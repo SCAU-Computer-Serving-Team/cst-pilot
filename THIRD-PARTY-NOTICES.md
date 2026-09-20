@@ -34,6 +34,25 @@ CST Pilot 发行版包含以下第三方组件。各组件以其原有许可证�
 | WizTree | 4.x（见随包 license.txt） | 专有软件；**仅个人使用免费，商业使用需购买授权** | https://diskanalyzer.com | 磁盘占用快速分析（usage 工具）。随包保留 `wiztree/license.txt`；使用者须自行确认使用场景符合其许可条款 |
 | LibreHardwareMonitorLib | — | MPL-2.0 | https://github.com/LibreHardwareMonitor/LibreHardwareMonitor | 硬件传感器读取（sensor/gpu 工具） |
 
+## 字体
+
+四者均为 SIL Open Font License 1.1。字体文件不存于开发仓库（`web/design/fonts/` 已忽略），发行时随 Web 通道打包。OFL-1.1 允许再分发，条件是保留版权声明与许可证原文，且不得使用其保留字体名。
+
+| 字体 | 版本 | 许可证 | 来源 | 用途 |
+|---|---|---|---|---|
+| Source Han Sans CN（思源黑体） | 以随包文件为准 | OFL-1.1 | https://github.com/adobe-fonts/source-han-sans | 界面正文与中文控件（Regular / Medium / Bold 三档字重） |
+| Inter | 以随包文件为准 | OFL-1.1 | https://github.com/rsms/inter | 产品名、模型名、页脚 |
+| JetBrains Mono | 以随包文件为准 | OFL-1.1 | https://github.com/JetBrains/JetBrainsMono | 聊天页行内工具名 |
+| Noto Sans SC | 以随包文件为准 | OFL-1.1 | https://github.com/notofonts/noto-cjk | 仅设计画布说明文字，不进界面 |
+
+字体用法见 [DESIGN.md · 字体分工](DESIGN.md#字体分工)，文件清单见 [DESIGN.md · 字体](DESIGN.md#字体)。
+
+## 设计资源
+
+| 资源 | 版本 | 许可证 | 来源 | 用途与条款 |
+|---|---|---|---|---|
+| transitions.dev skill | 随 skill 包 | **未声明** | https://transitions.dev/skill | 全站动效的令牌刻度与过渡片段（`transitions-dev`、`transitions-polish` 两个 skill）。仓库未声明许可证，站点区分免费与 Pro；复制 `_root.css` 或过渡片段进发行包前需先与站点条款核对。用法见 [DESIGN.md · 动效](DESIGN.md#动效) |
+
 ## 说明
 
 1. 本项目自身代码（diagnostics 工具、启动器、打包脚本、文档）随 CST Pilot 以内部项目形式分发。

@@ -21,6 +21,9 @@ outbox/
 # ---- 本地测试记录（按日期拆分，不入库）----
 doc/test/testlog/
 
+# ---- 设计资产（发行版需要，开发仓库不存；可由上游 OFL 字体包重建）----
+web/design/fonts/
+
 # ---- 杂项 ----
 Thumbs.db
 desktop.ini
