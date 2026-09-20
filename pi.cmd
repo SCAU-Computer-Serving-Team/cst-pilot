@@ -18,10 +18,11 @@ rem        XDG_CACHE_HOME -> .state\cache (fff host-cache redirect)
 rem        FFF_*_DB       -> .state\data  (fff frecency/history)
 rem        PSModuleAnalysisCachePath -> .state\cache (PS7 module cache;
 rem          its LOCALAPPDATA default is NOT covered by XDG_CACHE_HOME)
-rem    - Telemetry / update checks disabled:
+rem    - Built-in pi telemetry off; CST telemetry is separate:
 rem        PI_OFFLINE=1 (pi: no startup network ops, no install/update
-rem        telemetry, no version check), plus enableInstallTelemetry
-rem        =false in settings.json as belt-and-braces
+rem        telemetry, no version check), enableInstallTelemetry=false
+rem        in settings.json. CST telemetry (extension, own config at
+rem        agent\home\telemetry.json) is NOT blocked by PI_OFFLINE
 rem        POWERSHELL_TELEMETRY_OPTOUT=1, POWERSHELL_UPDATECHECK=Off
 rem    - --no-skills + explicit --skill (only agent\home\skills)
 rem    - --no-context-files, defaultProjectTrust=never (settings)
