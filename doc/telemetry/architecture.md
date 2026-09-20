@@ -13,7 +13,7 @@
 
 没有别的通道：无长连接、无拉取、无命令下发。
 
-数据形态：线上传批量信封（一次 POST 带一批记录），盘上存 JSONL（一行一条）。发送端缓存与接收端原始层同用 JSONL，追加写、按 `recordId` 去重。
+数据形态：线上传批量信封（一次 POST 带一批记录）。发送端缓存用 JSONL，一行一条，按 `recordId` 去重；接收端的原始层是 `sessions.payload` 列，不再另落一份文件。
 
 ```mermaid
 flowchart LR
@@ -74,8 +74,8 @@ pi 的会话事件机制覆盖会话切分的所有情况：退出、切换会�
 |---|---|---|
 | 发送端 | pi 扩展，TypeScript，零 npm 依赖 | 寄住 pi 进程，jiti 免编译运行；只用 Node 内置模块与全局 `fetch` |
 | 传输 | HTTPS POST + JSON | 唯一通道；端点 URL 随发行写入 `telemetry.json` |
-| 接收端 | 阿里云服务器自建 Node 常驻服务 | 框架与存储细化见 [receiver/SPEC.md](receiver/SPEC.md)；HTTPS 由服务器侧证书提供；代码独立仓库实现，不经工具包发行 |
+| 接收端 | 阿里云服务器自建 Node 常驻服务 | 框架与存储细化见 [receiver/SPEC.md](receiver/SPEC.md)；HTTPS 由服务器侧证书提供；代码在本仓库 `src/telemetry/`，不经工具包发行；身份解析靠 OA 的令牌内省接口，尚未实现 |
 
 合规约束：数据只落在队伍的阿里云服务器，不经任何第三方。schema 的脱敏设计（无对话内容、无路径原文、身份由上传凭据解析）在此基础上成立，随报错原文回显的内容是契约里显式记录的唯一例外。
 
-仓库边界：发送端随本仓库发行；接收端独立仓库实现。两者以 [信息收集契约](../contract.md) 为唯一共享契约，会话记录字段是其下的 [schema.md](schema.md)；接收端仓库内保留契约拷贝快照，快照标版本 0.1。
+仓库边界：发送端在 `agent/home/extensions/telemetry/`，随本仓库发行；接收端在 `src/telemetry/`，同仓库但不进发行包，部署到服务器上单独运行。两者以 [信息收集契约](../contract.md) 为唯一共享契约，会话记录字段是其下的 [schema.md](schema.md)；同仓库直接引用，不再另存副本。

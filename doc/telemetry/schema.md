@@ -193,7 +193,7 @@
 }
 ```
 
-`mid`、`deviceId`、`receivedAt`、`ip` 由接收端写入，不在上传的记录里。
+`mid`、`deviceId`、`receivedAt`、`ip` 由接收端写入，不在上传的记录里；其中身份两项**待 OAuth 落地**后再定稿。
 
 ## 尺寸
 
