@@ -4,9 +4,9 @@
     {
       "type": "frame",
       "id": "HRlE2",
-      "x": 0,
-      "y": 0,
-      "name": "主页 ·  浅色",
+      "x": 81,
+      "y": -507,
+      "name": "主页 · 浅色",
       "context": "定稿。混合配色：正文/图标 #1a2024、次要文字与页脚 #5f676c、边框 #d5dee3、悬停 #e3ecf1、选中 #dbe4e9（12 步中性色阶）；侧栏底色 #F5F6F8、发送按钮 #465A9F（取自 Blue hour 深段）。背景为 asset/blue-hour.glsl 动态 Shader。",
       "clip": true,
       "width": 1920,
@@ -107,8 +107,9 @@
                   "type": "frame",
                   "id": "T3yhq",
                   "name": "新对话",
+                  "context": "浅色侧栏的悬停底色。用无偏灰白 #EAEAEA，与聊天页选中会话、悬停面板选中行同一个值；不用中性4 #E3ECF1，因为它带蓝调。",
                   "width": "fill_container",
-                  "fill": "#e3ecf1",
+                  "fill": "#EAEAEA",
                   "cornerRadius": "$radius-row",
                   "gap": 10,
                   "padding": [
@@ -396,16 +397,6 @@
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": 10,
                       "fontWeight": "normal"
-                    },
-                    {
-                      "type": "icon",
-                      "id": "I9fVF",
-                      "x": 0,
-                      "y": 0,
-                      "width": 0,
-                      "height": 0,
-                      "library": "Material Symbols Rounded",
-                      "fill": "#5f676c"
                     },
                     {
                       "type": "icon",
@@ -717,10 +708,10 @@
     {
       "type": "frame",
       "id": "g1Rbpz",
-      "x": 2120,
-      "y": 0,
+      "x": 2201,
+      "y": -507,
       "name": "主页 · 深色",
-      "context": "深色版。背景使用独立深色调色板（asset/blue-hour-dark-palette.png）和用户预设参数；与浅色版共用动画 shader（asset/blue-hour.glsl），不改变浅色背景。UI 按 cst-pilot-colors.pen 深色色阶同位替换：正文/图标 #e0eaee（中性12）、次要文字与页脚 #aab3b7（中性11）、弱边框 #2d3438（中性6）、悬停 #1d2428（中性4）、选中 #242c2f（中性5）；侧栏底色 #1D2428（与聊天工作台·深色一致）；对话框（中性2，深色版不用独立灰白）；发送按钮 #7785DE（Blue hour 中段，浅色版用深段 #465A9F），箭头 #001f42。页脚 @cst-pilot-web 用深色中性1 #060b0e，因为页脚下方是调色板的亮色带，浅色在此不可读。品牌 C 与欢迎语保持纯白。",
+      "context": "深色版。背景使用独立深色调色板（asset/blue-hour-dark-palette.png）和用户预设参数；与浅色版共用动画 shader（asset/blue-hour.glsl），不改变浅色背景。UI 按 cst-pilot-colors.pen 深色色阶同位替换：正文/图标 #e0eaee（中性12）、次要文字与页脚 #aab3b7（中性11）、弱边框 #2d3438（中性6）、悬停 #1d2428（中性4）、选中 #242c2f（中性5）；侧栏底色 #131a1d（中性3，比悬停低一档，保证「新对话」的悬停底色可分辨，与两张深色页一致）；对话框（中性2，深色版不用独立灰白）；发送按钮 #7785DE（Blue hour 中段，浅色版用深段 #465A9F），箭头 #001f42。页脚 @cst-pilot-web 用深色中性1 #060b0e，因为页脚下方是调色板的亮色带，浅色在此不可读。品牌 C 与欢迎语保持纯白。",
       "clip": true,
       "width": 1920,
       "height": 1080,
@@ -732,7 +723,7 @@
           "name": "A 侧栏",
           "width": 264,
           "height": "fill_container",
-          "fill": "#1D2428",
+          "fill": "#131A1D",
           "stroke": "#2d3438",
           "strokeWidth": {
             "right": 1
@@ -1109,16 +1100,6 @@
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": 10,
                       "fontWeight": "normal"
-                    },
-                    {
-                      "type": "icon",
-                      "id": "c4foL",
-                      "x": 0,
-                      "y": 0,
-                      "width": 0,
-                      "height": 0,
-                      "library": "Material Symbols Rounded",
-                      "fill": "#aab3b7"
                     },
                     {
                       "type": "icon",
@@ -1902,7 +1883,7 @@
                 {
                   "type": "frame",
                   "id": "avrZg",
-                  "name": "HeroUI Ghost Button · 会话菜单",
+                  "name": "HeroUI Ghost Button · 消息菜单",
                   "context": "Button/Ghost/Icon/SM",
                   "width": 32,
                   "height": 32,
@@ -2969,7 +2950,7 @@
                               "y": 2,
                               "name": "轨道",
                               "innerRadius": 0.75,
-                              "fill": "#E4E6EB",
+                              "fill": "#E3ECF1",
                               "width": 16,
                               "height": 16
                             },
@@ -3147,7 +3128,7 @@
       "width": 360,
       "fill": "#FFFFFF",
       "cornerRadius": 16,
-      "stroke": "#E5E6EB",
+      "stroke": "#D5DEE3",
       "strokeWidth": 1,
       "effect": {
         "type": "shadow",
@@ -3178,7 +3159,7 @@
               "type": "text",
               "id": "PRZ1i",
               "name": "容量标签",
-              "fill": "#1F2329",
+              "fill": "#1A2024",
               "content": "上下文容量",
               "fontFamily": "Inter",
               "fontSize": 15,
@@ -3188,7 +3169,7 @@
               "type": "text",
               "id": "R149ae",
               "name": "容量数值",
-              "fill": "#646464",
+              "fill": "#5F676C",
               "content": "2.4万/100万（2.4%）",
               "fontFamily": "Inter",
               "fontSize": 14,
@@ -3202,7 +3183,7 @@
           "name": "容量进度条",
           "width": "fill_container",
           "height": 6,
-          "fill": "#EFF0F3",
+          "fill": "#E8F1F6",
           "cornerRadius": 3,
           "children": [
             {
@@ -3228,7 +3209,7 @@
               "type": "text",
               "id": "Kc6XT",
               "name": "命中率标签",
-              "fill": "#646464",
+              "fill": "#5F676C",
               "content": "平均缓存命中率",
               "fontFamily": "Inter",
               "fontSize": 14,
@@ -3238,7 +3219,7 @@
               "type": "text",
               "id": "t5IeC",
               "name": "命中率数值",
-              "fill": "#1F2329",
+              "fill": "#1A2024",
               "content": "87.8%",
               "fontFamily": "Inter",
               "fontSize": 14,
@@ -3250,7 +3231,7 @@
           "type": "rectangle",
           "id": "Ac9rk",
           "name": "分隔线",
-          "fill": "#EEF0F2",
+          "fill": "#D5DEE3",
           "width": "fill_container",
           "height": 1
         },
@@ -3273,7 +3254,7 @@
                   "type": "text",
                   "id": "v1IN1",
                   "name": "额度标题",
-                  "fill": "#1F2329",
+                  "fill": "#1A2024",
                   "content": "剩余额度",
                   "fontFamily": "Inter",
                   "fontSize": 15,
@@ -3287,7 +3268,7 @@
                   "height": 13,
                   "icon": "info",
                   "library": "lucide",
-                  "fill": "#9AA0AA"
+                  "fill": "#5F676C"
                 }
               ]
             },
@@ -3302,7 +3283,7 @@
                   "type": "text",
                   "id": "WlKvJ",
                   "name": "更多文字",
-                  "fill": "#646464",
+                  "fill": "#5F676C",
                   "content": "更多",
                   "fontFamily": "Inter",
                   "fontSize": 14,
@@ -3316,7 +3297,7 @@
                   "height": 14,
                   "icon": "chevron-right",
                   "library": "lucide",
-                  "fill": "#646464"
+                  "fill": "#5F676C"
                 }
               ]
             }
@@ -3333,7 +3314,7 @@
               "type": "text",
               "id": "P85YW",
               "name": "余额数值",
-              "fill": "#1F2329",
+              "fill": "#1A2024",
               "content": "¥ 42.00",
               "fontFamily": "Inter",
               "fontSize": 20,
@@ -3353,7 +3334,7 @@
       "width": 240,
       "fill": "#FFFFFF",
       "cornerRadius": 16,
-      "stroke": "#E5E6EB",
+      "stroke": "#D5DEE3",
       "strokeWidth": 1,
       "effect": {
         "type": "shadow",
@@ -3396,7 +3377,7 @@
               "type": "text",
               "id": "eU7C4",
               "name": "模型名",
-              "fill": "#202020",
+              "fill": "#1A2024",
               "content": "DeepSeek V4 Flash",
               "fontFamily": "Inter",
               "fontSize": 15,
@@ -3445,7 +3426,7 @@
               "type": "text",
               "id": "OBH1a",
               "name": "模型名",
-              "fill": "#202020",
+              "fill": "#1A2024",
               "content": "GLM 5.3 Flash",
               "fontFamily": "Inter",
               "fontSize": 15,
@@ -3480,7 +3461,7 @@
               "type": "text",
               "id": "nPysN",
               "name": "模型名",
-              "fill": "#202020",
+              "fill": "#1A2024",
               "content": "Kimi K3",
               "fontFamily": "Inter",
               "fontSize": 15,
@@ -3500,7 +3481,7 @@
       "width": 360,
       "fill": "#FFFFFF",
       "cornerRadius": 16,
-      "stroke": "#E5E6EB",
+      "stroke": "#D5DEE3",
       "strokeWidth": 1,
       "effect": {
         "type": "shadow",
@@ -3542,7 +3523,7 @@
                   "type": "text",
                   "id": "B3X47",
                   "name": "档位名",
-                  "fill": "#202020",
+                  "fill": "#1A2024",
                   "content": "关闭",
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 15,
@@ -3552,7 +3533,7 @@
                   "type": "text",
                   "id": "FUgo2",
                   "name": "档位说明",
-                  "fill": "#646464",
+                  "fill": "#5F676C",
                   "content": "直接回答，不展示思考过程",
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 13,
@@ -3596,7 +3577,7 @@
                   "type": "text",
                   "id": "Bn7qj",
                   "name": "档位名",
-                  "fill": "#202020",
+                  "fill": "#1A2024",
                   "content": "低",
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 15,
@@ -3606,7 +3587,7 @@
                   "type": "text",
                   "id": "A47qCb",
                   "name": "档位说明",
-                  "fill": "#646464",
+                  "fill": "#5F676C",
                   "content": "少量推理，响应更快",
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 13,
@@ -3650,7 +3631,7 @@
                   "type": "text",
                   "id": "xMIul",
                   "name": "档位名",
-                  "fill": "#202020",
+                  "fill": "#1A2024",
                   "content": "中",
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 15,
@@ -3660,7 +3641,7 @@
                   "type": "text",
                   "id": "BWgdo",
                   "name": "档位说明",
-                  "fill": "#646464",
+                  "fill": "#5F676C",
                   "content": "适度推理，平衡速度与质量",
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 13,
@@ -3704,7 +3685,7 @@
                   "type": "text",
                   "id": "W7XG2I",
                   "name": "档位名",
-                  "fill": "#202020",
+                  "fill": "#1A2024",
                   "content": "高",
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 15,
@@ -3714,7 +3695,7 @@
                   "type": "text",
                   "id": "AP4fM",
                   "name": "档位说明",
-                  "fill": "#646464",
+                  "fill": "#5F676C",
                   "content": "充分推理，复杂问题优先",
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 13,
@@ -3772,7 +3753,7 @@
                   "type": "text",
                   "id": "thJ57",
                   "name": "档位名",
-                  "fill": "#202020",
+                  "fill": "#1A2024",
                   "content": "最高",
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 15,
@@ -3782,7 +3763,7 @@
                   "type": "text",
                   "id": "X9kUZa",
                   "name": "档位说明",
-                  "fill": "#646464",
+                  "fill": "#5F676C",
                   "content": "尽可能深入推理",
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 13,
@@ -4018,7 +3999,7 @@
       "width": 240,
       "fill": "#FFFFFF",
       "cornerRadius": 16,
-      "stroke": "#E5E6EB",
+      "stroke": "#D5DEE3",
       "strokeWidth": 1,
       "effect": {
         "type": "shadow",
@@ -4055,13 +4036,13 @@
               "height": 18,
               "icon": "circle-user",
               "library": "lucide",
-              "fill": "#646464"
+              "fill": "#5F676C"
             },
             {
               "type": "text",
               "id": "g4LM0c",
               "name": "账号信息",
-              "fill": "#202020",
+              "fill": "#1A2024",
               "content": "账号信息",
               "fontFamily": "Source Han Sans CN",
               "fontSize": 15,
@@ -4090,13 +4071,13 @@
               "height": 18,
               "icon": "settings",
               "library": "lucide",
-              "fill": "#646464"
+              "fill": "#5F676C"
             },
             {
               "type": "text",
               "id": "X2TW8m",
               "name": "设置",
-              "fill": "#202020",
+              "fill": "#1A2024",
               "content": "设置",
               "fontFamily": "Source Han Sans CN",
               "fontSize": 15,
@@ -4125,13 +4106,13 @@
               "height": 18,
               "icon": "message-square-warning",
               "library": "lucide",
-              "fill": "#646464"
+              "fill": "#5F676C"
             },
             {
               "type": "text",
               "id": "DZHUF",
               "name": "反馈问题",
-              "fill": "#202020",
+              "fill": "#1A2024",
               "content": "反馈问题",
               "fontFamily": "Source Han Sans CN",
               "fontSize": 15,
@@ -4154,7 +4135,7 @@
               "type": "rectangle",
               "id": "M1sgCI",
               "name": "分隔线",
-              "fill": "#E0E0E0",
+              "fill": "#D5DEE3",
               "width": "fill_container",
               "height": 1
             }
@@ -4181,13 +4162,13 @@
               "height": 18,
               "icon": "log-out",
               "library": "lucide",
-              "fill": "#646464"
+              "fill": "#5F676C"
             },
             {
               "type": "text",
               "id": "RCUkW",
               "name": "登出",
-              "fill": "#202020",
+              "fill": "#1A2024",
               "content": "登出",
               "fontFamily": "Source Han Sans CN",
               "fontSize": 15,
@@ -4354,7 +4335,7 @@
       "width": 240,
       "fill": "#FFFFFF",
       "cornerRadius": 16,
-      "stroke": "#E5E6EB",
+      "stroke": "#D5DEE3",
       "strokeWidth": 1,
       "effect": {
         "type": "shadow",
@@ -4391,13 +4372,13 @@
               "height": 18,
               "icon": "log-in",
               "library": "lucide",
-              "fill": "#646464"
+              "fill": "#5F676C"
             },
             {
               "type": "text",
               "id": "h4OvIo",
               "name": "登录",
-              "fill": "#202020",
+              "fill": "#1A2024",
               "content": "登录",
               "fontFamily": "Source Han Sans CN",
               "fontSize": 15,
@@ -4426,13 +4407,13 @@
               "height": 18,
               "icon": "message-square-warning",
               "library": "lucide",
-              "fill": "#646464"
+              "fill": "#5F676C"
             },
             {
               "type": "text",
               "id": "Z0bf7e",
               "name": "反馈问题",
-              "fill": "#202020",
+              "fill": "#1A2024",
               "content": "反馈问题",
               "fontFamily": "Source Han Sans CN",
               "fontSize": 15,
@@ -4760,7 +4741,7 @@
       "x": 2120,
       "y": 1240,
       "name": "聊天工作台 · 深色",
-      "context": "深色版聊天工作页。大面积背景 #0B1215、侧栏深灰 #1D2428、卡片与悬停面板 #131A1D、气泡与表头 #1D2428；正文与主要图标亮白 #FFFFFF、次要 #AAB3B7、选中与设备容器 #242C2F、弱边框 #2D3438、输入框边框 #3C4448；检索与工具 #77B4FF、成功 #67CA83、停止按钮 #7785DE。结构与「聊天工作台 · 浅色」一致。",
+      "context": "深色版聊天工作页。大面积背景 #0B1215（中性2）、侧栏 #131A1D（中性3）、卡片与悬停面板 #131A1D、气泡与表头 #1D2428（中性4）；正文与主要图标亮白 #FFFFFF、次要 #AAB3B7、选中与设备容器 #242C2F（中性5）、弱边框 #2D3438、输入框边框 #3C4448；检索与工具 #77B4FF、成功 #67CA83、停止按钮 #7785DE。结构与「聊天工作台 · 浅色」一致。",
       "clip": true,
       "width": 1920,
       "height": 1080,
@@ -4772,7 +4753,7 @@
           "name": "侧边栏 · 保留主页结构",
           "width": 264,
           "height": "fill_container",
-          "fill": "#1D2428",
+          "fill": "#131A1D",
           "stroke": "#2D3438",
           "strokeWidth": {
             "right": 1
@@ -5172,7 +5153,7 @@
           "type": "frame",
           "id": "KXKcU",
           "name": "聊天主区 · 深色背景",
-          "context": "聊天主区采用纯白#FFFFFF，无背景图案、渐变、纹理或Shader；正文列宽1120px保持不变，诊断表格单独收窄至816px。首页背景不变。",
+          "context": "聊天主区采用中性2 #0B1215，无背景图案、渐变、纹理或Shader；正文列宽1120px保持不变，诊断表格单独收窄至816px。首页背景不变。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -5227,7 +5208,7 @@
                 {
                   "type": "frame",
                   "id": "FKYTf",
-                  "name": "HeroUI Ghost Button · 会话菜单",
+                  "name": "HeroUI Ghost Button · 消息菜单",
                   "context": "Button/Ghost/Icon/SM",
                   "width": 32,
                   "height": 32,
@@ -5386,7 +5367,7 @@
                       "type": "frame",
                       "id": "bMFp5",
                       "name": "Markdown 表格 · 设备与空间",
-                      "context": "HeroUI Table Header / Table Row / Table Cell。正文16px，表头14px，浅色中性背景。",
+                      "context": "HeroUI Table Header / Table Row / Table Cell。正文16px，表头14px，取通用色阶：表头中性4 #1D2428，正文中性10。",
                       "clip": true,
                       "width": 816,
                       "cornerRadius": 8,
@@ -6753,8 +6734,8 @@
     {
       "type": "frame",
       "id": "l3sMC",
-      "x": 0,
-      "y": -1372,
+      "x": 81,
+      "y": -1879,
       "name": "登录页 · 浅色",
       "context": "独立登录页，1080 正方形。背景为 asset/blue-hour-air.glsl，保留 AIR 椭圆布局与漂移。通过标量场柔化后查询首页 blue-hour-palette.png，保持五色过渡，不直接混合深浅 RGB。底部 70%—93% 在同一色表内渐变至冰蓝，独立浅色蒙层停用。静态颗粒 0.003。表单及排版不变，速度 0 可暂停。详见 asset/blue-hour-air.md。 作为居中登录面板：圆角32、1.5px内描边及柔和投影；主页在面板外模糊，面板本身保持清晰。",
       "clip": true,
@@ -6928,7 +6909,7 @@
           "width": 480,
           "fill": "#FFFFFF",
           "cornerRadius": 24,
-          "stroke": "#E5E6EB",
+          "stroke": "#D5DEE3",
           "strokeWidth": 1,
           "effect": {
             "type": "shadow",
@@ -7121,8 +7102,8 @@
     {
       "type": "frame",
       "id": "fTlPh",
-      "x": -2124,
-      "y": -747,
+      "x": -2043,
+      "y": -1254,
       "name": "登录页 · 浅色 · 呈现效果",
       "context": "1920×1080场景预览。主页快照高斯模糊20px并叠加15%暗色遮罩；正式实现模糊真实主页，不使用快照。登录组件按80%展示为864×864，水平居中且上下留108px。原主页不变。",
       "clip": true,
@@ -7341,7 +7322,7 @@
               "width": 384,
               "fill": "#FFFFFF",
               "cornerRadius": 19.200000000000003,
-              "stroke": "#E5E6EB",
+              "stroke": "#D5DEE3",
               "strokeWidth": 0.8,
               "effect": {
                 "type": "shadow",
@@ -7536,8 +7517,8 @@
     {
       "type": "frame",
       "id": "XuPCA",
-      "x": 2960,
-      "y": -1372,
+      "x": 3041,
+      "y": -1879,
       "name": "登录页 · 深色",
       "context": "独立登录页深色版，1080 正方形，结构与「登录页 · 浅色」一致。AIR 背景查专用深色五色色表 blue-hour-air-dark-palette.png：分布与浅色版一致（色标 10/30/50/70/90%），仅底色压深为 #161C4A；底部过渡与页脚同浅色版（底部冰蓝区配深色页脚字）。卡片 #131A1D、描边 #2D3438、输入框 #0B1215 边框 #3C4448、分段轨道 #1D2428 选中块 #242C2F、正文亮白 #FFFFFF、次要 #AAB3B7、登录按钮 #7785DE 字 #001F42。",
       "clip": true,
@@ -7601,7 +7582,7 @@
           "x": 0,
           "y": 0,
           "name": "背景渐变 · Blue hour AIR",
-          "context": "AIR 椭圆场缓慢漂移。先混合与柔化色表坐标，再查首页同一张 Oklab 五色色表；不直接混合深浅 RGB。页脚提亮内置于 Shader。",
+          "context": "AIR 椭圆场缓慢漂移。先混合与柔化色表坐标，再查 AIR 专用深色色表 blue-hour-air-dark-palette.png（底色 #161C4A）；不直接混合深浅 RGB。页脚提亮内置于 Shader。",
           "width": 1080,
           "height": 1080,
           "fill": {
@@ -7904,8 +7885,8 @@
     {
       "type": "frame",
       "id": "O9NST",
-      "x": 4281,
-      "y": -747,
+      "x": 4362,
+      "y": -1254,
       "name": "登录页 · 深色 · 呈现效果",
       "context": "1920×1080 深色场景预览，结构同浅色版。背后主页快照换「主页 · 深色」导出图（asset/login-preview/g1Rbpz.png），遮罩不变；登录面板 AIR 背景查 blue-hour-air-dark-palette.png（分布同浅色版，底色 #161C4A），表单配色同「登录页 · 深色」。正式实现模糊真实主页，不使用快照。",
       "clip": true,
@@ -7920,7 +7901,7 @@
           "x": 0,
           "y": 0,
           "name": "主页快照 · 高斯模糊20",
-          "context": "来自当前浅色主页的静态快照，只用于模糊场景预览。正式页面应模糊真实主页，不加载此快照。",
+          "context": "来自「主页 · 深色」的静态快照（asset/login-preview/g1Rbpz.png），只用于模糊场景预览。正式页面应模糊真实主页，不加载此快照。",
           "fill": {
             "type": "image",
             "enabled": true,
@@ -8014,7 +7995,7 @@
               "x": 0,
               "y": 0,
               "name": "背景渐变 · Blue hour AIR",
-              "context": "AIR 椭圆场缓慢漂移。先混合与柔化色表坐标，再查首页同一张 Oklab 五色色表；不直接混合深浅 RGB。页脚提亮内置于 Shader。",
+              "context": "AIR 椭圆场缓慢漂移。先混合与柔化色表坐标，再查 AIR 专用深色色表 blue-hour-air-dark-palette.png（底色 #161C4A）；不直接混合深浅 RGB。页脚提亮内置于 Shader。",
               "width": 864,
               "height": 864,
               "fill": {
@@ -8711,16 +8692,6 @@
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 10,
                   "fontWeight": "normal"
-                },
-                {
-                  "type": "icon",
-                  "id": "B44on",
-                  "x": 0,
-                  "y": 0,
-                  "width": 0,
-                  "height": 0,
-                  "library": "Material Symbols Rounded",
-                  "fill": "#5f676c"
                 },
                 {
                   "type": "icon",
@@ -15377,16 +15348,6 @@
                 },
                 {
                   "type": "icon",
-                  "id": "aR2b4",
-                  "x": 0,
-                  "y": 0,
-                  "width": 0,
-                  "height": 0,
-                  "library": "Material Symbols Rounded",
-                  "fill": "#AAB3B7"
-                },
-                {
-                  "type": "icon",
                   "id": "goYLu",
                   "x": 208,
                   "y": 21,
@@ -21457,7 +21418,7 @@
                                   "type": "text",
                                   "id": "yXTIU",
                                   "name": "页码文字",
-                                  "fill": "#FFFFFF",
+                                  "fill": "#131A1D",
                                   "content": "1",
                                   "fontFamily": "Source Han Sans CN",
                                   "fontSize": 13,
@@ -21645,13 +21606,14 @@
     {
       "type": "frame",
       "id": "L7gW7",
-      "x": 0,
-      "y": 2800,
+      "x": 1680,
+      "y": 1105,
       "name": "消息菜单 · 悬停",
+      "context": "点击聊天标题栏右上角三个点弹出。当前只列出「分享」一项，其余条目待定。宽240、圆角16、内边距12，与其余悬停面板同一套卡片样式。",
       "width": 240,
       "fill": "#FFFFFF",
       "cornerRadius": 16,
-      "stroke": "#E5E6EB",
+      "stroke": "#D5DEE3",
       "strokeWidth": 1,
       "layout": "vertical",
       "gap": 2,
@@ -21665,7 +21627,7 @@
           "cornerRadius": 8,
           "gap": 12,
           "padding": [
-            16,
+            10,
             12
           ],
           "children": [
@@ -21677,13 +21639,13 @@
               "height": 18,
               "icon": "share",
               "library": "Material Symbols Rounded",
-              "fill": "#646464"
+              "fill": "#5F676C"
             },
             {
               "type": "text",
               "id": "Z6Ukqo",
               "name": "分享",
-              "fill": "#202020",
+              "fill": "#1A2024",
               "content": "分享",
               "fontFamily": "Source Han Sans CN",
               "fontSize": 15,
@@ -21696,9 +21658,10 @@
     {
       "type": "frame",
       "id": "zQCZ5",
-      "x": 2120,
-      "y": 2800,
+      "x": 3800,
+      "y": 1138,
       "name": "消息菜单 · 悬停 · 深色",
+      "context": "深色版。点击聊天标题栏右上角三个点弹出。当前只列出「分享」一项，其余条目待定。结构与浅色版一致。",
       "width": 240,
       "fill": "#131A1D",
       "cornerRadius": 16,
@@ -21716,7 +21679,7 @@
           "cornerRadius": 8,
           "gap": 12,
           "padding": [
-            16,
+            10,
             12
           ],
           "children": [
@@ -21743,21 +21706,3229 @@
           ]
         }
       ]
+    },
+    {
+      "type": "frame",
+      "id": "sILEN",
+      "x": -2043,
+      "y": 5231,
+      "name": "工具调用 · 已返回（通用卡片）浅色",
+      "context": "工具调用返回后的展开态（通用卡片层）。触发条与「聊天工作台 · 浅色」的 Accordion 一致（#646464，不降级）。展开区水平留 32px 边距、与背景融为一体（无容器底色）；当轮调用平铺，调用之间 28px 留白 + #F0F0F0 发丝线。阅读顺序为单一纵向动线：每张卡 = 状态行（图标 + 等宽调用语句 + 目的 + 耗时）→ 概览层（字段行单列，字段名 12px 宽 64 列对齐，字段值 15px，分组标题 12px 500）→ 原始数据层（默认折叠）。全卡文字 #646464，层级靠字号与留白而非灰阶；降级只用黄色图标表达，提示条无底色、文字随正文灰，降级标注为灰色文字。sys overview 醒目例外见独立画布。",
+      "clip": true,
+      "width": 1120,
+      "fill": "#FFFFFF",
+      "layout": "vertical",
+      "gap": 20,
+      "children": [
+        {
+          "type": "frame",
+          "id": "BaWIy",
+          "name": "HeroUI Accordion · 已完成工作（展开）",
+          "context": "Accordion/Open trigger。展开态箭头向上，其余与折叠态一致。",
+          "width": "fill_container",
+          "height": 28,
+          "gap": 9,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "oKRIO",
+              "name": "完成图标",
+              "width": 17,
+              "height": 17,
+              "icon": "check-check",
+              "library": "lucide",
+              "fill": "#007B3A"
+            },
+            {
+              "type": "text",
+              "id": "QiF8n",
+              "name": "工作摘要",
+              "fill": "#646464",
+              "content": "已完成检查",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "B1d2U",
+              "name": "调用数量",
+              "fill": "#646464",
+              "content": "2 次工具调用",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "icon",
+              "id": "F6KHx",
+              "name": "收起工作详情",
+              "width": 14,
+              "height": 14,
+              "icon": "chevron-up",
+              "library": "lucide",
+              "fill": "#646464"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "TnlAn",
+          "name": "工作详情面板",
+          "context": "去容器化：面板不再铺灰底，当轮调用直接以留白与发丝线分群，靠亲密性组织。",
+          "width": "fill_container",
+          "fill": "#FFFFFF00",
+          "cornerRadius": 8,
+          "layout": "vertical",
+          "padding": [
+            4,
+            32
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "tgxLm",
+              "name": "调用卡片 · disk info（成功）",
+              "context": "单次调用卡片。状态行 + 概览层 + 原始数据层（本卡演示展开）。",
+              "width": "fill_container",
+              "fill": "#FFFFFF00",
+              "cornerRadius": 8,
+              "stroke": "#FFFFFF00",
+              "strokeWidth": 1,
+              "layout": "vertical",
+              "gap": 16,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "ckfTD",
+                  "name": "状态行",
+                  "width": "fill_container",
+                  "height": 24,
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "v5R8QI",
+                      "name": "状态图标",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "circle-check",
+                      "library": "lucide",
+                      "fill": "#007B3A"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "x79JP4",
+                      "name": "调用语句",
+                      "fill": "#F0F0F0",
+                      "cornerRadius": 4,
+                      "padding": [
+                        2,
+                        6
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "YaQtB",
+                          "name": "调用语句文字",
+                          "fill": "#646464",
+                          "content": "disk({ scope: \"info\", drive: \"C\" })",
+                          "fontFamily": "JetBrains Mono",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "FSNp9",
+                      "name": "调用目的",
+                      "fill": "#646464",
+                      "content": "读取型号与分区信息",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "UBl40",
+                      "name": "头部弹性间距",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "mAwwW",
+                      "name": "耗时",
+                      "fill": "#646464",
+                      "content": "0.8s",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "D5ADta",
+                  "name": "概览 · 卷信息",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "A7HXb",
+                      "name": "字段行 · 卷标",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "wvomr",
+                          "name": "字段名",
+                          "fill": "#646464",
+                          "content": "卷标",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "R1VBB",
+                          "name": "字段值",
+                          "fill": "#646464",
+                          "content": "C:（系统）",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Azd1H",
+                          "name": "标签补位",
+                          "width": 40,
+                          "height": 1
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "uQu9x",
+                      "name": "字段行 · 文件系统",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "xAl4K",
+                          "name": "字段名",
+                          "fill": "#646464",
+                          "content": "文件系统",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "nhwR9",
+                          "name": "字段值",
+                          "fill": "#646464",
+                          "content": "NTFS",
+                          "fontFamily": "Inter",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "vZGXn",
+                          "name": "标签补位",
+                          "width": 16,
+                          "height": 1
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "GNTBX",
+                      "name": "字段行 · 总容量",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "xC9mp",
+                          "name": "字段名",
+                          "fill": "#646464",
+                          "content": "总容量",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "hrJzn",
+                          "name": "字段值",
+                          "fill": "#646464",
+                          "content": "295.3 GB",
+                          "fontFamily": "Inter",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "s6D38B",
+                          "name": "标签补位",
+                          "width": 28,
+                          "height": 1
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "yOffu",
+                      "name": "字段行 · 剩余",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "qqoJB",
+                          "name": "字段名",
+                          "fill": "#646464",
+                          "content": "剩余",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "l1R5X",
+                          "name": "字段值",
+                          "fill": "#646464",
+                          "content": "40 GB · 已用 86.5%",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "CN87H",
+                          "name": "标签补位",
+                          "width": 40,
+                          "height": 1
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Nz0IH",
+                  "name": "概览 · 物理盘",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "uHyzH",
+                      "name": "分组标题",
+                      "fill": "#646464",
+                      "content": "物理盘",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "rVq21",
+                      "name": "字段行 · 型号",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "AQF9C",
+                          "name": "字段名",
+                          "fill": "#646464",
+                          "content": "型号",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "X2amQ",
+                          "name": "字段值",
+                          "fill": "#646464",
+                          "content": "YMTC PC411",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Lfvrq",
+                          "name": "标签补位",
+                          "width": 40,
+                          "height": 1
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "aukVx",
+                      "name": "字段行 · 容量",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "f57UFt",
+                          "name": "字段名",
+                          "fill": "#646464",
+                          "content": "容量",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "VerXN",
+                          "name": "字段值",
+                          "fill": "#646464",
+                          "content": "953.9 GB",
+                          "fontFamily": "Inter",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Oe666",
+                          "name": "标签补位",
+                          "width": 40,
+                          "height": 1
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "NWI3E",
+                      "name": "字段行 · 总线",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "WDvhK",
+                          "name": "字段名",
+                          "fill": "#646464",
+                          "content": "总线",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "yYCnU",
+                          "name": "字段值",
+                          "fill": "#646464",
+                          "content": "NVMe",
+                          "fontFamily": "Inter",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "uVlb5",
+                          "name": "标签补位",
+                          "width": 40,
+                          "height": 1
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "N1O33",
+                      "name": "字段行 · 健康",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "O6XA6n",
+                          "name": "字段名",
+                          "fill": "#646464",
+                          "content": "健康",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "Rc4Px",
+                          "name": "字段值",
+                          "fill": "#646464",
+                          "content": "健康",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "LjmXz",
+                          "name": "标签补位",
+                          "width": 40,
+                          "height": 1
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "GwB9Y",
+                  "name": "原始数据层（展开）",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "wANKB",
+                      "name": "原始数据切换条",
+                      "width": "fill_container",
+                      "height": 28,
+                      "gap": 6,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "fBHPo",
+                          "name": "原始数据图标",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "braces",
+                          "library": "lucide",
+                          "fill": "#8C8C8C"
+                        },
+                        {
+                          "type": "text",
+                          "id": "f96nip",
+                          "name": "原始数据标签",
+                          "fill": "#646464",
+                          "content": "原始数据",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "g30cx4",
+                          "name": "切换条弹性间距",
+                          "width": "fill_container",
+                          "height": 1
+                        },
+                        {
+                          "type": "icon",
+                          "id": "M9x7ux",
+                          "name": "收起原始数据",
+                          "width": 12,
+                          "height": 12,
+                          "icon": "chevron-up",
+                          "library": "lucide",
+                          "fill": "#8C8C8C"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "dKtBb",
+                      "name": "JSON 代码块",
+                      "width": "fill_container",
+                      "fill": "#F6F6F6",
+                      "cornerRadius": 6,
+                      "padding": [
+                        10,
+                        12
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ejiUZ",
+                          "name": "JSON 文本",
+                          "fill": "#646464",
+                          "content": "{\n  \"info\": {\n    \"physicalDisks\": [{ \"model\": \"YMTC PC411\", \"sizeGB\": 953, \"busType\": \"NVMe\", \"healthStatus\": \"Healthy\" }],\n    \"volumes\": [{ \"drive\": \"C:\", \"label\": \"系统\", \"fs\": \"NTFS\", \"totalGB\": 295.3, \"freeGB\": 40 }]\n  }\n}",
+                          "lineHeight": 1.6,
+                          "fontFamily": "JetBrains Mono",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "kKnha",
+              "name": "调用分隔 1",
+              "width": "fill_container",
+              "padding": [
+                28,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "EPSp3",
+                  "name": "分隔线",
+                  "width": "fill_container",
+                  "height": 1,
+                  "fill": "#F0F0F0"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "m1uaeM",
+              "name": "调用卡片 · disk health（降级）",
+              "context": "单次调用卡片（部分降级示例）。状态行含降级徽标；概览层键值 + 降级提示条；原始数据层默认折叠。",
+              "width": "fill_container",
+              "fill": "#FFFFFF00",
+              "cornerRadius": 8,
+              "stroke": "#FFFFFF00",
+              "strokeWidth": 1,
+              "layout": "vertical",
+              "gap": 16,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "sYUSv",
+                  "name": "状态行",
+                  "width": "fill_container",
+                  "height": 24,
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "Ace28",
+                      "name": "状态图标",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "triangle-alert",
+                      "library": "lucide",
+                      "fill": "#8C5A00"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "e3CGCV",
+                      "name": "调用语句",
+                      "fill": "#F0F0F0",
+                      "cornerRadius": 4,
+                      "padding": [
+                        2,
+                        6
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "HnkUU",
+                          "name": "调用语句文字",
+                          "fill": "#646464",
+                          "content": "disk({ scope: \"health\", drive: \"C\" })",
+                          "fontFamily": "JetBrains Mono",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "XjrQD",
+                      "name": "调用目的",
+                      "fill": "#646464",
+                      "content": "读取 SMART 可靠性计数器",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "qXmxd",
+                      "name": "头部弹性间距",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "AYLeb",
+                      "name": "降级标注",
+                      "fill": "#646464",
+                      "content": "部分降级",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "asG9a",
+                      "name": "耗时",
+                      "fill": "#646464",
+                      "content": "1.6s",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "hehjx",
+                  "name": "概览 · 可靠性计数",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "M4kjRz",
+                      "name": "字段行 · 温度",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "CpwRp",
+                          "name": "字段名",
+                          "fill": "#646464",
+                          "content": "温度",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "EKPpE",
+                          "name": "字段值",
+                          "fill": "#646464",
+                          "content": "41°C",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "uXFDq",
+                          "name": "标签补位",
+                          "width": 40,
+                          "height": 1
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "GShCg",
+                      "name": "字段行 · 通电时间",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "dGOjW",
+                          "name": "字段名",
+                          "fill": "#646464",
+                          "content": "通电时间",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "xKOs2",
+                          "name": "字段值",
+                          "fill": "#646464",
+                          "content": "1,842 小时",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "h6MEvo",
+                          "name": "标签补位",
+                          "width": 16,
+                          "height": 1
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "CGxY0",
+                      "name": "字段行 · 读取错误",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ykLGT",
+                          "name": "字段名",
+                          "fill": "#646464",
+                          "content": "读取错误",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "U1sDJ",
+                          "name": "字段值",
+                          "fill": "#646464",
+                          "content": "0 次",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "u55Hb",
+                          "name": "标签补位",
+                          "width": 16,
+                          "height": 1
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "BlOBP",
+                      "name": "字段行 · 写入错误",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "K56A7",
+                          "name": "字段名",
+                          "fill": "#646464",
+                          "content": "写入错误",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "oAzX1",
+                          "name": "字段值",
+                          "fill": "#646464",
+                          "content": "0 次",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 15,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "chyfS",
+                          "name": "标签补位",
+                          "width": 16,
+                          "height": 1
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "DWMML",
+                  "name": "降级提示条",
+                  "width": "fill_container",
+                  "fill": "#FFFFFF00",
+                  "cornerRadius": 6,
+                  "gap": 8,
+                  "padding": [
+                    4,
+                    0,
+                    4,
+                    54
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "LOOSb",
+                      "name": "提示图标",
+                      "width": 14,
+                      "height": 14,
+                      "icon": "triangle-alert",
+                      "library": "lucide",
+                      "fill": "#8C5A00"
+                    },
+                    {
+                      "type": "text",
+                      "id": "o2omP",
+                      "name": "提示文字",
+                      "fill": "#646464",
+                      "content": "磨损度与累计写入量不可用：普通权限下存储可靠性计数器部分字段拒绝访问，其余结果不受影响。",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "zP0is",
+                  "name": "原始数据层（折叠）",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "MmGjg",
+                      "name": "原始数据切换条",
+                      "width": "fill_container",
+                      "height": 28,
+                      "gap": 6,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "lmrXu",
+                          "name": "原始数据图标",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "braces",
+                          "library": "lucide",
+                          "fill": "#8C8C8C"
+                        },
+                        {
+                          "type": "text",
+                          "id": "SBwkw",
+                          "name": "原始数据标签",
+                          "fill": "#646464",
+                          "content": "原始数据",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "aH6hx",
+                          "name": "切换条弹性间距",
+                          "width": "fill_container",
+                          "height": 1
+                        },
+                        {
+                          "type": "icon",
+                          "id": "Sut77",
+                          "name": "展开原始数据",
+                          "width": 12,
+                          "height": 12,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "#8C8C8C"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "OgQnW",
+      "x": -843,
+      "y": 5231,
+      "name": "工具调用 · 已发送（等待返回）浅色",
+      "context": "工具调用返回前的形态：模型已发出输入、工具仍在执行。每次调用渲染一条约 30px 的浅灰胶囊条（#F6F6F6 底、无边框）：旋转指示 + 等宽调用语句 + 一句话目的 + 等待文案。输出返回后同一张卡片纵向展开为「工具调用 · 已返回（通用卡片）浅色」的完整卡片。文字 #646464 / 12px，与返回态同一套。",
+      "clip": true,
+      "width": 1120,
+      "fill": "#FFFFFF",
+      "layout": "vertical",
+      "gap": 8,
+      "children": [
+        {
+          "type": "frame",
+          "id": "GxZJ6",
+          "name": "调用条 · 读取型号与分区信息",
+          "width": "fill_container",
+          "fill": "#F6F6F6",
+          "cornerRadius": 8,
+          "stroke": "#FFFFFF00",
+          "strokeWidth": 1,
+          "gap": 8,
+          "padding": [
+            5,
+            16
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "ellipse",
+              "id": "yvVhj",
+              "name": "等待指示",
+              "innerRadius": 0.75,
+              "startAngle": 30,
+              "sweepAngle": 270,
+              "width": 14,
+              "height": 14,
+              "stroke": "#0665BE",
+              "strokeWidth": 2,
+              "strokeAlignment": "inner"
+            },
+            {
+              "type": "frame",
+              "id": "H7KDJu",
+              "name": "调用语句",
+              "fill": "#F0F0F0",
+              "cornerRadius": 4,
+              "padding": [
+                2,
+                6
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "C6RpE",
+                  "name": "调用语句文字",
+                  "fill": "#646464",
+                  "content": "disk({ scope: \"info\", drive: \"C\" })",
+                  "fontFamily": "JetBrains Mono",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "P23KYc",
+              "name": "调用目的",
+              "fill": "#8C8C8C",
+              "content": "读取型号与分区信息",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "P40OR",
+              "name": "弹性间距",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "text",
+              "id": "kJ8ZN",
+              "name": "等待文案",
+              "fill": "#8C8C8C",
+              "content": "等待返回…",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "xKKYa",
+          "name": "调用条 · 读取 SMART 可靠性计数器",
+          "width": "fill_container",
+          "fill": "#F6F6F6",
+          "cornerRadius": 8,
+          "stroke": "#FFFFFF00",
+          "strokeWidth": 1,
+          "gap": 8,
+          "padding": [
+            5,
+            16
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "ellipse",
+              "id": "S2ypwX",
+              "name": "等待指示",
+              "innerRadius": 0.75,
+              "startAngle": 30,
+              "sweepAngle": 270,
+              "width": 14,
+              "height": 14,
+              "stroke": "#0665BE",
+              "strokeWidth": 2,
+              "strokeAlignment": "inner"
+            },
+            {
+              "type": "frame",
+              "id": "task5",
+              "name": "调用语句",
+              "fill": "#F0F0F0",
+              "cornerRadius": 4,
+              "padding": [
+                2,
+                6
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "J1dje",
+                  "name": "调用语句文字",
+                  "fill": "#646464",
+                  "content": "disk({ scope: \"health\", drive: \"C\" })",
+                  "fontFamily": "JetBrains Mono",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "JpBL8",
+              "name": "调用目的",
+              "fill": "#8C8C8C",
+              "content": "读取 SMART 可靠性计数器",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "lYJty",
+              "name": "弹性间距",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "text",
+              "id": "T4Q7pu",
+              "name": "等待文案",
+              "fill": "#8C8C8C",
+              "content": "等待返回…",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "O3GWQ",
+      "x": 357,
+      "y": 5231,
+      "name": "工具调用 · sys overview（醒目例外）浅色",
+      "context": "例外工具卡片的独立画布：sys overview 回答「整机负载如何」，是诊断结论的主入口，概览层用大数字 + 主色 11 进度条呈现（醒目），与其余工具的通用灰阶卡片区分。runbook 的例外卡后续也在独立画布设计。",
+      "clip": true,
+      "width": 1120,
+      "fill": "#FFFFFF",
+      "layout": "vertical",
+      "gap": 20,
+      "padding": [
+        4,
+        32
+      ],
+      "children": [
+        {
+          "type": "frame",
+          "id": "LGbuP",
+          "name": "调用卡片 · sys overview（醒目）",
+          "context": "sys overview 是通用卡片的醒目例外：回答「整机负载如何」是诊断结论的主入口，数值用正文色 #202020 + 30px 大数字 + 主色 11 进度条，跳出全卡浅灰。其余骨架（状态行、原始数据层）与普通卡片一致。",
+          "width": "fill_container",
+          "fill": "#FFFFFF00",
+          "cornerRadius": 8,
+          "stroke": "#FFFFFF00",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 16,
+          "children": [
+            {
+              "type": "frame",
+              "id": "I9t4XI",
+              "name": "状态行",
+              "width": "fill_container",
+              "height": 24,
+              "gap": 8,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "v7VGF",
+                  "name": "状态图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "circle-check",
+                  "library": "lucide",
+                  "fill": "#007B3A"
+                },
+                {
+                  "type": "frame",
+                  "id": "SlSoH",
+                  "name": "调用语句",
+                  "fill": "#F0F0F0",
+                  "cornerRadius": 4,
+                  "padding": [
+                    2,
+                    6
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "rld97",
+                      "name": "调用语句文字",
+                      "fill": "#646464",
+                      "content": "sys({ scope: \"overview\" })",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "xY849",
+                  "name": "调用目的",
+                  "fill": "#646464",
+                  "content": "整机负载概况",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "m67ig",
+                  "name": "头部弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "nYJjJ",
+                  "name": "耗时",
+                  "fill": "#646464",
+                  "content": "0.6s",
+                  "fontFamily": "JetBrains Mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "pS7R5",
+              "name": "概览 · 负载大数字",
+              "width": "fill_container",
+              "gap": 24,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "jVPFX",
+                  "name": "统计块 · CPU 总占用",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 4,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "pp79v",
+                      "name": "统计标签",
+                      "fill": "#646464",
+                      "content": "CPU 总占用",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Y7Gl6g",
+                      "name": "统计数值",
+                      "fill": "#202020",
+                      "content": "23%",
+                      "fontFamily": "Inter",
+                      "fontSize": 30,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "E0z5Xf",
+                      "name": "进度条轨道",
+                      "width": 120,
+                      "height": 4,
+                      "fill": "#EAEAEA",
+                      "cornerRadius": 2,
+                      "layout": "none",
+                      "children": [
+                        {
+                          "type": "rectangle",
+                          "cornerRadius": 2,
+                          "id": "YM37B",
+                          "x": 0,
+                          "y": 0,
+                          "name": "进度条",
+                          "fill": "#0665BE",
+                          "width": 28,
+                          "height": 4
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "TE3os",
+                  "name": "统计块 · 内存占用",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 4,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ahOdO",
+                      "name": "统计标签",
+                      "fill": "#646464",
+                      "content": "内存占用",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "SmLs1",
+                      "name": "统计数值",
+                      "fill": "#202020",
+                      "content": "71%",
+                      "fontFamily": "Inter",
+                      "fontSize": 30,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "rczS9",
+                      "name": "进度条轨道",
+                      "width": 120,
+                      "height": 4,
+                      "fill": "#EAEAEA",
+                      "cornerRadius": 2,
+                      "layout": "none",
+                      "children": [
+                        {
+                          "type": "rectangle",
+                          "cornerRadius": 2,
+                          "id": "ShOlA",
+                          "x": 0,
+                          "y": 0,
+                          "name": "进度条",
+                          "fill": "#0665BE",
+                          "width": 85,
+                          "height": 4
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "hhdCu",
+                  "name": "统计块 · 开机时长",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 4,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "b5Hkm",
+                      "name": "统计标签",
+                      "fill": "#646464",
+                      "content": "开机时长",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Dd9q7",
+                      "name": "统计数值",
+                      "fill": "#202020",
+                      "content": "36.4 小时",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 30,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "gCbkl",
+                      "name": "进度条占位",
+                      "width": 120,
+                      "height": 4
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "f7pFoQ",
+              "name": "概览 · 机型补充",
+              "width": "fill_container",
+              "stroke": "#F0F0F0",
+              "strokeWidth": {
+                "top": 1
+              },
+              "gap": 10,
+              "padding": [
+                16,
+                0,
+                0,
+                0
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "KiC5F",
+                  "name": "键值对 · 机型",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "o1kf2",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "textGrowth": "fixed-width",
+                      "width": 60,
+                      "content": "机型",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Qz26h",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "华硕台式机 S500TE",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "TSjVd",
+                  "name": "键值对 · 处理器",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "mX2gB",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "textGrowth": "fixed-width",
+                      "width": 60,
+                      "content": "处理器",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "LtSeV",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "i5-13420H",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "kj1Pm",
+                  "name": "键值对 · 页面文件",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Nompb",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "textGrowth": "fixed-width",
+                      "width": 60,
+                      "content": "页面文件",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "L0kVHo",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "4.2 / 12 GB",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "nXtvM",
+              "name": "原始数据层（折叠）",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "NhoFS",
+                  "name": "原始数据切换条",
+                  "width": "fill_container",
+                  "height": 28,
+                  "gap": 6,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "y4xyd",
+                      "name": "原始数据图标",
+                      "width": 14,
+                      "height": 14,
+                      "icon": "braces",
+                      "library": "lucide",
+                      "fill": "#8C8C8C"
+                    },
+                    {
+                      "type": "text",
+                      "id": "FTFAt",
+                      "name": "原始数据标签",
+                      "fill": "#646464",
+                      "content": "原始数据",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "r33uA7",
+                      "name": "切换条弹性间距",
+                      "width": "fill_container",
+                      "height": 1
+                    },
+                    {
+                      "type": "icon",
+                      "id": "SXAEr",
+                      "name": "展开原始数据",
+                      "width": 12,
+                      "height": 12,
+                      "icon": "chevron-down",
+                      "library": "lucide",
+                      "fill": "#8C8C8C"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "G8uXFZ",
+      "x": -2043,
+      "y": 6140,
+      "name": "工具调用 · 通用渲染三模式 浅色",
+      "context": "通用渲染层的三种呈现模式实例，数据为 2026-09-20 本机真实采集：模式1 字段行（扁平对象，disk info，双物理盘按对象分组成子段）；模式2 排行列表（有序数组，sys proc byCpu top5，名称居左、数值右对齐列、发丝线分行）；模式3 原文块（长文本，eventlog detail WHEA-Logger 17 警告原文）。三模式共用同一骨架：状态行 + 概览层 + 原始数据层，文字 #646464 靠字号分层，标签列 64px 用补位帧对齐（Pen 定宽文本会拉伸，不用定宽文本排版）。",
+      "clip": true,
+      "width": 1120,
+      "fill": "#FFFFFF",
+      "layout": "vertical",
+      "padding": [
+        4,
+        32
+      ],
+      "children": [
+        {
+          "type": "text",
+          "id": "Pfu2u",
+          "name": "模式标注",
+          "fill": "#646464",
+          "content": "模式 1 · 字段行 —— 扁平对象（disk info）",
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 12,
+          "fontWeight": "500"
+        },
+        {
+          "type": "frame",
+          "id": "A3KNEX",
+          "name": "调用卡片 · disk info（本机）",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 16,
+          "children": [
+            {
+              "type": "frame",
+              "id": "UmYkf",
+              "name": "状态行",
+              "width": "fill_container",
+              "height": 24,
+              "gap": 8,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "WNFQr",
+                  "name": "状态图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "circle-check",
+                  "library": "lucide",
+                  "fill": "#007B3A"
+                },
+                {
+                  "type": "frame",
+                  "id": "HEgft",
+                  "name": "调用语句",
+                  "fill": "#F0F0F0",
+                  "cornerRadius": 4,
+                  "padding": [
+                    2,
+                    6
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "pawGw",
+                      "name": "调用语句文字",
+                      "fill": "#646464",
+                      "content": "disk({ scope: \"info\", drive: \"C\" })",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "J3CZLU",
+                  "name": "调用目的",
+                  "fill": "#646464",
+                  "content": "读取型号与卷信息",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "I0BDcM",
+                  "name": "头部弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "k34BIs",
+                  "name": "耗时",
+                  "fill": "#646464",
+                  "content": "0.7s",
+                  "fontFamily": "JetBrains Mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "oJLOq",
+              "name": "概览组 · ",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "qZivh",
+                  "name": "字段行 · 卷标",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "YjQ8f",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "卷标",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "BadEY",
+                      "name": "标签补位",
+                      "width": 40,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "TBB8u",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "C:（无卷标）",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "oqZZ7",
+                  "name": "字段行 · 文件系统",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "R1qn4",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "文件系统",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "L9n8j8",
+                      "name": "标签补位",
+                      "width": 16,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "V7OO7",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "NTFS",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "uzvCz",
+                  "name": "字段行 · 总容量",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "m32OK",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "总容量",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "rhsaZ",
+                      "name": "标签补位",
+                      "width": 28,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "O8vCuF",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "299.1 GB",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "x296in",
+                  "name": "字段行 · 剩余",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "G4hobW",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "剩余",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "UqZbb",
+                      "name": "标签补位",
+                      "width": 40,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "dFqLT",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "60.9 GB · 已用 79.6%",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "j05IN",
+              "name": "概览组 · 物理盘 · 1",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "MqW6p",
+                  "name": "分组标题",
+                  "fill": "#646464",
+                  "content": "物理盘 · 1",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "frame",
+                  "id": "qEgHv",
+                  "name": "字段行 · 型号",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "PJsix",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "型号",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "YMSt1",
+                      "name": "标签补位",
+                      "width": 40,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "MCLFT",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "Samsung SSD 970 EVO 1TB",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "tUQGm",
+                  "name": "字段行 · 介质",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "r8o5p",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "介质",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "lQpla",
+                      "name": "标签补位",
+                      "width": 40,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "y5UDUm",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "SSD",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "B2ylMw",
+                  "name": "字段行 · 总线",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "dTiLa",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "总线",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "VWPrH",
+                      "name": "标签补位",
+                      "width": 40,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "aUIB2",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "NVMe",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Eta9n",
+                  "name": "字段行 · 容量",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Ms7Hr",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "容量",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "rGuMP",
+                      "name": "标签补位",
+                      "width": 40,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "y29Y0",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "931.5 GB",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "z1lZVs",
+                  "name": "字段行 · 健康",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "lyacc",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "健康",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "TITV2",
+                      "name": "标签补位",
+                      "width": 40,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "P7yeO",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "良好",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "vlyi0",
+              "name": "概览组 · 物理盘 · 2",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "b8mMLc",
+                  "name": "分组标题",
+                  "fill": "#646464",
+                  "content": "物理盘 · 2",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "frame",
+                  "id": "W05inL",
+                  "name": "字段行 · 型号",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Ku0GG",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "型号",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "awL7t",
+                      "name": "标签补位",
+                      "width": 40,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "s1tUk",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "WD Blue SN580 1TB",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "pWOFf",
+                  "name": "字段行 · 介质",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "rHv7I",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "介质",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Dpvej",
+                      "name": "标签补位",
+                      "width": 40,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "U01TS6",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "SSD",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "O11QE",
+                  "name": "字段行 · 总线",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "nZD88",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "总线",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "K5ASV",
+                      "name": "标签补位",
+                      "width": 40,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "U3gnV",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "NVMe",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "m5YyD2",
+                  "name": "字段行 · 容量",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "HFfhb",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "容量",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "i8EJrd",
+                      "name": "标签补位",
+                      "width": 40,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "XbbhV",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "931.5 GB",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "GpnnJ",
+                  "name": "字段行 · 健康",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "B4stV",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "健康",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "aeLl5",
+                      "name": "标签补位",
+                      "width": 40,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "nwOkN",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "良好",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "FtJMk",
+              "name": "原始数据切换条",
+              "width": "fill_container",
+              "height": 24,
+              "gap": 6,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "C59Mf",
+                  "name": "原始数据图标",
+                  "width": 14,
+                  "height": 14,
+                  "icon": "braces",
+                  "library": "lucide",
+                  "fill": "#646464"
+                },
+                {
+                  "type": "text",
+                  "id": "fdLtb",
+                  "name": "原始数据标签",
+                  "fill": "#646464",
+                  "content": "原始数据",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "QDXmq",
+                  "name": "切换条弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "icon",
+                  "id": "uibdC",
+                  "name": "展开原始数据",
+                  "width": 12,
+                  "height": 12,
+                  "icon": "chevron-down",
+                  "library": "lucide",
+                  "fill": "#646464"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "SpgXo",
+          "name": "调用分隔",
+          "width": "fill_container",
+          "padding": [
+            28,
+            0
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "df5oR",
+              "name": "分隔线",
+              "width": "fill_container",
+              "height": 1,
+              "fill": "#F0F0F0"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "HayPn",
+          "name": "模式标注",
+          "fill": "#646464",
+          "content": "模式 2 · 排行列表 —— 有序数组（sys proc）",
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 12,
+          "fontWeight": "500"
+        },
+        {
+          "type": "frame",
+          "id": "k79rvP",
+          "name": "调用卡片 · sys proc（本机）",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 16,
+          "children": [
+            {
+              "type": "frame",
+              "id": "T7c01m",
+              "name": "状态行",
+              "width": "fill_container",
+              "height": 24,
+              "gap": 8,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "P0tRy6",
+                  "name": "状态图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "circle-check",
+                  "library": "lucide",
+                  "fill": "#007B3A"
+                },
+                {
+                  "type": "frame",
+                  "id": "VqxGF",
+                  "name": "调用语句",
+                  "fill": "#F0F0F0",
+                  "cornerRadius": 4,
+                  "padding": [
+                    2,
+                    6
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Q1uNPo",
+                      "name": "调用语句文字",
+                      "fill": "#646464",
+                      "content": "sys({ scope: \"proc\", top: 5 })",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "oWRlF",
+                  "name": "调用目的",
+                  "fill": "#646464",
+                  "content": "进程 CPU 与内存排行",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "L1I5xG",
+                  "name": "头部弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "asOmv",
+                  "name": "耗时",
+                  "fill": "#646464",
+                  "content": "1.4s",
+                  "fontFamily": "JetBrains Mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "WybTl",
+              "name": "列表表头",
+              "width": "fill_container",
+              "height": 24,
+              "stroke": "#F0F0F0",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 16,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "ne81R",
+                  "name": "表头 · 进程",
+                  "fill": "#646464",
+                  "content": "按 CPU 排行 · 共 212 个进程",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "p6M4pJ",
+                  "name": "表头列 · CPU %",
+                  "width": 72,
+                  "height": "fill_container",
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "GscK0",
+                      "name": "表头文字",
+                      "fill": "#646464",
+                      "content": "CPU %",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "E3svfr",
+                  "name": "表头列 · 工作集",
+                  "width": 88,
+                  "height": "fill_container",
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "WXxLG",
+                      "name": "表头文字",
+                      "fill": "#646464",
+                      "content": "工作集 MB",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "vqNh6",
+              "name": "排行行 · wetype_renderer",
+              "width": "fill_container",
+              "height": 30,
+              "stroke": "#F0F0F0",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 16,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "miagP",
+                  "name": "进程名",
+                  "fill": "#646464",
+                  "content": "wetype_renderer",
+                  "fontFamily": "Inter",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "nH1s5",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "htANw",
+                  "name": "数值列 · CPU",
+                  "width": 72,
+                  "height": "fill_container",
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "QXhdE",
+                      "name": "CPU 数值",
+                      "fill": "#646464",
+                      "content": "0.5",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "wShiE",
+                  "name": "数值列 · 工作集",
+                  "width": 88,
+                  "height": "fill_container",
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "J17M4D",
+                      "name": "工作集数值",
+                      "fill": "#646464",
+                      "content": "79",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "A0tZU",
+              "name": "排行行 · node",
+              "width": "fill_container",
+              "height": 30,
+              "stroke": "#F0F0F0",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 16,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "hgRmh",
+                  "name": "进程名",
+                  "fill": "#646464",
+                  "content": "node",
+                  "fontFamily": "Inter",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "WSp2Y",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "RYZtS",
+                  "name": "数值列 · CPU",
+                  "width": 72,
+                  "height": "fill_container",
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "g9S9K",
+                      "name": "CPU 数值",
+                      "fill": "#646464",
+                      "content": "0.4",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "W6YvH",
+                  "name": "数值列 · 工作集",
+                  "width": 88,
+                  "height": "fill_container",
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "MWL8s",
+                      "name": "工作集数值",
+                      "fill": "#646464",
+                      "content": "341",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "U2n7b",
+              "name": "排行行 · WindowsTerminal",
+              "width": "fill_container",
+              "height": 30,
+              "stroke": "#F0F0F0",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 16,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "D3gibz",
+                  "name": "进程名",
+                  "fill": "#646464",
+                  "content": "WindowsTerminal",
+                  "fontFamily": "Inter",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "WtdUc",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "abFj0",
+                  "name": "数值列 · CPU",
+                  "width": 72,
+                  "height": "fill_container",
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "JFvhI",
+                      "name": "CPU 数值",
+                      "fill": "#646464",
+                      "content": "0.4",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "vZkcL",
+                  "name": "数值列 · 工作集",
+                  "width": 88,
+                  "height": "fill_container",
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "P6V50z",
+                      "name": "工作集数值",
+                      "fill": "#646464",
+                      "content": "120",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "XjsUz",
+              "name": "排行行 · herdr",
+              "width": "fill_container",
+              "height": 30,
+              "stroke": "#F0F0F0",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 16,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "lQfnt",
+                  "name": "进程名",
+                  "fill": "#646464",
+                  "content": "herdr",
+                  "fontFamily": "Inter",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "TeI02",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "DhxHy",
+                  "name": "数值列 · CPU",
+                  "width": 72,
+                  "height": "fill_container",
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "NKyYc",
+                      "name": "CPU 数值",
+                      "fill": "#646464",
+                      "content": "0.3",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Kb29p",
+                  "name": "数值列 · 工作集",
+                  "width": 88,
+                  "height": "fill_container",
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "evf4l",
+                      "name": "工作集数值",
+                      "fill": "#646464",
+                      "content": "36",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Kiue9",
+              "name": "排行行 · wetype_server",
+              "width": "fill_container",
+              "height": 30,
+              "stroke": "#FFFFFF00",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 16,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "GEtA4",
+                  "name": "进程名",
+                  "fill": "#646464",
+                  "content": "wetype_server",
+                  "fontFamily": "Inter",
+                  "fontSize": 15,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "LQ3ei",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "Uqxon",
+                  "name": "数值列 · CPU",
+                  "width": 72,
+                  "height": "fill_container",
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ZeeVn",
+                      "name": "CPU 数值",
+                      "fill": "#646464",
+                      "content": "0.3",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "wUCP0",
+                  "name": "数值列 · 工作集",
+                  "width": 88,
+                  "height": "fill_container",
+                  "justifyContent": "end",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Dy3YV",
+                      "name": "工作集数值",
+                      "fill": "#646464",
+                      "content": "216",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "SUlcw",
+              "name": "原始数据切换条",
+              "width": "fill_container",
+              "height": 24,
+              "gap": 6,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "azQB3",
+                  "name": "原始数据图标",
+                  "width": 14,
+                  "height": 14,
+                  "icon": "braces",
+                  "library": "lucide",
+                  "fill": "#646464"
+                },
+                {
+                  "type": "text",
+                  "id": "rvKAs",
+                  "name": "原始数据标签",
+                  "fill": "#646464",
+                  "content": "原始数据",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "pPa7g",
+                  "name": "切换条弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "icon",
+                  "id": "O6xwXA",
+                  "name": "展开原始数据",
+                  "width": 12,
+                  "height": 12,
+                  "icon": "chevron-down",
+                  "library": "lucide",
+                  "fill": "#646464"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "xlJJJ",
+          "name": "调用分隔",
+          "width": "fill_container",
+          "padding": [
+            28,
+            0
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "VLost",
+              "name": "分隔线",
+              "width": "fill_container",
+              "height": 1,
+              "fill": "#F0F0F0"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "xOhRr",
+          "name": "模式标注",
+          "fill": "#646464",
+          "content": "模式 3 · 原文块 —— 长文本（eventlog detail）",
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 12,
+          "fontWeight": "500"
+        },
+        {
+          "type": "frame",
+          "id": "L8MZM",
+          "name": "调用卡片 · eventlog detail（本机）",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 16,
+          "children": [
+            {
+              "type": "frame",
+              "id": "ViAJX",
+              "name": "状态行",
+              "width": "fill_container",
+              "height": 24,
+              "gap": 8,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "YYYTq",
+                  "name": "状态图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "triangle-alert",
+                  "library": "lucide",
+                  "fill": "#8C5A00"
+                },
+                {
+                  "type": "frame",
+                  "id": "Gf1pU",
+                  "name": "调用语句",
+                  "fill": "#F0F0F0",
+                  "cornerRadius": 4,
+                  "padding": [
+                    2,
+                    6
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "cZAQk",
+                      "name": "调用语句文字",
+                      "fill": "#646464",
+                      "content": "eventlog({ scope: \"detail\", logName: \"System\", recordId: 384389878 })",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "fPsJ6",
+                  "name": "调用目的",
+                  "fill": "#646464",
+                  "content": "读取单条事件原文",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "reYS7",
+                  "name": "头部弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "RytG0",
+                  "name": "耗时",
+                  "fill": "#646464",
+                  "content": "0.3s",
+                  "fontFamily": "JetBrains Mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Wn3DT",
+              "name": "概览组 · 事件字段",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 8,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "dOk8V",
+                  "name": "字段行 · 提供程序",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "zChyg",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "提供程序",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "ASUSD",
+                      "name": "标签补位",
+                      "width": 16,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "inA8M",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "Microsoft-Windows-WHEA-Logger",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Ux92n",
+                  "name": "字段行 · 事件 ID",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "rieOP",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "事件 ID",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "qsxXZ",
+                      "name": "标签补位",
+                      "width": 22,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "NZtnx",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "17",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "QrTII",
+                  "name": "字段行 · 级别",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "KR0cq",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "级别",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "ATnik",
+                      "name": "标签补位",
+                      "width": 40,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "W6Ixa",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "警告",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "kgEXE",
+                  "name": "字段行 · 时间",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "MQUNV",
+                      "name": "字段名",
+                      "fill": "#646464",
+                      "content": "时间",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "QX0YI",
+                      "name": "标签补位",
+                      "width": 40,
+                      "height": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "kLUEr",
+                      "name": "字段值",
+                      "fill": "#646464",
+                      "content": "2026-09-20 16:42:35",
+                      "fontFamily": "Inter",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "LTMmG",
+              "name": "原文块",
+              "width": "fill_container",
+              "fill": "#F6F6F6",
+              "cornerRadius": 6,
+              "padding": [
+                10,
+                12
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "wk1gn",
+                  "name": "原文文本",
+                  "fill": "#646464",
+                  "content": "发生了已更正的硬件错误。\n\n组件: PCI Express Root Port\n错误源: Advanced Error Reporting (PCI Express)\n\n主总线: 设备: 函数: 0x0: 0x1: 0x0\n辅助总线: 设备: 函数: 0x0: 0x0: 0x0\n主要设备名称: PCI\\VEN_8086&DEV_460D&SUBSYS_00000000&REV_02\n辅助设备名称:",
+                  "lineHeight": 1.6,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 13,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "cVWfr",
+              "name": "原始数据切换条",
+              "width": "fill_container",
+              "height": 24,
+              "gap": 6,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "zB3HY",
+                  "name": "原始数据图标",
+                  "width": 14,
+                  "height": 14,
+                  "icon": "braces",
+                  "library": "lucide",
+                  "fill": "#646464"
+                },
+                {
+                  "type": "text",
+                  "id": "Do5BN",
+                  "name": "原始数据标签",
+                  "fill": "#646464",
+                  "content": "原始数据",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "rzMtb",
+                  "name": "切换条弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "icon",
+                  "id": "wisna",
+                  "name": "展开原始数据",
+                  "width": 12,
+                  "height": 12,
+                  "icon": "chevron-down",
+                  "library": "lucide",
+                  "fill": "#646464"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ],
   "variables": {
-    "draft-accent": {
-      "type": "color",
-      "value": "#465A9F"
-    },
-    "draft-ink": {
-      "type": "color",
-      "value": "#272B35"
-    },
-    "draft-muted": {
-      "type": "color",
-      "value": "#626875"
-    },
     "radius-control": {
       "type": "number",
       "value": 6
@@ -21771,18 +24942,6 @@
       "value": 12
     },
     "radius-composer": {
-      "type": "number",
-      "value": 16
-    },
-    "font-title": {
-      "type": "string",
-      "value": "Inter"
-    },
-    "text-title": {
-      "type": "number",
-      "value": 32
-    },
-    "text-description": {
       "type": "number",
       "value": 16
     },

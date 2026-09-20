@@ -101,7 +101,7 @@ for (const theme of ["light", "dark"]) {
 const out = {
   $schema: "https://www.designtokens.org/schemas/2025.10/format.json",
   $description:
-    "cst-pilot 自有配色。12 步色阶，每步绑定一种界面用途，取色依据是用途而不是明暗编号。浅深两套独立生成。详细划分见 doc/design/web/design-decisions.md。",
+    "cst-pilot 自有配色。12 步色阶，每步绑定一种界面用途，取色依据是用途而不是明暗编号。浅深两套独立生成。详细划分见 doc/design/web/design-standards.md。",
   color: { $type: "color" },
 };
 

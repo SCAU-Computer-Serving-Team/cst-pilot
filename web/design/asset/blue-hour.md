@@ -10,6 +10,9 @@
 | `blue-hour-palette.png` | 浅色版 256×1 色彩查找表，五色在 Oklab 空间插值后转为 sRGB |
 | `blue-hour-dark-palette.png` | 深色版 256×1 色彩查找表，沿用 Oklab 插值，使用独立颜色和色标位置 |
 | `make-blue-hour-dark-palette.mjs` | 深色色表生成器，运行 `node web/design/asset/make-blue-hour-dark-palette.mjs` 重建 |
+| `blue-hour.css` | 无 WebGL 时的 CSS 降级：`oklab` 插值线性渐变加噪点层；CSS 画不出板条，只得近似 |
+| `blue-hour.png` | 1920×1080 静态导出，用作色卡画布「cst-pilot 首页背景」的参考图 |
+| `blue-hour-air.glsl` 等 | 登录页 AIR 变体，见 [登录页 AIR 背景](blue-hour-air.md) |
 | `Blue hour-3840x2160.svg` | 用户提供的静态原图 |
 | `blue-hour-background.png` | 静态兼容图，取自 SVG |
 
