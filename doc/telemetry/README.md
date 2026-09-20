@@ -37,7 +37,7 @@ L1–L8 与各文档的议题编号（S / R）不通用。八条都已落成结�
 |---|---|---|
 | 部署 | 用什么机器、什么域名 | [receiver/SPEC.md](receiver/SPEC.md) 议题 R1 |
 | 运维 | 谁负责部署、备份与恢复 | [receiver/SPEC.md](receiver/SPEC.md) 议题 R13 |
-| 数据定义 | 效果指标、币种表登记范围、报错组数上限 | [../contract.md](../contract.md) 议题 S1、S3、S4 |
+| 数据定义 | 效果指标、报错组数上限 | [../contract.md](../contract.md) 议题 S1、S4 |
 | 发行 | `telemetry.json` 要进 `pack/pack.mjs` 白名单 | [sender/SPEC.md](sender/SPEC.md)「联网前提」 |
 | OAuth | 见下节 | — |
 
