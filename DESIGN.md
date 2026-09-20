@@ -70,12 +70,12 @@ omitted:
 
 本文是设计规范的唯一真源，只定「怎么取色、怎么排版」这一层。逐元素的取值、尺寸与形态由画布承载，本文不复述。冲突时以本文为准。
 
-本文不写 Layout、Elevation & Depth、Shapes、Components 四个章节：它们的内容只在画布上，尚未归纳成全站规则，取值直接看 [界面画布](web/design/cst-pilot-web.pen)。
+本文不写 Layout、Elevation & Depth、Shapes、Components 四个章节：它们的内容只在画布上，尚未归纳成全站规则，取值直接看 [界面画布](src/web/design/cst-pilot-web.pen)。
 
 | 参考 | 范围 |
 |---|---|
-| [cst-pilot-colors.pen](web/design/cst-pilot-colors.pen) | 色阶画布。取色的权威依据 |
-| [cst-pilot-web.pen](web/design/cst-pilot-web.pen) | 界面画布。各页浅深两版的取值、尺寸与形态 |
+| [cst-pilot-colors.pen](src/web/design/cst-pilot-colors.pen) | 色阶画布。取色的权威依据 |
+| [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) | 界面画布。各页浅深两版的取值、尺寸与形态 |
 | [文件清单](#文件清单) | 设计相关的全部文档、画布、资产与字体 |
 
 格式依据 [DESIGN.md Format](https://github.com/google-labs-code/design.md)（alpha）。本文件放在仓库根目录，供 Pen 从工作目录读取。
@@ -95,19 +95,19 @@ omitted:
 | [Pen 操作建议](doc/design/web/pen.md) | Pen CLI 与 MCP 的使用注意事项 |
 | [技术调研](doc/design/web/tech-research.md) | 降级能力分层、pi 多消费者、兼容版实测 |
 | [工具设计](doc/design/tool/) | `sys`、`driver`、`eventlog` 三个工具的设计理由 |
-| [Blue hour 背景](web/design/asset/blue-hour.md) | 首页 PRISM2 板条的色表、参数与来源 |
-| [登录页 AIR 背景](web/design/asset/blue-hour-air.md) | AIR 椭圆布局、控制参数与居中面板 |
-| [排版参考](web/design/asset/reference/README.md) | 同类 AI 对话产品的界面截图与共性结论 |
+| [Blue hour 背景](src/web/design/asset/blue-hour.md) | 首页 PRISM2 板条的色表、参数与来源 |
+| [登录页 AIR 背景](src/web/design/asset/blue-hour-air.md) | AIR 椭圆布局、控制参数与居中面板 |
+| [排版参考](src/web/design/asset/reference/README.md) | 同类 AI 对话产品的界面截图与共性结论 |
 
 ### 画布
 
 | 文件 | 内容 |
 |---|---|
-| [cst-pilot-colors.pen](web/design/cst-pilot-colors.pen) | 12 步用途、中性与四组彩色色阶 |
-| [cst-pilot-web.pen](web/design/cst-pilot-web.pen) | 首页、聊天工作台、登录页与仪表盘的浅深两版用色、背景与排版；另含上下文面板、模型选择、思考强度、账号菜单、消息菜单的悬停态 |
-| [heroui-colors.pen](web/design/heroui-colors.pen) | HeroUI v3 默认主题对照 |
-| [asset/pencil-heroui.pen](web/design/asset/pencil-heroui.pen) | HeroUI 组件参考画布 |
-| [achieved/](web/design/achieved/) | 归档：配色方案 B、C 的画布与导出图，已被 `cst-pilot-colors.pen` 取代 |
+| [cst-pilot-colors.pen](src/web/design/cst-pilot-colors.pen) | 12 步用途、中性与四组彩色色阶 |
+| [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) | 首页、聊天工作台、登录页与仪表盘的浅深两版用色、背景与排版；另含上下文面板、模型选择、思考强度、账号菜单、消息菜单的悬停态 |
+| [heroui-colors.pen](src/web/design/heroui-colors.pen) | HeroUI v3 默认主题对照 |
+| [asset/pencil-heroui.pen](src/web/design/asset/pencil-heroui.pen) | HeroUI 组件参考画布 |
+| [achieved/](src/web/design/achieved/) | 归档：配色方案 B、C 的画布与导出图，已被 `cst-pilot-colors.pen` 取代 |
 
 ### 资产
 
@@ -118,11 +118,11 @@ omitted:
 | 对照 | [heroui.tokens.json](doc/design/web/asset/heroui.tokens.json)、[make-heroui-tokens.mjs](doc/design/web/asset/make-heroui-tokens.mjs) | HeroUI v3 默认主题原始变量与解析脚本，不是本项目的映射结果 |
 | 导出图 | [cst-pilot-color-steps.png](doc/design/web/asset/cst-pilot-color-steps.png)、[cst-pilot-color-scale.png](doc/design/web/asset/cst-pilot-color-scale.png)、[cst-pilot-blue-hour.png](doc/design/web/asset/cst-pilot-blue-hour.png) | 三张色卡画布的导出，宽 2312 |
 | 对照图 | [heroui-colors-core.png](doc/design/web/asset/heroui-colors-core.png)、[heroui-colors-light.png](doc/design/web/asset/heroui-colors-light.png)、[heroui-colors-dark.png](doc/design/web/asset/heroui-colors-dark.png) | `heroui-colors.pen` 三张画布的导出 |
-| 色表 | [blue-hour-palette.png](web/design/asset/blue-hour-palette.png)、[blue-hour-dark-palette.png](web/design/asset/blue-hour-dark-palette.png)、[blue-hour-air-dark-palette.png](web/design/asset/blue-hour-air-dark-palette.png) | 256×1 色彩查找表 |
-| Shader | [blue-hour.glsl](web/design/asset/blue-hour.glsl)、[blue-hour-air.glsl](web/design/asset/blue-hour-air.glsl) | 首页与登录页的动态背景 |
-| 降级样式 | [blue-hour.css](web/design/asset/blue-hour.css) | 无 WebGL 时的 CSS 近似，不画板条 |
-| 背景原图 | [Blue hour-3840x2160.svg](web/design/asset/Blue%20hour-3840x2160.svg)、[blue-hour-background.png](web/design/asset/blue-hour-background.png)、[blue-hour.png](web/design/asset/blue-hour.png) | 用户提供的原图与静态兼容图 |
-| 主页快照 | [login-preview/](web/design/asset/login-preview/) | 登录页场景预览的模糊底层 |
+| 色表 | [blue-hour-palette.png](src/web/design/asset/blue-hour-palette.png)、[blue-hour-dark-palette.png](src/web/design/asset/blue-hour-dark-palette.png)、[blue-hour-air-dark-palette.png](src/web/design/asset/blue-hour-air-dark-palette.png) | 256×1 色彩查找表 |
+| Shader | [blue-hour.glsl](src/web/design/asset/blue-hour.glsl)、[blue-hour-air.glsl](src/web/design/asset/blue-hour-air.glsl) | 首页与登录页的动态背景 |
+| 降级样式 | [blue-hour.css](src/web/design/asset/blue-hour.css) | 无 WebGL 时的 CSS 近似，不画板条 |
+| 背景原图 | [Blue hour-3840x2160.svg](src/web/design/asset/Blue%20hour-3840x2160.svg)、[blue-hour-background.png](src/web/design/asset/blue-hour-background.png)、[blue-hour.png](src/web/design/asset/blue-hour.png) | 用户提供的原图与静态兼容图 |
+| 主页快照 | [login-preview/](src/web/design/asset/login-preview/) | 登录页场景预览的模糊底层 |
 
 ### 字体
 
@@ -130,7 +130,7 @@ omitted:
 
 | 字体 | 文件 | 用途 |
 |---|---|---|
-| Source Han Sans CN（思源黑体） | `web/design/fonts/` 三档字重（Regular / Medium / Bold） | 欢迎语、中文导航、会话标题、分组文字、账户信息 |
+| Source Han Sans CN（思源黑体） | `src/web/design/fonts/` 三档字重（Regular / Medium / Bold） | 欢迎语、中文导航、会话标题、分组文字、账户信息 |
 | Inter | 无文件 | 产品名、模型名、页脚 |
 | JetBrains Mono | 无文件 | 聊天页行内工具名 |
 | Noto Sans SC | 无文件 | 仅 `cst-pilot-colors.pen` 的设计说明 |
@@ -145,10 +145,10 @@ omitted:
 |---|---|
 | [assets/logo.png](assets/logo.png) | 主标识：`CST Pilot` 像素方块字形，2040×456，蓝白配色，用于仓库 README 插图 |
 | [assets/make-logo.cjs](assets/make-logo.cjs) | 主标识生成脚本；只留在开发仓库，`pack` 明确排除，不随发行包分发 |
-| [logo-original.png](web/design/asset/logo-original.png) | 主标识原图，与 `assets/logo.png` 同尺寸 |
-| [logo-reversed.png](web/design/asset/logo-reversed.png) | 反白版，用于深色底 |
-| [logo-reversed-accent.png](web/design/asset/logo-reversed-accent.png) | 反白版加强调色 |
-| [logo-mark.png](web/design/asset/logo-mark.png) | 单独的 `C` 字形标记，209×293 |
+| [logo-original.png](src/web/design/asset/logo-original.png) | 主标识原图，与 `assets/logo.png` 同尺寸 |
+| [logo-reversed.png](src/web/design/asset/logo-reversed.png) | 反白版，用于深色底 |
+| [logo-reversed-accent.png](src/web/design/asset/logo-reversed-accent.png) | 反白版加强调色 |
+| [logo-mark.png](src/web/design/asset/logo-mark.png) | 单独的 `C` 字形标记，209×293 |
 
 四份 `logo-*.png` 尚未被任何画布或文档引用，只作为素材留存。Web 端的标识形态、用法和尺寸随界面设计确定。
 
@@ -240,7 +240,7 @@ omitted:
 
 #### 动态背景
 
-Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用独立色表与参数；浅色背景不能原样复用于深色主题。参数、来源与算法差异见 [Blue hour 背景](web/design/asset/blue-hour.md) 与 [登录页 AIR 背景](web/design/asset/blue-hour-air.md)。两处背景目前只用于 Pen，不能据此认定网页动画或兼容版已经实现。
+Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用独立色表与参数；浅色背景不能原样复用于深色主题。参数、来源与算法差异见 [Blue hour 背景](src/web/design/asset/blue-hour.md) 与 [登录页 AIR 背景](src/web/design/asset/blue-hour-air.md)。两处背景目前只用于 Pen，不能据此认定网页动画或兼容版已经实现。
 
 ### 对比度边界
 
@@ -350,11 +350,11 @@ Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用�
 
 **位移过 40px 会显迟钝。** 除整块面板与抽屉外，都向 `--distance-base`（8px）收。
 
-**无障碍。** 每条过渡都要带 `prefers-reduced-motion` 降级。Pen 画布不读取系统偏好，背景动画需手动把速度设为 0，见 [Blue hour 背景](web/design/asset/blue-hour.md)。
+**无障碍。** 每条过渡都要带 `prefers-reduced-motion` 降级。Pen 画布不读取系统偏好，背景动画需手动把速度设为 0，见 [Blue hour 背景](src/web/design/asset/blue-hour.md)。
 
 ## 页面
 
-各页取值、尺寸与形态直接看 [界面画布](web/design/cst-pilot-web.pen)，本文只记画布上看不出来的规则。
+各页取值、尺寸与形态直接看 [界面画布](src/web/design/cst-pilot-web.pen)，本文只记画布上看不出来的规则。
 
 | 页面 | 画布帧 | 本文只记录的规则 |
 |---|---|---|

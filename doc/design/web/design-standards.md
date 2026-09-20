@@ -78,7 +78,7 @@
 
 采用 HeroUI v3 的语义角色、[Radix Colors](https://www.radix-ui.com/colors)（MIT）的 12 步用途组织方式和自有 OKLCH 色值。浅深两套独立生成；首页 Blue hour 背景与例外用色独立于通用色阶。
 
-规范集中在 [DESIGN.md · Colors](../../../DESIGN.md#colors)：用途划分、中性与彩色色阶、首页实际用色、动态背景参数及对比度边界。本文件不另存一套色值。取色的权威画布是 [cst-pilot-colors.pen](../../../web/design/cst-pilot-colors.pen)，完整文件清单见 [DESIGN.md · 文件清单](../../../DESIGN.md#文件清单)。
+规范集中在 [DESIGN.md · Colors](../../../DESIGN.md#colors)：用途划分、中性与彩色色阶、首页实际用色、动态背景参数及对比度边界。本文件不另存一套色值。取色的权威画布是 [cst-pilot-colors.pen](../../../src/web/design/cst-pilot-colors.pen)，完整文件清单见 [DESIGN.md · 文件清单](../../../DESIGN.md#文件清单)。
 
 ## 版式
 

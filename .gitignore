@@ -22,7 +22,7 @@ outbox/
 doc/test/testlog/
 
 # ---- 设计资产（发行版需要，开发仓库不存；可由上游 OFL 字体包重建）----
-web/design/fonts/
+src/web/design/fonts/
 
 # ---- 杂项 ----
 Thumbs.db
