@@ -8,15 +8,16 @@
 2. 一个写端点 `POST /v1/sessions`，一个 `GET /healthz`。不开对外读接口，报表走命令行导 CSV。
 3. 一场会话一条记录，原始记录整条存 `payload`，常用字段抽成列。
 4. 身份由队员的 OA 登录决定：接收端拿上传的令牌向 OA 内省，取 `mid` 与 `device_id`。
-5. 零 npm 依赖，只用 Node 内置模块。
+5. 零 npm 依赖，只用 Node 内置模块：免安装、免漏洞扫描、免升级依赖。
 6. **身份解析依赖 OA 的内省接口，该接口尚未实现**，见「依赖 OAuth 实现」。OAuth 相关的内容一律等它落地后再讨论。
 
 ## 接口
 
+请求体形状见 [信息收集契约](../../contract.md)「上传信封」。
+
 ```
 POST /v1/sessions
 Authorization: Bearer <OA 访问令牌>
-{ "v": "0.1", "batchId": "<uuid>", "sentAt": "...", "records": [ ... ] }
 ```
 
 | 响应 | 含义 | 发送端会怎么做 |
@@ -32,7 +33,7 @@ Authorization: Bearer <OA 访问令牌>
 1. 从 `Authorization` 头取令牌，内省通过后把 `mid` 与 `device_id` 写进每条记录。令牌不过的请求不入库。
 2. 逐条校验，非法条目计数上报，不拒绝整批。
 3. `receivedAt` 与 `ip` 由服务端补充。`ip` 只存网段。
-4. 单批上限 50 条或 1 MB，超出**整批拒绝，不截断**。截断会让发送端把没送到的记录也一起删掉。
+4. 单批上限见契约「上传信封」，超出**整批拒绝，不截断**。截断会让发送端把没送到的记录也一起删掉。
 5. 被限流的请求不写日志，否则限流本身会成为写入放大器。
 6. 响应不带任何指令字段。停采只借 404 / 410 传达。
 
@@ -114,8 +115,8 @@ Authorization: Bearer <服务凭据>
 | `record_id` | 主键，去重 |
 | `mid`、`device_id`、`received_at`、`ip_net` | 服务端写入 |
 | `v`、`kit_version`、`session_id` | 记录自带 |
-| `reason`、`end_reason`、`started_at`、`ended_at`、`duration_ms`、`active_ms`、`prompts`、`turns`、`messages` | 会话 |
-| `compactions`、`compaction_tokens`、`context_peak` | 上下文 |
+| `reason`、`end_reason`、`started_at`、`ended_at`、`duration_ms`、`active_ms`、`prompts`、`turns`、`context_entries` | 会话 |
+| `compactions`、`compaction_tokens`、`compaction_overflows`、`compaction_failures`、`context_peak`、`context_window` | 上下文 |
 | `network_errors`、`aborted`、`tool_failures` | 失败 |
 | `os_version`、`os_arch`、`admin` | 环境 |
 | `cost_cny`、`cost_usd`、`unpriced_turns` | 费用，分币种 |
@@ -157,7 +158,9 @@ Authorization: Bearer <服务凭据>
 | 列 | 来源 |
 |---|---|
 | `date`、`mid` | 主键。日期按 `received_at` 归到 +08:00 |
-| `sessions`、`duration_ms`、`active_ms`、`prompts`、`turns`、`messages` | 各列累加 |
+| `sessions`、`duration_ms`、`active_ms`、`prompts`、`turns`、`context_entries` | 各列累加 |
+| `compactions`、`compaction_overflows`、`compaction_failures` | 各列累加 |
+| `context_peak`、`context_window` | 取占比最高的那一条记录的两个值，成对写入 |
 | `tool_calls`、`tool_failures`、`degraded` | `payload.tools[]` 累加 |
 | `input_tokens`、`output_tokens`、`cache_read_tokens`、`cache_write_tokens`、`total_tokens` | `payload.models[]` 累加 |
 | `cost_cny`、`cost_usd`、`unpriced_turns` | 分币种 |
@@ -210,7 +213,6 @@ Authorization: Bearer <服务凭据>
 | 定时任务 | systemd timer | 任务在独立进程跑，崩了不拖累服务 |
 | HTTPS | Caddy 反代 | 自动申请与续期证书，Node 只监听 `127.0.0.1` |
 | 日志 | `console` 到 journald | |
-| npm 依赖 | 0 个 | 免 install、免漏洞扫描、免升级 |
 
 子命令：`serve`（默认）、`rollup`、`cleanup`、`report`、`members`、`delete`。
 

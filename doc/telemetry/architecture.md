@@ -72,7 +72,7 @@ pi 的会话事件机制覆盖会话切分的所有情况：退出、切换会�
 
 | 层 | 选型 | 说明 |
 |---|---|---|
-| 发送端 | pi 扩展，TypeScript，零 npm 依赖 | 寄住 pi 进程，jiti 免编译运行；只用 Node 内置模块与全局 `fetch` |
+| 发送端 | pi 扩展，TypeScript | 寄住 pi 进程，jiti 免编译运行；零 npm 依赖，只用 Node 内置模块与全局 `fetch` |
 | 传输 | HTTPS POST + JSON | 唯一通道；端点 URL 随发行写入 `telemetry.json` |
 | 接收端 | 阿里云服务器自建 Node 常驻服务 | 框架与存储细化见 [receiver/SPEC.md](receiver/SPEC.md)；HTTPS 由服务器侧证书提供；代码在本仓库 `src/telemetry/`，不经工具包发行；身份解析靠 OA 的令牌内省接口，尚未实现 |
 

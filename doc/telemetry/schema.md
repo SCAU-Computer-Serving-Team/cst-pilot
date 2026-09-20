@@ -1,8 +1,8 @@
 # 遥测数据契约（会话记录）
 
-状态：发送端与接收端的共同契约，契约版本 0.1。更新：2026-09-20。
+状态：会话记录的字段定义，契约版本 0.1，版本号以 [信息收集契约](../contract.md) 为准。更新：2026-09-20。
 
-本文只定义一个东西：会话记录有哪些字段、每个字段的统计口径是什么。共用字段、身份来源、计费币种、工具字段形状、不采集清单都写在 [信息收集契约](../contract.md)，本文引用不重抄。
+本文只定义一个东西：会话记录有哪些字段、每个字段的统计口径是什么。共用字段、上传信封、身份来源、计费币种、工具字段形状、不采集清单都写在 [信息收集契约](../contract.md)，本文引用不重抄。
 
 ## 会话记录字段
 
@@ -10,8 +10,8 @@
 
 | 键 | 值示例 | 来源 | 用途描述 |
 |---|---|---|---|
-| `sessionId` | `uuid`，pi 生成 | `ctx.sessionManager` | 与本地会话文件对应，便于回查。记录里只留前 8 位 |
-| `reason` | `startup｜new｜resume｜fork` | `session_start` | 区分启动、新建、恢复、分叉 |
+| `sessionId` | `uuid`，pi 生成 | `ctx.sessionManager` | 与本地会话文件对应，便于回查，记全量 |
+| `reason` | `startup｜reload｜new｜resume｜fork` | `session_start` | 区分启动、重载、新建、恢复、分叉 |
 | `endReason` | `quit｜reload｜new｜resume｜fork` | `session_shutdown` | 区分正常退出、切换会话、重载 |
 
 ### 时间
@@ -29,7 +29,7 @@
 |---|---|---|---|
 | `prompts` | `9` | `input` 事件（`source = interactive`）计数 | 队员提问次数，使用强度。不用 `agent_start`：自动重试会重复触发，不等于一次提问 |
 | `turns` | `23` | `turn_end` 计数 | 模型往返次数，与请求记录条数对照 |
-| `messages` | `47` | `session_shutdown` 时 `buildContextEntries().length` | 上下文规模，辅助判断压缩是否必要。不用 `message_start` 计数：它含 toolResult 事件，语义不符 |
+| `contextEntries` | `47` | `session_shutdown` 时 `buildContextEntries().length` | 会话结束时的上下文条目数，含压缩摘要与自定义条目。不用 `message_start` 计数：它含 toolResult 事件。上下文规模看 `contextPeak` |
 
 ### 模型
 
@@ -39,7 +39,7 @@
 |---|---|---|---|
 | `provider` | `cstoa` | `turn_end` 的 assistant 消息 | 供应商分布 |
 | `model` | `glm-5.3-flash` | 同上 | 模型使用分布 |
-| `thinkingLevel` | `minimal｜low｜medium｜high｜xhigh｜max` | `turn_end` 时的 `ctx.thinkingLevel` | 思考档位对成本的影响 |
+| `thinkingLevel` | `off｜minimal｜low｜medium｜high｜xhigh｜max` | `turn_end` 时的 `ctx.thinkingLevel` | 思考档位对成本的影响 |
 | `turns` | `23` | `turn_end` 按分组键计数 | 该组合的往返次数，占比最大者即主用模型 |
 | `input` | `182000` | `message.usage` 分组累计 | 输入 token，含未命中缓存的全部输入 |
 | `output` | `9400` | 同上 | 输出 token，主要计费项之一 |
@@ -80,9 +80,12 @@
 
 | 键 | 值示例 | 来源 | 用途描述 |
 |---|---|---|---|
-| `compactions` | `0` | `session_compact` | 压缩次数，反映长会话占比 |
-| `compactionTokens` | `0` | `session_compact` 的 `tokensBefore` 累计 | 被压缩的 token 规模，压缩本身也计费 |
-| `contextPeak` | `38100` | `ctx.getContextUsage()` | 上下文峰值，判断是否贴近窗口上限 |
+| `compactions` | `0` | `session_compact` | 压缩成功次数，反映长会话占比 |
+| `compactionTokens` | `0` | `session_compact` 的 `compactionEntry.tokensBefore` 累计 | 被压缩的 token 规模，压缩本身也计费 |
+| `compactionOverflows` | `0` | `session_compact` 的 `reason = overflow` 计数 | 上下文涨到溢出才压缩的次数，工具用得过重的信号 |
+| `compactionFailures` | `0` | `session_compact_failed` 计数 | 压缩失败次数。失败后上下文不会变小，长会话可能卡住 |
+| `contextPeak` | `38100` | `ctx.getContextUsage()` 的 `tokens` 峰值。该值为 `null` 或整个对象为 `undefined` 时跳过本次采样 | 上下文峰值，判断是否贴近窗口上限 |
+| `contextWindow` | `200000` | 峰值那次的 `contextWindow` | 峰值对应的窗口大小。没有它，`contextPeak` 跨模型不可比 |
 
 ### 工具
 
@@ -111,7 +114,7 @@
 
 | 键 | 值示例 | 来源 | 用途描述 |
 |---|---|---|---|
-| `providerErrors` | `{ 429: 1 }` | `after_provider_response` 状态码分类计数 | 区分网关限流、故障与模型问题，可由请求记录聚合 |
+| `providerErrors` | `{ "429": 1 }` | `after_provider_response` 状态码分类计数 | 区分网关限流、故障与模型问题，可由请求记录聚合 |
 | `networkErrors` | `2` | `turn_end` 的 `stopReason = error` 且本往返没有 `after_provider_response` | 网络层失败计数：断网、DNS 失败、连接超时等无响应错误 |
 | `aborted` | `0` | `stopReason = aborted` 计数 | 队员主动取消次数，模型跑偏的信号 |
 | `toolFailures` | `0` | `tool_execution_end` 的 `isError` 合计 | 工具失败总数，与 `tools[].failures` 对照 |
@@ -158,7 +161,7 @@
   "activeMs": 1502000,
   "prompts": 9,
   "turns": 23,
-  "messages": 47,
+  "contextEntries": 47,
   "models": [
     {
       "provider": "cstoa",
@@ -176,7 +179,10 @@
   ],
   "compactions": 0,
   "compactionTokens": 0,
+  "compactionOverflows": 0,
+  "compactionFailures": 0,
   "contextPeak": 38100,
+  "contextWindow": 200000,
   "tools": [
     { "name": "disk", "scope": "usage", "calls": 2, "failures": 0, "degraded": 1, "totalMs": 41200, "maxMs": 38000, "resultBytes": 21000 },
     { "name": "sys",  "scope": "gpu",   "calls": 1, "failures": 0, "degraded": 0, "totalMs": 3100,  "maxMs": 3100,  "resultBytes": 4200 }
@@ -197,4 +203,4 @@
 
 ## 尺寸
 
-会话记录约 1–3 KB。`errors` 的原文可能显著撑大记录，单条最长按实际报错为准，不设截断；受影响的只是这一条记录的体积，不改变组批规则。`tools` 元素数上限 512，`models` 通常 1–3 项。
+会话记录约 1–3 KB。`errors` 的原文可能显著撑大记录；受影响的只是这一条记录的体积，不改变组批规则。`tools` 元素数上限 512，`models` 通常 1–3 项。
