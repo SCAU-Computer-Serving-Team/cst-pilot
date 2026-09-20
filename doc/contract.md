@@ -13,6 +13,23 @@
 
 「值示例」里的 `uuid`、`sha256(...)`、`ISO 8601` 等是格式记号，不是字面值。具体取值见文末示例。
 
+## 上传信封
+
+只有 `session` 记录上传。一次 POST 带一批记录，形状如下。发送端构造，接收端按此校验。
+
+```
+POST /v1/sessions
+Authorization: Bearer <OA 访问令牌>
+{ "v": "0.1", "batchId": "<uuid>", "sentAt": "<ISO 8601>", "records": [ ... ] }
+```
+
+| 键 | 值示例 | 来源 | 用途描述 |
+|---|---|---|---|
+| `v` | `"0.1"` | 常量 | 契约版本，与记录内的 `v` 同值 |
+| `batchId` | `uuid` | 发送端生成 | 批次标识，接收端据此识别重发 |
+| `sentAt` | `ISO 8601` | 发送端时钟 | 发送时刻，仅作参考；时间基准用接收端的 `receivedAt` |
+| `records` | `[ ... ]` | 发送端 | 一批记录的数组，上限 50 条或 1 MB |
+
 ## 记录自带
 
 两种记录都携带。
@@ -39,7 +56,7 @@
 | `mid` | 上传凭据载荷 | 队员编号。使用统计与报表的归属单位 |
 | `deviceId` | 上传凭据载荷的 `device_id` | 设备标识。限流与删除的单位 |
 | `receivedAt` | 接收端时钟 | 时间基准，客户端时钟不可信 |
-| `ip` | 接收端从连接获取 | 来源统计，处理方式见 [telemetry/receiver/SPEC.md](telemetry/receiver/SPEC.md) 议题 R6 |
+| `ip` | 接收端从连接获取 | 来源统计。只存网段，见 [telemetry/receiver/SPEC.md](telemetry/receiver/SPEC.md)「接口」 |
 
 上传凭据是队员登录得到的 [OA 访问令牌](auth/README.md)，与模型调用共用同一个令牌。接收端不自己验签（令牌是 HMAC 签名，密钥不能外发），向 OA 内省令牌换取身份，取出 `mid` 与 `device_id` 写入记录；该接口待 OA 实现，见 [telemetry/receiver/SPEC.md](telemetry/receiver/SPEC.md)「依赖 OAuth 实现」。上传不设独立作用域：采不采由团队规定，不作为队员的可选项。
 
@@ -56,15 +73,15 @@
 
 | 键 | 值示例 | 来源 | 用途描述 |
 |---|---|---|---|
-| `sessionId` | `uuid`，pi 生成 | `ctx.sessionManager` | 关联会话记录与本地会话文件。只记前 8 位 |
+| `sessionId` | `uuid`，pi 生成 | `ctx.sessionManager` | 关联会话记录与本地会话文件，回查用，记全量 |
 | `seq` | `17` | 发送端累计 | 会话内第几次模型调用，从 1 开始。缺口即丢失率 |
 
 ### 时间
 
 | 键 | 值示例 | 来源 | 用途描述 |
 |---|---|---|---|
-| `requestedAt` | `ISO 8601 带本地时区偏移` | 发送端记录 | 调用开始时刻 |
-| `durationMs` | `4820` | `turn_end` 时间戳差 | 本次请求的模型调用耗时 |
+| `requestedAt` | `ISO 8601 带本地时区偏移` | `before_provider_request` 时刻 | 调用开始时刻 |
+| `durationMs` | `4820` | `before_provider_request` 至 assistant `message_end` 的时刻差 | 本次请求的模型调用耗时。不能用 `turn_end`：它在工具执行完才触发，会把工具耗时算进来 |
 | `ttftMs` | `640` | 首个 assistant `message_update` 到达耗时 | 首字延迟，从 `turn_start` 起算 |
 
 ### 模型与用量
@@ -73,7 +90,7 @@
 |---|---|---|---|
 | `provider` | `cstoa` | `turn_end` 的 assistant 消息 | 本次请求的供应商 |
 | `model` | `glm-5.3-flash` | 同上 | 本次请求的模型 |
-| `thinkingLevel` | `minimal｜low｜medium｜high｜xhigh｜max` | `turn_end` 时的 `ctx.thinkingLevel` | 本次请求的思考档位，取值与 pi 的 `ThinkingLevel` 一致 |
+| `thinkingLevel` | `off｜minimal｜low｜medium｜high｜xhigh｜max` | `turn_end` 时的 `ctx.thinkingLevel` | 本次请求的思考档位，取值与 pi 的 `ThinkingLevel` 一致。该字段可选，取不到时留空 |
 | `input` | `8432` | `message.usage` | 输入 token，含未命中缓存的全部输入 |
 | `output` | `1286` | 同上 | 输出 token |
 | `cacheRead` | `32768` | 同上 | 命中缓存的输入 token |
@@ -92,23 +109,23 @@
 
 ## 计费币种
 
-`cost` 与 `currency` 必须同源：数值来自 provider 的价目表，币种必须是那份价目表的币种。不做汇率换算。
+`cost` 与 `currency` 必须同源：数值来自 provider 的价目表，币种必须是那份价目表的币种。不做汇率换算。费用由发送端按价目表算出，接收端只存。
 
-币种由一张单独维护的映射表决定，**缺省 `USD`**：
+币种由一份单独的映射表决定，**缺省 `USD`**，文件是发送端扩展目录下的 `currency.json`：
 
-| provider | base URL 主机 | 币种 | 依据 |
-|---|---|---|---|
-| `cstoa`（团队 OA 代理） | `cstoa.top` | `CNY` | OA 网关按人民币计价 |
-| 其余 pi 内置 provider | — | `USD` | pi 的价目表按美元标价 |
+```json
+{ "cstoa": "CNY" }
+```
+
+键是 pi 的 provider id，值与 provider 价目表的币种一致。文件里只登记以人民币计价的 provider，其余一律按缺省 `USD`。`cstoa` 指团队 OA 代理，OA 网关按人民币计价。
 
 规则：
 
-1. 表里只登记以人民币计价的 provider，其余一律按缺省 `USD`。
-2. 新增 provider 只改这一处，不动字段定义。
-3. 表里没有、又无法确认币种的 provider 不猜：`currency` 留空，报表把该条单列为「未定价」，不出现在合计里。
-4. **经过国内代理不改变币种。** 按美元价目表算出的费用，不会因为流量走了国内地址就变成人民币。
+1. 新增 provider 只改这个文件，不动字段定义，不改采集代码。
+2. 文件里没有、又无法确认币种的 provider 不猜：`currency` 留空，报表把该条单列为「未定价」，不出现在合计里。
+3. **经过国内代理不改变币种。** 按美元价目表算出的费用，不会因为流量走了国内地址就变成人民币。
 
-登记范围见议题 S3。
+该文件随扩展目录整个复制进发行包。登记范围见议题 S3。
 
 ## 工具采集
 
@@ -140,8 +157,8 @@
 
 | 键 | 值示例 | 来源 | 用途描述 |
 |---|---|---|---|
-| `name` | `disk`，工具名 | `tool_execution_end` 的入参 | 哪些工具真被使用 |
-| `scope` | `usage`，随工具不同 | 同上 | 子功能分布，无 scope 的工具省略 |
+| `name` | `disk`，工具名 | `tool_execution_end` 的 `toolName` | 哪些工具真被使用 |
+| `scope` | `usage`，随工具不同 | `tool_call` 的 `input` | 子功能分布，无 scope 的工具省略 |
 | `calls` | `2` | `tool_execution_end` 计数 | 使用强度 |
 | `failures` | `0` | `isError` 计数 | 工具质量的直接指标，仅 `isError` 计入 |
 | `degraded` | `1` | 结果里降级标记出现次数 | 现场降级率，反映免管理员与缺驱动的影响 |
@@ -198,7 +215,9 @@
 
 ## 不采集
 
-对话正文、系统提示词、模型输出、工具参数值与输出正文、文件路径原文、会话名、计算机名与用户名、模型凭据原文、硬件序列号。IP 由接收端从连接获取，客户端不参与。
+对话正文、系统提示词、模型输出、工具参数值与输出正文、文件路径原文、会话名、计算机名与用户名、模型凭据原文、硬件序列号。
+
+IP 是采集项，由接收端从连接获取，客户端不参与，见「身份来源」。
 
 **唯一例外：turn 级报错原文。** 报错正文按会话记录的 `errors` 字段完整收集，不截断、不上传前脱敏，见 [telemetry/schema.md](telemetry/schema.md)「报错原文」。
 
@@ -220,9 +239,9 @@
 ## 议题
 
 数据定义相关的未决项。接收端的接口与运维议题归 [telemetry/receiver/SPEC.md](telemetry/receiver/SPEC.md)。
+
 | 组 | 编号 | 议题 | 状态与候选 |
 |---|---|---|---|
 | 效果指标 | S1 | 用什么指标衡量工具好不好用 | 会话内重复提问次数、队员取消次数、界面等待时长。MVP 不考虑，后续持续跟进 |
-| 费用口径 | S2 | 费用在客户端算还是接收端算 | A 客户端按价目表算，接收端只存。B 接收端按自己的价目表重算。C 只存 token，报表时对网关账单 |
-| 计费币种 | S3 | 币种表登记范围 | 团队的 OA 代理 provider 记 `CNY`。pi 内置的国内站点 provider（`deepseek`、`zai-coding-cn`、`moonshotai-cn`、`minimax-cn`、`qwen-token-plan-cn`、`xiaomi-token-plan-cn`）的价目表是否按人民币标价，逐条核对后再登记；对不上的保持缺省 `USD` |
+| 计费币种 | S3 | `currency.json` 的登记范围 | 现已登记 `cstoa`。pi 内置的国内站点 provider（`deepseek`、`zai-coding-cn`、`moonshotai-cn`、`minimax-cn`、`qwen-token-plan-cn`、`xiaomi-token-plan-cn`）的价目表是否按人民币标价，逐条核对后再登记；对不上的保持缺省 `USD` |
 | 报错原文 | S4 | 组数上限 | 单条不截断。按文本分组的组数是否保留上限（现值 10 组），超出的组丢弃算不算违背「完整收集」 |

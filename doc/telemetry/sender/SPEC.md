@@ -19,7 +19,7 @@
 | `record.ts` | `session_shutdown` 时把累计状态序列化为一条记录 | 读 ctx 快照与发行版 `VERSION` |
 | `credential.ts` | 被动读 `auth.json` 取上传凭据与有效期 | 磁盘 |
 | `outbox.ts` | `agent/home/telemetry/pending.jsonl`：追加、读出、成功移除、超限丢最旧 | 磁盘 |
-| `transport.ts` | 批量 POST、超时、结果分类 | 网络 |
+| `transport.ts` | 批量 POST、超时、响应分类 | 网络 |
 | `config.ts` | `telemetry.json` 与 `currency.json` 读取 | 磁盘 |
 
 ## 采集
@@ -30,12 +30,13 @@
 |---|---|
 | `session_start` | `sessionId`、`reason`、`startedAt` |
 | `input` | `source = interactive` 时 `prompts++` |
-| `turn_start` / `turn_end` | 配对求间隔累加 `activeMs`；`turns++`；`message.usage` 按 provider + model + thinkingLevel 分组累加进 `models`；`ctx.getContextUsage()` 采样保留峰值 `contextPeak`；`stopReason = aborted` 计 `aborted`；`stopReason = error` 时：本往返无 `after_provider_response` 则 `networkErrors++`，`errorMessage` 原文按文本分组进 `errors` |
+| `turn_start` / `turn_end` | 配对求间隔累加 `activeMs`；`turns++`；`message.usage` 按 provider + model + thinkingLevel 分组累加进 `models`；`ctx.getContextUsage()` 返回 `undefined` 或 `tokens` 为 `null` 时跳过采样，否则记峰值 `contextPeak` 与同次的 `contextWindow`；`stopReason = aborted` 计 `aborted`；`stopReason = error` 时：本往返无 `after_provider_response` 则 `networkErrors++`，`errorMessage` 原文按文本分组进 `errors` |
 | `after_provider_response` | 非 2xx 状态码计 `providerErrors`；标记本往返有响应（供 `networkErrors` 判定） |
 | `tool_execution_start` / `_end` | `toolCallId` 配对：`tools` 公共维度（`calls`/`failures`/`totalMs`/`maxMs`/`resultBytes`/`truncated`）；扩展字段：`runbook` 取结果的 `runbook.items` 累加 `entriesTotal`、`web_search` 按 provider 计 `providers`、`fetch_content` 按 mode 计 `modes`；`details.degraded === true` 计 `degraded` |
 | `tool_call` | 从入参提取 `scope`（无 scope 工具省略） |
-| `session_compact` / `_failed` | `compactions`、`tokensBefore` 累加 |
-| `session_shutdown` | `endedAt`、`endReason`；`messages = buildContextEntries().length`；序列化、写 outbox、触发上报（不等待） |
+| `session_compact` | `compactions++`；`compactionEntry.tokensBefore` 累加进 `compactionTokens`；`reason = overflow` 计 `compactionOverflows` |
+| `session_compact_failed` | `compactionFailures++`。只计数，不收 `errorMessage`：报错原文的例外只覆盖 turn 级 |
+| `session_shutdown` | `endedAt`、`endReason`；`contextEntries = buildContextEntries().length`；序列化、写 outbox、触发上报（不等待） |
 
 并行工具调用会让 start/end 交错，配对靠 `toolCallId`。
 
@@ -59,27 +60,30 @@
 
 ## 上报
 
-### 信封与端点
+### 端点
+
+请求体形状见 [信息收集契约](../../contract.md)「上传信封」。
 
 ```
 POST /v1/sessions
 Authorization: Bearer <OA 访问令牌>
-{ "v": "0.1", "batchId": "<uuid>", "sentAt": "<ISO 8601>", "records": [ ... ] }
 ```
 
-单批上限 50 条或 1 MB。鉴权细节由接收端 [议题 R4](../receiver/SPEC.md) 定，发送端只负责把令牌放进请求头。
+发送端只负责把令牌放进请求头，鉴权与校验由接收端负责。
 
-### 结果分类
+### 响应与处理
 
-| 响应 | 行为 |
+| 响应 | 处理 |
 |---|---|
 | 202 | 批次送达，从 `pending.jsonl` 移除 |
-| 401 / 403 | 凭据无效或过期。保留记录，停止本轮发送，等队员重新登录后由下一次 `session_start` 补发 |
+| 401 / 403 | 凭据无效、过期，或设备被吊销、改密。保留记录，停止本轮发送，等队员重新登录后由下一次 `session_start` 补发 |
 | 400 / 413 | 这一批本身不合法。丢弃该批，避免坏批反复堵住队列 |
-| 429 / 5xx / 网络错误 / 超时 | 保留，等下次 |
-| 404 / 410 | 端点不再接受上报，视为停采指令。停止发送，记录保留不删 |
+| 429 / 5xx / 网络错误 / 超时 | 保留，等下次。单次请求超时 5 秒 |
+| 404 / 410 | 端点不再接受上报，视为停采指令。停止发送，记录保留不删。停采只借状态码传达，接收端响应里不带指令字段，见 [接收端](../receiver/SPEC.md)「接口」 |
+| 磁盘只读或空间不足 | 不写盘，记录留内存照常发送；发送也失败则丢弃 |
+| 功能关闭 | 不采集、不落盘、不联网 |
 
-发送中超时 5 秒。
+以上均不提示队员。
 
 ### 队列
 
@@ -105,19 +109,6 @@ Authorization: Bearer <OA 访问令牌>
 
 不在采集与上报路径上调用会触发刷新的鉴权接口。那类调用会为算一个标识而联网并写盘，把采集变成会影响正常认证的动作。令牌本身也会轮换，任何派生自令牌的标识都不稳定，所以身份一律交给接收端从凭据本身解析。
 
-## 降级
-
-| 情况 | 处理 |
-|---|---|
-| 无网络、超时、5xx、429 | 记录留在盘上，下次重试 |
-| 令牌无效或过期 | 不发送，记录留住，等重新登录 |
-| 无权限或设备被吊销 | 停止发送，不删数据 |
-| 端点返回 404 / 410 | 端点不再接受上报，停止发送，不删数据。停采信号只借状态码传达，见 [../receiver/SPEC.md](../receiver/SPEC.md) 议题 R10 |
-| 磁盘只读或空间不足 | 不写盘，记录留内存照常发送；发送也失败则丢弃 |
-| 功能关闭 | 不采集、不落盘、不联网 |
-
-以上均不提示队员。
-
 ## 配置
 
 `agent/home/telemetry.json`，随发行写入：
@@ -128,7 +119,7 @@ Authorization: Bearer <OA 访问令牌>
 
 独立文件不用 `settings.json`：pi 未向扩展暴露设置管理器，自定义字段易受校验与迁移影响。
 
-计费币种表随扩展放在同目录 `currency.json`，登记以人民币计价的 provider，缺省 USD，定义见 [契约](../../contract.md)「计费币种」。
+计费币种映射表是扩展目录下的 `currency.json`（`agent/home/extensions/telemetry/currency.json`），形状与规则见 [契约](../../contract.md)「计费币种」。它不跟 `telemetry.json` 同目录：`telemetry.json` 在 `agent/home/` 下，需单独进发行白名单，`currency.json` 随扩展目录整个复制。
 
 源码常量：`POST_TIMEOUT_MS = 5000`、`BATCH_MAX_RECORDS = 50`、`OUTBOX_MAX_RECORDS = 200`、`ERRORS_MAX_GROUPS = 10`。
 
