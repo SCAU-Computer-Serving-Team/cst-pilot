@@ -75,3 +75,7 @@ NTFS → `wiztree-mft`，否则 → `wiztree-walk`，否则 FAT32 卷上会冒�
 文件里。实测（4.32）：该文件缺失、空、乱码、截断、带 BOM 或含越界数值都不影响
 CLI 导出，卡死只出现在文件被其他进程独占锁定时；因此该文件不参与 CLI 结果，
 清除只为规避换机器后的 GUI 状态不匹配。
+
+## 本项目遥测独立于 pi 自带遥测
+
+`pi.cmd` 的 `PI_OFFLINE=1` 只关 pi 自身的启动联网（版本检查、包更新、模型目录、pi 自带遥测），不拦扩展请求。本项目遥测由 `agent\home\extensions\telemetry\` 扩展实现，开关与端点在 `agent\home\telemetry.json`，与 pi 自带遥测互不影响。pi 自带遥测已由 `PI_OFFLINE=1` 与 `settings.json` 的 `enableInstallTelemetry=false` 关闭。
