@@ -9,6 +9,7 @@
 | 事项 | 负责方 |
 |---|---|
 | 登录入口、网址与数字码显示 | pi，扩展调用 `callbacks.onDeviceCode` |
+| Web UI 登录面板与二维码 | 扩展提供设备码信息，Web 前端渲染二维码与倒计时 |
 | 申请设备码、轮询、令牌交换 | 扩展 |
 | 凭据保存、刷新触发、并发刷新互斥 | pi，凭据位于 `agent/home/auth.json` |
 | 刷新请求 | 扩展实现 `refreshToken(credentials, signal)` |
@@ -38,6 +39,8 @@ agent/home/extensions/oauth/
 
 登录轮询响应 `callbacks.signal`，刷新请求响应 `signal`。扩展不另建后台刷新循环。
 
+TUI 与 Web UI 共用同一个 `login()`。设备码信息里除 `verificationUri` 外还有 `verificationUriComplete`（带数字码的完整链接），Web 前端用它渲染二维码。Web UI 尚未实现，取设备码信息的方式（pi 的会话事件或扩展 API）待定。
+
 ## 模型与凭据取用
 
 | provider 字段 | 值 |
@@ -66,6 +69,7 @@ agent/home/extensions/oauth/
 | 用例 | 说明 |
 |---|---|
 | 首次授权 | 全新 U 盘：`/login` → 手机输入数字码并确认 → 模型可用 |
+| Web UI 二维码 | Web UI 弹出二维码，手机扫码直达授权页并预填数字码 |
 | 无任务调用 | 未选任务、未创建修机会话时，权限与额度满足即可调用模型 |
 | 跳电脑 | 同一 U 盘换电脑、盘符变化：登录态按有效期延续，不要求重新授权 |
 | 记住到期 | 记住模式 7 天（自首次授权）到期后要求重新授权 |
