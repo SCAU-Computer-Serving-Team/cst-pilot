@@ -34,6 +34,19 @@ L1–L8 与各文档的议题编号（S / R）不通用。八条都已落成结�
 | 组 | 主题 | 位置 |
 |---|---|---|
 | S1–S4 | 数据字段与口径 | [../contract.md](../contract.md) |
-| R1–R15 | 接收端接口、存储、鉴权、保留期、报表 | [receiver/SPEC.md](receiver/SPEC.md) |
+| R1、R13 | 接收端的部署机器与运维归属 | [receiver/SPEC.md](receiver/SPEC.md) |
 
 发送端已没有未决项，故不列表。已定结论写进正文，未决项留在各文档议题表。
+
+## 等 OAuth 落地的部分
+
+OAuth 尚未实现。下面这些内容等它落地后再讨论定稿，现在按各自文中的暂定规则执行，不阻塞其余开发。
+
+| 位置 | 等什么 |
+|---|---|
+| [../auth/README.md](../auth/README.md)、[pi-extension.md](../auth/pi-extension.md) | OAuth 登录与令牌方案本身 |
+| [../contract.md](../contract.md)「身份来源」 | 令牌怎么换出队员身份 |
+| [sender/SPEC.md](sender/SPEC.md)「身份与凭据」 | 凭据的存放位置与字段 |
+| [receiver/SPEC.md](receiver/SPEC.md)「身份解析」 | 内省接口，见该文「依赖 OAuth 实现」D1–D5 |
+
+接收端的设计已写完，只剩两类未定项：用什么机器、谁运维，以及上表的部分。后者不阻塞开发，用桩顶替。
