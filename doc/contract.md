@@ -111,21 +111,39 @@ Authorization: Bearer <OA 访问令牌>
 
 `cost` 与 `currency` 必须同源：数值来自 provider 的价目表，币种必须是那份价目表的币种。不做汇率换算。费用由发送端按价目表算出，接收端只存。
 
-币种由一份单独的映射表决定，**缺省 `USD`**，文件是发送端扩展目录下的 `currency.json`：
+币种由 `currency.json` 决定，文件在发送端扩展目录下，列出 pi 全部内置 provider 加 `cstoa`：
 
 ```json
-{ "cstoa": "CNY" }
+{ "cstoa": "CNY", "deepseek": "CNY", "anthropic": "USD" }
 ```
 
-键是 pi 的 provider id，值与 provider 价目表的币种一致。文件里只登记以人民币计价的 provider，其余一律按缺省 `USD`。`cstoa` 指团队 OA 代理，OA 网关按人民币计价。
+判定规则只有一条：**该 provider 是否既面向中国大陆提供合规服务、又支持人民币计价。两条都满足记 `CNY`，有一条不满足记 `USD`。**
+
+记 `CNY` 的九个：
+
+| provider | 面向大陆 | 人民币计价 |
+|---|---|---|
+| `cstoa` | 团队 OA 代理 | 网关按人民币计价 |
+| `deepseek` | 深度求索，`api.deepseek.com` | 官方中文定价页按 ¥/百万 token |
+| `moonshotai-cn` | 月之暗面，`api.moonshot.cn` | ¥ 定价 |
+| `zai-coding-cn` | 智谱，`open.bigmodel.cn` | GLM Coding Plan ¥20/月起 |
+| `minimax-cn` | MiniMax 稀宇，`api.minimaxi.com` | ¥1 / ¥8 每百万 token |
+| `qwen-token-plan-cn` | 阿里云百炼，北京区域 | ¥39 / 139 / 499 每月 |
+| `xiaomi-token-plan-cn` | 小米 MiMo 中国站 | 境内按 ¥ 计费 |
+| `kimi-coding` | 月之暗面 Kimi，`kimi.com` | Kimi Code ¥49/月起 |
+| `ant-ling` | 蚂蚁百灵，绑支付宝结算 | 人民币 |
+
+其余三十一个记 `USD`，分两类：同一厂商的海外站或海外区域（`moonshotai`、`zai`、`minimax`、`qwen-token-plan`、`qwen-token-plan-individual`、`xiaomi`、`xiaomi-token-plan-ams`、`xiaomi-token-plan-sgp`），以及不面向大陆提供服务的海外服务（`anthropic`、`openai`、`google`、`xai` 等）。
 
 规则：
 
-1. 新增 provider 只改这个文件，不动字段定义，不改采集代码。
-2. 文件里没有、又无法确认币种的 provider 不猜：`currency` 留空，报表把该条单列为「未定价」，不出现在合计里。
-3. **经过国内代理不改变币种。** 按美元价目表算出的费用，不会因为流量走了国内地址就变成人民币。
+1. 新增 provider 先按上面那条判定，再改 `currency.json`，不动字段定义，不改采集代码。
+2. 文件里没有的 provider 按缺省 `USD`；取值确实不明时不猜，`currency` 留空，报表把该条单列为「未定价」，不出现在合计里。
+3. **判定看 provider 本身，不看链路经过哪里。** 海外厂商的服务走国内中转，币种不因此改变。
 
-该文件随扩展目录整个复制进发行包。登记范围见议题 S3。
+`cost` 的数值由 pi 的模型价目表给出，是估算值不是账单（[仪表盘](design/web/dashboard.md)同此口径）；`currency` 标的是 provider 的计价区域，用途是把用量分到国内、国外两组。实际金额以网关账单为准。
+
+该文件随扩展目录整个复制进发行包。
 
 ## 工具采集
 
@@ -243,5 +261,4 @@ IP 是采集项，由接收端从连接获取，客户端不参与，见「身�
 | 组 | 编号 | 议题 | 状态与候选 |
 |---|---|---|---|
 | 效果指标 | S1 | 用什么指标衡量工具好不好用 | 会话内重复提问次数、队员取消次数、界面等待时长。MVP 不考虑，后续持续跟进 |
-| 计费币种 | S3 | `currency.json` 的登记范围 | 现已登记 `cstoa`。pi 内置的国内站点 provider（`deepseek`、`zai-coding-cn`、`moonshotai-cn`、`minimax-cn`、`qwen-token-plan-cn`、`xiaomi-token-plan-cn`）的价目表是否按人民币标价，逐条核对后再登记；对不上的保持缺省 `USD` |
 | 报错原文 | S4 | 组数上限 | 单条不截断。按文本分组的组数是否保留上限（现值 10 组），超出的组丢弃算不算违背「完整收集」 |
