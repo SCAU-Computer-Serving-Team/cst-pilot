@@ -1,8 +1,8 @@
-# Web 通道决策
+# Web 技术决策
 
 状态：产品方向与技术栈已定，可进入架构设计；尚未实现。更新：2026-09-11。
 
-需求见 [PRD](../../PRD.md)，安排见 [Todo](../../Todo.md) #9。
+需求见 [PRD](../../PRD.md)，安排见 [Todo](../../Todo.md) 第 3 条。
 
 ## 产品目标
 
@@ -63,7 +63,7 @@ Web 相关实现统一放在扩展目录内。pi 支持带入口文件、辅助�
 | 事项 | 决策与约束 |
 |---|---|
 | 现代版 `modern` | React 19 + Tailwind CSS v4，承载主要视觉与动效设计 |
-| 兼容版 `compat` | React 18 + Tailwind CSS 3.4，目标为 Chromium 86 级内核 |
+| 兼容版 `compat` | React 18 + Tailwind CSS 3.4 |
 | 共享源码 | 共享代码与组件依赖需兼容两版 React，不能直接依赖 React 19 独有 API |
 | 两套样式 | 共用业务含义和组件接口，分别处理两版 Tailwind 的样式差异 |
 | 构建工具 | Vite；具体版本、依赖组织、锁文件及分发构建配置在实现时确定 |
@@ -71,21 +71,13 @@ Web 相关实现统一放在扩展目录内。pi 支持带入口文件、辅助�
 | 页面组织 | 不引入前端路由库；设置等内容通过组件展开、折叠或弹出呈现 |
 | 图表与动效 | 后续按设计选择现成库；兼容版允许简化效果 |
 
-兼容性是选型和实现的方向约束，不作为本阶段的验收门槛。两版保持相同的业务操作和诊断含义，视觉效果可以不同。
+兼容性是选型和实现的方向约束，不作为本阶段的验收门槛。两版保持相同的业务操作和诊断含义，视觉效果可以不同。两档对应的最低内核、入口命令与支持清单见 [浏览器支持](browser-support.md)。
 
 ### 兼容性判断
 
-Chromium 86 是兼容目标，尚未形成可用性保证。浏览器品牌、系统自带浏览器和静态扫描结果都不能代替实际内核验证。
+Chromium 86 是兼容目标，尚未形成可用性保证。浏览器品牌、系统自带浏览器和静态扫描结果都不能代替实际内核验证；未验证前一律标为目标支持。
 
-| 层次 | 处理方式 |
-|---|---|
-| JavaScript 语法 | 根据目标浏览器显式配置构建目标 |
-| JavaScript 内置 API | 检查项目和依赖实际使用的 API，按需改写或补充 polyfill |
-| CSS | 检查兼容版最终产物；对目标内核不支持的样式采用替代写法或简化效果 |
-| 第三方组件 | 引入兼容检查工具辅助检查；以实际版本和最终产物为准 |
-| 实际运行 | 在 Chromium 86 级浏览器验证页面加载与关键交互；未验证前标为目标支持 |
-
-Tailwind v4 的官方浏览器基线包含 Chrome 111；Vite 的构建目标主要处理语法转换，不自动补齐全部运行时 API。依据：[Tailwind 兼容说明](https://tailwindcss.com/docs/compatibility)、[Vite 构建说明](https://vite.dev/guide/build.html)。
+兼容版的写法约束见 [设计标准](design-standards.md) 兼容版降级，已做的实测见 [技术调研](tech-research.md)。
 
 ## 会话与交互
 
@@ -181,6 +173,6 @@ Web 沿用项目的只读工具策略，并提供必要的本机访问保护。�
 | `ExtensionCommandContext` | 新建与切换等会话控制接口有上下文限制；不能假定任意 HTTP 回调都能安全调用 |
 | `session_shutdown` / `session_start` | 会话切换会销毁并重新加载扩展；服务端生命周期必须随之处理 |
 | 长驻资源约定 | 在会话开始或需要资源的命令中启动，在关闭事件中释放；不能在扩展工厂加载时无条件监听端口 |
-| 二进制构建脚本 | 当前 pi 二进制采用 Bun 编译路线 |
+| 二进制构建脚本 | `build:binary` 用 `bun build --compile` 产出单文件二进制；扩展在所有运行模式下都由 jiti 加载（`dist/core/extensions/loader.js`）。二进制模式下 jiti 走 `virtualModules` 白名单（pi 全家桶与 typebox）且 `tryNative: false`，原生模块不可用；扩展自身的 `node_modules` 纯 JS 依赖可从磁盘解析 |
 
 本地依据位于 `agent/node_modules/@earendil-works/pi-coding-agent/` 下的 `docs/extensions.md`、`dist/core/extensions/types.d.ts`、`dist/core/agent-session.js` 和 `package.json`。升级 pi 后需重新核对相关接口与运行行为。

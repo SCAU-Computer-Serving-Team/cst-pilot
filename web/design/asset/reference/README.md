@@ -45,4 +45,4 @@
 
 ## 对 cst-pilot 的取舍
 
-待主页面设计时确定，逐条记录在 `doc/design/web/design-decisions.md`。
+待主页面设计时确定，逐条记录在 `doc/design/web/design-standards.md`。

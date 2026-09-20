@@ -13,8 +13,11 @@
 依据：
 
 - Tailwind v4 官方要求 Chrome 111 / Safari 16.4 / Firefox 128，因为它依赖 `@property` 与 `color-mix()`，旧内核上整块样式失效。
-- Tailwind 3.4 没有官方数值下限。兼容版把它钉在 86，并补三条 preflight 规则：`abbr`、`button` 与 `input`、`[hidden]`。
+- Tailwind 3.4 没有官方数值下限。兼容版把它钉在 86，并补三条 preflight 规则，清单见 [设计标准](design-standards.md) 兼容版降级。
 - 取 86 的理由是国内老内核的天花板。360 安全浏览器 13 与 360 极速浏览器 13.x 长期停在 Chromium 86。
+- Vite 的构建目标主要处理语法转换，不自动补齐全部运行时 API。
+
+来源：[Tailwind 兼容说明](https://tailwindcss.com/docs/compatibility)、[Vite 构建说明](https://vite.dev/guide/build.html)。
 
 现场只跑 Windows，Safari 与移动端不在范围内。
 
