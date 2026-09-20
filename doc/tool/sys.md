@@ -2,7 +2,7 @@
 
 查看整机、进程、GPU、磁盘 IO 和可读传感器。开机配置使用 [startup](startup.md)，历史故障使用 [eventlog](eventlog.md)。
 
-实现：[sys.ts](../../agent/home/extensions/diagnostics/sys.ts)；设计见 [sys 设计](../design/tool/sys_design.md)。
+实现：[sys.ts](../../agent/home/extensions/diagnostics/sys.ts)；设计见 [sys 设计](../design/tool/sys-design.md)。
 
 ## 调用
 

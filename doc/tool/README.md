@@ -1,6 +1,6 @@
 # 工具文档
 
-本目录说明七个注册工具的调用方式、返回字段和限制。设计理由见 [design](../design/tool/sys_design.md)，验证方法见 [测试指南](../test/README.md)。
+本目录说明七个注册工具的调用方式、返回字段和限制。设计理由见 [design](../design/tool/sys-design.md)，验证方法见 [测试指南](../test/README.md)。
 
 ## 分类
 
@@ -72,7 +72,7 @@ Windows 原生数据通过仓库自带的 `pwsh/pwsh.exe` 采集，使用 `-NoPr
 
 ## 维护
 
-`agent/home/extensions/diagnostics/index.ts` 是唯一扩展入口，按 pi 的多文件扩展约定注册六个工具。辅助模块只导出实际使用的函数和类型。入口创建共享目录索引并传给 disk、ls，每次重新加载入口都会建立新状态，见 [wz-index](wz-index.md)。
+`agent/home/extensions/diagnostics/index.ts` 是唯一扩展入口，按 pi 的多文件扩展约定注册七个工具。辅助模块只导出实际使用的函数和类型。入口创建共享目录索引并传给 disk、ls，每次重新加载入口都会建立新状态，见 [wz-index](wz-index.md)。
 
 - `disk.ts`、`driver.ts`、`eventlog.ts`：工具注册和参数 schema；对应 core 文件负责采集与路由。
 - `sys.ts`：工具注册与采集；`sys-commands.ts`：PowerShell 查询模板。

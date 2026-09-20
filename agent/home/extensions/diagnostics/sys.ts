@@ -37,7 +37,7 @@ import {
  *   页面文件状态 + 开机时长 + 内核内存池 + 机型信息
  *   （厂商 / 型号 / CPU / BIOS）。免管理员，纯快照。
  *
- * 里程碑（doc/design/tool/sys_design.md）：R1=proc，R2=gpu，R3=sensor，R4=overview。
+ * 里程碑（doc/design/tool/sys-design.md）：R1=proc，R2=gpu，R3=sensor，R4=overview。
  * R5（开机自启盘点）已从 sys 剥离为独立工具 startup.ts（配置盘点与实时
  * 负载不属一类问题，单独注册边界更清晰）。无 scope 时兜底 overview。
  */

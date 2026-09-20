@@ -2,7 +2,7 @@
 
 查看设备是否被识别、驱动状态是否异常，以及蓝牙、音频等服务是否运行。负载和温度使用 [sys](sys.md)，容量和 SMART 使用 [disk](disk.md)。
 
-实现：[driver.ts](../../agent/home/extensions/diagnostics/driver.ts) 与 [driver-core.ts](../../agent/home/extensions/diagnostics/driver-core.ts)；设计见 [driver 设计](../design/tool/driver_design.md)。
+实现：[driver.ts](../../agent/home/extensions/diagnostics/driver.ts) 与 [driver-core.ts](../../agent/home/extensions/diagnostics/driver-core.ts)；设计见 [driver 设计](../design/tool/driver-design.md)。
 
 ## 调用
 

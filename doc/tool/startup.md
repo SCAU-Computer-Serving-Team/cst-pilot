@@ -2,7 +2,7 @@
 
 列出注册表自启项、启动文件夹和自动启动服务，回答“开机会拉起什么”。当前资源占用使用 [sys](sys.md)。
 
-实现：[startup.ts](../../agent/home/extensions/diagnostics/startup.ts)；独立工具的设计理由见 [sys 设计](../design/tool/sys_design.md)。
+实现：[startup.ts](../../agent/home/extensions/diagnostics/startup.ts)；独立工具的设计理由见 [sys 设计](../design/tool/sys-design.md)。
 
 ## 调用
 

@@ -1,6 +1,6 @@
 # sys 设计
 
-状态：已实现。需求：[PRD R1–R4](../PRD.md)；接口：[sys](../tool/sys.md)；验证：[测试指南](../test/README.md)。R5 自启配置由独立的 [startup](../tool/startup.md) 实现。
+状态：已实现。需求：[PRD R1–R4](../../PRD.md)；接口：[sys](../../tool/sys.md)；验证：[测试指南](../../test/README.md)。R5 自启配置由独立的 [startup](../../tool/startup.md) 实现。
 
 ## 目标与边界
 
