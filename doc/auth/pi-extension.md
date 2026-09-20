@@ -7,20 +7,21 @@
 ## 结论
 
 1. 用 pi 原生的自定义 provider OAuth 机制实现：扩展通过 `pi.registerProvider("cstoa", { oauth })` 注册。
-2. 登录界面、凭据存储、自动刷新都由 pi 负责；扩展只实现 `login` 与 `refreshToken` 两个回调。
+2. 登录界面、凭据存储、刷新触发都由 pi 负责；扩展实现 `login` 与 `refreshToken` 两个回调，不维护独立刷新流程。
 3. 模型流量走 OA 代理（方案 S）：provider 的 `baseUrl` 指向 OA 的 OpenAI 兼容端点，`getApiKey` 返回 OA 访问令牌。
-4. 登录界面用 pi 原生设备码界面（可点击 URL + 6 位数字码）。二维码暂不做，见上游讨论。
-5. 扩展额外维护两样东西：设备标识与 OA 访问令牌缓存（供 `/api/agent/*` 调用）。
+4. 登录界面用 pi 原生设备码界面（网址 + 6 位数字码）。二维码暂不做，已向上游提 issue。
+5. 扩展只额外维护设备标识；任务与日志请求用 `ctx.modelRegistry.getProviderAuth("cstoa")` 取当前令牌，不另存副本。
 
 ## 与 pi 原生能力的分工
 
 | 事项 | 负责方 |
 |---|---|
-| 登录界面（URL、6 位数字码） | pi，`onDeviceCode` 回调 |
-| 凭据存储与自动刷新 | pi，`auth.json`（0600）与 `refreshToken` 回调 |
-| 设备码轮询 | 扩展。pi 的 `@earendil-works/pi-ai/oauth` 只导出类型，未导出轮询工具 |
-| 任务选择、日志等 OA API 调用 | 扩展 |
-| 二维码 | 暂不做。上游暂无提案，按贡献规范走 issue 流程 |
+| 登录界面（网址、6 位数字码） | pi，`onDeviceCode` 回调（不自动打开浏览器） |
+| 凭据存储与刷新触发 | pi，`auth.json` 与 `refreshToken` 回调；剩余有效期不足 5 分钟才触发 |
+| 刷新请求实现 | 扩展：调用 OA 的 refresh grant，并响应取消信号（15 秒超时） |
+| 设备码轮询 | 扩展：pi 的轮询工具未从公共 `/oauth` 入口导出 |
+| 任务选择、日志等 OA API 调用 | 扩展，令牌取自 `ctx.modelRegistry.getProviderAuth` |
+| 二维码 | 暂不做：已提上游 issue，等维护者答复 |
 
 ## 扩展结构
 
@@ -38,13 +39,14 @@ agent/home/extensions/oauth/
 1. `/login` 选择 "CSTOA OA"，pi 调用扩展的 `login(callbacks)`。
 2. `login`：POST `/api/oauth/device_authorization`，然后用 `callbacks.onDeviceCode({ userCode, verificationUri, intervalSeconds, expiresInSeconds })` 交给 pi 展示。
 3. 按 interval 轮询 `/api/oauth/token`，成功后返回 `{ access, refresh, expires }`。
-4. pi 把凭据写入 `auth.json`；临近过期时自动调用 `refreshToken(credentials, signal)`。
-5. 刷新走 OA 的 refresh grant，轮换令牌；失败则提示重新 `/login`。
+4. pi 把凭据写入 `auth.json`；取凭据时若剩余有效期不足 5 分钟才调用 `refreshToken(credentials, signal)`，不是后台定时刷新。
+5. 刷新走 OA 的 refresh grant，轮换令牌；`signal` 带 15 秒超时，网络请求必须把它传给 fetch。失败时提示重新 `/login`。
 
 约定：
 
-1. 默认每场扫码时不返回 refresh，凭据过期即要求重新登录。
-2. 开启「记住 7 天」时返回 refresh，由 pi 持久化与轮换。
+1. 默认模式下 OA 不下发 refresh；扩展以空字符串满足 pi 的字符串类型要求，进入刷新窗口时提示重新授权。
+2. 开启「记住 7 天」时返回 refresh，由 pi 持久化与轮换；7 天从首次授权起算。
+3. 扩展不缓存令牌副本；任务与日志请求每次经 `getProviderAuth` 取当前令牌。
 
 ## 模型调用（方案 S）
 
@@ -60,19 +62,23 @@ agent/home/extensions/oauth/
 
 ## OA API 调用（任务与日志）
 
-1. 登录与刷新回调里同步写 `agent/home/cst-oa.json`（0600），缓存当前 OA 访问令牌与过期时间。
-2. 调 `/api/agent/*` 前检查有效期；收到 401 或 403 时提示重新登录。
-3. 任务绑定（M1）：`/cst-task` 列出本人任务，选择后创建修机会话。
+1. 任务与日志请求用 `ctx.modelRegistry.getProviderAuth("cstoa")` 取当前访问令牌，需要时会触发 pi 的刷新流程。
+2. 不写任何令牌缓存文件；凭据只有 pi 的 `auth.json` 一份。
+3. 错误分类处理：401 令牌失效、403 权限或任务状态不允许、额度不足、网络失败分别提示。
+4. 任务绑定（M1）：`/cst-task` 列出本人任务，选择后创建修机会话；每场都要重新选择。
 
 ## 错误处理
 
 | 场景 | 行为 |
 |---|---|
 | 授权被拒 | 提示已拒绝，重新执行 /login |
-| 扫码超时 | 提示重新开始 |
+| 授权超时 | 提示重新开始（设备码 5 分钟有效期） |
 | 网络失败 | 提示检查网络，无离线模式 |
-| 设备被吊销 | 刷新或请求被拒后提示重新授权或联系管理员 |
+| 401 令牌失效 | 清理本地凭据并提示重新授权 |
+| 403 权限或任务状态不允许 | 提示对应原因，不当作登录失效 |
+| 设备被吊销、改密 | 请求被拒后提示重新授权或联系管理员 |
 | 额度不足 | 提示额度不足，不自动重试 |
+| 写盘失败、突然拔盘 | 提示凭据文件未写完并重新登录；不当作令牌盗用 |
 
 ## 打包与合规
 
@@ -84,7 +90,12 @@ agent/home/extensions/oauth/
 
 | 用例 | 说明 |
 |---|---|
-| 首次授权 | 全新 U 盘：/login → 扫码 → 选任务 → 模型可用 |
+| 首次授权 | 全新 U 盘：/login → 手机输入数字码并确认 → 选任务 → 模型可用 |
+| 跨电脑 | 同一 U 盘换电脑、盘符变化：登录态按有效期延续，任务必须重新选 |
+| 记住到期 | 记住模式 7 天（自首次授权）到期后要求重新授权 |
+| 并发刷新 | 多路并发请求只触发一次刷新（pi 文件锁） |
+| 本地退出 | /logout 只清本地凭据；服务端吊销后独立副本也失效 |
+| 拔盘、写盘失败 | 明确提示，不误报为令牌盗用 |
 | 拒绝 | 授权页拒绝后收到 access_denied |
 | 超时 | 5 分钟未确认，提示重新开始 |
 | 刷新 | 记住模式下 pi 自动刷新 |
@@ -97,5 +108,5 @@ agent/home/extensions/oauth/
 
 | 编号 | 事项 |
 |---|---|
-| V1 | 扩展能否读回 pi 的当前凭据（决定 cst-oa.json 是否必要） |
+| V1 | 已解决：`ctx.modelRegistry.getProviderAuth("cstoa")` 可读取当前令牌，无需缓存文件 |
 | V2 | 命令注册与刷新提示的最佳挂载点 |
