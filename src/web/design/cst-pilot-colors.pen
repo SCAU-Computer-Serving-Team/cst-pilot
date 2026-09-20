@@ -5649,7 +5649,7 @@
               "type": "text",
               "id": "QwMCAq",
               "fill": "#5f676c",
-              "content": "源文件 web/design/asset/blue-hour.png 与 blue-hour.css",
+              "content": "源文件 src/web/design/asset/blue-hour.png 与 blue-hour.css",
               "fontFamily": "Noto Sans SC",
               "fontSize": 12,
               "fontWeight": "normal"

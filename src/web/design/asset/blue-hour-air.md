@@ -7,7 +7,7 @@
 | `blue-hour-air.glsl` | WebGL 1.0 着色器，`@time` 驱动动画，两版共用 |
 | `blue-hour-palette.png` | 浅色版色表，与浅色首页共用 |
 | `blue-hour-air-dark-palette.png` | 深色版色表，分布对齐浅色版，底色由 `#22265E` 压深为 `#161C4A` |
-| `make-blue-hour-air-dark-palette.mjs` | 深色色表生成器，运行 `node web/design/asset/make-blue-hour-air-dark-palette.mjs` 重建 |
+| `make-blue-hour-air-dark-palette.mjs` | 深色色表生成器，运行 `node src/web/design/asset/make-blue-hour-air-dark-palette.mjs` 重建 |
 | `login-preview/HRlE2.png` | 浅色场景预览用的浅色主页快照 |
 | `login-preview/g1Rbpz.png` | 深色场景预览用的深色主页快照 |
 
@@ -54,7 +54,7 @@ Pen 不自动读取系统的减少动效偏好，需手动将速度设为 0。�
 | 场景预览 | 「登录页 · 浅色 · 呈现效果」与「登录页 · 深色 · 呈现效果」，均 1920×1080 |
 | 预览面板 | 按 80% 等比展示为 864×864，x=528、y=108 |
 | 背后主页 | 高斯模糊 20px，叠加 `#060B0E26` 遮罩 |
-| 面板配色 | 卡片、输入框、方式切换与登录按钮取值见 [DESIGN.md · 登录页](../../../DESIGN.md#页面) |
+| 面板配色 | 卡片、输入框、方式切换与登录按钮取值见 [DESIGN.md · 登录页](../../../../DESIGN.md#页面) |
 
 场景预览使用 `login-preview/HRlE2.png`（浅色主页快照）与 `login-preview/g1Rbpz.png`（深色主页快照）；登录面板仍使用动态 Shader。快照只用于设计场景，正式网页应模糊真实主页，不加载这两张图片。预览面板为独立副本，不自动同步源组件。
 

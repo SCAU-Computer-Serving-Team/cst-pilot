@@ -47,6 +47,8 @@ cst-pilot/
 |-- assets/                    品牌资源：logo.png 及其生成脚本
 |-- doc/                       产品、设计、工具与测试文档
 |-- pack/                      发行版构建脚本
+|-- src/
+|   `-- web/                    Web 端设计资产：Pen 画布、色表、字体与动态背景
 |-- agent/
 |   |-- node_modules/          pi 及依赖（不入库）
 |   `-- home/
