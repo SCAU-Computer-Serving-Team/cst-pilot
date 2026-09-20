@@ -1,6 +1,6 @@
 # driver 设计
 
-状态：四个 scope 已实现。需求：[PRD R7](../PRD.md)；接口：[driver](../tool/driver.md)。
+状态：四个 scope 已实现。需求：[PRD R7](../../PRD.md)；接口：[driver](../../tool/driver.md)。
 
 ## 目标与边界
 
@@ -20,7 +20,7 @@ driver 判断设备识别与状态；sys 处理负载和传感器，disk 处理�
 
 ## 采集结构
 
-[driver.ts](../../agent/home/extensions/diagnostics/driver.ts) 负责注册和参数 schema；[driver-core.ts](../../agent/home/extensions/diagnostics/driver-core.ts) 负责校验、命令、采集和返回。collect 函数可供局部脚本直接验证。
+[driver.ts](../../../agent/home/extensions/diagnostics/driver.ts) 负责注册和参数 schema；[driver-core.ts](../../../agent/home/extensions/diagnostics/driver-core.ts) 负责校验、命令、采集和返回。collect 函数可供局部脚本直接验证。
 
 | scope | 数据源与筛选 | 理由 |
 |---|---|---|
@@ -53,4 +53,4 @@ core 网卡仅取 NetConnectionID 非空的条目，保留虚拟网卡。Physica
 
 ## 实施记录
 
-2026-09-03 四个 scope 完成，本地 `_t12.mjs` 的 25 项验证通过；后续硬件 ID 和脚本字符串问题在 2026-09-05 修复。历史样机数据见 `test/testlog/`，当前接口以 [工具文档](../tool/driver.md) 为准。
+2026-09-03 四个 scope 完成，本地 `_t12.mjs` 的 25 项验证通过；后续硬件 ID 和脚本字符串问题在 2026-09-05 修复。历史样机数据见 `test/testlog/`，当前接口以 [工具文档](../../tool/driver.md) 为准。

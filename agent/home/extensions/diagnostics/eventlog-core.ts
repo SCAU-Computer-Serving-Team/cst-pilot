@@ -5,7 +5,7 @@ import { asRecord, asRecords, createPwshRunner, errorMessage, PWSH } from "./run
  * eventlog-core - 事件日志查询引擎（cst-pilot 定制，eventlog 工具的共享核心）
  *
  * 结构只读：Get-WinEvent 纯查询，无任何写路径。
- * 设计：doc/design/tool/event_design.md（里程碑 1-2 = 本文件）。
+ * 设计：doc/design/tool/event-design.md（里程碑 1-2 = 本文件）。
  *
  * 职责边界：
  * - 本文件：参数白名单校验 → pwsh 命令串构建（FilterHashtable 下推 + 多组 OR）→
@@ -528,7 +528,7 @@ export async function queryEvents(
 }
 
 /* ------------------------------------------------------------------ */
-/* scope 白名单（来源与核定见 doc/design/tool/event_design.md 及文件头实测结论） */
+/* scope 白名单（来源与核定见 doc/design/tool/event-design.md 及文件头实测结论） */
 /* ------------------------------------------------------------------ */
 
 /** boot：官方重启排查清单（all 组合全部） */

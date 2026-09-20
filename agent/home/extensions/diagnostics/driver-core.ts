@@ -6,7 +6,7 @@ import { createPwshRunner, PWSH } from "./runtime.ts";
  * driver-core - 设备与驱动健康查询引擎（cst-pilot 定制，driver 工具的共享核心）
  *
  * 结构只读：WMI/CIM 纯查询，无任何写路径（不装驱动、不启停设备、不改服务）。
- * 设计：doc/design/tool/driver_design.md。
+ * 设计：doc/design/tool/driver-design.md。
  *
  * 职责边界：
  * - 本文件：CMD 模板构造（拼接参数仅来自白名单字段）→ 执行解析 →

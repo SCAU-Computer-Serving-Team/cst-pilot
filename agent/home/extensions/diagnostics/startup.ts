@@ -9,7 +9,7 @@ import { asRecord, asRecords, createPwshRunner } from "./runtime.ts";
  *
  * 从 sys 工具体系剥离的独立工具（原 sys R5）：开机自启盘点是**配置盘点**
  * 而非实时负载，与 sys 的"此刻发生了什么"不属一类问题，单独注册
- * 一个工具，边界更清晰（决策记录见 doc/design/tool/sys_design.md 待拍板）。
+ * 一个工具，边界更清晰（决策记录见 doc/design/tool/sys-design.md 待拍板）。
  *
  * 结构只读：注册表只读枚举（Get-Item / Test-Path），无任何写路径。
  * - 注册表自启项：HKLM / HKCU 的 Run / RunOnce + HKLM Wow6432Node\Run

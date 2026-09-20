@@ -2,7 +2,7 @@
 
 查询崩溃、蓝屏、服务、磁盘和登录历史，并读取单条原文。实时负载使用 [sys](sys.md)，硬盘自身可靠性使用 [disk health](disk.md#healthsmart-可靠性数据)。
 
-实现：[eventlog.ts](../../agent/home/extensions/diagnostics/eventlog.ts) 与 [eventlog-core.ts](../../agent/home/extensions/diagnostics/eventlog-core.ts)；设计见 [事件日志设计](../design/tool/event_design.md)。
+实现：[eventlog.ts](../../agent/home/extensions/diagnostics/eventlog.ts) 与 [eventlog-core.ts](../../agent/home/extensions/diagnostics/eventlog-core.ts)；设计见 [事件日志设计](../design/tool/event-design.md)。
 
 ## 调用
 

@@ -11,7 +11,7 @@ import { diagnosticResult, OUTPUT_GUIDELINE, throwOnError } from "./result.ts";
  * 维修场景的故障线索（意外关机 / 蓝屏 / 崩溃 / 服务失败）都沉淀在事件日志里，
  * 本工具让 pi 直接读取并汇总。单工具多 scope（sys 同构）。
  *
- * 设计：doc/design/tool/event_design.md（里程碑 1-8 已实现，9 收尾待做）。
+ * 设计：doc/design/tool/event-design.md（里程碑 1-8 已实现，9 收尾待做）。
  * 全部逻辑（参数校验 / 命令构建 / 采集收敛 / 白名单 / scope 路由 / 降级）
  * 在 eventlog-core.ts（不依赖 pi 注册层）；本文件只做注册薄壳。
  *

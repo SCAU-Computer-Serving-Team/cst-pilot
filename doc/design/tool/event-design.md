@@ -1,6 +1,6 @@
 # eventlog 设计
 
-状态：八个 scope 已实现。需求：[PRD R6](../PRD.md)；接口与事件清单：[eventlog](../tool/eventlog.md)。
+状态：八个 scope 已实现。需求：[PRD R6](../../PRD.md)；接口与事件清单：[eventlog](../../tool/eventlog.md)。
 
 ## 目标与边界
 
@@ -34,7 +34,7 @@ flowchart LR
 | security | 4624/4625/4740；不覆盖域 Kerberos 4771 等事件 |
 | query | ID、级别、通道和后置条件组合，补充固定清单之外的事件 |
 
-清单源于项目原有微软排查资料和 SCM 提供者表核对，不应当作“全部故障事件”目录。完整 ID 保留在 [工具文档](../tool/eventlog.md#内置事件范围)，避免两处维护。
+清单源于项目原有微软排查资料和 SCM 提供者表核对，不应当作“全部故障事件”目录。完整 ID 保留在 [工具文档](../../tool/eventlog.md#内置事件范围)，避免两处维护。
 
 ## 输出控制
 

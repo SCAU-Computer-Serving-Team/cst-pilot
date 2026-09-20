@@ -11,7 +11,7 @@ import { diagnosticResult, OUTPUT_GUIDELINE, throwOnError } from "./result.ts";
  * 排查蓝牙 / 网卡 / 声卡等设备的驱动有没有出问题、出在哪个设备上，
  * 以及外接设备认没认出来。单工具多 scope（sys 同构）。
  *
- * 设计：doc/design/tool/driver_design.md。
+ * 设计：doc/design/tool/driver-design.md。
  * 全部逻辑（CMD 构造 / 白名单校验 / 采集收敛 / scope 路由）在
  * driver-core.ts（不依赖 pi 注册层）；本文件只做注册薄壳。
  *
