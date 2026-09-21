@@ -216,7 +216,7 @@ Authorization: Bearer <服务凭据>
 
 子命令：`serve`（默认）、`rollup`、`cleanup`、`report`、`members`、`delete`。
 
-代码放在本仓库的 `src/telemetry/`，与[发送端](../../sender/SPEC.md)同仓库，但不进工具包的发行包，部署到服务器上单独运行。
+代码放在本仓库的 `src/telemetry/`，与[发送端](../sender/SPEC.md)同仓库，但不进工具包的发行包，部署到服务器上单独运行。
 
 ```
 src/telemetry/
