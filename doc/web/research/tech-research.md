@@ -24,7 +24,7 @@
 | 项 | 结论 |
 |---|---|
 | Tailwind v4 | 硬不可用。产物含 `@layer`，86 会整块丢弃 |
-| Tailwind 3.4 | 可用。需补三条 preflight 规则，清单见 [设计标准](design-standards.md) |
+| Tailwind 3.4 | 可用。需补三条 preflight 规则，见 [浏览器支持](browser-support.md) 兼容版降级 |
 | React 18 与 19 | 生产构建都没用到 86 缺的内置方法 |
 | Radix 当前版本 | 自己实现了 `at` / `toSorted` / `toReversed`，对 `Array.prototype.at` 有特性检测回退 |
 | 未验证 | 真 Chromium 86 实跑；shadcn 按 Tailwind 版本发组件（未实测） |

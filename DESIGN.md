@@ -59,18 +59,18 @@ typography:
     fontWeight: 400
 omitted:
   - section: spacing
-    reason: 间距比例未讨论；各画布只有局部取值
+    reason: 各画布只有局部取值，未定为令牌
   - section: rounded
     reason: 只有画布变量 radius-control / radius-row / radius-menu / radius-composer，未定义全站圆角语义
   - section: components
-    reason: 组件 token 未讨论
+    reason: 组件 token 不在本文范围
 ---
 
 # CST Pilot Web 设计系统
 
 本文是设计规范的唯一真源，只定「怎么取色、怎么排版」这一层。逐元素的取值、尺寸与形态由画布承载，本文不复述。冲突时以本文为准。
 
-本文不写 Layout、Elevation & Depth、Shapes、Components 四个章节：它们的内容只在画布上，尚未归纳成全站规则，取值直接看 [界面画布](src/web/design/cst-pilot-web.pen)。
+本文不写 Layout、Elevation & Depth、Shapes、Components 四个章节，这些取值直接看 [界面画布](src/web/design/cst-pilot-web.pen)。
 
 | 参考 | 范围 |
 |---|---|
@@ -88,12 +88,11 @@ omitted:
 
 | 文件 | 内容 |
 |---|---|
-| [Web 技术决策](doc/design/web/tech-decisions.md) | 产品方向、承载与启动、技术栈、会话交互、只读边界、开发分发、架构阶段待办 |
-| [设计标准](doc/design/web/design-standards.md) | 组件库、令牌格式与分层、字号与动效标准、兼容版降级 |
-| [浏览器支持](doc/design/web/browser-support.md) | 两档内核基线、选档命令、支持清单与现场策略 |
-| [仪表盘](doc/design/web/dashboard.md) | 字段来源、费用与计时口径、Pi 接口核对 |
-| [Pen 操作建议](doc/design/web/pen.md) | Pen CLI 与 MCP 的使用注意事项 |
-| [技术调研](doc/design/web/tech-research.md) | 降级能力分层、pi 多消费者、兼容版实测 |
+| [Web 技术决策](doc/web/research/tech-decisions.md) | 产品方向、承载与启动、技术栈、会话交互、只读边界、开发分发、架构阶段待办 |
+| [浏览器支持](doc/web/research/browser-support.md) | 两档内核基线、选档命令、支持清单、兼容版降级与现场策略 |
+| [仪表盘](doc/web/SPEC/dashboard.md) | 字段来源、费用与计时口径、Pi 接口核对 |
+| [Pen 操作建议](doc/web/pen.md) | Pen CLI 与 MCP 的使用注意事项 |
+| [技术调研](doc/web/research/tech-research.md) | 降级能力分层、pi 多消费者、兼容版实测 |
 | [工具设计](doc/design/tool/) | `sys`、`driver`、`eventlog` 三个工具的设计理由 |
 | [Blue hour 背景](src/web/design/asset/blue-hour.md) | 首页 PRISM2 板条的色表、参数与来源 |
 | [登录页 AIR 背景](src/web/design/asset/blue-hour-air.md) | AIR 椭圆布局、控制参数与居中面板 |
@@ -104,20 +103,20 @@ omitted:
 | 文件 | 内容 |
 |---|---|
 | [cst-pilot-colors.pen](src/web/design/cst-pilot-colors.pen) | 12 步用途、中性与四组彩色色阶 |
-| [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) | 首页、聊天工作台、登录页与仪表盘的浅深两版用色、背景与排版；另含上下文面板、模型选择、思考强度、账号菜单、消息菜单的悬停态 |
+| [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) | 首页、聊天工作台、登录页与仪表盘的浅深两版用色、背景与排版；另含上下文面板、模型选择、思考强度、账号菜单、消息菜单的悬停态，以及工具调用卡片的三种通用渲染模式与 sys overview、runbook 两个例外，卡片的浅深两版齐备 |
 | [heroui-colors.pen](src/web/design/heroui-colors.pen) | HeroUI v3 默认主题对照 |
 | [asset/pencil-heroui.pen](src/web/design/asset/pencil-heroui.pen) | HeroUI 组件参考画布 |
-| [achieved/](src/web/design/achieved/) | 归档：配色方案 B、C 的画布与导出图，已被 `cst-pilot-colors.pen` 取代 |
+| [achieved/](src/web/design/achieved/) | 归档的配色方案 B、C 画布与导出图，不参与当前设计 |
 
 ### 资产
 
 | 类别 | 文件 | 用途 |
 |---|---|---|
-| 令牌 | [cst-pilot-colors.tokens.json](doc/design/web/asset/cst-pilot-colors.tokens.json) | 五组 × 浅深共 120 个色值，DTCG 2025.10 |
-| 生成器 | [make-color-scale.mjs](doc/design/web/asset/make-color-scale.mjs) | 由色相与明度曲线输出上表 |
-| 对照 | [heroui.tokens.json](doc/design/web/asset/heroui.tokens.json)、[make-heroui-tokens.mjs](doc/design/web/asset/make-heroui-tokens.mjs) | HeroUI v3 默认主题原始变量与解析脚本，不是本项目的映射结果 |
-| 导出图 | [cst-pilot-color-steps.png](doc/design/web/asset/cst-pilot-color-steps.png)、[cst-pilot-color-scale.png](doc/design/web/asset/cst-pilot-color-scale.png)、[cst-pilot-blue-hour.png](doc/design/web/asset/cst-pilot-blue-hour.png) | 三张色卡画布的导出，宽 2312 |
-| 对照图 | [heroui-colors-core.png](doc/design/web/asset/heroui-colors-core.png)、[heroui-colors-light.png](doc/design/web/asset/heroui-colors-light.png)、[heroui-colors-dark.png](doc/design/web/asset/heroui-colors-dark.png) | `heroui-colors.pen` 三张画布的导出 |
+| 令牌 | [cst-pilot-colors.tokens.json](doc/web/asset/cst-pilot-colors.tokens.json) | 五组 × 浅深共 120 个色值，DTCG 2025.10 |
+| 生成器 | [make-color-scale.mjs](doc/web/asset/make-color-scale.mjs) | 由色相与明度曲线输出上表 |
+| 对照 | [heroui.tokens.json](doc/web/asset/heroui.tokens.json)、[make-heroui-tokens.mjs](doc/web/asset/make-heroui-tokens.mjs) | HeroUI v3 默认主题原始变量与解析脚本，不是本项目的映射结果 |
+| 导出图 | [cst-pilot-color-steps.png](doc/web/asset/cst-pilot-color-steps.png)、[cst-pilot-color-scale.png](doc/web/asset/cst-pilot-color-scale.png)、[cst-pilot-blue-hour.png](doc/web/asset/cst-pilot-blue-hour.png) | 三张色卡画布的导出，宽 2312 |
+| 对照图 | [heroui-colors-core.png](doc/web/asset/heroui-colors-core.png)、[heroui-colors-light.png](doc/web/asset/heroui-colors-light.png)、[heroui-colors-dark.png](doc/web/asset/heroui-colors-dark.png) | `heroui-colors.pen` 三张画布的导出 |
 | 色表 | [blue-hour-palette.png](src/web/design/asset/blue-hour-palette.png)、[blue-hour-dark-palette.png](src/web/design/asset/blue-hour-dark-palette.png)、[blue-hour-air-dark-palette.png](src/web/design/asset/blue-hour-air-dark-palette.png) | 256×1 色彩查找表 |
 | Shader | [blue-hour.glsl](src/web/design/asset/blue-hour.glsl)、[blue-hour-air.glsl](src/web/design/asset/blue-hour-air.glsl) | 首页与登录页的动态背景 |
 | 降级样式 | [blue-hour.css](src/web/design/asset/blue-hour.css) | 无 WebGL 时的 CSS 近似，不画板条 |
@@ -150,7 +149,7 @@ omitted:
 | [logo-reversed-accent.png](src/web/design/asset/logo-reversed-accent.png) | 反白版加强调色 |
 | [logo-mark.png](src/web/design/asset/logo-mark.png) | 单独的 `C` 字形标记，209×293 |
 
-四份 `logo-*.png` 尚未被任何画布或文档引用，只作为素材留存。Web 端的标识形态、用法和尺寸随界面设计确定。
+四份 `logo-*.png` 是备用素材，未被画布引用；Web 端的标识形态、用法与尺寸未定。
 
 ## Colors
 
@@ -165,9 +164,9 @@ omitted:
 | 中性色 | 偏蓝；OKLCH 色相 230°，目标色度 0.012 |
 | 彩色色相 | 主色蓝 254°、成功绿 151°、警告琥珀 72°、危险红 26° |
 | 生成 | 浅深两套独立明度曲线；彩色峰值色度系数 0.94；超出 sRGB 色域时保留明度与色相、压低色度 |
-| 文件格式 | DTCG 2025.10；`reference` 原始值 → `system` 语义角色 → `component` 组件值 |
+| 文件格式 | DTCG 2025.10，后缀 `.tokens.json`；只能下层引用上层：`reference` 原始值 → `system` 语义角色 → `component` 组件值 |
 
-正文与 front matter 的十六进制值对应画布使用的 sRGB。完整五组、浅深两套共 120 个色值及 OKLCH 数值见 [颜色令牌](doc/design/web/asset/cst-pilot-colors.tokens.json)，生成规则见 [生成器](doc/design/web/asset/make-color-scale.mjs)。front matter 的颜色键描述首页落点及彩色实心档，不代表已完成 HeroUI 变量映射。其中 `primary` 是色系 `accent` 的第 9 步实心色，`success-solid`、`warning-solid`、`danger-solid` 同理。
+正文与 front matter 的十六进制值对应画布使用的 sRGB。完整五组、浅深两套共 120 个色值及 OKLCH 数值见 [颜色令牌](doc/web/asset/cst-pilot-colors.tokens.json)，生成规则见 [生成器](doc/web/asset/make-color-scale.mjs)。front matter 的颜色键描述首页落点及彩色实心档，不代表已完成 HeroUI 变量映射。其中 `primary` 是色系 `accent` 的第 9 步实心色，`success-solid`、`warning-solid`、`danger-solid` 同理。
 
 ### 12 步用途与中性色
 
@@ -190,7 +189,7 @@ omitted:
 
 ### 彩色语义
 
-四组彩色沿用相同的 12 步用途。首页未展示成功、警告、危险状态，发送按钮也不使用通用主色第 9 步；仪表盘的状态徽标是目前唯一落到组件的彩色用法，不能把色卡中的色块当成已完成的组件状态设计。
+四组彩色沿用相同的 12 步用途。首页未展示成功、警告、危险状态，发送按钮也不使用通用主色第 9 步；仪表盘的状态徽标是唯一落到组件的彩色用法；色卡里的色块不是组件状态设计。
 
 | 色系 | 第 9 步实心色（浅深相同） | 第 11 步文字：浅色 / 深色 | 第 12 步文字：浅色 / 深色 |
 |---|---|---|---|
@@ -208,7 +207,7 @@ omitted:
 | 项 | 浅色 | 深色 | 规则 |
 |---|---|---|---|
 | 侧栏底色 | `#F5F6F8` | 中性 3 | 浅色用独立灰白，不用中性 1 |
-| 悬停底色 | `#EAEAEA` | 中性 4 | 浅色用无偏灰白，不用中性 4 |
+| 悬停底色 | `#EAEAEA` | 中性 4 | 浅色用无偏灰白，不用中性 4。侧栏选中态同值，浅色三页一致；深色选中态用中性 5 `#242C2F` |
 | 消息输入框 | `#FFFFFF` | 中性 2 | 深色不用中性 3，避免与侧栏撞色 |
 | 发送按钮 | `#465A9F` | `#7785DE` | Blue hour 家族，不用主色第 9 步 |
 | 发送箭头 | `#FFFFFF` | `#001F42` | 深色取浅色主色阶第 12 步 |
@@ -218,7 +217,7 @@ omitted:
 
 #### 聊天页浅色：无色偏灰白
 
-覆盖仅作用于「聊天工作台 · 浅色」，不改主页、登录页与通用色阶。深色聊天页回通用色阶取色。
+覆盖作用于「聊天工作台 · 浅色」与「登录页 · 浅色」的控件，不改主页与通用色阶。深色聊天页回通用色阶取色；深色标题栏取中性 2 `#0B1215` 的 95%（`#0B1215F2`），与主区同色，不用更黑的中性 1。
 
 | 档 | 值 |
 |---|---|
@@ -226,27 +225,73 @@ omitted:
 | 标题栏 / 侧栏 | `#FFFFFFF2` / `#F6F6F6` |
 | 输入框 / 表格正文底 | `#FFFFFF` |
 | 用户气泡 / 表头 / 行内代码 | `#F0F0F0` |
-| 选中会话 / 设备图标容器 | `#EAEAEA` / `#E5E5E5` |
+| 选中会话 | `#EAEAEA` |
 | 正文 / 次要文字与图标 | `#202020` / `#646464` |
 | 分隔线 / 输入框边框 | `#E0E0E0` / `#D5D5D5` |
 | 检索与工具图标 / 成功状态 | 主色 11 `#0665BE` / 成功 11 `#007B3A` |
 | 停止按钮 / 图标 | `#465A9F` / `#FFFFFF`，保留品牌操作色 |
+| 等待轨道 | `#E3ECF1`，旋转加载器的静态轨道，是本节唯一不用灰白的中性色 |
+
+设备图标容器三个页面、两种主题都取中性 5，浅色 `#DBE4E9`、深色 `#242C2F`；图标在容器内水平与垂直居中。
+
+「登录页 · 浅色」沿用同一族灰白：方式切换轨道 `#F0F0F0`、选中块 `#FFFFFF`、激活文字 `#202020`、未激活文字 `#646464`、二维码描边 `#E5E5E5`。深色登录页不沿用，改取通用色阶：轨道中性 4 `#1D2428`、选中块中性 5 `#242C2F`、未激活文字与扫码提示中性 11 `#AAB3B7`、正文 `#FFFFFF`。
 
 #### 悬停面板
 
-输入框操作栏弹出上下文面板、模型选择与思考强度三个；侧栏左下角弹出账号菜单；聊天标题栏右上角三个点弹出消息菜单。五个面板共用一套卡片式样式，除选中行底色外全部取自通用色阶。
+输入框操作栏弹出上下文面板、模型选择与思考强度三个；侧栏左下角弹出账号菜单；聊天标题栏右上角三个点弹出消息菜单。五个面板共用一套卡片式样式，除选中行底色与投影外全部取自通用色阶。
 
-选中行浅色用 `#EAEAEA`，不用中性 5 `#DBE4E9`：后者带蓝调，在白面板上会读成淡蓝底。
+选中行浅色用 `#EAEAEA`，不用中性 5 `#DBE4E9`：后者带蓝调，在白面板上会读成淡蓝底。深色选中行用中性 5 `#242C2F`。
+
+#### 投影
+
+全站投影只用一个颜色：中性 12 `#1A2024`，靠透明度分档，不用纯黑，不带彩色。
+
+| 落点 | 透明度 | 参数 |
+|---|---|---|
+| 悬停面板 | 8% | 偏移 0,8；blur 24 |
+| 登录卡片 | 8% | 偏移 0,12；blur 40 |
+| 登录页面板 · 近层 | 8% | 偏移 0,4；blur 12 |
+| 登录页面板 · 远层 | 20% | 偏移 0,24；blur 64，spread -12 |
+| 首页欢迎标语 | 25% | 只在 Pen 上示意，未定实现 |
+
+#### 登录页面板
+
+登录页在场景里是一个 1080×1080、圆角 32 的居中面板。面板底色不可见，实际由 AIR 背景铺满，可见的只有描边与投影。
+
+| 部位 | 取值 |
+|---|---|
+| 面板描边 | 1.5px 三段线性渐变，自上而下 `#FFFFFFA6` → `#FFFFFF4D` → `#465A9F40` |
+| 面板投影 | 见[投影](#投影) |
+| 登录卡片 | 浅色白底 / 深色中性 3 `#131A1D`；圆角 24；描边中性 6（浅 `#D5DEE3` / 深 `#2D3438`） |
+| 卡片内控件 | 方式切换与二维码取无色偏灰白，见[聊天页浅色](#聊天页浅色无色偏灰白) |
+| 底部可读性渐变 | 主色浅色 4 `#DDECFF`；0%–70% 全透明，93% 起不透明 |
+| 欢迎语 | 标题 56px/600 `#FFFFFF`；副题 16px `#FFFFFFCC` |
+| 呈现效果帧的遮罩 | 中性 1 `#060B0E` 的 15%，即 `#060B0E26` |
+
+#### 工具调用卡片
+
+每个工具一次调用对应一张卡片，跟随聊天页取色，不另立色表。
+
+| 项 | 浅色 | 深色 |
+|---|---|---|
+| 卡片文字、标签与图标 | `#646464` | 中性 11 `#AAB3B7` |
+| 原文块正文，唯一降一档的密集长文 | 中性 10 `#757D82` | 中性 9 `#7F888C` |
+| 调用语句片与缩进竖线 | `#F0F0F0` | 中性 4 `#1D2428` |
+| 原文块与命令灰块 | `#F6F6F6` | 中性 2 `#0B1215` |
+
+语义色只给图标，不给边框和底色：成功用浅色 11 `#007B3A` / 深色 9 `#20A655`，警告用浅色 11 `#8C5A00` / 深色 9 `#ED9F26`，主色用浅色 11 `#0665BE` / 深色 9 `#1B85F2`。
+
+字号阶梯固定为顶行 13px、标签与组标题 12px、密集长文 11px，工具特殊也不放大。`sys overview` 与 `runbook` 是特殊工具，靠「当轮含特殊工具时折叠条默认展开」表达，骨架与字号同普通卡片。
 
 #### 动态背景
 
-Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用独立色表与参数；浅色背景不能原样复用于深色主题。参数、来源与算法差异见 [Blue hour 背景](src/web/design/asset/blue-hour.md) 与 [登录页 AIR 背景](src/web/design/asset/blue-hour-air.md)。两处背景目前只用于 Pen，不能据此认定网页动画或兼容版已经实现。
+Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用独立色表与参数；浅色背景不能原样复用于深色主题。参数、来源与算法差异见 [Blue hour 背景](src/web/design/asset/blue-hour.md) 与 [登录页 AIR 背景](src/web/design/asset/blue-hour-air.md)。两处背景只在画布上，网页动画与兼容版均未实现。
 
 ### 对比度边界
 
 正文和控件文字以 WCAG AA 4.5:1 为目标。第 9 步不是「可以直接配白字」的保证；当前主色、成功、警告、危险第 9 步与白色的对比度分别约为 3.69、3.16、2.19、4.10，均未达到普通文字要求。
 
-后续制作语义按钮时需单独确定前景色或调整背景。动态背景上的文字需检查多个动画时刻；当前画布未完成全量对比度验收，本次记录不改变已有配色。
+后续制作语义按钮时需单独确定前景色或调整背景。动态背景上的文字需检查多个动画时刻；全量对比度验收未完成。
 
 ## Typography
 
@@ -261,20 +306,33 @@ Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用�
 | `JetBrains Mono` | 聊天页行内的工具名 |
 | `Noto Sans SC` | 仅用于 `cst-pilot-colors.pen` 的标题、注释和色值说明 |
 
-字体按界面角色指定，不按每个字符自动切换。例如账户名 `Tim2354` 在当前画布中仍使用思源黑体。网页字体文件、加载策略和缺字回退字体尚未确定。
+字体按界面角色指定，不按每个字符自动切换。例如账户名 `Tim2354` 在当前画布中仍使用思源黑体。网页字体文件、加载策略与缺字回退字体未定。
+
+### 行高与字距
+
+首页不设行高与字距，用字体默认值。其余取值只在下列范围成立，不跨场景套用。
+
+| 范围 | 值 |
+|---|---|
+| 聊天页正文与控件 | `lineHeight: 1.5` |
+| 聊天页表格单元格 | `lineHeight: 1.45` |
+| 工具卡片原文块 | `lineHeight: 1.6` |
+| 仪表盘 36px 指标数值 | `letterSpacing: -0.6` |
 
 ### 使用边界
 
 字号与字重以画布为准，front matter 的 `typography` 键只收录已出现的元素，不代表全站阶梯。
 
-- 首页文本未显式设置行高和字距，使用字体默认值；不从截图估算为固定令牌。
+- 行高与字距只按[行高与字距](#行高与字距)取值，不从截图估算为固定令牌。
 - 56px/600 只用于首页欢迎语，不直接推广为对话正文或普通页面标题。
-- 15px/16px 的分组字号差异按画布保留，尚未统一；10px 账户说明是当前稿件值，不作为全站最小字号规范。
+- 15px 与 16px 的分组字号差异按画布执行；10px 只用于账户说明，不作全站最小字号。
 - 全站角色名称采用 `display / headline / title / body / label`，各分 `large / medium / small`；完整数值和首页元素的角色映射尚未确定。
 
 ## 动效
 
-全站动效采用 [transitions.dev](https://transitions.dev/skill) 的令牌刻度与规则，不自行定数值。该站提供两个 skill，已全局安装：`transitions-dev` 从零做动效，`transitions-polish` 把已有动效对齐到刻度。实现时把 skill 里的 `_root.css` 导入一次，全局引用其中的 CSS 变量。
+全站动效采用 [transitions.dev](https://transitions.dev/skill) 的令牌刻度与规则，不自行定数值。该站提供两个 skill，已全局安装：`transitions-dev` 从零做动效，`transitions-polish` 把已有动效对齐到刻度。
+
+**授权待确认。** transitions.dev 的 GitHub 仓库未声明许可证，站点区分免费与 Pro。skill 可安装使用；把 `_root.css` 或过渡片段复制进发行包前，需先与站点条款核对。
 
 本节只定令牌与规则。具体用哪条过渡（下拉、模态、骨架屏等）由 skill 按界面元素决定，不在此列举。
 
@@ -359,8 +417,8 @@ Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用�
 | 页面 | 画布帧 | 本文只记录的规则 |
 |---|---|---|
 | 主页 | 「主页 · 浅色」「主页 · 深色」 | 例外规则见 [例外规则](#例外规则) |
-| 聊天工作台 | 「聊天工作台 · 浅色」「聊天工作台 · 深色」 | 不显示「本机 · 只读诊断」标签、独立 SMART 权限提示与回答操作栏的「仅检查」说明；真实诊断结果保留在正文表格 |
-| 登录页 | 「登录页 · 浅色」「登录页 · 深色」，以及两个「呈现效果」帧 | 以 1080×1080 居中面板使用，32px 圆角、1.5px 内描边与柔和投影；背后主页模糊，面板保持清晰。「呈现效果」帧是面板 80% 等比副本，仅用于设计预览，正式实现模糊真实主页而非加载快照 |
-| 仪表盘 | 「仪表盘 · 浅色」「仪表盘 · 深色」 | 表头与徽标等比所在表面深一档；分页当前页以中性 12 作底、字取所在表面色；图表映射为输入主色 9、缓存读取主色 8、输出成功 9、缓存写入警告 9；状态徽标用彩色浅底配第 11 步文字，取消状态用中性色；圆角沿用 `radius-control=6` / `radius-row=8` / `radius-menu=12`，不使用胶囊式控件 |
+| 聊天工作台 | 「聊天工作台 · 浅色」「聊天工作台 · 深色」 | 诊断结果以正文表格呈现 |
+| 登录页 | 「登录页 · 浅色」「登录页 · 深色」，以及两个「呈现效果」帧 | 以 1080×1080 居中面板使用，配色、描边与投影见[登录页面板](#登录页面板)；背后主页模糊，面板保持清晰。两个「呈现效果」帧是面板 80% 等比副本，仅用于设计预览；正式实现模糊真实主页而非加载快照 |
+| 仪表盘 | 「仪表盘 · 浅色」「仪表盘 · 深色」 | 表头与徽标等比所在表面深一档；分页当前页以中性 12 作底、字取所在表面色；图表映射为输入主色 9、缓存读取主色 8、输出成功 9、缓存写入警告 9；状态徽标用彩色浅底配第 11 步文字，取消状态用中性色；圆角沿用 `radius-control=6` / `radius-row=8` / `radius-menu=12`，不使用胶囊式控件；图表色标 3px 与堆叠柱顶角 5px / 4px 是字面值，不进变量 |
 
-画布尺寸只描述该画布，不代表全站间距令牌或响应式断点。仪表盘的字段来源、费用与计时口径见 [仪表盘说明](doc/design/web/dashboard.md)。
+画布尺寸只描述该画布，不代表全站间距令牌或响应式断点。仪表盘的字段来源、费用与计时口径见 [仪表盘规格](doc/web/SPEC/dashboard.md)。

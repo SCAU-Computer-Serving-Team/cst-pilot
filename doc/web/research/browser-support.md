@@ -1,6 +1,6 @@
 # 浏览器支持
 
-口径：cst-pilot-web 的两个构建。不再以 `@agegr/pi-web` 为参照（该包 2026-09-10 已移除）。
+口径：cst-pilot-web 的两个构建。
 
 ## 两档基线
 
@@ -13,13 +13,29 @@
 依据：
 
 - Tailwind v4 官方要求 Chrome 111 / Safari 16.4 / Firefox 128，因为它依赖 `@property` 与 `color-mix()`，旧内核上整块样式失效。
-- Tailwind 3.4 没有官方数值下限。兼容版把它钉在 86，并补三条 preflight 规则，清单见 [设计标准](design-standards.md) 兼容版降级。
+- Tailwind 3.4 没有官方数值下限。兼容版把它钉在 86，并补三条 preflight 规则，见下节「兼容版降级」。
 - 取 86 的理由是国内老内核的天花板。360 安全浏览器 13 与 360 极速浏览器 13.x 长期停在 Chromium 86。
 - Vite 的构建目标主要处理语法转换，不自动补齐全部运行时 API。
 
 来源：[Tailwind 兼容说明](https://tailwindcss.com/docs/compatibility)、[Vite 构建说明](https://vite.dev/guide/build.html)。
 
 现场只跑 Windows，Safari 与移动端不在范围内。
+
+## 兼容版降级
+
+现代版直接用新语法，兼容版在构建时改写成旧内核能认的形式。
+
+| 对象 | 做法 |
+|---|---|
+| `oklch()` | 转 sRGB |
+| `color-mix()` | 预计算成固定值 |
+| `@layer` | 展开 |
+| `:is()` `:where()` | 改写 |
+| Tailwind 3.4 preflight | 补三条基础规则：`abbr`、`button` 与 `input`、`[hidden]` |
+| JS 语法 | Vite `build.target` 按目标内核配置 |
+| JS 内置 API | 检查项目与依赖实际用到的 API，按需改写或补 polyfill；构建不会自动补齐 |
+| 第三方组件 | 引入兼容检查工具辅助，以实际版本和最终产物为准 |
+| 实际运行 | 在目标内核验证页面加载与关键交互，未验证前标为目标支持 |
 
 ## 怎么选档
 
@@ -43,7 +59,7 @@
 | 豆包桌面版 | ~140 | 现代版 | ✅ 版本为社区推断 |
 | QQ 浏览器 21.x | 116–123 | 现代版 | ✅ 第三方源，建议真机确认 |
 | 夸克 PC | 112 | 现代版 | ⚠️ 余量 1 版 |
-| Win7 上的 Chromium | 109 封顶 | 兼容版 | ✅ 旧口径里的「不支持」已作废 |
+| Win7 上的 Chromium | 109 封顶 | 兼容版 | ✅ |
 | 360 安全浏览器 13 | 86 | 兼容版 | ✅ |
 | 360 极速浏览器 13.x | 86 | 兼容版 | ✅ |
 | 搜狗、2345 等旧壳 | 69–86 | — | ❌ 低于 86 的不可用 |

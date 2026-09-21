@@ -1,6 +1,6 @@
 {
   "$schema": "https://www.designtokens.org/schemas/2025.10/format.json",
-  "$description": "cst-pilot 自有配色。12 步色阶，每步绑定一种界面用途，取色依据是用途而不是明暗编号。浅深两套独立生成。详细划分见 doc/design/web/design-standards.md。",
+  "$description": "cst-pilot 自有配色。12 步色阶，每步绑定一种界面用途，取色依据是用途而不是明暗编号。浅深两套独立生成。详细划分见仓库根 DESIGN.md 的 Colors 一节。",
   "color": {
     "$type": "color",
     "light": {
