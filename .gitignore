@@ -1,6 +1,10 @@
 # ---- 运行环境与第三方产物（随 zip 分发，可重建，不进 git）----
 node/
 agent/node_modules/
+src/web/frontend/node_modules/
+src/web/frontend/build/
+src/web/frontend/.react-router/
+agent/home/extensions/web/static/
 agent/home/bin/
 agent/home/npm/
 agent/home/fff/
