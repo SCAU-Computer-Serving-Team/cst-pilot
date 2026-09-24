@@ -3,6 +3,7 @@ node/
 agent/node_modules/
 src/web/frontend/node_modules/
 src/web/frontend/build/
+src/web/frontend/public/fonts/
 src/web/frontend/.react-router/
 agent/home/extensions/web/static/
 agent/home/bin/

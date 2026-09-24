@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node scripts/prepare-fonts.mjs",
     "dev": "react-router dev",
+    "prebuild": "node scripts/prepare-fonts.mjs",
     "build": "react-router build && node scripts/publish.mjs",
     "typecheck": "react-router typegen && tsc --noEmit"
   },
