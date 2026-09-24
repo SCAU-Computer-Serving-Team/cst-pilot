@@ -1,6 +1,6 @@
 # MVP 要做的内容
 
-状态：待实现。产品待决事项见[待决议题](../issues.md)，待补画布见 [Todo](../Todo.md#todraw-画布)。更新：2026-09-23。
+状态：待实现。影响 MVP 的待处理事项见[议题清单](../issues.md#影响-web-mvp)，待补画布见 [Todo](../Todo.md#todraw-画布)。更新：2026-09-23。
 
 [PRD](../PRD.md) 的 W1–W9 定义 Web 的总体目标。本文划定首版交付范围，兼容版与仪表盘列在后续阶段；具体行为引用各规格。
 
@@ -89,7 +89,7 @@
 
 ## 八、实施 checkpoint
 
-按顺序完成；每个 checkpoint 验收后再进入下一阶段。接口细节、异常语义和画布缺口仍以对应 SPEC、[工程验证](issues.md)及 [Todo](../Todo.md#todraw-画布)为准。
+按顺序完成；每个 checkpoint 验收后再进入下一阶段。接口细节、异常语义和画布缺口仍以对应 SPEC、[议题清单](../issues.md#影响-web-mvp)及 [Todo](../Todo.md#todraw-画布)为准。
 
 | 阶段 | 实现内容 | 验收标准 |
 |---|---|---|

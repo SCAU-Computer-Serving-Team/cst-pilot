@@ -2,7 +2,7 @@
 
 本页是 Web 文档索引。[MVP](MVP.md) 定义阶段范围，[SPEC](SPEC/) 定义行为与接口草案，[research](research/) 保存依据与实测。SPEC 与详细设计的分类见[待决议题](../issues.md#d4-规格与详细设计的分类)。
 
-视觉规范和画布资产见 [DESIGN.md](../../DESIGN.md)。产品待决事项见[待决议题](../issues.md)，工程验证与视觉待办见 [Issues](issues.md)。
+视觉规范和画布资产见 [DESIGN.md](../../DESIGN.md)。MVP 工程验证、视觉事项和后续待决项统一列在[待处理议题](../issues.md)。
 
 ## SPEC
 
@@ -29,8 +29,7 @@
 
 | 文件 | 内容 |
 |---|---|
-| [../issues.md](../issues.md) | 需要产品或维护者确认的选择 |
-| [issues.md](issues.md) | 工程验证与视觉设计待办 |
+| [../issues.md](../issues.md) | MVP 待验证事项与后续待决项 |
 
 ## 其他
 

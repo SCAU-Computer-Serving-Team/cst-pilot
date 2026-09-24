@@ -27,7 +27,7 @@
 | 档位 | Tailwind | 最低内核 | 阶段 |
 |---|---|---|---|
 | 现代版 | v4 | Chromium 111 | MVP |
-| 兼容版 | 3.4 | Chromium 86 | 功能完善后加，见 [Issues](../issues.md) |
+| 兼容版 | 3.4 | Chromium 86 | 功能完善后加，见 [MVP 后续安排](../MVP.md#六后面再做) |
 
 Tailwind v4 要求 Chromium 111。兼容版推出前，先尝试 Edge；仍不支持时不要启动 Web，继续使用 TUI。
 
