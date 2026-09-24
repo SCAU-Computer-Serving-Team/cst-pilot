@@ -6,7 +6,9 @@
 
 1. 首选 pen cli 的操作方式。
 2. 让 Pen 桌面应用打开某个 .pen 文件，用 `Start-Process "D:\Pen\Pen.exe" "<绝对路径>"`。
-   `pen interactive --app desktop --in <file>` 只声明路径，不会真正打开文件。
+   这条只在已有一个实例运行时生效，由它转发；实例未启动时带路径参数启动会停在 Dashboard，不打开该文件。
+   `pen interactive --app desktop --in <file>` 只声明 CLI 会话自己的文件，不会让应用窗口打开它。
+   MCP 与 CLI 的 `save()` 都只作用于应用当前打开的画布，切换画布靠上面这条。
 3. MCP 需要应用里有一个已打开的文件才能工作，否则报 `A file needs to be open in the editor`。
 4. 导出画布节点为图片，用 `execute` 里的 `Export(nodeIds, "png", 目录)`。
    图片按节点 id 命名，不能指定文件名。

@@ -1,5 +1,5 @@
 // 颜色常量子集测试
-// 扫描 cst-pilot-web.pen 中出现的全部颜色常量，断言每个都满足以下二者之一：
+// 扫描 cst-pilot-web.pen 与 cst-pilot-tools.pen 中出现的全部颜色常量，断言每个都满足以下二者之一：
 //   1. 在 cst-pilot-colors.pen 中定义（12 步色阶、语义色、首页 Blue hour 色表等）；
 //   2. 在下方 EXCEPTIONS 清单中，且带有出处（DESIGN.md 例外章节等）。
 // 新增颜色时：优先取色阶画布已定义的步；确需新色时在 EXCEPTIONS 登记出处。
@@ -12,7 +12,10 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const webPenPath = path.join(root, "src/web/design/cst-pilot-web.pen");
+const penPaths = [
+  "src/web/design/cst-pilot-web.pen",
+  "src/web/design/cst-pilot-tools.pen",
+].map((p) => path.join(root, p));
 const colorsPenPath = path.join(root, "src/web/design/cst-pilot-colors.pen");
 
 /** 提取文本中的十六进制颜色。8 位含透明通道：全透明（alpha=00）视为不可见，跳过。 */
@@ -56,28 +59,28 @@ const EXCEPTIONS = {
   "465A9F": "DESIGN.md light-send · 发送/登录/进度弧强调色（Blue hour 深段）",
   "161C4A": "登录深色 AIR 底色（asset/blue-hour-air-dark-palette.png 色表）",
   // 既有帧 context 记录的深色体系取值
-  "1B1C22": "深色悬停面板弱边框/分隔线（上下文面板·悬停等帧 context）",
-  "111733": "深色面板投影 shadow #11173333",
   "E0E0E0": "聊天工作台 HeroUI 表格行描边（主画布既有元件）",
 };
 
-test("cst-pilot-web.pen 的颜色常量是色阶画布定义色与登记例外的子集", () => {
+test("界面画布的颜色常量是色阶画布定义色与登记例外的子集", () => {
   const palette = new Set(extractColors(readFileSync(colorsPenPath, "utf8")));
-  const used = count(extractColors(readFileSync(webPenPath, "utf8")));
 
-  const unknown = [...used.entries()]
-    .filter(([c]) => !palette.has(c) && !(c in EXCEPTIONS))
-    .sort((a, b) => b[1] - a[1]);
+  for (const penPath of penPaths) {
+    const used = count(extractColors(readFileSync(penPath, "utf8")));
+    const unknown = [...used.entries()]
+      .filter(([c]) => !palette.has(c) && !(c in EXCEPTIONS))
+      .sort((a, b) => b[1] - a[1]);
 
-  const lines = unknown.map(
-    ([c, n]) => `  #${c} ×${n}（色阶画布无此色，EXCEPTIONS 无登记）`,
-  );
-  assert.equal(
-    unknown.length,
-    0,
-    `发现 ${unknown.length} 个未登记颜色：\n${lines.join("\n")}\n` +
-      `处理：取色阶画布已有步替换，或在 EXCEPTIONS 中登记出处。`,
-  );
+    const lines = unknown.map(
+      ([c, n]) => `  #${c} ×${n}（色阶画布无此色，EXCEPTIONS 无登记）`,
+    );
+    assert.equal(
+      unknown.length,
+      0,
+      `${path.basename(penPath)} 发现 ${unknown.length} 个未登记颜色：\n${lines.join("\n")}\n` +
+        `处理：取色阶画布已有步替换，或在 EXCEPTIONS 中登记出处。`,
+    );
+  }
 });
 
 test("例外清单无冗余（登记的颜色不应已在色阶画布中定义）", () => {
@@ -90,8 +93,10 @@ test("例外清单无冗余（登记的颜色不应已在色阶画布中定义�
   );
 });
 
-test("例外清单中的颜色确实在 web 画布中被使用（防止登记幽灵条目）", () => {
-  const used = new Set(extractColors(readFileSync(webPenPath, "utf8")));
+test("例外清单中的颜色确实在界面画布中被使用（防止登记幽灵条目）", () => {
+  const used = new Set(
+    penPaths.flatMap((p) => extractColors(readFileSync(p, "utf8"))),
+  );
   const ghosts = Object.keys(EXCEPTIONS).filter((c) => !used.has(c));
   assert.deepEqual(
     ghosts,
