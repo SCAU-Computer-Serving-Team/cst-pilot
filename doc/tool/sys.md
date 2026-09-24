@@ -84,7 +84,7 @@ GPU Engine 和 GPU Process Memory 分别读取，失败原因放入 counterError
 
 每盘指标来自 `Win32_PerfFormattedData_PerfDisk_PhysicalDisk`，排除 `_Total`；busyPct 按 100 − PercentIdleTime 计算。进程速率来自 `Win32_Process` 的 Read/WriteTransferCount 差分，与磁盘指标共用采样窗口。
 
-进程 IO 计数并非按物理盘归属，不能将 byIo 与某一磁盘吞吐直接相加对账。持续高忙碌度和排队可提示 IO 瓶颈；低吞吐不直接证明碎片或坏盘，应结合访问模式、SMART 和事件日志核查。全空闲时 byIo 为空合法。
+进程 IO 计数按进程归属，与磁盘总吞吐是两个口径，不能将 byIo 与某一磁盘吞吐直接相加对账。持续高忙碌度和排队可提示 IO 瓶颈；低吞吐不直接证明碎片或坏盘，应结合访问模式、SMART 和事件日志核查。全空闲时 byIo 为空合法。
 
 ## sensor：温度、风扇与降频线索
 

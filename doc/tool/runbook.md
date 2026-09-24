@@ -6,6 +6,8 @@
 
 ## 调用
 
+以下路径为示例。实际清理前需确认内容属于可删除缓存；不同风险档分别生成清单。
+
 ```js
 runbook({
   title: "清理 C 盘临时文件",
@@ -17,10 +19,9 @@ runbook({
       shell: "powershell",
     },
     {
-      summary: "清理系统临时目录，需要管理员权限；删除后不可恢复。",
-      command: 'Remove-Item "C:\\Windows\\Temp\\*" -Recurse -Force -ErrorAction SilentlyContinue',
+      summary: "清理已确认无个人文件的示例应用缓存，释放空间；应用可能需要重新下载缓存。",
+      command: 'Remove-Item "$env:LOCALAPPDATA\\ExampleApp\\Cache\\*" -Recurse -Force -ErrorAction SilentlyContinue',
       shell: "powershell",
-      admin: true,
     },
   ],
 })
@@ -80,10 +81,10 @@ runbook({
 命令：
 Remove-Item "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
 
-环境：PowerShell（管理员）
-说明：清理系统临时目录，需要管理员权限；删除后不可恢复。
+环境：PowerShell（普通权限）
+说明：清理已确认无个人文件的示例应用缓存，释放空间；应用可能需要重新下载缓存。
 命令：
-Remove-Item "C:\Windows\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item "$env:LOCALAPPDATA\ExampleApp\Cache\*" -Recurse -Force -ErrorAction SilentlyContinue
 ```
 
 编码 UTF-8 带 BOM，换行 CRLF，中文系统记事本直接可读。
@@ -94,7 +95,7 @@ Remove-Item "C:\Windows\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
 2. 文件名 `<序号>-<风险档>-<标题>.txt`，序号当天唯一递增、跨天从 `01` 重新开始。
 3. 一次调用一个文件，一个序号对应一份清单；模型按风险档写三份，就依次占用 01、02、03。
 4. 沿用 `sequence` 重写时替换同序号的那一份：文件名跟新标题变，序号不变，文件数不增。
-5. 同一进程内的并发调用串行分配序号；不同进程同时写同一个 outbox 时序号可能重复，按「一个工具包一个实例」的场景未做跨进程互斥。
+5. 序号分配有模块级串行队列，同一模块实例内的并发调用不会撞号。跨进程，或同一进程里出现多份扩展实例时，序号仍可能重复；按「一个工具包一个实例」的场景未做跨进程互斥。
 
 ## 限制
 
@@ -102,5 +103,5 @@ Remove-Item "C:\Windows\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
 2. 只写工具包 `outbox` 目录，不接受自定义输出路径。
 3. 只生成 `.txt`，不生成 `.bat` / `.cmd` / `.ps1`，避免双击即执行。
 4. 沿用 `sequence` 修正会先删掉同序号的旧文件再写新的；只读介质下这一步会失败，写入动作本身失败但已删的旧文件不会自动恢复，不影响其他序号的清单。
-4. 工具包介质只读、空间不足或目录不可写时返回具体原因，不静默失败。
-5. 工具不判断命令的真实风险，分档与取舍由模型按 [SKILL](../../agent/home/skills/runbook/SKILL.md) 决定，队员执行前仍需自行确认。
+5. 工具包介质只读、空间不足或目录不可写时返回具体原因，不静默失败。
+6. 工具不判断命令的真实风险，分档与取舍由模型按 [SKILL](../../agent/home/skills/runbook/SKILL.md) 决定，队员执行前仍需自行确认。

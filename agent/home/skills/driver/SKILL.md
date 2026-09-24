@@ -5,7 +5,7 @@ description: driver 工具的参数与返回字段说明。四个 scope 的查�
 
 # driver 工具说明
 
-只读设备与驱动健康工具，按 `scope` 选择子功能，不传默认 `problem`。全部免管理员。与 sys 的边界：sys 管设备负载，driver 管设备健康（在不在、驱动对不对）；与 disk 的边界：盘上容量归 disk。
+只读设备与驱动健康工具，按 `scope` 选择子功能，不传默认 `problem`。可在普通权限下调用，采集失败时保留错误。与 sys 的边界：sys 管设备负载，driver 管设备健康（在不在、驱动对不对）；与 disk 的边界：盘上容量归 disk。
 
 ## 参数
 
@@ -15,8 +15,8 @@ description: driver 工具的参数与返回字段说明。四个 scope 的查�
 ## 返回字段
 
 1. `problem` / `find` 返回 `devices[]`（`name` / `class` / `status` / `errorCode` / `deviceId` / `hardwareIds[]`）与 `count`。`errorCode` 是 ConfigManagerErrorCode 原始值（0 = 正常），不翻译；`hardwareIds` 含 VEN/DEV，供联网定位驱动
-2. `problem` 只收 Status 为 Error / Unknown 的 PnP 设备，健康机器返回空数组（合法数据，不报错）
-3. `core` 返回 `net[]`（`name` / `connId` / `physical` 布尔 / `connStatus` 原始值）、`bluetooth[]` 与 `audio[]`（PnP 设备级）、`display[]`（`name` / `vendor` / `driver` / `status` / `bus`）、`services[]`（bthserv / Audiosrv 的 `state`，缺失 = 无该服务）、`drivers[]`（`class` / `device` / `version` / `date` yyyy-MM-dd / `provider`）
+2. `problem` 只收 Status 为 Error / Unknown 的 PnP 设备。查询成功时空数组表示未枚举到该范围内的异常，不能据此确认整机健康
+3. `core` 返回 `net[]`（`name` / `connId` / `physical` 布尔 / `connStatus` 原始值）、`bluetooth[]` 与 `audio[]`（PnP 设备级）、`display[]`（`name` / `vendor` / `driver` / `status` / `bus`）、`services[]`（bthserv / Audiosrv 的 `state`，仅采集成功时缺失才可解释为无该服务）、`drivers[]`（`class` / `device` / `version` / `date` yyyy-MM-dd / `provider`）
 4. `external` 返回 `devices[]`（同 problem 字段行）与 `removable[]`（`model` / `interface` / `mediaType` / `sizeGB`）
 5. `physical` 标志可能误报（个别虚拟网卡也返回 true），只作展示
 
@@ -30,5 +30,5 @@ description: driver 工具的参数与返回字段说明。四个 scope 的查�
 ## 通用约定
 
 1. `notice` 是错误码语义、盲区附注与字段导读，转达给队员时不能省略
-2. `error` 表示查询失败并附原因，如实转达；空数组是合法数据（无蓝牙、没插外设等）
+2. `error` 表示查询失败；`degraded` / `collectionErrors` 表示部分采集失败。只有采集成功时，空数组才可解释为未枚举到对应设备
 3. 设备名随驱动可能是任意语言，只透传不过滤

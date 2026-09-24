@@ -5,19 +5,19 @@ description: eventlog 工具的参数与返回字段说明。八个 scope 的查
 
 # eventlog 工具说明
 
-只读事件日志工具，读取机器沉淀的历史故障痕迹，按 `scope` 选择子功能，不传默认 `recent`。除 `security`（登录审计，需管理员）外各 scope 免管理员。与 sys 的分工：sys 看实时负载，eventlog 看历史痕迹。
+只读事件日志工具，读取 Windows 记录的历史故障线索，按 `scope` 选择子功能，不传默认 `recent`。除 `security`（登录审计，需管理员）外各 scope 免管理员。与 sys 的分工：sys 看实时负载，eventlog 看历史痕迹。
 
 ## 参数
 
 1. `scope`（可选）：`recent` / `boot` / `crash` / `service` / `disk` / `security` / `query` / `detail`，不传默认 `recent`
 2. `hours`（可选）：时间窗（小时），默认 24，上限 720；`top`（可选）：事件列表条数上限，默认 100（硬上限 100）；两者除 detail 外通用
-3. 分支参数：`level`（recent/query，默认 warn = Warning 及更严重）/ `kind`（boot）/ `type`（security）/ `app`（crash）/ `name`（service）/ `ids`+`provider`+`msg`+`logName`（query）/ `recordId` 或 `id` + `logName`（detail，二选一必填）——每支自含全部参数，`logName` 不是全局覆盖参数
+3. 分支参数：`level`（recent 默认 warn，包含 Warning 及更严重；query 省略时不限级别）/ `kind`（boot）/ `type`（security）/ `app`（crash）/ `name`（service）/ `ids`+`provider`+`msg`+`logName`（query）/ `recordId` 或 `id` + `logName`（detail，二选一必填）——每支自含全部参数，`logName` 不是全局覆盖参数
 
 ## 查询类 scope 的公共返回字段
 
 1. `logs`（实际查询通道）/ `hours` / `top` / `total`（时间窗内命中总数，含未显示的更早记录）/ `truncated`（total > top 时 true）/ `firstTime` / `lastTime`（事件样本的最早 / 最新时间，空列表时无此字段）/ `unreadable`（消息资源损坏被跳过的记录数）/ `noMatch`（条件级零命中提示码）/ `admin`（查询进程是否管理员）/ `events`（最新 top 条，时间倒序）/ `counts`（来源/ID 折叠计数表）/ `notice`
 2. `events` 每条：`logName` / `time`（本地时区）/ `recordId`（detail 直取用）/ `level` 数字与 `levelName`（英文固定映射）/ `provider` / `id` / `msg`（≤200 字符简述，无渲染模板的系统事件为 null）
-3. `counts` 每项：`key`（provider/id）/ `n`（出现次数）/ `last`（最近一次时间），n 降序最多 100 组，超出标记 `countsTruncated=true`；折叠完备（`sum(counts.n) === total`）
+3. `counts` 每项：`key`（provider/id）/ `n`（出现次数）/ `last`（最近一次时间），n 降序最多 100 组，超出标记 `countsTruncated=true`；仅在 `countsTruncated=false` 时要求 `sum(counts.n) === total`
 4. `noMatch` 固定码：`provider-not-found` = 提供程序名在本机不存在，`provider-log-mismatch` = 提供程序不写往所查通道
 
 ## 各 scope 的查询范围

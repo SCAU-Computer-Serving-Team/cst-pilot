@@ -15,20 +15,20 @@
 
 ## 工具一览
 
-1. 目录里谁占空间：[ls](ls.md)，无参数，实现 [ls.ts](../../agent/home/extensions/diagnostics/ls.ts)
+1. 目录里谁占空间：[ls](ls.md)，必填 `path`，可选 `top`，实现 [ls.ts](../../agent/home/extensions/diagnostics/ls.ts)
 2. 磁盘容量、型号、健康与占用：[disk](disk.md)，`space`、`info`、`health`、`usage`、`all`，实现 [disk.ts](../../agent/home/extensions/diagnostics/disk.ts)
 3. CPU、内存、GPU、IO 与传感器：[sys](sys.md)，`overview`、`proc`、`io`、`gpu`、`sensor`，实现 [sys.ts](../../agent/home/extensions/diagnostics/sys.ts)
 4. 开机会启动什么：[startup](startup.md)，无参数，实现 [startup.ts](../../agent/home/extensions/diagnostics/startup.ts)
 5. 崩溃、蓝屏、服务与登录历史：[eventlog](eventlog.md)，`recent`、`boot`、`crash`、`service`、`disk`、`security`、`query`、`detail`，实现 [eventlog-core.ts](../../agent/home/extensions/diagnostics/eventlog-core.ts)
 6. 设备识别与驱动状态：[driver](driver.md)，`problem`、`core`、`external`、`find`，实现 [driver-core.ts](../../agent/home/extensions/diagnostics/driver-core.ts)
-7. 让队员手动执行修复命令：[runbook](runbook.md)，无参数，实现 [runbook.ts](../../agent/home/extensions/diagnostics/runbook.ts)
+7. 让队员手动执行修复命令：[runbook](runbook.md)，必填 `title`、`level`、`items`，可选 `sequence`，实现 [runbook.ts](../../agent/home/extensions/diagnostics/runbook.ts)
 8. 维护共享目录大小缓存：[wz-index](wz-index.md)（内部模块），无子功能、不注册为工具，实现 [wz-index.ts](../../agent/home/extensions/diagnostics/wz-index.ts)
 
 ## 使用约定
 
 - 支持范围为 Windows 10/11 x64；裁剪系统、PE 和特殊介质的可用性需单独验证。
 - 工具不改注册表、设备状态或系统配置。存储扫描会在 `wiztree/tmp` 写入临时 CSV，并在结束时尝试清理；目录大小缓存保存在进程内。
-- runbook 是唯一写文件的工具，写入范围限于工具包 `outbox\`，只生成 txt 清单。
+- runbook 是唯一生成交付文件的工具，只在工具包 `outbox\` 写 txt 清单；扫描临时文件按上一条处理。
 - 文档中的 `工具名({...})` 是工具调用示意，不是可直接粘贴到 PowerShell 的命令。
 - 多功能工具用 `scope` 选择子功能；`ls`、`startup` 不使用 scope。默认值和必填参数见对应页面。
 - 示例数值仅用于说明字段，不能作为其他机器的通过标准。
@@ -80,7 +80,7 @@ Windows 原生数据通过仓库自带的 `pwsh/pwsh.exe` 采集，使用 `-NoPr
 - `runtime.ts`：便携程序路径、子进程、解码与 JSON 边界；`pwsh-data.ts`：PowerShell 数据表达式和采集包装。
 - `result.ts`：模型输出体积限制与整次失败上报；`driver-data.ts`：设备结果 schema 和运行时校验。
 
-扩展采用 `ExtensionAPI` 和 schema 推导参数。取消信号由 execute 逐层传入子进程及目录遍历；相对路径以 pi 的 `ctx.cwd` 为基准。开发检查参考 pi 0.84.4 的 API，使用严格类型检查与仅可擦除的 TypeScript 语法，不引入构建步骤。
+扩展采用 `ExtensionAPI` 和 schema 推导参数。取消信号由 execute 逐层传入子进程及目录遍历；相对路径以 pi 的 `ctx.cwd` 为基准。开发检查参考项目锁定的 pi 0.85.1 API，使用严格类型检查与仅可擦除的 TypeScript 语法，不引入构建步骤。
 
 格式与检查规则以根目录 [biome.json](../../biome.json) 为准：
 

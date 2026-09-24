@@ -84,7 +84,7 @@ cst-pilot/
 ## 注意事项
 
 1. 本仓库只含源码与文档，完整运行环境由 `pack/pack.mjs` 构建。
-2. 当前实现中，提示词为 `APPEND_SYSTEM.md`而非熟知的`AGENTS.md`，原因见 [doc/Notice.md](doc/Notice.md)
+2. 当前实现中，提示词用 `APPEND_SYSTEM.md`，与常见的 `AGENTS.md` 不同，原因见 [doc/Notice.md](doc/Notice.md)
 3. 模型URL和API当然是不包括的。如果你是CST的队员且需要相关资源，请联系你们的委员。
 4. WizTree 仅个人使用免费、商业使用需授权，见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
