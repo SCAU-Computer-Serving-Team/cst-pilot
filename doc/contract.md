@@ -82,7 +82,7 @@ Authorization: Bearer <OA 访问令牌>
 |---|---|---|---|
 | `requestedAt` | `ISO 8601 带本地时区偏移` | `before_provider_request` 时刻 | 调用开始时刻 |
 | `durationMs` | `4820` | `before_provider_request` 至 assistant `message_end` 的时刻差 | 本次请求的模型调用耗时。不能用 `turn_end`：它在工具执行完才触发，会把工具耗时算进来 |
-| `ttftMs` | `640` | 首个 assistant `message_update` 到达耗时 | 首字延迟，从 `turn_start` 起算 |
+| `ttftMs` | `640` | `before_provider_request` 至首个非空 `text_delta` / `thinking_delta` / `toolcall_delta` 的单调时钟差 | 首个输出等待；没有请求开始事件或有效增量时留空 |
 
 ### 模型与用量
 
@@ -90,7 +90,7 @@ Authorization: Bearer <OA 访问令牌>
 |---|---|---|---|
 | `provider` | `cstoa` | `turn_end` 的 assistant 消息 | 本次请求的供应商 |
 | `model` | `glm-5.3-flash` | 同上 | 本次请求的模型 |
-| `thinkingLevel` | `off｜minimal｜low｜medium｜high｜xhigh｜max` | `turn_end` 时的 `ctx.thinkingLevel` | 本次请求的思考档位，取值与 pi 的 `ThinkingLevel` 一致。该字段可选，取不到时留空 |
+| `thinkingLevel` | `off｜minimal｜low｜medium｜high｜xhigh｜max` | 请求发起时保存的 `ctx.thinkingLevel` | 本次请求的思考档位。缺失时留空，不用请求结束时的设置反推 |
 | `input` | `8432` | `message.usage` | 输入 token，含未命中缓存的全部输入 |
 | `output` | `1286` | 同上 | 输出 token |
 | `cacheRead` | `32768` | 同上 | 命中缓存的输入 token |
@@ -103,7 +103,7 @@ Authorization: Bearer <OA 访问令牌>
 
 | 键 | 值示例 | 来源 | 用途描述 |
 |---|---|---|---|
-| `status` | `ok｜aborted｜error` | `stopReason`、provider 状态码 | 结束状态，`aborted` 为队员主动取消，`error` 为 provider 非 2xx |
+| `status` | `ok｜aborted｜error` | `stopReason`、provider 状态码 | 以最终 `stopReason` 判定：`aborted` 为取消，`error` 包含供应商、网络及运行错误；成功重试前的 HTTP 错误不改变最终状态 |
 | `errorCode` | `429` | `after_provider_response` | HTTP 状态码，仅 `status = error` 且收到响应时存在。网络层失败（无响应）没有状态码。区分网关限流、故障与模型问题 |
 | `stopReason` | `stop｜length｜toolUse｜error｜aborted｜deferred` | `turn_end` | 模型侧结束原因，取值与 pi 的 `StopReason` 一致；`pending` 为中间态不记录。与 `status` 对照解释取消与截断 |
 
@@ -138,10 +138,10 @@ Authorization: Bearer <OA 访问令牌>
 规则：
 
 1. 新增 provider 先按上面那条判定，再改 `currency.json`，不动字段定义，不改采集代码。
-2. 文件里没有的 provider 按缺省 `USD`；取值确实不明时不猜，`currency` 留空，报表把该条单列为「未定价」，不出现在合计里。
+2. 映射表可用但没有该 provider 时，按缺省 `USD`。映射文件不可读或内容不合法时，`currency` 留空，该条单列为「未定价」，不计入费用合计。
 3. **判定看 provider 本身，不看链路经过哪里。** 海外厂商的服务走国内中转，币种不因此改变。
 
-`cost` 的数值由 pi 的模型价目表给出，是估算值不是账单（[仪表盘](web/SPEC/dashboard.md)同此口径）；`currency` 标的是 provider 的计价区域，用途是把用量分到国内、国外两组。实际金额以网关账单为准。
+`cost` 是 pi 模型价目表的估算值，[仪表盘](web/SPEC/dashboard.md)采用同一口径。按币种汇总前，须核实模型价格数值与 `currency.json` 的单位一致；不能只更换币种标签。实际金额以网关账单为准。
 
 该文件随扩展目录整个复制进发行包。
 
@@ -160,12 +160,12 @@ Authorization: Bearer <OA 访问令牌>
 | `disk` | 诊断 | `info` / `space` / `usage` / `health` / `all` |
 | `sys` | 诊断 | `proc` / `gpu` / `sensor` / `io` / `overview` |
 | `startup` | 诊断 | 无（同名字段） |
-| `eventlog` | 诊断 | `recent` / `query` / `bluescreen` / `boot` / `crash` |
-| `driver` | 诊断 | `devices` / `problem` / `external` / `find` / `core` |
+| `eventlog` | 诊断 | `recent` / `boot` / `crash` / `service` / `disk` / `security` / `query` / `detail` |
+| `driver` | 诊断 | `problem` / `core` / `external` / `find` |
 | `runbook` | 诊断 | 无 |
-| `fff` | 包（pi-fff） | 无 |
+| `ffgrep`、`fffind` | 包（pi-fff） | 无 |
 | `open_tui` | 包（pi-open-tui） | 无 |
-| `web_search` | 包（pi-web-access） | 无 |
+| `web_search`、`source_check` | 包（pi-web-access） | 无 |
 | `fetch_content` | 包（pi-web-access） | 无 |
 | `get_search_content` | 包（pi-web-access） | 无 |
 

@@ -30,10 +30,11 @@
 |---|---|
 | `session_start` | `sessionId`、`reason`、`startedAt` |
 | `input` | `source = interactive` 时 `prompts++` |
+| `before_provider_request` | 保存本次请求的思考档位；缺失时保留未知，不用结束时的设置反推 |
 | `turn_start` / `turn_end` | 配对求间隔累加 `activeMs`；`turns++`；`message.usage` 按 provider + model + thinkingLevel 分组累加进 `models`；`ctx.getContextUsage()` 返回 `undefined` 或 `tokens` 为 `null` 时跳过采样，否则记峰值 `contextPeak` 与同次的 `contextWindow`；`stopReason = aborted` 计 `aborted`；`stopReason = error` 时：本往返无 `after_provider_response` 则 `networkErrors++`，`errorMessage` 原文按文本分组进 `errors` |
 | `after_provider_response` | 非 2xx 状态码计 `providerErrors`；标记本往返有响应（供 `networkErrors` 判定） |
-| `tool_execution_start` / `_end` | `toolCallId` 配对：`tools` 公共维度（`calls`/`failures`/`totalMs`/`maxMs`/`resultBytes`/`truncated`）；扩展字段：`runbook` 取结果的 `runbook.items` 累加 `entriesTotal`、`web_search` 按 provider 计 `providers`、`fetch_content` 按 mode 计 `modes`；`details.degraded === true` 计 `degraded` |
-| `tool_call` | 从入参提取 `scope`（无 scope 工具省略） |
+| `tool_execution_start` / `_end` | `toolCallId` 配对：`tools` 公共维度（`calls`/`failures`/`totalMs`/`maxMs`/`resultBytes`/`truncated`）；扩展字段：`runbook` 取结果的 `runbook.items` 累加 `entriesTotal`、`web_search` 按 provider 计 `providers`、`fetch_content` 按 mode 计 `modes`；`degraded` 按下方结果取值表统计，每次调用最多计一次 |
+| `tool_call` | 从入参提取 `scope`；省略时按工具默认值记录（sys 为 overview、driver 为 problem、eventlog 为 recent），无 scope 工具省略 |
 | `session_compact` | `compactions++`；`compactionEntry.tokensBefore` 累加进 `compactionTokens`；`reason = overflow` 计 `compactionOverflows` |
 | `session_compact_failed` | `compactionFailures++`。只计数，不收 `errorMessage`：报错原文的例外只覆盖 turn 级 |
 | `session_shutdown` | `endedAt`、`endReason`；`contextEntries = buildContextEntries().length`；序列化、写 outbox、触发上报（不等待） |
@@ -46,15 +47,15 @@
 - 参数值与输出正文不采。
 - 报错原文完整入记录，不截断。同文本只留一份并按 `count` 累加，避免重复撑大记录。
 - 时间序列化用带本地时区偏移的 ISO 8601（`new Date().toISOString()` 是 UTC，不符合契约）。
-- `cost` 与 `currency` 一起写入：币种查 `currency.json`，查不到就留空，不猜。
+- `cost` 与 `currency` 一起写入。映射表可用但缺少 provider 时用缺省 `USD`；文件不可读或不合法时留空，见[计费币种](../../contract.md#计费币种)。模型价目表与币种单位须在实现前核对。
 
-### 从结果里取值的三个坑
+### 结果字段取值
 
-三处都容易照着字段名猜错，已按现有代码核实：
+按工具的实际包装结构读取，同一次调用的同一指标最多计一次：
 
-| 字段 | 取法 | 猜错会怎样 |
+| 字段 | 取法 | 限制 |
 |---|---|---|
-| `degraded` | `details.degraded === true` | 正常成功的结果也带 `notice`（字段导读、口径说明，`driver` 每次调用都加）。按 `notice` 出现与否统计，会把大量正常调用记成降级 |
+| `degraded` | `sys` / `driver` / `eventlog` 读取 `details[scope].degraded === true`；`startup` 读取 `details.startup.degraded === true`；`disk` 读取顶层 `degraded`，或 `usage.method === "node-walk"` / 非空 `usage.degradedFrom` | 仅顶层判断会漏记按 scope 包装的结果；普通 `notice` 不作为降级标记 |
 | `truncated` | A 诊断工具：结果文本含 `outputTruncated`。`diagnosticResult` 超限时只改文本，`details` 保持原对象，所以用一次子串扫描判断，不解析 JSON。B 内置 `bash`：`details.truncation.truncated` | `details.truncation` 对诊断工具不存在；`read`/`ls`/`find`/`grep` 的裁剪只写在文本里，没有结构标记，不计数 |
 | `entriesTotal` | 取结果的 `runbook.items`，工具已给出命令条数 | 入参字段名是 `items`（元素为 `{ summary, command, shell, admin? }`），没有 `commands` |
 

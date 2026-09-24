@@ -39,7 +39,7 @@
 |---|---|---|---|
 | `provider` | `cstoa` | `turn_end` 的 assistant 消息 | 供应商分布 |
 | `model` | `glm-5.3-flash` | 同上 | 模型使用分布 |
-| `thinkingLevel` | `off｜minimal｜low｜medium｜high｜xhigh｜max` | `turn_end` 时的 `ctx.thinkingLevel` | 思考档位对成本的影响 |
+| `thinkingLevel` | `off｜minimal｜low｜medium｜high｜xhigh｜max` | 请求发起时保存的 `ctx.thinkingLevel` | 思考档位对成本的影响 |
 | `turns` | `23` | `turn_end` 按分组键计数 | 该组合的往返次数，占比最大者即主用模型 |
 | `input` | `182000` | `message.usage` 分组累计 | 输入 token，含未命中缓存的全部输入 |
 | `output` | `9400` | 同上 | 输出 token，主要计费项之一 |
@@ -96,7 +96,7 @@
 | 项 | 规则 |
 |---|---|
 | 分组键 | `name` + `scope`，不是调用次序 |
-| 元素数上限 | 512。正常会话几十个即封顶，上限仅防 scope 取值失控撑爆记录 |
+| 元素数上限 | 512。上限用于控制 scope 分组数量与记录体积 |
 | 契约外工具 | 只采公共维度，按 name 分组 |
 | 元素示例 | `{ "name": "disk", "scope": "usage", "calls": 2, "failures": 0, "degraded": 1, "totalMs": 41200, "maxMs": 38000, "resultBytes": 21000, "truncated": 0 }` |
 
