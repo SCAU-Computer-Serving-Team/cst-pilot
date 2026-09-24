@@ -30,6 +30,7 @@
 		"noUnusedParameters": true
 	},
 	"include": [
-		"home/extensions/diagnostics/**/*.ts"
+		"home/extensions/diagnostics/**/*.ts",
+		"home/extensions/web/**/*.ts"
 	]
 }
