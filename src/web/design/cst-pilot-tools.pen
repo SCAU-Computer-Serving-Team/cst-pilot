@@ -1447,51 +1447,6 @@
                     },
                     {
                       "type": "frame",
-                      "id": "k8jvYj",
-                      "name": "HeroUI Ghost Button · 工具选择",
-                      "cornerRadius": 8,
-                      "gap": 6,
-                      "padding": [
-                        4,
-                        8
-                      ],
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "icon",
-                          "id": "ypoSZ",
-                          "name": "工具选项",
-                          "width": 16,
-                          "height": 16,
-                          "icon": "wrench",
-                          "library": "lucide",
-                          "fill": "#646464"
-                        },
-                        {
-                          "type": "text",
-                          "id": "Wf9AH",
-                          "name": "工具选择标签",
-                          "fill": "#646464",
-                          "content": "工具",
-                          "lineHeight": 1.5,
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "FI5py",
-                          "name": "展开工具",
-                          "width": 12,
-                          "height": 12,
-                          "icon": "chevron-down",
-                          "library": "lucide",
-                          "fill": "#646464"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
                       "id": "lMuCj",
                       "name": "编辑器弹性间距",
                       "width": "fill_container",

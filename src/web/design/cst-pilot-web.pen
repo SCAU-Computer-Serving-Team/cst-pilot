@@ -2852,51 +2852,6 @@
                     },
                     {
                       "type": "frame",
-                      "id": "k8jvYj",
-                      "name": "HeroUI Ghost Button · 工具选择",
-                      "cornerRadius": 8,
-                      "gap": 6,
-                      "padding": [
-                        4,
-                        8
-                      ],
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "icon",
-                          "id": "ypoSZ",
-                          "name": "工具选项",
-                          "width": 16,
-                          "height": 16,
-                          "icon": "wrench",
-                          "library": "lucide",
-                          "fill": "#646464"
-                        },
-                        {
-                          "type": "text",
-                          "id": "Wf9AH",
-                          "name": "工具选择标签",
-                          "fill": "#646464",
-                          "content": "工具",
-                          "lineHeight": 1.5,
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "FI5py",
-                          "name": "展开工具",
-                          "width": 12,
-                          "height": 12,
-                          "icon": "chevron-down",
-                          "library": "lucide",
-                          "fill": "#646464"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
                       "id": "lMuCj",
                       "name": "编辑器弹性间距",
                       "width": "fill_container",
@@ -6153,51 +6108,6 @@
                           "width": 20,
                           "height": 20,
                           "icon": "plus",
-                          "library": "lucide",
-                          "fill": "#AAB3B7"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "p8DzeJ",
-                      "name": "HeroUI Ghost Button · 工具选择",
-                      "cornerRadius": 8,
-                      "gap": 6,
-                      "padding": [
-                        4,
-                        8
-                      ],
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "icon",
-                          "id": "Ebcg6",
-                          "name": "工具选项",
-                          "width": 16,
-                          "height": 16,
-                          "icon": "wrench",
-                          "library": "lucide",
-                          "fill": "#AAB3B7"
-                        },
-                        {
-                          "type": "text",
-                          "id": "V7bXsG",
-                          "name": "工具选择标签",
-                          "fill": "#AAB3B7",
-                          "content": "工具",
-                          "lineHeight": 1.5,
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "gzLEm",
-                          "name": "展开工具",
-                          "width": 12,
-                          "height": 12,
-                          "icon": "chevron-down",
                           "library": "lucide",
                           "fill": "#AAB3B7"
                         }
@@ -21566,6 +21476,1754 @@
               "content": "分享",
               "fontFamily": "Source Han Sans CN",
               "fontSize": 15,
+              "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "YLKro",
+      "x": 0,
+      "y": 945,
+      "name": "排队与插队 · 浅色",
+      "width": 1176,
+      "fill": "#FFFFFF",
+      "cornerRadius": 16,
+      "layout": "vertical",
+      "gap": 12,
+      "padding": 16,
+      "children": [
+        {
+          "type": "frame",
+          "id": "JqBLc",
+          "name": "HeroUI Textarea · 排队输入",
+          "context": "Textarea/Primary + Button/Ghost/Icon/SM + Select。执行中保留输入能力；右下停止按钮替代发送。Enter发送，Shift+Enter换行。画布仅呈现静态状态。",
+          "width": "fill_container",
+          "fill": "#FFFFFF",
+          "cornerRadius": 16,
+          "stroke": "#D5D5D5",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 12,
+          "padding": [
+            16,
+            16,
+            12,
+            16
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "AJLga",
+              "name": "排队消息 · 待发送",
+              "width": "fill_container",
+              "stroke": "#D5D5D5",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "gap": 10,
+              "padding": [
+                0,
+                0,
+                12,
+                0
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "nyTHj",
+                  "name": "拖动排序",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "grip-vertical",
+                  "library": "lucide",
+                  "fill": "#646464"
+                },
+                {
+                  "type": "text",
+                  "id": "HU3WB",
+                  "name": "排队消息内容",
+                  "fill": "#202020",
+                  "content": "你好",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 16,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "Y9nkn",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "gybQU",
+                  "name": "右侧操作组",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Pm8c1",
+                      "name": "插队按钮 · 立即",
+                      "fill": "#465A9F",
+                      "cornerRadius": 8,
+                      "gap": 6,
+                      "padding": [
+                        6,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "lEGMa",
+                          "name": "插队图标",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "arrow-up",
+                          "library": "lucide",
+                          "fill": "#FFFFFF"
+                        },
+                        {
+                          "type": "text",
+                          "id": "NahTR",
+                          "name": "插队标签",
+                          "fill": "#FFFFFF",
+                          "content": "立即",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "icon",
+                      "id": "crVZA",
+                      "name": "编辑排队消息",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "pencil",
+                      "library": "lucide",
+                      "fill": "#646464"
+                    },
+                    {
+                      "type": "icon",
+                      "id": "QqEk9",
+                      "name": "删除排队消息",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "trash-2",
+                      "library": "lucide",
+                      "fill": "#646464"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "ivpgj",
+              "name": "编辑器占位文字",
+              "fill": "#646464",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "继续输入以排队后续修改",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 18,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "VtBnx",
+              "name": "编辑器操作栏",
+              "width": "fill_container",
+              "height": 36,
+              "gap": 10,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "IjvvB",
+                  "name": "HeroUI Ghost Button · 添加附件",
+                  "width": 32,
+                  "height": 32,
+                  "cornerRadius": 16,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "QNZFG",
+                      "name": "添加附件",
+                      "width": 20,
+                      "height": 20,
+                      "icon": "plus",
+                      "library": "lucide",
+                      "fill": "#646464"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "IBHGs",
+                  "name": "编辑器弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "VTzPO",
+                  "name": "HeroUI Select · 模型",
+                  "cornerRadius": 8,
+                  "gap": 12,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "I0yGF",
+                      "name": "上下文进度环",
+                      "width": 16,
+                      "height": 16,
+                      "layout": "none",
+                      "children": [
+                        {
+                          "type": "ellipse",
+                          "id": "b01JeE",
+                          "x": 0,
+                          "y": 0,
+                          "name": "轨道",
+                          "innerRadius": 0.75,
+                          "fill": "#E3ECF1",
+                          "width": 16,
+                          "height": 16
+                        },
+                        {
+                          "type": "ellipse",
+                          "id": "a9Vxwu",
+                          "x": 0,
+                          "y": 0,
+                          "name": "进度弧",
+                          "innerRadius": 0.75,
+                          "startAngle": 40,
+                          "sweepAngle": 50,
+                          "fill": "#465A9F",
+                          "width": 16,
+                          "height": 16
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "mpoO5",
+                      "name": "模型文字组",
+                      "gap": 7,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "xqWuz",
+                          "name": "当前模型",
+                          "fill": "#202020",
+                          "content": "glm-5.3-flash",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 16,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "vnaUX",
+                          "name": "模型下拉",
+                          "width": 13,
+                          "height": 13,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "#646464"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "oFn3n",
+                  "name": "HeroUI Select · 思考强度",
+                  "cornerRadius": 8,
+                  "gap": 6,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "P5owfN",
+                      "name": "思考强度图标",
+                      "width": 17,
+                      "height": 17,
+                      "icon": "brain",
+                      "library": "lucide",
+                      "fill": "#646464"
+                    },
+                    {
+                      "type": "text",
+                      "id": "IwOyY",
+                      "name": "思考强度",
+                      "fill": "#646464",
+                      "content": "高",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "icon",
+                      "id": "TNGbu",
+                      "name": "思考强度下拉",
+                      "width": 12,
+                      "height": 12,
+                      "icon": "chevron-down",
+                      "library": "lucide",
+                      "fill": "#646464"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "tAsQM",
+                  "name": "HeroUI Button · 发送 · 禁用",
+                  "context": "输入为空或仅触发符时禁用。任务运行中恢复为停止按钮。",
+                  "width": 34,
+                  "height": 34,
+                  "fill": "#e8f1f6",
+                  "cornerRadius": 8,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 2,
+                      "id": "IBLwD",
+                      "name": "停止图标",
+                      "fill": "#FFFFFF",
+                      "width": 11,
+                      "height": 11
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Fg4lX",
+          "name": "编辑器下方提示",
+          "width": "fill_container",
+          "gap": 16,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "klWl1",
+              "name": "发送快捷键",
+              "fill": "#646464",
+              "content": "Enter 发送 · Shift + Enter 换行",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "V2JNG",
+              "name": "页脚弹性间距",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "text",
+              "id": "xzuvv",
+              "name": "结果核验提示",
+              "fill": "#646464",
+              "content": "诊断建议仅供参考，请结合设备实际情况核验。",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "x62krm",
+      "x": -1393,
+      "y": 1405,
+      "name": "命令与技能补全 · 浅色",
+      "context": "输入 / 弹出补全面板：命令与技能同一列表，每行图标、名称、说明。↑↓ 移动，Enter 选中后折叠成输入框内标记，不立即执行。",
+      "width": 1176,
+      "fill": "#FFFFFF",
+      "cornerRadius": 16,
+      "layout": "vertical",
+      "gap": 4,
+      "padding": 16,
+      "children": [
+        {
+          "type": "frame",
+          "id": "k2fNW7",
+          "name": "补全面板 · 命令与技能",
+          "width": "fill_container",
+          "fill": "#FFFFFF",
+          "cornerRadius": 16,
+          "stroke": "#D5DEE3",
+          "strokeWidth": 1,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "color": "#1A202414",
+            "offset": {
+              "x": 0,
+              "y": 8
+            },
+            "blur": 24
+          },
+          "layout": "vertical",
+          "gap": 2,
+          "padding": 8,
+          "children": [
+            {
+              "type": "frame",
+              "id": "SsMCQ",
+              "name": "分组 · 命令",
+              "width": "fill_container",
+              "padding": [
+                4,
+                12,
+                2,
+                12
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "mT6ZC",
+                  "name": "分组标题",
+                  "fill": "#7F888C",
+                  "content": "命令",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Ge3F9",
+              "name": "补全行 · /compact",
+              "width": "fill_container",
+              "fill": "#EAEAEA",
+              "cornerRadius": 8,
+              "gap": 10,
+              "padding": [
+                6,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "E6b7iN",
+                  "name": "图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "shrink",
+                  "library": "lucide",
+                  "fill": "#5F676C"
+                },
+                {
+                  "type": "text",
+                  "id": "O6bMgc",
+                  "name": "名称",
+                  "fill": "#1A2024",
+                  "content": "/compact",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "Ey1LR",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "oG9qF",
+                  "name": "说明",
+                  "fill": "#7F888C",
+                  "content": "压缩上下文",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "i84T2u",
+              "name": "补全行 · /fork",
+              "width": "fill_container",
+              "fill": "#00000000",
+              "cornerRadius": 8,
+              "gap": 10,
+              "padding": [
+                6,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "vR78D",
+                  "name": "图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "git-fork",
+                  "library": "lucide",
+                  "fill": "#5F676C"
+                },
+                {
+                  "type": "text",
+                  "id": "BF0L4",
+                  "name": "名称",
+                  "fill": "#1A2024",
+                  "content": "/fork",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "SieWM",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "lx0Z1",
+                  "name": "说明",
+                  "fill": "#7F888C",
+                  "content": "派生当前会话",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "xO8kI",
+              "name": "分组 · 技能",
+              "width": "fill_container",
+              "padding": [
+                4,
+                12,
+                2,
+                12
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "yxUlR",
+                  "name": "分组标题",
+                  "fill": "#7F888C",
+                  "content": "技能",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "P5QyNp",
+              "name": "补全行 · /skill:disk",
+              "width": "fill_container",
+              "fill": "#00000000",
+              "cornerRadius": 8,
+              "gap": 10,
+              "padding": [
+                6,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "e2Yjgh",
+                  "name": "图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "sparkles",
+                  "library": "lucide",
+                  "fill": "#5F676C"
+                },
+                {
+                  "type": "text",
+                  "id": "TqbS3",
+                  "name": "名称",
+                  "fill": "#1A2024",
+                  "content": "/skill:disk",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "AehNy",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "H31CX",
+                  "name": "说明",
+                  "fill": "#7F888C",
+                  "content": "磁盘容量、型号与健康",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "vqtTK",
+              "name": "补全行 · /skill:driver",
+              "width": "fill_container",
+              "fill": "#00000000",
+              "cornerRadius": 8,
+              "gap": 10,
+              "padding": [
+                6,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "mzbgX",
+                  "name": "图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "sparkles",
+                  "library": "lucide",
+                  "fill": "#5F676C"
+                },
+                {
+                  "type": "text",
+                  "id": "kpybc",
+                  "name": "名称",
+                  "fill": "#1A2024",
+                  "content": "/skill:driver",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "AbOYr",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "aN9e9",
+                  "name": "说明",
+                  "fill": "#7F888C",
+                  "content": "设备识别与驱动状态",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "D8MtQA",
+              "name": "补全行 · /skill:eventlog",
+              "width": "fill_container",
+              "fill": "#00000000",
+              "cornerRadius": 8,
+              "gap": 10,
+              "padding": [
+                6,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "VRcQc",
+                  "name": "图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "sparkles",
+                  "library": "lucide",
+                  "fill": "#5F676C"
+                },
+                {
+                  "type": "text",
+                  "id": "xLTLS",
+                  "name": "名称",
+                  "fill": "#1A2024",
+                  "content": "/skill:eventlog",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "yPlNv",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "xy2le",
+                  "name": "说明",
+                  "fill": "#7F888C",
+                  "content": "崩溃、蓝屏与服务历史",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "y8kKa",
+              "name": "补全行 · /skill:ls",
+              "width": "fill_container",
+              "fill": "#00000000",
+              "cornerRadius": 8,
+              "gap": 10,
+              "padding": [
+                6,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "tQnTh",
+                  "name": "图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "sparkles",
+                  "library": "lucide",
+                  "fill": "#5F676C"
+                },
+                {
+                  "type": "text",
+                  "id": "OlItV",
+                  "name": "名称",
+                  "fill": "#1A2024",
+                  "content": "/skill:ls",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "NqW3J",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "qCZ4N",
+                  "name": "说明",
+                  "fill": "#7F888C",
+                  "content": "目录索引与文件列表",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Dwm1f",
+              "name": "补全行 · /skill:runbook",
+              "width": "fill_container",
+              "fill": "#00000000",
+              "cornerRadius": 8,
+              "gap": 10,
+              "padding": [
+                6,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "hADSA",
+                  "name": "图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "sparkles",
+                  "library": "lucide",
+                  "fill": "#5F676C"
+                },
+                {
+                  "type": "text",
+                  "id": "mKrny",
+                  "name": "名称",
+                  "fill": "#1A2024",
+                  "content": "/skill:runbook",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "UPftN",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "JbtEv",
+                  "name": "说明",
+                  "fill": "#7F888C",
+                  "content": "手动修复命令清单",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "b73X8",
+              "name": "补全行 · /skill:startup",
+              "width": "fill_container",
+              "fill": "#00000000",
+              "cornerRadius": 8,
+              "gap": 10,
+              "padding": [
+                6,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "IMdOF",
+                  "name": "图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "sparkles",
+                  "library": "lucide",
+                  "fill": "#5F676C"
+                },
+                {
+                  "type": "text",
+                  "id": "NTXzm",
+                  "name": "名称",
+                  "fill": "#1A2024",
+                  "content": "/skill:startup",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "Zl5oq",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "vUBTu",
+                  "name": "说明",
+                  "fill": "#7F888C",
+                  "content": "开机启动项",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "iKfx9",
+              "name": "补全行 · /skill:sys",
+              "width": "fill_container",
+              "fill": "#00000000",
+              "cornerRadius": 8,
+              "gap": 10,
+              "padding": [
+                6,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "WE7Uf",
+                  "name": "图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "sparkles",
+                  "library": "lucide",
+                  "fill": "#5F676C"
+                },
+                {
+                  "type": "text",
+                  "id": "yBuDR",
+                  "name": "名称",
+                  "fill": "#1A2024",
+                  "content": "/skill:sys",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "F0sCZ",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "iGzEj",
+                  "name": "说明",
+                  "fill": "#7F888C",
+                  "content": "系统概览",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "lJpTG",
+          "name": "HeroUI Textarea · 补全触发",
+          "context": "Textarea/Primary + Button/Ghost/Icon/SM + Select。执行中保留输入能力；右下停止按钮替代发送。Enter发送，Shift+Enter换行。画布仅呈现静态状态。",
+          "width": "fill_container",
+          "fill": "#FFFFFF",
+          "cornerRadius": 16,
+          "stroke": "#D5D5D5",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 12,
+          "padding": [
+            16,
+            16,
+            12,
+            16
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "QGO9f",
+              "name": "编辑器占位文字",
+              "fill": "#202020",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "/",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 18,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "CZppx",
+              "name": "编辑器操作栏",
+              "width": "fill_container",
+              "height": 36,
+              "gap": 10,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "LiX7s",
+                  "name": "HeroUI Ghost Button · 添加附件",
+                  "width": 32,
+                  "height": 32,
+                  "cornerRadius": 16,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "K11j3",
+                      "name": "添加附件",
+                      "width": 20,
+                      "height": 20,
+                      "icon": "plus",
+                      "library": "lucide",
+                      "fill": "#646464"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "XpJC7",
+                  "name": "编辑器弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "Uh5GD",
+                  "name": "HeroUI Select · 模型",
+                  "cornerRadius": 8,
+                  "gap": 12,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "h1Pi2",
+                      "name": "上下文进度环",
+                      "width": 16,
+                      "height": 16,
+                      "layout": "none",
+                      "children": [
+                        {
+                          "type": "ellipse",
+                          "id": "KtQ8s",
+                          "x": 0,
+                          "y": 0,
+                          "name": "轨道",
+                          "innerRadius": 0.75,
+                          "fill": "#E3ECF1",
+                          "width": 16,
+                          "height": 16
+                        },
+                        {
+                          "type": "ellipse",
+                          "id": "AiwXm",
+                          "x": 0,
+                          "y": 0,
+                          "name": "进度弧",
+                          "innerRadius": 0.75,
+                          "startAngle": 40,
+                          "sweepAngle": 50,
+                          "fill": "#465A9F",
+                          "width": 16,
+                          "height": 16
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "T1DbY",
+                      "name": "模型文字组",
+                      "gap": 7,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "T5P8hz",
+                          "name": "当前模型",
+                          "fill": "#202020",
+                          "content": "glm-5.3-flash",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 16,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "orvDj",
+                          "name": "模型下拉",
+                          "width": 13,
+                          "height": 13,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "#646464"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Pt0gj",
+                  "name": "HeroUI Select · 思考强度",
+                  "cornerRadius": 8,
+                  "gap": 6,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "wk0Aa",
+                      "name": "思考强度图标",
+                      "width": 17,
+                      "height": 17,
+                      "icon": "brain",
+                      "library": "lucide",
+                      "fill": "#646464"
+                    },
+                    {
+                      "type": "text",
+                      "id": "IH838",
+                      "name": "思考强度",
+                      "fill": "#646464",
+                      "content": "高",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "icon",
+                      "id": "f2RE8",
+                      "name": "思考强度下拉",
+                      "width": 12,
+                      "height": 12,
+                      "icon": "chevron-down",
+                      "library": "lucide",
+                      "fill": "#646464"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "b6cAsz",
+                  "name": "HeroUI Button · 发送 · 禁用",
+                  "context": "输入为空或仅触发符时禁用。任务运行中恢复为停止按钮。",
+                  "width": 34,
+                  "height": 34,
+                  "fill": "#e8f1f6",
+                  "cornerRadius": 8,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 2,
+                      "id": "h9Jp5",
+                      "name": "停止图标",
+                      "fill": "#FFFFFF",
+                      "width": 11,
+                      "height": 11
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "vdZX3",
+          "name": "编辑器下方提示",
+          "width": "fill_container",
+          "gap": 16,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "d7AKx",
+              "name": "发送快捷键",
+              "fill": "#646464",
+              "content": "Enter 发送 · Shift + Enter 换行",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "Y0L4kd",
+              "name": "页脚弹性间距",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "text",
+              "id": "O8ZdP",
+              "name": "结果核验提示",
+              "fill": "#646464",
+              "content": "诊断建议仅供参考，请结合设备实际情况核验。",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "oBWkc",
+      "x": -1393,
+      "y": 2161,
+      "name": "文件引用补全 · 浅色",
+      "context": "输入 @ 弹出文件引用补全面板，与 / 同一套交互：选中后折叠成标记，与消息一起提交。",
+      "width": 1176,
+      "fill": "#FFFFFF",
+      "cornerRadius": 16,
+      "layout": "vertical",
+      "gap": 4,
+      "padding": 16,
+      "children": [
+        {
+          "type": "frame",
+          "id": "J3pwlk",
+          "name": "补全面板 · 文件引用",
+          "width": "fill_container",
+          "fill": "#FFFFFF",
+          "cornerRadius": 16,
+          "stroke": "#D5DEE3",
+          "strokeWidth": 1,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "color": "#1A202414",
+            "offset": {
+              "x": 0,
+              "y": 8
+            },
+            "blur": 24
+          },
+          "layout": "vertical",
+          "gap": 2,
+          "padding": 8,
+          "children": [
+            {
+              "type": "frame",
+              "id": "JlImr",
+              "name": "分组 · 最近文件",
+              "width": "fill_container",
+              "padding": [
+                4,
+                12,
+                2,
+                12
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "jMlJ8",
+                  "name": "分组标题",
+                  "fill": "#7F888C",
+                  "content": "最近文件",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "eiGeM",
+              "name": "补全行 · CBS.log",
+              "width": "fill_container",
+              "fill": "#EAEAEA",
+              "cornerRadius": 8,
+              "gap": 10,
+              "padding": [
+                6,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "j8VnP",
+                  "name": "图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "file-text",
+                  "library": "lucide",
+                  "fill": "#5F676C"
+                },
+                {
+                  "type": "text",
+                  "id": "Q4ZNwb",
+                  "name": "名称",
+                  "fill": "#1A2024",
+                  "content": "CBS.log",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "dufzC",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "iy9SS",
+                  "name": "说明",
+                  "fill": "#7F888C",
+                  "content": "C:\\Windows\\Logs\\CBS",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Nq1AT",
+              "name": "补全行 · setupapi.dev.log",
+              "width": "fill_container",
+              "fill": "#00000000",
+              "cornerRadius": 8,
+              "gap": 10,
+              "padding": [
+                6,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "V5JrEG",
+                  "name": "图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "file-text",
+                  "library": "lucide",
+                  "fill": "#5F676C"
+                },
+                {
+                  "type": "text",
+                  "id": "n9812",
+                  "name": "名称",
+                  "fill": "#1A2024",
+                  "content": "setupapi.dev.log",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "s8OX0K",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "LogHY",
+                  "name": "说明",
+                  "fill": "#7F888C",
+                  "content": "C:\\Windows\\INF",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "kE41W",
+              "name": "补全行 · WindowsUpdate.log",
+              "width": "fill_container",
+              "fill": "#00000000",
+              "cornerRadius": 8,
+              "gap": 10,
+              "padding": [
+                6,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "bOIs9",
+                  "name": "图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "file-text",
+                  "library": "lucide",
+                  "fill": "#5F676C"
+                },
+                {
+                  "type": "text",
+                  "id": "PgsQy",
+                  "name": "名称",
+                  "fill": "#1A2024",
+                  "content": "WindowsUpdate.log",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "mLUFX",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "bK83E",
+                  "name": "说明",
+                  "fill": "#7F888C",
+                  "content": "C:\\Windows",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "SYLnG",
+              "name": "补全行 · 磁盘体检.txt",
+              "width": "fill_container",
+              "fill": "#00000000",
+              "cornerRadius": 8,
+              "gap": 10,
+              "padding": [
+                6,
+                12
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "K4LjnR",
+                  "name": "图标",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "file-text",
+                  "library": "lucide",
+                  "fill": "#5F676C"
+                },
+                {
+                  "type": "text",
+                  "id": "hZJbv",
+                  "name": "名称",
+                  "fill": "#1A2024",
+                  "content": "磁盘体检.txt",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "p6rgY4",
+                  "name": "弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "text",
+                  "id": "vz0XY",
+                  "name": "说明",
+                  "fill": "#7F888C",
+                  "content": "outbox\\",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "rbOKG",
+          "name": "HeroUI Textarea · 补全触发",
+          "context": "Textarea/Primary + Button/Ghost/Icon/SM + Select。执行中保留输入能力；右下停止按钮替代发送。Enter发送，Shift+Enter换行。画布仅呈现静态状态。",
+          "width": "fill_container",
+          "fill": "#FFFFFF",
+          "cornerRadius": 16,
+          "stroke": "#D5D5D5",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 12,
+          "padding": [
+            16,
+            16,
+            12,
+            16
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "m1lWg",
+              "name": "编辑器占位文字",
+              "fill": "#202020",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "@",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 18,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "SU07R",
+              "name": "编辑器操作栏",
+              "width": "fill_container",
+              "height": 36,
+              "gap": 10,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "Yd3Mz",
+                  "name": "HeroUI Ghost Button · 添加附件",
+                  "width": 32,
+                  "height": 32,
+                  "cornerRadius": 16,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "A6fFm",
+                      "name": "添加附件",
+                      "width": 20,
+                      "height": 20,
+                      "icon": "plus",
+                      "library": "lucide",
+                      "fill": "#646464"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "G28t4",
+                  "name": "编辑器弹性间距",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "UNIGh",
+                  "name": "HeroUI Select · 模型",
+                  "cornerRadius": 8,
+                  "gap": 12,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "zFwDm",
+                      "name": "上下文进度环",
+                      "width": 16,
+                      "height": 16,
+                      "layout": "none",
+                      "children": [
+                        {
+                          "type": "ellipse",
+                          "id": "rqkqQ",
+                          "x": 0,
+                          "y": 0,
+                          "name": "轨道",
+                          "innerRadius": 0.75,
+                          "fill": "#E3ECF1",
+                          "width": 16,
+                          "height": 16
+                        },
+                        {
+                          "type": "ellipse",
+                          "id": "W6JXAT",
+                          "x": 0,
+                          "y": 0,
+                          "name": "进度弧",
+                          "innerRadius": 0.75,
+                          "startAngle": 40,
+                          "sweepAngle": 50,
+                          "fill": "#465A9F",
+                          "width": 16,
+                          "height": 16
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "pxtBY",
+                      "name": "模型文字组",
+                      "gap": 7,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "Cdbp8",
+                          "name": "当前模型",
+                          "fill": "#202020",
+                          "content": "glm-5.3-flash",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 16,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "d2JK5a",
+                          "name": "模型下拉",
+                          "width": 13,
+                          "height": 13,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "#646464"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "ZQgdt",
+                  "name": "HeroUI Select · 思考强度",
+                  "cornerRadius": 8,
+                  "gap": 6,
+                  "padding": [
+                    4,
+                    8
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "Jak9N",
+                      "name": "思考强度图标",
+                      "width": 17,
+                      "height": 17,
+                      "icon": "brain",
+                      "library": "lucide",
+                      "fill": "#646464"
+                    },
+                    {
+                      "type": "text",
+                      "id": "FY4e5",
+                      "name": "思考强度",
+                      "fill": "#646464",
+                      "content": "高",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "icon",
+                      "id": "boMaZ",
+                      "name": "思考强度下拉",
+                      "width": 12,
+                      "height": 12,
+                      "icon": "chevron-down",
+                      "library": "lucide",
+                      "fill": "#646464"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "QU5vx",
+                  "name": "HeroUI Button · 发送 · 禁用",
+                  "context": "输入为空或仅触发符时禁用。任务运行中恢复为停止按钮。",
+                  "width": 34,
+                  "height": 34,
+                  "fill": "#e8f1f6",
+                  "cornerRadius": 8,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 2,
+                      "id": "ibm5N",
+                      "name": "停止图标",
+                      "fill": "#FFFFFF",
+                      "width": 11,
+                      "height": 11
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "AVhMk",
+          "name": "编辑器下方提示",
+          "width": "fill_container",
+          "gap": 16,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "HEDD4",
+              "name": "发送快捷键",
+              "fill": "#646464",
+              "content": "Enter 发送 · Shift + Enter 换行",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "OTUGX",
+              "name": "页脚弹性间距",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "text",
+              "id": "ebvEB",
+              "name": "结果核验提示",
+              "fill": "#646464",
+              "content": "诊断建议仅供参考，请结合设备实际情况核验。",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 12,
               "fontWeight": "normal"
             }
           ]
