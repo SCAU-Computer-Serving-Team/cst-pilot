@@ -45,4 +45,4 @@
 
 ## 对 cst-pilot 的取舍
 
-待主页面设计时确定，逐条记录在根目录 `DESIGN.md`。
+页面结构以[界面画布](../../cst-pilot-web.pen)为准，跨页面视觉规则见 [DESIGN.md](../../../../../DESIGN.md)。

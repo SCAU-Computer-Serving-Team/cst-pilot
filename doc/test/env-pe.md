@@ -22,12 +22,12 @@ PE 验证关注两件事：包内运行时能否启动，以及缺失能力能�
 
 | ID | 操作 | 独立核查 | 通过条件 |
 |---|---|---|---|
-| P01 | pi.cmd | 包内 node.exe --version | 启动或明确报错，不挂起 |
+| P01 | pi.cmd | 发行版核查 `agent/.runtime/prx.bin --version`；开发版核查 `node/node.exe --version` | 启动或明确报错，不挂起 |
 | P02 | 调用需 pwsh 的工具 | 包内 pwsh 的 PSVersionTable | 运行或明确失败，不静默切换数据源 |
 | P03 | sys overview | 同环境独立 CIM 查询 | WMI 不可用时保留错误，不显示健康空结果 |
 | P04 | driver problem | 同环境独立 CIM 查询 | 同 P03 |
 | P05 | eventlog recent | 事件服务、通道与 Get-WinEvent | 不可用时明确原因，不伪造无事件 |
-| P06 | startup | PE 自身注册表和服务 | 数据与当前 PE 一致；报告须说明并非离线目标系统 |
+| P06 | startup | PE 自身注册表和服务 | 数据与当前 PE 一致；报告须标明这是 PE 自身的项 |
 | P07 | disk usage，目标卷 | 当前权限、文件系统与独立统计 | 快速路径或降级有依据，不预设一定有 SYSTEM/MFT 权限 |
 | P08 | sys sensor | 可用模块、传感器和错误 | 允许无读数，错误来源明确 |
 | P09 | disk usage 后 ls，只读或写保护场景 | wiztree/tmp 可写性与实际失败返回 | 创建 CSV 失败可降级，无死循环、无陈旧缓存；另记录 pi 运行状态目录是否阻塞启动 |
