@@ -88,7 +88,16 @@ export function createWebServer(staticDirectory: string, port = WEB_PORT): Serve
 			let file = await stat(path)
 				.then((info) => (info.isFile() ? path : undefined))
 				.catch(() => undefined);
-			if (!file && pathname !== "/" && !extname(pathname) && request.headers.accept?.includes("text/html")) {
+			const reservedAssetPath = ["/assets", "/fonts"].some(
+				(directory) => pathname === directory || pathname.startsWith(`${directory}/`),
+			);
+			if (
+				!file &&
+				pathname !== "/" &&
+				!reservedAssetPath &&
+				!extname(pathname) &&
+				request.headers.accept?.includes("text/html")
+			) {
 				path = resolve(root, "index.html");
 				file = path;
 			}
