@@ -62,8 +62,6 @@ flowchart LR
 
 detail 的 XML 元素是 EventRecordID，PowerShell 属性是 RecordId。事件 ID 0 合法；System/1001 与 Application/1001 需要按通道区分。
 
-## 实施记录
+## 验证
 
-2026-09-03 完成核心查询、聚合、八个 scope、权限预检和文档；本地 `_t9.mjs`、`_t10.mjs` 历史记录为 89 + 59 项验证通过。SCM 元数据的事件 ID 带高位编码，核对时需解码；7025 在当时样机未声明，按既有范围保留。
-
-2026-09-05 修正字符串边界、多组消息过滤、崩溃提供程序/级别和管理员缓存。历史查询耗时与留存风险见 `test/testlog/`；原有测试次数不代表本次重新执行。
+按[测试指南](../../test/README.md)执行 eventlog 公共组，重点覆盖权限、过滤、计数与截断。核对 SCM 元数据时需解码事件 ID 的高位编码；具体环境结果放在 `doc/test/testlog/`。

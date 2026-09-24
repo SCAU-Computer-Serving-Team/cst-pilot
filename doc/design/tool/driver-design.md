@@ -29,7 +29,7 @@ driver 判断设备识别与状态；sys 处理负载和传感器，disk 处理�
 | external | PnP 的 USB/BTHENUM/DISPLAY 前缀；USB 或可移动 DiskDrive | 覆盖常见外设、显示器和可移动存储，保留内置 USB 设备 |
 | find | class 下推；name/id 在 Node 中字面匹配 | HardwareID 是数组，不能先用 DeviceID 筛掉仅硬件 ID 命中的设备 |
 
-core 网卡仅取 NetConnectionID 非空的条目，保留虚拟网卡。PhysicalAdapter 只展示，不用来排除：历史样机上的 VMware/Wintun 也曾返回 true。
+core 网卡仅取 NetConnectionID 非空的条目，保留虚拟网卡。PhysicalAdapter 只展示，不用于排除设备；虚拟网卡也可能返回 true。
 
 ## 输入与数据可信度
 
@@ -51,6 +51,6 @@ core 网卡仅取 NetConnectionID 非空的条目，保留虚拟网卡。Physica
 
 驱动更新、卸载、回滚属于后续处置建议，不纳入只读工具。版本应与厂商资料另行核对。
 
-## 实施记录
+## 验证
 
-2026-09-03 四个 scope 完成，本地 `_t12.mjs` 的 25 项验证通过；后续硬件 ID 和脚本字符串问题在 2026-09-05 修复。历史样机数据见 `test/testlog/`，当前接口以 [工具文档](../../tool/driver.md) 为准。
+按[测试指南](../../test/README.md)执行 driver 公共组与硬件差异项；验证记录放在 `doc/test/testlog/`。
