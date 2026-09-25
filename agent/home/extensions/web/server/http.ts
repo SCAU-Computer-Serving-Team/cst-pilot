@@ -2,7 +2,9 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 
-export const WEB_PORT = 52831;
+const configuredPort = Number(process.env.CST_WEB_PORT ?? 52831);
+export const WEB_PORT =
+	Number.isInteger(configuredPort) && configuredPort >= 1024 && configuredPort <= 65535 ? configuredPort : 52831;
 const WEB_HOST = "127.0.0.1";
 
 const contentTypes: Record<string, string> = {
@@ -41,7 +43,14 @@ function isInside(root: string, file: string): boolean {
 	return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
 }
 
-export function createWebServer(staticDirectory: string, port = WEB_PORT): Server {
+export function createWebServer(
+	staticDirectory: string,
+	port = WEB_PORT,
+	state: () => { sessions: { id: string; running: boolean }[]; stage: string } = () => ({
+		sessions: [],
+		stage: "foundation",
+	}),
+): Server {
 	const root = resolve(staticDirectory);
 	return createServer(async (request: IncomingMessage, response: ServerResponse) => {
 		response.setHeader("X-Content-Type-Options", "nosniff");
@@ -63,7 +72,7 @@ export function createWebServer(staticDirectory: string, port = WEB_PORT): Serve
 			return;
 		}
 		if (pathname === "/api/state") {
-			json(response, 200, { version: "0.0.0", sessions: [], connected: true, commands: [], stage: "foundation" });
+			json(response, 200, { version: "0.0.0", ...state(), connected: true, commands: [] });
 			return;
 		}
 		if (pathname === "/api" || pathname.startsWith("/api/")) {

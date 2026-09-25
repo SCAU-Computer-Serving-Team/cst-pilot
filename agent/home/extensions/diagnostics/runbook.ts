@@ -143,11 +143,17 @@ async function writeSlot(
  * 模型可能在同一轮回复里并行调用多个 runbook（按风险档各写一份）。
  * 序号分配必须串行，否则并发调用会读到同一个目录快照、拿到同一个序号。
  */
-let writeQueue: Promise<unknown> = Promise.resolve();
+const queueKey = Symbol.for("cst-pilot.runbook.write-queue");
+type QueueState = { pending: Promise<unknown> };
 
 function serialize<T>(task: () => Promise<T>): Promise<T> {
-	const result = writeQueue.then(task, task);
-	writeQueue = result.then(
+	// Every Web session loads its own diagnostics extension. A module-local queue
+	// would let two sessions choose the same next sequence from one directory.
+	const globals = globalThis as typeof globalThis & { [queueKey]?: QueueState };
+	if (!globals[queueKey]) globals[queueKey] = { pending: Promise.resolve() };
+	const queue = globals[queueKey];
+	const result = queue.pending.then(task, task);
+	queue.pending = result.then(
 		() => undefined,
 		() => undefined,
 	);
