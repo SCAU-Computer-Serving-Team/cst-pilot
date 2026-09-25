@@ -38,7 +38,7 @@
 | 聊天工作台 | `/s/<sessionId>` | 已有，对话流帧待重画 |
 | 分支树 | `/s/<sessionId>/tree` | **缺** |
 | 设置 | `/settings` | **缺** |
-| 登录页 | `/login` | API KEY 登录态待补画布 |
+| 登录页 | `/login` | APIKEY 默认态、自定义 Provider 态与 Provider 下拉组件均有浅深画布 |
 
 ## 四、聊天工作台要渲染的部分
 

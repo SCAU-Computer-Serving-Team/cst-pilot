@@ -6958,7 +6958,7 @@
       "x": 81,
       "y": -1926,
       "name": "登录页 · 浅色 · 呈现效果",
-      "context": "1920×1080场景预览。主页快照高斯模糊20px并叠加15%暗色遮罩；正式实现模糊真实主页，不使用快照。登录组件按80%展示为864×864，水平居中且上下留108px。",
+      "context": "1920×1080场景预览。主页快照高斯模糊20px并叠加15%暗色遮罩；正式实现模糊真实主页。登录组件按90%展示为972×972，水平居中且上下留54px。",
       "clip": true,
       "width": 1920,
       "height": 1080,
@@ -7000,15 +7000,15 @@
           "type": "frame",
           "id": "A2gvTP",
           "layoutPosition": "absolute",
-          "x": 528,
-          "y": 108,
-          "name": "登录面板 · 80%场景预览",
-          "context": "源组件为 1080×1080 登录页（扫码 OAuth 版），按 80% 等比展示：方形白框同心居中（y=240 h=384）、真实二维码 asset/qr-login.png、分段开关 218 宽置顶 [扫码登录|APIKEY]。AIR 渐变与面板保持清晰，模糊仅作用于背后主页快照。",
+          "x": 474,
+          "y": 54,
+          "name": "登录面板 · 90%场景预览",
+          "context": "源组件为1080×1080登录页（扫码态），按90%等比展示；面板972×972、卡片432×432。背景与面板清晰，背后主页模糊。",
           "clip": true,
-          "width": 864,
-          "height": 864,
+          "width": 972,
+          "height": 972,
           "fill": "#FFFFFF",
-          "cornerRadius": 25.6,
+          "cornerRadius": 28.8,
           "stroke": {
             "type": "gradient",
             "gradientType": "linear",
@@ -7032,7 +7032,7 @@
               }
             ]
           },
-          "strokeWidth": 1.2,
+          "strokeWidth": 1.35,
           "strokeAlignment": "inner",
           "effect": [
             {
@@ -7041,9 +7041,9 @@
               "color": "#1A202433",
               "offset": {
                 "x": 0,
-                "y": 19.200000000000003
+                "y": 21.6
               },
-              "blur": 51.2
+              "blur": 57.6
             },
             {
               "type": "shadow",
@@ -7051,9 +7051,9 @@
               "color": "#1A202414",
               "offset": {
                 "x": 0,
-                "y": 3.2
+                "y": 3.6
               },
-              "blur": 9.600000000000001
+              "blur": 10.8
             }
           ],
           "layout": "none",
@@ -7065,8 +7065,8 @@
               "y": 0,
               "name": "背景渐变 · Blue hour AIR",
               "context": "AIR 椭圆场缓慢漂移。先混合与柔化色表坐标，再查首页同一张 Oklab 五色色表；不直接混合深浅 RGB。页脚提亮内置于 Shader。",
-              "width": 864,
-              "height": 864,
+              "width": 972,
+              "height": 972,
               "fill": {
                 "type": "shader",
                 "enabled": true,
@@ -7080,7 +7080,7 @@
                   "u_palette": "asset/blue-hour-palette.png"
                 }
               },
-              "cornerRadius": 25.6
+              "cornerRadius": 28.8
             },
             {
               "type": "rectangle",
@@ -7117,30 +7117,30 @@
                   }
                 ]
               },
-              "width": 864,
-              "height": 864
+              "width": 972,
+              "height": 972
             },
             {
               "type": "text",
               "id": "VYWYV",
-              "x": 51.2,
-              "y": 35.2,
+              "x": 57.6,
+              "y": 39.6,
               "name": "产品名",
               "fill": "#FFFFFF",
               "content": "CST Pilot",
               "fontFamily": "Inter",
-              "fontSize": 16,
+              "fontSize": 18,
               "fontWeight": "600"
             },
             {
               "type": "frame",
               "id": "A8l0d7",
               "x": 0,
-              "y": 93,
+              "y": 104.625,
               "name": "欢迎语",
-              "width": 864,
+              "width": 972,
               "layout": "vertical",
-              "gap": 11.200000000000001,
+              "gap": 12.6,
               "alignItems": "center",
               "children": [
                 {
@@ -7150,7 +7150,7 @@
                   "fill": "#FFFFFF",
                   "content": "欢迎回来",
                   "fontFamily": "Source Han Sans CN",
-                  "fontSize": 44.800000000000004,
+                  "fontSize": 50.4,
                   "fontWeight": "600"
                 },
                 {
@@ -7160,7 +7160,7 @@
                   "fill": "#FFFFFFCC",
                   "content": "登录以同步模型配置与额度",
                   "fontFamily": "Source Han Sans CN",
-                  "fontSize": 12.8,
+                  "fontSize": 14.4,
                   "fontWeight": "normal"
                 }
               ]
@@ -7168,27 +7168,27 @@
             {
               "type": "frame",
               "id": "jRmot",
-              "x": 240,
-              "y": 240,
+              "x": 270,
+              "y": 270,
               "name": "登录卡片",
-              "width": 384,
-              "height": 384,
+              "width": 432,
+              "height": 432,
               "fill": "#FFFFFF",
-              "cornerRadius": 19.200000000000003,
+              "cornerRadius": 21.6,
               "stroke": "#D5DEE3",
-              "strokeWidth": 0.8,
+              "strokeWidth": 0.9,
               "effect": {
                 "type": "shadow",
                 "shadowType": "outer",
                 "color": "#1A202414",
                 "offset": {
                   "x": 0,
-                  "y": 9.600000000000001
+                  "y": 10.8
                 },
-                "blur": 32
+                "blur": 36
               },
               "layout": "vertical",
-              "padding": 22,
+              "padding": 24.75,
               "children": [
                 {
                   "type": "frame",
@@ -7201,20 +7201,20 @@
                       "type": "frame",
                       "id": "hdwFO",
                       "name": "方式切换",
-                      "width": 218,
+                      "width": 245.25,
                       "fill": "#F0F0F0",
-                      "cornerRadius": 8,
-                      "gap": 2,
-                      "padding": 2,
+                      "cornerRadius": 9,
+                      "gap": 2.25,
+                      "padding": 2.25,
                       "children": [
                         {
                           "type": "frame",
                           "id": "mExCM",
                           "name": "选项 · 扫码登录",
-                          "width": 106,
-                          "height": 28,
+                          "width": 119.25,
+                          "height": 31.5,
                           "fill": "#FFFFFF",
-                          "cornerRadius": 6,
+                          "cornerRadius": 6.75,
                           "justifyContent": "center",
                           "alignItems": "center",
                           "children": [
@@ -7225,7 +7225,7 @@
                               "fill": "#202020",
                               "content": "扫码登录",
                               "fontFamily": "Source Han Sans CN",
-                              "fontSize": 11,
+                              "fontSize": 12.375,
                               "fontWeight": "500"
                             }
                           ]
@@ -7234,10 +7234,10 @@
                           "type": "frame",
                           "id": "RpiCc",
                           "name": "选项 · APIKEY",
-                          "width": 106,
-                          "height": 28,
+                          "width": 119.25,
+                          "height": 31.5,
                           "fill": "#00000000",
-                          "cornerRadius": 6,
+                          "cornerRadius": 6.75,
                           "justifyContent": "center",
                           "alignItems": "center",
                           "children": [
@@ -7248,7 +7248,7 @@
                               "fill": "#646464",
                               "content": "APIKEY",
                               "fontFamily": "Inter",
-                              "fontSize": 11,
+                              "fontSize": 12.375,
                               "fontWeight": "normal"
                             }
                           ]
@@ -7261,8 +7261,8 @@
                   "type": "frame",
                   "id": "xxxPq",
                   "name": "弹性间距",
-                  "width": 1,
-                  "height": 42
+                  "width": 1.125,
+                  "height": 47.25
                 },
                 {
                   "type": "frame",
@@ -7270,7 +7270,7 @@
                   "name": "扫码组",
                   "width": "fill_container",
                   "layout": "vertical",
-                  "gap": 12,
+                  "gap": 13.5,
                   "alignItems": "center",
                   "children": [
                     {
@@ -7278,24 +7278,24 @@
                       "id": "aPbii",
                       "name": "二维码",
                       "clip": true,
-                      "width": 192,
-                      "height": 192,
+                      "width": 216,
+                      "height": 216,
                       "fill": {
                         "type": "image",
                         "enabled": true,
                         "url": "asset/qr-login.png",
                         "mode": "stretch"
                       },
-                      "cornerRadius": 10,
+                      "cornerRadius": 11.25,
                       "stroke": "#E5E5E5",
-                      "strokeWidth": 0.8
+                      "strokeWidth": 0.9
                     },
                     {
                       "type": "frame",
                       "id": "Fwv21",
                       "name": "提示组",
                       "layout": "vertical",
-                      "gap": 3,
+                      "gap": 3.375,
                       "alignItems": "center",
                       "children": [
                         {
@@ -7305,7 +7305,7 @@
                           "fill": "#5F676C",
                           "content": "使用 CST Pilot 移动端扫码登录",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 12,
+                          "fontSize": 13.5,
                           "fontWeight": "normal"
                         }
                       ]
@@ -7316,7 +7316,7 @@
                   "type": "frame",
                   "id": "iUWCA",
                   "name": "弹性间距",
-                  "width": 1,
+                  "width": 1.125,
                   "height": "fill_container"
                 }
               ]
@@ -7325,15 +7325,15 @@
               "type": "text",
               "id": "TQtPY",
               "x": 0,
-              "y": 800,
+              "y": 900,
               "name": "页脚",
               "fill": "#5F676C",
               "textGrowth": "fixed-width",
-              "width": 864,
+              "width": 972,
               "content": "@cst-pilot-web",
               "textAlign": "center",
               "fontFamily": "Inter",
-              "fontSize": 12,
+              "fontSize": 13.5,
               "fontWeight": "normal"
             }
           ]
@@ -7736,15 +7736,15 @@
           "type": "frame",
           "id": "vU4xd",
           "layoutPosition": "absolute",
-          "x": 528,
-          "y": 108,
-          "name": "登录面板 · 80%场景预览",
-          "context": "深色版 80% 场景预览，结构同浅色预览帧（A2gvTP）：扫码 OAuth 版方形白框同心居中、真实二维码、分段开关置顶。背后主页快照为深色版导出图。",
+          "x": 474,
+          "y": 54,
+          "name": "登录面板 · 90%场景预览",
+          "context": "深色扫码登录场景，面板972×972、卡片432×432；背后主页快照为深色版。",
           "clip": true,
-          "width": 864,
-          "height": 864,
+          "width": 972,
+          "height": 972,
           "fill": "#0B1215",
-          "cornerRadius": 25.6,
+          "cornerRadius": 28.8,
           "stroke": {
             "type": "gradient",
             "gradientType": "linear",
@@ -7768,7 +7768,7 @@
               }
             ]
           },
-          "strokeWidth": 1.2,
+          "strokeWidth": 1.35,
           "strokeAlignment": "inner",
           "effect": [
             {
@@ -7777,9 +7777,9 @@
               "color": "#1A202433",
               "offset": {
                 "x": 0,
-                "y": 19.200000000000003
+                "y": 21.6
               },
-              "blur": 51.2
+              "blur": 57.6
             },
             {
               "type": "shadow",
@@ -7787,9 +7787,9 @@
               "color": "#1A202414",
               "offset": {
                 "x": 0,
-                "y": 3.2
+                "y": 3.6
               },
-              "blur": 9.600000000000001
+              "blur": 10.8
             }
           ],
           "layout": "none",
@@ -7801,8 +7801,8 @@
               "y": 0,
               "name": "背景渐变 · Blue hour AIR",
               "context": "AIR 椭圆场缓慢漂移。先混合与柔化色表坐标，再查 AIR 专用深色色表 blue-hour-air-dark-palette.png（底色 #161C4A）；不直接混合深浅 RGB。页脚提亮内置于 Shader。",
-              "width": 864,
-              "height": 864,
+              "width": 972,
+              "height": 972,
               "fill": {
                 "type": "shader",
                 "enabled": true,
@@ -7816,7 +7816,7 @@
                   "u_palette": "asset/blue-hour-air-dark-palette.png"
                 }
               },
-              "cornerRadius": 25.6
+              "cornerRadius": 28.8
             },
             {
               "type": "rectangle",
@@ -7853,30 +7853,30 @@
                   }
                 ]
               },
-              "width": 864,
-              "height": 864
+              "width": 972,
+              "height": 972
             },
             {
               "type": "text",
               "id": "dFMOA",
-              "x": 51.2,
-              "y": 35.2,
+              "x": 57.6,
+              "y": 39.6,
               "name": "产品名",
               "fill": "#FFFFFF",
               "content": "CST Pilot",
               "fontFamily": "Inter",
-              "fontSize": 16,
+              "fontSize": 18,
               "fontWeight": "600"
             },
             {
               "type": "frame",
               "id": "l5DFF",
               "x": 0,
-              "y": 93,
+              "y": 104.625,
               "name": "欢迎语",
-              "width": 864,
+              "width": 972,
               "layout": "vertical",
-              "gap": 11.200000000000001,
+              "gap": 12.6,
               "alignItems": "center",
               "children": [
                 {
@@ -7886,7 +7886,7 @@
                   "fill": "#FFFFFF",
                   "content": "欢迎回来",
                   "fontFamily": "Source Han Sans CN",
-                  "fontSize": 44.800000000000004,
+                  "fontSize": 50.4,
                   "fontWeight": "600"
                 },
                 {
@@ -7896,7 +7896,7 @@
                   "fill": "#FFFFFFCC",
                   "content": "登录以同步模型配置与额度",
                   "fontFamily": "Source Han Sans CN",
-                  "fontSize": 12.8,
+                  "fontSize": 14.4,
                   "fontWeight": "normal"
                 }
               ]
@@ -7904,27 +7904,27 @@
             {
               "type": "frame",
               "id": "Defis",
-              "x": 240,
-              "y": 240,
+              "x": 270,
+              "y": 270,
               "name": "登录卡片",
-              "width": 384,
-              "height": 384,
+              "width": 432,
+              "height": 432,
               "fill": "#131A1D",
-              "cornerRadius": 19.200000000000003,
+              "cornerRadius": 21.6,
               "stroke": "#2D3438",
-              "strokeWidth": 0.8,
+              "strokeWidth": 0.9,
               "effect": {
                 "type": "shadow",
                 "shadowType": "outer",
                 "color": "#1A202414",
                 "offset": {
                   "x": 0,
-                  "y": 9.600000000000001
+                  "y": 10.8
                 },
-                "blur": 32
+                "blur": 36
               },
               "layout": "vertical",
-              "padding": 22,
+              "padding": 24.75,
               "children": [
                 {
                   "type": "frame",
@@ -7937,20 +7937,20 @@
                       "type": "frame",
                       "id": "J1Rcp",
                       "name": "方式切换",
-                      "width": 218,
+                      "width": 245.25,
                       "fill": "#1D2428",
-                      "cornerRadius": 8,
-                      "gap": 2,
-                      "padding": 2,
+                      "cornerRadius": 9,
+                      "gap": 2.25,
+                      "padding": 2.25,
                       "children": [
                         {
                           "type": "frame",
                           "id": "iBAD5",
                           "name": "选项 · 扫码登录",
-                          "width": 106,
-                          "height": 28,
+                          "width": 119.25,
+                          "height": 31.5,
                           "fill": "#242C2F",
-                          "cornerRadius": 6,
+                          "cornerRadius": 6.75,
                           "justifyContent": "center",
                           "alignItems": "center",
                           "children": [
@@ -7961,7 +7961,7 @@
                               "fill": "#FFFFFF",
                               "content": "扫码登录",
                               "fontFamily": "Source Han Sans CN",
-                              "fontSize": 11,
+                              "fontSize": 12.375,
                               "fontWeight": "500"
                             }
                           ]
@@ -7970,10 +7970,10 @@
                           "type": "frame",
                           "id": "QhL3Y",
                           "name": "选项 · APIKEY",
-                          "width": 106,
-                          "height": 28,
+                          "width": 119.25,
+                          "height": 31.5,
                           "fill": "#00000000",
-                          "cornerRadius": 6,
+                          "cornerRadius": 6.75,
                           "justifyContent": "center",
                           "alignItems": "center",
                           "children": [
@@ -7984,7 +7984,7 @@
                               "fill": "#AAB3B7",
                               "content": "APIKEY",
                               "fontFamily": "Inter",
-                              "fontSize": 11,
+                              "fontSize": 12.375,
                               "fontWeight": "normal"
                             }
                           ]
@@ -7997,8 +7997,8 @@
                   "type": "frame",
                   "id": "ritdp",
                   "name": "弹性间距",
-                  "width": 1,
-                  "height": 42
+                  "width": 1.125,
+                  "height": 47.25
                 },
                 {
                   "type": "frame",
@@ -8006,7 +8006,7 @@
                   "name": "扫码组",
                   "width": "fill_container",
                   "layout": "vertical",
-                  "gap": 12,
+                  "gap": 13.5,
                   "alignItems": "center",
                   "children": [
                     {
@@ -8014,22 +8014,22 @@
                       "id": "yvE0n",
                       "name": "二维码",
                       "clip": true,
-                      "width": 192,
-                      "height": 192,
+                      "width": 216,
+                      "height": 216,
                       "fill": {
                         "type": "image",
                         "enabled": true,
                         "url": "asset/qr-login.png",
                         "mode": "stretch"
                       },
-                      "cornerRadius": 10
+                      "cornerRadius": 11.25
                     },
                     {
                       "type": "frame",
                       "id": "f9bCtd",
                       "name": "提示组",
                       "layout": "vertical",
-                      "gap": 3,
+                      "gap": 3.375,
                       "alignItems": "center",
                       "children": [
                         {
@@ -8039,7 +8039,7 @@
                           "fill": "#AAB3B7",
                           "content": "使用 CST Pilot 移动端扫码登录",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 12,
+                          "fontSize": 13.5,
                           "fontWeight": "normal"
                         }
                       ]
@@ -8050,7 +8050,7 @@
                   "type": "frame",
                   "id": "WCQrC",
                   "name": "弹性间距",
-                  "width": 1,
+                  "width": 1.125,
                   "height": "fill_container"
                 }
               ]
@@ -8059,15 +8059,15 @@
               "type": "text",
               "id": "P6aW6",
               "x": 0,
-              "y": 800,
+              "y": 900,
               "name": "页脚",
               "fill": "#5F676C",
               "textGrowth": "fixed-width",
-              "width": 864,
+              "width": 972,
               "content": "@cst-pilot-web",
               "textAlign": "center",
               "fontFamily": "Inter",
-              "fontSize": 12,
+              "fontSize": 13.5,
               "fontWeight": "normal"
             }
           ]
@@ -23225,6 +23225,2582 @@
               "fontFamily": "Source Han Sans CN",
               "fontSize": 12,
               "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "g4P6HD",
+      "x": 81,
+      "y": -4528,
+      "name": "登录页 · APIKEY · 浅色",
+      "context": "APIKEY 登录默认态。复用登录页浅色的 AIR、面板、卡片与排版；1080×1080 设计基准，正式按90%呈现。Provider 下拉选择、可选自定义 Provider、APIKEY 密文输入与登录按钮；未勾选自定义时隐藏 BaseURL。Provider 菜单另见独立画布。",
+      "clip": true,
+      "width": 1080,
+      "height": 1080,
+      "fill": "#FFFFFF",
+      "cornerRadius": 32,
+      "stroke": {
+        "type": "gradient",
+        "gradientType": "linear",
+        "enabled": true,
+        "rotation": 180,
+        "size": {
+          "height": 1
+        },
+        "colors": [
+          {
+            "color": "#FFFFFFA6",
+            "position": 0
+          },
+          {
+            "color": "#FFFFFF4D",
+            "position": 0.5
+          },
+          {
+            "color": "#465A9F40",
+            "position": 1
+          }
+        ]
+      },
+      "strokeWidth": 1.5,
+      "strokeAlignment": "inner",
+      "effect": [
+        {
+          "type": "shadow",
+          "shadowType": "outer",
+          "color": "#1A202433",
+          "offset": {
+            "x": 0,
+            "y": 24
+          },
+          "blur": 64
+        },
+        {
+          "type": "shadow",
+          "shadowType": "outer",
+          "color": "#1A202414",
+          "offset": {
+            "x": 0,
+            "y": 4
+          },
+          "blur": 12
+        }
+      ],
+      "layout": "none",
+      "children": [
+        {
+          "type": "frame",
+          "id": "XtQH3",
+          "x": 0,
+          "y": 0,
+          "name": "背景渐变 · Blue hour AIR",
+          "context": "AIR 椭圆场缓慢漂移。先混合与柔化色表坐标，再查首页同一张 Oklab 五色色表；不直接混合深浅 RGB。页脚提亮内置于 Shader。",
+          "width": 1080,
+          "height": 1080,
+          "fill": {
+            "type": "shader",
+            "enabled": true,
+            "url": "asset/blue-hour-air.glsl",
+            "uniforms": {
+              "u_speed": 30,
+              "u_phase": 0,
+              "u_drift": 1,
+              "u_softness": 24,
+              "u_grain": 0.003,
+              "u_palette": "asset/blue-hour-palette.png"
+            }
+          },
+          "cornerRadius": 32
+        },
+        {
+          "type": "rectangle",
+          "id": "OLTbr",
+          "x": 0,
+          "y": 0,
+          "name": "底部可读性渐变",
+          "context": "底部 0%–70% 全透明、93% 起为不透明的主色浅色 4 #DDECFF，压亮底部以承载页脚文字。",
+          "enabled": false,
+          "fill": {
+            "type": "gradient",
+            "gradientType": "linear",
+            "enabled": true,
+            "rotation": 180,
+            "size": {
+              "height": 1
+            },
+            "colors": [
+              {
+                "color": "#DDECFF00",
+                "position": 0
+              },
+              {
+                "color": "#DDECFF00",
+                "position": 0.7
+              },
+              {
+                "color": "#DDECFF",
+                "position": 0.93
+              },
+              {
+                "color": "#DDECFF",
+                "position": 1
+              }
+            ]
+          },
+          "width": 1080,
+          "height": 1080
+        },
+        {
+          "type": "text",
+          "id": "msq2a",
+          "x": 64,
+          "y": 44,
+          "name": "产品名",
+          "fill": "#FFFFFF",
+          "content": "CST Pilot",
+          "fontFamily": "Inter",
+          "fontSize": 20,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "JDYHw",
+          "x": 0,
+          "y": 116,
+          "name": "欢迎语",
+          "width": 1080,
+          "layout": "vertical",
+          "gap": 14,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "C8NgZz",
+              "name": "欢迎标题",
+              "fill": "#FFFFFF",
+              "content": "欢迎回来",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 56,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "LJvri",
+              "name": "欢迎副题",
+              "fill": "#FFFFFFCC",
+              "content": "登录以同步模型配置与额度",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "CUNQ4",
+          "x": 300,
+          "y": 300,
+          "name": "登录卡片",
+          "context": "APIKEY 登录表单，480×480。切换轨道与扫码态共用，APIKEY 激活；Provider 选择、自定义 Provider 复选框、APIKEY 输入；登录按钮固定在卡片底部。",
+          "width": 480,
+          "height": 480,
+          "fill": "#FFFFFF",
+          "cornerRadius": 24,
+          "stroke": "#D5DEE3",
+          "strokeWidth": 1,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "color": "#1A202414",
+            "offset": {
+              "x": 0,
+              "y": 12
+            },
+            "blur": 40
+          },
+          "layout": "vertical",
+          "padding": 28,
+          "justifyContent": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "t8chY",
+              "name": "切换行",
+              "width": "fill_container",
+              "justifyContent": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "NE2FL",
+                  "name": "方式切换",
+                  "width": 272,
+                  "fill": "#F0F0F0",
+                  "cornerRadius": 10,
+                  "gap": 2,
+                  "padding": 3,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "mHEj0",
+                      "name": "选项 · 扫码登录",
+                      "width": 132,
+                      "fill": "#00000000",
+                      "cornerRadius": 8,
+                      "padding": [
+                        9,
+                        0
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "Q3rEB",
+                          "name": "扫码登录",
+                          "fill": "#646464",
+                          "content": "扫码登录",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "oPzQe",
+                      "name": "选项 · APIKEY",
+                      "width": 132,
+                      "fill": "#FFFFFF",
+                      "cornerRadius": 8,
+                      "padding": [
+                        9,
+                        0
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "TEWjY",
+                          "name": "APIKEY",
+                          "fill": "#202020",
+                          "content": "APIKEY",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "WsmeB",
+              "name": "弹性间距",
+              "width": 1,
+              "height": 20
+            },
+            {
+              "type": "frame",
+              "id": "uLjUp",
+              "name": "APIKEY 表单",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical",
+              "gap": 12,
+              "padding": [
+                28,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "jiUMZ",
+                  "name": "Provider 字段",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ye2vn",
+                      "name": "Provider 标签",
+                      "fill": "#202020",
+                      "content": "Provider",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "a4tN6",
+                      "name": "Provider 输入框",
+                      "width": "fill_container",
+                      "height": 42,
+                      "fill": "#FFFFFF",
+                      "cornerRadius": 8,
+                      "stroke": "#D5D5D5",
+                      "strokeWidth": 1,
+                      "gap": 12,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "Y7mhqq",
+                          "name": "Provider 值",
+                          "fill": "#202020",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "CST",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "k4cQD",
+                          "name": "Provider 操作图标",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "#646464"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "tMWPG",
+                  "name": "自定义 Provider · 未勾选",
+                  "width": "fill_container",
+                  "height": 20,
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "vU4Uw",
+                      "name": "自定义复选框",
+                      "width": 16,
+                      "height": 16,
+                      "fill": "#FFFFFF",
+                      "cornerRadius": 4,
+                      "stroke": "#CDD6DB",
+                      "strokeWidth": 1,
+                      "layout": "none"
+                    },
+                    {
+                      "type": "text",
+                      "id": "nCTWH",
+                      "name": "自定义 Provider 标签",
+                      "fill": "#646464",
+                      "content": "自定义 Provider",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Vs7C3",
+                  "name": "APIKEY 字段",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "TYIIN",
+                      "name": "APIKEY 标签",
+                      "fill": "#202020",
+                      "content": "APIKEY",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "FuPoY",
+                      "name": "APIKEY 输入框",
+                      "width": "fill_container",
+                      "height": 42,
+                      "fill": "#FFFFFF",
+                      "cornerRadius": 8,
+                      "stroke": "#D5D5D5",
+                      "strokeWidth": 1,
+                      "gap": 12,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "IAGzC",
+                          "name": "APIKEY 值",
+                          "fill": "#646464",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "输入 APIKEY",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "YAV5u",
+                          "name": "APIKEY 操作图标",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "eye-off",
+                          "library": "lucide",
+                          "fill": "#646464"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "pAEBl",
+              "name": "登录按钮",
+              "width": "fill_container",
+              "height": 42,
+              "fill": "#465A9F",
+              "cornerRadius": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "j0uXp",
+                  "name": "登录按钮文字",
+                  "fill": "#FFFFFF",
+                  "content": "登录",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "NKgK2",
+          "x": 0,
+          "y": 1000,
+          "name": "页脚",
+          "fill": "#5F676C",
+          "textGrowth": "fixed-width",
+          "width": 1080,
+          "content": "@cst-pilot-web",
+          "textAlign": "center",
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "v5xtE",
+      "x": 1321,
+      "y": -4528,
+      "name": "登录页 · APIKEY · 自定义 Provider · 浅色",
+      "context": "APIKEY 自定义 Provider 态。勾选自定义 Provider 后，在 APIKEY 上方增加 BaseURL 输入；取消勾选隐藏该行。保留 Provider 下拉选择和登录按钮。Provider、BaseURL 与密文均为设计示例。沿用1080设计基准与正式90%等比呈现。",
+      "clip": true,
+      "width": 1080,
+      "height": 1080,
+      "fill": "#FFFFFF",
+      "cornerRadius": 32,
+      "stroke": {
+        "type": "gradient",
+        "gradientType": "linear",
+        "enabled": true,
+        "rotation": 180,
+        "size": {
+          "height": 1
+        },
+        "colors": [
+          {
+            "color": "#FFFFFFA6",
+            "position": 0
+          },
+          {
+            "color": "#FFFFFF4D",
+            "position": 0.5
+          },
+          {
+            "color": "#465A9F40",
+            "position": 1
+          }
+        ]
+      },
+      "strokeWidth": 1.5,
+      "strokeAlignment": "inner",
+      "effect": [
+        {
+          "type": "shadow",
+          "shadowType": "outer",
+          "color": "#1A202433",
+          "offset": {
+            "x": 0,
+            "y": 24
+          },
+          "blur": 64
+        },
+        {
+          "type": "shadow",
+          "shadowType": "outer",
+          "color": "#1A202414",
+          "offset": {
+            "x": 0,
+            "y": 4
+          },
+          "blur": 12
+        }
+      ],
+      "layout": "none",
+      "children": [
+        {
+          "type": "frame",
+          "id": "K3xPz",
+          "x": 0,
+          "y": 0,
+          "name": "背景渐变 · Blue hour AIR",
+          "context": "AIR 椭圆场缓慢漂移。先混合与柔化色表坐标，再查首页同一张 Oklab 五色色表；不直接混合深浅 RGB。页脚提亮内置于 Shader。",
+          "width": 1080,
+          "height": 1080,
+          "fill": {
+            "type": "shader",
+            "enabled": true,
+            "url": "asset/blue-hour-air.glsl",
+            "uniforms": {
+              "u_speed": 30,
+              "u_phase": 0,
+              "u_drift": 1,
+              "u_softness": 24,
+              "u_grain": 0.003,
+              "u_palette": "asset/blue-hour-palette.png"
+            }
+          },
+          "cornerRadius": 32
+        },
+        {
+          "type": "rectangle",
+          "id": "FXobx",
+          "x": 0,
+          "y": 0,
+          "name": "底部可读性渐变",
+          "context": "底部 0%–70% 全透明、93% 起为不透明的主色浅色 4 #DDECFF，压亮底部以承载页脚文字。",
+          "enabled": false,
+          "fill": {
+            "type": "gradient",
+            "gradientType": "linear",
+            "enabled": true,
+            "rotation": 180,
+            "size": {
+              "height": 1
+            },
+            "colors": [
+              {
+                "color": "#DDECFF00",
+                "position": 0
+              },
+              {
+                "color": "#DDECFF00",
+                "position": 0.7
+              },
+              {
+                "color": "#DDECFF",
+                "position": 0.93
+              },
+              {
+                "color": "#DDECFF",
+                "position": 1
+              }
+            ]
+          },
+          "width": 1080,
+          "height": 1080
+        },
+        {
+          "type": "text",
+          "id": "mfgzT",
+          "x": 64,
+          "y": 44,
+          "name": "产品名",
+          "fill": "#FFFFFF",
+          "content": "CST Pilot",
+          "fontFamily": "Inter",
+          "fontSize": 20,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "fCCOD",
+          "x": 0,
+          "y": 116,
+          "name": "欢迎语",
+          "width": 1080,
+          "layout": "vertical",
+          "gap": 14,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "z7uhM0",
+              "name": "欢迎标题",
+              "fill": "#FFFFFF",
+              "content": "欢迎回来",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 56,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "HPJzE",
+              "name": "欢迎副题",
+              "fill": "#FFFFFFCC",
+              "content": "登录以同步模型配置与额度",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "QzXBS",
+          "x": 300,
+          "y": 300,
+          "name": "登录卡片",
+          "context": "自定义 Provider 已勾选。字段顺序：Provider、自定义 Provider、BaseURL、APIKEY；登录按钮位置与默认态一致。",
+          "width": 480,
+          "height": 480,
+          "fill": "#FFFFFF",
+          "cornerRadius": 24,
+          "stroke": "#D5DEE3",
+          "strokeWidth": 1,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "color": "#1A202414",
+            "offset": {
+              "x": 0,
+              "y": 12
+            },
+            "blur": 40
+          },
+          "layout": "vertical",
+          "padding": 28,
+          "justifyContent": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "ieTn1",
+              "name": "切换行",
+              "width": "fill_container",
+              "justifyContent": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "ZyKIW",
+                  "name": "方式切换",
+                  "width": 272,
+                  "fill": "#F0F0F0",
+                  "cornerRadius": 10,
+                  "gap": 2,
+                  "padding": 3,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "ZzwP1",
+                      "name": "选项 · 扫码登录",
+                      "width": 132,
+                      "fill": "#00000000",
+                      "cornerRadius": 8,
+                      "padding": [
+                        9,
+                        0
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "pvmJ4",
+                          "name": "扫码登录",
+                          "fill": "#646464",
+                          "content": "扫码登录",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "AhgBE",
+                      "name": "选项 · APIKEY",
+                      "width": 132,
+                      "fill": "#FFFFFF",
+                      "cornerRadius": 8,
+                      "padding": [
+                        9,
+                        0
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "CSoem",
+                          "name": "APIKEY",
+                          "fill": "#202020",
+                          "content": "APIKEY",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "qGEHo",
+              "name": "弹性间距",
+              "width": 1,
+              "height": 20
+            },
+            {
+              "type": "frame",
+              "id": "vcf3m",
+              "name": "APIKEY 表单",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical",
+              "gap": 12,
+              "padding": [
+                28,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "E9dVhg",
+                  "name": "Provider 字段",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "vKiRY",
+                      "name": "Provider 标签",
+                      "fill": "#202020",
+                      "content": "Provider",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "qp7l5",
+                      "name": "Provider 输入框",
+                      "width": "fill_container",
+                      "height": 42,
+                      "fill": "#FFFFFF",
+                      "cornerRadius": 8,
+                      "stroke": "#D5D5D5",
+                      "strokeWidth": 1,
+                      "gap": 12,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "f4HWaz",
+                          "name": "Provider 值",
+                          "fill": "#202020",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "OpenAI",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "P7fRd1",
+                          "name": "Provider 操作图标",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "#646464"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "M4MiC",
+                  "name": "自定义 Provider · 已勾选",
+                  "width": "fill_container",
+                  "height": 20,
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "YyRgD",
+                      "name": "自定义复选框",
+                      "width": 16,
+                      "height": 16,
+                      "fill": "#465A9F",
+                      "cornerRadius": 4,
+                      "stroke": "#465A9F",
+                      "strokeWidth": 1,
+                      "layout": "none",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "WSc7X",
+                          "x": 2,
+                          "y": 2,
+                          "name": "已勾选",
+                          "width": 12,
+                          "height": 12,
+                          "icon": "check",
+                          "library": "lucide",
+                          "fill": "#FFFFFF"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "C3kNc0",
+                      "name": "自定义 Provider 标签",
+                      "fill": "#646464",
+                      "content": "自定义 Provider",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "euVZi",
+                  "name": "BaseURL 字段",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "a9hSF",
+                      "name": "BaseURL 标签",
+                      "fill": "#202020",
+                      "content": "BaseURL",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "DOvrE",
+                      "name": "BaseURL 输入框",
+                      "width": "fill_container",
+                      "height": 42,
+                      "fill": "#FFFFFF",
+                      "cornerRadius": 8,
+                      "stroke": "#D5D5D5",
+                      "strokeWidth": 1,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "TeKpO",
+                          "name": "BaseURL 值",
+                          "fill": "#202020",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "https://api.example.com/v1",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "XVaCa",
+                  "name": "APIKEY 字段",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "FQqOx",
+                      "name": "APIKEY 标签",
+                      "fill": "#202020",
+                      "content": "APIKEY",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "r6fyt",
+                      "name": "APIKEY 输入框",
+                      "width": "fill_container",
+                      "height": 42,
+                      "fill": "#FFFFFF",
+                      "cornerRadius": 8,
+                      "stroke": "#D5D5D5",
+                      "strokeWidth": 1,
+                      "gap": 12,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "U85bwr",
+                          "name": "APIKEY 值",
+                          "fill": "#646464",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "••••••••••••••••",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "a03IX",
+                          "name": "APIKEY 操作图标",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "eye-off",
+                          "library": "lucide",
+                          "fill": "#646464"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "r7AqJ",
+              "name": "登录按钮",
+              "width": "fill_container",
+              "height": 42,
+              "fill": "#465A9F",
+              "cornerRadius": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "mLJzZ",
+                  "name": "登录按钮文字",
+                  "fill": "#FFFFFF",
+                  "content": "登录",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "vTDJo",
+          "x": 0,
+          "y": 1000,
+          "name": "页脚",
+          "fill": "#5F676C",
+          "textGrowth": "fixed-width",
+          "width": 1080,
+          "content": "@cst-pilot-web",
+          "textAlign": "center",
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "BCnjo",
+      "x": 2561,
+      "y": -4528,
+      "name": "Provider 选择 · 下拉 · 浅色",
+      "context": "点击登录表单的 Provider 选择框展开。选项文字与输入框值共用左侧起点（距边缘12）；面板宽度与输入框一致，向下展开，间隔8；沿用模型选择的白底、圆角16、中性描边、8%投影、行圆角8与选中底色。选项文字与输入框值左对齐，勾选图标置于行末；CST为当前选项，OpenAI行为悬停示意。条目只示意样式，实际清单随可用Provider配置。",
+      "width": 424,
+      "fill": "#FFFFFF",
+      "cornerRadius": 16,
+      "stroke": "#D5DEE3",
+      "strokeWidth": 1,
+      "effect": {
+        "type": "shadow",
+        "shadowType": "outer",
+        "color": "#1A202414",
+        "offset": {
+          "x": 0,
+          "y": 8
+        },
+        "blur": 24
+      },
+      "layout": "vertical",
+      "gap": 4,
+      "padding": [
+        16,
+        8
+      ],
+      "children": [
+        {
+          "type": "frame",
+          "id": "kkRfD",
+          "name": "Provider 行 · CST",
+          "width": "fill_container",
+          "fill": "#EAEAEA",
+          "cornerRadius": 8,
+          "gap": 10,
+          "padding": [
+            10,
+            12,
+            10,
+            4
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "Vj936",
+              "name": "Provider 名",
+              "fill": "#1A2024",
+              "content": "CST",
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "xBVXJ",
+              "name": "选中标记槽",
+              "width": 16,
+              "height": 16,
+              "layout": "none",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "R2F87",
+                  "x": 0,
+                  "y": 0,
+                  "name": "选中",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "check",
+                  "library": "lucide",
+                  "fill": "#465A9F"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "O480Kl",
+          "name": "Provider 行 · OpenAI · 悬停",
+          "width": "fill_container",
+          "fill": "#EAEAEA",
+          "cornerRadius": 8,
+          "gap": 10,
+          "padding": [
+            10,
+            12,
+            10,
+            4
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "OBrY7",
+              "name": "Provider 名",
+              "fill": "#1A2024",
+              "content": "OpenAI",
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "rKHwv",
+              "name": "选中标记槽",
+              "width": 16,
+              "height": 16,
+              "layout": "none"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "fg7NO",
+          "name": "Provider 行 · Anthropic",
+          "width": "fill_container",
+          "fill": "#00000000",
+          "cornerRadius": 8,
+          "gap": 10,
+          "padding": [
+            10,
+            12,
+            10,
+            4
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "Ys9XJ",
+              "name": "Provider 名",
+              "fill": "#1A2024",
+              "content": "Anthropic",
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "s3e8w",
+              "name": "选中标记槽",
+              "width": 16,
+              "height": 16,
+              "layout": "none"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Fpe68",
+          "name": "Provider 行 · Google",
+          "width": "fill_container",
+          "fill": "#00000000",
+          "cornerRadius": 8,
+          "gap": 10,
+          "padding": [
+            10,
+            12,
+            10,
+            4
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "n0G2cj",
+              "name": "Provider 名",
+              "fill": "#1A2024",
+              "content": "Google",
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "Ex4iz",
+              "name": "选中标记槽",
+              "width": 16,
+              "height": 16,
+              "layout": "none"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "EXYQ0",
+          "name": "Provider 行 · DeepSeek",
+          "width": "fill_container",
+          "fill": "#00000000",
+          "cornerRadius": 8,
+          "gap": 10,
+          "padding": [
+            10,
+            12,
+            10,
+            4
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "emKOr",
+              "name": "Provider 名",
+              "fill": "#1A2024",
+              "content": "DeepSeek",
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "Nkyvt",
+              "name": "选中标记槽",
+              "width": 16,
+              "height": 16,
+              "layout": "none"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "PX9Nr",
+      "x": 3165,
+      "y": -4528,
+      "name": "登录页 · APIKEY · 深色",
+      "context": "APIKEY 登录默认态。复用登录页浅色的 AIR、面板、卡片与排版；1080×1080 设计基准，正式按90%呈现。Provider 下拉选择、可选自定义 Provider、APIKEY 密文输入与登录按钮；未勾选自定义时隐藏 BaseURL。Provider 菜单另见独立画布。",
+      "clip": true,
+      "width": 1080,
+      "height": 1080,
+      "fill": "#FFFFFF",
+      "cornerRadius": 32,
+      "stroke": {
+        "type": "gradient",
+        "gradientType": "linear",
+        "enabled": true,
+        "rotation": 180,
+        "size": {
+          "height": 1
+        },
+        "colors": [
+          {
+            "color": "#FFFFFFA6",
+            "position": 0
+          },
+          {
+            "color": "#FFFFFF4D",
+            "position": 0.5
+          },
+          {
+            "color": "#465A9F40",
+            "position": 1
+          }
+        ]
+      },
+      "strokeWidth": 1.5,
+      "strokeAlignment": "inner",
+      "effect": [
+        {
+          "type": "shadow",
+          "shadowType": "outer",
+          "color": "#1A202433",
+          "offset": {
+            "x": 0,
+            "y": 24
+          },
+          "blur": 64
+        },
+        {
+          "type": "shadow",
+          "shadowType": "outer",
+          "color": "#1A202414",
+          "offset": {
+            "x": 0,
+            "y": 4
+          },
+          "blur": 12
+        }
+      ],
+      "layout": "none",
+      "children": [
+        {
+          "type": "frame",
+          "id": "o4l51x",
+          "x": 0,
+          "y": 0,
+          "name": "背景渐变 · Blue hour AIR",
+          "context": "AIR 椭圆场缓慢漂移。先混合与柔化色表坐标，再查首页同一张 Oklab 五色色表；不直接混合深浅 RGB。页脚提亮内置于 Shader。",
+          "width": 1080,
+          "height": 1080,
+          "fill": {
+            "type": "shader",
+            "enabled": true,
+            "url": "asset/blue-hour-air.glsl",
+            "uniforms": {
+              "u_speed": 30,
+              "u_phase": 0,
+              "u_drift": 1,
+              "u_softness": 24,
+              "u_grain": 0.015,
+              "u_palette": "asset/blue-hour-air-dark-palette.png"
+            }
+          },
+          "cornerRadius": 32
+        },
+        {
+          "type": "rectangle",
+          "id": "YnX1M",
+          "x": 0,
+          "y": 0,
+          "name": "底部可读性渐变",
+          "context": "底部 0%–70% 全透明、93% 起为不透明的主色浅色 4 #DDECFF，压亮底部以承载页脚文字。",
+          "enabled": false,
+          "fill": {
+            "type": "gradient",
+            "gradientType": "linear",
+            "enabled": true,
+            "rotation": 180,
+            "size": {
+              "height": 1
+            },
+            "colors": [
+              {
+                "color": "#DDECFF00",
+                "position": 0
+              },
+              {
+                "color": "#DDECFF00",
+                "position": 0.7
+              },
+              {
+                "color": "#DDECFF",
+                "position": 0.93
+              },
+              {
+                "color": "#DDECFF",
+                "position": 1
+              }
+            ]
+          },
+          "width": 1080,
+          "height": 1080
+        },
+        {
+          "type": "text",
+          "id": "SEDcc",
+          "x": 64,
+          "y": 44,
+          "name": "产品名",
+          "fill": "#FFFFFF",
+          "content": "CST Pilot",
+          "fontFamily": "Inter",
+          "fontSize": 20,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "kwbv3",
+          "x": 0,
+          "y": 116,
+          "name": "欢迎语",
+          "width": 1080,
+          "layout": "vertical",
+          "gap": 14,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "L6ox81",
+              "name": "欢迎标题",
+              "fill": "#FFFFFF",
+              "content": "欢迎回来",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 56,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "V89dS",
+              "name": "欢迎副题",
+              "fill": "#FFFFFFCC",
+              "content": "登录以同步模型配置与额度",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "BLtCa",
+          "x": 300,
+          "y": 300,
+          "name": "登录卡片",
+          "context": "APIKEY 登录表单，480×480。切换轨道与扫码态共用，APIKEY 激活；Provider 选择、自定义 Provider 复选框、APIKEY 输入；登录按钮固定在卡片底部。",
+          "width": 480,
+          "height": 480,
+          "fill": "#131A1D",
+          "cornerRadius": 24,
+          "stroke": "#2D3438",
+          "strokeWidth": 1,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "color": "#1A202414",
+            "offset": {
+              "x": 0,
+              "y": 12
+            },
+            "blur": 40
+          },
+          "layout": "vertical",
+          "padding": 28,
+          "justifyContent": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "gNBjN",
+              "name": "切换行",
+              "width": "fill_container",
+              "justifyContent": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "VOnVi",
+                  "name": "方式切换",
+                  "width": 272,
+                  "fill": "#1D2428",
+                  "cornerRadius": 10,
+                  "gap": 2,
+                  "padding": 3,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "RbiM0",
+                      "name": "选项 · 扫码登录",
+                      "width": 132,
+                      "fill": "#00000000",
+                      "cornerRadius": 8,
+                      "padding": [
+                        9,
+                        0
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "FVM0h",
+                          "name": "扫码登录",
+                          "fill": "#AAB3B7",
+                          "content": "扫码登录",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "qYx7C",
+                      "name": "选项 · APIKEY",
+                      "width": 132,
+                      "fill": "#242C2F",
+                      "cornerRadius": 8,
+                      "padding": [
+                        9,
+                        0
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "riOqW",
+                          "name": "APIKEY",
+                          "fill": "#E0EAEE",
+                          "content": "APIKEY",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "kh2P6",
+              "name": "弹性间距",
+              "width": 1,
+              "height": 20
+            },
+            {
+              "type": "frame",
+              "id": "p96NNS",
+              "name": "APIKEY 表单",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical",
+              "gap": 12,
+              "padding": [
+                28,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "oAWH4",
+                  "name": "Provider 字段",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "UvUgg",
+                      "name": "Provider 标签",
+                      "fill": "#E0EAEE",
+                      "content": "Provider",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "uNdb5",
+                      "name": "Provider 输入框",
+                      "width": "fill_container",
+                      "height": 42,
+                      "fill": "#0B1215",
+                      "cornerRadius": 8,
+                      "stroke": "#3C4448",
+                      "strokeWidth": 1,
+                      "gap": 12,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "NpBbq",
+                          "name": "Provider 值",
+                          "fill": "#E0EAEE",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "CST",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "jMwAN",
+                          "name": "Provider 操作图标",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "#646464"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "pVpvp",
+                  "name": "自定义 Provider · 未勾选",
+                  "width": "fill_container",
+                  "height": 20,
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "XdAl7",
+                      "name": "自定义复选框",
+                      "width": 16,
+                      "height": 16,
+                      "fill": "#131A1D",
+                      "cornerRadius": 4,
+                      "stroke": "#3C4448",
+                      "strokeWidth": 1,
+                      "layout": "none"
+                    },
+                    {
+                      "type": "text",
+                      "id": "X9rRVm",
+                      "name": "自定义 Provider 标签",
+                      "fill": "#AAB3B7",
+                      "content": "自定义 Provider",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "F2OWWz",
+                  "name": "APIKEY 字段",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "D5Cl8",
+                      "name": "APIKEY 标签",
+                      "fill": "#E0EAEE",
+                      "content": "APIKEY",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "YHiRz",
+                      "name": "APIKEY 输入框",
+                      "width": "fill_container",
+                      "height": 42,
+                      "fill": "#0B1215",
+                      "cornerRadius": 8,
+                      "stroke": "#3C4448",
+                      "strokeWidth": 1,
+                      "gap": 12,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "wQJOr",
+                          "name": "APIKEY 值",
+                          "fill": "#AAB3B7",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "输入 APIKEY",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "hZgOk",
+                          "name": "APIKEY 操作图标",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "eye-off",
+                          "library": "lucide",
+                          "fill": "#646464"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "IAhT3",
+              "name": "登录按钮",
+              "width": "fill_container",
+              "height": 42,
+              "fill": "#7785DE",
+              "cornerRadius": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "eWpLS",
+                  "name": "登录按钮文字",
+                  "fill": "#001F42",
+                  "content": "登录",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "mmlnU",
+          "x": 0,
+          "y": 1000,
+          "name": "页脚",
+          "fill": "#060B0E",
+          "textGrowth": "fixed-width",
+          "width": 1080,
+          "content": "@cst-pilot-web",
+          "textAlign": "center",
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "cegkr",
+      "x": 4405,
+      "y": -4528,
+      "name": "登录页 · APIKEY · 自定义 Provider · 深色",
+      "context": "APIKEY 自定义 Provider 态。勾选自定义 Provider 后，在 APIKEY 上方增加 BaseURL 输入；取消勾选隐藏该行。保留 Provider 下拉选择和登录按钮。Provider、BaseURL 与密文均为设计示例。沿用1080设计基准与正式90%等比呈现。",
+      "clip": true,
+      "width": 1080,
+      "height": 1080,
+      "fill": "#FFFFFF",
+      "cornerRadius": 32,
+      "stroke": {
+        "type": "gradient",
+        "gradientType": "linear",
+        "enabled": true,
+        "rotation": 180,
+        "size": {
+          "height": 1
+        },
+        "colors": [
+          {
+            "color": "#FFFFFFA6",
+            "position": 0
+          },
+          {
+            "color": "#FFFFFF4D",
+            "position": 0.5
+          },
+          {
+            "color": "#465A9F40",
+            "position": 1
+          }
+        ]
+      },
+      "strokeWidth": 1.5,
+      "strokeAlignment": "inner",
+      "effect": [
+        {
+          "type": "shadow",
+          "shadowType": "outer",
+          "color": "#1A202433",
+          "offset": {
+            "x": 0,
+            "y": 24
+          },
+          "blur": 64
+        },
+        {
+          "type": "shadow",
+          "shadowType": "outer",
+          "color": "#1A202414",
+          "offset": {
+            "x": 0,
+            "y": 4
+          },
+          "blur": 12
+        }
+      ],
+      "layout": "none",
+      "children": [
+        {
+          "type": "frame",
+          "id": "H1ebze",
+          "x": 0,
+          "y": 0,
+          "name": "背景渐变 · Blue hour AIR",
+          "context": "AIR 椭圆场缓慢漂移。先混合与柔化色表坐标，再查首页同一张 Oklab 五色色表；不直接混合深浅 RGB。页脚提亮内置于 Shader。",
+          "width": 1080,
+          "height": 1080,
+          "fill": {
+            "type": "shader",
+            "enabled": true,
+            "url": "asset/blue-hour-air.glsl",
+            "uniforms": {
+              "u_speed": 30,
+              "u_phase": 0,
+              "u_drift": 1,
+              "u_softness": 24,
+              "u_grain": 0.015,
+              "u_palette": "asset/blue-hour-air-dark-palette.png"
+            }
+          },
+          "cornerRadius": 32
+        },
+        {
+          "type": "rectangle",
+          "id": "z0RD0",
+          "x": 0,
+          "y": 0,
+          "name": "底部可读性渐变",
+          "context": "底部 0%–70% 全透明、93% 起为不透明的主色浅色 4 #DDECFF，压亮底部以承载页脚文字。",
+          "enabled": false,
+          "fill": {
+            "type": "gradient",
+            "gradientType": "linear",
+            "enabled": true,
+            "rotation": 180,
+            "size": {
+              "height": 1
+            },
+            "colors": [
+              {
+                "color": "#DDECFF00",
+                "position": 0
+              },
+              {
+                "color": "#DDECFF00",
+                "position": 0.7
+              },
+              {
+                "color": "#DDECFF",
+                "position": 0.93
+              },
+              {
+                "color": "#DDECFF",
+                "position": 1
+              }
+            ]
+          },
+          "width": 1080,
+          "height": 1080
+        },
+        {
+          "type": "text",
+          "id": "cbkFD",
+          "x": 64,
+          "y": 44,
+          "name": "产品名",
+          "fill": "#FFFFFF",
+          "content": "CST Pilot",
+          "fontFamily": "Inter",
+          "fontSize": 20,
+          "fontWeight": "600"
+        },
+        {
+          "type": "frame",
+          "id": "ewzGg",
+          "x": 0,
+          "y": 116,
+          "name": "欢迎语",
+          "width": 1080,
+          "layout": "vertical",
+          "gap": 14,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "mYh8B",
+              "name": "欢迎标题",
+              "fill": "#FFFFFF",
+              "content": "欢迎回来",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 56,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "t1kit",
+              "name": "欢迎副题",
+              "fill": "#FFFFFFCC",
+              "content": "登录以同步模型配置与额度",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "o8rd1",
+          "x": 300,
+          "y": 300,
+          "name": "登录卡片",
+          "context": "自定义 Provider 已勾选。字段顺序：Provider、自定义 Provider、BaseURL、APIKEY；登录按钮位置与默认态一致。",
+          "width": 480,
+          "height": 480,
+          "fill": "#131A1D",
+          "cornerRadius": 24,
+          "stroke": "#2D3438",
+          "strokeWidth": 1,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "color": "#1A202414",
+            "offset": {
+              "x": 0,
+              "y": 12
+            },
+            "blur": 40
+          },
+          "layout": "vertical",
+          "padding": 28,
+          "justifyContent": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "dgGmN",
+              "name": "切换行",
+              "width": "fill_container",
+              "justifyContent": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "IpSyL",
+                  "name": "方式切换",
+                  "width": 272,
+                  "fill": "#1D2428",
+                  "cornerRadius": 10,
+                  "gap": 2,
+                  "padding": 3,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "EcHzL",
+                      "name": "选项 · 扫码登录",
+                      "width": 132,
+                      "fill": "#00000000",
+                      "cornerRadius": 8,
+                      "padding": [
+                        9,
+                        0
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "iytUX",
+                          "name": "扫码登录",
+                          "fill": "#AAB3B7",
+                          "content": "扫码登录",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "E8UfEV",
+                      "name": "选项 · APIKEY",
+                      "width": 132,
+                      "fill": "#242C2F",
+                      "cornerRadius": 8,
+                      "padding": [
+                        9,
+                        0
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "U74Y24",
+                          "name": "APIKEY",
+                          "fill": "#E0EAEE",
+                          "content": "APIKEY",
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "aB5W2",
+              "name": "弹性间距",
+              "width": 1,
+              "height": 20
+            },
+            {
+              "type": "frame",
+              "id": "BcmLB",
+              "name": "APIKEY 表单",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical",
+              "gap": 12,
+              "padding": [
+                28,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "s7Hic9",
+                  "name": "Provider 字段",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "kf74A",
+                      "name": "Provider 标签",
+                      "fill": "#E0EAEE",
+                      "content": "Provider",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "O2G4J",
+                      "name": "Provider 输入框",
+                      "width": "fill_container",
+                      "height": 42,
+                      "fill": "#0B1215",
+                      "cornerRadius": 8,
+                      "stroke": "#3C4448",
+                      "strokeWidth": 1,
+                      "gap": 12,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "xFx1h",
+                          "name": "Provider 值",
+                          "fill": "#E0EAEE",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "OpenAI",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "vVVXe",
+                          "name": "Provider 操作图标",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "#646464"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "gzsBE",
+                  "name": "自定义 Provider · 已勾选",
+                  "width": "fill_container",
+                  "height": 20,
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "FAeFI",
+                      "name": "自定义复选框",
+                      "width": 16,
+                      "height": 16,
+                      "fill": "#7785DE",
+                      "cornerRadius": 4,
+                      "stroke": "#465A9F",
+                      "strokeWidth": 1,
+                      "layout": "none",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "zcTXm",
+                          "x": 2,
+                          "y": 2,
+                          "name": "已勾选",
+                          "width": 12,
+                          "height": 12,
+                          "icon": "check",
+                          "library": "lucide",
+                          "fill": "#131A1D"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "v0e5D",
+                      "name": "自定义 Provider 标签",
+                      "fill": "#AAB3B7",
+                      "content": "自定义 Provider",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "RiQUI",
+                  "name": "BaseURL 字段",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "MKJjD",
+                      "name": "BaseURL 标签",
+                      "fill": "#E0EAEE",
+                      "content": "BaseURL",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "K2aCZ",
+                      "name": "BaseURL 输入框",
+                      "width": "fill_container",
+                      "height": 42,
+                      "fill": "#0B1215",
+                      "cornerRadius": 8,
+                      "stroke": "#3C4448",
+                      "strokeWidth": 1,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "yCb9J",
+                          "name": "BaseURL 值",
+                          "fill": "#E0EAEE",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "https://api.example.com/v1",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "FTBwz",
+                  "name": "APIKEY 字段",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Nae0C",
+                      "name": "APIKEY 标签",
+                      "fill": "#E0EAEE",
+                      "content": "APIKEY",
+                      "lineHeight": 1.5,
+                      "fontFamily": "Inter",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "d4XrBZ",
+                      "name": "APIKEY 输入框",
+                      "width": "fill_container",
+                      "height": 42,
+                      "fill": "#0B1215",
+                      "cornerRadius": 8,
+                      "stroke": "#3C4448",
+                      "strokeWidth": 1,
+                      "gap": 12,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "vPn6N",
+                          "name": "APIKEY 值",
+                          "fill": "#AAB3B7",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "••••••••••••••••",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Inter",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "x1vVyW",
+                          "name": "APIKEY 操作图标",
+                          "width": 18,
+                          "height": 18,
+                          "icon": "eye-off",
+                          "library": "lucide",
+                          "fill": "#646464"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "g8kV5d",
+              "name": "登录按钮",
+              "width": "fill_container",
+              "height": 42,
+              "fill": "#7785DE",
+              "cornerRadius": 8,
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "t9aK3",
+                  "name": "登录按钮文字",
+                  "fill": "#001F42",
+                  "content": "登录",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 15,
+                  "fontWeight": "500"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "SCZfl",
+          "x": 0,
+          "y": 1000,
+          "name": "页脚",
+          "fill": "#060B0E",
+          "textGrowth": "fixed-width",
+          "width": 1080,
+          "content": "@cst-pilot-web",
+          "textAlign": "center",
+          "fontFamily": "Inter",
+          "fontSize": 15,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "kMSne",
+      "x": 5645,
+      "y": -4528,
+      "name": "Provider 选择 · 下拉 · 深色",
+      "context": "点击登录表单的 Provider 选择框展开。选项文字与输入框值共用左侧起点（距边缘12）；面板宽度与输入框一致，向下展开，间隔8；沿用模型选择的白底、圆角16、中性描边、8%投影、行圆角8与选中底色。选项文字与输入框值左对齐，勾选图标置于行末；CST为当前选项，OpenAI行为悬停示意。条目只示意样式，实际清单随可用Provider配置。",
+      "width": 424,
+      "fill": "#131A1D",
+      "cornerRadius": 16,
+      "stroke": "#2D3438",
+      "strokeWidth": 1,
+      "effect": {
+        "type": "shadow",
+        "shadowType": "outer",
+        "color": "#1A202414",
+        "offset": {
+          "x": 0,
+          "y": 8
+        },
+        "blur": 24
+      },
+      "layout": "vertical",
+      "gap": 4,
+      "padding": [
+        16,
+        8
+      ],
+      "children": [
+        {
+          "type": "frame",
+          "id": "nMZC1",
+          "name": "Provider 行 · CST",
+          "width": "fill_container",
+          "fill": "#242C2F",
+          "cornerRadius": 8,
+          "gap": 10,
+          "padding": [
+            10,
+            12,
+            10,
+            4
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "Te2yv",
+              "name": "Provider 名",
+              "fill": "#E0EAEE",
+              "content": "CST",
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "tHZha",
+              "name": "选中标记槽",
+              "width": 16,
+              "height": 16,
+              "layout": "none",
+              "children": [
+                {
+                  "type": "icon",
+                  "id": "Z1VwW",
+                  "x": 0,
+                  "y": 0,
+                  "name": "选中",
+                  "width": 16,
+                  "height": 16,
+                  "icon": "check",
+                  "library": "lucide",
+                  "fill": "#7785DE"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "G3weZ",
+          "name": "Provider 行 · OpenAI · 悬停",
+          "width": "fill_container",
+          "fill": "#242C2F",
+          "cornerRadius": 8,
+          "gap": 10,
+          "padding": [
+            10,
+            12,
+            10,
+            4
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "VjEFr",
+              "name": "Provider 名",
+              "fill": "#E0EAEE",
+              "content": "OpenAI",
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "EKb78",
+              "name": "选中标记槽",
+              "width": 16,
+              "height": 16,
+              "layout": "none"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "C9T798",
+          "name": "Provider 行 · Anthropic",
+          "width": "fill_container",
+          "fill": "#00000000",
+          "cornerRadius": 8,
+          "gap": 10,
+          "padding": [
+            10,
+            12,
+            10,
+            4
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "jsHYU",
+              "name": "Provider 名",
+              "fill": "#E0EAEE",
+              "content": "Anthropic",
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "UuqSa",
+              "name": "选中标记槽",
+              "width": 16,
+              "height": 16,
+              "layout": "none"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Q2KTY1",
+          "name": "Provider 行 · Google",
+          "width": "fill_container",
+          "fill": "#00000000",
+          "cornerRadius": 8,
+          "gap": 10,
+          "padding": [
+            10,
+            12,
+            10,
+            4
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "aCVEw",
+              "name": "Provider 名",
+              "fill": "#E0EAEE",
+              "content": "Google",
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "TP3ky",
+              "name": "选中标记槽",
+              "width": 16,
+              "height": 16,
+              "layout": "none"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "W2CtS",
+          "name": "Provider 行 · DeepSeek",
+          "width": "fill_container",
+          "fill": "#00000000",
+          "cornerRadius": 8,
+          "gap": 10,
+          "padding": [
+            10,
+            12,
+            10,
+            4
+          ],
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "XJojU",
+              "name": "Provider 名",
+              "fill": "#E0EAEE",
+              "content": "DeepSeek",
+              "fontFamily": "Inter",
+              "fontSize": 15,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "P5nZp",
+              "name": "选中标记槽",
+              "width": 16,
+              "height": 16,
+              "layout": "none"
             }
           ]
         }

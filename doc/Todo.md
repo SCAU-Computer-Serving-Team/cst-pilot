@@ -9,7 +9,7 @@
 
 ## ToDraw 画布
 
-`src/web/design/cst-pilot-web.pen` 现有：主页、聊天工作台、登录页、仪表盘各浅深两版；上下文面板、模型选择、思考强度、账号菜单、消息菜单的悬停态。`src/web/design/cst-pilot-tools.pen` 现有：三种通用渲染模式、折叠层级、等待/成功/失败/降级等状态、逐工具示例，以及 `sys overview`、`runbook`、`web_search`、`read` 图片等例外。下面只列尚需补画或调整的内容。
+`src/web/design/cst-pilot-web.pen` 现有：主页、聊天工作台、登录页、仪表盘各浅深两版；APIKEY 默认态、自定义 Provider 态和 Provider 下拉各浅深两版；上下文面板、模型选择、思考强度、账号菜单、消息菜单的悬停态。`src/web/design/cst-pilot-tools.pen` 现有：三种通用渲染模式、折叠层级、等待/成功/失败/降级等状态、逐工具示例，以及 `sys overview`、`runbook`、`web_search`、`read` 图片等例外。下面只列尚需补画或调整的内容。
 
 1. [ ] 分支树视图 `/s/<id>/tree`，见 [命令与功能对应](web/SPEC/commands.md)
 2. [ ] 输入框补全面板：`/` 命令与 `@` 文件引用，含选中后折叠成标记的样子，见 [命令与功能对应](web/SPEC/commands.md#输入框的交互)
@@ -23,4 +23,3 @@
 8. [ ] 操作栏对齐与补齐：按[命令与功能对应](web/SPEC/commands.md)补复制、导出与派生入口；MVP 不显示分享菜单
 9. [ ] 断线横幅与明确的退出入口，见 [前端工程](web/SPEC/frontend.md#用户可见的约束)
 10. [ ] 聊天工作台的对话流帧要重画：把 `cst-pilot-tools.pen` 中已有的折叠层级和展开卡片接入完整对话场景，替换当前「已完成工作」示意
-11. [ ] 补登录页的 API KEY 态（浅深两版）；扫码 OAuth 态留待后续阶段

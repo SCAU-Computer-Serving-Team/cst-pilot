@@ -1,9 +1,9 @@
-import { Button, TextArea } from "@heroui/react";
-import { ChevronDown, Monitor, PanelLeft, Plus, Settings, SquarePen, MessageSquare, ArrowUp } from "lucide-react";
+import { Button, Popover, TextArea } from "@heroui/react";
+import { ChevronDown, LogIn, Monitor, PanelLeft, Plus, Settings, SquarePen, MessageSquare, ArrowUp, MessageCircleQuestion } from "lucide-react";
 import { Link, useLocation } from "react-router";
 import { BlueHour } from "./blue-hour";
 
-const sampleSessions = [
+export const sampleSessions = [
   { id: "preview", title: "C 盘空间与硬盘信息", group: "今天" },
   { id: "fan-preview", title: "风扇狂转还降频", group: "今天" },
   { id: "startup-preview", title: "开机要等三分钟", group: "昨天" },
@@ -40,7 +40,15 @@ export function Sidebar({ preview = false }: { preview?: boolean }) {
       <div className="sidebar-footer">
         <div className="device-icon"><Monitor size={18} /></div>
         <div className="device-copy"><span>{preview ? "Tim2354" : "当前电脑"}</span><small>{preview ? "24宣传指导 · 设计预览" : "会话功能准备中"}</small></div>
-        <Button variant="ghost" isIconOnly isDisabled className="sidebar-icon" aria-label="设置视图尚未开放"><Settings size={22} /></Button>
+        <Popover>
+          <Button variant="ghost" isIconOnly className="sidebar-account-trigger" aria-label="账号菜单"><Settings size={22} aria-hidden="true" /></Button>
+          <Popover.Content placement="top end" className="sidebar-account-popover">
+            <Popover.Dialog aria-label="账号菜单" className="sidebar-account-menu">
+              <Link className="sidebar-account-item" to="/login"><LogIn size={18} aria-hidden="true" />登录</Link>
+              <Button variant="ghost" isDisabled className="sidebar-account-item" aria-label="反馈问题功能尚未开放"><MessageCircleQuestion size={18} aria-hidden="true" />反馈问题</Button>
+            </Popover.Dialog>
+          </Popover.Content>
+        </Popover>
       </div>
     </aside>
   );
