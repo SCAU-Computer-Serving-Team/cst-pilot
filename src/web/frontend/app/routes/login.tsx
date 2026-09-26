@@ -1,18 +1,54 @@
 import { Button, Checkbox, Input, Label, ListBox, Select, TextField } from "@heroui/react";
 import { Check, ChevronDown, Eye, EyeOff } from "lucide-react";
-import { useState } from "react";
-import { Link } from "react-router";
+import { type FormEvent, useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router";
+import { type ProviderStatus, apiJson } from "../app/api";
 import { BlueHour } from "../app/blue-hour";
 import { HomeSurface } from "../app/shell";
 
-const providers = ["CST", "OpenAI", "Anthropic", "Google", "DeepSeek"];
-
 export default function Login() {
-  const [provider, setProvider] = useState("CST");
+  const navigate = useNavigate();
+  const [providers, setProviders] = useState<ProviderStatus[]>([]);
+  const [provider, setProvider] = useState("");
   const [customProvider, setCustomProvider] = useState(false);
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    apiJson<{ providers: ProviderStatus[] }>("/api/auth", { signal: controller.signal })
+      .then((data) => {
+        setProviders(data.providers);
+        setProvider((current) => current || data.providers[0]?.id || "");
+      })
+      .catch((cause: unknown) => {
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "无法读取模型服务，请重试。");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, []);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (submitting || loading || customProvider || !provider || !apiKey.trim()) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      await apiJson(`/api/auth/${encodeURIComponent(provider)}/api-key`, { method: "PUT", body: { key: apiKey } });
+      setApiKey("");
+      navigate("/");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "登录未完成，请重试。");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
     <div className="login-scene">
@@ -23,19 +59,19 @@ export default function Login() {
         <div className="login-bottom-gradient" aria-hidden="true" />
         <Link className="login-brand" to="/">CST Pilot</Link>
         <div className="login-heading"><h1>欢迎回来</h1><p>登录以同步模型配置与额度</p></div>
-        <div className="login-card">
+        <form className="login-card" onSubmit={submit}>
           <div className="login-switch" aria-label="登录方式"><span className="login-switch-inactive">扫码登录</span><span className="login-switch-active">APIKEY</span></div>
           <div className="login-fields">
-            <Select selectedKey={provider} onSelectionChange={(key) => { if (key != null) setProvider(String(key)); }} className="login-field login-provider">
+            <Select selectedKey={provider || null} onSelectionChange={(key) => { if (key != null) { setProvider(String(key)); setError(""); } }} isDisabled={loading || !providers.length} className="login-field login-provider">
               <Label>Provider</Label>
-              <Select.Trigger className="login-input"><Select.Value>{provider}</Select.Value><ChevronDown size={16} aria-hidden="true" /></Select.Trigger>
+              <Select.Trigger className="login-input"><Select.Value>{providers.find((item) => item.id === provider)?.name ?? "选择 Provider"}</Select.Value><ChevronDown size={16} aria-hidden="true" /></Select.Trigger>
               <Select.Popover className="login-provider-popover" placement="bottom start">
                 <ListBox className="login-provider-list">
-                  {providers.map((name) => <ListBox.Item key={name} id={name} textValue={name} className="login-provider-option">{name}<span className="login-provider-check"><Check size={16} aria-hidden="true" /></span></ListBox.Item>)}
+                  {providers.map((item) => <ListBox.Item key={item.id} id={item.id} textValue={item.name} className="login-provider-option">{item.name}<span className="login-provider-check"><Check size={16} aria-hidden="true" /></span></ListBox.Item>)}
                 </ListBox>
               </Select.Popover>
             </Select>
-            <Checkbox isSelected={customProvider} onChange={setCustomProvider} className="login-custom-checkbox">
+            <Checkbox isSelected={customProvider} onChange={(selected) => { setCustomProvider(selected); setError(""); }} className="login-custom-checkbox">
               <Checkbox.Content>
                 <Checkbox.Control><Checkbox.Indicator><Check size={13} aria-hidden="true" /></Checkbox.Indicator></Checkbox.Control>
                 <Label>自定义 Provider</Label>
@@ -51,8 +87,10 @@ export default function Login() {
               </div>
             </TextField>
           </div>
-          <Button isDisabled className="login-submit" aria-label="登录功能开发中，暂不能提交">登录</Button>
-        </div>
+          {customProvider && <p className="login-message" role="status">自定义 Provider 需先在模型配置中添加，当前页面暂不支持提交 BaseURL。</p>}
+          {error && <p className="login-message login-message--error" role="alert">{error}</p>}
+          <Button type="submit" isDisabled={loading || submitting || !provider || !apiKey.trim() || customProvider} className="login-submit">{submitting ? "正在登录…" : "登录"}</Button>
+        </form>
         <span className="login-footnote">@cst-pilot-web</span>
       </main>
     </div>

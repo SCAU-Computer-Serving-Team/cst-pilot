@@ -256,7 +256,7 @@ a:focus-visible, button:focus-visible { outline: 2px solid #1b85f2; outline-offs
 .login-switch-active { border-radius: calc(8 * var(--login-unit)); color: var(--chat-ink); background: var(--login-selected); box-shadow: 0 1px 3px #1a202414; }
 .login-fields { width: 100%; height: calc(318 * var(--login-unit)); display: flex; flex-direction: column; gap: calc(12 * var(--login-unit)); padding-top: calc(28 * var(--login-unit)); }
 .login-field { width: 100%; display: flex; flex-direction: column; gap: calc(6 * var(--login-unit)); color: var(--chat-ink); }
-.login-field [data-slot="label"] { font-size: calc(14 * var(--login-unit)); font-weight: 400; line-height: calc(21 * var(--login-unit)); }
+.login-field [data-slot="label"] { color: var(--chat-ink); font-size: calc(14 * var(--login-unit)); font-weight: 400; line-height: calc(21 * var(--login-unit)); }
 .login-field .login-input { display: flex; align-items: center; justify-content: space-between; width: 100%; height: calc(42 * var(--login-unit)); min-height: 0; padding: 0 calc(12 * var(--login-unit)); border: var(--login-unit) solid var(--chat-input-border); border-radius: calc(8 * var(--login-unit)); background: var(--login-input-bg); color: var(--chat-ink); font-size: calc(14 * var(--login-unit)); outline: none; }
 .login-field .login-input:focus-visible, .login-field .login-input[data-focus-visible] { border-color: #1b85f2; box-shadow: 0 0 0 calc(2 * var(--login-unit)) #1b85f255; }
 .login-field .login-input::placeholder { color: var(--chat-muted); opacity: 1; }
@@ -265,11 +265,16 @@ a:focus-visible, button:focus-visible { outline: 2px solid #1b85f2; outline-offs
 .login-key-visibility { position: absolute; top: 50%; right: calc(4 * var(--login-unit)); transform: translateY(-50%); width: calc(34 * var(--login-unit)); height: calc(34 * var(--login-unit)); min-width: 0; padding: 0; color: var(--chat-muted); }
 .login-custom-checkbox { display: flex; align-items: center; gap: calc(8 * var(--login-unit)); min-height: calc(20 * var(--login-unit)); color: var(--chat-muted); font-size: calc(13 * var(--login-unit)); cursor: pointer; }
 .login-custom-checkbox [data-slot="checkbox-content"] { display: flex; align-items: center; gap: calc(8 * var(--login-unit)); width: 100%; cursor: pointer; }
-.login-custom-checkbox [data-slot="label"] { font-size: inherit; font-weight: 400; }
+.login-custom-checkbox [data-slot="label"] { color: var(--chat-muted); font-size: inherit; font-weight: 400; }
 .login-custom-checkbox [data-slot="checkbox-control"] { width: calc(16 * var(--login-unit)); height: calc(16 * var(--login-unit)); border: var(--login-unit) solid var(--chat-input-border); border-radius: calc(3 * var(--login-unit)); background: var(--login-input-bg); }
 .login-custom-checkbox[data-selected] [data-slot="checkbox-control"] { border-color: var(--app-send); background: var(--app-send); color: var(--app-send-icon); }
 .login-custom-checkbox [data-slot="checkbox-indicator"] svg { width: calc(13 * var(--login-unit)); height: calc(13 * var(--login-unit)); }
-.login-submit { width: 100%; height: calc(42 * var(--login-unit)); min-height: 0; margin-top: auto; border-radius: calc(8 * var(--login-unit)); background: var(--app-send); color: var(--app-send-icon); font-size: calc(14 * var(--login-unit)); opacity: 1 !important; cursor: not-allowed; }
+.login-submit { width: 100%; height: calc(42 * var(--login-unit)); min-height: 0; margin-top: auto; border-radius: calc(8 * var(--login-unit)); background: var(--app-send); color: var(--app-send-icon); font-size: calc(14 * var(--login-unit)); opacity: 1 !important; cursor: pointer; }
+.login-submit[data-disabled] { cursor: not-allowed; opacity: .65 !important; }
+.login-message { position: absolute; left: calc(28 * var(--login-unit)); right: calc(28 * var(--login-unit)); bottom: calc(76 * var(--login-unit)); margin: 0; color: var(--chat-muted); font-size: calc(12 * var(--login-unit)); line-height: 1.35; }
+.login-message--error { color: #bf091b; }
+:root[data-theme="dark"] .login-message--error { color: #ff8a80; }
+@media (prefers-color-scheme: dark) { :root[data-theme="system"] .login-message--error { color: #ff8a80; } }
 .login-provider-popover { width: calc(424 * var(--login-unit)); padding: calc(16 * var(--login-unit)) calc(8 * var(--login-unit)); border: var(--login-unit) solid var(--chat-border); border-radius: calc(16 * var(--login-unit)); background: var(--login-card); box-shadow: 0 calc(8 * var(--login-unit)) calc(24 * var(--login-unit)) #1a202414; }
 .login-provider-list { display: flex; flex-direction: column; gap: calc(4 * var(--login-unit)); padding: 0; outline: none; }
 .login-provider-option { display: flex; align-items: center; justify-content: space-between; gap: calc(8 * var(--login-unit)); height: calc(38 * var(--login-unit)); padding: 0 calc(12 * var(--login-unit)) 0 calc(4 * var(--login-unit)); border-radius: calc(8 * var(--login-unit)); color: var(--chat-ink); font-size: calc(14 * var(--login-unit)); outline: none; cursor: pointer; }
