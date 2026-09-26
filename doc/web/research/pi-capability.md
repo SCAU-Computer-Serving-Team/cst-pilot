@@ -1,6 +1,6 @@
 # Pi 能力清单
 
-状态：已按 0.85.1 核对，并用官方 Windows 二进制验证最小接管路径。更新：2026-09-23。
+状态：已按 0.85.1 核对；官方 Windows 二进制已验证接管和浏览器接口提交。更新：2026-09-26。
 
 本文记录本项目实际依赖的 Pi 能力，作为实现依据。依据项目安装的 `@earendil-works/pi-coding-agent` 0.85.1，不以全局 Pi 版本作为依据。设计见[会话运行与并行](../SPEC/session-runtime.md)与[页面地址与接口设计](../SPEC/app-router.md)，决策见[技术决策](tech-decisions.md)。
 
@@ -88,13 +88,13 @@ Web 扩展怎么被加载、什么时间能做什么，看下表。其中重载�
 
 ## 运行承载
 
-TUI 待机会话与 Web 使用独立的会话实例，不改 Pi 内核。`/web` 先切换 TUI，再由 Web 打开它原先保存的会话。Web 运行层按会话 ID 管理实例；多会话的服务对象装配仍需验证。
+TUI 待机会话与 Web 使用独立的会话实例，不改 Pi 内核。`/web` 先切换 TUI，再由 Web 打开它原先保存的会话。Web 运行层按会话 ID 管理实例，各实例共用设置与模型服务，分别加载扩展资源。
 
 | 项 | 决定 |
 |---|---|
 | Pi 自带 runtime | 启动时承载 TUI 会话；接管后切换为待机会话并保持进程 |
 | Web 运行层 | Web 扩展在 `pi.exe` 进程内创建，按会话 ID 管理多个独立执行实例 |
-| 服务实例 | `settingsManager`、`modelRuntime`、`resourceLoader` 的数量与共享方式待装配验证，见 [待处理议题](../../issues.md#1-承载与运行) |
+| 服务实例 | 共用一个 `settingsManager` 和 `modelRuntime`；每场会话独立创建 `resourceLoader`，避免扩展实例串用 |
 | 内核改动 | 不做 |
 | 新进程 | 不新增 |
 | 发行链 | 不变，继续用官方 `pi.exe` |
