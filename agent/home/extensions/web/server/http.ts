@@ -50,6 +50,7 @@ export function createWebServer(
 		sessions: [],
 		stage: "foundation",
 	}),
+	api?: (request: IncomingMessage, response: ServerResponse, pathname: string) => Promise<boolean>,
 ): Server {
 	const root = resolve(staticDirectory);
 	return createServer(async (request: IncomingMessage, response: ServerResponse) => {
@@ -59,11 +60,6 @@ export function createWebServer(
 			fail(response, 403, "invalid_host", "此页面只允许从本机打开。");
 			return;
 		}
-		if (request.method !== "GET" && request.method !== "HEAD") {
-			response.setHeader("Allow", "GET, HEAD");
-			fail(response, 405, "method_not_allowed", "当前操作暂不可用。");
-			return;
-		}
 		let pathname: string;
 		try {
 			pathname = decodeURIComponent(new URL(request.url ?? "/", `http://${WEB_HOST}:${port}`).pathname);
@@ -71,12 +67,18 @@ export function createWebServer(
 			fail(response, 400, "invalid_path", "页面地址无效。");
 			return;
 		}
-		if (pathname === "/api/state") {
+		if (pathname === "/api/state" && (request.method === "GET" || request.method === "HEAD")) {
 			json(response, 200, { version: "0.0.0", ...state(), connected: true, commands: [] });
 			return;
 		}
+		if (api && await api(request, response, pathname)) return;
 		if (pathname === "/api" || pathname.startsWith("/api/")) {
 			fail(response, 404, "not_found", "接口尚未提供。");
+			return;
+		}
+		if (request.method !== "GET" && request.method !== "HEAD") {
+			response.setHeader("Allow", "GET, HEAD");
+			fail(response, 405, "method_not_allowed", "当前操作暂不可用。");
 			return;
 		}
 		if (

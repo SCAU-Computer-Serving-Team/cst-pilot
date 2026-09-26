@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createWebApi } from "./server/api.ts";
 import { getWebContainer } from "./server/container.ts";
 import { createWebServer, listenWebServer, WEB_PORT } from "./server/http.ts";
 import { WebSessionPool } from "./server/sessions.ts";
@@ -116,8 +117,8 @@ export default function web(pi: ExtensionAPI): void {
 				// Bind the socket before releasing TUI; a failed port bind must not park it.
 				const server = createWebServer(staticDirectory, WEB_PORT, () => ({
 					sessions: pool.snapshot(),
-					stage: "session-runtime",
-				}));
+					stage: "api-inbox",
+				}), createWebApi(pool, agentDir, WEB_PORT));
 				try {
 					await listenWebServer(server);
 					container.server = server;
@@ -141,6 +142,7 @@ export default function web(pi: ExtensionAPI): void {
 					await pool.close();
 					container.pool = undefined;
 					container.server = undefined;
+					server.closeAllConnections();
 					await new Promise<void>((resolve) => server.close(() => resolve()));
 					throw error;
 				}
@@ -168,7 +170,10 @@ export default function web(pi: ExtensionAPI): void {
 		if (container.starting) await container.starting.catch(() => undefined);
 		const server = container.server;
 		container.server = undefined;
-		if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+		if (server?.listening) {
+			server.closeAllConnections();
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+		}
 		await container.pool?.close();
 		container.pool = undefined;
 		container.parked = false;

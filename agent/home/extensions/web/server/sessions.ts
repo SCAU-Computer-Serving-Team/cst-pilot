@@ -132,6 +132,20 @@ export class WebSessionPool {
 		return this.slots.get(id);
 	}
 
+	async list(): Promise<{ id: string; title: string; updatedAt?: string; running: boolean }[]> {
+		const saved = await SessionManager.listAll(this.options.sessionDir);
+		const rows: { id: string; title: string; updatedAt?: string; running: boolean }[] = saved.map((entry) => ({
+			id: entry.id,
+			title: entry.name ?? entry.firstMessage ?? "新对话",
+			updatedAt: entry.modified.toISOString(),
+			running: this.slots.get(entry.id)?.session.isStreaming ?? false,
+		}));
+		for (const { id, session } of this.slots.values()) {
+			if (!rows.some((entry) => entry.id === id)) rows.push({ id, title: "新对话", updatedAt: undefined, running: session.isStreaming });
+		}
+		return rows;
+	}
+
 	snapshot(): { id: string; running: boolean }[] {
 		return [...this.slots.values()].map(({ id, session }) => ({ id, running: session.isStreaming }));
 	}
