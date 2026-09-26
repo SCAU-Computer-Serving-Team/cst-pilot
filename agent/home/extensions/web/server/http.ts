@@ -46,7 +46,9 @@ function isInside(root: string, file: string): boolean {
 export function createWebServer(
 	staticDirectory: string,
 	port = WEB_PORT,
-	state: () => { sessions: { id: string; running: boolean }[]; stage: string } = () => ({
+	state: () =>
+		| { sessions: { id: string; running: boolean }[]; stage: string }
+		| Promise<{ sessions: { id: string; running: boolean }[]; stage: string }> = () => ({
 		sessions: [],
 		stage: "foundation",
 	}),
@@ -68,10 +70,29 @@ export function createWebServer(
 			return;
 		}
 		if (pathname === "/api/state" && (request.method === "GET" || request.method === "HEAD")) {
-			json(response, 200, { version: "0.0.0", ...state(), connected: true, commands: [] });
+			try {
+				json(response, 200, {
+					version: "0.0.0",
+					...(await state()),
+					connected: true,
+					commands: [
+						"/compact",
+						"/fork",
+						"/skill:disk",
+						"/skill:driver",
+						"/skill:eventlog",
+						"/skill:ls",
+						"/skill:runbook",
+						"/skill:startup",
+						"/skill:sys",
+					],
+				});
+			} catch {
+				fail(response, 503, "state_unavailable", "暂时无法读取会话状态");
+			}
 			return;
 		}
-		if (api && await api(request, response, pathname)) return;
+		if (api && (await api(request, response, pathname))) return;
 		if (pathname === "/api" || pathname.startsWith("/api/")) {
 			fail(response, 404, "not_found", "接口尚未提供。");
 			return;

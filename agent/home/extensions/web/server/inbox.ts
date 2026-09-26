@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { ImageRef } from "./attachments.ts";
 
 export type Delivery = "queue" | "steer";
 export type ItemStatus = "pending" | "delivering" | "delivered" | "failed" | "cancelled";
@@ -11,6 +12,8 @@ export interface InboxItem {
 	delivery: Delivery;
 	acceptedText: string;
 	acceptedDelivery: Delivery;
+	images: ImageRef[];
+	skill?: string;
 	status: ItemStatus;
 	acceptedAt: number;
 }
@@ -24,8 +27,8 @@ export class InboxConflict extends Error {}
 
 export interface InboxExecutor {
 	isBusy(): boolean;
-	prompt(text: string): Promise<void>;
-	steer(text: string): Promise<void>;
+	prompt(text: string, images: ImageRef[], skill?: string): Promise<void>;
+	steer(text: string, images: ImageRef[], skill?: string): Promise<void>;
 }
 
 /** One inbox per session; only the owning server process may write its file. */
@@ -95,15 +98,32 @@ export class SessionInbox {
 		return this.transact(async (current) => structuredClone(current));
 	}
 
-	async accept(id: string, text: string, delivery: Delivery): Promise<InboxItem> {
-		if (!/^[a-zA-Z0-9_-]{1,128}$/.test(id) || !text.trim() || text.length > 100_000) {
+	async accept(
+		id: string,
+		text: string,
+		delivery: Delivery,
+		images: ImageRef[] = [],
+		skill?: string,
+	): Promise<InboxItem> {
+		if (skill !== undefined && !["disk", "driver", "eventlog", "ls", "runbook", "startup", "sys"].includes(skill))
+			throw new Error("技能名称无效");
+		if (
+			!/^[a-zA-Z0-9_-]{1,128}$/.test(id) ||
+			(!text.trim() && images.length === 0 && !skill) ||
+			text.length > 100_000
+		) {
 			throw new Error("消息格式无效");
 		}
 		if (delivery !== "queue" && delivery !== "steer") throw new Error("提交方式无效");
 		const item = await this.transact(async (current) => {
 			const existing = current.items.find((entry) => entry.id === id);
 			if (existing) {
-				if (existing.acceptedText !== text || existing.acceptedDelivery !== delivery)
+				if (
+					existing.acceptedText !== text ||
+					existing.acceptedDelivery !== delivery ||
+					JSON.stringify(existing.images ?? []) !== JSON.stringify(images) ||
+					existing.skill !== skill
+				)
 					throw new InboxConflict("消息 ID 已用于其他内容");
 				return { ...existing };
 			}
@@ -113,6 +133,8 @@ export class SessionInbox {
 				delivery,
 				acceptedText: text,
 				acceptedDelivery: delivery,
+				images,
+				skill,
 				status: "pending",
 				sequence: current.nextSequence,
 				acceptedAt: Date.now(),
@@ -145,7 +167,10 @@ export class SessionInbox {
 			if (current.version !== version) throw new InboxConflict("队列已更新，请重新读取");
 			const target = current.items.find((item) => item.id === id && item.status === "pending");
 			if (!target) throw new InboxConflict("条目已投递或不存在");
-			if (edit.text !== undefined && (!edit.text.trim() || edit.text.length > 100_000))
+			if (
+				edit.text !== undefined &&
+				((!edit.text.trim() && target.images.length === 0 && !target.skill) || edit.text.length > 100_000)
+			)
 				throw new Error("消息格式无效");
 			if (edit.delivery !== undefined && edit.delivery !== "queue" && edit.delivery !== "steer")
 				throw new Error("提交方式无效");
@@ -239,8 +264,9 @@ export class SessionInbox {
 				});
 				if (!next) return;
 				try {
-					if (next.busy && next.item.delivery === "steer") await this.executor.steer(next.item.text);
-					else await this.executor.prompt(next.item.text);
+					if (next.busy && next.item.delivery === "steer")
+						await this.executor.steer(next.item.text, next.item.images ?? [], next.item.skill);
+					else await this.executor.prompt(next.item.text, next.item.images ?? [], next.item.skill);
 					await this.transact(async (current) => {
 						await this.save({
 							...current,
@@ -283,6 +309,15 @@ function validSnapshot(value: unknown): value is InboxSnapshot {
 				typeof item.text === "string" &&
 				typeof item.acceptedText === "string" &&
 				(item.acceptedDelivery === "queue" || item.acceptedDelivery === "steer") &&
+				(item.skill === undefined || typeof item.skill === "string") &&
+				(item.images === undefined ||
+					(Array.isArray(item.images) &&
+						item.images.every(
+							(ref) =>
+								typeof ref.id === "string" &&
+								typeof ref.mimeType === "string" &&
+								Number.isSafeInteger(ref.bytes),
+						))) &&
 				Number.isSafeInteger(item.sequence) &&
 				(item.delivery === "queue" || item.delivery === "steer") &&
 				["pending", "delivering", "delivered", "failed", "cancelled"].includes(item.status),

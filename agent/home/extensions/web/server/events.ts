@@ -10,11 +10,11 @@ export class SessionEvents {
 	private readonly clients = new Set<ServerResponse>();
 	private readonly unsubscribe: () => void;
 
-	constructor(session: AgentSession) {
-		this.unsubscribe = session.subscribe((event) => this.publish("session", event));
+	constructor(session?: AgentSession) {
+		this.unsubscribe = session?.subscribe((event) => this.publish("session", event)) ?? (() => {});
 	}
 
-	publish(name: "session" | "queue", value: unknown): void {
+	publish(name: "session" | "queue" | "state", value: unknown): void {
 		let data: string;
 		try {
 			data = JSON.stringify(value);
@@ -26,7 +26,18 @@ export class SessionEvents {
 		this.history.push({ sequence, frame });
 		if (this.history.length > 256) this.history.shift();
 		for (const client of this.clients) {
-			if (!client.write(frame)) client.end();
+			if (client.writableEnded || client.destroyed) {
+				this.clients.delete(client);
+				continue;
+			}
+			try {
+				if (!client.write(frame)) {
+					this.clients.delete(client);
+					client.end();
+				}
+			} catch {
+				this.clients.delete(client);
+			}
 		}
 	}
 
@@ -56,7 +67,15 @@ export class SessionEvents {
 			response.write(": connected\n\n");
 		}
 		this.clients.add(response);
-		const heartbeat = setInterval(() => response.write(": keepalive\n\n"), 20_000);
+		const heartbeat = setInterval(() => {
+			if (response.writableEnded || response.destroyed) return;
+			try {
+				response.write(": keepalive\n\n");
+			} catch {
+				this.clients.delete(response);
+				clearInterval(heartbeat);
+			}
+		}, 20_000);
 		heartbeat.unref();
 		response.on("close", () => {
 			clearInterval(heartbeat);

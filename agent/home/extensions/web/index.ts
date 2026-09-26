@@ -116,10 +116,15 @@ export default function web(pi: ExtensionAPI): void {
 				container.pool = pool;
 				// Bind the socket before releasing TUI; a failed port bind must not park it.
 				const api = createWebApi(pool, agentDir, WEB_PORT);
-				const server = createWebServer(staticDirectory, WEB_PORT, () => ({
-					sessions: pool.snapshot(),
-					stage: "api-inbox",
-				}), api);
+				const server = createWebServer(
+					staticDirectory,
+					WEB_PORT,
+					async () => ({
+						sessions: await pool.list(),
+						stage: "api-inbox",
+					}),
+					api,
+				);
 				container.closeApi = api.close;
 				try {
 					await listenWebServer(server);

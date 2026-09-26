@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { InboxConflict, SessionInbox } from "./inbox.ts";
 
-const today = new Date().toISOString().slice(0, 10);
+const now = new Date();
+const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 const tempRoot = join("E:/tmp", today);
 await mkdir(tempRoot, { recursive: true });
 const root = await mkdtemp(join(tempRoot, "cst-web-inbox-"));
@@ -87,6 +88,37 @@ test("editing or cancelling keeps the original idempotency key reserved", async 
 	snapshot = await inbox.change("a", snapshot.version, { remove: true });
 	assert.equal(snapshot.items[0].status, "cancelled");
 	assert.equal((await inbox.accept("a", "original", "queue")).status, "cancelled");
+});
+
+test("an in-flight input is visible but never resent after a simulated process restart", async () => {
+	let release: (() => void) | undefined;
+	let calls = 0;
+	const inbox = new SessionInbox(root, "uncertain", {
+		isBusy: () => false,
+		prompt: async () => {
+			calls++;
+			await new Promise<void>((resolve) => {
+				release = resolve;
+			});
+		},
+		steer: async () => {},
+	});
+	await inbox.accept("request", "diagnose", "queue");
+	await waitFor(async () => (await inbox.snapshot()).items[0]?.status === "delivering");
+	const restarted = new SessionInbox(root, "uncertain", {
+		isBusy: () => false,
+		prompt: async () => {
+			calls++;
+		},
+		steer: async () => {},
+	});
+	assert.equal((await restarted.snapshot()).items[0].status, "delivering");
+	restarted.wake();
+	await new Promise((resolve) => setTimeout(resolve, 30));
+	assert.equal(calls, 1);
+	release?.();
+	await inbox.close();
+	await restarted.close();
 });
 
 test("failed delivery is not replayed after restart", async () => {

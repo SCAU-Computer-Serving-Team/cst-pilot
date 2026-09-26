@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -66,7 +66,7 @@ test("saved sessions resolve by ID and concurrent opens reuse the writer", async
 	const [one, two] = await Promise.all([pool.openHandoff(original.id, file), pool.openSaved(original.id)]);
 	assert.strictEqual(one, original);
 	assert.strictEqual(two, original);
-	await assert.rejects(pool.openSaved("../../not-a-session"), /不存在/);
+	await assert.rejects(pool.openSaved("../../not-a-session"), /不存在|无效/);
 });
 
 test("a saved session reopens by ID after its first writer is disposed", async () => {
@@ -110,6 +110,34 @@ test("a saved session reopens by ID after its first writer is disposed", async (
 			assert.equal(reopened.id, original.id);
 			assert.equal(reopened.session.messages.length, 2);
 			assert.strictEqual(await second.openSaved(original.id), reopened);
+		} finally {
+			await second.close();
+		}
+	} finally {
+		await rm(home, { recursive: true, force: true });
+	}
+});
+
+test("empty Web sessions and create retries survive process restart", async () => {
+	const home = await mkdtemp(join(tempRoot, "cst-web-empty-"));
+	const options = {
+		cwd: home,
+		agentDir: home,
+		sessionDir: join(home, "sessions"),
+		withLoader: <T>(load: () => Promise<T>) => load(),
+	};
+	try {
+		await writeFile(join(home, "settings.json"), JSON.stringify({ defaultTools: ["read", "ls"] }));
+		const first = new WebSessionPool(options);
+		const original = await first.createWithKey("same-request");
+		assert.ok(original.file);
+		await assert.rejects(stat(original.file), { code: "ENOENT" });
+		await first.close();
+		const second = new WebSessionPool(options);
+		try {
+			assert.ok((await second.list()).some((item) => item.id === original.id));
+			assert.equal((await second.createWithKey("same-request")).id, original.id);
+			assert.equal((await second.openSaved(original.id)).id, original.id);
 		} finally {
 			await second.close();
 		}
