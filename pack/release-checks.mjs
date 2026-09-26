@@ -10,6 +10,9 @@ export function checkReleaseTree(root, files) {
     if (/^pi\.exe$/i.test(rel)) {
       throw new Error(`pi.exe 不得位于发行根（应装配为 agent/.runtime/prx.bin）: ${rel}`);
     }
+    if (/^agent\/home\/extensions\/web\/test\//i.test(rel)) {
+      throw new Error(`Web 测试文件不得进入发行包: ${rel}`);
+    }
     if (/(^|\/)(\.state|\.git|sessions|\.cache)(\/|$)|^agent\/home\/(auth\.json|models\.json|web-search\.json|fff\/|npm\/)|^wiztree\/(tmp\/|WizTree3\.ini(?:\.bad)?$)|(^|\/)\.env(?:\.|$)/i.test(rel)) {
       throw new Error(`发行树含运行状态或凭据路径: ${rel}`);
     }

@@ -85,7 +85,7 @@ const CONFIG = {
     { src: "lhm", dst: "lhm", exclude: [] },
     { src: "agent/home/bin", dst: "agent/home/bin", exclude: [] },
     { src: "agent/home/skills", dst: "agent/home/skills", exclude: [] },
-    { src: "agent/home/extensions", dst: "agent/home/extensions", exclude: [] },
+    { src: "agent/home/extensions", dst: "agent/home/extensions", exclude: ["web/test/"] },
   ],
 
   // agent/home 散文件（发行版白名单；排除运行态与开发态：npm/、sessions/、fff/、

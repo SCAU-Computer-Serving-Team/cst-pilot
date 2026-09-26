@@ -1,0 +1,26 @@
+name: Web backend
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: windows-latest
+    env:
+      CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+      - run: npm ci --prefix agent --ignore-scripts
+      - run: npm run check --prefix agent
+      - run: npm run test:web --prefix agent
+      - run: node --test pack/test/*.test.mjs
