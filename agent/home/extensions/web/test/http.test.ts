@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { type AddressInfo, createServer as createNetServer } from "node:net";
+import { join } from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
-import { createWebServer, listenWebServer } from "./http.ts";
+import { createWebServer, listenWebServer } from "../server/http.ts";
+import { testRoot } from "./support.ts";
 
-const staticDirectory = fileURLToPath(new URL("../static/", import.meta.url));
+const staticDirectory = await mkdtemp(join(await testRoot(), "cst-web-static-"));
+await writeFile(join(staticDirectory, "index.html"), "<!doctype html><html><body>test</body></html>");
 
 async function availablePort(): Promise<number> {
 	const probe = createNetServer();
@@ -17,7 +20,10 @@ async function availablePort(): Promise<number> {
 const port = await availablePort();
 const server = createWebServer(staticDirectory, port);
 await listenWebServer(server, port);
-after(() => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))));
+after(async () => {
+	await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+	await rm(staticDirectory, { recursive: true, force: true });
+});
 
 for (const pathname of ["/assets/missing", "/assets/missing.js", "/fonts/missing", "/assets", "/fonts"]) {
 	test(`${pathname} is not an SPA navigation`, async () => {

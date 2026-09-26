@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { MutationReceipts } from "./receipts.ts";
+import { MutationReceipts } from "../server/receipts.ts";
+import { testRoot } from "./support.ts";
 
-const now = new Date();
-const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-await mkdir(join("E:/tmp", date), { recursive: true });
+const rootDir = await testRoot();
 
 test("concurrent retries and a process restart return one result", async () => {
-	const root = await mkdtemp(join("E:/tmp", date, "cst-receipts-"));
+	const root = await mkdtemp(join(rootDir, "cst-receipts-"));
 	try {
 		const store = new MutationReceipts(root);
 		let count = 0;
@@ -28,7 +27,7 @@ test("concurrent retries and a process restart return one result", async () => {
 });
 
 test("a failed mutation remains uncertain and is never rerun automatically", async () => {
-	const root = await mkdtemp(join("E:/tmp", date, "cst-receipts-failure-"));
+	const root = await mkdtemp(join(rootDir, "cst-receipts-failure-"));
 	try {
 		const store = new MutationReceipts(root);
 		await assert.rejects(

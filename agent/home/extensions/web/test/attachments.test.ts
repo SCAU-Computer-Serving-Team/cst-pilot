@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { ImageStore } from "./attachments.ts";
+import { ImageStore } from "../server/attachments.ts";
+import { testRoot } from "./support.ts";
 
-const now = new Date();
-const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-await mkdir(join("E:/tmp", date), { recursive: true });
+const rootDir = await testRoot();
 
 test("the image budget and MIME signature are checked before acceptance", async () => {
-	const root = await mkdtemp(join("E:/tmp", date, "cst-images-"));
+	const root = await mkdtemp(join(rootDir, "cst-images-"));
 	try {
 		const images = new ImageStore(root);
 		const header = Buffer.from("89504e470d0a1a0a", "hex");

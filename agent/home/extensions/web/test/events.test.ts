@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test } from "node:test";
-import { SessionEvents } from "./events.ts";
+import { SessionEvents } from "../server/events.ts";
 
 test("an event ID older than the retained SSE history asks the client to reload", async () => {
 	const events = new SessionEvents();

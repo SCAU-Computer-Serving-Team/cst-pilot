@@ -6,13 +6,12 @@ import { type AddressInfo, createServer as createNetServer } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { createWebApi } from "./api.ts";
-import { createWebServer, listenWebServer } from "./http.ts";
-import { WebSessionPool } from "./sessions.ts";
+import { createWebApi } from "../server/api.ts";
+import { createWebServer, listenWebServer } from "../server/http.ts";
+import { WebSessionPool } from "../server/sessions.ts";
+import { testRoot } from "./support.ts";
 
-const now = new Date();
-const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-await mkdir(join("E:/tmp", date), { recursive: true });
+const rootDir = await testRoot();
 async function availablePort(): Promise<number> {
 	const probe = createNetServer();
 	await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
@@ -22,15 +21,20 @@ async function availablePort(): Promise<number> {
 }
 
 test("HTTP submits to two Pi sessions, returns immediately, streams results, and does not replay on refresh", async () => {
-	const home = await mkdtemp(join("E:/tmp", date, "cst-web-e2e-"));
+	const home = await mkdtemp(join(rootDir, "cst-web-e2e-"));
 	let modelCalls = 0;
 	const modelRequests: string[] = [];
+	let releaseInitialResponses!: () => void;
+	const initialResponses = new Promise<void>((resolve) => {
+		releaseInitialResponses = resolve;
+	});
 	const model = createServer(async (request, response) => {
 		const chunks: Buffer[] = [];
 		for await (const chunk of request) chunks.push(chunk);
 		const payload = Buffer.concat(chunks).toString("utf8");
 		modelRequests.push(payload);
 		modelCalls++;
+		if (modelCalls <= 2) await initialResponses;
 		if (payload.includes("force-auth-error")) {
 			response.writeHead(401, { "Content-Type": "application/json" });
 			response.end(JSON.stringify({ error: { message: "Unauthorized" } }));
@@ -149,20 +153,29 @@ test("HTTP submits to two Pi sessions, returns immediately, streams results, and
 		assert.equal(selected.status, 200);
 		const thinking = await send("/api/models/thinking", { sessionId: one.id, level: "off" });
 		assert.equal(thinking.status, 200);
-		const started = Date.now();
 		const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==";
-		const [a, b] = await Promise.all([
-			send(`/api/sessions/${one.id}/messages`, {
-				id: "a",
-				text: "first",
-				delivery: "queue",
-				images: [{ mimeType: "image/png", data: png }],
-			}),
-			send(`/api/sessions/${two.id}/messages`, { id: "b", text: "second", delivery: "queue" }),
-		]);
-		assert.equal(a.status, 202);
-		assert.equal(b.status, 202);
-		assert.ok(Date.now() - started < 180, "acceptance must not wait for the model");
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		try {
+			const [a, b] = await Promise.race([
+				Promise.all([
+					send(`/api/sessions/${one.id}/messages`, {
+						id: "a",
+						text: "first",
+						delivery: "queue",
+						images: [{ mimeType: "image/png", data: png }],
+					}),
+					send(`/api/sessions/${two.id}/messages`, { id: "b", text: "second", delivery: "queue" }),
+				]),
+				new Promise<never>((_, reject) => {
+					timeout = setTimeout(() => reject(new Error("提交等待了模型响应")), 5_000);
+				}),
+			]);
+			assert.equal(a.status, 202);
+			assert.equal(b.status, 202);
+		} finally {
+			if (timeout) clearTimeout(timeout);
+			releaseInitialResponses();
+		}
 		for (let i = 0; i < 120; i++) {
 			const [left, right] = await Promise.all(
 				[one, two].map(async ({ id }) => await (await fetch(`${origin}/api/sessions/${id}`)).json()),

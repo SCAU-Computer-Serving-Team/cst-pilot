@@ -48,8 +48,8 @@ export default function web(pi: ExtensionAPI): void {
 				return;
 			}
 			if (ctx.mode !== "tui") return;
-			// Until checkpoint 3 supplies durable input and browser controls, keep
-			// ordinary /web runs as a preview so the TUI remains usable.
+			// Keep ordinary /web runs as a preview until browser controls are ready.
+			// The takeover path is for backend verification only.
 			if (process.env.CST_WEB_TAKEOVER !== "1") {
 				const server = createWebServer(staticDirectory);
 				try {

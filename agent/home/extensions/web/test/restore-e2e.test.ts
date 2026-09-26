@@ -1,16 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { type AddressInfo, createServer as createNetServer } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { createWebApi } from "./api.ts";
-import { createWebServer, listenWebServer } from "./http.ts";
-import { WebSessionPool } from "./sessions.ts";
+import { createWebApi } from "../server/api.ts";
+import { createWebServer, listenWebServer } from "../server/http.ts";
+import { WebSessionPool } from "../server/sessions.ts";
+import { testRoot } from "./support.ts";
 
-const now = new Date();
-const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-await mkdir(join("E:/tmp", date), { recursive: true });
+const rootDir = await testRoot();
 
 async function boot(home: string) {
 	const pool = new WebSessionPool({
@@ -44,7 +43,7 @@ async function boot(home: string) {
 }
 
 test("accepted images and empty session IDs are still available after server restart", async () => {
-	const home = await mkdtemp(join("E:/tmp", date, "cst-web-restore-"));
+	const home = await mkdtemp(join(rootDir, "cst-web-restore-"));
 	await writeFile(join(home, "settings.json"), JSON.stringify({ defaultTools: ["read", "ls"] }));
 	const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==";
 	let first: Awaited<ReturnType<typeof boot>> | undefined;

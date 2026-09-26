@@ -5,16 +5,15 @@ import { type AddressInfo, createServer as createNetServer } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { createWebApi } from "./api.ts";
-import { createWebServer, listenWebServer } from "./http.ts";
-import { WebSessionPool } from "./sessions.ts";
+import { createWebApi } from "../server/api.ts";
+import { createWebServer, listenWebServer } from "../server/http.ts";
+import { WebSessionPool } from "../server/sessions.ts";
+import { testRoot } from "./support.ts";
 
-const now = new Date();
-const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-await mkdir(join("E:/tmp", date), { recursive: true });
+const rootDir = await testRoot();
 
 test("an SDK extension dialog crosses HTTP and accepts one browser answer", async () => {
-	const home = await mkdtemp(join("E:/tmp", date, "cst-web-ui-e2e-"));
+	const home = await mkdtemp(join(rootDir, "cst-web-ui-e2e-"));
 	const extension = join(home, "extensions", "ask");
 	await mkdir(extension, { recursive: true });
 	await writeFile(

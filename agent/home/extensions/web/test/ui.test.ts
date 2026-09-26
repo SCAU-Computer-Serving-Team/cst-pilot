@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { WebUiBridge } from "./ui.ts";
+import { WebUiBridge } from "../server/ui.ts";
 
 test("selection is visible, validates answer and resolves exactly once", async () => {
 	const bridge = new WebUiBridge();

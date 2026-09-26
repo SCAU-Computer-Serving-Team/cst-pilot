@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "check": "biome check home/extensions && tsc --noEmit -p tsconfig.json",
+    "test:web": "node --test home/extensions/web/test/*.test.ts",
     "format": "biome check --write home/extensions",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

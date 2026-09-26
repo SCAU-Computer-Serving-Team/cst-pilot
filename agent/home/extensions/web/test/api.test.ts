@@ -1,18 +1,16 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { type AddressInfo, createServer as createNetServer } from "node:net";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { createWebApi } from "./api.ts";
-import { createWebServer, listenWebServer } from "./http.ts";
-import { WebSessionPool } from "./sessions.ts";
+import { createWebApi } from "../server/api.ts";
+import { createWebServer, listenWebServer } from "../server/http.ts";
+import { WebSessionPool } from "../server/sessions.ts";
+import { testRoot } from "./support.ts";
 
-const now = new Date();
-const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-const base = join("E:/tmp", today);
-await mkdir(base, { recursive: true });
+const base = await testRoot();
 const home = await mkdtemp(join(base, "cst-web-api-"));
 await writeFile(join(home, "settings.json"), JSON.stringify({ defaultTools: ["read", "ls"] }));
 const pool = new WebSessionPool({

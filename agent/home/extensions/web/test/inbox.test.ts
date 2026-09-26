@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { InboxConflict, SessionInbox } from "./inbox.ts";
+import { InboxConflict, SessionInbox } from "../server/inbox.ts";
+import { testRoot } from "./support.ts";
 
-const now = new Date();
-const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-const tempRoot = join("E:/tmp", today);
-await mkdir(tempRoot, { recursive: true });
+const tempRoot = await testRoot();
 const root = await mkdtemp(join(tempRoot, "cst-web-inbox-"));
 after(() => rm(root, { recursive: true, force: true }));
 const waitFor = async (condition: () => Promise<boolean>) => {

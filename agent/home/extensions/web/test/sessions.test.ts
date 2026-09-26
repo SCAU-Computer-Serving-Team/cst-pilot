@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { WebSessionPool } from "./sessions.ts";
+import { WebSessionPool } from "../server/sessions.ts";
+import { testRoot } from "./support.ts";
 
-const now = new Date();
-const tempRoot = `E:/tmp/${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-await mkdir(tempRoot, { recursive: true });
+const tempRoot = await testRoot();
 const agentDir = await mkdtemp(join(tempRoot, "cst-web-pool-"));
 const sessionDir = join(agentDir, "sessions");
 await writeFile(join(agentDir, "settings.json"), JSON.stringify({ defaultTools: ["read", "ls"] }));
