@@ -25,17 +25,19 @@ await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
 const { port } = probe.address() as AddressInfo;
 await new Promise<void>((resolve) => probe.close(() => resolve()));
 const origin = `http://127.0.0.1:${port}`;
+const api = createWebApi(pool, home, port);
 const server = createWebServer(
 	fileURLToPath(new URL("../static/", import.meta.url)),
 	port,
 	() => ({ sessions: [], stage: "test" }),
-	createWebApi(pool, home, port),
+	api,
 );
 await listenWebServer(server, port);
 after(async () => {
 	server.closeAllConnections();
 	await new Promise<void>((resolve) => server.close(() => resolve()));
 	await pool.close();
+	await api.close();
 	await rm(home, { recursive: true, force: true });
 });
 const post = (path: string, value: unknown, headers: Record<string, string> = {}) =>

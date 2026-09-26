@@ -115,10 +115,12 @@ export default function web(pi: ExtensionAPI): void {
 				});
 				container.pool = pool;
 				// Bind the socket before releasing TUI; a failed port bind must not park it.
+				const api = createWebApi(pool, agentDir, WEB_PORT);
 				const server = createWebServer(staticDirectory, WEB_PORT, () => ({
 					sessions: pool.snapshot(),
 					stage: "api-inbox",
-				}), createWebApi(pool, agentDir, WEB_PORT));
+				}), api);
+				container.closeApi = api.close;
 				try {
 					await listenWebServer(server);
 					container.server = server;
@@ -140,6 +142,8 @@ export default function web(pi: ExtensionAPI): void {
 						parkedContext.ui.setWidget("cst-web-parked", undefined);
 					}
 					await pool.close();
+					await api.close();
+					container.closeApi = undefined;
 					container.pool = undefined;
 					container.server = undefined;
 					server.closeAllConnections();
@@ -175,6 +179,8 @@ export default function web(pi: ExtensionAPI): void {
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 		}
 		await container.pool?.close();
+		await container.closeApi?.();
+		container.closeApi = undefined;
 		container.pool = undefined;
 		container.parked = false;
 	});

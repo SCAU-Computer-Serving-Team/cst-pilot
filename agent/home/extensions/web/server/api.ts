@@ -53,7 +53,7 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 		return instance;
 	}
 
-	return async (request: IncomingMessage, response: ServerResponse, pathname: string): Promise<boolean> => {
+	const handle = async (request: IncomingMessage, response: ServerResponse, pathname: string): Promise<boolean> => {
 		if (pathname !== "/api" && !pathname.startsWith("/api/")) return false;
 		const method = request.method ?? "GET";
 		if (request.headers.origin && request.headers.origin !== origin) {
@@ -170,4 +170,10 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 		}
 		return true;
 	};
+	return Object.assign(handle, {
+		close: async () => {
+			await Promise.all([...inboxes.values()].map((box) => box.close()));
+			for (const stream of streams.values()) stream.close();
+		},
+	});
 }

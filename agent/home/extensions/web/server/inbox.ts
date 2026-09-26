@@ -34,6 +34,8 @@ export class SessionInbox {
 	private serial: Promise<void> = Promise.resolve();
 	private dispatching = false;
 	private wakeRequested = false;
+	private closed = false;
+	private active?: Promise<void>;
 	private readonly file: string;
 	readonly sessionId: string;
 	private readonly executor: InboxExecutor;
@@ -190,18 +192,25 @@ export class SessionInbox {
 		});
 	}
 
+	async close(): Promise<void> {
+		this.closed = true;
+		await this.active;
+		await this.serial;
+	}
+
 	/** No dispatch on load. A new submission or an SDK idle event may wake this process's inbox. */
 	wake(): void {
 		this.schedule();
 	}
 
 	private schedule(): void {
+		if (this.closed) return;
 		if (this.dispatching) {
 			this.wakeRequested = true;
 			return;
 		}
 		this.dispatching = true;
-		void this.drain().finally(() => {
+		this.active = this.drain().finally(() => {
 			this.dispatching = false;
 			if (this.wakeRequested) {
 				this.wakeRequested = false;

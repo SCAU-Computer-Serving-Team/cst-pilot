@@ -9,6 +9,7 @@ export interface WebContainer {
 	loadingWebSession: number;
 	parked: boolean;
 	pool?: WebSessionPool;
+	closeApi?: () => Promise<void>;
 }
 
 export function getWebContainer(): WebContainer {
