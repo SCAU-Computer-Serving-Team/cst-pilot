@@ -21,6 +21,7 @@ agent/home/web-search.json
 agent/home/pi-web-session-index.json
 agent/home/open-tui.json
 agent/home/sessions/
+agent/home/web-inbox/
 outbox/
 
 # ---- 本地测试记录（按日期拆分，不入库）----
