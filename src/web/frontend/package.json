@@ -9,7 +9,7 @@
     "prebuild": "node scripts/prepare-fonts.mjs",
     "build": "react-router build && node scripts/publish.mjs",
     "typecheck": "react-router typegen && tsc --noEmit",
-    "test": "node --test app/app/*.test.ts"
+    "test": "node --test app/app/*.test.ts app/cards/*.test.ts"
   },
   "dependencies": {
     "@fontsource/inter": "5.3.0",
@@ -21,7 +21,10 @@
     "lucide-react": "0.468.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "react-router": "7.18.4"
+    "react-markdown": "10.1.0",
+    "react-router": "7.18.4",
+    "rehype-highlight": "7.0.2",
+    "remark-gfm": "4.0.1"
   },
   "devDependencies": {
     "@react-router/dev": "7.18.4",
