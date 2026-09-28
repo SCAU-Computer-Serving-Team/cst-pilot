@@ -1,13 +1,14 @@
 export type ProviderStatus = {
   id: string;
   name: string;
+  supportsApiKey: boolean;
   type: string | null;
   requiresLogin: boolean;
 };
 
 type ApiError = { error?: { message?: string } };
 
-export async function apiJson<T>(path: string, options: { method?: "GET" | "PUT" | "POST" | "PATCH"; body?: unknown; signal?: AbortSignal } = {}): Promise<T> {
+export async function apiJson<T>(path: string, options: { method?: "GET" | "PUT" | "POST" | "PATCH" | "DELETE"; body?: unknown; signal?: AbortSignal; idempotencyKey?: string } = {}): Promise<T> {
   const method = options.method ?? "GET";
   let response: Response;
   try {
@@ -19,7 +20,7 @@ export async function apiJson<T>(path: string, options: { method?: "GET" | "PUT"
       headers: method === "GET" ? undefined : {
         "Content-Type": "application/json",
         "X-CST-Web-Request": "1",
-        "Idempotency-Key": crypto.randomUUID(),
+        "Idempotency-Key": options.idempotencyKey ?? crypto.randomUUID(),
       },
       body: method === "GET" ? undefined : JSON.stringify(options.body ?? {}),
     });

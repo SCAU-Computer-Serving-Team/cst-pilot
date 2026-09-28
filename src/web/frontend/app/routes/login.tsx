@@ -22,8 +22,9 @@ export default function Login() {
     const controller = new AbortController();
     apiJson<{ providers: ProviderStatus[] }>("/api/auth", { signal: controller.signal })
       .then((data) => {
-        setProviders(data.providers);
-        setProvider((current) => current || data.providers[0]?.id || "");
+        const apiKeyProviders = data.providers.filter((item) => item.supportsApiKey);
+        setProviders(apiKeyProviders);
+        setProvider((current) => current || apiKeyProviders.find((item) => item.id === "cst")?.id || apiKeyProviders[0]?.id || "");
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "无法读取模型服务，请重试。");
@@ -36,11 +37,11 @@ export default function Login() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submitting || loading || customProvider || !provider || !apiKey.trim()) return;
+    if (submitting || loading || !provider || !apiKey.trim() || (customProvider && !baseUrl.trim())) return;
     setSubmitting(true);
     setError("");
     try {
-      await apiJson(`/api/auth/${encodeURIComponent(provider)}/api-key`, { method: "PUT", body: { key: apiKey } });
+      await apiJson(`/api/auth/${encodeURIComponent(provider)}/api-key`, { method: "PUT", body: { key: apiKey, ...(customProvider ? { baseUrl: baseUrl.trim() } : {}) } });
       setApiKey("");
       navigate("/");
     } catch (cause) {
@@ -87,9 +88,8 @@ export default function Login() {
               </div>
             </TextField>
           </div>
-          {customProvider && <p className="login-message" role="status">自定义 Provider 需先在模型配置中添加，当前页面暂不支持提交 BaseURL。</p>}
           {error && <p className="login-message login-message--error" role="alert">{error}</p>}
-          <Button type="submit" isDisabled={loading || submitting || !provider || !apiKey.trim() || customProvider} className="login-submit">{submitting ? "正在登录…" : "登录"}</Button>
+          <Button type="submit" isDisabled={loading || submitting || !provider || !apiKey.trim() || (customProvider && !baseUrl.trim())} className="login-submit">{submitting ? "正在登录…" : "登录"}</Button>
         </form>
         <span className="login-footnote">@cst-pilot-web</span>
       </main>
