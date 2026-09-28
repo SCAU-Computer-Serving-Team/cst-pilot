@@ -50,7 +50,7 @@ export function createWebServer(
 		| { sessions: { id: string; running: boolean }[]; stage: string }
 		| Promise<{ sessions: { id: string; running: boolean }[]; stage: string }> = () => ({
 		sessions: [],
-		stage: "foundation",
+		stage: "preview",
 	}),
 	api?: (request: IncomingMessage, response: ServerResponse, pathname: string) => Promise<boolean>,
 ): Server {

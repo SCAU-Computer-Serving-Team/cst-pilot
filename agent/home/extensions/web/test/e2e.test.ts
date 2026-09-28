@@ -24,6 +24,7 @@ test("HTTP submits to two Pi sessions, returns immediately, streams results, and
 	const home = await mkdtemp(join(rootDir, "cst-web-e2e-"));
 	let modelCalls = 0;
 	const modelRequests: string[] = [];
+	const modelPaths: string[] = [];
 	let releaseInitialResponses!: () => void;
 	const initialResponses = new Promise<void>((resolve) => {
 		releaseInitialResponses = resolve;
@@ -33,6 +34,7 @@ test("HTTP submits to two Pi sessions, returns immediately, streams results, and
 		for await (const chunk of request) chunks.push(chunk);
 		const payload = Buffer.concat(chunks).toString("utf8");
 		modelRequests.push(payload);
+		modelPaths.push(request.url ?? "");
 		modelCalls++;
 		if (modelCalls <= 2) await initialResponses;
 		if (payload.includes("force-auth-error")) {
@@ -353,6 +355,37 @@ test("HTTP submits to two Pi sessions, returns immediately, streams results, and
 			modelRequests.some((text) => text.includes("Skill-token-check")),
 			"only explicit skill invocation expands the skill",
 		);
+		const customBaseUrl = `http://127.0.0.1:${modelPort}/custom/v1`;
+		const customLogin = await fetch(`${origin}/api/auth/probe/api-key`, {
+			method: "PUT",
+			headers: {
+				Origin: origin,
+				"X-CST-Web-Request": "1",
+				"Content-Type": "application/json",
+				"Idempotency-Key": randomUUID(),
+			},
+			body: JSON.stringify({ key: "mock-secret", baseUrl: customBaseUrl }),
+		});
+		assert.equal(customLogin.status, 200);
+		assert.notEqual(pool.get(one.id)?.session.model?.baseUrl, customBaseUrl);
+		assert.equal(
+			(
+				await send(`${sessionPath}/messages`, {
+					id: "custom-endpoint",
+					text: "custom endpoint check",
+					delivery: "queue",
+				})
+			).status,
+			202,
+		);
+		for (let i = 0; i < 120; i++) {
+			const state = await (await fetch(`${origin}${sessionPath}`)).json();
+			if (state.queue.items.find((item: { id: string }) => item.id === "custom-endpoint")?.status === "delivered")
+				break;
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		assert.ok(modelPaths.some((path) => path.startsWith("/custom/v1/chat/completions")));
+		assert.equal(pool.get(one.id)?.session.model?.baseUrl, customBaseUrl);
 		await send(`${sessionPath}/messages`, { id: "steer-anchor", text: "running task", delivery: "queue" });
 		for (let i = 0; i < 40; i++) {
 			if ((await (await fetch(`${origin}${sessionPath}`)).json()).running) break;

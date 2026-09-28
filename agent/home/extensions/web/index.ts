@@ -30,9 +30,7 @@ export default function web(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => {
 		if (container.parked && ctx.mode === "tui") {
 			ctx.ui.setEditorComponent((tui, theme, keys) => new ParkedEditor(tui, theme, keys));
-			ctx.ui.setWidget("cst-web-parked", [
-				"会话已由 Web 运行层接管（验证模式）；页面交互尚未接入。关闭终端将结束服务。",
-			]);
+			ctx.ui.setWidget("cst-web-parked", ["会话已由 Web 接管，请在浏览器中操作。关闭终端将结束服务。"]);
 		}
 	});
 
@@ -48,25 +46,6 @@ export default function web(pi: ExtensionAPI): void {
 				return;
 			}
 			if (ctx.mode !== "tui") return;
-			// Keep ordinary /web runs as a preview until browser controls are ready.
-			// The takeover path is for backend verification only.
-			if (process.env.CST_WEB_TAKEOVER !== "1") {
-				const server = createWebServer(staticDirectory);
-				try {
-					await listenWebServer(server);
-					container.server = server;
-					openBrowser();
-					ctx.ui.notify("已打开 Web 预览；会话操作仍在 TUI 中完成。", "info");
-				} catch (error) {
-					server.close();
-					const message =
-						(error as NodeJS.ErrnoException).code === "EADDRINUSE"
-							? "Web 端口已被占用。请关闭占用端口的程序后重试。"
-							: `Web 预览启动失败：${error instanceof Error ? error.message : String(error)}`;
-					ctx.ui.notify(message, "error");
-				}
-				return;
-			}
 			if (ctx.ui.getEditorText().trim()) {
 				ctx.ui.notify("编辑器还有未提交的内容，请先保存或清空。", "warning");
 				return;
@@ -161,7 +140,7 @@ export default function web(pi: ExtensionAPI): void {
 				await start;
 				openBrowser();
 				// After ctx.newSession, the old command context is stale. Use only the fresh context here.
-				parkedContext?.ui.notify("Web 接管验证已启动；页面交互接口仍待开发。", "info");
+				parkedContext?.ui.notify("Web 已启动，终端已进入待机。请在浏览器中继续操作。", "info");
 			} catch (error) {
 				const message =
 					(error as NodeJS.ErrnoException).code === "EADDRINUSE"

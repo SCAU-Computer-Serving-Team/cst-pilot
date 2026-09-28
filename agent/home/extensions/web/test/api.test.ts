@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { type AddressInfo, createServer as createNetServer } from "node:net";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createWebApi } from "../server/api.ts";
 import { createWebServer, listenWebServer } from "../server/http.ts";
+import { withProviderEndpoint } from "../server/provider-endpoint.ts";
 import { WebSessionPool } from "../server/sessions.ts";
 import { testRoot } from "./support.ts";
 
@@ -85,6 +86,10 @@ test("API shares one session, accepts once, and does not expose absolute paths",
 	const path = `/api/sessions/${slot.id}`;
 	const detail = await (await fetch(`${origin}${path}`)).json();
 	assert.equal(detail.id, slot.id);
+	assert.ok(Array.isArray(detail.entries));
+	assert.ok(Object.hasOwn(detail, "contextUsage"));
+	const modelList = await (await fetch(`${origin}/api/models?sessionId=${slot.id}`)).json();
+	assert.ok(Object.hasOwn(modelList, "contextUsage"));
 	const submitted = { id: "idempotent-a", text: "inspect", delivery: "queue" };
 	const first = await post(`${path}/messages`, submitted);
 	assert.equal(first.status, 202);
@@ -116,6 +121,43 @@ test("API key login, status and logout keep the secret out of responses", async 
 	assert.ok(details.includes("openai"));
 	const logout = await post("/api/auth/openai/logout", {});
 	assert.equal(logout.status, 200);
+});
+
+test("custom BaseURL uses Pi's provider model metadata and persists separately from the API key", async () => {
+	const secret = "custom-endpoint-test-secret";
+	const baseUrl = "https://example.test/v1";
+	const put = (url: string) =>
+		fetch(`${origin}/api/auth/openai/api-key`, {
+			method: "PUT",
+			headers: {
+				Origin: origin,
+				"X-CST-Web-Request": "1",
+				"Content-Type": "application/json",
+				"Idempotency-Key": randomUUID(),
+			},
+			body: JSON.stringify({ key: secret, baseUrl: url }),
+		});
+	const saved = await put(baseUrl);
+	assert.equal(saved.status, 200);
+	assert.equal((await saved.text()).includes(secret), false);
+	const config = await readFile(join(home, "models.json"), "utf8");
+	assert.equal(JSON.parse(config).providers.openai.baseUrl, baseUrl);
+	assert.equal(config.includes(secret), false);
+	const { modelRuntime } = await pool.getServices();
+	assert.ok(modelRuntime.getModels("openai").length > 0);
+	assert.ok(modelRuntime.getModels("openai").every((model) => model.baseUrl === baseUrl));
+	const invalid = await put("http://example.test/v1");
+	assert.equal(invalid.status, 400);
+	assert.equal(await readFile(join(home, "models.json"), "utf8"), config);
+	await assert.rejects(
+		withProviderEndpoint(home, "openai", "https://another.example.test/v1", modelRuntime, async () => {
+			throw new Error("login rejected");
+		}),
+		/login rejected/,
+	);
+	assert.equal(await readFile(join(home, "models.json"), "utf8"), config);
+	assert.ok(modelRuntime.getModels("openai").every((model) => model.baseUrl === baseUrl));
+	assert.equal((await post("/api/auth/openai/logout", {})).status, 200);
 });
 
 test("an extension question can be answered once from another browser request", async () => {
