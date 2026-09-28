@@ -93,7 +93,7 @@ omitted:
 |---|---|
 | [cst-pilot-colors.pen](src/web/design/cst-pilot-colors.pen) | 12 步用途、中性与四组彩色色阶 |
 | [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) | 首页、聊天工作台、登录页、APIKEY 表单与仪表盘的浅深两版；另含 Provider 下拉及上下文、模型、账号等悬停面板 |
-| [cst-pilot-tools.pen](src/web/design/cst-pilot-tools.pen) | 工具调用画布。以「聊天工作台 · 浅色」一帧为参照，配工具卡片的三种通用渲染模式、「已发送（等待返回）」状态，以及 `sys overview`、`runbook` 两个例外；浅深两版齐备 |
+| [cst-pilot-tools.pen](src/web/design/cst-pilot-tools.pen) | 工具调用画布。以「聊天工作台 · 浅色」一帧为参照，配工具卡片的三种通用渲染模式、「已发送（等待返回）」状态，以及 `sys overview`、`runbook` 两个例外；浅深两版齐备。逐工具帧只有浅色，深色按三个通用模板与色阶推导 |
 | [heroui-colors.pen](src/web/design/heroui-colors.pen) | HeroUI v3 默认主题对照 |
 | [asset/pencil-heroui.pen](src/web/design/asset/pencil-heroui.pen) | HeroUI 组件参考画布 |
 
@@ -287,7 +287,7 @@ omitted:
 
 加载指示圆弧直径等于同行字号，颜色与同行文字一致。例外工具（`sys overview`、`runbook`、`web_search`、`read` 图片形态）不进入折叠：状态行按第 1 层 16px 呈现，展开内容仍为第 3 层 12px、第 4 层 11px。`sys overview` 与 `runbook` 骨架同普通卡片，差别见[诊断卡片](doc/web/SPEC/diagnostic-cards.md#渲染规则)；`web_search` 单独占一行，展开仅显示传入关键词（12px），不弹出返回内容，完成以图标标识，见[web_search 卡片](doc/design/web/tool/web_search.md)；`read` 读取图片时先展示图片，再展示绝对路径，见[read 卡片](doc/design/web/tool/read.md)。
 
-字段行数值列按整张卡片对齐：取卡内最长的字段名宽度，加 10px 间距作为数值列起点，所有分组的字段行共用同一列。
+字段行数值列按整张卡片对齐：数值列起点取卡内最长的字段名宽度加 34px（标签列内 12px 间隔、最短 10px 补位，再接 12px 间隔），所有分组的字段行共用同一列。
 
 卡片正文、字段名与字段值、分组标题用思源黑体（分组标题 500，其余 400）；调用语句片与耗时用 JetBrains Mono；卡片内不用 Inter。
 

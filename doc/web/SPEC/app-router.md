@@ -89,11 +89,11 @@ API KEY 与后续 OAuth 共用模型服务登录状态。有效期、刷新和�
 | POST | `/api/models/select` | 按 `sessionId` 切换模型；无会话的主页选择在新建会话时提交 |
 | POST | `/api/models/scoped` | 改启用范围，对应 `/scoped-models` |
 | POST | `/api/models/thinking` | 按 `sessionId` 设置思考强度；无会话的主页选择在新建会话时提交 |
-| GET | `/api/auth` | 各 provider 的登录状态、凭据类型与 `requiresLogin`；不返回凭据。模型服务拒绝凭据后，标记需重新登录 |
-| PUT | `/api/auth/<provider>/api-key` | 用后台管理员账号的 API KEY 登录；后端保存凭据，响应不返回密钥 |
+| GET | `/api/auth` | 各 Provider 的登录状态、凭据类型、是否支持 API KEY 及 `requiresLogin`；不返回凭据。模型服务拒绝凭据后标记需重新登录 |
+| PUT | `/api/auth/<provider>/api-key` | 提交 `key`；可附 `baseUrl` 覆盖所选 Provider 的模型地址。地址写入 Pi 的 `models.json`，密钥由 Pi 写入 `auth.json`，响应不返回密钥 |
 | POST | `/api/auth/<provider>/logout` | 清除该 provider 的本地登录状态 |
 
-OAuth 登录流程接口留待 OA 登录实现后确定，MVP 不提供扫码或设备码接口。
+自定义 BaseURL 沿用所选 Provider 在 Pi 中已有的模型与请求协议，不创建新模型。地址须为 HTTPS 或本机 HTTP；登录失败时恢复原模型配置。OAuth 登录流程接口留待 OA 登录实现后确定，MVP 不提供扫码或设备码接口。
 
 ### 设置
 
