@@ -1,6 +1,6 @@
 # 页面地址与接口设计
 
-状态：MVP 后端接口已实现并完成本机联调；页面交互待接入。OAuth 与仪表盘接口属于后续阶段。更新：2026-09-26。
+状态：MVP 后端接口已实现并完成本机联调；页面已接入接口，交互与视觉对照在 Checkpoint 4 完善。OAuth 与仪表盘接口属于后续阶段。更新：2026-09-29。
 
 本文定义 Web 的地址空间与服务端接口。会话如何运行见[会话运行与并行](session-runtime.md)，前端工程见[前端工程](frontend.md)，视觉取值见 [DESIGN.md](../../../DESIGN.md)。
 
@@ -91,7 +91,7 @@ API KEY 与后续 OAuth 共用模型服务登录状态。有效期、刷新和�
 | POST | `/api/models/thinking` | 按 `sessionId` 设置思考强度；无会话的主页选择在新建会话时提交 |
 | GET | `/api/auth` | 各 Provider 的登录状态、凭据类型、是否支持 API KEY 及 `requiresLogin`；不返回凭据。模型服务拒绝凭据后标记需重新登录 |
 | PUT | `/api/auth/<provider>/api-key` | 提交 `key`；可附 `baseUrl` 覆盖所选 Provider 的模型地址。地址写入 Pi 的 `models.json`，密钥由 Pi 写入 `auth.json`，响应不返回密钥 |
-| POST | `/api/auth/<provider>/logout` | 清除该 provider 的本地登录状态 |
+| POST | `/api/auth/<provider>/logout` | 清除该 Provider 的本地登录状态 |
 
 自定义 BaseURL 沿用所选 Provider 在 Pi 中已有的模型与请求协议，不创建新模型。地址须为 HTTPS 或本机 HTTP；登录失败时恢复原模型配置。OAuth 登录流程接口留待 OA 登录实现后确定，MVP 不提供扫码或设备码接口。
 
@@ -110,6 +110,8 @@ cstoa 额度与仪表盘用量接口在后续阶段确定。
 |---|---|---|
 | GET | `/api/state` | 启动快照：版本、会话列表与运行状态、连接状态、可用命令；当前查看对象由页面地址决定 |
 | GET | `/api/events` | 全局事件流：会话列表变化、占用变化、设置变化 |
+| GET | `/api/files` | 项目文件清单，供输入框 `@` 引用补全；限深 6 层、最多 4000 条，结果缓存 30 秒 |
+| GET | `/api/quota` | 按 `provider` 查询额度：DeepSeek 返回账户余额，OpenCode Go / Go Plus 返回 5 小时、每周、每月用量窗口；成功结果按端点及凭据缓存 60 秒 |
 
 `/api/state` 是页面首次加载的唯一入口。
 

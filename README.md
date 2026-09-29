@@ -52,7 +52,7 @@ cst-pilot/
 |-- agent/
 |   |-- node_modules/          pi 及依赖（不入库）
 |   `-- home/
-|       |-- extensions/        扩展：branding 品牌页眉、diagnostics 诊断工具
+|       |-- extensions/        扩展：branding 品牌页眉、diagnostics 诊断工具、web 本机页面、telemetry 币种表
 |       |-- skills/            诊断工具的使用说明
 |       `-- bin/, npm/, fff/, sessions/, *.json   运行产物与密钥（不入库）
 |-- node/                      Node.js（不入库）
