@@ -3,7 +3,7 @@ import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { WebSessionPool } from "../server/sessions.ts";
+import { WebSessionPool } from "../server/session/sessions.ts";
 import { testRoot } from "./support.ts";
 
 const tempRoot = await testRoot();

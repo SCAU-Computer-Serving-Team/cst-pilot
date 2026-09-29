@@ -4,12 +4,13 @@ import { join } from "node:path";
 import type { ImageRef } from "./attachments.ts";
 
 export type Delivery = "queue" | "steer";
+export type ItemDelivery = Delivery | "direct";
 export type ItemStatus = "pending" | "delivering" | "delivered" | "failed" | "cancelled";
 export interface InboxItem {
 	id: string;
 	sequence: number;
 	text: string;
-	delivery: Delivery;
+	delivery: ItemDelivery;
 	acceptedText: string;
 	acceptedDelivery: Delivery;
 	images: ImageRef[];
@@ -127,10 +128,17 @@ export class SessionInbox {
 					throw new InboxConflict("消息 ID 已用于其他内容");
 				return { ...existing };
 			}
+			// An idle first request is delivered directly. Pending work, a paused queue, or
+			// an active session turns subsequent requests into real follow-ups.
+			const direct =
+				delivery === "queue" &&
+				!current.paused &&
+				!this.executor.isBusy() &&
+				!current.items.some((entry) => ["pending", "delivering", "failed"].includes(entry.status));
 			const added: InboxItem = {
 				id,
 				text,
-				delivery,
+				delivery: direct ? "direct" : delivery,
 				acceptedText: text,
 				acceptedDelivery: delivery,
 				images,
@@ -250,6 +258,18 @@ export class SessionInbox {
 				const next = await this.transact(async (current) => {
 					if (current.paused || current.items.some((item) => item.status === "failed")) return undefined;
 					const busy = this.executor.isBusy();
+					if (busy && current.items.some((item) => item.status === "pending" && item.delivery === "direct")) {
+						await this.save({
+							...current,
+							version: current.version + 1,
+							items: current.items.map((item) =>
+								item.status === "pending" && item.delivery === "direct"
+									? { ...item, delivery: "queue" as const }
+									: item,
+							),
+						});
+						return undefined;
+					}
 					const pending = current.items.find(
 						(item) => item.status === "pending" && (item.delivery === "steer" || !busy),
 					);
@@ -319,7 +339,7 @@ function validSnapshot(value: unknown): value is InboxSnapshot {
 								Number.isSafeInteger(ref.bytes),
 						))) &&
 				Number.isSafeInteger(item.sequence) &&
-				(item.delivery === "queue" || item.delivery === "steer") &&
+				(item.delivery === "queue" || item.delivery === "steer" || item.delivery === "direct") &&
 				["pending", "delivering", "delivered", "failed", "cancelled"].includes(item.status),
 		)
 	);

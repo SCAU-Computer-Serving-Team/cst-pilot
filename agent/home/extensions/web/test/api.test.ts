@@ -5,10 +5,10 @@ import { type AddressInfo, createServer as createNetServer } from "node:net";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { withProviderEndpoint } from "../server/api/provider-endpoint.ts";
 import { createWebApi } from "../server/api.ts";
 import { createWebServer, listenWebServer } from "../server/http.ts";
-import { withProviderEndpoint } from "../server/provider-endpoint.ts";
-import { WebSessionPool } from "../server/sessions.ts";
+import { WebSessionPool } from "../server/session/sessions.ts";
 import { testRoot } from "./support.ts";
 
 const base = await testRoot();

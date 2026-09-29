@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { InboxConflict, SessionInbox } from "../server/inbox.ts";
+import { InboxConflict, SessionInbox } from "../server/session/inbox.ts";
 import { testRoot } from "./support.ts";
 
 const tempRoot = await testRoot();
@@ -40,6 +40,72 @@ test("accept persists before delivery, deduplicates simultaneous writers and sur
 	await resumed.accept("another", "next", "queue");
 	await waitFor(async () => (await resumed.snapshot()).items.every((item) => item.status === "delivered"));
 	assert.deepEqual(sent, ["hello", "next"]);
+});
+
+test("idle first message goes directly to the session; only follow-ups are queued", async () => {
+	let release!: () => void;
+	let started!: () => void;
+	const running = new Promise<void>((resolve) => {
+		started = resolve;
+	});
+	const finish = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const sent: string[] = [];
+	const inbox = new SessionInbox(root, "direct", {
+		isBusy: () => false,
+		prompt: async (text) => {
+			sent.push(text);
+			if (text === "first") {
+				started();
+				await finish;
+			}
+		},
+		steer: async () => {},
+	});
+	try {
+		const first = await inbox.accept("first", "first", "queue");
+		assert.equal(first.delivery, "direct");
+		await running;
+		const followUp = await inbox.accept("second", "second", "queue");
+		assert.equal(followUp.delivery, "queue");
+		assert.equal((await inbox.snapshot()).items.find((item) => item.id === "second")?.status, "pending");
+		assert.deepEqual(sent, ["first"]);
+		release();
+		await waitFor(async () => (await inbox.snapshot()).items.every((item) => item.status === "delivered"));
+		assert.deepEqual(sent, ["first", "second"]);
+	} finally {
+		release();
+		await inbox.close();
+	}
+});
+
+test("a direct input that loses the idle race becomes a visible follow-up", async () => {
+	let busy = false;
+	const sent: string[] = [];
+	const inbox = new SessionInbox(
+		root,
+		"race",
+		{
+			isBusy: () => busy,
+			prompt: async (text) => {
+				sent.push(text);
+			},
+			steer: async () => {},
+		},
+		(snapshot) => {
+			if (snapshot.items[0]?.delivery === "direct" && snapshot.items[0].status === "pending") busy = true;
+		},
+	);
+	await inbox.accept("first", "first", "queue");
+	await waitFor(async () => (await inbox.snapshot()).items[0]?.delivery === "queue");
+	assert.equal((await inbox.snapshot()).items[0].status, "pending");
+	assert.deepEqual(sent, []);
+	busy = false;
+	inbox.wake();
+	await waitFor(async () => (await inbox.snapshot()).items[0]?.status === "delivered");
+	assert.deepEqual(sent, ["first"]);
+	await inbox.close();
 });
 
 test("versions, reorder and pause are enforced by the server", async () => {

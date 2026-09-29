@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createWebApi } from "../server/api.ts";
 import { createWebServer, listenWebServer } from "../server/http.ts";
-import { WebSessionPool } from "../server/sessions.ts";
+import { WebSessionPool } from "../server/session/sessions.ts";
 import { testRoot } from "./support.ts";
 
 const rootDir = await testRoot();

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { ImageStore } from "../server/attachments.ts";
+import { ImageStore } from "../server/session/attachments.ts";
 import { testRoot } from "./support.ts";
 
 const rootDir = await testRoot();

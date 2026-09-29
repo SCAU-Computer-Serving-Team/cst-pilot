@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createWebApi } from "../server/api.ts";
 import { createWebServer, listenWebServer } from "../server/http.ts";
-import { WebSessionPool } from "../server/sessions.ts";
+import { WebSessionPool } from "../server/session/sessions.ts";
 import { testRoot } from "./support.ts";
 
 const rootDir = await testRoot();
@@ -37,9 +37,10 @@ test("HTTP submits to two Pi sessions, returns immediately, streams results, and
 		modelPaths.push(request.url ?? "");
 		modelCalls++;
 		if (modelCalls <= 2) await initialResponses;
-		if (payload.includes("force-auth-error")) {
-			response.writeHead(401, { "Content-Type": "application/json" });
-			response.end(JSON.stringify({ error: { message: "Unauthorized" } }));
+		if (payload.includes("force-auth-error") || payload.includes("force-balance-error")) {
+			const authError = !payload.includes("force-balance-error");
+			response.writeHead(authError ? 401 : 402, { "Content-Type": "application/json" });
+			response.end(JSON.stringify({ error: { message: authError ? "Unauthorized" : "Insufficient Balance" } }));
 			return;
 		}
 		await new Promise((resolve) =>
@@ -174,6 +175,8 @@ test("HTTP submits to two Pi sessions, returns immediately, streams results, and
 			]);
 			assert.equal(a.status, 202);
 			assert.equal(b.status, 202);
+			assert.equal((await a.json()).item.delivery, "direct");
+			assert.equal((await b.json()).item.delivery, "direct");
 		} finally {
 			if (timeout) clearTimeout(timeout);
 			releaseInitialResponses();
@@ -250,6 +253,7 @@ test("HTTP submits to two Pi sessions, returns immediately, streams results, and
 			delivery: "queue",
 		});
 		assert.equal(queued.status, 202);
+		assert.equal((await queued.json()).item.delivery, "queue");
 		const stop = await send(`${sessionPath}/abort`, {});
 		assert.equal(stop.status, 200);
 		const paused = await (await fetch(`${origin}${sessionPath}`)).json();
@@ -409,12 +413,59 @@ test("HTTP submits to two Pi sessions, returns immediately, streams results, and
 		);
 		for (let i = 0; i < 120; i++) {
 			const state = await (await fetch(`${origin}${sessionPath}`)).json();
-			if (state.queue.items.find((item: { id: string }) => item.id === "expired-key")?.status === "failed") break;
+			if (state.queue.items.find((item: { id: string }) => item.id === "expired-key")?.status === "delivered") break;
 			await new Promise((resolve) => setTimeout(resolve, 50));
 		}
 		assert.equal(modelCalls, authCalls + 1);
+		const authDetail = await (await fetch(`${origin}${sessionPath}`)).json();
+		assert.equal(
+			authDetail.queue.items.find((item: { id: string }) => item.id === "expired-key").status,
+			"delivered",
+		);
+		assert.ok(
+			authDetail.messages.some(
+				(message: { role: string; stopReason?: string }) =>
+					message.role === "assistant" && message.stopReason === "error",
+			),
+		);
 		const auth = await (await fetch(`${origin}/api/auth`)).json();
 		assert.equal(auth.providers.find((provider: { id: string }) => provider.id === "probe").requiresLogin, true);
+		const relogin = await fetch(`${origin}/api/auth/probe/api-key`, {
+			method: "PUT",
+			headers: {
+				Origin: origin,
+				"X-CST-Web-Request": "1",
+				"Content-Type": "application/json",
+				"Idempotency-Key": randomUUID(),
+			},
+			body: JSON.stringify({ key: "mock-secret" }),
+		});
+		assert.equal(relogin.status, 200);
+		const balance = await send(`${sessionPath}/messages`, {
+			id: "balance-error",
+			text: "force-balance-error",
+			delivery: "queue",
+		});
+		assert.equal(balance.status, 202);
+		for (let i = 0; i < 120; i++) {
+			const state = await (await fetch(`${origin}${sessionPath}`)).json();
+			if (state.queue.items.find((item: { id: string }) => item.id === "balance-error")?.status === "delivered")
+				break;
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		const balanceDetail = await (await fetch(`${origin}${sessionPath}`)).json();
+		assert.equal(
+			balanceDetail.queue.items.find((item: { id: string }) => item.id === "balance-error").status,
+			"delivered",
+		);
+		assert.ok(
+			balanceDetail.messages.some(
+				(message: { role: string; stopReason?: string; errorMessage?: string }) =>
+					message.role === "assistant" &&
+					message.stopReason === "error" &&
+					message.errorMessage?.includes("Insufficient Balance"),
+			),
+		);
 	} finally {
 		server.closeAllConnections();
 		await new Promise<void>((resolve) => server.close(() => resolve()));

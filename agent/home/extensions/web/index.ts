@@ -5,7 +5,7 @@ import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent
 import { createWebApi } from "./server/api.ts";
 import { getWebContainer } from "./server/container.ts";
 import { createWebServer, listenWebServer, WEB_PORT } from "./server/http.ts";
-import { WebSessionPool } from "./server/sessions.ts";
+import { WebSessionPool } from "./server/session/sessions.ts";
 
 const url = `http://127.0.0.1:${WEB_PORT}/`;
 const staticDirectory = fileURLToPath(new URL("./static/", import.meta.url));

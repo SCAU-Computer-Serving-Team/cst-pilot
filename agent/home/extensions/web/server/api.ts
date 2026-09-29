@@ -3,12 +3,14 @@ import { rm } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { resolveModelScopeWithDiagnostics } from "@earendil-works/pi-coding-agent";
-import { type ImageRef, ImageStore } from "./attachments.ts";
-import { SessionEvents } from "./events.ts";
-import { type Delivery, InboxConflict, SessionInbox } from "./inbox.ts";
-import { withProviderEndpoint } from "./provider-endpoint.ts";
-import { MutationReceipts } from "./receipts.ts";
-import type { WebSessionPool } from "./sessions.ts";
+import { createAuthRoutes } from "./api/auth.ts";
+import { listProjectFiles } from "./api/project-files.ts";
+import { getProviderQuota } from "./api/quota.ts";
+import { type ImageRef, ImageStore } from "./session/attachments.ts";
+import { SessionEvents } from "./session/events.ts";
+import { type Delivery, InboxConflict, SessionInbox } from "./session/inbox.ts";
+import { MutationReceipts } from "./session/receipts.ts";
+import type { WebSessionPool } from "./session/sessions.ts";
 
 function send(response: ServerResponse, status: number, body: unknown): void {
 	response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
@@ -72,6 +74,7 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 				: undefined);
 		return receipts.once(key, signature, () => (sessionId ? serialize(sessionId, action) : action()));
 	}
+	const authRoutes = createAuthRoutes({ pool, agentDir, invalidAuth, globalEvents, body, writeOnce, serialize, send });
 	const imageContent = async (id: string, refs: ImageRef[]) =>
 		Promise.all(
 			refs.map(async (ref) => ({
@@ -118,7 +121,7 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 									providerId: slot.session.model.provider,
 								});
 							}
-							throw new Error("模型调用失败");
+							// prompt 已接收用户消息。模型失败由助手消息呈现，不应标为投递失败。
 						}
 					},
 					steer: async (text, refs, skill) =>
@@ -185,6 +188,7 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 				const { modelRuntime, settingsManager } = await pool.getServices();
 				const sessionId = new URL(request.url ?? "/", origin).searchParams.get("sessionId");
 				const slot = sessionId ? await pool.openSaved(sessionId) : undefined;
+				const stats = slot?.session.getSessionStats();
 				send(response, 200, {
 					models: modelRuntime.getModels().map((model) => ({
 						id: model.id,
@@ -196,7 +200,17 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 						maxTokens: model.maxTokens,
 					})),
 					enabled: settingsManager.getEnabledModels() ?? [],
-					contextUsage: slot?.session.getSessionStats().contextUsage ?? null,
+					thinkingLevels: slot?.session.getAvailableThinkingLevels() ?? [],
+					contextUsage: stats?.contextUsage ?? null,
+					usage: stats
+						? {
+								tokens: stats.tokens,
+								cacheHitRate:
+									stats.tokens.input + stats.tokens.cacheRead > 0
+										? stats.tokens.cacheRead / (stats.tokens.input + stats.tokens.cacheRead)
+										: null,
+							}
+						: null,
 					selected: slot?.session.model
 						? {
 								provider: slot.session.model.provider,
@@ -204,6 +218,25 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 								thinkingLevel: slot.session.thinkingLevel,
 							}
 						: null,
+				});
+				return true;
+			}
+			if (pathname === "/api/quota" && method === "GET") {
+				const providerId = new URL(request.url ?? "/", origin).searchParams.get("provider") ?? "";
+				const { modelRuntime } = await pool.getServices();
+				send(response, 200, await getProviderQuota(providerId, modelRuntime));
+				return true;
+			}
+			if (pathname === "/api/files" && method === "GET") {
+				const query = (new URL(request.url ?? "/", origin).searchParams.get("query") ?? "").toLowerCase();
+				const all = listProjectFiles(process.cwd());
+				const matches = (query ? all.filter((file) => file.toLowerCase().includes(query)) : all).slice(0, 50);
+				send(response, 200, {
+					total: all.length,
+					files: matches.map((path) => ({
+						path,
+						dir: path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "",
+					})),
 				});
 				return true;
 			}
@@ -220,7 +253,12 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 				if (!model) throw new Error("请求的模型不存在");
 				const result = await writeOnce(request, pathname, input, async () => {
 					await slot.session.setModel(model);
-					return { provider: model.provider, id: model.id };
+					return {
+						provider: model.provider,
+						id: model.id,
+						thinkingLevel: slot.session.thinkingLevel,
+						thinkingLevels: slot.session.getAvailableThinkingLevels(),
+					};
 				});
 				send(response, 200, result);
 				return true;
@@ -259,94 +297,7 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 				send(response, 200, result);
 				return true;
 			}
-			if (pathname === "/api/auth" && method === "GET") {
-				const { modelRuntime } = await pool.getServices();
-				const credentials = await modelRuntime.listCredentials();
-				send(response, 200, {
-					providers: modelRuntime.getProviders().map((provider) => ({
-						id: provider.id,
-						name: provider.name,
-						supportsApiKey: !!provider.auth.apiKey,
-						type: credentials.find((credential) => credential.providerId === provider.id)?.type ?? null,
-						requiresLogin: invalidAuth.has(provider.id),
-					})),
-				});
-				return true;
-			}
-			const auth = /^\/api\/auth\/([a-zA-Z0-9_-]{1,128})\/(api-key|logout)$/.exec(pathname);
-			if (auth && (method === "PUT" || method === "POST")) {
-				const [, providerId, action] = auth;
-				const { modelRuntime } = await pool.getServices();
-				const authProvider = modelRuntime.getProvider(providerId);
-				if (!authProvider) throw new Error("请求的模型服务不存在");
-				if (action === "api-key" && !authProvider.auth.apiKey) throw new Error("请求的模型服务不支持 API KEY 登录");
-				const input = await body(request);
-				if (action === "api-key" && method === "PUT") {
-					if (
-						typeof input.key !== "string" ||
-						!input.key.trim() ||
-						input.key.length > 8_192 ||
-						(input.baseUrl !== undefined && typeof input.baseUrl !== "string") ||
-						Object.keys(input).some((key) => key !== "key" && key !== "baseUrl")
-					)
-						throw new Error("请求的密钥或 BaseURL 格式无效");
-					const result = await writeOnce(request, pathname, input, () =>
-						serialize(`auth:${providerId}`, async () => {
-							const login = async () => {
-								let prompts = 0;
-								await modelRuntime.login(providerId, "api_key", {
-									prompt: async (question) => {
-										if (++prompts !== 1 || question.type !== "secret")
-											throw new Error("该模型服务需要其他登录信息");
-										return input.key as string;
-									},
-									notify: () => {},
-								});
-								return { providerId, type: "api_key" };
-							};
-							const responseBody =
-								typeof input.baseUrl === "string"
-									? await serialize("auth-config:all", async () => {
-											if (
-												pool
-													.snapshot()
-													.some(
-														({ id, running }) =>
-															running && pool.get(id)?.session.model?.provider === providerId,
-													)
-											)
-												throw new InboxConflict("此 Provider 的会话正在执行，请完成后再修改 BaseURL");
-											return withProviderEndpoint(
-												agentDir,
-												providerId,
-												input.baseUrl as string,
-												modelRuntime,
-												login,
-											);
-										})
-									: await login();
-							invalidAuth.delete(providerId);
-							globalEvents.publish("state", { type: "auth_changed", providerId });
-							return responseBody;
-						}),
-					);
-					send(response, 200, result);
-					return true;
-				}
-				if (action === "logout" && method === "POST") {
-					if (Object.keys(input).length) throw new Error("请求格式无效");
-					const result = await writeOnce(request, pathname, input, () =>
-						serialize(`auth:${providerId}`, async () => {
-							await modelRuntime.logout(providerId);
-							invalidAuth.delete(providerId);
-							globalEvents.publish("state", { type: "auth_changed", providerId });
-							return { providerId, type: null };
-						}),
-					);
-					send(response, 200, result);
-					return true;
-				}
-			}
+			if (await authRoutes(request, response, pathname, method)) return true;
 			if (pathname === "/api/sessions" && method === "GET") {
 				send(response, 200, { sessions: await pool.list() });
 				return true;

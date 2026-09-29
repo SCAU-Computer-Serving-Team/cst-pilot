@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
-import { MutationReceipts } from "../server/receipts.ts";
+import { MutationReceipts } from "../server/session/receipts.ts";
 import { testRoot } from "./support.ts";
 
 const rootDir = await testRoot();
