@@ -1,18 +1,21 @@
 import { Button, Label, ListBox, Select, TextArea } from "@heroui/react";
-import { ArrowUp, Check, ChevronDown, Command, Plus, Sparkles, Square } from "lucide-react";
-import { type ClipboardEvent, type CSSProperties, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { ArrowUp, Brain, Check, ChevronDown, Command, FileText, Plus, Sparkles, Square } from "lucide-react";
+import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { apiJson } from "./api";
+import { ContextMeter } from "./context-meter";
 import { addImage, encodeImages, loadImages, type DraftImage } from "./draft-images";
 
 type Model = { id: string; provider: string; name: string; reasoning: boolean };
 type Selection = { provider: string; id: string; thinkingLevel?: string } | null;
+// 档位与 pi 的 ThinkingLevel 一一对应（off/minimal/low/medium/high/xhigh/max），面板内用英文短名。
 const thinkingOptions = [
-  { id: "off", label: "关闭", description: "直接回答，不展示思考过程" },
-  { id: "minimal", label: "极低", description: "尽量减少推理" },
-  { id: "low", label: "低", description: "少量推理，响应更快" },
-  { id: "medium", label: "中", description: "适度推理，平衡速度与质量" },
-  { id: "high", label: "高", description: "充分推理，复杂问题优先" },
-  { id: "xhigh", label: "最高", description: "尽可能深入推理" },
+  { id: "off", label: "Off" },
+  { id: "minimal", label: "Minimal" },
+  { id: "low", label: "Low" },
+  { id: "medium", label: "Medium" },
+  { id: "high", label: "High" },
+  { id: "xhigh", label: "XHigh" },
+  { id: "max", label: "Max" },
 ];
 export type ComposerConfig = { provider?: string; modelId?: string; thinkingLevel?: string; messageId: string; images: { mimeType: string; data: string }[]; skill?: string };
 const commandLabels: Record<string, string> = { "/compact": "压缩会话", "/fork": "派生会话", "/skill:disk": "磁盘诊断", "/skill:driver": "驱动检查", "/skill:eventlog": "事件日志", "/skill:ls": "目录占用", "/skill:runbook": "命令清单", "/skill:startup": "开机自启", "/skill:sys": "系统状态" };
@@ -26,6 +29,10 @@ function ImagePreview({ src, onClose }: { src: string; onClose: () => void }) {
   </dialog>;
 }
 
+type SessionUsage = {
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
+  cacheHitRate: number | null;
+};
 export function Composer({ home = false, sessionId, running = false, queueActive = false, contextUsage, onSend, onStop, onCommand }: {
   home?: boolean;
   sessionId?: string;
@@ -47,15 +54,37 @@ export function Composer({ home = false, sessionId, running = false, queueActive
   const [models, setModels] = useState<Model[]>([]);
   const [modelQuery, setModelQuery] = useState("");
   const [loadedContext, setLoadedContext] = useState<{ tokens: number | null; contextWindow: number; percent: number | null } | null>(null);
+  const [usageStats, setUsageStats] = useState<SessionUsage | null>(null);
   const [selected, setSelected] = useState<Selection>(null);
   const [thinking, setThinking] = useState("off");
+  const [thinkingLevels, setThinkingLevels] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const [commands, setCommands] = useState<string[]>([]);
   const [command, setCommand] = useState("");
   const [commandIndex, setCommandIndex] = useState(0);
   const [suggestionsVisible, setSuggestionsVisible] = useState(true);
+  const [files, setFiles] = useState<{ path: string; dir: string }[]>([]);
+  const [fileIndex, setFileIndex] = useState(0);
+  const [filesVisible, setFilesVisible] = useState(true);
   const suggestions = !command && suggestionsVisible && /^\/[\w:-]*$/.test(text) ? commands.filter((item) => item.startsWith(text)) : [];
+  // `@` 文件引用：光标位于行尾的 @query 时列出项目文件。
+  const fileMatch = filesVisible ? /(?:^|\s)@([^\s@]*)$/.exec(text) : null;
+  const fileSuggestions = fileMatch ? files.filter((file) => file.path.toLowerCase().includes((fileMatch[1] ?? "").toLowerCase())).slice(0, 40) : [];
+  const filesOpen = !!fileMatch;
+  useEffect(() => {
+    if (!filesOpen || files.length) return;
+    let active = true;
+    apiJson<{ files: { path: string; dir: string }[] }>("/api/files")
+      .then((data) => { if (active) setFiles(data.files); })
+      .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "文件列表加载失败"); });
+    return () => { active = false; };
+  }, [filesOpen, files.length]);
   function selectCommand(name: string) { setCommand(name); setText(""); setCommandIndex(0); }
+  function selectFile(path: string) {
+    const at = text.lastIndexOf("@");
+    setText(`${at >= 0 ? text.slice(0, at) : ""}@${path} `);
+    setFileIndex(0); setFilesVisible(false);
+  }
   const [error, setError] = useState("");
 
   useEffect(() => { setText(sessionStorage.getItem(draftKey) ?? ""); setMessageId(sessionStorage.getItem(`${draftKey}:id`) ?? crypto.randomUUID()); }, [draftKey]);
@@ -101,22 +130,27 @@ export function Composer({ home = false, sessionId, running = false, queueActive
   }, []);
   useEffect(() => {
     let active = true;
-    apiJson<{ models: Model[]; selected: (Selection & { thinkingLevel?: string }); contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null } }>(`/api/models${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`)
-      .then((data) => { if (active) { setModels(data.models); setSelected(data.selected); setThinking(data.selected?.thinkingLevel ?? "off"); setLoadedContext(data.contextUsage ?? null); } })
+    apiJson<{ models: Model[]; selected: (Selection & { thinkingLevel?: string }); thinkingLevels?: string[]; contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null }; usage?: SessionUsage | null }>(`/api/models${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`)
+      .then((data) => { if (active) { setModels(data.models); setSelected(data.selected); setThinking(data.selected?.thinkingLevel ?? "off"); setThinkingLevels(data.thinkingLevels ?? []); setLoadedContext(data.contextUsage ?? null); setUsageStats(data.usage ?? null); } })
       .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "模型列表加载失败"); });
     return () => { active = false; };
   }, [sessionId]);
 
   const usage = contextUsage ?? loadedContext;
-  const usagePercent = usage?.percent ?? 0;
+  const cacheHitRate = usageStats?.cacheHitRate ?? null;
   const modelKey = selected ? `${selected.provider}/${selected.id}` : "auto";
+  const availableThinking = thinkingLevels.length ? thinkingOptions.filter((option) => thinkingLevels.includes(option.id)) : thinkingOptions;
   const modelMatches = models.filter((item) => `${item.provider} ${item.name} ${item.id}`.toLowerCase().includes(modelQuery.toLowerCase()));
   async function chooseModel(key: string) {
     if (!sessionId && key === "auto") { setSelected(null); setModelQuery(""); return; }
     const choice = models.find((item) => `${item.provider}/${item.id}` === key);
     if (!choice) return;
     try {
-      if (sessionId) await apiJson("/api/models/select", { method: "POST", body: { sessionId, provider: choice.provider, modelId: choice.id } });
+      if (sessionId) {
+        const changed = await apiJson<{ thinkingLevel?: string; thinkingLevels?: string[] }>("/api/models/select", { method: "POST", body: { sessionId, provider: choice.provider, modelId: choice.id } });
+        if (changed.thinkingLevel) setThinking(changed.thinkingLevel);
+        if (changed.thinkingLevels) setThinkingLevels(changed.thinkingLevels);
+      }
       setSelected({ provider: choice.provider, id: choice.id }); setModelQuery(""); setError("");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "无法切换模型"); }
   }
@@ -147,6 +181,14 @@ export function Composer({ home = false, sessionId, running = false, queueActive
   }
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if (fileSuggestions.length && ["ArrowUp", "ArrowDown", "Tab", "Enter", "Escape"].includes(event.key)) {
+      event.preventDefault();
+      if (event.key === "ArrowUp") setFileIndex((value) => (value - 1 + fileSuggestions.length) % fileSuggestions.length);
+      else if (event.key === "ArrowDown") setFileIndex((value) => (value + 1) % fileSuggestions.length);
+      else if (event.key === "Escape") setFilesVisible(false);
+      else selectFile((fileSuggestions[fileIndex] ?? fileSuggestions[0]).path);
+      return;
+    }
     if (suggestions.length && ["ArrowUp", "ArrowDown", "Tab", "Enter", "Escape"].includes(event.key)) {
       event.preventDefault();
       if (event.key === "ArrowUp") setCommandIndex((value) => (value - 1 + suggestions.length) % suggestions.length);
@@ -164,12 +206,18 @@ export function Composer({ home = false, sessionId, running = false, queueActive
   return (
     <div className={`composer ${home ? "composer--home" : "composer--chat"}`} aria-label="消息编辑器">
       {command && <div className="composer-command"><span>{command}</span><Button variant="ghost" isIconOnly aria-label="移除命令" onPress={() => setCommand("")}>×</Button></div>}
-      <TextArea aria-label="消息" className="composer-input" value={text} onChange={(event) => { setText(event.target.value); setCommandIndex(0); setSuggestionsVisible(true); setMessageId(crypto.randomUUID()); }} onKeyDown={keyDown} onPaste={paste}
+      <TextArea aria-label="消息" className="composer-input" value={text} onChange={(event) => { setText(event.target.value); setCommandIndex(0); setFileIndex(0); setSuggestionsVisible(true); setFilesVisible(true); setMessageId(crypto.randomUUID()); }} onKeyDown={keyDown} onPaste={paste}
         placeholder={home ? "描述这台电脑遇到的问题…" : queueActive ? "继续输入以排队后续修改" : "继续提问，或补充这台电脑的情况…"} rows={home ? 1 : 2} />
       {!!suggestions.length && <div className="command-suggestions" role="group" aria-label="命令补全">{([false, true] as const).map((skill) => {
         const group = suggestions.filter((item) => item.startsWith("/skill:") === skill);
         return group.length ? <div key={String(skill)} className="command-group"><span className="command-group-title">{skill ? "技能" : "命令"}</span>{group.map((item) => <Button key={item} className={suggestions.indexOf(item) === commandIndex ? "command-active" : ""} variant="ghost" onPress={() => selectCommand(item)}>{skill ? <Sparkles size={16} /> : <Command size={16} />}<span>{item}</span><small>{commandLabels[item]}</small></Button>)}</div> : null;
       })}</div>}
+      {!!fileSuggestions.length && <div className="command-suggestions file-suggestions" role="group" aria-label="文件引用补全">
+        <div className="command-group"><span className="command-group-title">文件引用</span>
+          {fileSuggestions.map((file, index) => <Button key={file.path} className={index === fileIndex ? "command-active" : ""} variant="ghost" onPress={() => selectFile(file.path)}><FileText size={16} />
+            <span>{file.path.split("/").pop()}</span><small>{file.dir}</small></Button>)}
+        </div>
+      </div>}
       {!!images.length && <div className="draft-images" aria-label="待发送图片">{images.map((image, index) => <div className="draft-image" key={`${image.hash}-${index}`}>
         <button className="draft-image-open" type="button" aria-label={`查看图片 ${index + 1}`} onClick={() => setPreviewImage(image.url)}><img src={image.url} alt={`待发送图片 ${index + 1}`} /></button><Button variant="ghost" isIconOnly aria-label={`移除图片 ${index + 1}`} onPress={() => removeImage(index)}>×</Button>
       </div>)}</div>}
@@ -179,9 +227,10 @@ export function Composer({ home = false, sessionId, running = false, queueActive
         <input ref={fileInput} className="visually-hidden" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple aria-label="选择图片" onChange={(event) => { void attach([...event.target.files ?? []]); event.target.value = ""; }} />
         <Button variant="ghost" isIconOnly className="composer-icon" aria-label="添加图片" onPress={() => fileInput.current?.click()}><Plus size={20} /></Button>
         <span className="composer-spacer" />
-        <Select aria-label="模型" selectedKey={modelKey} onSelectionChange={(key) => { if (key != null) void chooseModel(String(key)); }} className="model-select">
-          <Label className="visually-hidden">模型</Label>
-          <Select.Trigger className="composer-model">{!home && <span className="context-meter"><span className="context-ring" style={{ "--context-progress": `${Math.max(0, Math.min(100, usagePercent))}%` } as CSSProperties} data-level={usagePercent >= 90 ? "danger" : usagePercent >= 75 ? "warning" : "normal"} aria-label={usage?.percent == null ? "上下文用量未知" : `上下文用量 ${Math.round(usagePercent)}%`} /><span className="context-panel" role="tooltip"><strong>上下文容量</strong><span>{usage?.tokens == null ? "用量未知" : `${usage.tokens.toLocaleString("zh-CN")} / ${usage.contextWindow.toLocaleString("zh-CN")}（${usage.percent == null ? "占比未知" : `${usage.percent.toFixed(1)}%`}）`}</span><span className="context-progress" aria-hidden="true"><span style={{ width: `${Math.max(0, Math.min(100, usagePercent))}%` }} /></span></span></span>}{models.find((item) => `${item.provider}/${item.id}` === modelKey)?.name ?? "自动选择"}<ChevronDown size={13} /></Select.Trigger>
+        {!home && <ContextMeter usage={usage} cacheHitRate={cacheHitRate} provider={selected?.provider ?? ""} />}
+          <Select aria-label="模型" selectedKey={modelKey} onSelectionChange={(key) => { if (key != null) void chooseModel(String(key)); }} className="model-select">
+            <Label className="visually-hidden">模型</Label>
+            <Select.Trigger className="composer-model"><span className="model-label">{models.find((item) => `${item.provider}/${item.id}` === modelKey)?.name ?? "自动选择"}<ChevronDown size={13} /></span></Select.Trigger>
           <Select.Popover className="composer-popover model-popover" placement="top end"><div className="model-search"><input aria-label="搜索模型" value={modelQuery} onChange={(event) => setModelQuery(event.target.value)} placeholder="搜索 Provider 或模型名称" /><small>显示 {Math.min(modelMatches.length, 80)} / {modelMatches.length}</small></div><ListBox>
             {!sessionId && <ListBox.Item id="auto" textValue="自动选择"><Check className="model-option-check" size={16} aria-hidden="true" /><span>自动选择</span></ListBox.Item>}
             {modelMatches.slice(0, 80).map((model) => <ListBox.Item key={`${model.provider}/${model.id}`} id={`${model.provider}/${model.id}`} textValue={`${model.provider} ${model.name}`}><Check className="model-option-check" size={16} aria-hidden="true" /><span title={`${model.provider} · ${model.name}`}>{model.name}</span></ListBox.Item>)}
@@ -189,11 +238,11 @@ export function Composer({ home = false, sessionId, running = false, queueActive
         </Select>
         {!home && <Select aria-label="思考强度" selectedKey={thinking} onSelectionChange={(key) => { if (key != null) void chooseThinking(String(key)); }} className="thinking-select">
           <Label className="visually-hidden">思考强度</Label>
-          <Select.Trigger className="composer-thinking">{thinking === "off" ? "思考关闭" : `思考 · ${thinkingOptions.find((option) => option.id === thinking)?.label ?? thinking}`}<ChevronDown size={12} /></Select.Trigger>
-          <Select.Popover className="composer-popover thinking-popover" placement="top end"><ListBox>{thinkingOptions.map((option) => <ListBox.Item id={option.id} key={option.id} textValue={option.label}><span className="thinking-option-copy"><span>{option.label}</span><small>{option.description}</small></span><Check className="model-option-check" size={16} aria-hidden="true" /></ListBox.Item>)}</ListBox></Select.Popover>
+          <Select.Trigger className="composer-thinking"><Brain size={16} aria-hidden="true" />{thinking === "off" ? "Off" : thinkingOptions.find((option) => option.id === thinking)?.label ?? thinking}<ChevronDown size={13} /></Select.Trigger>
+          <Select.Popover className="composer-popover thinking-popover" placement="top end"><ListBox>{availableThinking.map((option) => <ListBox.Item id={option.id} key={option.id} textValue={option.label}><span className="thinking-option-copy"><span>{option.label}</span></span><Check className="model-option-check" size={16} aria-hidden="true" /></ListBox.Item>)}</ListBox></Select.Popover>
         </Select>}
         <Button isIconOnly isDisabled={sending || (!text.trim() && !images.length && !command && !running) || (!onSend && !onStop && !onCommand)} className="composer-send"
-          aria-label={running && !text.trim() && !images.length && !command ? "停止生成" : "发送消息"} onPress={() => void submit()}>{running && !text.trim() && !images.length && !command ? <Square size={15} /> : <ArrowUp size={16} />}</Button>
+          aria-label={running && !text.trim() && !images.length && !command ? "停止生成" : "发送消息"} onPress={() => void submit()}>{running && !text.trim() && !images.length && !command ? <Square size={12} fill="currentColor" /> : <ArrowUp size={16} />}</Button>
       </div>
     </div>
   );

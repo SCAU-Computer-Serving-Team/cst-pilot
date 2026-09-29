@@ -21,7 +21,7 @@ export type QueueItem = {
   id: string;
   text: string;
   status: "pending" | "delivering" | "delivered" | "failed" | "cancelled";
-  delivery: "queue" | "steer";
+  delivery: "direct" | "queue" | "steer";
   images: { id: string; mimeType: string }[];
   sequence: number;
 };

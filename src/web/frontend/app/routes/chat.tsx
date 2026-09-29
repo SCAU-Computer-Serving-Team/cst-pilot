@@ -1,13 +1,14 @@
 import { Button, Disclosure } from "@heroui/react";
-import { ArrowUp, Brain, Copy, Download, GitFork, GripVertical, HardDrive, ListTree, Pencil, Trash2 } from "lucide-react";
+import { ArrowUp, Brain, Copy, Download, GitFork, GripVertical, HardDrive, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { apiJson } from "../app/api";
 import { Composer } from "../app/composer";
-import { sampleSessions, Sidebar } from "../app/shell";
+import { orderedParts, visibleQueueItems } from "../app/conversation-parts";
+import { sampleSessions } from "../app/shell";
 import { type ContentPart, type InboxSnapshot, type Message, type Question, useSessionDetail } from "../app/web-state";
 import { ToolGroup } from "../cards/tool-card";
 import { matchToolResults } from "../cards/match-results";
@@ -55,14 +56,16 @@ function Conversation({ id, entries, streaming, running, refresh }: {
             <img key={imageIndex} className="message-image" alt={`附图 ${imageIndex + 1}`} src={`data:${part.mimeType};base64,${part.data}`} />)}
         </div></div> :
         <article className="assistant-block" key={entryId ?? `assistant-${index}`}>
-          {Array.isArray(message.content) && message.content.filter((part) => part.type === "thinking").map((part, thoughtIndex) => <Disclosure className="thinking-line" key={thoughtIndex} isDisabled={part.redacted}>
-            <Disclosure.Heading><Disclosure.Trigger className="thinking-trigger"><Brain size={16} aria-hidden="true" /><span>已思考 · {part.redacted ? "内容不可用" : part.thinking.slice(0, 48)}</span></Disclosure.Trigger></Disclosure.Heading>
-            <Disclosure.Content>{!part.redacted && <pre>{part.thinking}</pre>}</Disclosure.Content>
-          </Disclosure>)}
-          {Array.isArray(message.content) && message.content.some((part) => part.type === "toolCall") && <ToolGroup
-            calls={message.content.filter((part): part is Extract<ContentPart, { type: "toolCall" }> => part.type === "toolCall")}
-            results={resultsByTurn.get(entryId ?? `stamp:${message.timestamp}`) ?? new Map()} live={running && index === display.length - 1} startedAt={message.timestamp} />}
-          {textOf(message) && <Markdown text={textOf(message)} />}
+          {orderedParts(typeof message.content === "string" ? [{ type: "text", text: message.content }] : message.content).map((part, partIndex) => {
+            if (part.kind === "thinking") return <Disclosure className="thinking-line" key={partIndex} isDisabled={part.part.redacted}>
+              <Disclosure.Heading><Disclosure.Trigger className="thinking-trigger"><Brain size={16} aria-hidden="true" /><span>已思考{part.part.redacted ? " · 内容不可用" : ""}</span><Disclosure.Indicator /></Disclosure.Trigger></Disclosure.Heading>
+              <Disclosure.Content>{!part.part.redacted && <pre>{part.part.thinking}</pre>}</Disclosure.Content>
+            </Disclosure>;
+            if (part.kind === "tools") return <ToolGroup key={partIndex} calls={part.calls}
+              results={resultsByTurn.get(entryId ?? `stamp:${message.timestamp}`) ?? new Map()}
+              live={running && index === display.length - 1} startedAt={message.timestamp} />;
+            return part.text && <Markdown key={partIndex} text={part.text} />;
+          })}
           {message.stopReason === "error" && <p className="message-error" role="alert">{message.errorMessage || "模型调用失败，请检查登录状态和模型设置。"}</p>}
           {message.stopReason === "aborted" && <p className="message-warning">已停止生成</p>}
           {entryId && message.stopReason != null && message.stopReason !== "toolUse" && <div className="answer-actions">
@@ -83,15 +86,15 @@ function QueuePanel({ id, queue, refresh }: { id: string; queue: InboxSnapshot; 
   const [error, setError] = useState("");
   const [editing, setEditing] = useState("");
   const [text, setText] = useState("");
-  const pending = queue.items.filter((item) => item.status === "pending" || item.status === "failed");
-  const queuedIds = queue.items.filter((item) => item.status === "pending" && item.delivery === "queue").map((item) => item.id);
-  if (!pending.length && !queue.paused) return null;
+  const pending = visibleQueueItems(queue.items);
+  const queuedIds = pending.filter((item) => item.status === "pending" && item.delivery === "queue").map((item) => item.id);
+  if (!pending.length) return null;
   async function change(path: string, method: "PATCH" | "DELETE" | "POST" | "PUT", body: object) {
     try { await apiJson(`${base(id)}/${path}`, { method, body: { version: queue.version, ...body } }); setError(""); setEditing(""); await refresh(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "队列更新失败"); await refresh(); }
   }
   return <section className="queue-panel" aria-label="排队消息">
-    <strong>{queue.paused ? "排队已暂停 · 发送新消息后继续" : `排队 · ${pending.length} 条`}</strong>
+    <strong>{queue.paused ? "排队已暂停 · 发送新消息后继续" : pending.every((item) => item.status === "failed") ? "投递失败" : `排队 · ${pending.length} 条`}</strong>
     {pending.map((item) => <div className="queue-item" key={item.id} draggable={item.status === "pending" && item.delivery === "queue"}
       onDragStart={(event) => { event.dataTransfer.setData("text/plain", item.id); event.dataTransfer.effectAllowed = "move"; }}
       onDragOver={(event) => { if (item.status === "pending" && item.delivery === "queue") event.preventDefault(); }}
@@ -107,13 +110,9 @@ function QueuePanel({ id, queue, refresh }: { id: string; queue: InboxSnapshot; 
         <GripVertical size={16} aria-hidden="true" className="queue-grip" />
         <span>{item.status === "failed" ? "投递失败 · " : ""}{item.text || "图片消息"}</span>
         {item.status === "pending" && <>
-          <Button variant="ghost" className="queue-steer" onPress={() => void change(`queue/${item.id}/steer`, "POST", {})}>插话</Button>
+          <Button variant="ghost" className="queue-steer" onPress={() => void change(`queue/${item.id}/steer`, "POST", {})}><ArrowUp size={14} aria-hidden="true" />立即</Button>
           <Button variant="ghost" isIconOnly aria-label="编辑排队消息" onPress={() => { setEditing(item.id); setText(item.text); }}><Pencil size={16} /></Button>
           <Button variant="ghost" isIconOnly aria-label="删除排队消息" onPress={() => void change(`queue/${item.id}`, "DELETE", {})}><Trash2 size={16} /></Button>
-          <Button variant="ghost" isIconOnly aria-label="上移排队消息" isDisabled={queuedIds.indexOf(item.id) <= 0} onPress={() => {
-            const ids = [...queuedIds];
-            const at = ids.indexOf(item.id); if (at > 0) { [ids[at - 1], ids[at]] = [ids[at], ids[at - 1]]; void change("queue/order", "PUT", { ids }); }
-          }}><ArrowUp size={16} /></Button>
         </>}
       </>}
     </div>)}
@@ -147,8 +146,7 @@ export default function Chat() {
   const example = params.get("preview") === "1" ? sampleSessions.find((session) => session.id === sessionId) : undefined;
   const { detail, streaming, error, refresh } = useSessionDetail(example ? undefined : sessionId);
   const [title, setTitle] = useState(example?.title ?? "会话");
-  const [actionError, setActionError] = useState("");
-  const queued = !!detail && (detail.queue.paused || detail.queue.items.some((item) => item.status === "pending" || item.status === "failed"));
+  const queued = !!detail && visibleQueueItems(detail.queue.items).some((item) => item.status === "pending");
   useEffect(() => {
     if (!sessionId || example) return;
     let active = true;
@@ -178,30 +176,17 @@ export default function Chat() {
     }
     await refresh();
   }
-  async function rename() {
-    if (!sessionId) return;
-    const name = window.prompt("会话名称", title);
-    if (!name || !name.trim()) return;
-    try { await apiJson(`${base(sessionId)}`, { method: "PATCH", body: { name: name.trim() } }); setTitle(name.trim()); }
-    catch (cause) { setActionError(cause instanceof Error ? cause.message : "重命名失败"); }
-  }
-  return <div className="app-layout chat-layout">
-    <Sidebar preview={!!example} />
-    <main className="chat-main">
+  return <main className="chat-main">
       <header className="chat-header"><HardDrive size={20} /><h1>{title}</h1>
-        {!example && <><Button variant="ghost" onPress={() => void rename()}>重命名</Button><Link className="header-link" to={`/s/${sessionId}/tree`}><ListTree size={17} />分支树</Link></>}
         {example && <span className="preview-tag">设计预览 · 示例数据</span>}
       </header>
       {error && <div className="connection-banner" role="alert">{error}</div>}
-      {actionError && <p className="message-error" role="alert">{actionError}</p>}
       {detail ? <Conversation id={detail.id} entries={detail.entries?.length ? detail.entries : detail.messages.map((message) => ({ message }))} streaming={streaming} running={!!detail.running} refresh={refresh} />
         : <div className="chat-empty">{example ? "此会话暂无对话示例。" : error || "正在读取会话…"}</div>}
       <div className="chat-composer-area">
         {detail?.ui.map((question) => <QuestionPanel key={question.requestId} id={detail.id} question={question} refresh={refresh} />)}
         {detail && <QueuePanel id={detail.id} queue={detail.queue} refresh={refresh} />}
         <Composer key={sessionId} sessionId={sessionId} queueActive={!example && queued} contextUsage={detail?.contextUsage} running={!!detail?.running || !!streaming} onSend={example ? undefined : send} onStop={example ? undefined : stop} onCommand={example ? undefined : command} />
-        <div className="composer-footnote"><span>Enter 发送 · Shift + Enter 换行</span><span>诊断建议仅供参考，请结合设备实际情况核验。</span></div>
       </div>
-    </main>
-  </div>;
+    </main>;
 }

@@ -3,7 +3,7 @@ import { Braces, CheckCheck, ChevronDown, CircleCheck, CirclePause, CircleX, Cop
 import { useEffect, useState } from "react";
 import type { ContentPart, Message } from "../app/web-state";
 import { type Block, mapTool } from "./map-tool";
-import { isStandaloneTool, toolState, type ToolState } from "./tool-state";
+import { isStandaloneTool, splitToolCalls, toolState, type ToolState } from "./tool-state";
 
 type Call = Extract<ContentPart, { type: "toolCall" }>;
 const summary = (args: unknown) => typeof args === "string" ? args : Array.isArray(args) ? args.join(" · ") : "未提供关键词";
@@ -46,6 +46,7 @@ function SearchRow({ call, result, live, state, failed }: { call: Call; result?:
     <Globe className="search-tool-icon" size={18} aria-hidden="true" />
     <span className={`search-status search-status--${status}`}>{label}</span>
     {status === "running" ? <LoaderCircle className="tool-status-icon tool-status-icon--running" size={16} aria-hidden="true" /> : status !== "interrupted" && <StatusIcon state={status} />}
+    <Disclosure.Indicator />
   </Disclosure.Trigger></Disclosure.Heading><Disclosure.Content>
     <small className={failed ? "search-query search-query--error" : "search-query"}>{summary(call.arguments.query ?? call.arguments.queries)}{failed && ` · ${String(data.error ?? "请检查网络或检索配置")}`}</small>
   </Disclosure.Content></Disclosure>;
@@ -80,18 +81,18 @@ export function ToolCard({ call, result, live, startedAt }: { call: Call; result
   const elapsed = startedAt && (result?.timestamp ?? (live ? now : 0)) >= startedAt
     ? `${(((result?.timestamp ?? now) - startedAt) / 1000).toFixed(1)}s` : undefined;
   const heading = <><StatusIcon state={state} />
-    <span>{state === "running" ? `正在调用 ${invocation} 工具…` : `${invocation} · ${status}`}</span>
+    <span>{state === "running" ? `正在调用 ${call.name} 工具` : `${invocation} · ${status}`}</span>
     {elapsed && <time className="tool-elapsed">{elapsed}</time>}</>;
-  const content = <>
+  const content = <div className="tool-card-detail">
     <Card.Content><div className="tool-card-body">
       <code className="tool-invocation">{callText}</code>
       {!view ? (state === "running" ? null : <p>本次调用没有返回结果。</p>) : view.blocks.map((block) => <div key={block.id}>{renderBlock(block)}</div>)}
     </div></Card.Content>
     {result && <Disclosure isExpanded={raw} onExpandedChange={setRaw}>
-      <Disclosure.Heading><Disclosure.Trigger className="tool-raw-toggle"><Braces size={14} aria-hidden="true" /><span>原始数据</span><span className="tool-raw-spacer" /><Disclosure.Indicator><ChevronDown size={12} /></Disclosure.Indicator></Disclosure.Trigger></Disclosure.Heading>
+      <Disclosure.Heading><Disclosure.Trigger className="tool-raw-toggle"><Braces size={12} aria-hidden="true" /><span>原始数据</span><span className="tool-raw-spacer" /><Disclosure.Indicator><ChevronDown size={12} /></Disclosure.Indicator></Disclosure.Trigger></Disclosure.Heading>
       <Disclosure.Content><pre className="tool-raw">{(view?.raw || JSON.stringify(details) || "无原始结果").slice(0, 100000)}{(view?.raw.length ?? 0) > 100000 && "\n……显示已截断"}</pre></Disclosure.Content>
     </Disclosure>}
-  </>;
+  </div>;
   return <Card variant="transparent" className={`tool-card ${special ? "tool-card--special" : ""} ${state === "error" ? "tool-card--error" : ""}`}>
     {special ? <><Card.Header><div className="tool-card-heading tool-static-heading">{heading}</div></Card.Header>{content}</> :
       <Disclosure isExpanded={open} onExpandedChange={(value) => { setTouched(true); setOpen(value); }}>
@@ -101,26 +102,27 @@ export function ToolCard({ call, result, live, startedAt }: { call: Call; result
   </Card>;
 }
 
-export function ToolGroup({ calls, results, live, startedAt }: { calls: Call[]; results: Map<string, Message>; live?: boolean; startedAt?: number }) {
+function CollapsedToolGroup({ calls, results, live, startedAt }: { calls: Call[]; results: Map<string, Message>; live?: boolean; startedAt?: number }) {
   const [open, setOpen] = useState(false);
-  const normal = calls.filter((call) => !isStandaloneTool(call, results.get(call.id)));
-  const special = calls.filter((call) => !normal.includes(call));
-  const states = normal.map((call) => {
-    const result = results.get(call.id);
-    return result ? mapTool(call, result).status : undefined;
-  });
-  const failed = states.includes("error");
-  const degraded = states.includes("degraded");
-  const finished = states.every((state) => state != null);
-  return <>
-    {!!normal.length && <Disclosure className="tool-group" isExpanded={open} onExpandedChange={setOpen}>
+  const states = calls.map((call) => {
+      const result = results.get(call.id);
+      return result ? mapTool(call, result).status : undefined;
+    });
+    const failed = states.includes("error");
+    const degraded = states.includes("degraded");
+    const finished = states.every((state) => state != null);
+    return <Disclosure className="tool-group" isExpanded={open} onExpandedChange={setOpen}>
       <Disclosure.Heading><Disclosure.Trigger className="conversation-status tool-group-heading">
         {!finished ? <StatusIcon state={live ? "running" : "interrupted"} size={18} /> : failed ? <StatusIcon state="error" size={18} /> : degraded ? <StatusIcon state="degraded" size={18} /> : <CheckCheck size={18} className="success-icon" aria-hidden="true" />}
         <span className={!finished && live ? "tool-group-state--running" : undefined}>{!finished ? (live ? "正在调用多个工具…" : "检查未完成") : failed ? "部分检查失败" : degraded ? "检查返回部分结果" : "已完成检查"}</span>
-        <small>{normal.length} 次工具调用</small><Disclosure.Indicator />
+        <small>{calls.length} 次工具调用</small><Disclosure.Indicator />
       </Disclosure.Trigger></Disclosure.Heading>
-      <Disclosure.Content>{normal.map((call) => <ToolCard key={call.id} call={call} result={results.get(call.id)} live={live} startedAt={startedAt} />)}</Disclosure.Content>
-    </Disclosure>}
-    {special.map((call) => <ToolCard key={call.id} call={call} result={results.get(call.id)} live={live} startedAt={startedAt} />)}
-  </>;
+      <Disclosure.Content>{calls.map((call) => <ToolCard key={call.id} call={call} result={results.get(call.id)} live={live} startedAt={startedAt} />)}</Disclosure.Content>
+    </Disclosure>;
+}
+
+export function ToolGroup({ calls, results, live, startedAt }: { calls: Call[]; results: Map<string, Message>; live?: boolean; startedAt?: number }) {
+  return <>{splitToolCalls(calls, results).map((segment, index) => segment.kind === "standalone"
+    ? <ToolCard key={`${index}-${segment.calls[0].id}`} call={segment.calls[0]} result={results.get(segment.calls[0].id)} live={live} startedAt={startedAt} />
+    : <CollapsedToolGroup key={`${index}-${segment.calls[0].id}`} calls={segment.calls} results={results} live={live} startedAt={startedAt} />)}</>;
 }

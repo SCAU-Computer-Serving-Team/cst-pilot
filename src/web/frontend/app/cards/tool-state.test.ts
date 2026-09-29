@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ContentPart, Message } from "../app/web-state.ts";
-import { isStandaloneTool, toolState } from "./tool-state.ts";
+import { isStandaloneTool, splitToolCalls, toolState } from "./tool-state.ts";
 
 const call = (name: string, scope?: string): Extract<ContentPart, { type: "toolCall" }> => ({ type: "toolCall", id: "call", name, arguments: scope ? { scope } : {} });
 const result: Message = { role: "toolResult", timestamp: 1, content: [{ type: "text", text: "完成" }] };
@@ -26,6 +26,11 @@ test("canvas exceptions render outside the collapsed tool group", () => {
   for (const value of [call("disk"), call("sys", "proc"), call("read"), call("fffind")]) {
     assert.equal(isStandaloneTool(value, result), false);
   }
+});
+
+test("standalone tools keep their position among grouped calls", () => {
+  const groups = splitToolCalls([call("disk"), call("web_search"), call("sys", "proc"), call("disk")], new Map());
+  assert.deepEqual(groups.map((group) => [group.kind, group.calls.length]), [["group", 1], ["standalone", 1], ["group", 2]]);
 });
 
 test("read images stay visible while text reads remain collapsible", () => {

@@ -1,7 +1,6 @@
 import { Button } from "@heroui/react";
 import { useEffect, useState } from "react";
 import { apiJson, type ProviderStatus } from "../app/api";
-import { Sidebar } from "../app/shell";
 
 type Theme = "light" | "dark" | "system";
 type Model = { provider: string; id: string; name: string };
@@ -43,7 +42,7 @@ export default function Settings() {
     catch (cause) { setError(cause instanceof Error ? cause.message : "退出登录失败"); }
     finally { setWorking(false); }
   }
-  return <div className="app-layout chat-layout"><Sidebar /><main className="chat-main settings-main">
+  return <main className="chat-main settings-main">
     <header className="chat-header"><h1>设置</h1></header>
     <div className="settings-content">
       {error && <p role="alert" className="message-error">{error}</p>}
@@ -52,7 +51,7 @@ export default function Settings() {
           <Button key={value} variant={theme === value ? "primary" : "ghost"} isDisabled={working} onPress={() => void updateTheme(value)}>{({ system: "跟随系统", light: "浅色", dark: "深色" })[value]}</Button>
         )}</div>
       </section>
-      <section><h2>模型服务</h2><p>凭据只在后端保存。需要重新登录时，请打开登录页更新 API KEY。</p>
+      <section id="accounts"><h2>模型服务</h2><p>凭据只在后端保存。需要重新登录时，请打开登录页更新 API KEY。</p>
         {providers.filter((provider) => provider.type || provider.requiresLogin).map((provider) => <div key={provider.id} className="settings-row"><span>{provider.name}</span><span>{provider.requiresLogin ? "需要重新登录" : "已登录"}</span>
           {provider.type && <Button variant="ghost" isDisabled={working} onPress={() => void logout(provider.id)}>退出</Button>}
         </div>)}
@@ -67,5 +66,5 @@ export default function Settings() {
       </section>
       <section><h2>快捷键</h2><p>Enter 发送，Shift + Enter 换行；运行时 Esc 停止当前会话。</p></section>
     </div>
-  </main></div>;
+  </main>;
 }
