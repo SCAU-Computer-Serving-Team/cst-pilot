@@ -39,11 +39,11 @@ typography:
     fontWeight: 600
   navigation:
     fontFamily: "Source Han Sans CN"
-    fontSize: "19px"
+    fontSize: "20px"
     fontWeight: 400
   conversation:
     fontFamily: "Source Han Sans CN"
-    fontSize: "15px"
+    fontSize: "16px"
     fontWeight: 400
   input-placeholder:
     fontFamily: "Source Han Sans CN"
@@ -55,27 +55,47 @@ typography:
     fontWeight: 400
   footer:
     fontFamily: "Inter"
-    fontSize: "15px"
+    fontSize: "16px"
     fontWeight: 400
+spacing:
+  micro: "2px"
+  tight: "4px"
+  inline: "8px"
+  component: "12px"
+  section: "16px"
+  group: "24px"
+heights:
+  inline: "22px"
+  control: "26px"
+  control-lg: "32px"
+  menu-row: "42px"
+icons:
+  inline: "14px"
+  body: "16px"
+  menu: "18px"
+  header: "22px"
+rounded:
+  control: "6px"
+  row: "8px"
+  menu: "12px"
+  composer: "16px"
 omitted:
-  - section: spacing
-    reason: 各画布只有局部取值，未定为令牌
-  - section: rounded
-    reason: 只有画布变量 radius-control / radius-row / radius-menu / radius-composer，未定义全站圆角语义
   - section: components
     reason: 组件 token 不在本文范围
 ---
 
 # CST Pilot Web 设计系统
 
-本文定义 Web 的颜色、排版、动效与跨页面视觉规则。页面布局和逐元素尺寸由画布承载；本文明确列出的视觉规则优先于画布示意。
+本文与 [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) 的「规范 · 全部令牌」板同为最高级视觉参考，两者内容必须一致，改动同时更新。本文承载规则、取值与边界；规范板承载尺寸、排版、状态、交互、动效与页面骨架的对照图。逐页帧与两者冲突时，以本文与规范板为准。
+
+颜色以 [cst-pilot-colors.pen](src/web/design/cst-pilot-colors.pen) 为权威依据，工具卡片以 [cst-pilot-tools.pen](src/web/design/cst-pilot-tools.pen) 为权威依据。
 
 产品行为、接口与实现安排见 [Web 文档](doc/web/README.md)，不由本文裁定。
 
 | 参考 | 范围 |
 |---|---|
 | [cst-pilot-colors.pen](src/web/design/cst-pilot-colors.pen) | 色阶画布。取色的权威依据 |
-| [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) | 界面画布。各页浅深两版的取值、尺寸与形态 |
+| [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) | 界面画布。各页浅深两版的取值、尺寸与形态；「规范 · 全部令牌」板与本文同级 |
 | [cst-pilot-tools.pen](src/web/design/cst-pilot-tools.pen) | 工具调用画布。工具卡片与调用状态的取值、尺寸与形态 |
 | [文件清单](#文件清单) | 视觉画布、资产与字体 |
 
@@ -92,7 +112,7 @@ omitted:
 | 文件 | 内容 |
 |---|---|
 | [cst-pilot-colors.pen](src/web/design/cst-pilot-colors.pen) | 12 步用途、中性与四组彩色色阶 |
-| [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) | 首页、聊天工作台、登录页、APIKEY 表单与仪表盘的浅深两版；另含 Provider 下拉及上下文、模型、账号等悬停面板 |
+| [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) | 首页、聊天工作台、登录页、APIKEY 表单、仪表盘与设置页的浅深两版；另含 Provider 下拉、上下文、模型、账号、侧栏会话与消息等悬停面板，输入框补全面板、补全选中标记与排队组件的浅深两版，以及「规范 · 全部令牌」规范总板（尺寸、排版、对齐、状态、交互、动效、页面骨架） |
 | [cst-pilot-tools.pen](src/web/design/cst-pilot-tools.pen) | 工具调用画布。以「聊天工作台 · 浅色」一帧为参照，配工具卡片的三种通用渲染模式、「已发送（等待返回）」状态，以及 `sys overview`、`runbook` 两个例外；浅深两版齐备。逐工具帧只有浅色，深色按三个通用模板与色阶推导 |
 | [heroui-colors.pen](src/web/design/heroui-colors.pen) | HeroUI v3 默认主题对照 |
 | [asset/pencil-heroui.pen](src/web/design/asset/pencil-heroui.pen) | HeroUI 组件参考画布 |
@@ -103,7 +123,7 @@ omitted:
 |---|---|---|
 | 令牌 | [cst-pilot-colors.tokens.json](doc/web/asset/cst-pilot-colors.tokens.json) | 五组 × 浅深共 120 个色值，DTCG 2025.10 |
 | 生成器 | [make-color-scale.mjs](doc/web/asset/make-color-scale.mjs) | 由色相与明度曲线输出上表 |
-| 对照 | [heroui.tokens.json](doc/web/asset/heroui.tokens.json)、[make-heroui-tokens.mjs](doc/web/asset/make-heroui-tokens.mjs) | HeroUI v3 默认主题原始变量与解析脚本，不是本项目的映射结果 |
+| 对照 | [heroui.tokens.json](doc/web/asset/heroui.tokens.json)、[make-heroui-tokens.mjs](doc/web/asset/make-heroui-tokens.mjs) | HeroUI v3 默认主题的原始变量与解析脚本；本项目尚未映射 |
 | 导出图 | [cst-pilot-color-steps.png](doc/web/asset/cst-pilot-color-steps.png)、[cst-pilot-color-scale.png](doc/web/asset/cst-pilot-color-scale.png)、[cst-pilot-blue-hour.png](doc/web/asset/cst-pilot-blue-hour.png) | 三张色卡画布的导出，宽 2312 |
 | 对照图 | [heroui-colors-core.png](doc/web/asset/heroui-colors-core.png)、[heroui-colors-light.png](doc/web/asset/heroui-colors-light.png)、[heroui-colors-dark.png](doc/web/asset/heroui-colors-dark.png) | `heroui-colors.pen` 三张画布的导出 |
 | 色表 | [blue-hour-palette.png](src/web/design/asset/blue-hour-palette.png)、[blue-hour-dark-palette.png](src/web/design/asset/blue-hour-dark-palette.png)、[blue-hour-air-dark-palette.png](src/web/design/asset/blue-hour-air-dark-palette.png) | 256×1 色彩查找表 |
@@ -178,7 +198,7 @@ omitted:
 
 ### 彩色语义
 
-四组彩色沿用相同的 12 步用途。首页未展示成功、警告、危险状态，发送按钮也不使用通用主色第 9 步；仪表盘的状态徽标是唯一落到组件的彩色用法；色卡里的色块不是组件状态设计。
+四组彩色沿用相同的 12 步用途。首页未展示成功、警告、危险状态，发送按钮也不使用通用主色第 9 步；仪表盘的状态徽标是唯一落到组件的彩色用法；色卡里的色块只作取色用。
 
 | 色系 | 第 9 步实心色（浅深相同） | 第 11 步文字：浅色 / 深色 | 第 12 步文字：浅色 / 深色 |
 |---|---|---|---|
@@ -196,13 +216,13 @@ omitted:
 | 项 | 浅色 | 深色 | 规则 |
 |---|---|---|---|
 | 侧栏底色 | `#F5F6F8` | 中性 3 | 浅色用独立灰白，不用中性 1 |
-| 悬停底色 | `#EAEAEA` | 中性 4 | 浅色用无偏灰白，不用中性 4。侧栏选中态同值，浅色三页一致；深色选中态用中性 5 `#242C2F` |
+| 悬停文字 | 正文色 | 正文色 | 悬停不给底色，只把文字提到正文色；非正文元素静置时取中性 11（浅 `#5F676C`、深 `#AAB3B7`）。选中态仍用底色：浅 `#EAEAEA`、深中性 5 `#242C2F` |
 | 消息输入框 | `#FFFFFF` | 中性 2 | 深色不用中性 3，避免与侧栏撞色 |
 | 发送按钮 | `#465A9F` | `#7785DE` | Blue hour 家族，不用主色第 9 步 |
 | 发送箭头 | `#FFFFFF` | `#001F42` | 深色取浅色主色阶第 12 步 |
 | 页脚 `@cst-pilot-web` | 中性 11 | 中性 1 | 深色页脚压在底部亮色带上，用中性 1 才能读 |
 
-品牌 C 的两条弧线使用白色透明度渐变描边：0% 处 `#FFFFFF00`、55% 处 `#FFFFFF1F`、100% 处 `#FFFFFFFF`，画布渐变旋转为 0°。它不是整条不透明白线。
+品牌 C 的两条弧线使用白色透明度渐变描边：0% 处 `#FFFFFF00`、55% 处 `#FFFFFF1F`、100% 处 `#FFFFFFFF`，画布渐变旋转为 0°。
 
 #### 聊天页浅色：无色偏灰白
 
@@ -227,9 +247,23 @@ omitted:
 
 #### 悬停面板
 
-输入框操作栏弹出上下文面板、模型选择与思考强度三个；侧栏左下角弹出账号菜单；聊天标题栏右上角三个点弹出消息菜单。五个面板共用一套卡片式样式，除选中行底色与投影外全部取自通用色阶。
+输入框操作栏弹出上下文面板、模型选择与思考强度三个；侧栏会话右键弹出会话菜单（重命名、导出、删除）；侧栏左下角弹出账号菜单；聊天标题栏右上角三个点弹出消息菜单。6 个面板共用一套卡片式样式，除选中行底色与投影外全部取自通用色阶。点击面板外、按 Esc、页面滚动三者都关闭；弹出后焦点进入面板，方向键可切换项；一次只执行一个动作，执行后立即关闭；危险项置底、放在分隔线以下。侧栏会话菜单三项：重命名、导出、删除。账号菜单已登录时依次显示账号信息、设置、主题、反馈问题、分隔线、登出；未登录时显示登录、主题、反馈问题。主题按钮按「跟随系统 → 浅色 → 深色」循环切换，显示当前状态并保存到本机设置。
 
 选中行浅色用 `#EAEAEA`，不用中性 5 `#DBE4E9`：后者带蓝调，在白面板上会读成淡蓝底。深色选中行用中性 5 `#242C2F`。
+
+悬停不给底色，只把行内文字提到正文色，选中行底色不随悬停变化。侧边栏会话右键菜单的悬停行取中性 4：浅色 `#E3ECF1`、深色 `#1D2428`。非正文的折叠态（工具分组、工具卡、思考过程、联网检索、原始数据、列表行）静置时取中性 11，浅 `#5F676C`、深 `#AAB3B7`，悬停提到正文色。
+
+**展开指示统一。** 所有可展开组件都在文字后紧跟一个三角指示，间隔一个字的空位（8px）；折叠朝右、展开朝下，不推到行尾。工具分组、工具卡、思考过程、联网检索、原始数据一律如此。
+
+**行内图标对齐。** 图标墨迹中心与同行文字墨迹中心严格重合。同行文字 12–14px 时图标下移 2px，16px 及以上下移 2.5px（`top` 微调，不改变行高）；图标尺寸不小于同行文字，12px 文字配 12px 图标。画布用「图标位」空框包住图标，`padding-top` 取下移量的两倍，空框高度记入行高。
+
+**工具卡间距。** 状态行与展开内容相隔 16px；展开内容块间 12px；分组内标题与字段行相隔 4px；字段行高 17px、两列相隔 12px；展开内容左侧缩进 24px，高度指示线挂在展开内容容器上并覆盖到原始数据行。
+
+**思考过程折叠态不显示内容。** 折叠只写「已思考」，展开后才展示推理内容。
+
+输入框操作栏里上下文环嵌在模型选择内部，但两者是两个控件。悬停环时模型 pill 不给底色，改由环自己出一圈 3px 悬停底色，避免两处悬停连成一块。
+
+思考强度列出哪些档位由模型决定，不固定展示全集。pi 的模型配置给出每个模型支持的档位（`getAvailableThinkingLevels`），前端按当前模型渲染；例如 GLM 5.3 Flash 只有 Low、High、Max 三档，档位行只写英文短名，不带说明文字。
 
 #### 投影
 
@@ -285,7 +319,11 @@ omitted:
 | 第 3 层 · 卡片内容 | 12px | 概览组、排行组、提示条、调用语句片 |
 | 第 4 层 · 密集长文 | 11px | 原文块正文（长文本、代码、日志） |
 
-加载指示圆弧直径等于同行字号，颜色与同行文字一致。例外工具（`sys overview`、`runbook`、`web_search`、`read` 图片形态）不进入折叠：状态行按第 1 层 16px 呈现，展开内容仍为第 3 层 12px、第 4 层 11px。`sys overview` 与 `runbook` 骨架同普通卡片，差别见[诊断卡片](doc/web/SPEC/diagnostic-cards.md#渲染规则)；`web_search` 单独占一行，展开仅显示传入关键词（12px），不弹出返回内容，完成以图标标识，见[web_search 卡片](doc/design/web/tool/web_search.md)；`read` 读取图片时先展示图片，再展示绝对路径，见[read 卡片](doc/design/web/tool/read.md)。
+加载指示圆弧直径等于同行字号，颜色与同行文字一致。四个例外工具不进入折叠，状态行按第 1 层 16px 呈现，展开内容仍为第 3 层 12px、第 4 层 11px：
+
+- `sys overview` 与 `runbook`：骨架同普通卡片，差别见[诊断卡片](doc/web/SPEC/diagnostic-cards.md#渲染规则)。
+- `web_search`：单独占一行，展开只显示传入关键词（12px），不弹出返回内容，完成以图标标识。见 [web_search 卡片](doc/design/web/tool/web_search.md)。
+- `read` 图片形态：先展示图片，再展示绝对路径。见 [read 卡片](doc/design/web/tool/read.md)。
 
 字段行数值列按整张卡片对齐：数值列起点取卡内最长的字段名宽度加 34px（标签列内 12px 间隔、最短 10px 补位，再接 12px 间隔），所有分组的字段行共用同一列。
 
@@ -297,7 +335,7 @@ Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用�
 
 ### 对比度边界
 
-正文和控件文字以 WCAG AA 4.5:1 为目标。第 9 步不是「可以直接配白字」的保证；当前主色、成功、警告、危险第 9 步与白色的对比度分别约为 3.69、3.16、2.19、4.10，均未达到普通文字要求。
+正文和控件文字以 WCAG AA 4.5:1 为目标。第 9 步与白色文字达不到该比例：当前主色、成功、警告、危险第 9 步与白色的对比度约为 3.69、3.16、2.19、4.10，第 9 步只用于色块与图标。
 
 后续制作语义按钮时需单独确定前景色或调整背景。动态背景上的文字需检查多个动画时刻；全量对比度验收未完成。
 
@@ -333,7 +371,98 @@ Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用�
 
 - 行高与字距只按[行高与字距](#行高与字距)取值，不从截图估算为固定令牌。
 - 56px/600 只用于首页欢迎语，不直接推广为对话正文或普通页面标题。
-- 15px 与 16px 的分组字号差异按画布执行；10px 只用于账户说明，不作全站最小字号。
+- Markdown 标题按 #1/#2 = 24px/600、#3–#6 = 16px/600，与画布和 `styles.css` 一致。
+- 只在一个位置出现的字号作为例外记录在[尺寸与间距](#尺寸与间距)。
+- 10px 只用于账户说明，不作全站最小字号。
+
+## 尺寸与间距
+
+本节与规范板的「规范 · 全部令牌」一一对应，改动同时更新。front matter 的 `spacing` / `heights` / `icons` / `rounded` 与 [styles.css](src/web/frontend/app/styles.css) 的 `--space-*` / `--control-*` / `--icon-*` 是同一套值的实现：先改本节与规范板，再落到变量。
+
+**字号。** 不设阶梯，取值与用途按画布。同用途改用附近已有值，不新增数值。
+
+共用取值（多页出现）：
+
+| 字号 | 用途 |
+|---|---|
+| 10px | 账户说明，仅页脚账户行 |
+| 11px | 工具状态词、角标 |
+| 12px | 标签、日期、表头、按钮文字、图表坐标 |
+| 13px | 状态行、筛选与分页、模型名、时间 |
+| 14px | 账号行、表格值、筛选器 |
+| 16px | 侧栏会话条目与日期分隔、菜单与面板行、输入占位符、对话正文字段行与技术行、登录副题 |
+| 18px | 会话标题、用户消息、回复正文、模型选择 |
+| 20px | 侧栏导航、页面标题、产品名、首页输入占位符、面板卡片标题 |
+| 24px | Markdown 标题 #1/#2、面板大标题 |
+| 56px | 首页欢迎语 |
+
+例外（整个画布只在一个位置出现）：
+
+| 字号 | 出现的文字 |
+|---|---|
+| 30px | 仪表盘（仪表盘页标题） |
+| 36px | 1,284,600 等 4 个（仪表盘指标数值） |
+| 50px | 欢迎回来（登录页 90% 呈现效果帧，56 缩放后的取整值） |
+
+登录页两个 90% 缩放的呈现效果帧不保留缩放小数，一律取最近的整数偶数：12 / 14 / 14 / 50。[styles.css](src/web/frontend/app/styles.css) 的 `--font-micro/small/label/body/title/display` 是 11/12/13/16/20/24 六个常用值的别名，取值仍按本表。输出正文另按四层递减 16 / 13 / 12 / 11，见[工具调用卡片](#工具调用卡片)。
+
+**间距。** 2px 基准，六档。
+
+| 令牌 | 值 | 用途 |
+|---|---|---|
+| `--space-micro` | 2px | 行内相邻文本、面板行间距 |
+| `--space-tight` | 4px | 图标与文字 |
+| `--space-inline` | 8px | 控件之间、面板内边距 |
+| `--space-component` | 12px | 卡片内边距、菜单项之间 |
+| `--space-section` | 16px | 区块之间 |
+| `--space-group` | 24px | 分组之间、面板外边距 |
+
+命令、技能与文件引用补全的行高为 26px，相邻行间距为 0px。命令与技能分组间距为 4px。补全行的图标位不加内边距，名称和说明的行高为 1；三者在行内居中。
+
+**盒高。** 四档，按用途定死，不由内容撑开。控件纵向内边距一律为 0，居中交给 flex。
+
+| 令牌 | 值 | 用途 |
+|---|---|---|
+| `--control-inline` | 22px | 行内标签、徽标、字段行 |
+| `--control` | 26px | 聊天页操作栏、排队行按钮、补全选中标记、补全行 |
+| `--control-lg` | 32px | 首页操作栏、账号行按钮、下拉选项 |
+| `--control-menu` | 42px | 菜单项、侧栏条目 |
+
+**图标。** 四档，尺寸不小于同行文字。
+
+| 令牌 | 值 | 用途 |
+|---|---|---|
+| `--icon-inline` | 14px | 行内小图标、上下文进度环、下三角 |
+| `--icon-body` | 16px | 行内常规：工具、思考、排队拖动 |
+| `--icon-menu` | 18px | 菜单项、侧栏条目 |
+| `--icon-header` | 22px | 页头按钮、设备图标 |
+
+**圆角。** 四档，与画布变量同名：`--radius-control` 6px（按钮、输入、标签）、`--radius-row` 8px（列表行、菜单项）、`--radius-menu` 12px（面板、下拉）、`--radius-composer` 16px（输入框外框、大卡片）。
+
+**交互状态。** 六个状态按用途取用，不叠用。
+
+| 状态 | 取值 |
+|---|---|
+| 静置 | 非正文元素取中性 11，正文元素取正文色 |
+| 悬停 | 文字提到正文色；可点击的列表行与菜单项加中性 4（浅 `#E3ECF1` / 深 `#1D2428`） |
+| 按下 | 中性 5（浅 `#DBE4E9` / 深 `#242C2F`） |
+| 选中 | 浅 `#EAEAEA` / 深中性 5；悬停不改选中底色 |
+| 禁用 | 不透明度 45% |
+| 焦点 | 2px 实心中性 8 环，偏移 2px |
+
+**页面骨架。** 视口基准 1920×1080，规范板上有 1∶1 骨架图。
+
+| 部位 | 取值 |
+|---|---|
+| 侧栏 | 宽 264；页脚高 64 |
+| 聊天页标题栏 | 高 76 |
+| 内容列 | 宽 `min(1120px, 100% - 72px)`，在主区内居中 |
+| 工具分组与工具卡 | 宽 `min(1056px, 100% - 64px)`，在内容列内左缩进 32 |
+| 正文表格 | 宽 `min(816px, 100%)` |
+| 聊天页输入框 | 宽 `min(1144px, 100% - 48px)`，高 105，距底 12 |
+| 首页输入框 | 宽 800，高不小于 110，在主区水平居中 |
+
+不在表内的取值（5/6/9/10/14px 间距、17/18/20/28px 盒高等）属未迁移项，改到附近代码时并入最近一档，不再新增。
 
 ## 动效
 
@@ -428,5 +557,6 @@ Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用�
 | 登录页 | 「登录页 · 浅色」「登录页 · 深色」，以及两个「呈现效果」帧 | 正式面板按设计基准的 90% 等比呈现，标准尺寸 972×972，与两个「呈现效果」帧一致；窗口适配、配色、描边与投影见[登录页面板](#登录页面板)。正式实现模糊背后的真实主页，面板保持清晰 |
 | APIKEY 登录 | 「登录页 · APIKEY · 浅色 / 深色」「登录页 · APIKEY · 自定义 Provider · 浅色 / 深色」「Provider 选择 · 下拉 · 浅色 / 深色」 | 复用登录页面板；勾选后的字段顺序与菜单样式见[登录页面板](#登录页面板)。Provider 列表、BaseURL 与密文为设计示例 |
 | 仪表盘 | 「仪表盘 · 浅色」「仪表盘 · 深色」 | 表头与徽标等比所在表面深一档；分页当前页以中性 12 作底、字取所在表面色；图表映射为输入主色 9、缓存读取主色 8、输出成功 9、缓存写入警告 9；状态徽标用彩色浅底配第 11 步文字，取消状态用中性色；圆角沿用 `radius-control=6` / `radius-row=8` / `radius-menu=12`，不使用胶囊式控件；图表色标 3px 与堆叠柱顶角 5px / 4px 是字面值，不进变量 |
+| 设置页 | 「设置 · 浅色」「设置 · 深色」 | 浅色沿用聊天页灰白族，深色回通用色阶；深色分组卡片用中性 3 底。单页三分组：外观、模型服务、快捷键；内容列收窄至 816 居中，组间 64、子组间 32，帧高 1400。分组 = 组标题 + 说明 + 圆角 12 描边卡片，卡内行以底线分隔；设置行左为标签 + 说明、右为控件。启用模型与 TUI `/scoped-models` 语义一致：启用项置顶、顺序即循环顺序、改动在保存后写入设置；未保存标记用警告 11 步文字；不可用条目划线并配警告徽标；Provider 状态徽标用彩色第 3 步浅底配第 11 步文字；实心保存按钮同分页当前页（中性 12 底、所在表面色字） |
 
 画布尺寸只描述该画布，不代表全站间距令牌或响应式断点。仪表盘的字段来源、费用与计时口径见 [仪表盘规格](doc/web/SPEC/dashboard.md)。
