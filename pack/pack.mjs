@@ -19,6 +19,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { supplementGoFlash } from "./model-catalog.mjs";
 import { checkReleaseTree, sha256, verifyManifest } from "./release-checks.mjs";
 import { smokeRelease } from "./smoke.mjs";
 
@@ -99,7 +100,7 @@ const CONFIG = {
     _comment:
       "默认开放读取、检索和诊断工具。扩展随包提供，启动不安装或更新。配置与会话保存在 agent/home，临时状态保存在 .state。此配置不是系统沙箱；PowerShell 等原生组件可能留下宿主缓存。",
     defaultProvider: "opencode-go",
-    defaultModel: "glm-5.3-flash",
+    defaultModel: "deepseek-flash",
     defaultTools: ["read", "ls"],
     defaultProjectTrust: "never",
     enableInstallTelemetry: false,
@@ -300,7 +301,10 @@ for (const f of CONFIG.REPO_HOME_FILES) {
   if (!fs.existsSync(src)) die(`仓库缺少 agent/home/${f}`);
   fs.copyFileSync(src, path.join(out, "agent", "home", f));
 }
-console.log("  仓库侧: pi.cmd/文档/pwsh/wiztree/lhm/home 资源");
+const catalogPath = path.join(out, "agent", "home", "models-store.json");
+const catalog = supplementGoFlash(JSON.parse(fs.readFileSync(catalogPath, "utf8")));
+fs.writeFileSync(catalogPath, JSON.stringify(catalog, null, 2) + "\n");
+console.log("  仓库侧: pi.cmd/文档/pwsh/wiztree/lhm/home 资源（含 Go Flash 离线模型）");
 fs.cpSync(path.join(scriptDir, "licenses"), path.join(out, "licenses"), { recursive: true });
 
 // ---------- [4] 发行 settings.json ----------
