@@ -112,7 +112,7 @@ omitted:
 | 文件 | 内容 |
 |---|---|
 | [cst-pilot-colors.pen](src/web/design/cst-pilot-colors.pen) | 12 步用途、中性与四组彩色色阶 |
-| [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) | 首页、聊天工作台、登录页、APIKEY 表单、仪表盘与设置页的浅深两版；另含 Provider 下拉、上下文、模型、账号、侧栏会话与消息等悬停面板，输入框补全面板、补全选中标记与排队组件的浅深两版，以及「规范 · 全部令牌」规范总板（尺寸、排版、对齐、状态、交互、动效、页面骨架） |
+| [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) | 首页、聊天工作台、登录页、APIKEY 表单、仪表盘与设置页的浅深两版；另含 Provider 下拉、上下文、模型、账号、侧栏会话与消息等悬停面板，输入框补全面板、未发送图片、补全选中标记与排队组件的浅深两版，分支总结的确认、自定义提示词、生成中与完成四态（浅深两版），以及「规范 · 全部令牌」规范总板（尺寸、排版、对齐、状态、交互、动效、页面骨架） |
 | [cst-pilot-tools.pen](src/web/design/cst-pilot-tools.pen) | 工具调用画布。以「聊天工作台 · 浅色」一帧为参照，配工具卡片的三种通用渲染模式、「已发送（等待返回）」状态，以及 `sys overview`、`runbook` 两个例外；浅深两版齐备。逐工具帧只有浅色，深色按三个通用模板与色阶推导 |
 | [heroui-colors.pen](src/web/design/heroui-colors.pen) | HeroUI v3 默认主题对照 |
 | [asset/pencil-heroui.pen](src/web/design/asset/pencil-heroui.pen) | HeroUI 组件参考画布 |
@@ -130,7 +130,7 @@ omitted:
 | Shader | [blue-hour.glsl](src/web/design/asset/blue-hour.glsl)、[blue-hour-air.glsl](src/web/design/asset/blue-hour-air.glsl) | 首页与登录页的动态背景 |
 | 降级样式 | [blue-hour.css](src/web/design/asset/blue-hour.css) | 无 WebGL 时的 CSS 近似，不画板条 |
 | 背景原图 | [Blue hour-3840x2160.svg](src/web/design/asset/Blue%20hour-3840x2160.svg)、[blue-hour-background.png](src/web/design/asset/blue-hour-background.png)、[blue-hour.png](src/web/design/asset/blue-hour.png) | 用户提供的原图与静态兼容图 |
-| 主页快照 | [login-preview/](src/web/design/asset/login-preview/) | 登录页场景预览的模糊底层 |
+| 页面快照 | [login-preview/](src/web/design/asset/login-preview/)、[tree-preview/](src/web/design/asset/tree-preview/)、[chat-preview/](src/web/design/asset/chat-preview/) | 弹出层与状态帧的底图：登录页预览的模糊底层、分支树页快照、聊天页快照 |
 
 ### 字体
 
@@ -557,6 +557,6 @@ Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用�
 | 登录页 | 「登录页 · 浅色」「登录页 · 深色」，以及两个「呈现效果」帧 | 正式面板按设计基准的 90% 等比呈现，标准尺寸 972×972，与两个「呈现效果」帧一致；窗口适配、配色、描边与投影见[登录页面板](#登录页面板)。正式实现模糊背后的真实主页，面板保持清晰 |
 | APIKEY 登录 | 「登录页 · APIKEY · 浅色 / 深色」「登录页 · APIKEY · 自定义 Provider · 浅色 / 深色」「Provider 选择 · 下拉 · 浅色 / 深色」 | 复用登录页面板；勾选后的字段顺序与菜单样式见[登录页面板](#登录页面板)。Provider 列表、BaseURL 与密文为设计示例 |
 | 仪表盘 | 「仪表盘 · 浅色」「仪表盘 · 深色」 | 表头与徽标等比所在表面深一档；分页当前页以中性 12 作底、字取所在表面色；图表映射为输入主色 9、缓存读取主色 8、输出成功 9、缓存写入警告 9；状态徽标用彩色浅底配第 11 步文字，取消状态用中性色；圆角沿用 `radius-control=6` / `radius-row=8` / `radius-menu=12`，不使用胶囊式控件；图表色标 3px 与堆叠柱顶角 5px / 4px 是字面值，不进变量 |
-| 设置页 | 「设置 · 浅色」「设置 · 深色」 | 浅色沿用聊天页灰白族，深色回通用色阶；深色分组卡片用中性 3 底。单页三分组：外观、模型服务、快捷键；内容列收窄至 816 居中，组间 64、子组间 32，帧高 1400。分组 = 组标题 + 说明 + 圆角 12 描边卡片，卡内行以底线分隔；设置行左为标签 + 说明、右为控件。启用模型与 TUI `/scoped-models` 语义一致：启用项置顶、顺序即循环顺序、改动在保存后写入设置；未保存标记用警告 11 步文字；不可用条目划线并配警告徽标；Provider 状态徽标用彩色第 3 步浅底配第 11 步文字；实心保存按钮同分页当前页（中性 12 底、所在表面色字） |
+| 设置页 | 「设置 · 浅色」「设置 · 深色」 | 浅色沿用聊天页灰白族，深色回通用色阶；深色分组卡片用中性 3 底。单页三分组：外观、模型服务、快捷键；内容列收窄至 816 居中，组间 64、子组间 32，帧高 1400。分组 = 组标题 + 说明 + 圆角 12 描边卡片，卡内行以底线分隔；设置行左为标签 + 说明、右为控件。启用模型与 TUI `/scoped-models` 语义一致：启用项置顶、顺序即循环顺序、改动在保存后写入设置；未保存标记用警告 11 步文字；不可用条目划线并配警告徽标；Provider 状态徽标用彩色第 3 步浅底配第 11 步图标（已登录对勾 / 需登录警告，不带文字）；登录动作为图标按钮不带文字：OAuth 提供商用跳转图标，API KEY 提供商用铅笔图标，已登录行另有「退出」文字按钮；启用模型列表只含已登录或已配置 KEY 的 Provider；实心保存按钮同分页当前页（中性 12 底、所在表面色字） |
 
 画布尺寸只描述该画布，不代表全站间距令牌或响应式断点。仪表盘的字段来源、费用与计时口径见 [仪表盘规格](doc/web/SPEC/dashboard.md)。

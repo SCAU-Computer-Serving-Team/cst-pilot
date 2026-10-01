@@ -35,3 +35,4 @@ Thumbs.db
 desktop.ini
 .state/
 .audit/
+src/web/frontend/.dev-server.log
