@@ -1,6 +1,6 @@
 import { Button, Card, Disclosure } from "@heroui/react";
 import { Braces, CheckCheck, ChevronDown, CircleCheck, CirclePause, CircleX, Copy, Globe, Info, LoaderCircle, TriangleAlert } from "lucide-react";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import type { ContentPart, Message } from "../app/web-state";
 import { type Block, mapTool } from "./map-tool";
 import { isStandaloneTool, splitToolCalls, toolState, type ToolState } from "./tool-state";
@@ -52,7 +52,7 @@ function SearchRow({ call, result, live, state, failed }: { call: Call; result?:
   </Disclosure.Content></Disclosure>;
 }
 
-export function ToolCard({ call, result, live, startedAt }: { call: Call; result?: Message; live?: boolean; startedAt?: number }) {
+export const ToolCard = memo(function ToolCard({ call, result, live, startedAt }: { call: Call; result?: Message; live?: boolean; startedAt?: number }) {
   const special = isStandaloneTool(call, result);
   const [open, setOpen] = useState(special || !!live);
   const [touched, setTouched] = useState(false);
@@ -100,7 +100,7 @@ export function ToolCard({ call, result, live, startedAt }: { call: Call; result
         <Disclosure.Content>{content}</Disclosure.Content>
       </Disclosure>}
   </Card>;
-}
+});
 
 function CollapsedToolGroup({ calls, results, live, startedAt }: { calls: Call[]; results: Map<string, Message>; live?: boolean; startedAt?: number }) {
   const [open, setOpen] = useState(false);
@@ -121,8 +121,14 @@ function CollapsedToolGroup({ calls, results, live, startedAt }: { calls: Call[]
     </Disclosure>;
 }
 
-export function ToolGroup({ calls, results, live, startedAt }: { calls: Call[]; results: Map<string, Message>; live?: boolean; startedAt?: number }) {
+// 调用数组由 splitTurn 每次重建，按内容引用逐项比较；结果表、live、起始时间不变则跳过。
+export const ToolGroup = memo(function ToolGroup({ calls, results, live, startedAt }: { calls: Call[]; results: Map<string, Message>; live?: boolean; startedAt?: number }) {
   return <>{splitToolCalls(calls, results).map((segment, index) => segment.kind === "standalone"
     ? <ToolCard key={`${index}-${segment.calls[0].id}`} call={segment.calls[0]} result={results.get(segment.calls[0].id)} live={live} startedAt={startedAt} />
     : <CollapsedToolGroup key={`${index}-${segment.calls[0].id}`} calls={segment.calls} results={results} live={live} startedAt={startedAt} />)}</>;
-}
+}, (prev, next) =>
+  prev.results === next.results &&
+  prev.live === next.live &&
+  prev.startedAt === next.startedAt &&
+  prev.calls.length === next.calls.length &&
+  prev.calls.every((call, index) => call === next.calls[index]));
