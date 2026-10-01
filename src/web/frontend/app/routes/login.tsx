@@ -1,13 +1,14 @@
 import { Button, Checkbox, Input, Label, ListBox, Select, TextField } from "@heroui/react";
 import { Check, ChevronDown, Eye, EyeOff } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { type ProviderStatus, apiJson } from "../app/api";
 import { BlueHour } from "../app/blue-hour";
 import { HomeSurface } from "../app/shell";
 
 export default function Login() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const [providers, setProviders] = useState<ProviderStatus[]>([]);
   const [provider, setProvider] = useState("");
   const [customProvider, setCustomProvider] = useState(false);
@@ -24,7 +25,8 @@ export default function Login() {
       .then((data) => {
         const apiKeyProviders = data.providers.filter((item) => item.supportsApiKey);
         setProviders(apiKeyProviders);
-        setProvider((current) => current || apiKeyProviders.find((item) => item.id === "cst")?.id || apiKeyProviders[0]?.id || "");
+        const requested = params.get("provider");
+        setProvider((current) => current || apiKeyProviders.find((item) => item.id === requested)?.id || apiKeyProviders.find((item) => item.id === "cst")?.id || apiKeyProviders[0]?.id || "");
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "无法读取模型服务，请重试。");
