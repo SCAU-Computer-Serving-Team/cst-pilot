@@ -25,6 +25,9 @@ function json(response: ServerResponse, status: number, body: unknown): void {
 		"Cache-Control": "no-store",
 		"Content-Type": "application/json; charset=utf-8",
 		"X-Content-Type-Options": "nosniff",
+		// 短响应用完即断：HTTP/1.1 下 keep-alive 连接会与 SSE 长连接争抢浏览器每域 6 连接限制，
+		// 导致事件流排队饥饿。本机握手零成本，断开无损。
+		Connection: "close",
 	});
 	response.end(response.req.method === "HEAD" ? undefined : JSON.stringify(body));
 }
@@ -78,6 +81,7 @@ export function createWebServer(
 					commands: [
 						"/compact",
 						"/fork",
+						"/tree",
 						"/skill:disk",
 						"/skill:driver",
 						"/skill:eventlog",
@@ -156,6 +160,7 @@ export function createWebServer(
 				"Cache-Control": isHtml ? "no-cache" : hashed ? "public, max-age=31536000, immutable" : "no-cache",
 				"Content-Type": contentTypes[extname(file)] ?? "application/octet-stream",
 				"Content-Length": contents.length,
+				Connection: "close",
 			});
 			response.end(request.method === "HEAD" ? undefined : contents);
 		} catch (error) {

@@ -13,7 +13,12 @@ import { MutationReceipts } from "./session/receipts.ts";
 import type { WebSessionPool } from "./session/sessions.ts";
 
 function send(response: ServerResponse, status: number, body: unknown): void {
-	response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+	// Connection close：短响应用完即断，避免与 SSE 长连接争抢浏览器每域 6 连接限制（同 http.ts）。
+	response.writeHead(status, {
+		"Content-Type": "application/json; charset=utf-8",
+		"Cache-Control": "no-store",
+		Connection: "close",
+	});
 	response.end(JSON.stringify(body));
 }
 function problem(response: ServerResponse, status: number, code: string, message: string): void {
@@ -189,8 +194,36 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 				const sessionId = new URL(request.url ?? "/", origin).searchParams.get("sessionId");
 				const slot = sessionId ? await pool.openSaved(sessionId) : undefined;
 				const stats = slot?.session.getSessionStats();
+				// 未指定会话（首页）或会话未选模型时，回退到全局默认模型：新会话实际会使用它。
+				const fallbackProvider = settingsManager.getDefaultProvider();
+				const fallbackModel = settingsManager.getDefaultModel();
+				const selectedModel =
+					slot?.session.model ??
+					(fallbackProvider && fallbackModel && modelRuntime.getModel(fallbackProvider, fallbackModel)
+						? { provider: fallbackProvider, id: fallbackModel }
+						: undefined);
+				// 与 /scoped-models 同口径：清单只含可用模型；存储的启用模式展开为具体 id，未匹配的单独返回
+				// Web 端只认「已登录」：以存储凭据（auth.json）为准，环境变量提供的可用性不进列表
+				const credentials = await modelRuntime.listCredentials();
+				const signedIn = new Set(credentials.map((credential) => credential.providerId));
+				const available = (await modelRuntime.getAvailable()).filter((model) => signedIn.has(model.provider));
+				const patterns = settingsManager.getEnabledModels();
+				let enabled: string[] | null = null;
+				let unavailableEnabled: string[] = [];
+				if (patterns?.length) {
+					const scope = await resolveModelScopeWithDiagnostics(patterns, modelRuntime);
+					const listed = new Set(available.map((model) => `${model.provider}/${model.id}`));
+					enabled = [];
+					unavailableEnabled = [];
+					for (const scoped of scope.scopedModels) {
+						const id = `${scoped.model.provider}/${scoped.model.id}`;
+						(listed.has(id) ? enabled : unavailableEnabled).push(id);
+					}
+					for (const diagnostic of scope.diagnostics)
+						if (diagnostic.code === "no-match") unavailableEnabled.push(diagnostic.pattern);
+				}
 				send(response, 200, {
-					models: modelRuntime.getModels().map((model) => ({
+					models: available.map((model) => ({
 						id: model.id,
 						provider: model.provider,
 						name: model.name,
@@ -199,7 +232,8 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 						contextWindow: model.contextWindow,
 						maxTokens: model.maxTokens,
 					})),
-					enabled: settingsManager.getEnabledModels() ?? [],
+					enabled,
+					unavailableEnabled,
 					thinkingLevels: slot?.session.getAvailableThinkingLevels() ?? [],
 					contextUsage: stats?.contextUsage ?? null,
 					usage: stats
@@ -211,11 +245,14 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 										: null,
 							}
 						: null,
-					selected: slot?.session.model
+					selected: selectedModel
 						? {
-								provider: slot.session.model.provider,
-								id: slot.session.model.id,
-								thinkingLevel: slot.session.thinkingLevel,
+								provider: selectedModel.provider,
+								id: selectedModel.id,
+								thinkingLevel:
+									slot?.session.thinkingLevel ??
+									settingsManager.getModelThinkingLevel(selectedModel.provider, selectedModel.id) ??
+									undefined,
 							}
 						: null,
 				});
@@ -290,9 +327,20 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 					const patterns = input.patterns as string[];
 					const scope = await resolveModelScopeWithDiagnostics(patterns, modelRuntime);
 					if (scope.diagnostics.length) throw new Error("请求的模型范围没有匹配项");
-					settingsManager.setEnabledModels(patterns);
-					pool.setScopedModels(scope.scopedModels);
-					return { enabled: settingsManager.getEnabledModels() ?? [] };
+					// 与 /scoped-models 的保存一致：覆盖全部可用模型时存为默认范围（不限制）。可用口径同上，只含已登录 Provider
+					const credentials = await modelRuntime.listCredentials();
+					const signedIn = new Set(credentials.map((credential) => credential.providerId));
+					const availableIds = (await modelRuntime.getAvailable())
+						.filter((model) => signedIn.has(model.provider))
+						.map((model) => `${model.provider}/${model.id}`);
+					const coversAll =
+						patterns.length > 0 &&
+						patterns.length === availableIds.length &&
+						availableIds.every((id) => patterns.includes(id));
+					settingsManager.setEnabledModels(coversAll ? undefined : patterns);
+					pool.setScopedModels(coversAll ? [] : scope.scopedModels);
+					globalEvents.publish("state", { type: "settings_changed" });
+					return { enabled: settingsManager.getEnabledModels() ?? null };
 				});
 				send(response, 200, result);
 				return true;
@@ -357,8 +405,21 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 					messages: slot.session.messages,
 					entries: slot.session.sessionManager
 						.getBranch()
-						.filter((entry) => entry.type === "message")
-						.map((entry) => ({ id: entry.id, message: entry.message })),
+						// 分支总结条目的 type 是 branch_summary，得单独转成前端认识的消息，否则正文里看不到它。
+						.filter((entry) => entry.type === "message" || entry.type === "branch_summary")
+						.map((entry) =>
+							entry.type === "branch_summary"
+								? {
+										id: entry.id,
+										message: {
+											role: "branchSummary",
+											summary: entry.summary,
+											fromId: entry.fromId,
+											timestamp: new Date(entry.timestamp).getTime(),
+										},
+									}
+								: { id: entry.id, message: entry.message },
+						),
 					running: slot.session.isStreaming,
 					contextUsage: slot.session.getSessionStats().contextUsage ?? null,
 					queue: await (await inbox(id)).snapshot(),
@@ -418,21 +479,48 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 			}
 			if (suffix === "tree" && method === "GET") {
 				const slot = await pool.openSaved(id);
-				send(response, 200, { tree: slot.session.sessionManager.getTree() });
+				send(response, 200, {
+					tree: slot.session.sessionManager.getTree(),
+					leafId: slot.session.sessionManager.getLeafId(),
+				});
 				return true;
 			}
 			if (suffix === "tree/navigate" && method === "POST") {
 				const input = await body(request);
+				if (input.summarize !== undefined && typeof input.summarize !== "boolean")
+					throw new Error("请求的总结开关无效");
+				if (
+					input.customInstructions !== undefined &&
+					(typeof input.customInstructions !== "string" || input.customInstructions.length > 20_000)
+				)
+					throw new Error("请求的总结提示无效");
 				const result = await writeOnce(request, pathname, input, async () => {
 					const slot = await pool.openSaved(id);
 					if (slot.session.isStreaming) throw new InboxConflict("会话正在执行");
 					if (typeof input.entryId !== "string" || !slot.session.sessionManager.getEntry(input.entryId))
 						throw new Error("请求的分支节点不存在");
-					const navigated = await slot.session.navigateTree(input.entryId);
-					if (navigated.cancelled) throw new InboxConflict("分支导航被取消");
-					return { id, entryId: input.entryId, editorText: navigated.editorText };
+					const navigated = await slot.session.navigateTree(input.entryId, {
+						summarize: input.summarize === true,
+						customInstructions: input.customInstructions as string | undefined,
+					});
+					// 取消由用户发起（点取消总结触发 /abort），属于正常结果；报 409 会让前端把主动取消当成冲突。
+					if (navigated.cancelled) return { id, entryId: input.entryId, cancelled: true };
+					return {
+						id,
+						entryId: input.entryId,
+						cancelled: false,
+						editorText: navigated.editorText,
+						summaryEntryId: navigated.summaryEntry?.id,
+					};
 				});
 				send(response, 200, result);
+				return true;
+			}
+			if (suffix === "tree/abort" && method === "POST") {
+				// 不走 writeOnce：总结进行中时导航请求占着会话写锁，排队会让取消永远迟到。
+				// 停一颗中止信号本身幂等，不依赖去重；导航请求会以 cancelled 收尾。
+				pool.get(id)?.session.abortBranchSummary();
+				send(response, 200, { aborted: true });
 				return true;
 			}
 			if (suffix === "export" && method === "GET") {

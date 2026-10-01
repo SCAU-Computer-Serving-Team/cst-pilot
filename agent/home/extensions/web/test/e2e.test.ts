@@ -90,6 +90,14 @@ test("HTTP submits to two Pi sessions, returns immediately, streams results, and
 							contextWindow: 10000,
 							maxTokens: 300,
 						},
+						{
+							id: "mock2",
+							name: "mock2",
+							reasoning: false,
+							input: ["text"],
+							contextWindow: 10000,
+							maxTokens: 300,
+						},
 					],
 				},
 			},
@@ -152,6 +160,20 @@ test("HTTP submits to two Pi sessions, returns immediately, streams results, and
 		const scope = await send("/api/models/scoped", { patterns: ["probe/mock"] });
 		assert.equal(scope.status, 200);
 		assert.equal(pool.get(one.id)?.session.scopedModels[0]?.model.id, "mock");
+		const scopedList = await (await fetch(`${origin}/api/models`)).json();
+		assert.deepEqual(scopedList.enabled, ["probe/mock"]);
+		assert.deepEqual(scopedList.unavailableEnabled, []);
+		const allIds = scopedList.models.map(
+			(model: { provider: string; id: string }) => `${model.provider}/${model.id}`,
+		);
+		assert.ok(allIds.includes("probe/mock") && allIds.includes("probe/mock2"));
+		assert.ok(scopedList.models.every((model: { provider: string }) => model.provider === "probe"));
+		const scopeAll = await send("/api/models/scoped", { patterns: allIds });
+		assert.equal(scopeAll.status, 200);
+		assert.deepEqual((await scopeAll.json()).enabled, null);
+		assert.equal(pool.get(one.id)?.session.scopedModels.length, 0);
+		const allList = await (await fetch(`${origin}/api/models`)).json();
+		assert.equal(allList.enabled, null);
 		const selected = await send("/api/models/select", { sessionId: one.id, provider: "probe", modelId: "mock" });
 		assert.equal(selected.status, 200);
 		const thinking = await send("/api/models/thinking", { sessionId: one.id, level: "off" });
@@ -219,8 +241,10 @@ test("HTTP submits to two Pi sessions, returns immediately, streams results, and
 		assert.equal(rename.status, 200);
 		const tree = await fetch(`${origin}${sessionPath}/tree`);
 		assert.equal(tree.status, 200);
-		const nodes = (await tree.json()).tree;
+		const treeData = (await tree.json()) as { tree: { entry: { id: string } }[]; leafId: string | null };
+		const nodes = treeData.tree;
 		assert.ok(nodes.length > 0);
+		assert.ok(treeData.leafId, "分支树响应应携带当前叶条目");
 		const forked = await send(`${sessionPath}/fork`, { entryId: nodes[0].entry.id }, "fork-once");
 		assert.equal(forked.status, 201);
 		const branch = await forked.json();
