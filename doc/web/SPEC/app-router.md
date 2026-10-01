@@ -21,7 +21,7 @@
 |---|---|---|
 | `/` | 主页 | 入口，含会话列表 |
 | `/s/<sessionId>` | 聊天工作台 | 会话 ID 在地址里 |
-| `/s/<sessionId>/tree` | 分支树 | 对应 TUI 的 `/tree` |
+| `/s/<sessionId>/tree` | 分支树 | 对应 TUI 的 `/tree`，呈现与行布局规则见[分支树](branch-tree.md) |
 | `/dashboard` | 仪表盘 | MVP 后实现，字段口径见[仪表盘](dashboard.md) |
 | `/login` | 登录页 | 居中面板 |
 | `/settings` | 设置 | 入口在账号菜单 |
@@ -81,19 +81,21 @@
 
 ### 模型与登录
 
-API KEY 与后续 OAuth 共用模型服务登录状态。有效期、刷新和失效方式按凭据类型处理；浏览器只展示状态，不保存凭据。
+模型服务登录支持 OAuth 与 API KEY 两种方式，与 pi 的 `/login` 一致；两种方式共用同一种模型服务登录状态，设置面板与登录页都能进入。有效期、刷新和失效方式按凭据类型处理；浏览器只展示状态，不保存凭据。本项目语境下的「账号」特指 cstoa 私有服务，与模型服务登录态是两回事。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| GET | `/api/models` | 模型清单与启用范围；指定 `sessionId` 时附该会话当前选择 |
+| GET | `/api/models` | 可用模型清单与启用范围：`enabled` 为 `null` 表示全启用，`unavailableEnabled` 列出已存储但未匹配的启用模式；指定 `sessionId` 时附该会话当前选择 |
 | POST | `/api/models/select` | 按 `sessionId` 切换模型；无会话的主页选择在新建会话时提交 |
-| POST | `/api/models/scoped` | 改启用范围，对应 `/scoped-models` |
+| POST | `/api/models/scoped` | 改启用范围，对应 `/scoped-models`；覆盖全部可用模型时归一为默认范围（`null`） |
 | POST | `/api/models/thinking` | 按 `sessionId` 设置思考强度；无会话的主页选择在新建会话时提交 |
 | GET | `/api/auth` | 各 Provider 的登录状态、凭据类型、是否支持 API KEY 及 `requiresLogin`；不返回凭据。模型服务拒绝凭据后标记需重新登录 |
 | PUT | `/api/auth/<provider>/api-key` | 提交 `key`；可附 `baseUrl` 覆盖所选 Provider 的模型地址。地址写入 Pi 的 `models.json`，密钥由 Pi 写入 `auth.json`，响应不返回密钥 |
 | POST | `/api/auth/<provider>/logout` | 清除该 Provider 的本地登录状态 |
 
-自定义 BaseURL 沿用所选 Provider 在 Pi 中已有的模型与请求协议，不创建新模型。地址须为 HTTPS 或本机 HTTP；登录失败时恢复原模型配置。OAuth 登录流程接口留待 OA 登录实现后确定，MVP 不提供扫码或设备码接口。
+自定义 BaseURL 沿用所选 Provider 在 Pi 中已有的模型与请求协议，不创建新模型。地址须为 HTTPS 或本机 HTTP；登录失败时恢复原模型配置。OAuth 登录由后端调用 pi 的 `login(provider, "oauth")` 驱动，授权链接、设备码与进度经接口转发给页面；接口形状随登录页 OAuth 态落地。
+
+| POST | `/api/auth/<provider>/oauth` | OAuth 登录：启动流程，回传授权链接或设备码；手动回贴码与取消随该接口一并定义（后续落地） |
 
 ### 设置
 

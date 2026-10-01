@@ -29,6 +29,13 @@
     MCP 新建/修改 icon 节点后建议重启验证。
 10. MCP `Update` 改 icon 节点时必须带上 `icon`、`library`、`width`、`height` 全部字段，
     只传 `fill` 等部分字段会把节点重置成无名空壳（0×0，Material Symbols Rounded），保存后丢失。
+11. `Get` 回调里的 `context.bounds` 是父级相对坐标，不是画布绝对坐标；且新建或 Move 过的子树，
+    子节点 bounds 可能是插入瞬间的缓存值，与父级当前位置对不上。定位校验只看三层以内，
+    或改用整帧截图确认；布局尽量交给 flex（layout: vertical/horizontal），需要精确定位时
+    才在非 layout 容器里写绝对 x/y。
+12. 新建**顶层** frame 用 `Insert(root, …)`（`root` 是字符串节点 id）。新建的 frame 默认是 flex 布局，
+    子节点写下的 x/y 会被布局覆盖并改写，必须显式带上 `layout: "none"`；如果已经插入完才发现，
+    改回 `layout: "none"` 不会恢复坐标，要用 `Update` 把每个子节点的 x/y 再写一遍。
 
 ## 来源
 
