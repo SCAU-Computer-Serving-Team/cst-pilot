@@ -13,11 +13,7 @@
 
 ## 开源与工程化
 
-1. [ ] 补 LICENSE：仓库根目录缺许可证文件，开源发布前必须补
-2. [ ] GitHub Actions CI：push 与 PR 触发，运行 `agent` 的 `check` 与 `test:web`、前端的 typecheck 与测试；未通过不合并
-3. [ ] 前端 lint：biome 配置扩展到 `src/web/frontend`，与 typecheck、测试互补
-4. [ ] 贡献规范：CONTRIBUTING 说明本地开发、检查与测试命令；issue 模板区分缺陷报告与议题讨论
-5. [ ] 发行接入校验：静态产物存在性、文件清单与第三方许可证，见 [MVP 后续安排](web/MVP.md#六后面再做)
+1. [ ] 分支保护：把 CI 的两个 job 设为 `main` 的必需检查，未通过不允许合并。workflow 已就绪，见[贡献规范](../CONTRIBUTING.md#提交到上游)
 
 ## ToDraw 画布
 
