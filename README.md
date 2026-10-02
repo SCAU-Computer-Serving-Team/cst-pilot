@@ -45,7 +45,7 @@
 cst-pilot/
 |-- pi.cmd                     TUI 入口（发行版同款）
 |-- assets/                    品牌资源：logo.png 及其生成脚本
-|-- doc/                       产品、设计、工具与测试文档
+|-- doc/                       产品、Web、遥测、工具与测试文档，索引见 doc/README.md
 |-- pack/                      发行版构建脚本
 |-- src/
 |   `-- web/                    Web 前端源码及 Pen 画布、色表、字体与动态背景
