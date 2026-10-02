@@ -271,6 +271,12 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 .composer--home { min-height: 110px; padding: 16px; }
 .composer--chat { width: 100%; height: 105px; padding: 12px; border: 1px solid var(--chat-input-border); }
 .composer .composer-input { appearance: none; resize: none; border: 0; box-shadow: none; outline: none; background: transparent; color: var(--chat-ink); width: 100%; flex: 1; min-height: 42px; padding: 0; line-height: 1.5; opacity: 1; }
+.composer .composer-input { white-space: pre-wrap; word-break: break-word; overflow-y: auto; cursor: text; }
+.composer .composer-input:empty::before { content: attr(data-placeholder); color: var(--app-muted); opacity: 1; padding-top: .2em; }
+.composer-chip { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 2px 0 6px; margin: 0 2px 0 1px; border-radius: 6px; background: var(--app-hover); color: var(--chat-ink); font-size: .9em; line-height: 1; vertical-align: -5px; user-select: none; }
+.composer-chip > svg { flex: 0 0 14px; color: var(--chat-tool); }
+.composer-chip .chip-remove { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border-radius: 4px; color: var(--chat-muted); font-size: 13px; line-height: 1; opacity: 0; }
+.composer-chip:hover .chip-remove, .composer-chip .chip-remove:focus-visible { opacity: 1; }
 .composer .composer-input::placeholder { color: var(--app-muted); opacity: 1; padding-top: .2em; }
 .composer--home .composer-input { color: var(--app-ink); font-size: 20px; }
 .composer--chat .composer-input { font-size: 16px; }

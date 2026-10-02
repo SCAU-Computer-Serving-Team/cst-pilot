@@ -1,4 +1,4 @@
-import { Button, Label, ListBox, Select, TextArea } from "@heroui/react";
+import { Button, Label, ListBox, Select } from "@heroui/react";
 import {
 	ArrowUp,
 	Brain,
@@ -16,6 +16,7 @@ import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState } 
 import { useNavigate } from "react-router";
 import { apiJson } from "./api";
 import { ContextMeter } from "./context-meter";
+import { editorHtml, extractPayload, parseEditor } from "./composer-editor";
 import { addImage, type DraftImage, encodeImages, loadImages } from "./draft-images";
 
 type Model = { id: string; provider: string; name: string; reasoning: boolean };
@@ -50,6 +51,7 @@ const commandLabels: Record<string, string> = {
 	"/skill:startup": "开机自启",
 	"/skill:sys": "系统状态",
 };
+const knownCommands = Object.keys(commandLabels);
 
 function ImagePreview({ src, onClose }: { src: string; onClose: () => void }) {
 	const dialog = useRef<HTMLDialogElement>(null);
@@ -130,18 +132,101 @@ export function Composer({
 	const [thinkingLevels, setThinkingLevels] = useState<string[]>([]);
 	const [sending, setSending] = useState(false);
 	const [commands, setCommands] = useState<string[]>([]);
-	const [command, setCommand] = useState("");
 	const [commandIndex, setCommandIndex] = useState(0);
 	const [suggestionsVisible, setSuggestionsVisible] = useState(true);
 	const [files, setFiles] = useState<{ path: string; dir: string }[]>([]);
 	const [fileIndex, setFileIndex] = useState(0);
 	const [filesVisible, setFilesVisible] = useState(true);
+	const [chipCount, setChipCount] = useState(0);
 	const suggestions =
-		!command && suggestionsVisible && /^\/[\w:-]*$/.test(text)
+		chipCount === 0 && suggestionsVisible && /^\/[\w:-]*$/.test(text)
 			? commands.filter((item) => item.startsWith(text))
 			: [];
 	// `@` 文件引用：光标位于行尾的 @query 时列出项目文件。
 	const fileMatch = filesVisible ? /(?:^|\s)@([^\s@]*)$/.exec(text) : null;
+	const editorRef = useRef<HTMLDivElement>(null);
+	// 读回编辑器内容：withChips=false 只要纯文本，true 时 chip 还原成它的 token。
+	function readEditor(withChips: boolean): string {
+		const root = editorRef.current;
+		if (!root) return "";
+		let out = "";
+		const walk = (node: Node) => {
+			if (node.nodeType === Node.TEXT_NODE) {
+				out += node.textContent ?? "";
+				return;
+			}
+			if (node.nodeType !== Node.ELEMENT_NODE) return;
+			const el = node as HTMLElement;
+			if (el.classList.contains("composer-chip")) {
+				if (withChips) out += `${el.dataset.token ?? ""} `;
+				return;
+			}
+			if (el.tagName === "BR") {
+				out += "\n";
+				return;
+			}
+			el.childNodes.forEach(walk);
+			if (el.tagName === "DIV" || el.tagName === "P") out += "\n";
+		};
+		root.childNodes.forEach(walk);
+		return out.replace(/\n+$/u, "");
+	}
+	// 编辑器 DOM 是事实源：同步纯文本状态、草稿和空态。
+	function syncFromEditor() {
+		const root = editorRef.current;
+		if (!root) return;
+		const chips = root.querySelectorAll(".composer-chip").length;
+		if (chips === 0 && !readEditor(false).trim() && root.innerHTML !== "") root.innerHTML = "";
+		setChipCount(chips);
+		setText(readEditor(false));
+		setMessageId(crypto.randomUUID());
+		setCommandIndex(0);
+		setFileIndex(0);
+		setSuggestionsVisible(true);
+		setFilesVisible(true);
+		sessionStorage.setItem(draftKey, readEditor(true));
+	}
+	function caretToEnd() {
+		const root = editorRef.current;
+		if (!root) return;
+		root.focus();
+		const range = document.createRange();
+		range.selectNodeContents(root);
+		range.collapse(false);
+		const selection = window.getSelection();
+		selection?.removeAllRanges();
+		selection?.addRange(range);
+	}
+	function renderEditor(serialized: string) {
+		const root = editorRef.current;
+		if (!root) return;
+		root.innerHTML = editorHtml(parseEditor(serialized, knownCommands));
+		syncFromEditor();
+		caretToEnd();
+	}
+	function removeChip(button: HTMLElement) {
+		const chip = button.closest(".composer-chip");
+		const parent = chip?.parentNode;
+		if (!chip || !parent) return;
+		const at = [...parent.childNodes].indexOf(chip);
+		chip.remove();
+		const range = document.createRange();
+		range.setStart(parent, at);
+		range.collapse(true);
+		const selection = window.getSelection();
+		selection?.removeAllRanges();
+		selection?.addRange(range);
+		syncFromEditor();
+	}
+	useEffect(() => {
+		const onClick = (event: MouseEvent) => {
+			const button = (event.target as HTMLElement).closest?.(".chip-remove");
+			if (button) removeChip(button as HTMLElement);
+		};
+		const root = editorRef.current;
+		root?.addEventListener("click", onClick);
+		return () => root?.removeEventListener("click", onClick);
+	}, [draftKey]);
 	const fileSuggestions = fileMatch
 		? files.filter((file) => file.path.toLowerCase().includes((fileMatch[1] ?? "").toLowerCase())).slice(0, 40)
 		: [];
@@ -162,41 +247,24 @@ export function Composer({
 	}, [filesOpen, files.length]);
 	// 视图类命令（/tree、/fork）在补全面板里选中即执行，不折叠成标记，也不等回车。
 	function selectCommand(name: string) {
-		if (name === "/fork") {
-			setSuggestionsVisible(false);
-			setCommandIndex(0);
-			if (!sessionId) {
-				setCommand("");
-				setText("");
-				setError("请先进入会话，再使用此命令。");
-				return;
-			}
-			setCommand("");
-			setText("");
-			onFork?.();
-			return;
-		}
-		if (name === "/tree") {
-			setSuggestionsVisible(false);
-			setCommandIndex(0);
-			if (!sessionId) {
-				setCommand("");
-				setText("");
-				setError("请先进入会话，再使用此命令。");
-				return;
-			}
-			setCommand("");
-			setText("");
-			navigate(`/s/${sessionId}/tree`);
-			return;
-		}
-		setCommand(name);
-		setText("");
+		setSuggestionsVisible(false);
 		setCommandIndex(0);
+		if (name === "/fork" || name === "/tree") {
+			if (!sessionId) {
+				renderEditor("");
+				setError("请先进入会话，再使用此命令。");
+				return;
+			}
+			renderEditor("");
+			if (name === "/tree") navigate(`/s/${sessionId}/tree`);
+			else onFork?.();
+			return;
+		}
+		renderEditor(`${name} `);
 	}
 	function selectFile(path: string) {
-		const at = text.lastIndexOf("@");
-		setText(`${at >= 0 ? text.slice(0, at) : ""}@${path} `);
+		const trimmed = readEditor(false).replace(/@[^\s@]*$/u, "");
+		renderEditor(`${trimmed} @${path} `);
 		setFileIndex(0);
 		setFilesVisible(false);
 	}
@@ -204,13 +272,23 @@ export function Composer({
 	const navigate = useNavigate();
 
 	useEffect(() => {
-		setText(sessionStorage.getItem(draftKey) ?? "");
+		const stored = sessionStorage.getItem(draftKey) ?? "";
+		const root = editorRef.current;
+		if (root) {
+			root.innerHTML = editorHtml(parseEditor(stored, knownCommands));
+			setChipCount(root.querySelectorAll(".composer-chip").length);
+		}
+		setText(
+			parseEditor(stored, knownCommands)
+				.filter((segment) => segment.kind === "text")
+				.map((segment) => (segment.kind === "text" ? segment.text : ""))
+				.join(""),
+		);
 		setMessageId(sessionStorage.getItem(`${draftKey}:id`) ?? crypto.randomUUID());
 	}, [draftKey]);
 	useEffect(() => {
-		sessionStorage.setItem(draftKey, text);
 		sessionStorage.setItem(`${draftKey}:id`, messageId);
-	}, [draftKey, text, messageId]);
+	}, [draftKey, messageId]);
 	useEffect(() => {
 		let active = true;
 		const stored = JSON.parse(sessionStorage.getItem(`${draftKey}:images`) ?? "[]") as string[];
@@ -263,7 +341,7 @@ export function Composer({
 		setImages(next);
 		setMessageId(crypto.randomUUID());
 	}
-	function paste(event: ClipboardEvent<HTMLTextAreaElement>) {
+	function paste(event: ClipboardEvent<HTMLDivElement>) {
 		const files = [...event.clipboardData.items]
 			.filter((item) => item.kind === "file")
 			.map((item) => item.getAsFile())
@@ -271,6 +349,12 @@ export function Composer({
 		if (files.length) {
 			event.preventDefault();
 			void attach(files);
+			return;
+		}
+		const plain = event.clipboardData.getData("text/plain");
+		if (plain) {
+			event.preventDefault();
+			document.execCommand("insertText", false, plain);
 		}
 	}
 	useEffect(() => {
@@ -374,7 +458,7 @@ export function Composer({
 			setError("");
 			try {
 				await onSummary(text.trim());
-				setText("");
+				renderEditor("");
 				setMessageId(crypto.randomUUID());
 				sessionStorage.removeItem(draftKey);
 				sessionStorage.removeItem(`${draftKey}:id`);
@@ -385,7 +469,9 @@ export function Composer({
 			}
 			return;
 		}
-		if (!text.trim() && !images.length && !command && running) {
+		const serialized = readEditor(true);
+		const { command, body } = extractPayload(serialized, knownCommands);
+		if (!body.trim() && !images.length && !command && running) {
 			if (onStop) {
 				setSending(true);
 				try {
@@ -399,7 +485,7 @@ export function Composer({
 			}
 			return;
 		}
-		if ((!text.trim() && !images.length && !command) || (!onSend && !onCommand)) return;
+		if ((!body.trim() && !images.length && !command) || (!onSend && !onCommand)) return;
 		setSending(true);
 		setError("");
 		try {
@@ -408,10 +494,10 @@ export function Composer({
 				navigate(`/s/${sessionId}/tree`);
 			} else if (command === "/compact") {
 				if (!onCommand) throw new Error("请先进入会话，再使用此命令。");
-				await onCommand("compact", text);
+				await onCommand("compact", body);
 			} else {
 				if (!onSend) throw new Error("当前无法提交消息");
-				await onSend(text, {
+				await onSend(body, {
 					provider: selected?.provider,
 					modelId: selected?.id,
 					thinkingLevel: thinking,
@@ -420,14 +506,13 @@ export function Composer({
 					skill: command.startsWith("/skill:") ? command.slice(7) : undefined,
 				});
 			}
-			setCommand("");
 			setPreviewImage(null);
 			images.forEach((image) => {
 				URL.revokeObjectURL(image.url);
 			});
 			setImages([]);
 			sessionStorage.removeItem(`${draftKey}:images`);
-			setText("");
+			renderEditor("");
 			setMessageId(crypto.randomUUID());
 			sessionStorage.removeItem(draftKey);
 			sessionStorage.removeItem(`${draftKey}:id`);
@@ -437,7 +522,7 @@ export function Composer({
 			setSending(false);
 		}
 	}
-	function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+	function keyDown(event: KeyboardEvent<HTMLDivElement>) {
 		if (event.nativeEvent.isComposing || event.keyCode === 229) return;
 		if (fileSuggestions.length && ["ArrowUp", "ArrowDown", "Tab", "Enter", "Escape"].includes(event.key)) {
 			event.preventDefault();
@@ -456,11 +541,6 @@ export function Composer({
 			else selectCommand(suggestions[commandIndex] ?? suggestions[0]);
 			return;
 		}
-		if (event.key === "Escape" && command) {
-			event.preventDefault();
-			setCommand("");
-			return;
-		}
 		if (event.key === "Escape" && running) {
 			event.preventDefault();
 			void onStop?.();
@@ -471,6 +551,8 @@ export function Composer({
 			void submit();
 		}
 	}
+	const nothingToSend = !text.trim() && !images.length && chipCount === 0;
+
 	return (
 		<div className={`composer-shell ${home ? "composer-shell--home" : "composer-shell--chat"}`}>
 			{!!images.length && (
@@ -507,29 +589,18 @@ export function Composer({
 						</Button>
 					</div>
 				)}
-				{command && (
-					<div className="composer-command">
-						<span>{command}</span>
-						<Button variant="ghost" isIconOnly aria-label="移除命令" onPress={() => setCommand("")}>
-							×
-						</Button>
-					</div>
-				)}
-				<TextArea
-					aria-label="消息"
+				// biome-ignore lint/a11y/useSemanticElements: 多行内嵌标记输入没有对应原生元素，必须用 contenteditable div
+				<div
+					ref={editorRef}
 					className="composer-input"
-					value={text}
-					onChange={(event) => {
-						setText(event.target.value);
-						setCommandIndex(0);
-						setFileIndex(0);
-						setSuggestionsVisible(true);
-						setFilesVisible(true);
-						setMessageId(crypto.randomUUID());
-					}}
-					onKeyDown={keyDown}
-					onPaste={paste}
-					placeholder={
+					// biome-ignore lint/a11y/useFocusableInteractive: contenteditable 本身可聚焦，tabIndex 仅为辅助键盘可达
+					tabIndex={0}
+					contentEditable
+					suppressContentEditableWarning
+					role="textbox"
+					aria-label="消息"
+					aria-multiline="true"
+					data-placeholder={
 						home
 							? "描述这台电脑遇到的问题…"
 							: summaryTag
@@ -538,7 +609,9 @@ export function Composer({
 									? "继续输入以排队后续修改"
 									: "继续提问，或补充这台电脑的情况…"
 					}
-					rows={home ? 1 : 2}
+					onInput={syncFromEditor}
+					onKeyDown={keyDown}
+					onPaste={paste}
 				/>
 				{!!suggestions.length && (
 					<fieldset className="command-suggestions" aria-label="命令补全">
@@ -696,20 +769,20 @@ export function Composer({
 							sending ||
 							(summaryTag
 								? !text.trim()
-								: (!text.trim() && !images.length && !command && !running) ||
+								: (nothingToSend && !running) ||
 									(!onSend && !onStop && !onCommand))
 						}
 						className="composer-send"
 						aria-label={
 							summaryTag
 								? "开始分支总结"
-								: running && !text.trim() && !images.length && !command
+								: running && nothingToSend
 									? "停止生成"
 									: "发送消息"
 						}
 						onPress={() => void submit()}
 					>
-						{running && !text.trim() && !images.length && !command ? (
+						{running && nothingToSend ? (
 							<Square size={12} fill="currentColor" />
 						) : (
 							<ArrowUp size={16} />
