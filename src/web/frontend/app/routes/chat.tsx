@@ -1,5 +1,5 @@
 import { Button, Disclosure, Popover } from "@heroui/react";
-import { ArrowDown, ArrowUp, Brain, Copy, Download, EllipsisVertical, GitBranch, GitFork, GripVertical, HardDrive, ListTree, Pencil, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Brain, ChevronDown, Copy, Download, EllipsisVertical, GitBranch, GitFork, GripVertical, HardDrive, ListTree, Pencil, Trash2, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -112,15 +112,19 @@ const AssistantTurn = memo(AssistantTurnImpl, (prev, next) =>
   prev.turn.assistants.length === next.turn.assistants.length &&
   prev.turn.assistants.every((entry, index) => entry === next.turn.assistants[index]));
 
-/** 分支总结消息：标题行（分支图标 + 标题 + 时间）与 Markdown 正文，与助手消息同宽同左缘。 */
+/** 分支总结消息：标题行是折叠触发器（分支图标 + 标题 + 时间 + 展开箭头，箭头在最右端），展开后正文收进灰底原文块，与工具调用原文块同一规范；总结输出按原文呈现，不在聊天流里直接渲染。 */
 const SummaryEntry = memo(function SummaryEntry({ entry }: { entry: TurnEntry }) {
+  const [open, setOpen] = useState(false);
   return <article className="assistant-block summary-block">
-    <div className="summary-head">
-      <GitBranch size={18} aria-hidden="true" />
-      <span className="summary-title">分支总结</span>
-      <span className="summary-time">{new Date(entry.message.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</span>
-    </div>
-    <Markdown text={entry.message.summary ?? ""} />
+    <Disclosure isExpanded={open} onExpandedChange={setOpen}>
+      <Disclosure.Heading><Disclosure.Trigger className="summary-head">
+        <GitBranch size={18} aria-hidden="true" />
+        <span className="summary-title">分支已总结</span>
+        <span className="summary-time">{new Date(entry.message.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</span>
+        <Disclosure.Indicator><ChevronDown size={14} aria-hidden="true" /></Disclosure.Indicator>
+      </Disclosure.Trigger></Disclosure.Heading>
+      <Disclosure.Content><section className="tool-text"><pre className="tool-raw">{entry.message.summary ?? ""}</pre></section></Disclosure.Content>
+    </Disclosure>
   </article>;
 });
 

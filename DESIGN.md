@@ -130,7 +130,7 @@ omitted:
 | Shader | [blue-hour.glsl](src/web/design/asset/blue-hour.glsl)、[blue-hour-air.glsl](src/web/design/asset/blue-hour-air.glsl) | 首页与登录页的动态背景 |
 | 降级样式 | [blue-hour.css](src/web/design/asset/blue-hour.css) | 无 WebGL 时的 CSS 近似，不画板条 |
 | 背景原图 | [Blue hour-3840x2160.svg](src/web/design/asset/Blue%20hour-3840x2160.svg)、[blue-hour-background.png](src/web/design/asset/blue-hour-background.png)、[blue-hour.png](src/web/design/asset/blue-hour.png) | 用户提供的原图与静态兼容图 |
-| 页面快照 | [login-preview/](src/web/design/asset/login-preview/)、[tree-preview/](src/web/design/asset/tree-preview/)、[chat-preview/](src/web/design/asset/chat-preview/) | 弹出层与状态帧的底图：登录页预览的模糊底层、分支树页快照、聊天页快照 |
+| 页面快照 | [login-preview/](src/web/design/asset/login-preview/)、[tree-preview/](src/web/design/asset/tree-preview/) | 带遮罩的弹出层底图：登录页预览的模糊底层、分支树页快照。整页状态帧不用快照，直接复制目标页帧 |
 
 ### 字体
 

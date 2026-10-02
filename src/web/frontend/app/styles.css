@@ -593,9 +593,13 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 .summary-pending { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 30px; color: var(--chat-ink); font-size: var(--font-body); }
 .summary-pending > svg { flex: 0 0 var(--icon-menu); color: var(--tree-summary); }
 .summary-cancel { margin-left: auto; width: var(--control); height: var(--control); min-width: var(--control); color: var(--tool-danger); }
-.summary-head { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 28px; }
+.summary-head { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 28px; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.summary-head:is(:focus-visible, [data-focus-visible="true"]) { outline: 2px solid var(--app-focus); outline-offset: 2px; }
+.summary-head .disclosure__indicator { flex: 0 0 auto; color: var(--chat-muted); }
 .summary-head > svg { flex: 0 0 var(--icon-menu); color: var(--tree-summary); }
 .summary-title { color: var(--chat-ink); font-size: var(--font-body); font-weight: 500; }
+.summary-block > .disclosure { width: 100%; }
+.summary-block .tool-text .tool-raw { margin-top: 12px; }
 .summary-time { margin-left: auto; color: var(--chat-muted); font-size: var(--font-label); }
 @media (prefers-reduced-motion: reduce) { .back-to-bottom { scroll-behavior: auto; } }
 .settings-content { width: min(816px, calc(100% - 72px)); margin: 30px auto; padding-bottom: 64px; overflow-y: auto; display: flex; flex-direction: column; gap: 64px; }
@@ -909,11 +913,11 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 @keyframes menu-exit { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(var(--scale-tiny)); } }
 .composer-actions .select__trigger > svg:last-child, .login-provider .select__trigger > svg:last-child { transition: transform var(--duration-fast) var(--ease-smooth-out); }
 .composer-actions .select__trigger[aria-expanded="true"] > svg:last-child, .login-provider .select__trigger[aria-expanded="true"] > svg:last-child { transform: rotate(180deg); }
-:is(.tool-group, .tool-card, .thinking-line, .search-tool, .turn-process) .disclosure__content { transition: height var(--duration-fast) var(--ease-smooth-out), opacity var(--duration-fast) var(--ease-smooth-out); will-change: auto; }
+:is(.tool-group, .tool-card, .thinking-line, .search-tool, .turn-process, .summary-block) .disclosure__content { transition: height var(--duration-fast) var(--ease-smooth-out), opacity var(--duration-fast) var(--ease-smooth-out); will-change: auto; }
 /* 折叠朝右、展开朝下，方向只有一个来源：指示器自身旋转，内部再旋转一律清掉。 */
-:is(.tool-group, .tool-card, .thinking-line, .search-tool, .turn-process) .disclosure__indicator { margin-left: 0; transition: transform var(--duration-fast) var(--ease-smooth-out); rotate: none; transform: rotate(-90deg); }
-:is(.tool-group, .tool-card, .thinking-line, .search-tool, .turn-process) .disclosure__indicator > * { rotate: none !important; transform: none !important; }
-:is(.tool-group, .tool-card, .thinking-line, .search-tool, .turn-process) [aria-expanded="true"] .disclosure__indicator { rotate: none; transform: rotate(0deg); }
+:is(.tool-group, .tool-card, .thinking-line, .search-tool, .turn-process, .summary-block) .disclosure__indicator { margin-left: 0; transition: transform var(--duration-fast) var(--ease-smooth-out); rotate: none; transform: rotate(-90deg); }
+:is(.tool-group, .tool-card, .thinking-line, .search-tool, .turn-process, .summary-block) .disclosure__indicator > * { rotate: none !important; transform: none !important; }
+:is(.tool-group, .tool-card, .thinking-line, .search-tool, .turn-process, .summary-block) [aria-expanded="true"] .disclosure__indicator { rotate: none; transform: rotate(0deg); }
 .tool-group > .disclosure__content { position: relative; padding: 0 0 0 24px; }
 .tool-group > .disclosure__content::before { content: ""; position: absolute; left: 7px; top: 10px; bottom: 10px; width: 2px; background: var(--chat-bubble); }
 .tool-group > .disclosure__content > .tool-card { margin-top: 12px; }
@@ -932,7 +936,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 .tool-raw-toggle { cursor: pointer; border-radius: var(--radius-control); transition: color var(--duration-quick) var(--ease-smooth-out); }
 .tool-raw-toggle:is(:hover, [data-hovered="true"]) { color: var(--chat-ink); }
 .tool-raw-toggle:is(:focus-visible, [data-focus-visible="true"]) { outline: 2px solid var(--app-focus); outline-offset: 2px; box-shadow: none; }
-:is(.tool-group, .tool-card) .disclosure__heading { margin: 0; font: inherit; }
+:is(.tool-group, .tool-card, .summary-block) .disclosure__heading { margin: 0; font: inherit; }
 .login-card .login-key-visibility { transform: translateY(-50%); }
 .login-card .login-submit { border-radius: calc(8 * var(--login-unit)); }
 .login-field .login-input { box-shadow: none; transition: background-color var(--duration-quick) var(--ease-smooth-out), border-color var(--duration-quick) var(--ease-smooth-out); }
