@@ -11,8 +11,8 @@
 ## AGENTS.md 不会生效
 
 `--no-context-files` 关闭的不只是项目上下文文件，也包括 `agent\home` 下的全局
-AGENTS.md（加载逻辑在 `noContextFiles` 时直接返回空列表）。因此 Agent 指令不放在
-AGENTS.md，而是放在 `agent\home\APPEND_SYSTEM.md`——pi 内置的追加系统提示词文件，
+AGENTS.md（加载逻辑在 `noContextFiles` 时直接返回空列表）。Agent 指令放在
+`agent\home\APPEND_SYSTEM.md`——pi 内置的追加系统提示词文件，
 从 `PI_CODING_AGENT_DIR` 自动发现并附加到默认系统提示词之后，不受该开关影响，
 也无需改动 `pi.cmd` 的启动参数。
 
