@@ -432,12 +432,13 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 										id: entry.id,
 										message: {
 											role: "branchSummary",
+											parentId: entry.parentId,
 											summary: entry.summary,
 											fromId: entry.fromId,
 											timestamp: new Date(entry.timestamp).getTime(),
 										},
 									}
-								: { id: entry.id, message: entry.message },
+								: { id: entry.id, parentId: entry.parentId, message: entry.message },
 						),
 					running: slot.session.isStreaming,
 					contextUsage: slot.session.getSessionStats().contextUsage ?? null,

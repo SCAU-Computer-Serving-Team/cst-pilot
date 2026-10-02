@@ -15,7 +15,7 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { apiJson } from "../app/api";
 import { branchSummaryHref } from "../app/branch-summary";
@@ -74,6 +74,9 @@ export default function SessionTree() {
 	const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
 	const [choice, setChoice] = useState("");
 	const [actionError, setActionError] = useState("");
+	// 键盘游标：null 表示跟随当前叶（leafIndex）。
+	const [cursor, setCursor] = useState<number | null>(null);
+	const rowRefs = useRef(new Map<string, HTMLElement>());
 	useEffect(() => {
 		if (!choice) return;
 		const onKey = (event: KeyboardEvent) => {
@@ -108,6 +111,38 @@ export default function SessionTree() {
 		return allRows.filter((row) => matchesSearch(row.node, rowTexts.get(row.node.entry.id)!, query));
 	}, [allRows, foldResult, query, rowTexts]);
 	const leafIndex = useMemo(() => rows.findIndex((row) => row.node.entry.id === leafId), [rows, leafId]);
+	const cursorIndex = cursor ?? (leafIndex >= 0 ? leafIndex : rows.length - 1);
+
+	// 方向键移动游标，Enter 打开选择对话框；输入框、下拉与选择对话框打开时不接管。
+	useEffect(() => {
+		if (preview) return;
+		const onKey = (event: KeyboardEvent) => {
+			if (choice) return;
+			const target = event.target as HTMLElement | null;
+			if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+			if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+				event.preventDefault();
+				setCursor((value) => {
+					const base = value ?? leafIndex;
+					const next = event.key === "ArrowUp" ? Math.max(0, base - 1) : Math.min(rows.length - 1, base + 1);
+					return rows.length ? next : null;
+				});
+				return;
+			}
+			if (event.key === "Enter" && cursorIndex >= 0 && cursorIndex < rows.length) {
+				event.preventDefault();
+				setChoice(rows[cursorIndex].node.entry.id);
+			}
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [preview, choice, rows, leafIndex, cursorIndex]);
+
+	// 游标行滚动到可见区域。
+	useEffect(() => {
+		if (cursorIndex < 0 || cursorIndex >= rows.length) return;
+		rowRefs.current.get(rows[cursorIndex].node.entry.id)?.scrollIntoView({ block: "nearest" });
+	}, [cursorIndex, rows]);
 
 	async function jump(entryId: string) {
 		if (!sessionId || preview) return;
@@ -214,7 +249,7 @@ export default function SessionTree() {
 				) : rows.length === 0 ? (
 					<li className="tree-empty">{query ? "没有匹配的条目" : "此会话还没有条目"}</li>
 				) : (
-					rows.map((row) => {
+					rows.map((row, index) => {
 						const id = row.node.entry.id;
 						const text = rowTexts.get(id)!;
 						const summary = row.node.entry.type === "branch_summary";
@@ -222,9 +257,15 @@ export default function SessionTree() {
 						return (
 							<li
 								key={id}
+								ref={(el) => {
+									if (el) rowRefs.current.set(id, el);
+									else rowRefs.current.delete(id);
+								}}
 								// biome-ignore lint/a11y/noNoninteractiveTabindex: 行要能 Tab 聚焦并用 Enter 选择；分支树的键盘跳段落地后改为 roving tabindex
 								tabIndex={0}
-								className={`tree-row tree-row-${text.kind} ${id === leafId ? "tree-row-current" : ""}`}
+								className={`tree-row tree-row-${text.kind} ${id === leafId ? "tree-row-current" : ""} ${
+									index === cursorIndex ? "tree-row-cursor" : ""
+								}`}
 								onClick={() => {
 									if (!preview) setChoice(id);
 								}}

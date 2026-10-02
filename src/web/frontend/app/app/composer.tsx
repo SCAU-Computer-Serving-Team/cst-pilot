@@ -88,6 +88,7 @@ export function Composer({
 	onSend,
 	onStop,
 	onCommand,
+	onFork,
 	onSummary,
 }: {
 	home?: boolean;
@@ -99,7 +100,8 @@ export function Composer({
 	summaryTag?: { label: string; onCancel: () => void };
 	onSend?: (text: string, config: ComposerConfig) => Promise<void>;
 	onStop?: () => Promise<void>;
-	onCommand?: (name: "compact" | "fork", text: string) => Promise<void>;
+	onCommand?: (name: "compact", text: string) => Promise<void>;
+	onFork?: () => void;
 	onSummary?: (instructions: string) => Promise<void>;
 }) {
 	const draftKey = `cst-draft:${sessionId ?? "new"}`;
@@ -158,8 +160,22 @@ export function Composer({
 			active = false;
 		};
 	}, [filesOpen, files.length]);
-	// 视图类命令（/tree）在补全面板里选中即跳转，不折叠成标记，也不等回车。
+	// 视图类命令（/tree、/fork）在补全面板里选中即执行，不折叠成标记，也不等回车。
 	function selectCommand(name: string) {
+		if (name === "/fork") {
+			setSuggestionsVisible(false);
+			setCommandIndex(0);
+			if (!sessionId) {
+				setCommand("");
+				setText("");
+				setError("请先进入会话，再使用此命令。");
+				return;
+			}
+			setCommand("");
+			setText("");
+			onFork?.();
+			return;
+		}
 		if (name === "/tree") {
 			setSuggestionsVisible(false);
 			setCommandIndex(0);
@@ -390,9 +406,9 @@ export function Composer({
 			if (command === "/tree") {
 				if (!sessionId) throw new Error("请先进入会话，再使用此命令。");
 				navigate(`/s/${sessionId}/tree`);
-			} else if (command === "/compact" || command === "/fork") {
+			} else if (command === "/compact") {
 				if (!onCommand) throw new Error("请先进入会话，再使用此命令。");
-				await onCommand(command.slice(1) as "compact" | "fork", text);
+				await onCommand("compact", text);
 			} else {
 				if (!onSend) throw new Error("当前无法提交消息");
 				await onSend(text, {

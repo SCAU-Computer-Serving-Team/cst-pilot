@@ -590,6 +590,15 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 .summary-option svg { flex: 0 0 var(--icon-menu); color: var(--chat-muted); }
 .summary-option:is(:hover, [data-hovered="true"]) { background: var(--app-track); }
 .summary-option:is(:focus-visible, [data-focus-visible="true"]) { outline: 2px solid var(--app-focus); outline-offset: 2px; }
+/* 派生选择对话框（画布 n3Qkm/utKHY）：宽 560，消息列表带微小长方形滚动条。 */
+.fork-dialog { display: flex; flex-direction: column; gap: 12px; width: 560px; max-width: calc(100vw - 48px); padding: 24px; border: 1px solid var(--chat-input-border); border-radius: var(--radius-composer); background: var(--chat-row); box-shadow: 0 24px 64px #1a202433; }
+.fork-list-wrap { position: relative; }
+.fork-list { display: flex; flex-direction: column; gap: 4px; max-height: 242px; margin: 0; padding: 0 10px 0 0; overflow-y: auto; list-style: none; scrollbar-width: none; outline: none; }
+.fork-list::-webkit-scrollbar { width: 0; height: 0; }
+.fork-row { display: flex; align-items: center; width: 100%; height: 34px; padding: 0 12px; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--chat-ink); font-size: var(--font-body); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.fork-row:disabled { color: var(--chat-muted); cursor: not-allowed; }
+.fork-row-active { background: var(--app-hover); }
+.fork-thumb { position: absolute; right: 2px; width: 4px; border-radius: 2px; background: var(--chat-muted); opacity: 0.5; pointer-events: none; }
 /* 分支总结 · 生成中与完成：正文尾部一条 30 高的状态行，和一条与助手消息同宽同左缘的总结消息。 */
 .summary-pending { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 30px; color: var(--chat-ink); font-size: var(--font-body); }
 .summary-pending > svg { flex: 0 0 var(--icon-menu); color: var(--tree-summary); }
@@ -979,6 +988,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 .tree-empty { margin: 48px auto; color: var(--chat-muted); text-align: center; }
 .tree-row { position: relative; display: flex; align-items: center; width: 100%; height: 40px; padding: 0 36px; cursor: pointer; color: var(--chat-ink); font-size: 16px; }
 .tree-row:hover, .tree-row:focus-visible { background: var(--app-hover); outline: none; }
+.tree-row-cursor { background: var(--app-hover); }
 .tree-row-current { background: var(--app-selected); }
 .tree-slot { position: relative; flex: 0 0 32px; height: 100%; }
 .tree-line { position: absolute; left: 4px; top: 0; width: 2px; height: 40px; background: var(--tree-line); }

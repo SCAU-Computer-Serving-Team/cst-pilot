@@ -42,7 +42,7 @@ export type Question = {
 export type SessionDetail = {
 	id: string;
 	messages: Message[];
-	entries: { id: string; message: Message }[];
+	entries: { id: string; parentId?: string | null; message: Message }[];
 	running: boolean;
 	contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null } | null;
 	queue: InboxSnapshot;

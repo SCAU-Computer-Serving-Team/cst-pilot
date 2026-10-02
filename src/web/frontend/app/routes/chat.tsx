@@ -33,6 +33,7 @@ import {
 	type TurnEntry,
 	visibleQueueItems,
 } from "../app/conversation-parts";
+import { ForkPicker, forkTargets } from "../app/fork-picker";
 import { splitStableText } from "../app/markdown-split";
 import { sampleSessions } from "../app/shell";
 import { rehypeStreamWords, StreamWords } from "../app/stream-words";
@@ -105,14 +106,14 @@ function AssistantTurnImpl({
 	turn,
 	live,
 	resultsByTurn,
-	fork,
+	onFork,
 	onError,
 }: {
 	id: string;
 	turn: Turn;
 	live: boolean;
 	resultsByTurn: Map<string, Map<string, Message>>;
-	fork: (entryId: string) => Promise<void>;
+	onFork: () => void;
 	onError: (text: string) => void;
 }) {
 	const { process, finalText } = splitTurn(turn.assistants);
@@ -236,7 +237,7 @@ function AssistantTurnImpl({
 					>
 						<Copy size={15} />
 					</Button>
-					<Button variant="ghost" isIconOnly aria-label="从此回答派生会话" onPress={() => void fork(last.id!)}>
+					<Button variant="ghost" isIconOnly aria-label="派生会话" onPress={() => onFork()}>
 						<GitFork size={15} />
 					</Button>
 					<a href={`${base(id)}/export`} download={`session-${id}.md`} aria-label="导出会话">
@@ -257,7 +258,7 @@ const AssistantTurn = memo(
 		prev.live === next.live &&
 		prev.id === next.id &&
 		prev.resultsByTurn === next.resultsByTurn &&
-		prev.fork === next.fork &&
+		prev.onFork === next.onFork &&
 		prev.onError === next.onError &&
 		prev.turn.user === next.turn.user &&
 		prev.turn.assistants.length === next.turn.assistants.length &&
@@ -303,6 +304,7 @@ function Conversation({
 	summarizing,
 	refresh,
 	onCancelSummary,
+	onFork,
 }: {
 	id: string;
 	entries: { id?: string; message: Message }[];
@@ -311,8 +313,8 @@ function Conversation({
 	summarizing: boolean;
 	refresh: () => Promise<void>;
 	onCancelSummary: () => Promise<void>;
+	onFork: () => void;
 }) {
-	const navigate = useNavigate();
 	const scroll = useRef<HTMLDivElement>(null);
 	const [following, setFollowing] = useState(true);
 	const [error, setError] = useState("");
@@ -339,17 +341,6 @@ function Conversation({
 	useEffect(() => {
 		if (following) scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
 	}, [entries, streaming, following]);
-	const fork = useCallback(
-		async (entryId: string) => {
-			try {
-				const created = await apiJson<{ id: string }>(`${base(id)}/fork`, { method: "POST", body: { entryId } });
-				navigate(`/s/${created.id}`);
-			} catch (cause) {
-				setError(cause instanceof Error ? cause.message : "无法派生会话");
-			}
-		},
-		[id, navigate],
-	);
 	return (
 		<>
 			<div
@@ -409,7 +400,7 @@ function Conversation({
 									turn={turn}
 									live={live}
 									resultsByTurn={resultsByTurn}
-									fork={fork}
+									onFork={onFork}
 									onError={setError}
 								/>
 							)}
@@ -640,6 +631,7 @@ export default function Chat() {
 	const example =
 		params.get("preview") === "1" ? sampleSessions.find((session) => session.id === sessionId) : undefined;
 	const { detail, streaming, error, refresh } = useSessionDetail(example ? undefined : sessionId);
+	const [forkOpen, setForkOpen] = useState(false);
 	const [title, setTitle] = useState(example?.title ?? "会话");
 	const [summarizing, setSummarizing] = useState(false);
 	const [summaryNote, setSummaryNote] = useState("");
@@ -729,19 +721,10 @@ export default function Chat() {
 		await apiJson(`${base(sessionId)}/abort`, { method: "POST" });
 		await refresh();
 	}
-	async function command(name: "compact" | "fork", text: string) {
+	async function command(name: "compact", text: string) {
 		if (!sessionId) return;
 		if (name === "compact")
 			await apiJson(`${base(sessionId)}/compact`, { method: "POST", body: { instructions: text } });
-		else {
-			const entryId = [...(detail?.entries ?? [])].reverse().find((entry) => entry.message.role === "assistant")?.id;
-			if (!entryId) throw new Error("当前会话还没有可派生的消息");
-			const created = await apiJson<{ id: string }>(`${base(sessionId)}/fork`, {
-				method: "POST",
-				body: { entryId },
-			});
-			navigate(`/s/${created.id}`);
-		}
 		await refresh();
 	}
 	return (
@@ -780,6 +763,7 @@ export default function Chat() {
 					summarizing={summarizing}
 					refresh={refresh}
 					onCancelSummary={cancelSummary}
+					onFork={example ? () => undefined : () => setForkOpen(true)}
 				/>
 			) : (
 				<div className="chat-empty">{example ? "此会话暂无对话示例。" : error || "正在读取会话…"}</div>
@@ -807,8 +791,17 @@ export default function Chat() {
 					onSend={example ? undefined : send}
 					onStop={example ? undefined : stop}
 					onCommand={example ? undefined : command}
+					onFork={example ? undefined : () => setForkOpen(true)}
 				/>
 			</div>
+			{forkOpen && (
+				<ForkPicker
+					sessionId={sessionId ?? ""}
+					targets={forkTargets(detail?.entries ?? [])}
+					running={!!detail?.running || !!streaming}
+					onClose={() => setForkOpen(false)}
+				/>
+			)}
 		</main>
 	);
 }
