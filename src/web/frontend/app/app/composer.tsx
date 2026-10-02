@@ -589,17 +589,12 @@ export function Composer({
 						</Button>
 					</div>
 				)}
-				// biome-ignore lint/a11y/useSemanticElements: 多行内嵌标记输入没有对应原生元素，必须用 contenteditable div
 				<div
 					ref={editorRef}
 					className="composer-input"
-					// biome-ignore lint/a11y/useFocusableInteractive: contenteditable 本身可聚焦，tabIndex 仅为辅助键盘可达
-					tabIndex={0}
 					contentEditable
 					suppressContentEditableWarning
-					role="textbox"
 					aria-label="消息"
-					aria-multiline="true"
 					data-placeholder={
 						home
 							? "描述这台电脑遇到的问题…"
@@ -628,7 +623,7 @@ export function Composer({
 											onPress={() => selectCommand(item)}
 										>
 											{skill ? <Sparkles size={16} /> : <Command size={16} />}
-											<span>{item}</span>
+											<span>{skill ? item.slice("/skill:".length) : item.slice(1)}</span>
 											<small>{commandLabels[item]}</small>
 										</Button>
 									))}
