@@ -1,6 +1,6 @@
 # 分支树
 
-状态：行结构已按 pi TUI 规则重画并对齐实现，页面已接入接口。更新：2026-09-30。
+状态：行结构已按 pi TUI 规则重画并对齐实现，页面已接入接口。更新：2026-10-02。
 
 本文定义分支树视图 `/s/<id>/tree` 的呈现与交互。规则直接对齐 pi TUI 的 `TreeList`：`agent/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tree-selector.js` 的 `flattenTree`、`recalculateVisualStructure` 与 `isFoldable`。命令承载见[命令与功能对应](commands.md)，接口见[页面地址与接口设计](app-router.md)，视觉取值见 [DESIGN.md](../../../DESIGN.md)。画布：`src/web/design/cst-pilot-web.pen` 的「分支树」浅深两版与「分支总结」四态（确认、自定义提示词、生成中、完成，各浅深两版）。
 

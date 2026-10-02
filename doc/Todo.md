@@ -1,18 +1,29 @@
 # Todo
 
-## 开发准备
+更新：2026-10-02。
 
-1. [ ] 准备统一模型配置入口的需求文档
-2. [ ] 按[遥测需求](telemetry/README.md#需求)与规格实现采集和上报；OAuth 依赖按该目录的待决项处理
-3. [ ] **自制 @cst-pilot/web**：后端接口、会话池、输入收件箱与并发隔离已完成本机联调；首页、聊天工作台、分支树、设置与登录页已接入接口；分支树的排版对照、分支总结的 Chrome 端到端对照已可跑。接下来按 [MVP](web/MVP.md) 做视觉对照；功能完成后接入发行包。4. [ ] `SPEC` 与详细设计的目录分类暂缓，见[文档分类](issues.md#d4-规格与详细设计的分类)。
-5. [ ] 账号菜单按画布 `n26gq` 重组：Provider 登录态并入账号信息、补分隔线。先做前端。~~Provider 状态应当等价于 `/scope-model` 这类命令的作用面——当前模型选择器把全部模型都列进来，超出预期。~~（模型选择器已按启用范围过滤）
-6. [ ] cstoa 额度接口待确定。DeepSeek 余额与 OpenCode Go / Go Plus 用量已接入上下文面板，见 [聊天工作台](web/SPEC/chat-workspace.md)。
+## 功能开发
+
+1. [ ] **自制 @cst-pilot/web**：按 [MVP](web/MVP.md) 推进，当前阶段为页面与画布的视觉对照；功能验收后接入发行包
+2. [ ] 遥测：按[遥测需求](telemetry/README.md#需求)与规格实现采集和上报；OAuth 依赖按该目录的待决项处理
+3. [ ] 统一模型配置入口的需求文档
+4. [ ] 账号菜单按画布 `n26gq` 重组：Provider 登录态并入账号信息、补分隔线。先做前端
+5. [ ] cstoa 额度接口待确定；DeepSeek 余额与 OpenCode Go / Go Plus 用量已接入上下文面板，见 [聊天工作台](web/SPEC/chat-workspace.md)
+6. [ ] `SPEC` 与详细设计的目录分类暂缓，见[文档分类](issues.md#d4-规格与详细设计的分类)
+
+## 开源与工程化
+
+1. [ ] 补 LICENSE：仓库根目录缺许可证文件，开源发布前必须补
+2. [ ] GitHub Actions CI：push 与 PR 触发，运行 `agent` 的 `check` 与 `test:web`、前端的 typecheck 与测试；未通过不合并
+3. [ ] 前端 lint：biome 配置扩展到 `src/web/frontend`，与 typecheck、测试互补
+4. [ ] 贡献规范：CONTRIBUTING 说明本地开发、检查与测试命令；issue 模板区分缺陷报告与议题讨论
+5. [ ] 发行接入校验：静态产物存在性、文件清单与第三方许可证，见 [MVP 后续安排](web/MVP.md#六后面再做)
 
 ## ToDraw 画布
 
-`src/web/design/cst-pilot-web.pen` 现有：主页、聊天工作台、登录页、仪表盘各浅深两版；APIKEY 默认态、自定义 Provider 态和 Provider 下拉各浅深两版；上下文面板、模型选择、思考强度、账号菜单、消息菜单的悬停态；分支树与分支总结四态（确认、自定义提示词、生成中、完成）各浅深两版；输入框的补全面板、未发送图片、补全选中标记与排队组件（基础、暂停、失败）各浅深两版。`src/web/design/cst-pilot-tools.pen` 现有：三种通用渲染模式、折叠层级、等待/成功/失败/降级等状态、逐工具示例，以及 `sys overview`、`runbook`、`web_search`、`read` 图片等例外。下面只列尚需补画或调整的内容。
+现有画布：[cst-pilot-web.pen](../src/web/design/cst-pilot-web.pen) 覆盖主页、聊天工作台、登录页、仪表盘、分支树、分支总结与各弹出层、输入框状态的浅深两版；[cst-pilot-tools.pen](../src/web/design/cst-pilot-tools.pen) 覆盖工具卡片的三种通用渲染模式、折叠层级、各状态与逐工具示例。下面只列尚需补画或调整的内容。
 
-1. [x] 设置视图 `/settings`（浅深两版已画，页面已按画布实现）
+1. [ ] 对话流帧重画：把 `cst-pilot-tools.pen` 中已有的折叠层级和展开卡片接入完整对话场景，替换当前「已完成工作」示意；过程折叠行（工作中 N 秒）与等待流光还没有画布，见[聊天工作台](web/SPEC/chat-workspace.md#过程折叠)
 2. [ ] 工具卡片补齐，画布 `src/web/design/cst-pilot-tools.pen`：
    - [ ] 多列排行行：名称 + 2～3 个右对齐指标列
    - [ ] 输出截断提示条：呈现 `outputTruncated` 等裁剪信息；现有画布已有 `notice`、降级和失败示例
@@ -20,8 +31,7 @@
 4. [ ] 扩展提问面板：选择、确认、输入、多行编辑四种，见 [会话运行与并行](web/SPEC/session-runtime.md#能力范围)
 5. [ ] 操作栏对齐与补齐：按[命令与功能对应](web/SPEC/commands.md)补复制、导出与派生入口；MVP 不显示分享菜单
 6. [ ] 断线横幅与明确的退出入口，见 [前端工程](web/SPEC/frontend.md#用户可见的约束)
-7. [ ] 聊天工作台的对话流帧要重画：把 `cst-pilot-tools.pen` 中已有的折叠层级和展开卡片接入完整对话场景，替换当前「已完成工作」示意；过程折叠行（工作中 N 秒）与等待流光还没有画布，见[聊天工作台](web/SPEC/chat-workspace.md#过程折叠)
-8. [ ] 分支树补齐与 TUI 对齐，见[分支树](web/SPEC/branch-tree.md)：
+7. [ ] 分支树补齐与 TUI 对齐，见[分支树](web/SPEC/branch-tree.md)：
    - [ ] 视图过滤四档（无工具、仅用户、仅标记、全部）与默认档持久化，画布未画
    - [ ] 条目标记（label）的编辑入口与标记时间戳显示
    - [ ] 条目复制（TUI 的 c 键）
