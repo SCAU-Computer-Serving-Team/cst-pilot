@@ -20,7 +20,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { supplementGoFlash } from "./model-catalog.mjs";
-import { checkReleaseTree, sha256, verifyManifest } from "./release-checks.mjs";
+import { RELEASE_SETTINGS } from "./release-settings.mjs";
+import { checkReleaseContent, checkReleaseTree, sha256, verifyManifest } from "./release-checks.mjs";
 import { smokeRelease } from "./smoke.mjs";
 
 // ---------- 构建配置（发行工程单一事实源） ----------
@@ -71,6 +72,7 @@ const CONFIG = {
   // 仓库 → 发行根
   REPO_ROOT_ITEMS: [
     { p: "pi.cmd", f: true },
+    { p: "LICENSE", f: true },
     { p: "README.md", f: true },
     { p: "AGENTS.md", f: true },
     { p: "biome.json", f: true },
@@ -94,20 +96,6 @@ const CONFIG = {
   // pi 内 /login 填写网关凭据（写入发行树的 agent/home/auth.json，属该机的本地状态）；
   // models-store.json 仅模型目录缓存，无凭据，随包保留（离线可用模型列表）。
   REPO_HOME_FILES: ["APPEND_SYSTEM.md", "models-store.json", "open-tui.json"],
-
-  // 发行 settings.json 生成（packages 用本地路径，不触发任何安装）
-  RELEASE_SETTINGS: {
-    _comment:
-      "默认开放读取、检索和诊断工具。扩展随包提供，启动不安装或更新。配置与会话保存在 agent/home，临时状态保存在 .state。此配置不是系统沙箱；PowerShell 等原生组件可能留下宿主缓存。",
-    defaultProvider: "opencode-go",
-    defaultModel: "deepseek-flash",
-    defaultTools: ["read", "ls"],
-    defaultProjectTrust: "never",
-    enableInstallTelemetry: false,
-    lastChangelogVersion: "0.85.1",
-    theme: "dark",
-    packages: ["./packages/pi-fff", "./packages/pi-open-tui", "./packages/pi-web-access"],
-  },
 };
 
 // ---------- 工具函数 ----------
@@ -310,7 +298,7 @@ fs.cpSync(path.join(scriptDir, "licenses"), path.join(out, "licenses"), { recurs
 // ---------- [4] 发行 settings.json ----------
 
 banner("生成发行 settings.json（本地路径扩展 + 遥测关闭）");
-fs.writeFileSync(path.join(out, "agent", "home", "settings.json"), JSON.stringify(CONFIG.RELEASE_SETTINGS, null, 2) + "\n");
+fs.writeFileSync(path.join(out, "agent", "home", "settings.json"), JSON.stringify(RELEASE_SETTINGS, null, 2) + "\n");
 
 fs.writeFileSync(path.join(out, "BUILD-INFO.json"), JSON.stringify({
   version: CONFIG.VERSION, piVersion: CONFIG.PI_VERSION, piExeSha256: CONFIG.PI_EXE_SHA256,
@@ -323,6 +311,7 @@ banner("生成 VERSION 与 SHA256SUMS");
 fs.writeFileSync(path.join(out, "VERSION"), `cst-pilot ${CONFIG.VERSION}\npi ${CONFIG.PI_VERSION}\n`);
 const files = walk(out);
 checkReleaseTree(out, files);
+checkReleaseContent(out, files);
 const sums = files.map((rel) => {
   const h = crypto.createHash("sha256");
   h.update(fs.readFileSync(path.join(out, rel)));
@@ -348,10 +337,14 @@ if (argv.includes("--skip-smoke")) {
 banner("复核发行树和校验清单");
 const releaseFiles = walk(out);
 checkReleaseTree(out, releaseFiles);
+checkReleaseContent(out, releaseFiles);
 verifyManifest(out, releaseFiles);
 let bytes = 0;
 for (const rel of releaseFiles) bytes += fs.statSync(path.join(out, rel)).size;
 console.log(`  发行树: ${releaseFiles.length} 个文件 / ${(bytes / 1024 / 1024).toFixed(1)} MB（不含运行态）`);
+const staticFiles = releaseFiles.filter((rel) => rel.startsWith("agent/home/extensions/web/static/"));
+const staticBytes = staticFiles.reduce((sum, rel) => sum + fs.statSync(path.join(out, rel)).size, 0);
+console.log(`  Web 静态产物: ${staticFiles.length} 个文件 / ${(staticBytes / 1024 / 1024).toFixed(1)} MB`);
 
 // ---------- [8] 可选 zip ----------
 

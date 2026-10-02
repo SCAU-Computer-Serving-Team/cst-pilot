@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { goFlash, supplementGoFlash } from "../model-catalog.mjs";
+import { RELEASE_SETTINGS } from "../release-settings.mjs";
 
 test("portable startup selects a readable dark theme and the Go Flash default", () => {
-  const settings = JSON.parse(readFileSync(new URL("../../agent/home/settings.json", import.meta.url), "utf8"));
-  assert.equal(settings.theme, "dark");
-  assert.equal(settings.defaultProvider, "opencode-go");
-  assert.equal(settings.defaultModel, goFlash.id);
+  assert.equal(RELEASE_SETTINGS.theme, "dark");
+  assert.equal(RELEASE_SETTINGS.defaultProvider, "opencode-go");
+  assert.equal(RELEASE_SETTINGS.defaultModel, goFlash.id);
+  assert.deepEqual(RELEASE_SETTINGS.packages, ["./packages/pi-fff", "./packages/pi-open-tui", "./packages/pi-web-access"]);
 });
 
 test("offline catalog supplies the OpenCode Go default without touching other models", () => {

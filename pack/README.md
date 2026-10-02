@@ -8,6 +8,8 @@ node\node.exe pack\pack.mjs --official <官方ZIP或目录> --out <新的输出�
 
 脚本核对官方文件和扩展版本，在副本中用本机模拟模型测试，再按清单生成 ZIP 并解压校验。无需真实密钥；测试副本保留在输出目录的 `_smoke` 下，不进入 ZIP。
 
+发行树校验分两类：`checkReleaseTree` 拒绝运行态、凭据与密钥；`checkReleaseContent` 要求 Web 入口页与样式表引用的资源、随包许可证文件齐备，缺一即拒绝打包。装配完成后 `SHA256SUMS` 覆盖全部发行文件，并在打包后复核。
+
 发行配置默认使用 OpenCode Go 的 `deepseek-flash`（DeepSeek V4.1 Flash）。打包时补全离线模型目录，不复制本机 `auth.json`；运行时由队员在本机登录。
 
 `--esbuild <本地esbuild入口>` 可复用已安装的 0.25.10。未指定时使用固定版本的 npx。`--skip-smoke` 仅用于检查装配目录，不能同时生成 ZIP。
