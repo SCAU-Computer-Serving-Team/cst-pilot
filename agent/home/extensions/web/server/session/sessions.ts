@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentSession, AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import {
@@ -121,16 +122,41 @@ export class WebSessionPool {
 		return this.open(id, () => SessionManager.open(file, this.options.sessionDir));
 	}
 
+	/**
+	 * 列出 agent 会话根目录下所有分类目录的会话（对齐 pi 的 SessionManager.listAll() 无参版）。
+	 * 分类目录按 cwd 编码命名；侧边栏与打开接口都要能看到全部历史，不随服务启动 cwd 变化。
+	 */
+	private async listAllProjectSessions(): Promise<Awaited<ReturnType<typeof SessionManager.listAll>>> {
+		const root = join(this.options.agentDir, "sessions");
+		let entries: Dirent[];
+		try {
+			entries = await readdir(root, { withFileTypes: true });
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+			throw error;
+		}
+		const dirs = [root]
+			.concat(
+				entries
+					.filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+					.map((entry) => join(root, entry.name)),
+			)
+			// 根目录直接放 jsonl（无分类子目录的布局）也列出，兼容旧布局与测试环境。
+			.filter((dir, index, all) => all.indexOf(dir) === index);
+		const lists = await Promise.all(dirs.map((dir) => SessionManager.listAll(dir)));
+		return lists.flat();
+	}
+
 	/** Resolve IDs against the kit's session directory, never against an HTTP path. */
 	async openSaved(id: string): Promise<WebSessionSlot> {
 		if (this.closed) throw new Error("Web 已退出");
 		if (this.removed.has(id) || (await this.isDeleted(id))) throw new Error("会话不存在");
 		const existing = this.slots.get(id) ?? this.opening.get(id);
 		if (existing) return existing;
-		const matches = (await SessionManager.listAll(this.options.sessionDir)).filter((entry) => entry.id === id);
+		const matches = (await this.listAllProjectSessions()).filter((entry) => entry.id === id);
 		if (matches.length > 1) throw new Error("会话不存在或 ID 不唯一");
-		if (matches.length === 1)
-			return this.open(id, () => SessionManager.open(matches[0].path, this.options.sessionDir));
+		// 省略第二参：落盘目录取文件所在目录，历史会话的新分支留在原分类目录。
+		if (matches.length === 1) return this.open(id, () => SessionManager.open(matches[0].path));
 		const created = await this.readCreated();
 		if (!Object.values(created).includes(id)) throw new Error("会话不存在或 ID 不唯一");
 		return this.open(id, () => SessionManager.create(this.options.cwd, this.options.sessionDir, { id }));
@@ -232,7 +258,7 @@ export class WebSessionPool {
 		this.removed.add(id);
 		let tombstoned = false;
 		try {
-			const entries = await SessionManager.listAll(this.options.sessionDir);
+			const entries = await this.listAllProjectSessions();
 			const matches = entries.filter((entry) => entry.id === id);
 			if (matches.length > 1) throw new Error("会话 ID 不唯一");
 			const tombstone = this.deletedFile(id);
@@ -257,9 +283,7 @@ export class WebSessionPool {
 	}
 
 	async list(): Promise<{ id: string; title: string; updatedAt?: string; running: boolean }[]> {
-		const saved = (await SessionManager.listAll(this.options.sessionDir)).filter(
-			(entry) => !this.removed.has(entry.id),
-		);
+		const saved = (await this.listAllProjectSessions()).filter((entry) => !this.removed.has(entry.id));
 		const visible = (
 			await Promise.all(saved.map(async (entry) => ({ entry, deleted: await this.isDeleted(entry.id) })))
 		)

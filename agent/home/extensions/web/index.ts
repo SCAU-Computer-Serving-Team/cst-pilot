@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createWebApi } from "./server/api.ts";
 import { getWebContainer } from "./server/container.ts";
-import { createWebServer, listenWebServer, WEB_PORT } from "./server/http.ts";
+import { createWebServer, listenWebServer, setHttpAccessLog, WEB_PORT } from "./server/http.ts";
 import { WebSessionPool } from "./server/session/sessions.ts";
 
 const url = `http://127.0.0.1:${WEB_PORT}/`;
@@ -95,6 +96,7 @@ export default function web(pi: ExtensionAPI): void {
 				container.pool = pool;
 				// Bind the socket before releasing TUI; a failed port bind must not park it.
 				const api = createWebApi(pool, agentDir, WEB_PORT);
+				setHttpAccessLog(join(agentDir, "web-access.log"));
 				const server = createWebServer(
 					staticDirectory,
 					WEB_PORT,

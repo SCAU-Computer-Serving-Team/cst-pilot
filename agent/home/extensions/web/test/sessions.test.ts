@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { WebSessionPool } from "../server/session/sessions.ts";
 import { testRoot } from "./support.ts";
@@ -220,6 +220,69 @@ test("two SDK sessions run concurrently and abort stays within one session", asy
 		}
 	} finally {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
+		await rm(home, { recursive: true, force: true });
+	}
+});
+
+test("sessions in every categorized directory under the agent sessions root are listed and openable", async () => {
+	const home = await mkdtemp(join(tempRoot, "cst-web-crossdir-"));
+	const options = {
+		cwd: home,
+		agentDir: home,
+		sessionDir: join(home, "sessions"),
+		withLoader: <T>(load: () => Promise<T>) => load(),
+	};
+	try {
+		await writeFile(join(home, "settings.json"), JSON.stringify({ defaultTools: ["read", "ls"] }));
+		const first = new WebSessionPool(options);
+		const original = await first.create();
+		original.session.sessionManager.appendMessage({
+			role: "user",
+			content: [{ type: "text", text: "historic" }],
+			timestamp: Date.now(),
+		});
+		// 项目内 pi 版本在首条 assistant 消息后才落盘，补一条使文件真实存在。
+		original.session.sessionManager.appendMessage({
+			role: "assistant",
+			content: [{ type: "text", text: "done" }],
+			api: "openai-completions",
+			provider: "probe",
+			model: "mock",
+			stopReason: "stop",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now(),
+		});
+		await first.close();
+		// 把落盘文件移到另一个分类目录，模拟服务 cwd 与历史会话目录不一致。
+		const file = original.file ?? original.session.sessionManager.getSessionFile();
+		assert.ok(file);
+		const other = join(home, "sessions", "--other-project--");
+		await mkdir(other, { recursive: true });
+		const moved = join(other, `2026-01-01T00-00-00-000Z_${original.id}.jsonl`);
+		await rename(file, moved);
+		// created.json 里已登记的 id 也一并清除，逼 openSaved 走文件匹配路径。
+		const second = new WebSessionPool(options);
+		try {
+			assert.ok((await second.list()).some((item) => item.id === original.id));
+			const reopened = await second.openSaved(original.id);
+			assert.equal(reopened.session.messages.length, 2);
+			// 新分支落盘仍在原分类目录。
+			// 测试上下文里会话刚重开，叶指针必然存在。
+			const branched = reopened.session.sessionManager.createBranchedSession(
+				reopened.session.sessionManager.getLeafId()!,
+			);
+			if (branched) assert.equal(dirname(branched), other);
+		} finally {
+			await second.close();
+		}
+	} finally {
 		await rm(home, { recursive: true, force: true });
 	}
 });

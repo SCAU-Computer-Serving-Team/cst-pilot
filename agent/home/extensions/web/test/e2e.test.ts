@@ -20,7 +20,7 @@ async function availablePort(): Promise<number> {
 	return port;
 }
 
-test("HTTP submits to two Pi sessions, returns immediately, streams results, and does not replay on refresh", async () => {
+test("HTTP 端到端冒烟：并发会话与队列、幂等重放、模型范围、SSE 重放、skill 展开、自定义端点、steer 与鉴权错误", async () => {
 	const home = await mkdtemp(join(rootDir, "cst-web-e2e-"));
 	let modelCalls = 0;
 	const modelRequests: string[] = [];

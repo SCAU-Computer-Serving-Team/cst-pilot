@@ -442,7 +442,7 @@ test("分支总结：总结、自定义提示词与取消", async () => {
 
 		assert.deepEqual(scenarioOne.options, ["不总结", "总结", "用自定义提示词总结"], "确认对话框缺选项");
 		assert.equal(scenarioOne.pendingSeen, true, "没有出现待总结状态行");
-		assert.equal(scenarioOne.title, "分支总结", "总结消息缺少标题");
+		assert.equal(scenarioOne.title, "分支已总结", "总结消息缺少标题");
 		assert.equal(scenarioOne.blocks, 1, "总结消息数量不对");
 		assert.equal(scenarioOne.pendingLeft, false, "总结结束后状态行没有撤掉");
 		assert.equal(scenarioOne.path, `/s/${session.id}`, "没有回到聊天页");
@@ -485,6 +485,154 @@ test("分支总结：总结、自定义提示词与取消", async () => {
 			afterFive.messages.filter((message) => message.role === "branchSummary").length,
 		);
 	} finally {
+		server.close();
+		model.close();
+		await pool.close();
+	}
+});
+
+test("生成中提交树导航：先停生成再导航，不再 409", async () => {
+	const home = await mkdtemp(join(rootDir, "cst-web-tree-abort-"));
+	const held = new Set<import("node:http").ServerResponse>();
+	const model = createServer(async (request, response) => {
+		let raw = "";
+		for await (const chunk of request) raw += String(chunk);
+		response.writeHead(200, { "Content-Type": "text/event-stream" });
+		if (raw.includes("慢速问题")) {
+			// 不 end：保持生成中，直到导航把它 abort 掉。
+			held.add(response);
+			request.on("close", () => held.delete(response));
+			response.write(
+				`data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", choices: [{ index: 0, delta: { role: "assistant", content: "……" }, finish_reason: null }] })}\n\n`,
+			);
+			return;
+		}
+		response.write(
+			`data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", choices: [{ index: 0, delta: { role: "assistant", content: "回答" }, finish_reason: null }] })}\n\n`,
+		);
+		response.end(
+			`data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+		);
+	});
+	await new Promise<void>((resolve) => model.listen(0, "127.0.0.1", resolve));
+	const modelPort = (model.address() as AddressInfo).port;
+	await writeFile(
+		join(home, "settings.json"),
+		JSON.stringify({ defaultProvider: "probe", defaultModel: "mock", defaultTools: ["read"] }),
+	);
+	await writeFile(
+		join(home, "models.json"),
+		JSON.stringify({
+			providers: {
+				probe: {
+					baseUrl: `http://127.0.0.1:${modelPort}/v1`,
+					api: "openai-completions",
+					models: [
+						{ id: "mock", name: "mock", reasoning: false, input: ["text"], contextWindow: 10000, maxTokens: 300 },
+					],
+				},
+			},
+		}),
+	);
+	const port = await freePort();
+	const origin = `http://127.0.0.1:${port}`;
+	const pool = new WebSessionPool({
+		cwd: home,
+		agentDir: home,
+		sessionDir: join(home, "sessions"),
+		withLoader: (load) => load(),
+	});
+	const api = createWebApi(pool, home, port);
+	const server = createWebServer(STATIC_DIR, port, () => ({ sessions: pool.snapshot(), stage: "test" }), api);
+	try {
+		await listenWebServer(server, port);
+		const call = (path: string, method: string, input?: unknown) =>
+			fetch(`${origin}${path}`, {
+				method,
+				headers: {
+					Origin: origin,
+					"X-CST-Web-Request": "1",
+					"Content-Type": "application/json",
+					"Idempotency-Key": randomUUID(),
+				},
+				body: input === undefined ? undefined : JSON.stringify(input),
+			});
+		const session = (await (await call("/api/sessions", "POST", {})).json()) as { id: string };
+		const detail = async () =>
+			(await (await fetch(`${origin}/api/sessions/${session.id}`)).json()) as {
+				running: boolean;
+				messages: { role: string; stopReason?: string }[];
+			};
+		// 等待条件用末尾的终结 assistant，不用 running：投递尚未开始时 running 也是假，会提前退。
+		const waitAnswer = async () => {
+			for (let attempt = 0; attempt < 300; attempt++) {
+				const last = (await detail()).messages.at(-1);
+				if (last?.role === "assistant" && last.stopReason && last.stopReason !== "toolUse") return;
+				await new Promise((resolve) => setTimeout(resolve, 50));
+			}
+			throw new Error("模型回复没有落地");
+		};
+		const send = async (text: string) => {
+			const response = await call(`/api/sessions/${session.id}/messages`, "POST", {
+				id: randomUUID(),
+				text,
+				delivery: "queue",
+			});
+			assert.equal(response.status, 202);
+			await waitAnswer();
+		};
+		await send("开场");
+		// 第二条消息挂在慢速流上：会话进入生成中。
+		assert.equal(
+			(
+				await call(`/api/sessions/${session.id}/messages`, "POST", {
+					id: randomUUID(),
+					text: "慢速问题",
+					delivery: "queue",
+				})
+			).status,
+			202,
+		);
+		let streaming = false;
+		for (let attempt = 0; attempt < 100 && !streaming; attempt++) {
+			streaming = (await detail()).running;
+			if (!streaming) await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		assert.equal(streaming, true, "慢速请求没有进入生成中");
+		// 生成中直接导航（旧行为是 409）。
+		const tree = (await (await fetch(`${origin}/api/sessions/${session.id}/tree`)).json()) as {
+			tree: TreeNode[];
+			leafId: string | null;
+		};
+		type TreeNode = { entry: { id: string; type: string; message?: { role: string } }; children: TreeNode[] };
+		const flat: TreeNode[] = [];
+		const walk = (nodes: TreeNode[]) => {
+			for (const node of nodes) {
+				flat.push(node);
+				walk(node.children);
+			}
+		};
+		walk(tree.tree);
+		const target = flat.find((node) => node.entry.type === "message" && node.entry.message?.role === "assistant")!;
+		assert.ok(target, "找不到导航目标");
+		const navigated = await call(`/api/sessions/${session.id}/tree/navigate`, "POST", { entryId: target.entry.id });
+		assert.equal(navigated.status, 200, "生成中导航被拒绝");
+		const result = (await navigated.json()) as { cancelled: boolean };
+		assert.equal(result.cancelled, false);
+		// 导航后生成停止，叶指针落在目标上。
+		await waitAnswer();
+		let settled = false;
+		for (let attempt = 0; attempt < 100 && !settled; attempt++) {
+			settled = !(await detail()).running;
+			if (!settled) await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		assert.equal(settled, true, "导航后生成没有停止");
+		const after = (await (await fetch(`${origin}/api/sessions/${session.id}/tree`)).json()) as {
+			leafId: string | null;
+		};
+		assert.equal(after.leafId, target.entry.id, "叶指针没有落在导航目标上");
+	} finally {
+		for (const response of held) response.destroy();
 		server.close();
 		model.close();
 		await pool.close();

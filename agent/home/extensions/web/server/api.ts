@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { appendFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
@@ -38,8 +39,20 @@ async function body(request: IncomingMessage, limit = 128 * 1024): Promise<Recor
 	return value as Record<string, unknown>;
 }
 
+/** 临时访问日志：诊断响应挂起问题用，逐行追加，不改行为。 */
+let accessLogPath: string | null = null;
+function accessLog(line: string): void {
+	if (!accessLogPath) return;
+	try {
+		appendFileSync(accessLogPath, `${new Date().toISOString()} ${line}\n`);
+	} catch {
+		/* 诊断日志失败不影响请求 */
+	}
+}
+
 /** A deliberately narrow first API slice: unsupported operations remain 404. */
 export function createWebApi(pool: WebSessionPool, agentDir: string, port: number) {
+	accessLogPath = join(agentDir, "web-access.log");
 	const inboxes = new Map<string, SessionInbox>();
 	const streams = new Map<string, SessionEvents>();
 	const globalEvents = new SessionEvents();
@@ -152,6 +165,12 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 	const handle = async (request: IncomingMessage, response: ServerResponse, pathname: string): Promise<boolean> => {
 		if (pathname !== "/api" && !pathname.startsWith("/api/")) return false;
 		const method = request.method ?? "GET";
+		const startedAt = Date.now();
+		const logDone = (how: string, status?: number) => {
+			accessLog(`${method} ${pathname} -> ${how}${status ? ` ${status}` : ""} ${Date.now() - startedAt}ms`);
+		};
+		response.on("close", () => logDone("close", response.statusCode));
+		response.on("finish", () => logDone("finish", response.statusCode));
 		if (request.headers.origin && request.headers.origin !== origin) {
 			problem(response, 403, "invalid_origin", "请求来源不受信任");
 			return true;
@@ -496,7 +515,12 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 					throw new Error("请求的总结提示无效");
 				const result = await writeOnce(request, pathname, input, async () => {
 					const slot = await pool.openSaved(id);
-					if (slot.session.isStreaming) throw new InboxConflict("会话正在执行");
+					// 对齐 TUI：提交导航时若正在生成，先停队列与当前生成再导航（同 abort 端点的顺序）；
+					// 排队消息留在队列面板，不丢。压缩进行中仍由 navigateTree 拒绝。
+					if (slot.session.isStreaming) {
+						await (await inbox(id)).pause();
+						await slot.session.abort();
+					}
 					if (typeof input.entryId !== "string" || !slot.session.sessionManager.getEntry(input.entryId))
 						throw new Error("请求的分支节点不存在");
 					const navigated = await slot.session.navigateTree(input.entryId, {
