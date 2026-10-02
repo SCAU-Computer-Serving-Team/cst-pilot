@@ -605,6 +605,12 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 .fork-row:disabled { color: var(--chat-muted); cursor: not-allowed; }
 .fork-row-active { background: var(--app-hover); }
 .fork-thumb { position: absolute; right: 2px; width: 4px; border-radius: 2px; background: var(--chat-muted); opacity: 0.5; pointer-events: none; }
+.fork-dialog-foot { display: flex; align-items: center; gap: 12px; padding-top: 10px; border-top: 1px solid var(--chat-border); }
+.fork-foot-note { flex: 1; min-width: 0; color: var(--chat-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.composer-actions .fork-confirm { height: 28px; min-height: 28px; padding: 0 14px; border-radius: var(--radius-control); background: var(--app-send); color: var(--app-send-icon); }
+.composer-actions .fork-confirm:is(:hover, [data-hovered="true"]):not(:disabled, [aria-disabled="true"]) { background-color: var(--app-send-hover); }
+.fork-source-banner { display: flex; align-items: center; gap: 8px; margin: 0 20px 8px; padding: 8px 12px; border: 1px solid var(--chat-input-border); border-radius: var(--radius-row); background: var(--app-hover); color: var(--chat-ink); font-size: 13px; }
+.fork-source-banner span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 分支总结 · 生成中与完成：正文尾部一条 30 高的状态行，和一条与助手消息同宽同左缘的总结消息。 */
 .summary-pending { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 30px; color: var(--chat-ink); font-size: var(--font-body); }
 .summary-pending > svg { flex: 0 0 var(--icon-menu); color: var(--tree-summary); }

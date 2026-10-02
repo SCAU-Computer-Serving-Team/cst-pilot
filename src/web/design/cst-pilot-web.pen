@@ -61799,6 +61799,72 @@
                   ]
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "z9wIhQ",
+              "name": "确认条",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 6,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "Lj3Ix",
+                  "name": "发丝线",
+                  "width": "fill_container",
+                  "height": 1,
+                  "fill": "#F0F0F0"
+                },
+                {
+                  "type": "frame",
+                  "id": "gSe2S",
+                  "name": "确认行",
+                  "width": "fill_container",
+                  "height": 28,
+                  "padding": [
+                    0,
+                    2
+                  ],
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "pmxjo",
+                      "name": "分支点预览",
+                      "fill": "#646464",
+                      "content": "分支点：帮我查这个固态的信息 之前",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "uV3jZ",
+                      "name": "派生按钮",
+                      "width": 64,
+                      "height": 26,
+                      "fill": "#465A9F",
+                      "cornerRadius": 6,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ukYVz",
+                          "name": "按钮文字",
+                          "fill": "#FFFFFF",
+                          "content": "派生",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }
@@ -62024,6 +62090,72 @@
                       "fontFamily": "Inter",
                       "fontSize": 14,
                       "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "q2PuTt",
+              "name": "确认条",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 6,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "XNIBM",
+                  "name": "发丝线",
+                  "width": "fill_container",
+                  "height": 1,
+                  "fill": "#394247"
+                },
+                {
+                  "type": "frame",
+                  "id": "uSQGh",
+                  "name": "确认行",
+                  "width": "fill_container",
+                  "height": 28,
+                  "padding": [
+                    0,
+                    2
+                  ],
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "gnHge",
+                      "name": "分支点预览",
+                      "fill": "#9BA6A6",
+                      "content": "分支点：帮我查这个固态的信息 之前",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "xIk5m",
+                      "name": "派生按钮",
+                      "width": 64,
+                      "height": 26,
+                      "fill": "#7785DE",
+                      "cornerRadius": 6,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "U40tRk",
+                          "name": "按钮文字",
+                          "fill": "#FFFFFF",
+                          "content": "派生",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
                     }
                   ]
                 }

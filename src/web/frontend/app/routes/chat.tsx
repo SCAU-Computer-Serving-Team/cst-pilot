@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import { apiJson } from "../app/api";
@@ -632,6 +632,16 @@ export default function Chat() {
 		params.get("preview") === "1" ? sampleSessions.find((session) => session.id === sessionId) : undefined;
 	const { detail, streaming, error, refresh } = useSessionDetail(example ? undefined : sessionId);
 	const [forkOpen, setForkOpen] = useState(false);
+	const location = useLocation();
+	const [forkSource, setForkSource] = useState("");
+	// 派生跳转带入的来源提示：换路由即读取，读后立刻清掉历史状态避免刷新后复现
+	useEffect(() => {
+		const state = location.state as { forkSource?: string } | null;
+		if (state?.forkSource) {
+			setForkSource(state.forkSource);
+			window.history.replaceState({}, "");
+		}
+	}, [location.state]);
 	const [title, setTitle] = useState(example?.title ?? "会话");
 	const [summarizing, setSummarizing] = useState(false);
 	const [summaryNote, setSummaryNote] = useState("");
@@ -701,6 +711,7 @@ export default function Chat() {
 		config: { messageId: string; images: { mimeType: string; data: string }[]; skill?: string },
 	) {
 		if (!sessionId) return;
+		setForkSource("");
 		// 提交成功即返回（立即清空输入框、复位发送按钮）；队列与气泡由 SSE 事件驱动的刷新补齐，
 		// 避免落盘窗口内 GET 偶发变慢时按钮长时间置灰。
 		await apiJson(`${base(sessionId)}/messages`, {
@@ -753,6 +764,14 @@ export default function Chat() {
 				<div className="connection-banner" role="alert">
 					{summaryNote || error}
 				</div>
+			)}
+			{forkSource && (
+				<output className="fork-source-banner">
+					<span>{`已从此会话派生：「${forkSource}」，输入框已预填这条消息`}</span>
+					<Button variant="ghost" isIconOnly aria-label="关闭提示" onPress={() => setForkSource("")}>
+						<X size={14} />
+					</Button>
+				</output>
 			)}
 			{detail ? (
 				<Conversation

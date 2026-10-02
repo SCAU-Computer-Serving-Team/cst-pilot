@@ -483,6 +483,9 @@ export function Composer({
 			if (command === "/tree") {
 				if (!sessionId) throw new Error("请先进入会话，再使用此命令。");
 				navigate(`/s/${sessionId}/tree`);
+			} else if (command === "/fork") {
+				if (!sessionId || !onFork) throw new Error("请先进入会话，再使用此命令。");
+				onFork();
 			} else if (command === "/compact") {
 				if (!onCommand) throw new Error("请先进入会话，再使用此命令。");
 				await onCommand("compact", body);
