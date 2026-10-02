@@ -1,5 +1,5 @@
 import type { Server } from "node:http";
-import type { WebSessionPool } from "./sessions.ts";
+import type { WebSessionPool } from "./session/sessions.ts";
 
 const key = Symbol.for("cst-pilot.web.container");
 
@@ -9,6 +9,7 @@ export interface WebContainer {
 	loadingWebSession: number;
 	parked: boolean;
 	pool?: WebSessionPool;
+	closeApi?: () => Promise<void>;
 }
 
 export function getWebContainer(): WebContainer {

@@ -1,7 +1,7 @@
 {
   "_comment": "默认向模型开放读取和诊断工具。pi.cmd 限制项目资源加载并关闭启动联网。凭据在 auth.json 或 models.json；models-store.json 仅缓存模型目录。这不是系统沙箱。",
   "defaultProvider": "opencode-go",
-  "defaultModel": "glm-5.3-flash",
+  "defaultModel": "deepseek-flash",
   "defaultTools": [
     "read",
     "ls"
@@ -14,5 +14,8 @@
     "npm:pi-open-tui@0.2.10",
     "npm:pi-web-access@0.18.0"
   ],
-  "theme": "dark"
+  "theme": "light",
+  "enabledModels": [
+    "opencode-go/deepseek-flash"
+  ]
 }

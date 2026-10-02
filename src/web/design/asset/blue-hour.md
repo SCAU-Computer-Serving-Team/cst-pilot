@@ -2,7 +2,7 @@
 
 ## 使用
 
-`cst-pilot-web.pen` 的两张主页使用 `blue-hour.glsl` 动态填充；浅色聊天页使用纯白背景，不引用背景图片。仅用于 Pen 设计稿，未实现网页。
+`cst-pilot-web.pen` 的两张主页使用 `blue-hour.glsl` 动态填充；浅色聊天页使用纯白背景，不引用背景图片。网页端由 `src/web/frontend/app/app/blue-hour.tsx` 实现，取不到 WebGL 时用 `blue-hour.css` 近似。
 
 | 文件 | 用途 |
 |---|---|

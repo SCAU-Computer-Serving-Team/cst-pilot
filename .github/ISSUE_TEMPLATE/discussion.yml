@@ -1,0 +1,36 @@
+name: 议题讨论
+description: 需求、方案取舍或文档口径等待讨论的问题
+title: "[议题] "
+labels: ["discussion"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: 要解决的问题
+      description: 一句话说清待定的是什么。
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 背景
+      description: 与哪些既有结论或文档相关，给出文件路径或链接。
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: 备选方案
+      description: 列出可选做法与各自影响。方案未定时写「待定」。
+      placeholder: |
+        1. 方案 A：…，影响 …
+        2. 方案 B：…，影响 …
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: 期望结论
+      description: 需要谁在什么时间点给出结论，结论要写回哪份文档。
+    validations:
+      required: false

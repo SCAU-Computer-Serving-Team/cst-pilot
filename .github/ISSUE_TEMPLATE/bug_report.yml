@@ -1,0 +1,53 @@
+name: 缺陷报告
+description: 功能没按预期工作，需要复现步骤与实际结果
+title: "[缺陷] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请勿粘贴密钥、机主隐私数据或真实会话内容。涉及凭据的问题只描述现象。
+  - type: textarea
+    id: what
+    attributes:
+      label: 现象
+      description: 实际发生了什么，期望是什么。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 按顺序列出操作，包含会话地址或命令。
+      placeholder: |
+        1. 执行 pi.cmd
+        2. 输入 /web
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: 环境
+      description: 发行版版本号（VERSION 文件）、Windows 版本、浏览器与版本。开发中发现问题时写分支与提交号。
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 日志与截图
+      description: 相关错误文本或截图。终端输出请去掉本机路径与凭据。
+    validations:
+      required: false
+  - type: dropdown
+    id: channel
+    attributes:
+      label: 出现位置
+      options:
+        - Web 页面
+        - TUI
+        - 诊断工具结果
+        - 发行与构建
+        - 其他
+    validations:
+      required: true

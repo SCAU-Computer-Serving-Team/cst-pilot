@@ -1,6 +1,6 @@
 # 前端工程
 
-状态：页面形态与工程边界已定，尚未实现。更新：2026-09-23。
+状态：页面形态与工程边界已定，前端工程、路由外壳与各页面已建立并接入接口；交互与视觉对照在 Checkpoint 4 完善。前端 lint 已并入仓库根 `biome.json`，由 CI 执行。更新：2026-10-02。
 
 本文定义 Web 前端要实现成什么样。地址与接口见[页面地址与接口设计](app-router.md)，会话运行见[会话运行与并行](session-runtime.md)，视觉取值见 [DESIGN.md](../../../DESIGN.md)。
 
@@ -53,7 +53,7 @@ Tailwind v4 要求 Chromium 111。兼容版推出前，先尝试 Edge；仍不�
 | 前端源码 | `src/web/frontend/`，**不进发行包** |
 | 前端产物 | `agent/home/extensions/web/static/`，构建产生，不入 Git |
 
-前端源码放在扩展目录之外，是为了让 `pack/pack.mjs` 对 `agent/home/extensions/` 的整目录复制规则不需要为 Web 开例外。
+前端源码放在扩展目录之外；扩展目录中的 `web/test/` 由 `pack/pack.mjs` 排除，不进入发行包。
 
 ## 目录划分
 
@@ -63,10 +63,13 @@ src/web/frontend/                    前端源码，不进发行包
 agent/home/extensions/web/           扩展，进发行包
 ├── index.ts                         入口：起服务器、注册 /web 命令
 ├── server/                          服务器骨架、接口处理器、与 runtime 的对接
+├── test/                            Web 后端测试，不进发行包
 └── static/                          页面产物，MVP 仅现代版，构建产生，不入 Git
 ```
 
-源码目录内部按**功能**分层，一层一个领域：`chat/`、`cards/`、`tree/`、`dashboard/`、`settings/`、`app/`、`lib/`。不按「页面 / 组件 / 工具函数」这类技术类型分层。
+Web 后端测试运行 `npm --prefix agent run test:web`，格式与类型检查运行 `npm --prefix agent run check`。前端 lint、类型与测试分别运行 `npm run lint|typecheck|test --prefix src/web/frontend`，命令汇总见 [CONTRIBUTING](../../../CONTRIBUTING.md#检查与测试)。前端 lint 必须从 `src/web/frontend` 目录发起：biome 按运行目录识别 React 项目，换目录会漏掉 React 规则。
+
+源码目录内部按**功能**分层：`app/` 放页面外壳、路由、共用状态与输入框，`cards/` 放工具卡片的字段映射与渲染组件。不按「页面 / 组件 / 工具函数」这类技术类型分层。
 
 ## 加载与依赖边界
 
@@ -116,11 +119,11 @@ agent/home/extensions/web/           扩展，进发行包
 
 ## 打包接入
 
-前端源码位于扩展目录外，`pack/pack.mjs` 可继续整目录复制扩展。后续需增加静态产物存在性、文件清单与许可证校验。
+前端源码位于扩展目录外；`pack/pack.mjs` 复制扩展时排除 `web/test/`。发行校验在 `pack/release-checks.mjs`：入口页与样式表引用的资源必须在发行树内，随包许可证文件必须齐备，`SHA256SUMS` 覆盖全部发行文件。现代版产物当前为 30 个文件 / 约 26 MB，其中思源黑体三份 OTF 约 24 MB。
 
 | 进包 | 不进包 |
 |---|---|
-| `index.ts` 与 `server/` 下的运行文件 | 前端源码 |
+| `index.ts` 与 `server/` 下的运行文件 | 前端源码、`web/test/` |
 | `static/` 下的现代版产物；兼容版在后续加入 | 开发依赖、构建缓存、锁文件 |
 | 必要的许可证 | 构建工具产物 |
 

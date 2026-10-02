@@ -1,8 +1,6 @@
 # Web 端文档
 
-本页是 Web 文档索引。[MVP](MVP.md) 定义阶段范围，[SPEC](SPEC/) 定义行为与接口草案，[research](research/) 保存依据与实测。SPEC 与详细设计的分类见[待决议题](../issues.md#d4-规格与详细设计的分类)。
-
-视觉规范和画布资产见 [DESIGN.md](../../DESIGN.md)。MVP 工程验证、视觉事项和后续待决项统一列在[待处理议题](../issues.md)。
+本页是 Web 文档索引。[MVP](MVP.md) 定义阶段范围，[SPEC](SPEC/) 定义行为与接口草案，[research](research/) 保存依据与实测。视觉规范和画布资产见 [DESIGN.md](../../DESIGN.md)；待验证事项与后续待决项统一列在[待处理议题](../issues.md)，SPEC 与详细设计的分类见该页 [D4](../issues.md#d4-规格与详细设计的分类)。
 
 ## SPEC
 
@@ -12,6 +10,8 @@
 | [app-router.md](SPEC/app-router.md) | 页面地址与接口设计：请求入口、地址空间、路由组织、接口清单与约定、双版本 |
 | [session-runtime.md](SPEC/session-runtime.md) | 会话运行与并行：产品要求、路由与执行分离、写权与会话串行、输入收件箱、会话可见性、共享状态、能力范围 |
 | [chat-workspace.md](SPEC/chat-workspace.md) | 聊天工作台：对话流、工具调用的折叠、图片、排队与插队、中断、编辑器、状态恢复 |
+| [branch-tree.md](SPEC/branch-tree.md) | 分支树：入口、接口、可见条目与排序、行布局与标记、折叠、验证方式 |
+| [branch-summary.md](SPEC/branch-summary.md) | 分支总结：三种选择的后果、状态流转、接口、前端处理、与 TUI 的差异、验证方式 |
 | [commands.md](SPEC/commands.md) | 命令与功能对应：TUI 内置命令的 Web 呈现形式与否决清单 |
 | [diagnostic-cards.md](SPEC/diagnostic-cards.md) | 诊断卡片：展示要求与约束 |
 | [dashboard.md](SPEC/dashboard.md) | 仪表盘：页面结构、计数口径与呈现规则 |
@@ -20,16 +20,10 @@
 
 | 文件 | 内容 |
 |---|---|
-| [tech-decisions.md](research/tech-decisions.md) | 承载与启动、页面形态、前端技术栈、开发与分发 |
+| [tech-decisions.md](research/tech-decisions.md) | 承载与启动、页面形态、技术栈与分发的选择理由 |
 | [pi-capability.md](research/pi-capability.md) | Pi 0.85.1 能力清单、内置命令与可用 API、扩展运行约定、发行二进制、运行承载、用量与费用字段 |
 | [measurements.md](research/measurements.md) | 四轮实测的数字：文件数与解压、形态对比、内核能力、框架表现、Next 版本边界 |
 | [opencode.md](research/opencode.md) | 参考实现的形态对照、收件箱分层、可借鉴与不适合照搬的做法 |
-
-## Issues
-
-| 文件 | 内容 |
-|---|---|
-| [../issues.md](../issues.md) | MVP 待验证事项与后续待决项 |
 
 ## 其他
 

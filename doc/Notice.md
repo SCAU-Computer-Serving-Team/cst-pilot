@@ -1,18 +1,17 @@
 # 运行注意事项
 
+本项目与常规 pi Agent 用法不同的地方。完整论证分散在各开发文档中，这里只留一份清单：每条给出结论和权威出处，未指向出处的条目以本文为准。
+
 ## 运行边界
 
 默认工具不修改系统配置，系统仍按当前进程权限允许操作。未知扩展与手动命令需单独核查其读写行为。
 配置与会话保存在 `agent/home`，临时状态保存在 `.state`。Windows 日志和 PowerShell 原生缓存不保证完全留在 U 盘。
 
-本项目与常规 pi Agent 用法不同的地方。完整论证分散在各开发文档中，
-这里只留一份清单：每条给出结论和权威出处，未指向出处的条目以本文为准。
-
 ## AGENTS.md 不会生效
 
 `--no-context-files` 关闭的不只是项目上下文文件，也包括 `agent\home` 下的全局
-AGENTS.md（加载逻辑在 `noContextFiles` 时直接返回空列表）。因此 Agent 指令不放在
-AGENTS.md，而是放在 `agent\home\APPEND_SYSTEM.md`——pi 内置的追加系统提示词文件，
+AGENTS.md（加载逻辑在 `noContextFiles` 时直接返回空列表）。Agent 指令放在
+`agent\home\APPEND_SYSTEM.md`——pi 内置的追加系统提示词文件，
 从 `PI_CODING_AGENT_DIR` 自动发现并附加到默认系统提示词之后，不受该开关影响，
 也无需改动 `pi.cmd` 的启动参数。
 

@@ -1,6 +1,6 @@
 # 信息收集契约
 
-状态：信息收集业务的最高参考，契约版本 0.1。更新：2026-09-20。
+状态：契约版本 0.1。更新：2026-10-02。
 
 本文是信息收集业务的最高参考：字段定义、身份来源、计费币种、工具字段形状、隐私边界都只有这一份定义，其他文档引用不重抄；写法冲突时以本文为准。
 
@@ -133,7 +133,7 @@ Authorization: Bearer <OA 访问令牌>
 | `kimi-coding` | 月之暗面 Kimi，`kimi.com` | Kimi Code ¥49/月起 |
 | `ant-ling` | 蚂蚁百灵，绑支付宝结算 | 人民币 |
 
-其余三十一个记 `USD`，分两类：同一厂商的海外站或海外区域（`moonshotai`、`zai`、`minimax`、`qwen-token-plan`、`qwen-token-plan-individual`、`xiaomi`、`xiaomi-token-plan-ams`、`xiaomi-token-plan-sgp`），以及不面向大陆提供服务的海外服务（`anthropic`、`openai`、`google`、`xai` 等）。
+其余三十一个记 `USD`：同一厂商的海外站或海外区域，以及不面向大陆提供服务的海外厂商。
 
 规则：
 

@@ -1,6 +1,20 @@
+import { appendFileSync } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, isAbsolute, relative, resolve, sep } from "node:path";
+
+let accessLogPath: string | null = null;
+export function setHttpAccessLog(path: string): void {
+	accessLogPath = path;
+}
+function accessLog(line: string): void {
+	if (!accessLogPath) return;
+	try {
+		appendFileSync(accessLogPath, `${new Date().toISOString()} ${line}\n`);
+	} catch {
+		/* 诊断日志失败不影响请求 */
+	}
+}
 
 const configuredPort = Number(process.env.CST_WEB_PORT ?? 52831);
 export const WEB_PORT =
@@ -25,6 +39,9 @@ function json(response: ServerResponse, status: number, body: unknown): void {
 		"Cache-Control": "no-store",
 		"Content-Type": "application/json; charset=utf-8",
 		"X-Content-Type-Options": "nosniff",
+		// 短响应用完即断：HTTP/1.1 下 keep-alive 连接会与 SSE 长连接争抢浏览器每域 6 连接限制，
+		// 导致事件流排队饥饿。本机握手零成本，断开无损。
+		Connection: "close",
 	});
 	response.end(response.req.method === "HEAD" ? undefined : JSON.stringify(body));
 }
@@ -46,22 +63,26 @@ function isInside(root: string, file: string): boolean {
 export function createWebServer(
 	staticDirectory: string,
 	port = WEB_PORT,
-	state: () => { sessions: { id: string; running: boolean }[]; stage: string } = () => ({
+	state: () =>
+		| { sessions: { id: string; running: boolean }[]; stage: string }
+		| Promise<{ sessions: { id: string; running: boolean }[]; stage: string }> = () => ({
 		sessions: [],
-		stage: "foundation",
+		stage: "preview",
 	}),
+	api?: (request: IncomingMessage, response: ServerResponse, pathname: string) => Promise<boolean>,
 ): Server {
 	const root = resolve(staticDirectory);
 	return createServer(async (request: IncomingMessage, response: ServerResponse) => {
+		const startedAt = Date.now();
+		const label = `${request.method ?? "GET"} ${decodeURIComponent((request.url ?? "/").split("?")[0])}`;
+		const logDone = (how: string) =>
+			accessLog(`${label} -> ${how} ${response.statusCode} ${Date.now() - startedAt}ms`);
+		response.on("close", () => logDone("close"));
+		response.on("finish", () => logDone("finish"));
 		response.setHeader("X-Content-Type-Options", "nosniff");
 		response.setHeader("Referrer-Policy", "no-referrer");
 		if (request.headers.host !== `${WEB_HOST}:${port}`) {
 			fail(response, 403, "invalid_host", "此页面只允许从本机打开。");
-			return;
-		}
-		if (request.method !== "GET" && request.method !== "HEAD") {
-			response.setHeader("Allow", "GET, HEAD");
-			fail(response, 405, "method_not_allowed", "当前操作暂不可用。");
 			return;
 		}
 		let pathname: string;
@@ -71,12 +92,38 @@ export function createWebServer(
 			fail(response, 400, "invalid_path", "页面地址无效。");
 			return;
 		}
-		if (pathname === "/api/state") {
-			json(response, 200, { version: "0.0.0", ...state(), connected: true, commands: [] });
+		if (pathname === "/api/state" && (request.method === "GET" || request.method === "HEAD")) {
+			try {
+				json(response, 200, {
+					version: "0.0.0",
+					...(await state()),
+					connected: true,
+					commands: [
+						"/compact",
+						"/fork",
+						"/tree",
+						"/skill:disk",
+						"/skill:driver",
+						"/skill:eventlog",
+						"/skill:ls",
+						"/skill:runbook",
+						"/skill:startup",
+						"/skill:sys",
+					],
+				});
+			} catch {
+				fail(response, 503, "state_unavailable", "暂时无法读取会话状态");
+			}
 			return;
 		}
+		if (api && (await api(request, response, pathname))) return;
 		if (pathname === "/api" || pathname.startsWith("/api/")) {
 			fail(response, 404, "not_found", "接口尚未提供。");
+			return;
+		}
+		if (request.method !== "GET" && request.method !== "HEAD") {
+			response.setHeader("Allow", "GET, HEAD");
+			fail(response, 405, "method_not_allowed", "当前操作暂不可用。");
 			return;
 		}
 		if (
@@ -133,6 +180,7 @@ export function createWebServer(
 				"Cache-Control": isHtml ? "no-cache" : hashed ? "public, max-age=31536000, immutable" : "no-cache",
 				"Content-Type": contentTypes[extname(file)] ?? "application/octet-stream",
 				"Content-Length": contents.length,
+				Connection: "close",
 			});
 			response.end(request.method === "HEAD" ? undefined : contents);
 		} catch (error) {

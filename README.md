@@ -35,7 +35,7 @@
 
 ### 未来计划
 
-自制 Web 操作界面，随便携发行版提供；目标是在本项目开放的能力范围内完整替代 TUI 操作，保留 TUI 通道。目前仍然在计划中。
+自制 Web 操作界面正在开发。执行 `/web` 后默认接管会话并启用业务接口，页面与工具卡片仍在完善。完成验收后接入便携发行版，保留 TUI 通道。
 
 ## 目录结构
 
@@ -45,19 +45,19 @@
 cst-pilot/
 |-- pi.cmd                     TUI 入口（发行版同款）
 |-- assets/                    品牌资源：logo.png 及其生成脚本
-|-- doc/                       产品、设计、工具与测试文档
+|-- doc/                       产品、Web、遥测、工具与测试文档，索引见 doc/README.md
 |-- pack/                      发行版构建脚本
 |-- src/
-|   `-- web/                    Web 端设计资产：Pen 画布、色表、字体与动态背景
+|   `-- web/                    Web 前端源码及 Pen 画布、色表、字体与动态背景
 |-- agent/
 |   |-- node_modules/          pi 及依赖（不入库）
 |   `-- home/
-|       |-- extensions/        扩展：branding 品牌页眉、diagnostics 诊断工具
+|       |-- extensions/        扩展：branding 品牌页眉、diagnostics 诊断工具、web 本机页面、telemetry 币种表
 |       |-- skills/            诊断工具的使用说明
 |       `-- bin/, npm/, fff/, sessions/, *.json   运行产物与密钥（不入库）
 |-- node/                      Node.js（不入库）
 |-- pwsh/, wiztree/, lhm/      便携运行时（不入库）
-`-- README.md, AGENTS.md, THIRD-PARTY-NOTICES.md, biome.json, .gitignore
+`-- README.md, CONTRIBUTING.md, AGENTS.md, LICENSE, THIRD-PARTY-NOTICES.md, biome.json, .gitignore, .github/
 ```
 
 ### 发行版（pack 产出）
@@ -74,7 +74,7 @@ cst-pilot/
 |-- pwsh/, wiztree/, lhm/
 |-- doc/                       不含 test/
 |-- licenses/
-|-- README.md, AGENTS.md, THIRD-PARTY-NOTICES.md, biome.json
+|-- README.md, AGENTS.md, LICENSE, THIRD-PARTY-NOTICES.md, biome.json
 `-- VERSION, SHA256SUMS, BUILD-INFO.json
 ```
 
@@ -100,6 +100,14 @@ pi.cmd
 **首次运行**需在 pi 内执行 `/login` 选择 provider 并填写 API key（凭据写入本机 `agent/home/auth.json`）。
 
 开发版仅代码开发。需要自备环境。
+
+## 开发
+
+本地开发、检查与提交规范见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 许可证
+
+本项目以 [MIT](LICENSE) 分发。发行版内含第三方组件，各自的许可证与条款见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) 与发行包 `licenses/`。
 
 ## 致谢
 

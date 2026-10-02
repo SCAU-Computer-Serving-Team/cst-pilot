@@ -1,10 +1,12 @@
 import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createWebApi } from "./server/api.ts";
 import { getWebContainer } from "./server/container.ts";
-import { createWebServer, listenWebServer, WEB_PORT } from "./server/http.ts";
-import { WebSessionPool } from "./server/sessions.ts";
+import { createWebServer, listenWebServer, setHttpAccessLog, WEB_PORT } from "./server/http.ts";
+import { WebSessionPool } from "./server/session/sessions.ts";
 
 const url = `http://127.0.0.1:${WEB_PORT}/`;
 const staticDirectory = fileURLToPath(new URL("./static/", import.meta.url));
@@ -29,9 +31,7 @@ export default function web(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => {
 		if (container.parked && ctx.mode === "tui") {
 			ctx.ui.setEditorComponent((tui, theme, keys) => new ParkedEditor(tui, theme, keys));
-			ctx.ui.setWidget("cst-web-parked", [
-				"会话已由 Web 运行层接管（验证模式）；页面交互尚未接入。关闭终端将结束服务。",
-			]);
+			ctx.ui.setWidget("cst-web-parked", ["会话已由 Web 接管，请在浏览器中操作。关闭终端将结束服务。"]);
 		}
 	});
 
@@ -47,25 +47,6 @@ export default function web(pi: ExtensionAPI): void {
 				return;
 			}
 			if (ctx.mode !== "tui") return;
-			// Until checkpoint 3 supplies durable input and browser controls, keep
-			// ordinary /web runs as a preview so the TUI remains usable.
-			if (process.env.CST_WEB_TAKEOVER !== "1") {
-				const server = createWebServer(staticDirectory);
-				try {
-					await listenWebServer(server);
-					container.server = server;
-					openBrowser();
-					ctx.ui.notify("已打开 Web 预览；会话操作仍在 TUI 中完成。", "info");
-				} catch (error) {
-					server.close();
-					const message =
-						(error as NodeJS.ErrnoException).code === "EADDRINUSE"
-							? "Web 端口已被占用。请关闭占用端口的程序后重试。"
-							: `Web 预览启动失败：${error instanceof Error ? error.message : String(error)}`;
-					ctx.ui.notify(message, "error");
-				}
-				return;
-			}
 			if (ctx.ui.getEditorText().trim()) {
 				ctx.ui.notify("编辑器还有未提交的内容，请先保存或清空。", "warning");
 				return;
@@ -114,10 +95,18 @@ export default function web(pi: ExtensionAPI): void {
 				});
 				container.pool = pool;
 				// Bind the socket before releasing TUI; a failed port bind must not park it.
-				const server = createWebServer(staticDirectory, WEB_PORT, () => ({
-					sessions: pool.snapshot(),
-					stage: "session-runtime",
-				}));
+				const api = createWebApi(pool, agentDir, WEB_PORT);
+				setHttpAccessLog(join(agentDir, "web-access.log"));
+				const server = createWebServer(
+					staticDirectory,
+					WEB_PORT,
+					async () => ({
+						sessions: await pool.list(),
+						stage: "api-inbox",
+					}),
+					api,
+				);
+				container.closeApi = api.close;
 				try {
 					await listenWebServer(server);
 					container.server = server;
@@ -139,8 +128,11 @@ export default function web(pi: ExtensionAPI): void {
 						parkedContext.ui.setWidget("cst-web-parked", undefined);
 					}
 					await pool.close();
+					await api.close();
+					container.closeApi = undefined;
 					container.pool = undefined;
 					container.server = undefined;
+					server.closeAllConnections();
 					await new Promise<void>((resolve) => server.close(() => resolve()));
 					throw error;
 				}
@@ -150,7 +142,7 @@ export default function web(pi: ExtensionAPI): void {
 				await start;
 				openBrowser();
 				// After ctx.newSession, the old command context is stale. Use only the fresh context here.
-				parkedContext?.ui.notify("Web 接管验证已启动；页面交互接口仍待开发。", "info");
+				parkedContext?.ui.notify("Web 已启动，终端已进入待机。请在浏览器中继续操作。", "info");
 			} catch (error) {
 				const message =
 					(error as NodeJS.ErrnoException).code === "EADDRINUSE"
@@ -168,8 +160,13 @@ export default function web(pi: ExtensionAPI): void {
 		if (container.starting) await container.starting.catch(() => undefined);
 		const server = container.server;
 		container.server = undefined;
-		if (server?.listening) await new Promise<void>((resolve) => server.close(() => resolve()));
+		if (server?.listening) {
+			server.closeAllConnections();
+			await new Promise<void>((resolve) => server.close(() => resolve()));
+		}
 		await container.pool?.close();
+		await container.closeApi?.();
+		container.closeApi = undefined;
 		container.pool = undefined;
 		container.parked = false;
 	});
