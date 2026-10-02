@@ -8,14 +8,14 @@ export type BranchSummaryChoice = { entryId: string; mode: "summarize" | "custom
 export const summaryTagText = "自定义总结提示词";
 
 export function branchSummaryChoice(params: URLSearchParams): BranchSummaryChoice | undefined {
-  const entryId = params.get("branch");
-  const mode = params.get("mode");
-  if (!entryId || (mode !== "summarize" && mode !== "custom")) return undefined;
-  return { entryId, mode };
+	const entryId = params.get("branch");
+	const mode = params.get("mode");
+	if (!entryId || (mode !== "summarize" && mode !== "custom")) return undefined;
+	return { entryId, mode };
 }
 
 export function branchSummaryHref(sessionId: string, entryId: string, mode: BranchSummaryChoice["mode"]): string {
-  return `/s/${encodeURIComponent(sessionId)}?branch=${encodeURIComponent(entryId)}&mode=${mode}`;
+	return `/s/${encodeURIComponent(sessionId)}?branch=${encodeURIComponent(entryId)}&mode=${mode}`;
 }
 
 export type NavigateResult = { cancelled: boolean; editorText?: string; summaryEntryId?: string };
@@ -24,6 +24,9 @@ export type NavigateResult = { cancelled: boolean; editorText?: string; summaryE
  * 导航与总结必须一次调用完成：pi 的总结取自「当前叶指针到目标条目」那段分支，
  * 叶指针一移动，那段分支就找不回来了。自定义提示词因此要在输入框里收好再发这一次请求。
  */
-export function summaryBody(entryId: string, customInstructions?: string): { entryId: string; summarize: true; customInstructions?: string } {
-  return customInstructions ? { entryId, summarize: true, customInstructions } : { entryId, summarize: true };
+export function summaryBody(
+	entryId: string,
+	customInstructions?: string,
+): { entryId: string; summarize: true; customInstructions?: string } {
+	return customInstructions ? { entryId, summarize: true, customInstructions } : { entryId, summarize: true };
 }

@@ -349,7 +349,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 .composer-command { display: flex; align-items: center; align-self: flex-start; gap: 8px; height: var(--control); margin-bottom: 6px; padding: 0 8px; border-radius: var(--radius-control); color: var(--chat-ink); background: var(--app-hover); font-size: var(--font-body); line-height: 1; }
 .composer-command svg { flex: 0 0 var(--icon-body); color: var(--chat-tool); }
 .composer-command button { min-width: 22px; width: 22px; height: 22px; padding: 0; color: var(--chat-muted); }
-.command-suggestions { position: absolute; bottom: calc(100% - 1px); left: 0; z-index: 5; display: flex; flex-direction: column; gap: 4px; width: 100%; max-height: min(440px, 60vh); overflow-y: auto; padding: 12px; border: 1px solid var(--chat-border); border-radius: var(--radius-composer) var(--radius-composer) 0 0; background: var(--chat-row); box-shadow: 0 8px 24px #1a202414; }
+.command-suggestions { position: absolute; bottom: calc(100% - 1px); left: 0; z-index: 5; display: flex; flex-direction: column; gap: 4px; margin: 0; min-inline-size: 0; width: 100%; max-height: min(440px, 60vh); overflow-y: auto; padding: 12px; border: 1px solid var(--chat-border); border-radius: var(--radius-composer) var(--radius-composer) 0 0; background: var(--chat-row); box-shadow: 0 8px 24px #1a202414; }
 .command-group { display: flex; flex-direction: column; gap: 0; }
 .file-suggestions { gap: 0; }
 .command-group-title { padding: 4px 12px 2px; color: var(--chat-muted); font-size: 12px; }
@@ -358,7 +358,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 .command-suggestions button small { margin-left: auto; color: var(--chat-muted); font-size: 12px; }
 .command-suggestions .command-active { background: var(--app-hover); }
 /* 附件缩略图卡片照画布「未发送图片 · 输入框」：圆角 14、1px 弱边框、内边距 10、间距 8，缩略图 80×64。 */
-.composer-attachments { display: flex; gap: 8px; width: fit-content; max-width: 100%; padding: 10px; border: 1px solid var(--app-sidebar-border); border-radius: 14px; background: var(--chat-row); box-shadow: 0 6px 18px #1a202414; overflow-x: auto; }
+.composer-attachments { display: flex; gap: 8px; margin: 0; padding: 10px; list-style: none; width: fit-content; max-width: 100%; padding: 10px; border: 1px solid var(--app-sidebar-border); border-radius: 14px; background: var(--chat-row); box-shadow: 0 6px 18px #1a202414; overflow-x: auto; }
 :root[data-theme="dark"] .composer-attachments { box-shadow: 0 6px 18px #00000066; }
 @media (prefers-color-scheme: dark) { :root[data-theme="system"] .composer-attachments { box-shadow: 0 6px 18px #00000066; } }
 .draft-image { position: relative; flex: 0 0 80px; height: 64px; }
@@ -562,6 +562,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 .queue-panel { margin-bottom: 0; border-bottom: 0; border-radius: var(--radius-composer) var(--radius-composer) 0 0; }
 .chat-composer-area:has(.queue-panel) .composer--chat { border-radius: 0 0 var(--radius-composer) var(--radius-composer); }
 .queue-panel > strong { display: block; margin-bottom: 6px; color: var(--chat-muted); font-size: 12px; font-weight: 500; }
+.queue-list { margin: 0; padding: 0; list-style: none; }
 .queue-item { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 0; border-bottom: 1px solid var(--chat-border); }
 .queue-item:last-of-type { border-bottom: 0; }
 .queue-grip { flex: 0 0 16px; color: var(--chat-muted); cursor: grab; }
@@ -730,12 +731,14 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 .settings-model { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px; border-bottom: 1px solid var(--chat-border); }
 .settings-model:last-child { border-bottom: 0; }
 .settings-check { display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 1px solid var(--chat-input-border); border-radius: var(--radius-control); background: var(--chat-row); color: #fff; cursor: pointer; }
-.settings-check[aria-checked="true"] { border-color: transparent; background: #1b85f2; }
+.settings-check[aria-pressed="true"] { border-color: transparent; background: #1b85f2; }
 .settings-check-disabled { cursor: default; border-color: var(--chat-border); background: transparent; }
 .settings-model-name { font-size: 14px; color: var(--chat-ink); }
 .settings-model-unavailable .settings-model-name { color: var(--chat-muted); text-decoration: line-through; }
 .settings-model-provider { font-size: 12px; color: var(--chat-muted); }
-.settings-grip { display: inline-flex; color: var(--chat-muted); cursor: grab; }
+/* 模型列表用 ul/li 承载拖拽排序，去掉列表默认边距与标记。 */
+.settings-models { margin: 0; padding: 0; list-style: none; }
+.settings-grip { display: inline-flex; padding: 0; border: 0; background: transparent; color: var(--chat-muted); cursor: grab; }
 /* t-check：勾选描边（transitions.dev 25-checkbox-check） */
 .t-check {
   transition:
@@ -747,7 +750,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
   stroke-dashoffset: var(--check-len, 15);
   transition: stroke-dashoffset var(--check-uncheck) var(--check-ease);
 }
-.t-check[aria-checked="true"] svg path {
+.t-check[aria-pressed="true"] svg path {
   stroke-dashoffset: 0;
   transition: stroke-dashoffset var(--check-draw) var(--check-ease) var(--check-delay);
 }
@@ -971,7 +974,8 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 .tree-toolbar-button { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; color: var(--chat-muted); font-size: 13px; }
 .tree-toolbar-button svg { color: var(--app-send); }
 .tree-counter { color: var(--chat-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-.tree-list { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 0 16px; }
+/* 分支树用 ul/li 承载，去掉列表默认边距与标记。 */
+.tree-list { flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: 8px 0 16px; list-style: none; }
 .tree-empty { margin: 48px auto; color: var(--chat-muted); text-align: center; }
 .tree-row { position: relative; display: flex; align-items: center; width: 100%; height: 40px; padding: 0 36px; cursor: pointer; color: var(--chat-ink); font-size: 16px; }
 .tree-row:hover, .tree-row:focus-visible { background: var(--app-hover); outline: none; }

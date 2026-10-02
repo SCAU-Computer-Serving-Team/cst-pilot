@@ -92,7 +92,8 @@ export type TreeRow = {
 	subtreeEnd: number;
 };
 
-const byTimestamp = (a: TreeNode, b: TreeNode) => new Date(a.entry.timestamp).getTime() - new Date(b.entry.timestamp).getTime();
+const byTimestamp = (a: TreeNode, b: TreeNode) =>
+	new Date(a.entry.timestamp).getTime() - new Date(b.entry.timestamp).getTime();
 
 /**
  * 铺平可见树。排序：含当前叶的子树排最前，其余按时间戳。
@@ -110,7 +111,9 @@ export function layoutTree(roots: TreeNode[], leafId: string | null): TreeRow[] 
 	};
 	roots.forEach(mark);
 	const order = (nodes: TreeNode[]) =>
-		[...nodes].sort((a, b) => Number(containsLeaf.get(b) ?? false) - Number(containsLeaf.get(a) ?? false) || byTimestamp(a, b));
+		[...nodes].sort(
+			(a, b) => Number(containsLeaf.get(b) ?? false) - Number(containsLeaf.get(a) ?? false) || byTimestamp(a, b),
+		);
 
 	type StackItem = {
 		node: TreeNode;
@@ -162,7 +165,9 @@ export function layoutTree(roots: TreeNode[], leafId: string | null): TreeRow[] 
 		});
 		const multipleChildren = children.length > 1;
 		const childIndent = multipleChildren || (item.justBranched && item.indent > 0) ? item.indent + 1 : item.indent;
-		const childGutters = connectorDisplayed ? [...item.gutters, { column: connectorColumn, show: !item.isLast }] : item.gutters;
+		const childGutters = connectorDisplayed
+			? [...item.gutters, { column: connectorColumn, show: !item.isLast }]
+			: item.gutters;
 		for (let i = children.length - 1; i >= 0; i--) {
 			stack.push({
 				node: children[i],
@@ -206,7 +211,10 @@ export function foldable(row: TreeRow): boolean {
 }
 
 /** 应用折叠集合：被折叠行隐藏全部可见后代。返回剩余行与被折叠行的隐藏计数。 */
-export function applyFold(rows: TreeRow[], folded: ReadonlySet<string>): { visible: TreeRow[]; hiddenCounts: Map<string, number> } {
+export function applyFold(
+	rows: TreeRow[],
+	folded: ReadonlySet<string>,
+): { visible: TreeRow[]; hiddenCounts: Map<string, number> } {
 	const hiddenCounts = new Map<string, number>();
 	const ranges: (readonly [number, number])[] = [];
 	for (const row of rows) {
@@ -216,16 +224,28 @@ export function applyFold(rows: TreeRow[], folded: ReadonlySet<string>): { visib
 		}
 	}
 	if (!ranges.length) return { visible: rows, hiddenCounts };
-	return { visible: rows.filter((row) => !ranges.some(([start, end]) => row.index > start && row.index <= end)), hiddenCounts };
+	return {
+		visible: rows.filter((row) => !ranges.some(([start, end]) => row.index > start && row.index <= end)),
+		hiddenCounts,
+	};
 }
 
-const shorten = (text: string, max = 200) => text.replace(/[\n\t]/g, " ").trim().slice(0, max);
+const shorten = (text: string, max = 200) =>
+	text
+		.replace(/[\n\t]/g, " ")
+		.trim()
+		.slice(0, max);
 
 /** 工具调用的参数摘要（结果为空时作为回退）。 */
 function toolSummary(args: Record<string, unknown>): string {
-	const first = (keys: string[]) => keys.map((key) => args[key]).find((value) => typeof value === "string" && value) as string | undefined;
+	const first = (keys: string[]) =>
+		keys.map((key) => args[key]).find((value) => typeof value === "string" && value) as string | undefined;
 	const main = first(["path", "file_path", "pattern", "command", "query", "url", "directory", "target"]);
-	if (main) return `${main}`.replace(/[\n\t]/g, " ").trim().slice(0, 80);
+	if (main)
+		return `${main}`
+			.replace(/[\n\t]/g, " ")
+			.trim()
+			.slice(0, 80);
 	const json = JSON.stringify(args);
 	return json.length > 40 ? `${json.slice(0, 40)}…` : json;
 }
@@ -233,16 +253,21 @@ function toolSummary(args: Record<string, unknown>): string {
 export type RowText = { kind: "user" | "assistant" | "tool" | "info"; role?: string; text: string };
 
 /** 行文案：角色与摘要。kind 决定配色。 */
-export function rowText(node: TreeNode, toolCalls: Map<string, { name: string; arguments: Record<string, unknown> }>): RowText {
+export function rowText(
+	node: TreeNode,
+	toolCalls: Map<string, { name: string; arguments: Record<string, unknown> }>,
+): RowText {
 	const entry = node.entry;
 	if (entry.type === "message" && entry.message) {
 		const message = entry.message;
-		if (message.role === "user") return { kind: "user", role: "user:", text: shorten(textContent(message.content)) || "（图片消息）" };
+		if (message.role === "user")
+			return { kind: "user", role: "user:", text: shorten(textContent(message.content)) || "（图片消息）" };
 		if (message.role === "assistant") {
 			const text = shorten(textContent(message.content));
 			if (text) return { kind: "assistant", role: "assistant:", text };
 			if (message.stopReason === "aborted") return { kind: "assistant", role: "assistant:", text: "（已停止）" };
-			if (message.errorMessage) return { kind: "assistant", role: "assistant:", text: shorten(message.errorMessage, 80) };
+			if (message.errorMessage)
+				return { kind: "assistant", role: "assistant:", text: shorten(message.errorMessage, 80) };
 			return { kind: "assistant", role: "assistant:", text: "（无文本回复）" };
 		}
 		if (message.role === "toolResult") {
@@ -252,15 +277,19 @@ export function rowText(node: TreeNode, toolCalls: Map<string, { name: string; a
 			const summary = shorten(textContent(message.content), 120) || (call ? toolSummary(call.arguments) : "");
 			return { kind: "tool", text: `[${name}]${summary ? ` ${summary}` : ""}` };
 		}
-		if (message.role === "bashExecution") return { kind: "tool", text: `[bash] ${shorten(message.command ?? "", 80)}` };
+		if (message.role === "bashExecution")
+			return { kind: "tool", text: `[bash] ${shorten(message.command ?? "", 80)}` };
 		return { kind: "info", text: `[${message.role}]` };
 	}
-	if (entry.type === "custom_message") return { kind: "info", text: `[${entry.customType ?? "custom"}] ${shorten(textContent(entry.content))}` };
-	if (entry.type === "compaction") return { kind: "info", text: `压缩 · ${Math.round((entry.tokensBefore ?? 0) / 1000)}k tokens` };
+	if (entry.type === "custom_message")
+		return { kind: "info", text: `[${entry.customType ?? "custom"}] ${shorten(textContent(entry.content))}` };
+	if (entry.type === "compaction")
+		return { kind: "info", text: `压缩 · ${Math.round((entry.tokensBefore ?? 0) / 1000)}k tokens` };
 	if (entry.type === "branch_summary") return { kind: "info", text: `分支总结 · ${shorten(entry.summary ?? "")}` };
 	if (entry.type === "session_info") return { kind: "info", text: `[标题: ${entry.name ?? "空"}]` };
 	if (entry.type === "model_change") return { kind: "info", text: `[模型: ${entry.modelId ?? ""}]` };
-	if (entry.type === "thinking_level_change") return { kind: "info", text: `[思考强度: ${entry.thinkingLevel ?? ""}]` };
+	if (entry.type === "thinking_level_change")
+		return { kind: "info", text: `[思考强度: ${entry.thinkingLevel ?? ""}]` };
 	if (entry.type === "label") return { kind: "info", text: `[标记: ${entry.label ?? "(已清除)"}]` };
 	return { kind: "info", text: `[${entry.type}]` };
 }

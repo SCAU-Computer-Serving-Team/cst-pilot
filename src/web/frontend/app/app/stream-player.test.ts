@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { type PacerClock, pacingStep, playableText, StreamPacer, sliceMessage, snapBudget } from "./stream-player.ts";
 import type { Message } from "./web-state.ts";
-import { pacingStep, playableText, sliceMessage, snapBudget, StreamPacer, type PacerClock } from "./stream-player.ts";
 
 test("pacingStep 按积压平滑缩放并封顶：慢模型 1 字、快模型 ≤12 字", () => {
 	assert.equal(pacingStep(1), 1);
@@ -17,12 +17,17 @@ const msg = (content: Message["content"], timestamp = 1): Message => ({ role: "a
 
 test("playableText 串联 text 与 thinking，跳过 toolCall", () => {
 	assert.equal(playableText(msg("字符串内容")), "字符串内容");
-	assert.equal(playableText(msg([
-		{ type: "thinking", thinking: "想" },
-		{ type: "text", text: "正文" },
-		{ type: "toolCall", id: "a", name: "disk", arguments: {} },
-		{ type: "text", text: "结论" },
-	])), "想正文结论");
+	assert.equal(
+		playableText(
+			msg([
+				{ type: "thinking", thinking: "想" },
+				{ type: "text", text: "正文" },
+				{ type: "toolCall", id: "a", name: "disk", arguments: {} },
+				{ type: "text", text: "结论" },
+			]),
+		),
+		"想正文结论",
+	);
 });
 
 test("sliceMessage 按预算裁剪，跨 part 边界与 toolCall 整体出现", () => {

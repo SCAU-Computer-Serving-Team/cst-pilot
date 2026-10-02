@@ -24,6 +24,6 @@
 		"lineWidth": 120
 	},
 	"files": {
-		"includes": ["agent/home/extensions/**/*.ts", "!!**/node_modules"]
+		"includes": ["agent/home/extensions/**/*.ts", "src/web/frontend/**/*.{ts,tsx}", "!!**/node_modules", "!!src/web/frontend/build", "!!src/web/frontend/.react-router"]
 	}
 }

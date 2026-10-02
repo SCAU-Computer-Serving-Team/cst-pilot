@@ -37,7 +37,12 @@ export function sliceMessage(message: Message, budget: number): Message {
 				budget -= text.length;
 				continue;
 			}
-			if (budget > 0) content.push(part.type === "text" ? { ...part, text: text.slice(0, budget) } : { ...part, thinking: text.slice(0, budget) });
+			if (budget > 0)
+				content.push(
+					part.type === "text"
+						? { ...part, text: text.slice(0, budget) }
+						: { ...part, thinking: text.slice(0, budget) },
+				);
 			return { ...message, content };
 		}
 		content.push(part);
@@ -72,7 +77,10 @@ export class StreamPacer {
 
 	constructor(publish: (message: Message) => void, clock?: PacerClock) {
 		this.publish = publish;
-		this.clock = clock ?? { setTimeout: (callback, ms) => window.setTimeout(callback, ms), clearTimeout: (handle) => window.clearTimeout(handle as number) };
+		this.clock = clock ?? {
+			setTimeout: (callback, ms) => window.setTimeout(callback, ms),
+			clearTimeout: (handle) => window.clearTimeout(handle as number),
+		};
 	}
 
 	/** 收到新的全量快照：有未播放内容时立即走一步，并保持 24ms 步进直到追平。 */
