@@ -1957,53 +1957,474 @@
                   "children": [
                     {
                       "type": "frame",
-                      "id": "fz8vQ",
-                      "name": "HeroUI Accordion · 已完成工作",
-                      "context": "Accordion/Closed trigger。默认折叠原始调用详情；展开可查看 disk 两次调用。",
+                      "id": "ngLEq",
+                      "name": "过程区",
+                      "context": "过程折叠：一行过程行 + 发丝线 + 展开区；完成后自动折叠，历史回放折叠。",
                       "width": "fill_container",
-                      "height": 28,
-                      "gap": 9,
-                      "alignItems": "center",
+                      "layout": "vertical",
+                      "gap": 6,
                       "children": [
                         {
-                          "type": "icon",
-                          "id": "mYhal",
-                          "name": "完成图标",
-                          "width": 17,
-                          "height": 17,
-                          "icon": "check-check",
-                          "library": "lucide",
-                          "fill": "#007B3A"
+                          "type": "frame",
+                          "id": "q77hTH",
+                          "name": "过程行 · 已工作",
+                          "width": "fill_container",
+                          "height": 28,
+                          "gap": 10,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "t2Czve",
+                              "name": "过程耗时",
+                              "fill": "#646464",
+                              "content": "已工作 42 秒",
+                              "fontFamily": "Source Han Sans CN",
+                              "fontSize": 16,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "Zs35v",
+                              "name": "展开指示",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "chevron-down",
+                              "library": "lucide",
+                              "fill": "#646464"
+                            }
+                          ]
                         },
                         {
-                          "type": "text",
-                          "id": "wjgBf",
-                          "name": "工作摘要",
-                          "fill": "#646464",
-                          "content": "已完成检查",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
-                          "fontWeight": "normal"
+                          "type": "rectangle",
+                          "id": "M8aOlt",
+                          "name": "发丝线",
+                          "fill": "#F0F0F0",
+                          "width": "fill_container",
+                          "height": 1
                         },
                         {
-                          "type": "text",
-                          "id": "taqjv",
-                          "name": "调用数量",
-                          "fill": "#646464",
-                          "content": "2 次工具调用",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "K6C78v",
-                          "name": "展开工作详情",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "chevron-right",
-                          "library": "lucide",
-                          "fill": "#646464"
+                          "type": "frame",
+                          "id": "n28973",
+                          "name": "过程展开区",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 10,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "ETriA",
+                              "name": "思考行 · 已思考",
+                              "width": "fill_container",
+                              "height": 28,
+                              "gap": 10,
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "pcuIp",
+                                  "name": "思考图标",
+                                  "width": 18,
+                                  "height": 18,
+                                  "icon": "brain",
+                                  "library": "lucide",
+                                  "fill": "#646464"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "GQL49",
+                                  "name": "思考状态文案",
+                                  "fill": "#646464",
+                                  "content": "已思考",
+                                  "fontFamily": "Source Han Sans CN",
+                                  "fontSize": 16,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "icon",
+                                  "id": "jqBIp",
+                                  "name": "展开思考摘要",
+                                  "width": 14,
+                                  "height": 14,
+                                  "icon": "chevron-right",
+                                  "library": "lucide",
+                                  "fill": "#646464"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "fz8vQ",
+                              "name": "计数行 · 已完成检查",
+                              "context": "第 1 层：同类工具调用合并成一行，展开是第 2 层工具行。",
+                              "width": "fill_container",
+                              "height": 28,
+                              "gap": 9,
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "mYhal",
+                                  "name": "完成图标",
+                                  "width": 17,
+                                  "height": 17,
+                                  "icon": "check-check",
+                                  "library": "lucide",
+                                  "fill": "#007B3A"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "wjgBf",
+                                  "name": "工作摘要",
+                                  "fill": "#646464",
+                                  "content": "已完成检查",
+                                  "fontFamily": "Source Han Sans CN",
+                                  "fontSize": 16,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "taqjv",
+                                  "name": "调用数量",
+                                  "fill": "#646464",
+                                  "content": "2 次工具调用",
+                                  "fontFamily": "Source Han Sans CN",
+                                  "fontSize": 14,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "icon",
+                                  "id": "K6C78v",
+                                  "name": "展开工作详情",
+                                  "width": 14,
+                                  "height": 14,
+                                  "icon": "chevron-down",
+                                  "library": "lucide",
+                                  "fill": "#646464"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "A6R0GU",
+                              "name": "工具展开区",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 8,
+                              "padding": [
+                                0,
+                                0,
+                                0,
+                                24
+                              ],
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "K1lV6r",
+                                  "name": "工具行 · disk 完成",
+                                  "width": "fill_container",
+                                  "height": 28,
+                                  "gap": 10,
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "id": "N2j1K",
+                                      "name": "成功图标",
+                                      "width": 17,
+                                      "height": 17,
+                                      "icon": "check",
+                                      "library": "lucide",
+                                      "fill": "#007B3A"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "id": "PEXNG",
+                                      "name": "工具名",
+                                      "fill": "#202020",
+                                      "content": "正在调用 disk 工具",
+                                      "fontFamily": "Source Han Sans CN",
+                                      "fontSize": 16,
+                                      "fontWeight": "normal"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "id": "l4Joi0",
+                                      "name": "耗时",
+                                      "fill": "#646464",
+                                      "content": "3.8s",
+                                      "fontFamily": "Source Han Sans CN",
+                                      "fontSize": 14,
+                                      "fontWeight": "normal"
+                                    },
+                                    {
+                                      "type": "icon",
+                                      "id": "t05Kxz",
+                                      "name": "展开指示",
+                                      "width": 14,
+                                      "height": 14,
+                                      "icon": "chevron-down",
+                                      "library": "lucide",
+                                      "fill": "#646464"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "m8NPf",
+                                  "name": "调用卡片 · disk usage",
+                                  "width": "fill_container",
+                                  "cornerRadius": 8,
+                                  "stroke": "#D5DEE3",
+                                  "strokeWidth": 1,
+                                  "layout": "vertical",
+                                  "gap": 10,
+                                  "padding": 12,
+                                  "children": [
+                                    {
+                                      "type": "frame",
+                                      "id": "KwhUc",
+                                      "name": "调用语句",
+                                      "fill": "#F5F5F5",
+                                      "cornerRadius": 4,
+                                      "padding": [
+                                        4,
+                                        8
+                                      ],
+                                      "children": [
+                                        {
+                                          "type": "text",
+                                          "id": "OJXIk",
+                                          "fill": "#202020",
+                                          "content": "disk({ scope: \"usage\", path: \"C:\\\", top: 5 })",
+                                          "fontFamily": "JetBrains Mono",
+                                          "fontSize": 13,
+                                          "fontWeight": "normal"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "frame",
+                                      "id": "o8b9aR",
+                                      "name": "概览组",
+                                      "width": "fill_container",
+                                      "layout": "vertical",
+                                      "gap": 4,
+                                      "children": [
+                                        {
+                                          "type": "frame",
+                                          "id": "C3UVaT",
+                                          "name": "字段行",
+                                          "width": "fill_container",
+                                          "gap": 12,
+                                          "alignItems": "center",
+                                          "children": [
+                                            {
+                                              "type": "text",
+                                              "id": "uyUmo",
+                                              "name": "字段名",
+                                              "fill": "#646464",
+                                              "content": "扫描根",
+                                              "fontFamily": "Source Han Sans CN",
+                                              "fontSize": 13,
+                                              "fontWeight": "normal"
+                                            },
+                                            {
+                                              "type": "text",
+                                              "id": "yTkZR",
+                                              "name": "字段值",
+                                              "fill": "#202020",
+                                              "content": "C:\\",
+                                              "fontFamily": "Source Han Sans CN",
+                                              "fontSize": 13,
+                                              "fontWeight": "normal"
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "type": "frame",
+                                          "id": "at5U9",
+                                          "name": "字段行",
+                                          "width": "fill_container",
+                                          "gap": 12,
+                                          "alignItems": "center",
+                                          "children": [
+                                            {
+                                              "type": "text",
+                                              "id": "uYERJ",
+                                              "name": "字段名",
+                                              "fill": "#646464",
+                                              "content": "总大小",
+                                              "fontFamily": "Source Han Sans CN",
+                                              "fontSize": 13,
+                                              "fontWeight": "normal"
+                                            },
+                                            {
+                                              "type": "text",
+                                              "id": "suWH2",
+                                              "name": "字段值",
+                                              "fill": "#202020",
+                                              "content": "121.44 GB",
+                                              "fontFamily": "Source Han Sans CN",
+                                              "fontSize": 13,
+                                              "fontWeight": "normal"
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "type": "frame",
+                                          "id": "trcCj",
+                                          "name": "字段行",
+                                          "width": "fill_container",
+                                          "gap": 12,
+                                          "alignItems": "center",
+                                          "children": [
+                                            {
+                                              "type": "text",
+                                              "id": "CifM6",
+                                              "name": "字段名",
+                                              "fill": "#646464",
+                                              "content": "统计方式",
+                                              "fontFamily": "Source Han Sans CN",
+                                              "fontSize": 13,
+                                              "fontWeight": "normal"
+                                            },
+                                            {
+                                              "type": "text",
+                                              "id": "Cuzqt",
+                                              "name": "字段值",
+                                              "fill": "#202020",
+                                              "content": "wiztree-mft",
+                                              "fontFamily": "Source Han Sans CN",
+                                              "fontSize": 13,
+                                              "fontWeight": "normal"
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "frame",
+                                      "id": "KVs3i",
+                                      "name": "提示行",
+                                      "width": "fill_container",
+                                      "gap": 6,
+                                      "alignItems": "center",
+                                      "children": [
+                                        {
+                                          "type": "icon",
+                                          "id": "GVJ0B",
+                                          "width": 14,
+                                          "height": 14,
+                                          "icon": "info",
+                                          "library": "lucide",
+                                          "fill": "#646464"
+                                        },
+                                        {
+                                          "type": "text",
+                                          "id": "Q2r51",
+                                          "fill": "#646464",
+                                          "content": "WizTree 全量 MFT 导出（128,442 行）。以上为部分统计，不代表全部占用。",
+                                          "fontFamily": "Source Han Sans CN",
+                                          "fontSize": 12,
+                                          "fontWeight": "normal"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "frame",
+                                      "id": "qytAC",
+                                      "name": "原始数据行",
+                                      "width": "fill_container",
+                                      "height": 24,
+                                      "gap": 6,
+                                      "alignItems": "center",
+                                      "children": [
+                                        {
+                                          "type": "icon",
+                                          "id": "WqwKE",
+                                          "width": 14,
+                                          "height": 14,
+                                          "icon": "braces",
+                                          "library": "lucide",
+                                          "fill": "#646464"
+                                        },
+                                        {
+                                          "type": "text",
+                                          "id": "sMsrQ",
+                                          "fill": "#646464",
+                                          "content": "原始数据",
+                                          "fontFamily": "Source Han Sans CN",
+                                          "fontSize": 13,
+                                          "fontWeight": "normal"
+                                        },
+                                        {
+                                          "type": "icon",
+                                          "id": "HdMxB",
+                                          "width": 14,
+                                          "height": 14,
+                                          "icon": "chevron-down",
+                                          "library": "lucide",
+                                          "fill": "#646464"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "YKuyZ",
+                                  "name": "工具行 · sys 完成",
+                                  "width": "fill_container",
+                                  "height": 28,
+                                  "gap": 10,
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "id": "jBZke",
+                                      "name": "成功图标",
+                                      "width": 17,
+                                      "height": 17,
+                                      "icon": "check",
+                                      "library": "lucide",
+                                      "fill": "#007B3A"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "id": "OdogW",
+                                      "name": "工具名",
+                                      "fill": "#202020",
+                                      "content": "正在调用 sys 工具",
+                                      "fontFamily": "Source Han Sans CN",
+                                      "fontSize": 16,
+                                      "fontWeight": "normal"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "id": "mnQ4v",
+                                      "name": "耗时",
+                                      "fill": "#646464",
+                                      "content": "1.2s",
+                                      "fontFamily": "Source Han Sans CN",
+                                      "fontSize": 14,
+                                      "fontWeight": "normal"
+                                    },
+                                    {
+                                      "type": "icon",
+                                      "id": "FVjTI",
+                                      "name": "展开指示",
+                                      "width": 14,
+                                      "height": 14,
+                                      "icon": "chevron-right",
+                                      "library": "lucide",
+                                      "fill": "#646464"
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
                         }
                       ]
                     },
@@ -2614,6 +3035,46 @@
                   "layout": "vertical",
                   "gap": 10,
                   "children": [
+                    {
+                      "type": "frame",
+                      "id": "yTbp1",
+                      "name": "过程行 · 工作中",
+                      "context": "运行中：秒数实时推进；展开指示随过程区开合切换方向。",
+                      "width": "fill_container",
+                      "height": 28,
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "dRNTl",
+                          "name": "过程耗时",
+                          "fill": "#646464",
+                          "content": "工作中 12 秒",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 16,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "n8jo6",
+                          "name": "展开指示",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "#646464"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "T5PSK",
+                      "name": "发丝线",
+                      "fill": "#F0F0F0",
+                      "width": "fill_container",
+                      "height": 1
+                    },
                     {
                       "type": "frame",
                       "id": "t3PLo",
@@ -5112,53 +5573,474 @@
                   "children": [
                     {
                       "type": "frame",
-                      "id": "I8Q9aI",
-                      "name": "HeroUI Accordion · 已完成工作",
-                      "context": "Accordion/Closed trigger。默认折叠原始调用详情；展开可查看 disk 两次调用。",
+                      "id": "OfZjh",
+                      "name": "过程区",
+                      "context": "过程折叠：一行过程行 + 发丝线 + 展开区；完成后自动折叠，历史回放折叠。",
                       "width": "fill_container",
-                      "height": 28,
-                      "gap": 9,
-                      "alignItems": "center",
+                      "layout": "vertical",
+                      "gap": 6,
                       "children": [
                         {
-                          "type": "icon",
-                          "id": "N26JVz",
-                          "name": "完成图标",
-                          "width": 17,
-                          "height": 17,
-                          "icon": "check-check",
-                          "library": "lucide",
-                          "fill": "#67CA83"
+                          "type": "frame",
+                          "id": "ZVISg",
+                          "name": "过程行 · 已工作",
+                          "width": "fill_container",
+                          "height": 28,
+                          "gap": 10,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "ENNbr",
+                              "name": "过程耗时",
+                              "fill": "#AAB3B7",
+                              "content": "已工作 42 秒",
+                              "fontFamily": "Source Han Sans CN",
+                              "fontSize": 16,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "YpRjt",
+                              "name": "展开指示",
+                              "width": 14,
+                              "height": 14,
+                              "icon": "chevron-down",
+                              "library": "lucide",
+                              "fill": "#AAB3B7"
+                            }
+                          ]
                         },
                         {
-                          "type": "text",
-                          "id": "mkCFi",
-                          "name": "工作摘要",
-                          "fill": "#AAB3B7",
-                          "content": "已完成检查",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
-                          "fontWeight": "normal"
+                          "type": "rectangle",
+                          "id": "qwMFR",
+                          "name": "发丝线",
+                          "fill": "#1D2428",
+                          "width": "fill_container",
+                          "height": 1
                         },
                         {
-                          "type": "text",
-                          "id": "v1bsNI",
-                          "name": "调用数量",
-                          "fill": "#AAB3B7",
-                          "content": "2 次工具调用",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "type": "icon",
-                          "id": "HqLtU",
-                          "name": "展开工作详情",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "chevron-right",
-                          "library": "lucide",
-                          "fill": "#AAB3B7"
+                          "type": "frame",
+                          "id": "K4vhu1",
+                          "name": "过程展开区",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 10,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "OrPkN",
+                              "name": "思考行 · 已思考",
+                              "width": "fill_container",
+                              "height": 28,
+                              "gap": 10,
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "z7MWL9",
+                                  "name": "思考图标",
+                                  "width": 18,
+                                  "height": 18,
+                                  "icon": "brain",
+                                  "library": "lucide",
+                                  "fill": "#AAB3B7"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "SFZxH",
+                                  "name": "思考状态文案",
+                                  "fill": "#AAB3B7",
+                                  "content": "已思考",
+                                  "fontFamily": "Source Han Sans CN",
+                                  "fontSize": 16,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "icon",
+                                  "id": "QsRyY",
+                                  "name": "展开思考摘要",
+                                  "width": 14,
+                                  "height": 14,
+                                  "icon": "chevron-right",
+                                  "library": "lucide",
+                                  "fill": "#AAB3B7"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "I8Q9aI",
+                              "name": "计数行 · 已完成检查",
+                              "context": "第 1 层：同类工具调用合并成一行，展开是第 2 层工具行。",
+                              "width": "fill_container",
+                              "height": 28,
+                              "gap": 9,
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "N26JVz",
+                                  "name": "完成图标",
+                                  "width": 17,
+                                  "height": 17,
+                                  "icon": "check-check",
+                                  "library": "lucide",
+                                  "fill": "#67CA83"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "mkCFi",
+                                  "name": "工作摘要",
+                                  "fill": "#AAB3B7",
+                                  "content": "已完成检查",
+                                  "fontFamily": "Source Han Sans CN",
+                                  "fontSize": 16,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "v1bsNI",
+                                  "name": "调用数量",
+                                  "fill": "#AAB3B7",
+                                  "content": "2 次工具调用",
+                                  "fontFamily": "Source Han Sans CN",
+                                  "fontSize": 14,
+                                  "fontWeight": "normal"
+                                },
+                                {
+                                  "type": "icon",
+                                  "id": "HqLtU",
+                                  "name": "展开工作详情",
+                                  "width": 14,
+                                  "height": 14,
+                                  "icon": "chevron-down",
+                                  "library": "lucide",
+                                  "fill": "#AAB3B7"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "qYJGE",
+                              "name": "工具展开区",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 8,
+                              "padding": [
+                                0,
+                                0,
+                                0,
+                                24
+                              ],
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "pkl8J",
+                                  "name": "工具行 · disk 完成",
+                                  "width": "fill_container",
+                                  "height": 28,
+                                  "gap": 10,
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "id": "vE1YD",
+                                      "name": "成功图标",
+                                      "width": 17,
+                                      "height": 17,
+                                      "icon": "check",
+                                      "library": "lucide",
+                                      "fill": "#67CA83"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "id": "mzhQ8",
+                                      "name": "工具名",
+                                      "fill": "#E0EAEE",
+                                      "content": "正在调用 disk 工具",
+                                      "fontFamily": "Source Han Sans CN",
+                                      "fontSize": 16,
+                                      "fontWeight": "normal"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "id": "mqOi1",
+                                      "name": "耗时",
+                                      "fill": "#AAB3B7",
+                                      "content": "3.8s",
+                                      "fontFamily": "Source Han Sans CN",
+                                      "fontSize": 14,
+                                      "fontWeight": "normal"
+                                    },
+                                    {
+                                      "type": "icon",
+                                      "id": "o2lDU",
+                                      "name": "展开指示",
+                                      "width": 14,
+                                      "height": 14,
+                                      "icon": "chevron-down",
+                                      "library": "lucide",
+                                      "fill": "#AAB3B7"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "HSeFf",
+                                  "name": "调用卡片 · disk usage",
+                                  "width": "fill_container",
+                                  "cornerRadius": 8,
+                                  "stroke": "#4F575B",
+                                  "strokeWidth": 1,
+                                  "layout": "vertical",
+                                  "gap": 10,
+                                  "padding": 12,
+                                  "children": [
+                                    {
+                                      "type": "frame",
+                                      "id": "T4VBH",
+                                      "name": "调用语句",
+                                      "fill": "#1D2428",
+                                      "cornerRadius": 4,
+                                      "padding": [
+                                        4,
+                                        8
+                                      ],
+                                      "children": [
+                                        {
+                                          "type": "text",
+                                          "id": "xmN6d",
+                                          "fill": "#E0EAEE",
+                                          "content": "disk({ scope: \"usage\", path: \"C:\\\", top: 5 })",
+                                          "fontFamily": "JetBrains Mono",
+                                          "fontSize": 13,
+                                          "fontWeight": "normal"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "frame",
+                                      "id": "h7Ohg",
+                                      "name": "概览组",
+                                      "width": "fill_container",
+                                      "layout": "vertical",
+                                      "gap": 4,
+                                      "children": [
+                                        {
+                                          "type": "frame",
+                                          "id": "F3kZ1M",
+                                          "name": "字段行",
+                                          "width": "fill_container",
+                                          "gap": 12,
+                                          "alignItems": "center",
+                                          "children": [
+                                            {
+                                              "type": "text",
+                                              "id": "PT9FX",
+                                              "name": "字段名",
+                                              "fill": "#AAB3B7",
+                                              "content": "扫描根",
+                                              "fontFamily": "Source Han Sans CN",
+                                              "fontSize": 13,
+                                              "fontWeight": "normal"
+                                            },
+                                            {
+                                              "type": "text",
+                                              "id": "DPrqj",
+                                              "name": "字段值",
+                                              "fill": "#E0EAEE",
+                                              "content": "C:\\",
+                                              "fontFamily": "Source Han Sans CN",
+                                              "fontSize": 13,
+                                              "fontWeight": "normal"
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "type": "frame",
+                                          "id": "df7fj",
+                                          "name": "字段行",
+                                          "width": "fill_container",
+                                          "gap": 12,
+                                          "alignItems": "center",
+                                          "children": [
+                                            {
+                                              "type": "text",
+                                              "id": "Ggn3h",
+                                              "name": "字段名",
+                                              "fill": "#AAB3B7",
+                                              "content": "总大小",
+                                              "fontFamily": "Source Han Sans CN",
+                                              "fontSize": 13,
+                                              "fontWeight": "normal"
+                                            },
+                                            {
+                                              "type": "text",
+                                              "id": "g6oadS",
+                                              "name": "字段值",
+                                              "fill": "#E0EAEE",
+                                              "content": "121.44 GB",
+                                              "fontFamily": "Source Han Sans CN",
+                                              "fontSize": 13,
+                                              "fontWeight": "normal"
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "type": "frame",
+                                          "id": "A0RAd",
+                                          "name": "字段行",
+                                          "width": "fill_container",
+                                          "gap": 12,
+                                          "alignItems": "center",
+                                          "children": [
+                                            {
+                                              "type": "text",
+                                              "id": "wQOsH",
+                                              "name": "字段名",
+                                              "fill": "#AAB3B7",
+                                              "content": "统计方式",
+                                              "fontFamily": "Source Han Sans CN",
+                                              "fontSize": 13,
+                                              "fontWeight": "normal"
+                                            },
+                                            {
+                                              "type": "text",
+                                              "id": "YQYei",
+                                              "name": "字段值",
+                                              "fill": "#E0EAEE",
+                                              "content": "wiztree-mft",
+                                              "fontFamily": "Source Han Sans CN",
+                                              "fontSize": 13,
+                                              "fontWeight": "normal"
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "frame",
+                                      "id": "h457Z",
+                                      "name": "提示行",
+                                      "width": "fill_container",
+                                      "gap": 6,
+                                      "alignItems": "center",
+                                      "children": [
+                                        {
+                                          "type": "icon",
+                                          "id": "N3ipFs",
+                                          "width": 14,
+                                          "height": 14,
+                                          "icon": "info",
+                                          "library": "lucide",
+                                          "fill": "#AAB3B7"
+                                        },
+                                        {
+                                          "type": "text",
+                                          "id": "JNFMq",
+                                          "fill": "#AAB3B7",
+                                          "content": "WizTree 全量 MFT 导出（128,442 行）。以上为部分统计，不代表全部占用。",
+                                          "fontFamily": "Source Han Sans CN",
+                                          "fontSize": 12,
+                                          "fontWeight": "normal"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "frame",
+                                      "id": "G2EtFh",
+                                      "name": "原始数据行",
+                                      "width": "fill_container",
+                                      "height": 24,
+                                      "gap": 6,
+                                      "alignItems": "center",
+                                      "children": [
+                                        {
+                                          "type": "icon",
+                                          "id": "oeeuM",
+                                          "width": 14,
+                                          "height": 14,
+                                          "icon": "braces",
+                                          "library": "lucide",
+                                          "fill": "#AAB3B7"
+                                        },
+                                        {
+                                          "type": "text",
+                                          "id": "xlTcv",
+                                          "fill": "#AAB3B7",
+                                          "content": "原始数据",
+                                          "fontFamily": "Source Han Sans CN",
+                                          "fontSize": 13,
+                                          "fontWeight": "normal"
+                                        },
+                                        {
+                                          "type": "icon",
+                                          "id": "kgmJ3",
+                                          "width": 14,
+                                          "height": 14,
+                                          "icon": "chevron-down",
+                                          "library": "lucide",
+                                          "fill": "#AAB3B7"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "frame",
+                                  "id": "VxRmC",
+                                  "name": "工具行 · sys 完成",
+                                  "width": "fill_container",
+                                  "height": 28,
+                                  "gap": 10,
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "id": "zTtlS",
+                                      "name": "成功图标",
+                                      "width": 17,
+                                      "height": 17,
+                                      "icon": "check",
+                                      "library": "lucide",
+                                      "fill": "#67CA83"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "id": "dbVuT",
+                                      "name": "工具名",
+                                      "fill": "#E0EAEE",
+                                      "content": "正在调用 sys 工具",
+                                      "fontFamily": "Source Han Sans CN",
+                                      "fontSize": 16,
+                                      "fontWeight": "normal"
+                                    },
+                                    {
+                                      "type": "text",
+                                      "id": "NHxFb",
+                                      "name": "耗时",
+                                      "fill": "#AAB3B7",
+                                      "content": "1.2s",
+                                      "fontFamily": "Source Han Sans CN",
+                                      "fontSize": 14,
+                                      "fontWeight": "normal"
+                                    },
+                                    {
+                                      "type": "icon",
+                                      "id": "UhZ2c",
+                                      "name": "展开指示",
+                                      "width": 14,
+                                      "height": 14,
+                                      "icon": "chevron-right",
+                                      "library": "lucide",
+                                      "fill": "#AAB3B7"
+                                    }
+                                  ]
+                                }
+                              ]
+                            }
+                          ]
                         }
                       ]
                     },
@@ -5769,6 +6651,46 @@
                   "layout": "vertical",
                   "gap": 10,
                   "children": [
+                    {
+                      "type": "frame",
+                      "id": "n32gp",
+                      "name": "过程行 · 工作中",
+                      "context": "运行中：秒数实时推进；展开指示随过程区开合切换方向。",
+                      "width": "fill_container",
+                      "height": 28,
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "OUpfq",
+                          "name": "过程耗时",
+                          "fill": "#AAB3B7",
+                          "content": "工作中 12 秒",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 16,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "IscmU",
+                          "name": "展开指示",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "#AAB3B7"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "DDNt0",
+                      "name": "发丝线",
+                      "fill": "#1D2428",
+                      "width": "fill_container",
+                      "height": 1
+                    },
                     {
                       "type": "frame",
                       "id": "ulsI4",
@@ -59957,10 +60879,10 @@
       "x": 6000,
       "y": 10975,
       "name": "分支总结 · 完成 · 深色",
-      "context": "深色版。图标 #ED9F26、正文 #E0EAEE、圆点与时间 #AAB3B7；其余几何与浅色一致。底图是聊天页的实时副本。",
+      "context": "分支总结 · 完成。待总结状态行就地换成一条可折叠的分支总结消息：标题行 28 作折叠触发器（chevron-down 在最右端），展开时正文收进深色原文块 #0B1215 r6 pad[10,12]，文字 11px #7F888C lh1.6 保留原始换行，总结输出按 Markdown 原文呈现、不在聊天流直接渲染。画布加高以容纳展开态。底图是聊天页的实时副本。",
       "clip": true,
       "width": 1920,
-      "height": 1080,
+      "height": 1418,
       "fill": "#0B1215",
       "children": [
         {
@@ -60291,7 +61213,7 @@
               "id": "WquIb",
               "layoutPosition": "absolute",
               "x": 12,
-              "y": 1000,
+              "y": 1338,
               "name": "当前电脑与设置",
               "width": 239,
               "height": 64,
@@ -61350,6 +62272,7 @@
                   "type": "frame",
                   "id": "WI5V6",
                   "name": "分支总结 · 消息",
+                  "context": "分支总结完成后的折叠消息块。标题行是折叠触发器：git-branch 18px 取分支总结色、「分支已总结」16px/500 正文色、右端时间 13px 中性、最右端 chevron-down 14px #AAB3B7。展开后正文收进深色原文块（见原文块 context），块内间距 12。整块与上一块相隔 24，与助手消息同宽同左缘。",
                   "width": "fill_container",
                   "layout": "vertical",
                   "gap": 12,
@@ -61399,6 +62322,44 @@
                           "fontFamily": "Source Han Sans CN",
                           "fontSize": 13,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "Y6rZAC",
+                          "name": "折叠按钮",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "#AAB3B7"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "L1MHK",
+                      "name": "原文块 · 分支总结",
+                      "context": "同工具调用 原文块 深色模板：底 #0B1215 r6 pad[10,12]，文字 11px #7F888C lh1.6，保留原始换行。总结输出以 Markdown 原文呈现，不在聊天流里直接渲染。",
+                      "width": "fill_container",
+                      "fill": "#0B1215",
+                      "cornerRadius": 6,
+                      "padding": [
+                        10,
+                        12
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "e80KhE",
+                          "name": "原文文本 · 分支总结",
+                          "fill": "#7F888C",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "The user explored a different conversation branch before returning here. Summary of that exploration:\n\n## Goal\n\n查清本机固态硬盘 YMTC PC411-1TB-B 的规格：接口代际、闪存颗粒与缓存方案，并判断是否存在兼容或寿命上的顾虑。\n\n## Findings\n\n- 接口为 PCIe Gen4 x4，容量 1TB，NVMe 协议。\n- 颗粒为 TLC，无独立 DRAM 缓存，采用 HMB 主机缓存方案。\n- 健康状态 Healthy，未发现寿命风险迹象。\n\n## Constraints & Preferences\n\n- 只关注与本机直接相关的信息，不需要选购或升级建议。\n- 联网检索仅使用中文关键词。\n- 命令输出直接在聊天中给出，未指定写入文件。",
+                          "lineHeight": 1.6,
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
                         }
                       ]
                     }
@@ -61411,7 +62372,7 @@
               "id": "gZYXC",
               "layoutPosition": "absolute",
               "x": 256,
-              "y": 935,
+              "y": 1273,
               "name": "HeroUI Textarea · 底部消息编辑器",
               "context": "Textarea/Primary + Button/Ghost/Icon/SM + Select。执行中保留输入能力；右下停止按钮替代发送。Enter发送，Shift+Enter换行。画布仅呈现静态状态。",
               "width": 1144,
