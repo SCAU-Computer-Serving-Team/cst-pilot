@@ -1,1 +1,20 @@
-agent/home/extensions/**/*.ts text eol=lf
+# 文本文件入库统一 LF，checkout 按下方规则转换
+* text=auto
+
+# 批处理必须是 CRLF，否则老版本 cmd 解析 goto 标签可能出错
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# 二进制资产不做任何转换
+*.pen -text
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.gif -text
+*.webp -text
+*.ico -text
+*.otf -text
+*.ttf -text
+*.woff -text
+*.woff2 -text
+*.bin -text
