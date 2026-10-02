@@ -4,6 +4,7 @@
 1. 若从未阅读过，按照一下顺序阅读文档，获取关键信息
   1. 基本情况：`doc\PRD.md`、`README.md`、通过ls获取文档结构。
   2. 开发情况和已开发内容： `doc\Todo.md`、`doc\tool\README.md`、`doc\Notice.md`、`doc\test\README.md`、`doc\design\README.md` 。
+  3. 其他与任务相关的文档
 2. 请大概了解`earendil-works/pi`，本项目基于Pi二次开发，但是要遵循Pi的工程规范。有充足的文档可供后续阅读。
 
 ## 文档规范
