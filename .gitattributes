@@ -1,5 +1,5 @@
-# 文本文件入库统一 LF，checkout 按下方规则转换
-* text=auto
+# 文本文件入库统一 LF，checkout 也强制 LF（否则 Windows 上 autocrlf 会转成 CRLF，biome 按 LF 校验）
+* text=auto eol=lf
 
 # 批处理必须是 CRLF，否则老版本 cmd 解析 goto 标签可能出错
 *.cmd text eol=crlf
