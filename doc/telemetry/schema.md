@@ -67,14 +67,7 @@
 }
 ```
 
-多模型会话示例（同一会话先粗排后精排）：
-
-```json
-"models": [
-  { "provider": "cstoa", "model": "glm-5.3-flash",       "thinkingLevel": "low",  "turns": 18, "input": 140000, "output": 7200, "cacheRead": 52000, "cacheWrite": 0, "totalTokens": 199200, "cost": 2.00, "currency": "CNY" },
-  { "provider": "cstoa", "model": "deepseek-v4.1-flash", "thinkingLevel": "high", "turns": 5,  "input": 42000,  "output": 2200, "cacheRead": 9000,  "cacheWrite": 0, "totalTokens": 53200,  "cost": 0.92, "currency": "CNY" }
-]
-```
+多模型会话时数组含多个元素，`turns` 最多的那个即主用模型。
 
 ### 上下文
 
@@ -100,15 +93,7 @@
 | 契约外工具 | 只采公共维度，按 name 分组 |
 | 元素示例 | `{ "name": "disk", "scope": "usage", "calls": 2, "failures": 0, "degraded": 1, "totalMs": 41200, "maxMs": 38000, "resultBytes": 21000, "truncated": 0 }` |
 
-多元素示例（同一 `sys` 工具按 scope 拆分）：
-
-```json
-"tools": [
-  { "name": "disk", "scope": "usage", "calls": 2, "failures": 0, "degraded": 1, "totalMs": 41200, "maxMs": 38000, "resultBytes": 21000 },
-  { "name": "sys",  "scope": "gpu",   "calls": 1, "failures": 0, "degraded": 0, "totalMs": 3100,  "maxMs": 3100,  "resultBytes": 4200 },
-  { "name": "sys",  "scope": "proc",  "calls": 3, "failures": 1, "degraded": 0, "totalMs": 9800,  "maxMs": 4100,  "resultBytes": 12600 }
-]
-```
+多元素示例：同一 `sys` 工具按 scope 各占一个元素，见文末完整记录。
 
 ### 失败
 

@@ -93,9 +93,9 @@
 | PUT | `/api/auth/<provider>/api-key` | 提交 `key`；可附 `baseUrl` 覆盖所选 Provider 的模型地址。地址写入 Pi 的 `models.json`，密钥由 Pi 写入 `auth.json`，响应不返回密钥 |
 | POST | `/api/auth/<provider>/logout` | 清除该 Provider 的本地登录状态 |
 
-自定义 BaseURL 沿用所选 Provider 在 Pi 中已有的模型与请求协议，不创建新模型。地址须为 HTTPS 或本机 HTTP；登录失败时恢复原模型配置。OAuth 登录由后端调用 pi 的 `login(provider, "oauth")` 驱动，授权链接、设备码与进度经接口转发给页面；接口形状随登录页 OAuth 态落地。
+自定义 BaseURL 沿用所选 Provider 在 Pi 中已有的模型与请求协议，不创建新模型。地址须为 HTTPS 或本机 HTTP；登录失败时恢复原模型配置。
 
-| POST | `/api/auth/<provider>/oauth` | OAuth 登录：启动流程，回传授权链接或设备码；手动回贴码与取消随该接口一并定义（后续落地） |
+OAuth 登录由后端调用 pi 的 `login(provider, "oauth")` 驱动，授权链接、设备码与进度经 `POST /api/auth/<provider>/oauth` 转发给页面，手动回贴码与取消随该接口一并定义。接口形状随登录页 OAuth 态落地。
 
 ### 设置
 
@@ -138,12 +138,6 @@ cstoa 额度与仪表盘用量接口在后续阶段确定。
 
 ## 双版本
 
-**MVP 只有现代版。** `/web` 直接打开，没有档位参数。
+**MVP 只有现代版。** `/web` 直接打开，没有档位参数；服务端只选一个产物目录，地址共用一套、不加前缀，端口只有一个。
 
-| 事项 | 决定 |
-|---|---|
-| 产物 | 只出 Tailwind v4 一版，服务端只选一个产物目录 |
-| 地址 | 共用同一套地址，不加前缀 |
-| 端口 | 一个 |
-
-兼容版（Tailwind 3.4、Chromium 86）在功能完善后增加，入口命令与切换方式届时确定。基线见[浏览器基线](frontend.md#浏览器基线)。
+兼容版（Tailwind 3.4、Chromium 86）在功能完善后增加，入口命令与切换方式届时确定，基线见[浏览器基线](frontend.md#浏览器基线)。

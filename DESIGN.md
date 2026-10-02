@@ -88,16 +88,7 @@ omitted:
 
 本文与 [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) 的「规范 · 全部令牌」板同为最高级视觉参考，两者内容必须一致，改动同时更新。本文承载规则、取值与边界；规范板承载尺寸、排版、状态、交互、动效与页面骨架的对照图。逐页帧与两者冲突时，以本文与规范板为准。
 
-颜色以 [cst-pilot-colors.pen](src/web/design/cst-pilot-colors.pen) 为权威依据，工具卡片以 [cst-pilot-tools.pen](src/web/design/cst-pilot-tools.pen) 为权威依据。
-
-产品行为、接口与实现安排见 [Web 文档](doc/web/README.md)，不由本文裁定。
-
-| 参考 | 范围 |
-|---|---|
-| [cst-pilot-colors.pen](src/web/design/cst-pilot-colors.pen) | 色阶画布。取色的权威依据 |
-| [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) | 界面画布。各页浅深两版的取值、尺寸与形态；「规范 · 全部令牌」板与本文同级 |
-| [cst-pilot-tools.pen](src/web/design/cst-pilot-tools.pen) | 工具调用画布。工具卡片与调用状态的取值、尺寸与形态 |
-| [文件清单](#文件清单) | 视觉画布、资产与字体 |
+取色以 [色阶画布](src/web/design/cst-pilot-colors.pen) 为权威依据，工具卡片以[工具调用画布](src/web/design/cst-pilot-tools.pen) 为权威依据。产品行为、接口与实现安排见 [Web 文档](doc/web/README.md)，不由本文裁定。
 
 格式依据 [DESIGN.md Format](https://github.com/google-labs-code/design.md)（alpha）。本文件放在仓库根目录，供 Pen 从工作目录读取。
 
@@ -135,13 +126,6 @@ omitted:
 ### 字体
 
 画布使用的字体族见 [字体分工](#字体分工)。字体文件不入开发仓库（三份 OTF 共 25 MB），发行版随 Web 通道提供，可由上游 OFL 发布物重建。`cst-pilot-web.pen` 按相对路径 `fonts/` 引用其中三份，本地缺失时画布回退到系统字体。
-
-| 字体 | 文件 | 用途 |
-|---|---|---|
-| Source Han Sans CN（思源黑体） | `src/web/design/fonts/` 三档字重（Regular / Medium / Bold） | 欢迎语、中文导航、会话标题、分组文字、账户信息 |
-| Inter | 无文件 | 产品名、模型名、页脚 |
-| JetBrains Mono | 无文件 | 聊天页行内工具名 |
-| Noto Sans SC | 无文件 | 仅 `cst-pilot-colors.pen` 的设计说明 |
 
 ## Overview
 
@@ -331,7 +315,7 @@ omitted:
 
 #### 动态背景
 
-Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用独立色表与参数；浅色背景不能原样复用于深色主题。参数、来源与算法差异见 [Blue hour 背景](src/web/design/asset/blue-hour.md) 与 [登录页 AIR 背景](src/web/design/asset/blue-hour-air.md)。两处背景只在画布上，网页动画与兼容版均未实现。
+Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用独立色表与参数；浅色背景不能原样复用于深色主题。参数、来源与算法差异见 [Blue hour 背景](src/web/design/asset/blue-hour.md) 与 [登录页 AIR 背景](src/web/design/asset/blue-hour-air.md)。两处背景已在前端实现（`blue-hour.tsx`，WebGL 画布，取不到 WebGL 时回落到 CSS 近似）；兼容版未实现。
 
 ### 对比度边界
 
@@ -343,16 +327,16 @@ Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用�
 
 ### 字体分工
 
-网页正文与控件使用思源黑体和 Inter；聊天页行内工具名使用 JetBrains Mono。色卡里的 Noto Sans SC 仅用于设计说明。字体文件清单见 [字体](#字体)。
+字体按界面角色指定，不按每个字符自动切换。例如账户名 `Tim2354` 在当前画布中仍使用思源黑体。
 
-| 字体 | 画布中的用途 |
-|---|---|
-| `Source Han Sans CN`（思源黑体） | 欢迎语、中文导航、会话标题、分组文字、输入提示，以及当前账户信息 |
-| `Inter` | 产品名 `CST Pilot`、模型名称、页脚 `@cst-pilot-web` |
-| `JetBrains Mono` | 聊天页行内的工具名 |
-| `Noto Sans SC` | 仅用于 `cst-pilot-colors.pen` 的标题、注释和色值说明 |
+| 字体 | 画布中的用途 | 文件 |
+|---|---|---|
+| `Source Han Sans CN`（思源黑体） | 欢迎语、中文导航、会话标题、分组文字、输入提示，以及当前账户信息 | `src/web/design/fonts/` 三档字重（Regular / Medium / Bold） |
+| `Inter` | 产品名 `CST Pilot`、模型名称、页脚 `@cst-pilot-web` | 无 |
+| `JetBrains Mono` | 聊天页行内的工具名 | 无 |
+| `Noto Sans SC` | 仅用于 `cst-pilot-colors.pen` 的标题、注释和色值说明 | 无 |
 
-字体按界面角色指定，不按每个字符自动切换。例如账户名 `Tim2354` 在当前画布中仍使用思源黑体。网页字体分发、加载与缺字回退方案见[资源待办](doc/issues.md#3-视觉与资源)。
+网页字体的分发与加载见[前端工程](doc/web/SPEC/frontend.md#打包接入)，子集化见[资源待办](doc/issues.md#3-视觉与资源)。
 
 ### 行高与字距
 
