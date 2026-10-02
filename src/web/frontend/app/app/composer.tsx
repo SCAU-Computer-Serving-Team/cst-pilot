@@ -15,8 +15,8 @@ import {
 import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { apiJson } from "./api";
-import { ContextMeter } from "./context-meter";
 import { editorHtml, extractPayload, parseEditor } from "./composer-editor";
+import { ContextMeter } from "./context-meter";
 import { addImage, type DraftImage, encodeImages, loadImages } from "./draft-images";
 
 type Model = { id: string; provider: string; name: string; reasoning: boolean };
@@ -218,15 +218,6 @@ export function Composer({
 		selection?.addRange(range);
 		syncFromEditor();
 	}
-	useEffect(() => {
-		const onClick = (event: MouseEvent) => {
-			const button = (event.target as HTMLElement).closest?.(".chip-remove");
-			if (button) removeChip(button as HTMLElement);
-		};
-		const root = editorRef.current;
-		root?.addEventListener("click", onClick);
-		return () => root?.removeEventListener("click", onClick);
-	}, [draftKey]);
 	const fileSuggestions = fileMatch
 		? files.filter((file) => file.path.toLowerCase().includes((fileMatch[1] ?? "").toLowerCase())).slice(0, 40)
 		: [];
@@ -589,12 +580,16 @@ export function Composer({
 						</Button>
 					</div>
 				)}
+				{/* biome-ignore lint/a11y/useSemanticElements: 多行富文本输入没有等价的原生元素，contenteditable + textbox 是标准模式 */}
 				<div
 					ref={editorRef}
 					className="composer-input"
+					role="textbox"
+					aria-multiline="true"
+					aria-label="消息"
+					tabIndex={0}
 					contentEditable
 					suppressContentEditableWarning
-					aria-label="消息"
 					data-placeholder={
 						home
 							? "描述这台电脑遇到的问题…"
@@ -607,6 +602,10 @@ export function Composer({
 					onInput={syncFromEditor}
 					onKeyDown={keyDown}
 					onPaste={paste}
+					onClick={(event) => {
+						const button = (event.target as HTMLElement).closest<HTMLElement>(".chip-remove");
+						if (button) removeChip(button);
+					}}
 				/>
 				{!!suggestions.length && (
 					<fieldset className="command-suggestions" aria-label="命令补全">
@@ -762,26 +761,13 @@ export function Composer({
 						isIconOnly
 						isDisabled={
 							sending ||
-							(summaryTag
-								? !text.trim()
-								: (nothingToSend && !running) ||
-									(!onSend && !onStop && !onCommand))
+							(summaryTag ? !text.trim() : (nothingToSend && !running) || (!onSend && !onStop && !onCommand))
 						}
 						className="composer-send"
-						aria-label={
-							summaryTag
-								? "开始分支总结"
-								: running && nothingToSend
-									? "停止生成"
-									: "发送消息"
-						}
+						aria-label={summaryTag ? "开始分支总结" : running && nothingToSend ? "停止生成" : "发送消息"}
 						onPress={() => void submit()}
 					>
-						{running && nothingToSend ? (
-							<Square size={12} fill="currentColor" />
-						) : (
-							<ArrowUp size={16} />
-						)}
+						{running && nothingToSend ? <Square size={12} fill="currentColor" /> : <ArrowUp size={16} />}
 					</Button>
 				</div>
 			</section>

@@ -65,9 +65,7 @@ function chipHtml(segment: Extract<EditorSegment, { kind: "chip" }>): string {
 /** 段列表 → 编辑器 HTML（草稿恢复、插入标记时用）。文本里的换行落成 <br>。 */
 export function editorHtml(segments: readonly EditorSegment[]): string {
 	return segments
-		.map((segment) =>
-			segment.kind === "text" ? escapeHtml(segment.text).replace(/\n/g, "<br>") : chipHtml(segment),
-		)
+		.map((segment) => (segment.kind === "text" ? escapeHtml(segment.text).replace(/\n/g, "<br>") : chipHtml(segment)))
 		.join("");
 }
 
@@ -76,10 +74,7 @@ export function editorHtml(segments: readonly EditorSegment[]): string {
  * 文件 chip 还原成 "@path " 并入正文，纯文本原样保留。
  * 手打的命令前缀不在此处理，按普通正文交给后端。
  */
-export function extractPayload(
-	value: string,
-	commands: readonly string[],
-): { command: string; body: string } {
+export function extractPayload(value: string, commands: readonly string[]): { command: string; body: string } {
 	const segments = parseEditor(value, commands);
 	let command = "";
 	let body = "";
