@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  agent:
+    name: Agent 与发行包
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+      - run: npm ci --prefix agent --ignore-scripts
+      - run: npm run check --prefix agent
+      - run: npm run test:web --prefix agent
+        env:
+          CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
+      - run: node --test pack/test/*.test.mjs
+
+  web:
+    name: Web 前端
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            agent/package-lock.json
+            src/web/frontend/package-lock.json
+      # biome 由 agent 侧安装，前端的 lint 脚本直接调用它，保证格式规则只有一份。
+      - run: npm ci --prefix agent --ignore-scripts
+      - run: npm ci --prefix src/web/frontend --ignore-scripts
+      - run: npm run lint --prefix src/web/frontend
+      - run: npm run typecheck --prefix src/web/frontend
+      - run: npm run test --prefix src/web/frontend
+      - run: npm run build --prefix src/web/frontend
