@@ -57,7 +57,7 @@ cst-pilot/
 |       `-- bin/, npm/, fff/, sessions/, *.json   运行产物与密钥（不入库）
 |-- node/                      Node.js（不入库）
 |-- pwsh/, wiztree/, lhm/      便携运行时（不入库）
-`-- README.md, AGENTS.md, THIRD-PARTY-NOTICES.md, biome.json, .gitignore
+`-- README.md, CONTRIBUTING.md, AGENTS.md, LICENSE, THIRD-PARTY-NOTICES.md, biome.json, .gitignore, .github/
 ```
 
 ### 发行版（pack 产出）
@@ -74,7 +74,7 @@ cst-pilot/
 |-- pwsh/, wiztree/, lhm/
 |-- doc/                       不含 test/
 |-- licenses/
-|-- README.md, AGENTS.md, THIRD-PARTY-NOTICES.md, biome.json
+|-- README.md, AGENTS.md, LICENSE, THIRD-PARTY-NOTICES.md, biome.json
 `-- VERSION, SHA256SUMS, BUILD-INFO.json
 ```
 
@@ -100,6 +100,14 @@ pi.cmd
 **首次运行**需在 pi 内执行 `/login` 选择 provider 并填写 API key（凭据写入本机 `agent/home/auth.json`）。
 
 开发版仅代码开发。需要自备环境。
+
+## 开发
+
+本地开发、检查与提交规范见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 许可证
+
+本项目以 [MIT](LICENSE) 分发。发行版内含第三方组件，各自的许可证与条款见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) 与发行包 `licenses/`。
 
 ## 致谢
 

@@ -1,6 +1,6 @@
 # 第三方组件声明（Third-Party Notices）
 
-CST Pilot 发行版包含以下第三方组件。各组件以其原有许可证分发；本文件仅为汇总说明，许可证原文以各组件随包文件或上游仓库为准。
+CST Pilot 发行版包含以下第三方组件。各组件以其原有许可证分发；本文件仅为汇总说明，许可证原文以各组件随包文件或上游仓库为准。本项目自身代码以 [MIT](LICENSE) 分发。
 
 ## 运行时与核心
 
@@ -32,7 +32,7 @@ CST Pilot 发行版包含以下第三方组件。各组件以其原有许可证�
 | 组件 | 版本 | 许可证 | 来源 | 用途与条款 |
 |---|---|---|---|---|
 | WizTree | 4.x（见随包 license.txt） | 专有软件；**仅个人使用免费，商业使用需购买授权** | https://diskanalyzer.com | 磁盘占用快速分析（usage 工具）。随包保留 `wiztree/license.txt`；使用者须自行确认使用场景符合其许可条款 |
-| LibreHardwareMonitorLib | — | MPL-2.0 | https://github.com/LibreHardwareMonitor/LibreHardwareMonitor | 硬件传感器读取（sensor/gpu 工具） |
+| LibreHardwareMonitorLib | — | MPL-2.0 | https://github.com/LibreHardwareMonitor/LibreHardwareMonitor | 硬件传感器读取（sensor/gpu 工具），许可证原文见随包 `licenses/MPL-2.0.txt` |
 
 ## 字体
 
@@ -55,6 +55,7 @@ CST Pilot 发行版包含以下第三方组件。各组件以其原有许可证�
 
 ## 说明
 
-1. 本项目自身代码（diagnostics 工具、启动器、打包脚本、文档）随 CST Pilot 以内部项目形式分发。
+1. 本项目自身代码（diagnostics 工具、启动器、打包脚本、文档）以 MIT 分发，原文见仓库与发行包根目录的 `LICENSE`。
 2. 发行包内 `VERSION` 与 `SHA256SUMS` 用于完整性校验；`SHA256SUMS` 覆盖装配完成时的发行树。
 3. WizTree 的商用授权条款请阅读随包 `wiztree/license.txt`；如 CST 的使用构成商业场景，请按其要求购买 supporter code，或将 usage 工具的降级路径（Node 扫描）作为替代。
+4. 上游 npm 包未随附许可证文本时，本文件只登记许可证类型与来源链接。当前属此情况的有 `@ff-labs/pi-fff` 系列（含 fff-bin-win32-x64、fff-node、fff-bun）与 `@yuuang/ffi-rs-win32-x64-msvc`，均为 MIT。
