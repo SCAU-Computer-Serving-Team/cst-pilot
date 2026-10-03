@@ -33,7 +33,7 @@ OAuth 负责队员登录认证和接入团队模型服务。登录态随 U 盘�
 | TUI | pi 原生设备码界面：网址与 6 位数字码 | 受终端限制，不自动打开机主浏览器 |
 | Web UI | 登录面板渲染二维码，编码 `verification_uri_complete` | 手机扫码直达授权页并预填数字码；前端负责二维码与倒计时 |
 
-扩展向 Web 层提供 `{ userCode, verificationUriComplete, expiresInSeconds, interval }`，Web 前端据此渲染。Web UI 的 OAuth 登录面板尚未实现（登录页已支持 API KEY），本节先定接口形状。
+扩展把 `verification_uri_complete` 填进 `device_code` 事件的 `verificationUri`，Web 前端直接编码该链接并渲染倒计时；设备码信息经 Web server 转发（方式见 [pi-extension.md](pi-extension.md)「登录与刷新」）。Web UI 的 OAuth 登录面板已实现（登录页扫码 tab），与 API KEY 共用登录状态展示与退出。
 
 上游 issue #9774（给 pi 原生设备码对话框加二维码）**只涉及 TUI**。Web UI 的二维码由本项目前端实现，不依赖上游。
 

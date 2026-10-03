@@ -20,6 +20,7 @@ jobs:
           cache-dependency-path: agent/package-lock.json
       - run: npm ci --prefix agent --ignore-scripts
       - run: npm run check --prefix agent
+      - run: npm run test:oauth --prefix agent
       - run: npm run test:web --prefix agent
         env:
           CST_WEB_TEST_TMPDIR: ${{ runner.temp }}

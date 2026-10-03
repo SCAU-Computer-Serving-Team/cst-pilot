@@ -39,7 +39,9 @@ agent/home/extensions/oauth/
 
 登录轮询响应 `callbacks.signal`，刷新请求响应 `signal`。扩展不另建后台刷新循环。
 
-TUI 与 Web UI 共用同一个 `login()`。设备码信息里除 `verificationUri` 外还有 `verificationUriComplete`（带数字码的完整链接），Web 前端用它渲染二维码。Web UI 的 OAuth 登录面板尚未实现，取设备码信息的方式（pi 的会话事件或扩展 API）待定。
+TUI 与 Web UI 共用同一个 `login()`，设备码展示由各 UI 形态负责（TUI 用内核原生对话框；Web 登录页扫码 tab 已实现）。约定：扩展把 `verification_uri_complete`（带数字码的完整链接）填进 `onDeviceCode` 的 `verificationUri` 字段，与内核内置 Kimi provider 一致；TUI 点击打开即预填数字码，Web 前端直接编码该链接渲染二维码，扩展侧只放行 http(s) 链接。
+
+Web 端接入方式已定：Web server 直接调用 `modelRuntime.login("cstoa", "oauth", interaction)`（与现有 API KEY 登录同一路径），消费 `interaction.notify` 的 `device_code` 事件，经 `/api/events` SSE 推给登录页。不新增跨扩展通道，也不需要 pi 内核新增会话事件。
 
 ## 模型与凭据取用
 

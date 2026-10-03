@@ -1,6 +1,6 @@
 # OAuth 扩展交接
 
-状态：待开发，规格已定稿。更新：2026-10-03。接手人从本文开始，按阅读顺序过完即可动手。
+状态：扩展与 Web 面板已实现（mock e2e + 浏览器全流程验证通过），待真机联调；规格已定稿。更新：2026-10-03。接手人从本文开始，按阅读顺序过完即可动手。
 
 ## 交付物
 
@@ -11,9 +11,9 @@
 | `agent/home/extensions/oauth/device.ts` | 设备标识的生成与持久化 | [README.md](README.md)「令牌与设备标识」 |
 | `agent/home/extensions/oauth/package.json` | 已就位 | — |
 
-骨架文件已建好，注释里标了每步的协议要求。只使用 Node 内置模块与全局 `fetch`。
+扩展文件已实现，只使用 Node 内置模块与全局 `fetch`；测试见 `agent/home/extensions/oauth/test/`（`npm run test:oauth`）。
 
-Web UI 的 OAuth 登录面板是第二阶段交付，取设备码信息的方式待定（见文末）。
+Web UI 的 OAuth 登录面板已实现；取设备码信息的方式：Web server 直接调用内核 `modelRuntime.login()`，消费 `notify` 的 `device_code` 事件（详见 [pi-extension.md](pi-extension.md)「登录与刷新」）。
 
 ## 阅读顺序
 
@@ -46,6 +46,9 @@ OA 服务端在独立仓库 [cstoa-api-fastapi](https://github.com/SCAU-Computer
 
 - `POST /api/oauth/introspect`：遥测接收端（cst-pilot-server 仓库）靠它解析上报者身份，尚未列入 README「OA 接口」表。对接时向 OA 侧提出，响应需区分 `active`、`mid`、`device_id` 与 `expired` / `invalid` / `revoked` / `password-changed`。
 
-## 待定项
+## 实现进度
 
-- Web UI 取设备码信息的方式：pi 的会话事件或扩展 API，二选一，实现登录面板前定。
+1. 扩展已完成：设备标识（device.json）、RFC 8628 设备流、令牌轮换刷新、mock 单测与内核 e2e。
+2. Web 面板已完成：登录页扫码 tab（进入即申请、二维码 + 倒计时 + 刷新/取消）、服务端 `oauth/start|status|cancel` 路由、`/api/events` 事件（`oauth_device_code` / `oauth_result`）。测试见 `agent/home/extensions/web/test/oauth-api.test.ts`。
+3. 真机联调：需 OA 测试账号 + 手机 TOTP 完成一次真实设备授权；生产写操作前先报主审查。
+4. 已知外部依赖：OA 模型代理当前要求 `X-CSTOA-Session`（修机会话），未接入会话前扫码登录只能到"凭据签发"，模型调用会被 400 拒绝；见 [README.md](README.md) 的模型接入说明。
