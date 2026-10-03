@@ -15,6 +15,7 @@ lhm/*.dll
 
 # ---- 运行时状态与密钥 ----
 agent/home/auth.json
+agent/home/telemetry.json
 agent/home/models.json
 agent/home/models-store.json
 agent/home/web-search.json
