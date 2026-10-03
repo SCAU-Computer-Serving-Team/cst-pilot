@@ -79,9 +79,10 @@ set "FFF_FRECENCY_DB=%STATE%\data\fff-frecency.mdb"
 set "FFF_HISTORY_DB=%STATE%\data\fff-history.mdb"
 set "PSModuleAnalysisCachePath=%STATE%\cache\PSModuleAnalysisCache.txt"
 
-rem ---- strip host model-provider credentials: the kit's login state
-rem ---- lives only in agent\home\auth.json. Inherited *_API_KEY / token
-rem ---- variables would otherwise make providers look logged in.
+rem ---- strip host model-provider credentials and endpoint overrides: the
+rem ---- kit's login state lives only in agent\home\auth.json. Inherited
+rem ---- *_API_KEY / token variables would otherwise make providers look
+rem ---- logged in; CSTOA_OA_HOST could redirect the OA authorization flow.
 for %%V in (
     COPILOT_GITHUB_TOKEN
     ANTHROPIC_AUTH_TOKEN
@@ -131,6 +132,7 @@ for %%V in (
     AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
     AWS_CONTAINER_CREDENTIALS_FULL_URI
     AWS_WEB_IDENTITY_TOKEN_FILE
+    CSTOA_OA_HOST
 ) do set "%%V="
 
 if defined PI_INHERIT_HOST_PATH (
