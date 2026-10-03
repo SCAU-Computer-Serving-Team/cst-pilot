@@ -256,25 +256,26 @@ OA_SERVICE_TOKEN=<接收端服务凭据>
 
 ## 部署
 
-已部署到 timserver_1（2026-10-03，Ubuntu 26.04，与 /srv/everos 共存）：
+已部署到 cstoa 服务器（2026-10-03，8.138.170.239，Alibaba Cloud Linux 3；与 cstoa OA、nginx 共存，未动既有服务）：
 
 | 项 | 实际值 |
 |---|---|
-| 二进制与 env | `/srv/cst-pilot-server/telemetry-receiver`、同目录 `telemetry.env`（root:csttele 640/750） |
+| 二进制与 env | `/opt/cst-pilot-server/telemetry-receiver`、同目录 `telemetry.env`（root:csttele） |
 | 数据库 | `/var/lib/cst-telemetry/telemetry.db`，属主系统用户 `csttele`（无 shell） |
 | 服务 | systemd `cst-telemetry.service`，`ProtectSystem=strict` + `ReadWritePaths=/var/lib/cst-telemetry`，开机自启 |
-| 监听 | `127.0.0.1:8787`，公网不直接暴露 |
+| 内部监听 | `127.0.0.1:8787`，路径 `POST /v1/sessions`、`GET /healthz` |
+| 公网入口 | nginx（改前备份 `nginx.conf.bak-telemetry-20261003`）：`location = /api/telemetry` → `127.0.0.1:8787/v1/sessions` |
+| 上报地址 | `https://www.cstoa.top/api/telemetry`。裸域 cstoa.top 301 到 www，POST 跟随重定向会丢包，endpoint 必须带 www |
 | 身份 | 桩模式（`OA_INTROSPECT_URL` 未配置），令牌格式 `stub-<mid>-<device>` |
-| 内存 | 常驻约 13MB |
+| 内存 | 常驻约 11MB |
 
-上线验证：healthz、桩令牌上报 202（accepted=1）、export-csv 出记录、delete 清理、重启持久。运维提示：交互 shell 跑 export-csv / delete 要带 `TELEMETRY_DB=/var/lib/cst-telemetry/telemetry.db`（systemd 环境变量不进 shell）。
+上线验证：healthz、公网 HTTPS 桩令牌上报 202（accepted=1）、export-csv 出记录、delete 清理、重启持久。运维提示：交互 shell 跑 export-csv / delete 要带 `TELEMETRY_DB=/var/lib/cst-telemetry/telemetry.db`（systemd 环境变量不进 shell）。
 
 待接：
 
 1. `cst-telemetry-rollup.timer` 每天 03:00 聚合前一天
 2. `cst-telemetry-cleanup.timer` 每天 04:00 清理保留期，并做一次 `VACUUM INTO` 备份，保留 30 天
-3. 公网 HTTPS 入口（Caddy 反代到本机 8787），等 cstoa.top 域名归属确定后配置；80/443 目前空闲
-4. OAuth 落地后配 `OA_INTROSPECT_URL` 与 `OA_SERVICE_TOKEN` 换真内省
+3. OAuth 落地后配 `OA_INTROSPECT_URL` 与 `OA_SERVICE_TOKEN` 换真内省
 
 备份落在同一块盘上只防误删，不防机器丢失。跨机备份列入待办。
 

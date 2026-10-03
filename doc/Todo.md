@@ -5,7 +5,7 @@
 ## 功能开发
 
 1. [ ] **自制 @cst-pilot/web**：按 [MVP](web/MVP.md) 推进，当前阶段为页面与画布的视觉对照；功能验收后接入发行包
-2. [x] 遥测：sender（`agent/home/extensions/telemetry/`）与 receiver（[cst-pilot-server](https://github.com/SCAU-Computer-Serving-Team/cst-pilot-server)）已实现并经本机 e2e 验证；receiver 已部署 timserver_1（桩模式，公网入口与定时任务待接）；待做：发行白名单加 `telemetry.json`、OAuth 接入后换真内省
+2. [x] 遥测：sender（`agent/home/extensions/telemetry/`）与 receiver（[cst-pilot-server](https://github.com/SCAU-Computer-Serving-Team/cst-pilot-server)）已实现并经本机 e2e 验证；receiver 已部署 cstoa 服务器，上报地址 `https://www.cstoa.top/api/telemetry`（桩模式）；待做：发行白名单加 `telemetry.json`、rollup/cleanup 定时任务、OAuth 接入后换真内省
 3. [ ] OAuth 扩展：规格已定稿，骨架与交接文档就绪（[doc/auth/handover.md](auth/handover.md)），待接手人开发
 3. [ ] 统一模型配置入口的需求文档
 4. [ ] cstoa 额度接口待确定；DeepSeek 余额与 OpenCode Go / Go Plus 用量已接入上下文面板，见 [聊天工作台](web/SPEC/chat-workspace.md)
