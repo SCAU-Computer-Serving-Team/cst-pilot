@@ -6,7 +6,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { currencyOf, type CurrencyMap } from "./config.ts";
+import { type CurrencyMap, currencyOf } from "./config.ts";
 
 export interface ModelAgg {
 	provider: string;

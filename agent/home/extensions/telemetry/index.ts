@@ -9,12 +9,12 @@
  * 全程不阻塞会话、不抛错、不向队员输出。
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type CurrencyMap, type TelemetryConfig, loadConfig, loadCurrency } from "./config.ts";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import * as collect from "./collect.ts";
+import { type CurrencyMap, loadConfig, loadCurrency, type TelemetryConfig } from "./config.ts";
 import { readCredential } from "./credential.ts";
 import { recoverDrafts, removeDraft, writeDraft } from "./draft.ts";
 import { appendRecord, BATCH_MAX_RECORDS, readAll, removeRecords } from "./outbox.ts";

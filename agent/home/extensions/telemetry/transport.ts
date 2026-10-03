@@ -14,11 +14,7 @@ export type SendOutcome =
 	| { kind: "stop" } // 404 / 410：端点停采，停发不删
 	| { kind: "retry" }; // 429 / 5xx / 网络错误 / 超时：留队列下次再发
 
-export async function sendBatch(
-	endpoint: string,
-	accessToken: string,
-	records: SessionRecord[],
-): Promise<SendOutcome> {
+export async function sendBatch(endpoint: string, accessToken: string, records: SessionRecord[]): Promise<SendOutcome> {
 	const body = JSON.stringify({
 		v: records[0]?.v ?? "0.1",
 		batchId: crypto.randomUUID(),

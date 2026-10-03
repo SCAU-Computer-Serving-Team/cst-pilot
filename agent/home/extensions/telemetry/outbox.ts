@@ -3,8 +3,8 @@
  * 全部读写经 shared 的串行队列，多实例互斥；尽力而为，不承诺送达。
  */
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { SessionRecord } from "./record.ts";
 import { enqueue } from "./shared.ts";

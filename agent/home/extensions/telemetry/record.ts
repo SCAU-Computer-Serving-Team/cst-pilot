@@ -84,7 +84,12 @@ export interface FinalizeInput {
 	contextEntries: number | undefined;
 }
 
-export function buildRecord(state: SessionState, input: FinalizeInput, kitVersion: string, admin: boolean): SessionRecord {
+export function buildRecord(
+	state: SessionState,
+	input: FinalizeInput,
+	kitVersion: string,
+	admin: boolean,
+): SessionRecord {
 	const errorEntries = [...state.errors.entries()]
 		.sort((a, b) => b[1] - a[1])
 		.slice(0, ERRORS_MAX_GROUPS)
