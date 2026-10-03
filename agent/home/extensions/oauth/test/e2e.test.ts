@@ -16,9 +16,13 @@ const here = dirname(fileURLToPath(import.meta.url));
 const extensionDir = join(here, "..");
 
 let agentDir: string | undefined;
+let previousAgentDir: string | undefined;
 
 afterEach(async () => {
 	delete process.env.CSTOA_OA_HOST;
+	if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+	else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	previousAgentDir = undefined;
 	if (agentDir) await rm(agentDir, { recursive: true, force: true }).catch(() => undefined);
 	agentDir = undefined;
 });
@@ -27,6 +31,9 @@ test("e2e：内核加载扩展完成设备流，凭据写入 auth.json 且模型
 	agentDir = await mkdtemp(join(tmpdir(), "cstoa-oauth-e2e-"));
 	await mkdir(join(agentDir, "extensions"), { recursive: true });
 	await cp(extensionDir, join(agentDir, "extensions", "oauth"), { recursive: true });
+	// 发行版由 pi.cmd 设置该变量；测试显式指向隔离目录，保证 device.json 不落到真实配置。
+	previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = agentDir;
 
 	const mock = await startMockOa();
 	process.env.CSTOA_OA_HOST = mock.host;
@@ -63,6 +70,9 @@ test("e2e：内核加载扩展完成设备流，凭据写入 auth.json 且模型
 		assert.equal(stored.cstoa?.type, "oauth");
 		assert.equal(stored.cstoa?.access, "access-1");
 		assert.equal(stored.cstoa?.refresh, "refresh-1");
+		// 设备标识与凭据使用同一个隔离目录。
+		const device = JSON.parse(await readFile(join(agentDir, "device.json"), "utf8")) as { device_id?: string };
+		assert.match(device.device_id ?? "", /^dev_[0-9a-f]{32}$/);
 
 		const requestAuth = await provider.auth.oauth?.toAuth(credential);
 		assert.equal(requestAuth?.apiKey, "access-1");

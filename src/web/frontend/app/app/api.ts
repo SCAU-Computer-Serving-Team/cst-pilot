@@ -2,8 +2,22 @@ export type ProviderStatus = {
 	id: string;
 	name: string;
 	supportsApiKey: boolean;
+	supportsOAuth: boolean;
 	type: string | null;
 	requiresLogin: boolean;
+};
+
+export type OauthDeviceCode = {
+	userCode: string;
+	verificationUri: string;
+	intervalSeconds: number;
+	expiresInSeconds: number;
+};
+
+export type OauthStatus = {
+	state: "idle" | "pending" | "succeeded" | "failed" | "cancelled";
+	deviceCode?: OauthDeviceCode;
+	error?: string;
 };
 
 type ApiError = { error?: { message?: string } };
@@ -45,4 +59,20 @@ export async function apiJson<T>(
 		throw new Error(typeof message === "string" ? message : `请求未完成（${response.status}），请重试。`);
 	}
 	return data as T;
+}
+
+export function startOauthLogin(providerId: string): Promise<{ started: boolean }> {
+	return apiJson<{ started: boolean }>(`/api/auth/${encodeURIComponent(providerId)}/oauth/start`, {
+		method: "POST",
+	});
+}
+
+export function getOauthStatus(providerId: string): Promise<OauthStatus> {
+	return apiJson<OauthStatus>(`/api/auth/${encodeURIComponent(providerId)}/oauth/status`);
+}
+
+export function cancelOauthLogin(providerId: string): Promise<{ cancelled: boolean }> {
+	return apiJson<{ cancelled: boolean }>(`/api/auth/${encodeURIComponent(providerId)}/oauth/cancel`, {
+		method: "POST",
+	});
 }
