@@ -10,6 +10,16 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { WebUiBridge } from "./ui.ts";
 
+/** 遥测扩展挂在 globalThis 的定稿入口；扩展未启用时无副作用。 */
+function finalizeTelemetrySession(sessionId: string, reason: string): void {
+	const holder = globalThis as Record<symbol, { finalizers?: Map<string, (r: string) => void> } | undefined>;
+	try {
+		holder[Symbol.for("cst-pilot/telemetry")]?.finalizers?.get(sessionId)?.(reason);
+	} catch {
+		// 遥测定稿失败不影响销毁流程。
+	}
+}
+
 // The browser must never choose tools. Keep the set no broader than the kit's read/diagnostic tools.
 const WEB_TOOLS = [
 	"read",
@@ -63,7 +73,7 @@ export class WebSessionPool {
 		return this.canonical;
 	}
 
-	private async build(manager: SessionManager): Promise<WebSessionSlot> {
+	private async build(manager: SessionManager, startReason: "new" | "resume" | "fork"): Promise<WebSessionSlot> {
 		const canonical = await this.getServices();
 		const services = await this.options.withLoader(() =>
 			createAgentSessionServices({
@@ -80,6 +90,8 @@ export class WebSessionPool {
 			services,
 			sessionManager: manager,
 			tools: WEB_TOOLS,
+			// 遥测按会话起因分类；缺省会是 startup，丢失 new/resume/fork 语义。
+			sessionStartEvent: { type: "session_start", reason: startReason },
 		});
 		const ui = new WebUiBridge();
 		try {
@@ -94,14 +106,18 @@ export class WebSessionPool {
 		}
 	}
 
-	private async open(key: string, manager: () => SessionManager): Promise<WebSessionSlot> {
+	private async open(
+		key: string,
+		manager: () => SessionManager,
+		startReason: "new" | "resume" | "fork",
+	): Promise<WebSessionSlot> {
 		if (this.closed) throw new Error("Web 已退出");
 		const existing = this.slots.get(key);
 		if (existing) return existing;
 		const pending = this.opening.get(key);
 		if (pending) return pending;
 		const task = (async () => {
-			const slot = await this.build(manager());
+			const slot = await this.build(manager(), startReason);
 			if (slot.id !== key) {
 				slot.session.dispose();
 				throw new Error("会话 ID 与记录不一致");
@@ -119,7 +135,7 @@ export class WebSessionPool {
 
 	/** Called only with the TUI's saved file, after the TUI has switched away. */
 	openHandoff(id: string, file: string): Promise<WebSessionSlot> {
-		return this.open(id, () => SessionManager.open(file, this.options.sessionDir));
+		return this.open(id, () => SessionManager.open(file, this.options.sessionDir), "resume");
 	}
 
 	/**
@@ -156,16 +172,16 @@ export class WebSessionPool {
 		const matches = (await this.listAllProjectSessions()).filter((entry) => entry.id === id);
 		if (matches.length > 1) throw new Error("会话不存在或 ID 不唯一");
 		// 省略第二参：落盘目录取文件所在目录，历史会话的新分支留在原分类目录。
-		if (matches.length === 1) return this.open(id, () => SessionManager.open(matches[0].path));
+		if (matches.length === 1) return this.open(id, () => SessionManager.open(matches[0].path), "resume");
 		const created = await this.readCreated();
 		if (!Object.values(created).includes(id)) throw new Error("会话不存在或 ID 不唯一");
-		return this.open(id, () => SessionManager.create(this.options.cwd, this.options.sessionDir, { id }));
+		return this.open(id, () => SessionManager.create(this.options.cwd, this.options.sessionDir, { id }), "new");
 	}
 
 	async create(): Promise<WebSessionSlot> {
 		if (this.closed) throw new Error("Web 已退出");
 		const manager = SessionManager.create(this.options.cwd, this.options.sessionDir);
-		return this.open(manager.getSessionId(), () => manager);
+		return this.open(manager.getSessionId(), () => manager, "new");
 	}
 
 	private deletedFile(id: string): string {
@@ -249,7 +265,7 @@ export class WebSessionPool {
 		const file = source.session.sessionManager.createBranchedSession(entryId);
 		if (!file) throw new Error("会话尚未保存");
 		const manager = SessionManager.open(file, this.options.sessionDir);
-		return this.open(manager.getSessionId(), () => manager);
+		return this.open(manager.getSessionId(), () => manager, "fork");
 	}
 
 	async deleteSaved(id: string): Promise<void> {
@@ -265,6 +281,7 @@ export class WebSessionPool {
 			await mkdir(join(tombstone, ".."), { recursive: true });
 			await writeFile(tombstone, "deleted", { flag: "wx" });
 			tombstoned = true;
+			finalizeTelemetrySession(id, "delete");
 			slot.ui.close();
 			slot.session.dispose();
 			this.slots.delete(id);
@@ -304,6 +321,13 @@ export class WebSessionPool {
 					running: this.slots.get(id)?.session.isStreaming ?? false,
 				});
 		}
+		// 最近更新的排最前：updatedAt 缺项（新建未落盘）沉底，其余按更新时间倒序。
+		rows.sort((a, b) => {
+			if (!a.updatedAt && !b.updatedAt) return 0;
+			if (!a.updatedAt) return 1;
+			if (!b.updatedAt) return -1;
+			return b.updatedAt.localeCompare(a.updatedAt);
+		});
 		return rows;
 	}
 
@@ -321,7 +345,8 @@ export class WebSessionPool {
 		await this.createdWrites;
 		await Promise.allSettled([...this.opening.values()]);
 		await Promise.allSettled([...this.slots.values()].map(({ session }) => session.abort()));
-		for (const { session, ui } of this.slots.values()) {
+		for (const { session, ui, id } of this.slots.values()) {
+			finalizeTelemetrySession(id, "quit");
 			ui.close();
 			session.dispose();
 		}
