@@ -33,9 +33,15 @@
 7. 设备与驱动健康：异常设备定位、网卡/蓝牙/音频/显示现状与驱动版本、外接设备识别
 8. 命令交付：把需要队员手动执行的修复命令写成 txt 清单，落在工具包 `outbox\` 下，按风险分档并按序号排列，供逐条复制执行
 
+## 服务端相关
+
+1. 遥测。
+
 ### 未来计划
 
 自制 Web 操作界面正在开发。执行 `/web` 后默认接管会话并启用业务接口，页面与工具卡片仍在完善。完成验收后接入便携发行版，保留 TUI 通道。
+
+使用情况遥测已实现：采集端为工具包扩展，接收端在独立仓库 cst-pilot-server。待发行接入与服务器部署后启用。
 
 ## 目录结构
 
@@ -48,11 +54,12 @@ cst-pilot/
 |-- doc/                       产品、Web、遥测、工具与测试文档，索引见 doc/README.md
 |-- pack/                      发行版构建脚本
 |-- src/
-|   `-- web/                    Web 前端源码及 Pen 画布、色表、字体与动态背景
+|   |-- web/                    Web 前端源码及 Pen 画布、色表、字体与动态背景
+|   `-- test/                   设计资产的校验测试
 |-- agent/
 |   |-- node_modules/          pi 及依赖（不入库）
 |   `-- home/
-|       |-- extensions/        扩展：branding 品牌页眉、diagnostics 诊断工具、web 本机页面、telemetry 币种表
+|       |-- extensions/        扩展：branding 品牌页眉、diagnostics 诊断工具、web 本机页面、telemetry 使用情况遥测
 |       |-- skills/            诊断工具的使用说明
 |       `-- bin/, npm/, fff/, sessions/, *.json   运行产物与密钥（不入库）
 |-- node/                      Node.js（不入库）
