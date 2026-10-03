@@ -14,6 +14,8 @@ export interface TelemetryShared {
 	recovered: boolean;
 	/** 收到 404 / 410 后置位，视为停采指令。 */
 	stopped: boolean;
+	/** 管理员探测单飞：进程内只发一次，定稿时取结果。 */
+	adminProbe?: Promise<boolean>;
 	/** 会话定稿入口，按 sessionId 注册；TUI 由 shutdown 事件触发，Web 由运行层触发。 */
 	finalizers: Map<string, (reason: string) => void>;
 }

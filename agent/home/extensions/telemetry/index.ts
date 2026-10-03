@@ -18,7 +18,7 @@ import { type CurrencyMap, loadConfig, loadCurrency, type TelemetryConfig } from
 import { readCredential } from "./credential.ts";
 import { recoverDrafts, removeDraft, writeDraft } from "./draft.ts";
 import { appendRecord, BATCH_MAX_RECORDS, readAll, removeRecords } from "./outbox.ts";
-import { buildRecord, detectAdmin, kitVersion } from "./record.ts";
+import { buildRecord, cachedAdmin, detectAdmin, kitVersion } from "./record.ts";
 import { shared } from "./shared.ts";
 import { sendBatch } from "./transport.ts";
 
@@ -33,20 +33,20 @@ export default function telemetry(pi: ExtensionAPI): void {
 	let config: TelemetryConfig | undefined;
 	let currency: CurrencyMap | undefined;
 	let version = "";
-	let admin = false;
 	let state: collect.SessionState | undefined;
 	let finalized = false;
 	let ctx: ExtensionContext | undefined;
 	let ready: Promise<void> | undefined;
 
-	/** 首个事件到达时加载一次；此后 config / currency / version / admin 全为缓存值。 */
+	/** 首个事件到达时加载一次；此后 config / currency / version 为缓存值。
+	 * 管理员探测耗时秒级，不进这里：session_start 是会话关键路径，只发探测不等待，定稿时取结果。 */
 	function ensureReady(): Promise<void> {
 		ready ??= (async () => {
-			[config, currency, version, admin] = await Promise.all([
+			s.adminProbe ??= detectAdmin();
+			[config, currency, version] = await Promise.all([
 				loadConfig(agentDir),
 				loadCurrency(extensionDir),
-				kitVersion(process.cwd()),
-				detectAdmin(),
+				kitVersion(extensionDir, process.cwd()),
 			]);
 		})();
 		return ready;
@@ -69,7 +69,7 @@ export default function telemetry(pi: ExtensionAPI): void {
 			state,
 			{ endReason: "", endedAt: Date.now(), contextEntries: undefined },
 			version,
-			admin,
+			cachedAdmin(),
 		);
 		await writeDraft(agentDir, state.sessionId, {
 			record,
@@ -93,12 +93,13 @@ export default function telemetry(pi: ExtensionAPI): void {
 				await removeDraft(agentDir, current.sessionId);
 				return;
 			}
+			const adminNow = await Promise.resolve(s.adminProbe).catch(() => false);
 			await draftChain;
 			const record = buildRecord(
 				current,
 				{ endReason: reason, endedAt: Date.now(), contextEntries: safeContextEntries() },
 				version,
-				admin,
+				adminNow === true,
 			);
 			await appendRecord(agentDir, record);
 			await removeDraft(agentDir, current.sessionId);
@@ -172,6 +173,8 @@ export default function telemetry(pi: ExtensionAPI): void {
 	pi.on("session_start", async (event, context) => {
 		await ensureReady();
 		if (!active()) return;
+		// 同一实例被顶替（上一会话未走正常销毁路径）：先把旧累计按 crash 定稿，再开新会话。
+		if (state && !finalized) await finalize("crash");
 		ctx = context;
 		state = collect.newState(
 			context.sessionManager.getSessionId(),

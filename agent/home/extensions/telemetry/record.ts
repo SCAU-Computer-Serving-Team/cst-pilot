@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { release } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { ModelAgg, SessionState, ToolAgg } from "./collect.ts";
 
@@ -15,6 +15,11 @@ const execFileP = promisify(execFile);
 
 export const CONTRACT_VERSION = "0.1";
 export const ERRORS_MAX_GROUPS = 10;
+
+/** 发行包根：扩展目录在 <包根>/agent/home/extensions/telemetry，上四级是包根。 */
+export function packageRoot(extensionDir: string): string {
+	return resolve(extensionDir, "..", "..", "..", "..");
+}
 
 export interface SessionRecord {
 	v: string;
@@ -143,39 +148,55 @@ export function crashRecord(draft: SessionRecord, lastTurnEndedAt: number): Sess
 
 let kitVersionCache: string | undefined;
 
-/** 发行版根的 VERSION；开发环境读不到留空。 */
-export async function kitVersion(cwd: string): Promise<string> {
+/** 发行版根的 VERSION。启动目录不定，优先按扩展目录定位包根，回退启动目录；读不到留空且不缓存，下次事件重试（文件读毫秒级）。 */
+export async function kitVersion(extensionDir: string, cwd: string): Promise<string> {
 	if (kitVersionCache !== undefined) return kitVersionCache;
-	try {
-		kitVersionCache = (await readFile(join(cwd, "VERSION"), "utf8")).trim();
-	} catch {
-		kitVersionCache = "";
+	for (const file of [join(packageRoot(extensionDir), "VERSION"), join(cwd, "VERSION")]) {
+		try {
+			const value = (await readFile(file, "utf8")).trim();
+			if (value) {
+				kitVersionCache = value;
+				return kitVersionCache;
+			}
+		} catch {
+			// 读不到就试下一个候选。
+		}
 	}
-	return kitVersionCache;
+	return "";
 }
 
 let adminCache: boolean | undefined;
 
-/** 管理员探测：Windows 一次 PowerShell 预检并缓存；失败按非管理员记录。 */
-export async function detectAdmin(): Promise<boolean> {
-	if (adminCache !== undefined) return adminCache;
-	if (process.platform !== "win32") {
-		adminCache = false;
+/** 管理员探测：Windows 一次 PowerShell 预检并缓存；失败按非管理员记录。
+ * 探测耗时秒级，不得在会话关键路径 await；调用后进程内只发一次，定稿时再取结果。 */
+export function detectAdmin(): Promise<boolean> {
+	if (adminCache !== undefined) return Promise.resolve(adminCache);
+	const done = (async () => {
+		if (process.platform !== "win32") {
+			adminCache = false;
+			return adminCache;
+		}
+		try {
+			const { stdout } = await execFileP(
+				"powershell",
+				[
+					"-NoProfile",
+					"-Command",
+					"([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)",
+				],
+				{ timeout: 10_000 },
+			);
+			adminCache = stdout.trim() === "True";
+		} catch {
+			adminCache = false;
+		}
 		return adminCache;
-	}
-	try {
-		const { stdout } = await execFileP(
-			"powershell",
-			[
-				"-NoProfile",
-				"-Command",
-				"([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)",
-			],
-			{ timeout: 10_000 },
-		);
-		adminCache = stdout.trim() === "True";
-	} catch {
-		adminCache = false;
-	}
-	return adminCache;
+	})();
+	done.catch(() => undefined);
+	return done;
+}
+
+/** 探测当前值：未完成时为 false。草稿写盘用；定稿用 await detectAdmin() 拿最终值。 */
+export function cachedAdmin(): boolean {
+	return adminCache === true;
 }

@@ -9,3 +9,6 @@
  * 两个函数实现在 oa.ts。字段约定见规格「模型与凭据取用」：
  * baseUrl 指向 OA 代理，api 为 openai-completions，oauth.getApiKey 返回 credentials.access。
  */
+export default function oauth(_pi: unknown): void {
+	// 骨架阶段不注册 provider；pi 要求扩展导出合法工厂函数，空实现仅保证可加载。
+}

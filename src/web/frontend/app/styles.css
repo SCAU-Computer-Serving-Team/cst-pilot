@@ -362,7 +362,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 .command-suggestions button { display: flex; align-items: center; justify-content: flex-start; gap: 10px; width: 100%; height: var(--control-lg); min-height: var(--control-lg); padding: 0 12px; color: var(--chat-ink); text-align: left; font-size: 12px; }
 .command-suggestions button svg { flex: 0 0 16px; color: var(--chat-muted); }
 .command-suggestions button small { margin-left: auto; color: var(--chat-muted); font-size: 12px; }
-.command-suggestions .command-active { background: var(--app-hover); }
+.command-suggestions .command-active { background: var(--app-selected); }
 /* 附件缩略图卡片照画布「未发送图片 · 输入框」：圆角 14、1px 弱边框、内边距 10、间距 8，缩略图 80×64。 */
 .composer-attachments { display: flex; gap: 8px; margin: 0; padding: 10px; list-style: none; width: fit-content; max-width: 100%; padding: 10px; border: 1px solid var(--app-sidebar-border); border-radius: 14px; background: var(--chat-row); box-shadow: 0 6px 18px #1a202414; overflow-x: auto; }
 :root[data-theme="dark"] .composer-attachments { box-shadow: 0 6px 18px #00000066; }
@@ -974,12 +974,12 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
 .login-field .login-input:is(:hover, [data-hovered="true"]):not(:disabled, [aria-disabled="true"], :focus-visible, [data-focus-visible="true"]) { border-color: var(--app-muted); }
 .sidebar :is(.sidebar-icon, .sidebar-account-trigger) > svg { width: 22px; height: 22px; margin: 0; }
 .composer-actions .composer-icon > svg { width: 20px; height: 20px; margin: 0; }
-/* 命令、技能与文件补全：行高 32、行间距 2，说明右对齐。 */
-.command-group-title { padding: 6px 12px 4px; color: var(--app-muted); font-size: 12px; }
+/* 命令、技能与文件补全：名称 14、说明 12、组标 11，说明右对齐，与画布一致。 */
+.command-group-title { padding: 6px 12px 4px; color: var(--app-muted); font-size: 11px; }
 .command-suggestions button { border-radius: 8px; }
 .command-suggestions button svg { margin: 0; flex: 0 0 16px; }
-.command-suggestions button small { margin-left: auto !important; color: var(--app-muted); font-size: 13px; line-height: 1; }
-.command-suggestions button > span { flex: 1; min-width: 0; font-size: 13px; line-height: 1; }
+.command-suggestions button small { margin-left: auto !important; color: var(--app-muted); font-size: 12px; line-height: 1; }
+.command-suggestions button > span { flex: 1; min-width: 0; font-size: 14px; line-height: 1; }
 .tool-card .tool-card-body .tool-raw { margin-left: 0; }
 .tool-card--special .tool-card-heading { min-height: 24px; }
 .tool-card--special .tool-elapsed { font: 16px/21px "JetBrains Mono", monospace; }

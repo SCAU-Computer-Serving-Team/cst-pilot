@@ -22448,7 +22448,7 @@
                   "name": "文字",
                   "fill": "#646464",
                   "content": "命令",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 11,
                   "fontWeight": "normal"
                 }
@@ -22486,6 +22486,7 @@
                   "name": "名称",
                   "fill": "#202020",
                   "content": "compact",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -22498,8 +22499,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "压缩上下文",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -22537,6 +22539,7 @@
                   "name": "名称",
                   "fill": "#202020",
                   "content": "fork",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -22549,8 +22552,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "派生当前会话",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -22588,6 +22592,7 @@
                   "name": "名称",
                   "fill": "#202020",
                   "content": "tree",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -22600,8 +22605,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "打开分支树",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -22626,7 +22632,7 @@
                   "name": "文字",
                   "fill": "#646464",
                   "content": "技能",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 11,
                   "fontWeight": "normal"
                 }
@@ -22664,6 +22670,7 @@
                   "name": "名称",
                   "fill": "#202020",
                   "content": "disk",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -22676,8 +22683,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "磁盘容量、型号与健康",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -22715,6 +22723,7 @@
                   "name": "名称",
                   "fill": "#202020",
                   "content": "driver",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -22727,8 +22736,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "设备识别与驱动状态",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -22766,6 +22776,7 @@
                   "name": "名称",
                   "fill": "#202020",
                   "content": "eventlog",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -22778,8 +22789,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "崩溃、蓝屏与服务历史",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -22817,6 +22829,7 @@
                   "name": "名称",
                   "fill": "#202020",
                   "content": "ls",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -22829,8 +22842,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "目录索引与文件列表",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -22868,6 +22882,7 @@
                   "name": "名称",
                   "fill": "#202020",
                   "content": "runbook",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -22880,8 +22895,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "手动修复命令清单",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -22919,6 +22935,7 @@
                   "name": "名称",
                   "fill": "#202020",
                   "content": "startup",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -22931,8 +22948,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "开机启动项",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -22970,6 +22988,7 @@
                   "name": "名称",
                   "fill": "#202020",
                   "content": "sys",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -22982,8 +23001,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "系统概览",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -23315,7 +23335,7 @@
                   "name": "文字",
                   "fill": "#646464",
                   "content": "最近文件",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 11,
                   "fontWeight": "normal"
                 }
@@ -23353,6 +23373,7 @@
                   "name": "名称",
                   "fill": "#202020",
                   "content": "CBS.log",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -23365,6 +23386,7 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "C:\\Windows\\Logs",
+                  "lineHeight": 1,
                   "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
@@ -23404,6 +23426,7 @@
                   "name": "名称",
                   "fill": "#202020",
                   "content": "setupapi.dev.log",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -23416,6 +23439,7 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "C:\\Windows\\INF",
+                  "lineHeight": 1,
                   "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
@@ -23455,6 +23479,7 @@
                   "name": "名称",
                   "fill": "#202020",
                   "content": "WindowsUpdate.log",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -23467,6 +23492,7 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "C:\\Windows",
+                  "lineHeight": 1,
                   "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
@@ -23506,6 +23532,7 @@
                   "name": "名称",
                   "fill": "#202020",
                   "content": "磁盘体检.txt",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -23518,6 +23545,7 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "outbox\\",
+                  "lineHeight": 1,
                   "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
@@ -31236,7 +31264,7 @@
                   "name": "文字",
                   "fill": "#AAB3B7",
                   "content": "命令",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 11,
                   "fontWeight": "normal"
                 }
@@ -31273,6 +31301,7 @@
                   "name": "名称",
                   "fill": "#E0EAEE",
                   "content": "compact",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -31285,8 +31314,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "压缩上下文",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -31323,6 +31353,7 @@
                   "name": "名称",
                   "fill": "#E0EAEE",
                   "content": "fork",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -31335,8 +31366,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "派生当前会话",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -31373,6 +31405,7 @@
                   "name": "名称",
                   "fill": "#E0EAEE",
                   "content": "tree",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -31385,8 +31418,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "打开分支树",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -31411,7 +31445,7 @@
                   "name": "文字",
                   "fill": "#AAB3B7",
                   "content": "技能",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 11,
                   "fontWeight": "normal"
                 }
@@ -31448,6 +31482,7 @@
                   "name": "名称",
                   "fill": "#E0EAEE",
                   "content": "disk",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -31460,8 +31495,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "磁盘容量、型号与健康",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -31498,6 +31534,7 @@
                   "name": "名称",
                   "fill": "#E0EAEE",
                   "content": "driver",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -31510,8 +31547,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "设备识别与驱动状态",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -31548,6 +31586,7 @@
                   "name": "名称",
                   "fill": "#E0EAEE",
                   "content": "eventlog",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -31560,8 +31599,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "崩溃、蓝屏与服务历史",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -31598,6 +31638,7 @@
                   "name": "名称",
                   "fill": "#E0EAEE",
                   "content": "ls",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -31610,8 +31651,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "目录索引与文件列表",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -31648,6 +31690,7 @@
                   "name": "名称",
                   "fill": "#E0EAEE",
                   "content": "runbook",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -31660,8 +31703,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "手动修复命令清单",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -31698,6 +31742,7 @@
                   "name": "名称",
                   "fill": "#E0EAEE",
                   "content": "startup",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -31710,8 +31755,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "开机启动项",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -31748,6 +31794,7 @@
                   "name": "名称",
                   "fill": "#E0EAEE",
                   "content": "sys",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -31760,8 +31807,9 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "系统概览",
+                  "lineHeight": 1,
                   "textAlign": "right",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
                   "fontWeight": "normal"
                 }
@@ -31808,7 +31856,7 @@
                       "name": "快捷键提示",
                       "fill": "#AAB3B7",
                       "content": "↑↓ 选择 · 回车选中 · Esc 关闭",
-                      "fontFamily": "Inter",
+                      "fontFamily": "Source Han Sans CN",
                       "fontSize": 11,
                       "fontWeight": "normal"
                     }
@@ -32140,7 +32188,7 @@
                   "name": "文字",
                   "fill": "#AAB3B7",
                   "content": "最近文件",
-                  "fontFamily": "Inter",
+                  "fontFamily": "Source Han Sans CN",
                   "fontSize": 11,
                   "fontWeight": "normal"
                 }
@@ -32177,6 +32225,7 @@
                   "name": "名称",
                   "fill": "#E0EAEE",
                   "content": "CBS.log",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -32189,6 +32238,7 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "C:\\Windows\\Logs",
+                  "lineHeight": 1,
                   "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
@@ -32227,6 +32277,7 @@
                   "name": "名称",
                   "fill": "#E0EAEE",
                   "content": "setupapi.dev.log",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -32239,6 +32290,7 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "C:\\Windows\\INF",
+                  "lineHeight": 1,
                   "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
@@ -32277,6 +32329,7 @@
                   "name": "名称",
                   "fill": "#E0EAEE",
                   "content": "WindowsUpdate.log",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -32289,6 +32342,7 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "C:\\Windows",
+                  "lineHeight": 1,
                   "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
@@ -32327,6 +32381,7 @@
                   "name": "名称",
                   "fill": "#E0EAEE",
                   "content": "磁盘体检.txt",
+                  "lineHeight": 1,
                   "fontFamily": "Inter",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -32339,6 +32394,7 @@
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
                   "content": "outbox\\",
+                  "lineHeight": 1,
                   "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
@@ -32387,7 +32443,7 @@
                       "name": "快捷键提示",
                       "fill": "#AAB3B7",
                       "content": "↑↓ 选择 · 回车引用 · Esc 关闭",
-                      "fontFamily": "Inter",
+                      "fontFamily": "Source Han Sans CN",
                       "fontSize": 11,
                       "fontWeight": "normal"
                     }

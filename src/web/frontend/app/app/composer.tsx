@@ -637,7 +637,7 @@ export function Composer({
 				{!!fileSuggestions.length && (
 					<fieldset className="command-suggestions file-suggestions" aria-label="文件引用补全">
 						<div className="command-group">
-							<span className="command-group-title">文件引用</span>
+							<span className="command-group-title">最近文件</span>
 							{fileSuggestions.map((file, index) => (
 								<Button
 									key={file.path}

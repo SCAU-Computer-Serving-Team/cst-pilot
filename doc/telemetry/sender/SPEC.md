@@ -19,7 +19,7 @@
 | `index.ts` | 入口：注册事件订阅，串联采集、草稿、定稿、上报；进程内首实例执行恢复 | 无 |
 | `collect.ts` | 采集器：事件 → 内存累计状态。每会话实例一份，纯数据结构，可单测 | 无，不做任何同步 I/O |
 | `draft.ts` | `agent/home/telemetry/drafts/`：轮次级草稿的重写、定稿删除、启动恢复 | 磁盘 |
-| `record.ts` | 定稿时把累计状态序列化为一条记录 | 读 ctx 快照与发行版 `VERSION` |
+| `record.ts` | 定稿时把累计状态序列化为一条记录 | 读 ctx 快照；`kitVersion` 按扩展目录上溯包根读 `VERSION`，不依赖启动目录 |
 | `credential.ts` | 被动读 `auth.json` 取上传凭据与有效期 | 磁盘 |
 | `outbox.ts` | `agent/home/telemetry/pending.jsonl`：追加、读出、成功移除、超限丢最旧。全部读写经进程级串行队列 | 磁盘 |
 | `transport.ts` | 批量 POST、超时、响应分类 | 网络 |
@@ -31,7 +31,7 @@
 
 | 事件 | 累计内容 |
 |---|---|
-| `session_start` | `sessionId`、`reason`、`startedAt`、`channel`；进程内首个初始化的实例顺带执行草稿恢复 |
+| `session_start` | `sessionId`、`reason`、`startedAt`、`channel`；进程内首个初始化的实例顺带执行草稿恢复。同实例再收到 `session_start`（上一会话未经 shutdown 被顶替）时，先把旧累计按 `crash` 定稿再开新会话 |
 | `input` | `source = interactive` 时 `prompts++` |
 | `before_provider_request` | 保存本次请求的思考档位；缺失时保留未知，不用结束时的设置反推 |
 | `turn_start` / `turn_end` | 配对求间隔累加 `activeMs`；`turns++`；`message.usage` 按 provider + model + thinkingLevel 分组累加进 `models`；`ctx.getContextUsage()` 返回 `undefined` 或 `tokens` 为 `null` 时跳过采样，否则记峰值 `contextPeak` 与同次的 `contextWindow`；`stopReason = aborted` 计 `aborted`；`stopReason = error` 时：本往返无 `after_provider_response` 则 `networkErrors++`，`errorMessage` 原文按文本分组进 `errors`；`turn_end` 后把累计状态重写为该会话草稿并记 `lastTurnEndedAt` |
@@ -51,6 +51,8 @@
 - 报错原文完整入记录，不截断。同文本只留一份并按 `count` 累加，避免重复撑大记录。
 - 时间序列化用带本地时区偏移的 ISO 8601（`new Date().toISOString()` 是 UTC，不符合契约）。
 - `cost` 与 `currency` 一起写入。映射表可用但缺少 provider 时用缺省 `USD`；文件不可读或不合法时留空，见[计费币种](../../contract.md#计费币种)。模型价目表与币种单位须在实现前核对。
+- 管理员探测（Windows PowerShell）耗时秒级，不在事件路径等待：`session_start` 只发起探测，定稿时取结果，草稿期间未完成按非管理员记录。
+- `kitVersion` 不依赖启动目录：优先按扩展目录上溯包根读 `VERSION`，回退启动目录；读不到留空且不缓存，下次事件重试。
 
 ### 结果字段取值
 
@@ -142,7 +144,7 @@ Authorization: Bearer <OA 访问令牌>
 | 发送单飞 | 进程内同时只有一个在途批次：队列内读快照 → 队列外 POST → 队列内移除已确认记录；占用期间的新触发直接跳过 |
 | 恢复单次 | 进程内首个初始化的实例执行草稿恢复，后续实例跳过 |
 
-会丢记录的情况都已知并接受：超限淘汰；磁盘只读或写入失败；尚无完成轮次的会话在定稿前被强杀；pi 退出时最后一次发送尚未返回。为消除这些情况而引入确认与重放机制，成本高于收益。
+会丢记录的情况都已知并接受：超限淘汰；磁盘只读或写入失败；尚无完成轮次的会话在定稿前被强杀；pi 退出时最后一次发送尚未返回；两个 pi 进程共用同一 home 时，一边清理队列的读改写与另一边的追加存在毫秒级覆盖窗口（串行队列只限进程内）。为消除这些情况而引入确认与重放机制，成本高于收益。
 
 ## 身份与凭据
 
