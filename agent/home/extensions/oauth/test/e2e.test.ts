@@ -71,7 +71,7 @@ test("e2e：内核加载扩展完成设备流，凭据写入 auth.json 且模型
 			| undefined;
 		assert.ok(deviceCode, "应收到 device_code 通知");
 		assert.equal(deviceCode.userCode, "123456");
-		assert.equal(deviceCode.verificationUri, `${mock.host}/oauth/device?user_code=123456`);
+		assert.equal(deviceCode.verificationUri, `${mock.host}/#/oauth/device?code=123456`);
 
 		const stored = JSON.parse(await readFile(join(agentDir, "auth.json"), "utf8")) as {
 			cstoa?: { type?: string; access?: string; refresh?: string };

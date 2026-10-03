@@ -44,7 +44,7 @@ export function createAuthRoutes({
 	/** 每个 provider 至多一条进行中的扫码流程；发起方同样是内核的 modelRuntime.login。 */
 	const oauthFlows = new Map<string, OauthFlow>();
 
-	function startOauthFlow(modelRuntime: ModelRuntime, providerId: string): void {
+	function startOauthFlow(modelRuntime: ModelRuntime, providerId: string): OauthFlow {
 		oauthFlows.get(providerId)?.controller.abort();
 		const controller = new AbortController();
 		const flow: OauthFlow = { controller, state: "pending" };
@@ -89,6 +89,18 @@ export function createAuthRoutes({
 				flow.error = error instanceof Error ? error.message : String(error);
 				globalEvents.publish("state", { type: "oauth_result", providerId, ok: false, error: flow.error });
 			});
+		return flow;
+	}
+
+	async function waitForDeviceCode(flow: OauthFlow): Promise<NonNullable<OauthFlow["deviceCode"]>> {
+		const deadline = Date.now() + 10_000;
+		while (flow.state === "pending" && !flow.deviceCode) {
+			if (Date.now() >= deadline) throw new Error("获取二维码超时，请重试。");
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		if (flow.deviceCode) return flow.deviceCode;
+		if (flow.state === "cancelled") throw new Error("扫码登录已取消。");
+		throw new Error(flow.error || "扫码登录未完成，请重试。");
 	}
 
 	return async (
@@ -121,8 +133,8 @@ export function createAuthRoutes({
 			if (!authProvider?.auth.oauth) throw new Error("请求的模型服务不支持扫码登录");
 			if (action === "start" && method === "POST") {
 				const existing = oauthFlows.get(providerId);
-				if (!existing || existing.state !== "pending") startOauthFlow(modelRuntime, providerId);
-				send(response, 202, { started: true });
+				const flow = existing?.state === "pending" ? existing : startOauthFlow(modelRuntime, providerId);
+				send(response, 202, { started: true, deviceCode: await waitForDeviceCode(flow) });
 				return true;
 			}
 			if (action === "status" && method === "GET") {

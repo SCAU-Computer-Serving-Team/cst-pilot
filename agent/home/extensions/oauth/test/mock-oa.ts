@@ -36,7 +36,7 @@ export async function startMockOa(options: MockOptions = {}): Promise<MockOa> {
 					device_code: "device-code-1",
 					user_code: "123456",
 					verification_uri: `${host}/oauth/device`,
-					verification_uri_complete: `${host}/oauth/device?user_code=123456`,
+					verification_uri_complete: `${host}/#/oauth/device?code=123456`,
 					expires_in: 60,
 					interval: 1,
 				}),

@@ -41,7 +41,7 @@ test("login：完整设备流返回凭据、通知完整授权链接并生成设
 		assert.ok(credentials.expires > Date.now());
 		assert.equal(events.length, 1);
 		assert.equal(events[0].userCode, "123456");
-		assert.equal(events[0].verificationUri, `${mock.host}/oauth/device?user_code=123456`);
+		assert.equal(events[0].verificationUri, `${mock.host}/#/oauth/device?code=123456`);
 
 		const deviceFile = JSON.parse(await readFile(join(agentDir, "device.json"), "utf8")) as {
 			device_id?: string;

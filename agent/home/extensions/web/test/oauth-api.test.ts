@@ -90,6 +90,15 @@ const oauthStatus = async () => {
 test("扫码登录：start 后 device_code 可查，批准后凭据写入 auth.json", async () => {
 	const started = await post("/api/auth/cstoa/oauth/start", {});
 	assert.equal(started.status, 202);
+	const startedBody = (await started.json()) as {
+		started: boolean;
+		deviceCode?: { userCode: string; verificationUri: string; expiresInSeconds: number };
+	};
+	assert.equal(startedBody.started, true);
+	assert.equal(startedBody.deviceCode?.userCode, "123456");
+	assert.equal(startedBody.deviceCode?.verificationUri, `${mock.host}/#/oauth/device?code=123456`);
+	assert.ok((startedBody.deviceCode?.expiresInSeconds ?? 0) > 0);
+	assert.equal(JSON.stringify(startedBody).includes("device-code-1"), false);
 
 	let status = await oauthStatus();
 	for (let i = 0; i < 100 && !(status.state === "pending" && status.deviceCode); i++) {
@@ -98,7 +107,7 @@ test("扫码登录：start 后 device_code 可查，批准后凭据写入 auth.j
 	}
 	assert.equal(status.state, "pending");
 	assert.equal(status.deviceCode?.userCode, "123456");
-	assert.equal(status.deviceCode?.verificationUri, `${mock.host}/oauth/device?user_code=123456`);
+	assert.equal(status.deviceCode?.verificationUri, `${mock.host}/#/oauth/device?code=123456`);
 	// device_code 是换令牌的秘密，任何响应都不能回传。
 	assert.equal(JSON.stringify(status).includes("device-code-1"), false);
 

@@ -61,10 +61,15 @@ export async function apiJson<T>(
 	return data as T;
 }
 
-export function startOauthLogin(providerId: string): Promise<{ started: boolean }> {
-	return apiJson<{ started: boolean }>(`/api/auth/${encodeURIComponent(providerId)}/oauth/start`, {
-		method: "POST",
-	});
+export function startOauthLogin(
+	providerId: string,
+): Promise<{ started: boolean; deviceCode?: OauthDeviceCode }> {
+	return apiJson<{ started: boolean; deviceCode?: OauthDeviceCode }>(
+		`/api/auth/${encodeURIComponent(providerId)}/oauth/start`,
+		{
+			method: "POST",
+		},
+	);
 }
 
 export function getOauthStatus(providerId: string): Promise<OauthStatus> {

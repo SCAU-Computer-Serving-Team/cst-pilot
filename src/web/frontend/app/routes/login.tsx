@@ -105,6 +105,14 @@ export default function Login() {
 		setQrState("starting");
 		setQrError("");
 		const events = new EventSource("/api/events");
+		const acceptDeviceCode = (value: OauthDeviceCode) => {
+			if (disposed) return;
+			const seconds = value.expiresInSeconds || 300;
+			setDeviceCode(value);
+			setExpiresAt(Date.now() + seconds * 1000);
+			setQrState("pending");
+			setQrError("");
+		};
 		events.addEventListener("state", (raw) => {
 			if (disposed) return;
 			let event: {
@@ -121,15 +129,12 @@ export default function Login() {
 			}
 			if (event.providerId !== oauthProvider) return;
 			if (event.type === "oauth_device_code") {
-				const seconds = event.expiresInSeconds ?? 300;
-				setDeviceCode({
+				acceptDeviceCode({
 					userCode: event.userCode ?? "",
 					verificationUri: event.verificationUri ?? "",
 					intervalSeconds: event.intervalSeconds ?? 5,
-					expiresInSeconds: seconds,
+					expiresInSeconds: event.expiresInSeconds ?? 300,
 				});
-				setExpiresAt(Date.now() + seconds * 1000);
-				setQrState("pending");
 			} else if (event.type === "oauth_result") {
 				if (event.ok) navigate("/");
 				else if (event.cancelled) setQrState("cancelled");
@@ -139,28 +144,33 @@ export default function Login() {
 				}
 			}
 		});
-		void getOauthStatus(oauthProvider)
-			.then(async (status) => {
+		void startOauthLogin(oauthProvider)
+			.then((result) => {
 				if (disposed) return;
-				if (status.state === "pending") {
-					if (status.deviceCode) {
-						setDeviceCode(status.deviceCode);
-						setExpiresAt(Date.now() + status.deviceCode.expiresInSeconds * 1000);
-					}
-					setQrState("pending");
-					return;
-				}
-				await startOauthLogin(oauthProvider);
+				if (result.deviceCode) acceptDeviceCode(result.deviceCode);
 			})
 			.catch((cause: unknown) => {
 				if (disposed) return;
 				setQrState("failed");
 				setQrError(cause instanceof Error ? cause.message : "无法发起扫码登录，请重试。");
 			});
+		const poll = window.setInterval(() => {
+			void getOauthStatus(oauthProvider)
+				.then((status) => {
+					if (disposed) return;
+					if (status.state === "pending" && status.deviceCode) acceptDeviceCode(status.deviceCode);
+					else if (status.state === "succeeded") navigate("/");
+					else if (status.state === "failed") {
+						setQrState("failed");
+						setQrError(status.error ?? "登录未完成，请重试。");
+					} else if (status.state === "cancelled") setQrState("cancelled");
+				})
+				.catch(() => undefined);
+		}, 2000);
 		return () => {
 			disposed = true;
+			window.clearInterval(poll);
 			events.close();
-			void cancelOauthLogin(oauthProvider).catch(() => undefined);
 		};
 	}, [mode, oauthProvider, navigate]);
 
@@ -173,7 +183,12 @@ export default function Login() {
 			setDeviceCode(null);
 			setExpiresAt(0);
 			setQrState("starting");
-			await startOauthLogin(oauthProvider);
+			const result = await startOauthLogin(oauthProvider);
+			if (result.deviceCode) {
+				setDeviceCode(result.deviceCode);
+				setExpiresAt(Date.now() + result.deviceCode.expiresInSeconds * 1000);
+				setQrState("pending");
+			}
 		} catch (cause) {
 			setQrState("failed");
 			setQrError(cause instanceof Error ? cause.message : "无法获取二维码，请重试。");
