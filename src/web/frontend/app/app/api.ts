@@ -61,9 +61,7 @@ export async function apiJson<T>(
 	return data as T;
 }
 
-export function startOauthLogin(
-	providerId: string,
-): Promise<{ started: boolean; deviceCode?: OauthDeviceCode }> {
+export function startOauthLogin(providerId: string): Promise<{ started: boolean; deviceCode?: OauthDeviceCode }> {
 	return apiJson<{ started: boolean; deviceCode?: OauthDeviceCode }>(
 		`/api/auth/${encodeURIComponent(providerId)}/oauth/start`,
 		{
