@@ -41,7 +41,16 @@ test("e2e：内核加载扩展完成设备流，凭据写入 auth.json 且模型
 		const services = await createAgentSessionServices({ cwd: process.cwd(), agentDir });
 		const provider = services.modelRuntime.getProvider("cstoa");
 		assert.ok(provider, "cstoa provider 应已注册");
-		assert.equal(provider.getModels().length, 4);
+		const models = provider.getModels();
+		assert.equal(models.length, 4);
+		// 参数预置：与 pi-ai 目录中的同族/同名模型对齐。
+		const deepseek = models.find((model) => model.id === "deepseek-v4.1-flash");
+		assert.equal(deepseek?.contextWindow, 1_000_000);
+		assert.equal(deepseek?.reasoning, true);
+		const glm = models.find((model) => model.id === "glm-5.3-flash");
+		assert.equal(glm?.contextWindow, 1_000_000);
+		assert.equal(glm?.reasoning, true);
+		assert.deepEqual(glm?.input, ["text", "image"]);
 
 		const events: unknown[] = [];
 		const credential = await services.modelRuntime.login("cstoa", "oauth", {
