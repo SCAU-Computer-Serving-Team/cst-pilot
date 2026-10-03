@@ -1,6 +1,6 @@
 # OA 登录与模型接入
 
-状态：实现规格，尚未开发，整份等 OAuth 落地后再讨论。更新：2026-10-02。
+状态：规格已定稿，骨架与交接文档就绪，待开发。更新：2026-10-03，交接入口见 [handover.md](handover.md)。
 
 OAuth 负责队员登录认证和接入团队模型服务。登录态随 U 盘保存，按令牌有效期延续。在 Web 中，OAuth 与 API KEY 共用模型服务的登录状态展示和退出操作；本文只规定 OAuth 的有效期和刷新。Web 接口见[模型与登录](../web/SPEC/app-router.md#模型与登录)。
 
@@ -33,7 +33,7 @@ OAuth 负责队员登录认证和接入团队模型服务。登录态随 U 盘�
 | TUI | pi 原生设备码界面：网址与 6 位数字码 | 受终端限制，不自动打开机主浏览器 |
 | Web UI | 登录面板渲染二维码，编码 `verification_uri_complete` | 手机扫码直达授权页并预填数字码；前端负责二维码与倒计时 |
 
-扩展向 Web 层提供 `{ userCode, verificationUriComplete, expiresInSeconds, interval }`，Web 前端据此渲染。Web UI 尚未实现，本节先定接口形状。
+扩展向 Web 层提供 `{ userCode, verificationUriComplete, expiresInSeconds, interval }`，Web 前端据此渲染。Web UI 的 OAuth 登录面板尚未实现（登录页已支持 API KEY），本节先定接口形状。
 
 上游 issue #9774（给 pi 原生设备码对话框加二维码）**只涉及 TUI**。Web UI 的二维码由本项目前端实现，不依赖上游。
 
@@ -101,7 +101,7 @@ OAuth 负责队员登录认证和接入团队模型服务。登录态随 U 盘�
 | 凭据进入模型上下文 | 文件读取与检索工具排除凭据文件，日志不输出令牌 |
 | 授权接口滥用 | 申请设备码按 IP 限流，令牌轮询遵循 interval，数字码限制尝试次数 |
 
-TOTP 在本期实现绑定和校验，授权页强制校验；丢失后由管理员重置。
+TOTP 在本期实现绑定和校验，授权页强制校验（Authenticator 应用）；丢失后由管理员重置。
 
 审计记录队员、设备、作用域、接口、结果、IP 与时间，保留 180 天。队员可在「我的设备」吊销授权，管理员可批量吊销。
 
@@ -149,5 +149,6 @@ TOTP 在本期实现绑定和校验，授权页强制校验；丢失后由管理
 ## 相关规格
 
 1. [pi 扩展方案](pi-extension.md)：事件、凭据取用与发行方式。
-2. [遥测系统](../telemetry/README.md)：独立的数据采集与上传规格。上传鉴权复用本文的访问令牌，接收端据此解析队员身份。
-3. [OA 侧任务拆分](https://github.com/SCAU-Computer-Serving-Team/cstoa-api-fastapi/blob/main/docs/oa-tasks.md)：后端实施清单，登录与模型接入范围以本文为准。
+2. [交接文档](handover.md)：开发起点、阅读顺序与外部依赖。
+3. [遥测系统](../telemetry/README.md)：独立的数据采集与上传规格。上传鉴权复用本文的访问令牌，接收端据此解析队员身份。
+4. [OA 侧任务拆分](https://github.com/SCAU-Computer-Serving-Team/cstoa-api-fastapi/blob/main/docs/oa-tasks.md)：后端实施清单，登录与模型接入范围以本文为准。

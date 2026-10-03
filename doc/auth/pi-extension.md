@@ -1,6 +1,6 @@
 # OA 登录扩展
 
-状态：实现规格，尚未开发，整份等 OAuth 落地后再讨论。更新：2026-09-20。适配项目锁定的 pi 0.85.1，业务约定见 [OA 登录与模型接入](README.md)。
+状态：规格已定稿，骨架已建，待开发。更新：2026-10-03。适配项目锁定的 pi 0.85.1，业务约定见 [OA 登录与模型接入](README.md)，交接入口见 [handover.md](handover.md)。
 
 扩展通过 `pi.registerProvider("cstoa", { oauth })` 接入原生 `/login`，不修改 pi 内核。
 
@@ -39,7 +39,7 @@ agent/home/extensions/oauth/
 
 登录轮询响应 `callbacks.signal`，刷新请求响应 `signal`。扩展不另建后台刷新循环。
 
-TUI 与 Web UI 共用同一个 `login()`。设备码信息里除 `verificationUri` 外还有 `verificationUriComplete`（带数字码的完整链接），Web 前端用它渲染二维码。Web UI 尚未实现，取设备码信息的方式（pi 的会话事件或扩展 API）待定。
+TUI 与 Web UI 共用同一个 `login()`。设备码信息里除 `verificationUri` 外还有 `verificationUriComplete`（带数字码的完整链接），Web 前端用它渲染二维码。Web UI 的 OAuth 登录面板尚未实现，取设备码信息的方式（pi 的会话事件或扩展 API）待定。
 
 ## 模型与凭据取用
 
