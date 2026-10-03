@@ -1,14 +1,14 @@
 # 接收端
 
-状态：设计稿，契约版本 0.1。更新：2026-09-20。会话记录字段见 [schema.md](../schema.md)，共用字段、身份来源与计费币种见 [../../contract.md](../../contract.md)，系统切块见 [../architecture.md](../architecture.md)。
+状态：设计稿，已实现并经本机 e2e 验证（systemd 部署、Caddy、members 导入未做）。契约版本 0.1。更新：2026-10-03。会话记录字段见 [schema.md](../schema.md)，共用字段、身份来源与计费币种见 [../../contract.md](../../contract.md)，系统切块见 [../architecture.md](../architecture.md)。
 
 ## 结论
 
-1. 单个 Node 常驻进程加一个 SQLite 文件，只做两件事：收记录、写数据库。看板与告警后置。
+1. 单个常驻进程加一个 SQLite 文件，只做两件事：收记录、写数据库。看板与告警后置。
 2. 一个写端点 `POST /v1/sessions`，一个 `GET /healthz`。不开对外读接口，报表走命令行导 CSV。
 3. 一场会话一条记录，原始记录整条存 `payload`，常用字段抽成列。
 4. 身份由队员的 OA 登录决定：接收端拿上传的令牌向 OA 内省，取 `mid` 与 `device_id`。
-5. 零 npm 依赖，只用 Node 内置模块：免安装、免漏洞扫描、免升级依赖。
+5. 除标准库外只依赖纯 Go 的 SQLite 驱动：免运行时安装、免漏洞扫描、交叉编译单二进制部署。
 6. **身份解析依赖 OA 的内省接口，该接口尚未实现**，见「依赖 OAuth 实现」。OAuth 相关的内容一律等它落地后再讨论。
 
 ## 接口
@@ -114,7 +114,7 @@ Authorization: Bearer <服务凭据>
 |---|---|
 | `record_id` | 主键，去重 |
 | `mid`、`device_id`、`received_at`、`ip_net` | 服务端写入 |
-| `v`、`kit_version`、`session_id` | 记录自带 |
+| `v`、`kit_version`、`session_id`、`channel` | 记录自带 |
 | `reason`、`end_reason`、`started_at`、`ended_at`、`duration_ms`、`active_ms`、`prompts`、`turns`、`context_entries` | 会话 |
 | `compactions`、`compaction_tokens`、`compaction_overflows`、`compaction_failures`、`context_peak`、`context_window` | 上下文 |
 | `network_errors`、`aborted`、`tool_failures` | 失败 |
@@ -203,47 +203,41 @@ Authorization: Bearer <服务凭据>
 
 | 层 | 选型 | 说明 |
 |---|---|---|
-| 运行时 | Node.js 24 LTS | |
-| 语言 | TypeScript，用 `node` 直接运行 | 类型剥离，无构建步骤；`tsc --noEmit` 只做检查，不进产物 |
-| HTTP | `node:http` | 两个路由，不引框架 |
-| 数据库 | `node:sqlite`，WAL 模式 | |
-| 令牌内省 | 全局 `fetch` | |
-| 测试 | `node:test` | 单测校验、抽列、CSV 转义、去重；集成测试用内存库加桩内省 |
+| 运行时 | Go，编译单二进制（约 11MB） | 目标机是 2G 内存 Linux：常驻约 12MB，无需运行时 |
+| 语言 | Go，交叉编译 `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o telemetry-receiver ./src` | 无解释器，部署只拷一个文件 |
+| HTTP | `net/http` | 两个路由，不引框架 |
+| 数据库 | modernc.org/sqlite（纯 Go，无 cgo） | WAL；页缓存上限 2MB、不开 mmap |
+| 令牌内省 | `net/http` 客户端 | 60 秒缓存，SHA-256 键 |
+| 内存上限 | `debug.SetMemoryLimit(24MiB)` | GC 软上限，超限加速回收 |
+| 测试 | 主仓库 e2e 拉起二进制做 HTTP 集成 | 测试侧用 node:test + 只读 SQLite 连接断言库内数据 |
 | 进程 | systemd | 单进程常驻 |
 | 定时任务 | systemd timer | 任务在独立进程跑，崩了不拖累服务 |
-| HTTPS | Caddy 反代 | 自动申请与续期证书，Node 只监听 `127.0.0.1` |
+| HTTPS | Caddy 反代 | 自动申请与续期证书，服务只监听 `127.0.0.1` |
 | 日志 | `console` 到 journald | |
 
-子命令：`serve`（默认）、`rollup`、`cleanup`、`report`、`members`、`delete`。
+子命令：`serve`（默认）、`export-csv`、`rollup`、`delete`。members 导入与独立进程的 cleanup/backup 未实现，归「议题」。
 
-代码放在本仓库的 `src/telemetry/`，与[发送端](../sender/SPEC.md)同仓库，但不进工具包的发行包，部署到服务器上单独运行。
+代码在独立仓库 `cst-pilot-server` 的 `src/`，不随工具包发行，部署到服务器上单独运行；契约文档随主仓库。五个源文件加 go.mod：
 
 ```
-src/telemetry/
-  main.ts        子命令分发
-  server.ts      HTTP：路由、体积限制、限流
-  auth.ts        内省调用与 60 秒缓存
-  validate.ts    逐条校验
-  store.ts       SQLite 写入、去重、查询
-  columns.ts     从 payload 抽列
-  schema.sql     建表
-  rollup.ts      每日聚合
-  cleanup.ts     保留期清理与备份
-  report.ts      CSV 导出
-  members.ts     成员 CSV 导入
-  delete.ts      按设备或队员删除
-  config.ts      环境变量
-  deploy/        systemd unit 与 Caddyfile
+cst-pilot-server/
+  go.mod         唯一外部依赖 modernc.org/sqlite
+  src/
+    main.go        子命令分发与环境变量、GC 软上限
+    server.go      HTTP：路由、体积限制、整批/逐条分流、uploads 记录
+    auth.go        内省（桩/真切换）与 60 秒缓存
+    validate.go    整批拒绝与逐条拒收
+    store.go       SQLite 建表、写入、去重、devices/uploads、rollup、保留期、CSV 导出
 ```
 
 配置用环境变量：
 
 ```
-PORT=8080
-DB_PATH=/var/lib/cst-telemetry/telemetry.db
-OA_INTROSPECT_URL=https://cstoa.top/api/oauth/introspect
-OA_INTROSPECT_TOKEN=<接收端服务凭据>
-ACCEPTED_VERSIONS=0.1
+TELEMETRY_PORT=8080
+TELEMETRY_HOST=127.0.0.1
+TELEMETRY_DB=/var/lib/cst-telemetry/telemetry.db
+OA_INTROSPECT_URL=https://cstoa.top/api/oauth/introspect   # 未配置时用桩（令牌格式 stub-<mid>-<device>）
+OA_SERVICE_TOKEN=<接收端服务凭据>
 ```
 
 ## 依赖 OAuth 实现
@@ -273,11 +267,7 @@ ACCEPTED_VERSIONS=0.1
 
 ## 报表
 
-第一版只做命令行导出 CSV：读 `daily_rollup`，一行一个「日期加队员」。
-
-```
-node src/telemetry/main.ts report --from 2026-09-01 --to 2026-09-30
-```
+第一版只做命令行导出 CSV：当前导出 `sessions` 明细（`export-csv [out]`），读 `daily_rollup` 的按日汇总导出未做，归「议题」。
 
 不做 HTTP 读接口。本地仪表盘只看不上传的请求记录，不读接收端；服务端加读接口要多一套鉴权，换不来对应的收益。
 

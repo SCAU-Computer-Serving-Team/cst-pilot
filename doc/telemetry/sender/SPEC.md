@@ -1,43 +1,46 @@
 # 发送端
 
-状态：设计稿，契约版本 0.1。更新：2026-09-20。会话记录字段见 [../schema.md](../schema.md)，共用字段、身份来源与计费币种见 [../../contract.md](../../contract.md)，系统切块见 [../architecture.md](../architecture.md)。
+状态：设计稿，已实现并经本机 e2e 验证（部署与 OAuth 接入未做）。契约版本 0.1。更新：2026-10-03。会话记录字段见 [../schema.md](../schema.md)，共用字段、身份来源与计费币种见 [../../contract.md](../../contract.md)，系统切块见 [../architecture.md](../architecture.md)。
 
 ## 结论
 
 1. pi 扩展，目录 `agent/home/extensions/telemetry/`，与 `diagnostics` 平级。零 npm 依赖，只用 Node 内置模块与全局 `fetch`。
-2. 采集靠 `pi.on(...)` 订阅事件，内存累计，会话结束发一条会话记录。不改现有工具代码。
-3. 上报走批量信封，先写盘再发送，收到确认后删除。全程不阻塞会话、不抛错、不向队员输出。
-4. 身份由上传凭据决定：发送时带上队员的 OAuth 访问令牌，接收端解析出 `mid` 与 `deviceId`。采集侧不读凭据、不算指纹。
-5. 尽力上传，允许有限丢失，不为此引入可靠消息机制。
+2. 采集订阅会话事件，内存累计：轮次结束（`turn_end`）把累计状态重写为该会话的草稿；会话结束（shutdown）定稿成一条会话记录。不改现有工具代码。
+3. TUI 与 Web 共用同一套采集规则，只有 shutdown 实现不同：TUI 是 pi 的 `session_shutdown` 事件，Web 是运行层销毁实例时调用定稿，见下方「TUI 与 Web 会话」。
+4. TUI 与多场 Web 会话并行时各有一份采集实例：各自累计、各写各的草稿；`pending.jsonl` 与发送经 `globalThis` 单例互斥协调，不依赖扩展实例间共享模块状态。
+5. 上报走批量信封，先写盘再发送，收到确认后删除。全程不阻塞会话、不抛错、不向队员输出。
+6. 身份由上传凭据决定：发送时带上队员的 OAuth 访问令牌，接收端解析出 `mid` 与 `deviceId`。采集侧不读凭据、不算指纹。
+7. 尽力上传，允许有限丢失，不为此引入可靠消息机制。
 
 ## 模块划分
 
 | 文件 | 职责 | I/O |
 |---|---|---|
-| `index.ts` | 入口：注册事件订阅，串联采集、记录、上报 | 无 |
-| `collect.ts` | 采集器：事件 → 内存累计状态。纯数据结构，可单测 | 无，不同步等待任何 I/O |
-| `record.ts` | `session_shutdown` 时把累计状态序列化为一条记录 | 读 ctx 快照与发行版 `VERSION` |
+| `index.ts` | 入口：注册事件订阅，串联采集、草稿、定稿、上报；进程内首实例执行恢复 | 无 |
+| `collect.ts` | 采集器：事件 → 内存累计状态。每会话实例一份，纯数据结构，可单测 | 无，不做任何同步 I/O |
+| `draft.ts` | `agent/home/telemetry/drafts/`：轮次级草稿的重写、定稿删除、启动恢复 | 磁盘 |
+| `record.ts` | 定稿时把累计状态序列化为一条记录 | 读 ctx 快照与发行版 `VERSION` |
 | `credential.ts` | 被动读 `auth.json` 取上传凭据与有效期 | 磁盘 |
-| `outbox.ts` | `agent/home/telemetry/pending.jsonl`：追加、读出、成功移除、超限丢最旧 | 磁盘 |
+| `outbox.ts` | `agent/home/telemetry/pending.jsonl`：追加、读出、成功移除、超限丢最旧。全部读写经进程级串行队列 | 磁盘 |
 | `transport.ts` | 批量 POST、超时、响应分类 | 网络 |
 | `config.ts` | `telemetry.json` 与 `currency.json` 读取 | 磁盘 |
 
 ## 采集
 
-采集器三条纪律：只改内存（微秒级返回）；不同步等待网络与磁盘；整体 try/catch，任何一步出错跳过本次累计。
+采集器三条纪律：只改内存（微秒级返回）；不做任何同步 I/O；整体 try/catch，任何一步出错跳过本次累计。草稿写盘不属于采集器：编排层在每个 `turn_end` 先累计、后重写草稿，写失败静默跳过，不影响会话。
 
 | 事件 | 累计内容 |
 |---|---|
-| `session_start` | `sessionId`、`reason`、`startedAt` |
+| `session_start` | `sessionId`、`reason`、`startedAt`、`channel`；进程内首个初始化的实例顺带执行草稿恢复 |
 | `input` | `source = interactive` 时 `prompts++` |
 | `before_provider_request` | 保存本次请求的思考档位；缺失时保留未知，不用结束时的设置反推 |
-| `turn_start` / `turn_end` | 配对求间隔累加 `activeMs`；`turns++`；`message.usage` 按 provider + model + thinkingLevel 分组累加进 `models`；`ctx.getContextUsage()` 返回 `undefined` 或 `tokens` 为 `null` 时跳过采样，否则记峰值 `contextPeak` 与同次的 `contextWindow`；`stopReason = aborted` 计 `aborted`；`stopReason = error` 时：本往返无 `after_provider_response` 则 `networkErrors++`，`errorMessage` 原文按文本分组进 `errors` |
+| `turn_start` / `turn_end` | 配对求间隔累加 `activeMs`；`turns++`；`message.usage` 按 provider + model + thinkingLevel 分组累加进 `models`；`ctx.getContextUsage()` 返回 `undefined` 或 `tokens` 为 `null` 时跳过采样，否则记峰值 `contextPeak` 与同次的 `contextWindow`；`stopReason = aborted` 计 `aborted`；`stopReason = error` 时：本往返无 `after_provider_response` 则 `networkErrors++`，`errorMessage` 原文按文本分组进 `errors`；`turn_end` 后把累计状态重写为该会话草稿并记 `lastTurnEndedAt` |
 | `after_provider_response` | 非 2xx 状态码计 `providerErrors`；标记本往返有响应（供 `networkErrors` 判定） |
 | `tool_execution_start` / `_end` | `toolCallId` 配对：`tools` 公共维度（`calls`/`failures`/`totalMs`/`maxMs`/`resultBytes`/`truncated`）；扩展字段：`runbook` 取结果的 `runbook.items` 累加 `entriesTotal`、`web_search` 按 provider 计 `providers`、`fetch_content` 按 mode 计 `modes`；`degraded` 按下方结果取值表统计，每次调用最多计一次 |
 | `tool_call` | 从入参提取 `scope`；省略时按工具默认值记录（sys 为 overview、driver 为 problem、eventlog 为 recent），无 scope 工具省略 |
 | `session_compact` | `compactions++`；`compactionEntry.tokensBefore` 累加进 `compactionTokens`；`reason = overflow` 计 `compactionOverflows` |
 | `session_compact_failed` | `compactionFailures++`。只计数，不收 `errorMessage`：报错原文的例外只覆盖 turn 级 |
-| `session_shutdown` | `endedAt`、`endReason`；`contextEntries = buildContextEntries().length`；序列化、写 outbox、触发上报（不等待） |
+| `session_shutdown`（TUI）/ 实例销毁（Web） | 定稿：`endedAt`、`endReason`；`contextEntries = buildContextEntries().length`；`turns` 与 `prompts` 均为 0 时不产生记录；序列化、追加 outbox、删草稿、触发上报（不等待） |
 
 并行工具调用会让 start/end 交错，配对靠 `toolCallId`。
 
@@ -59,6 +62,42 @@
 | `truncated` | A 诊断工具：结果文本含 `outputTruncated`。`diagnosticResult` 超限时只改文本，`details` 保持原对象，所以用一次子串扫描判断，不解析 JSON。B 内置 `bash`：`details.truncation.truncated` | `details.truncation` 对诊断工具不存在；`read`/`ls`/`find`/`grep` 的裁剪只写在文本里，没有结构标记，不计数 |
 | `entriesTotal` | 取结果的 `runbook.items`，工具已给出命令条数 | 入参字段名是 `items`（元素为 `{ summary, command, shell, admin? }`），没有 `commands` |
 
+### TUI 与 Web 会话
+
+两端共用同一套采集规则：轮次级草稿一致，定稿概念一致，差异只在 shutdown 的实现与会话起止原因的取值。
+
+| 端 | 事件来源 | shutdown 实现 |
+|---|---|---|
+| TUI | 扩展实例随 TUI 会话加载，`pi.on(...)` 订阅本会话事件 | pi 的 `session_shutdown` 事件 |
+| Web | 每场 Web 会话独立加载扩展实例（`WebSessionPool`，mode `rpc`），各自订阅本会话事件 | 运行层销毁实例时调用定稿，销毁点只有两处：删除会话（`deleteSaved`）与 Web 整体关闭（`close`，含进程退出）。切换页面不销毁实例 |
+
+`reason` / `endReason` 的取值按端收敛：
+
+| 取值 | TUI | Web |
+|---|---|---|
+| `reason: new / resume / fork` | 会话替换 | 新建 / 打开历史（含 TUI 交接）/ 派生（`createBranchedSession`，新会话 ID，源实例继续累计） |
+| `reason: startup / reload` | 有 | 无（Web 无 `/reload`，也不随进程启动建会话） |
+| `endReason: quit` | 进程退出 | 进程退出（`close` 逐实例销毁） |
+| `endReason: new / resume / fork / reload` | 会话替换时旧会话定稿 | 无（Web 切换不销毁实例） |
+| `endReason: delete` | 无 | 删除会话（`deleteSaved`），实例中途销毁 |
+| `endReason: crash` | 两端同：强杀后恢复补记 | 同左 |
+
+`channel` 字段（`tui｜web`）由加载环境决定，Web 运行层创建会话实例时标记。
+
+实现前核对两项已出结论：SDK 会话（mode `rpc`）的事件覆盖面与 TUI 一致，`session_start`、`input`、`turn_start`/`turn_end`、`tool_call`、`tool_execution_*` 与 provider 事件均正常派发（e2e 已验证）；`AgentSession.dispose()` 不发任何事件（已核对内核源码），运行层显式定稿调用保留。Web 会话的 `session_start` reason 由 `WebSessionPool` 经 `sessionStartEvent` 显式传入（new / resume / fork）。
+
+## 草稿与恢复
+
+草稿是进行中会话的落盘形态：`agent/home/telemetry/drafts/<sessionId>.json`，内容为该会话的累计状态加 `lastTurnEndedAt`（最近一个 `turn_end` 时刻）。按会话分文件，多实例并行写互不干扰。
+
+| 动作 | 规则 |
+|---|---|
+| 重写 | 每个 `turn_end` 整体重写（先写临时文件再改名），首个轮次时创建；同一会话的写操作经内存串行链排队，避免连续轮次的改名乱序 |
+| 定稿 | 补 `endedAt`、`endReason`、`contextEntries` 后追加写 `pending.jsonl`，删草稿。`turns` 与 `prompts` 均为 0 的会话不产生记录，启动即 `/web` 的 TUI 待机会话由此自然跳过 |
+| 恢复 | 进程启动时扫 `drafts/`：残留草稿补成 `endReason = crash` 的记录，`endedAt` 取 `lastTurnEndedAt`，`contextEntries` 留空，写 `pending.jsonl` 后删草稿；复用草稿内预生成的 `recordId`，接收端去重兑底双份 |
+
+工具包常驻U盘，拔盘、断电、机主电脑崩溃都会强杀进程，草稿把丢失窗口从整场会话缩到一轮。草稿只在首个轮次后存在，尚无完成轮次的会话被强杀时无草稿可恢复，全丢，接受。
+
 ## 上报
 
 ### 端点
@@ -77,7 +116,7 @@ Authorization: Bearer <OA 访问令牌>
 | 响应 | 处理 |
 |---|---|
 | 202 | 批次送达，从 `pending.jsonl` 移除 |
-| 401 / 403 | 凭据无效、过期，或设备被吊销、改密。保留记录，停止本轮发送，等队员重新登录后由下一次 `session_start` 补发 |
+| 401 / 403 | 凭据无效、过期，或设备被吊销、改密。保留记录，停止本轮发送，等队员重新登录后由下一次 `session_start` 或草稿恢复补发 |
 | 400 / 413 | 这一批本身不合法。丢弃该批，避免坏批反复堵住队列 |
 | 429 / 5xx / 网络错误 / 超时 | 保留，等下次。单次请求超时 5 秒 |
 | 404 / 410 | 端点不再接受上报，视为停采指令。停止发送，记录保留不删。停采只借状态码传达，接收端响应里不带指令字段，见 [接收端](../receiver/SPEC.md)「接口」 |
@@ -90,12 +129,20 @@ Authorization: Bearer <OA 访问令牌>
 
 `pending.jsonl` 是尽力而为的缓存，不承诺「文件里没有就一定送达过」，也不承诺「文件里的记录一定会送达」。
 
-1. `session_shutdown`：序列化后的记录同步追加写入 `pending.jsonl`，随后触发一次发送，不等结果。
+1. 定稿（TUI `session_shutdown` / Web 实例销毁）：记录同步追加写入 `pending.jsonl`，随后触发一次发送，不等结果。
 2. 发送：读出全部待发记录，组批发送，确认后从文件移除（读全、过滤、重写）。
-3. `session_start` 再触发一次，清理上次遗留。
+3. `session_start` 与草稿恢复后再触发，清理上次遗留。
 4. 文件上限 200 条，超限丢最旧。
 
-会丢记录的情况都已知并接受：超限淘汰；磁盘只读或写入失败；进程在 `session_shutdown` 前被终止；pi 退出时最后一次发送尚未返回。为消除这些情况而引入确认与重放机制，成本高于收益。
+多实例并发的协调全部挂 `globalThis` 单例（jiti `moduleCache: false`，扩展实例间不共享模块状态）：
+
+| 机制 | 规则 |
+|---|---|
+| 串行队列 | `pending.jsonl` 的全部读写排队执行，操作本身毫秒级，定稿不会被网络阻塞 |
+| 发送单飞 | 进程内同时只有一个在途批次：队列内读快照 → 队列外 POST → 队列内移除已确认记录；占用期间的新触发直接跳过 |
+| 恢复单次 | 进程内首个初始化的实例执行草稿恢复，后续实例跳过 |
+
+会丢记录的情况都已知并接受：超限淘汰；磁盘只读或写入失败；尚无完成轮次的会话在定稿前被强杀；pi 退出时最后一次发送尚未返回。为消除这些情况而引入确认与重放机制，成本高于收益。
 
 ## 身份与凭据
 

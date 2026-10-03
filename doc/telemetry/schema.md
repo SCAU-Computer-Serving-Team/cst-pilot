@@ -1,6 +1,6 @@
 # 遥测数据契约（会话记录）
 
-状态：会话记录的字段定义，契约版本 0.1，版本号以 [信息收集契约](../contract.md) 为准。更新：2026-09-20。
+状态：会话记录的字段定义，契约版本 0.1，版本号以 [信息收集契约](../contract.md) 为准。更新：2026-10-03。
 
 本文只定义一个东西：会话记录有哪些字段、每个字段的统计口径是什么。共用字段、上传信封、身份来源、计费币种、工具字段形状、不采集清单都写在 [信息收集契约](../contract.md)，本文引用不重抄。
 
@@ -10,16 +10,17 @@
 
 | 键 | 值示例 | 来源 | 用途描述 |
 |---|---|---|---|
-| `sessionId` | `uuid`，pi 生成 | `ctx.sessionManager` | 与本地会话文件对应，便于回查，记全量 |
-| `reason` | `startup｜reload｜new｜resume｜fork` | `session_start` | 区分启动、重载、新建、恢复、分叉 |
-| `endReason` | `quit｜reload｜new｜resume｜fork` | `session_shutdown` | 区分正常退出、切换会话、重载 |
+| `sessionId` | `uuid`，pi 生成 | `ctx.sessionManager` | 与本地会话文件对应，便于回查，记全量。Web 派生产生新 ID，源会话不拆分 |
+| `reason` | `startup｜reload｜new｜resume｜fork` | `session_start` | 区分启动、重载、新建、恢复、分叉。两端取值映射见 [sender](sender/SPEC.md)「TUI 与 Web 会话」 |
+| `endReason` | `quit｜reload｜new｜resume｜fork｜delete｜crash` | 定稿事件 | 区分正常退出、切换会话、重载；`delete` 为 Web 删除会话，`crash` 为强杀后恢复补记 |
+| `channel` | `tui｜web` | 加载环境 | 会话运行在哪端，报表看两端使用占比 |
 
 ### 时间
 
 | 键 | 值示例 | 来源 | 用途描述 |
 |---|---|---|---|
 | `startedAt` | `ISO 8601 带本地时区偏移` | `session_start` | 会话开始时刻，用于时段分析与跨天归属 |
-| `endedAt` | `ISO 8601 带本地时区偏移` | `session_shutdown` | 会话结束时刻 |
+| `endedAt` | `ISO 8601 带本地时区偏移` | 定稿时刻；`crash` 记录取草稿的 `lastTurnEndedAt` | 会话结束时刻。`crash` 时止于最后一个完成轮次 |
 | `durationMs` | `2382000` | `endedAt` − `startedAt` | 会话持续时间，含队员离开的空档 |
 | `activeMs` | `1502000` | 发送端累计：各 `turn_start` 到 `turn_end` 的间隔求和 | Agent 运行时间：模型与工具在跑的时间，不含等待输入。衡量工具负载，不代表队员投入 |
 
@@ -27,9 +28,9 @@
 
 | 键 | 值示例 | 来源 | 用途描述 |
 |---|---|---|---|
-| `prompts` | `9` | `input` 事件（`source = interactive`）计数 | 队员提问次数，使用强度。不用 `agent_start`：自动重试会重复触发，不等于一次提问 |
+| `prompts` | `9` | `input` 事件（`source` 为 `interactive` 或 `rpc`）计数 | 队员提问次数，使用强度。Web 提交走 `rpc`。不用 `agent_start`：自动重试会重复触发，不等于一次提问 |
 | `turns` | `23` | `turn_end` 计数 | 模型往返次数，与请求记录条数对照 |
-| `contextEntries` | `47` | `session_shutdown` 时 `buildContextEntries().length` | 会话结束时的上下文条目数，含压缩摘要与自定义条目。不用 `message_start` 计数：它含 toolResult 事件。上下文规模看 `contextPeak` |
+| `contextEntries` | `47` | 定稿时 `buildContextEntries().length`；`crash` 记录留空 | 会话结束时的上下文条目数，含压缩摘要与自定义条目。不用 `message_start` 计数：它含 toolResult 事件。上下文规模看 `contextPeak` |
 
 ### 模型
 
@@ -138,6 +139,7 @@
   "recordId": "0f3a91c47bd2e5a8",
   "kitVersion": "0.3.1",
   "sessionId": "1f2e8a3b",
+  "channel": "tui",
   "reason": "startup",
   "endReason": "quit",
   "startedAt": "2026-09-16T14:02:11+08:00",
