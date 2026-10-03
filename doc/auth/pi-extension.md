@@ -45,7 +45,7 @@ TUI 与 Web UI 共用同一个 `login()`。设备码信息里除 `verificationUr
 
 | provider 字段 | 值 |
 |---|---|
-| `baseUrl` | `https://cstoa.top/api/agent/llm/v1` |
+| `baseUrl` | `https://www.cstoa.top/api/agent/llm/v1` |
 | `api` | `openai-completions` |
 | `models` | OA 网关提供的可用模型清单 |
 | `oauth.getApiKey` | `(credentials) => credentials.access` |

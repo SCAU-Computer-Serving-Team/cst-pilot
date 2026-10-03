@@ -18,8 +18,8 @@ OAuth 负责队员登录认证和接入团队模型服务。登录态随 U 盘�
 |---|---|
 | 授权协议 | OAuth 2.0 设备授权流，RFC 8628 |
 | 授权主体 | 队员；机主不是 OA 用户 |
-| 手机入口 | `https://cstoa.top/oauth/device` |
-| 模型端点 | `https://cstoa.top/api/agent/llm/v1` |
+| 手机入口 | `https://www.cstoa.top/oauth/device` |
+| 模型端点 | `https://www.cstoa.top/api/agent/llm/v1` |
 | 模型权限 | `llm:chat`，按队员本人额度使用 |
 | 用量归属 | 队员个人额度，标记为「维修」用途 |
 | 授权界面 | 按形态显示，见「登录形态」；不自动打开机主浏览器 |
