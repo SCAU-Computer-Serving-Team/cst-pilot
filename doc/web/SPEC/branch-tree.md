@@ -1,8 +1,8 @@
 # 分支树
 
-状态：行结构已按 pi TUI 规则重画并对齐实现，页面已接入接口。更新：2026-10-02。
+状态：行结构已按 pi TUI 规则重画并对齐实现，页面已接入接口。更新：2026-10-03。
 
-本文定义分支树视图 `/s/<id>/tree` 的呈现与交互。规则直接对齐 pi TUI 的 `TreeList`：`agent/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tree-selector.js` 的 `flattenTree`、`recalculateVisualStructure` 与 `isFoldable`。命令承载见[命令与功能对应](commands.md)，接口见[页面地址与接口设计](app-router.md)，视觉取值见 [DESIGN.md](../../../DESIGN.md)。画布：`src/web/design/cst-pilot-web.pen` 的「分支树」浅深两版与「分支总结」四态（确认、自定义提示词、生成中、完成，各浅深两版）。
+本文定义分支树视图 `/s/<id>/tree` 的呈现与交互。规则直接对齐 pi TUI 的 `TreeList`：`agent/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/components/tree-selector.js` 的 `flattenTree`、`recalculateVisualStructure` 与 `isFoldable`。命令承载见[命令与功能对应](commands.md)，接口见[页面地址与接口设计](app-router.md)，视觉取值见 [DESIGN.md](../../../DESIGN.md)。画布：`src/web/design/cst-pilot-web.pen` 的「分支树」浅深两版、「消息弹窗」浅深两版与「分支总结」四态（确认、自定义提示词、生成中、完成，各浅深两版）。
 
 ## 入口
 
@@ -37,7 +37,17 @@
 - 隐藏无正文的 assistant 消息；错误、中止与当前叶条目除外。
 - **被隐藏条目的子条目挂到最近的可见祖先**，层级与连接符都按可见树重算。所以隐藏条目会改变分叉：两个子条目藏掉一个，父条目就不再是分支点。
 
-视图过滤的其他档位（无工具、仅用户、仅标记、全部）画布未画，待定。
+视图过滤的其他档位（无工具、仅用户、仅标记、全部）语义与 TUI 的 `filterMode` 一一对应：
+
+| 档位 | 规则 |
+|---|---|
+| 默认视图 | 隐藏设置类条目 |
+| 无工具 | 默认再藏工具结果（`toolResult`） |
+| 仅用户 | 只留用户消息 |
+| 仅标记 | 只留有标记（label）的条目 |
+| 全部 | 设置类与工具结果都可见 |
+
+无正文 assistant 的隐藏在全部档位生效（错误、中止与当前叶除外）。工具栏下拉与 `Ctrl+O`（`Shift+Ctrl+O` 反向）都能换档，循环顺序同上表；换档时清空折叠集合。选中档持久化到本机（`localStorage`），下次进入树页沿用。被隐藏条目的子条目同样挂到最近的可见祖先，层级按可见树重算。
 
 ## 排序
 
@@ -102,6 +112,21 @@ TUI 用 `├─` `└─` `│` 三个字符画这些位置；Web 用方块与�
 ### 当前位置
 
 当前叶条目所在行整行加底色（浅色 `#EAEAEA`，深色 `#242C2F`），右端显示「当前位置」（12px，浅色 `#0665BE`，深色 `#77B4FF`）。工具栏右端计数为当前叶的可见行序号与可见总数（如 `17 / 20 条`）。
+
+## 选中与消息弹窗
+
+点击一行或键盘游标停在行上按 Enter 都会选中该行。选中当前叶所在行（位置没有变化）时不弹选择对话框，只在页面底部居中给出消息弹窗「你已经在本消息处」，2.6 秒后自动消失；选中其余行弹出分支总结的选择对话框，见 [分支总结](branch-summary.md)。
+
+| 消息弹窗元素 | 取值 |
+|---|---|
+| 位置 | 页面底部居中，距底 32 |
+| 尺寸 | 高 44、内边距 0 16，宽度随文案 |
+| 卡片 | 圆角 16、1px 中性 6 描边、投影 0,8 blur 24 中性 12 8% |
+| 底色 | 浅色 `--chat-row` 白；深色中性 3 `#131A1D` |
+| 内容 | 图标 18 中性 11（lucide `info`）+ 文字 16 正文色，相隔 8 |
+| 动效 | 进场 250ms 自下方 8px 淡入；自动消失不做过场 |
+
+键盘操作：↑/↓ 移动游标（跟随当前叶起算），Enter 选中游标行，Ctrl+O 循环视图过滤（Shift 反向），Esc 退出树页回到会话页 `/s/<id>`（与关闭按钮一致）；输入框、下拉与选择对话框打开时方向键、Enter 与 Esc 由对应控件接管，其中下拉弹层打开时 Esc 先关弹层。
 
 ## 验证
 

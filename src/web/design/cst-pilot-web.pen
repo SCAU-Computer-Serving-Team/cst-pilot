@@ -333,6 +333,67 @@
                       "fontWeight": "normal"
                     }
                   ]
+                },
+                {
+                  "type": "frame",
+                  "id": "d7b8y1",
+                  "name": "一周内分组",
+                  "width": "fill_container",
+                  "padding": [
+                    16,
+                    12,
+                    4,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "lnyy9v",
+                      "name": "一周内",
+                      "fill": "#5f676c",
+                      "content": "一周内",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "y7nx1x",
+                  "name": "A 会话 浏览器经常无响应",
+                  "context": "浅色侧栏的悬停底色。用无偏灰白 #EAEAEA，与聊天页选中会话、悬停面板选中行同一个值；不用中性4 #E3ECF1，因为它带蓝调。",
+                  "width": "fill_container",
+                  "fill": "#EAEAEA",
+                  "cornerRadius": "$radius-row",
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "ogczsv",
+                      "name": "图标",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "square-pen",
+                      "library": "lucide",
+                      "fill": "#1a2024"
+                    },
+                    {
+                      "type": "text",
+                      "id": "1utmd1",
+                      "name": "文字",
+                      "fill": "#1a2024",
+                      "content": "浏览器经常无响应",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 20,
+                      "fontWeight": "normal"
+                    }
+                  ]
                 }
               ]
             },
@@ -1031,6 +1092,66 @@
                       "content": "开机要等三分钟",
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "news6p",
+                  "name": "一周内分组",
+                  "width": "fill_container",
+                  "padding": [
+                    16,
+                    12,
+                    4,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "q6m1ys",
+                      "name": "一周内",
+                      "fill": "#aab3b7",
+                      "content": "一周内",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "2z7sra",
+                  "name": "A 会话 浏览器经常无响应",
+                  "width": "fill_container",
+                  "fill": "#1d2428",
+                  "cornerRadius": "$radius-row",
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "qkocez",
+                      "name": "图标",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "square-pen",
+                      "library": "lucide",
+                      "fill": "#e0eaee"
+                    },
+                    {
+                      "type": "text",
+                      "id": "ye1isi",
+                      "name": "文字",
+                      "fill": "#e0eaee",
+                      "content": "浏览器经常无响应",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 20,
                       "fontWeight": "normal"
                     }
                   ]
@@ -1735,6 +1856,66 @@
                       "content": "开机要等三分钟",
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "z2wr6r",
+                  "name": "一周内分组",
+                  "width": "fill_container",
+                  "padding": [
+                    16,
+                    12,
+                    4,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "1mulnu",
+                      "name": "一周内",
+                      "fill": "#646464",
+                      "content": "一周内",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "kpxq85",
+                  "name": "A 会话 浏览器经常无响应",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "cornerRadius": "$radius-row",
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "wbjyhx",
+                      "name": "图标",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "square-pen",
+                      "library": "lucide",
+                      "fill": "#202020"
+                    },
+                    {
+                      "type": "text",
+                      "id": "cdmnie",
+                      "name": "文字",
+                      "fill": "#202020",
+                      "content": "浏览器经常无响应",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 20,
                       "fontWeight": "normal"
                     }
                   ]
@@ -4951,6 +5132,66 @@
                       "content": "开机要等三分钟",
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "xhxvod",
+                  "name": "一周内分组",
+                  "width": "fill_container",
+                  "padding": [
+                    16,
+                    12,
+                    4,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "os3dcv",
+                      "name": "一周内",
+                      "fill": "#AAB3B7",
+                      "content": "一周内",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "kgq5fn",
+                  "name": "A 会话 浏览器经常无响应",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "cornerRadius": "$radius-row",
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "opx24o",
+                      "name": "图标",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "square-pen",
+                      "library": "lucide",
+                      "fill": "#FFFFFF"
+                    },
+                    {
+                      "type": "text",
+                      "id": "j4sszz",
+                      "name": "文字",
+                      "fill": "#FFFFFF",
+                      "content": "浏览器经常无响应",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 20,
                       "fontWeight": "normal"
                     }
                   ]
@@ -8585,6 +8826,66 @@
                       "content": "开机要等三分钟",
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "06iesk",
+                  "name": "一周内分组",
+                  "width": "fill_container",
+                  "padding": [
+                    16,
+                    12,
+                    4,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "h9md5t",
+                      "name": "一周内",
+                      "fill": "#5f676c",
+                      "content": "一周内",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "qi6tzw",
+                  "name": "A 会话 浏览器经常无响应",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "cornerRadius": "$radius-row",
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "t29i5r",
+                      "name": "图标",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "square-pen",
+                      "library": "lucide",
+                      "fill": "#1a2024"
+                    },
+                    {
+                      "type": "text",
+                      "id": "h4tktm",
+                      "name": "文字",
+                      "fill": "#1a2024",
+                      "content": "浏览器经常无响应",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 20,
                       "fontWeight": "normal"
                     }
                   ]
@@ -15174,6 +15475,66 @@
                       "content": "开机要等三分钟",
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "bzrcso",
+                  "name": "一周内分组",
+                  "width": "fill_container",
+                  "padding": [
+                    16,
+                    12,
+                    4,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "aukb7j",
+                      "name": "一周内",
+                      "fill": "#AAB3B7",
+                      "content": "一周内",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "q5wb9x",
+                  "name": "A 会话 浏览器经常无响应",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "cornerRadius": "$radius-row",
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "yo784q",
+                      "name": "图标",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "square-pen",
+                      "library": "lucide",
+                      "fill": "#E0EAEE"
+                    },
+                    {
+                      "type": "text",
+                      "id": "4of638",
+                      "name": "文字",
+                      "fill": "#E0EAEE",
+                      "content": "浏览器经常无响应",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 20,
                       "fontWeight": "normal"
                     }
                   ]
@@ -22038,18 +22399,17 @@
       "name": "命令与技能补全 · 浅色",
       "context": "输入 / 弹出补全面板：命令与技能同一列表，每行图标、名称、说明。↑↓ 移动，Enter 选中后折叠成输入框内标记，不立即执行。",
       "width": 1176,
-      "height": 446,
       "fill": "#FFFFFF",
       "cornerRadius": 16,
       "layout": "vertical",
-      "gap": 4,
+      "gap": 8,
       "padding": 16,
       "children": [
         {
           "type": "frame",
           "id": "BhxUd",
           "name": "补全面板 · 命令与技能 v2",
-          "context": "定宽 400 左对齐悬浮于输入框上方；名称列宽 104，说明紧邻；选中行底 #E3ECF1",
+          "context": "定宽 400 左对齐悬浮于输入框上方；名称列宽 104，说明紧邻；选中行底 #EAEAEA",
           "width": 400,
           "fill": "#FFFFFF",
           "cornerRadius": 12,
@@ -22098,16 +22458,17 @@
               "type": "frame",
               "id": "mTFom",
               "name": "行 · compact",
-              "context": "行高 32，圆角 6，选中底 #E3ECF1",
+              "context": "行高 32，圆角 6，选中底 #EAEAEA",
               "width": "fill_container",
               "height": 32,
-              "fill": "#E3ECF1",
+              "fill": "#EAEAEA",
               "cornerRadius": 6,
               "gap": 8,
               "padding": [
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -22134,7 +22495,10 @@
                   "id": "Q56z27",
                   "name": "说明",
                   "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "压缩上下文",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -22145,7 +22509,7 @@
               "type": "frame",
               "id": "fVuoU",
               "name": "行 · fork",
-              "context": "行高 32，圆角 6，选中底 #E3ECF1",
+              "context": "行高 32，圆角 6，选中底 #EAEAEA",
               "width": "fill_container",
               "height": 32,
               "fill": "#FFFFFF00",
@@ -22155,6 +22519,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -22181,7 +22546,10 @@
                   "id": "AK0rt",
                   "name": "说明",
                   "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "派生当前会话",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -22192,7 +22560,7 @@
               "type": "frame",
               "id": "vtO54",
               "name": "行 · tree",
-              "context": "行高 32，圆角 6，选中底 #E3ECF1",
+              "context": "行高 32，圆角 6，选中底 #EAEAEA",
               "width": "fill_container",
               "height": 32,
               "fill": "#FFFFFF00",
@@ -22202,6 +22570,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -22228,7 +22597,10 @@
                   "id": "EWKaO",
                   "name": "说明",
                   "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "打开分支树",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -22264,7 +22636,7 @@
               "type": "frame",
               "id": "K9m8u",
               "name": "行 · disk",
-              "context": "行高 32，圆角 6，选中底 #E3ECF1",
+              "context": "行高 32，圆角 6，选中底 #EAEAEA",
               "width": "fill_container",
               "height": 32,
               "fill": "#FFFFFF00",
@@ -22274,6 +22646,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -22300,7 +22673,10 @@
                   "id": "TUsw8",
                   "name": "说明",
                   "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "磁盘容量、型号与健康",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -22311,7 +22687,7 @@
               "type": "frame",
               "id": "a1uYx",
               "name": "行 · driver",
-              "context": "行高 32，圆角 6，选中底 #E3ECF1",
+              "context": "行高 32，圆角 6，选中底 #EAEAEA",
               "width": "fill_container",
               "height": 32,
               "fill": "#FFFFFF00",
@@ -22321,6 +22697,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -22347,7 +22724,10 @@
                   "id": "E8kpuF",
                   "name": "说明",
                   "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "设备识别与驱动状态",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -22358,7 +22738,7 @@
               "type": "frame",
               "id": "J4GzF",
               "name": "行 · eventlog",
-              "context": "行高 32，圆角 6，选中底 #E3ECF1",
+              "context": "行高 32，圆角 6，选中底 #EAEAEA",
               "width": "fill_container",
               "height": 32,
               "fill": "#FFFFFF00",
@@ -22368,6 +22748,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -22394,7 +22775,10 @@
                   "id": "rhGBi",
                   "name": "说明",
                   "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "崩溃、蓝屏与服务历史",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -22405,7 +22789,7 @@
               "type": "frame",
               "id": "wGEP9",
               "name": "行 · ls",
-              "context": "行高 32，圆角 6，选中底 #E3ECF1",
+              "context": "行高 32，圆角 6，选中底 #EAEAEA",
               "width": "fill_container",
               "height": 32,
               "fill": "#FFFFFF00",
@@ -22415,6 +22799,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -22441,7 +22826,10 @@
                   "id": "PqqSc",
                   "name": "说明",
                   "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "目录索引与文件列表",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -22452,7 +22840,7 @@
               "type": "frame",
               "id": "mCIJ1",
               "name": "行 · runbook",
-              "context": "行高 32，圆角 6，选中底 #E3ECF1",
+              "context": "行高 32，圆角 6，选中底 #EAEAEA",
               "width": "fill_container",
               "height": 32,
               "fill": "#FFFFFF00",
@@ -22462,6 +22850,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -22488,7 +22877,10 @@
                   "id": "DFqgg",
                   "name": "说明",
                   "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "手动修复命令清单",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -22499,7 +22891,7 @@
               "type": "frame",
               "id": "NBD1f",
               "name": "行 · startup",
-              "context": "行高 32，圆角 6，选中底 #E3ECF1",
+              "context": "行高 32，圆角 6，选中底 #EAEAEA",
               "width": "fill_container",
               "height": 32,
               "fill": "#FFFFFF00",
@@ -22509,6 +22901,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -22535,7 +22928,10 @@
                   "id": "L2HJmT",
                   "name": "说明",
                   "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "开机启动项",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -22546,7 +22942,7 @@
               "type": "frame",
               "id": "PpU5m",
               "name": "行 · sys",
-              "context": "行高 32，圆角 6，选中底 #E3ECF1",
+              "context": "行高 32，圆角 6，选中底 #EAEAEA",
               "width": "fill_container",
               "height": 32,
               "fill": "#FFFFFF00",
@@ -22556,6 +22952,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -22582,59 +22979,13 @@
                   "id": "S5YWuT",
                   "name": "说明",
                   "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "系统概览",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
-                }
-              ]
-            },
-            {
-              "type": "frame",
-              "id": "q6Uh2s",
-              "name": "提示脚",
-              "width": "fill_container",
-              "layout": "vertical",
-              "gap": 4,
-              "padding": [
-                4,
-                2,
-                0,
-                2
-              ],
-              "children": [
-                {
-                  "type": "frame",
-                  "id": "F1haSp",
-                  "name": "发丝线",
-                  "width": "fill_container",
-                  "height": 1,
-                  "fill": "#F0F0F0"
-                },
-                {
-                  "type": "frame",
-                  "id": "V4NNCv",
-                  "name": "提示行",
-                  "width": "fill_container",
-                  "layout": "vertical",
-                  "padding": [
-                    2,
-                    0,
-                    2,
-                    6
-                  ],
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "RdCWB",
-                      "name": "快捷键提示",
-                      "fill": "#646464",
-                      "content": "↑↓ 选择 · 回车选中 · Esc 关闭",
-                      "fontFamily": "Inter",
-                      "fontSize": 11,
-                      "fontWeight": "normal"
-                    }
-                  ]
                 }
               ]
             }
@@ -22918,7 +23269,7 @@
       "fill": "#FFFFFF",
       "cornerRadius": 16,
       "layout": "vertical",
-      "gap": 4,
+      "gap": 8,
       "padding": 16,
       "children": [
         {
@@ -22974,16 +23325,17 @@
               "type": "frame",
               "id": "fZ8bb",
               "name": "行 · CBS.log",
-              "context": "行高 32，圆角 6，选中底 #E3ECF1",
+              "context": "行高 32，圆角 6，选中底 #EAEAEA",
               "width": "fill_container",
               "height": 32,
-              "fill": "#E3ECF1",
+              "fill": "#EAEAEA",
               "cornerRadius": 6,
               "gap": 8,
               "padding": [
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -23010,7 +23362,10 @@
                   "id": "p5PIu",
                   "name": "说明",
                   "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "C:\\Windows\\Logs",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -23021,7 +23376,7 @@
               "type": "frame",
               "id": "ErMFk",
               "name": "行 · setupapi.dev.log",
-              "context": "行高 32，圆角 6，选中底 #E3ECF1",
+              "context": "行高 32，圆角 6，选中底 #EAEAEA",
               "width": "fill_container",
               "height": 32,
               "fill": "#FFFFFF00",
@@ -23031,6 +23386,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -23057,7 +23413,10 @@
                   "id": "P54EEA",
                   "name": "说明",
                   "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "C:\\Windows\\INF",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -23068,7 +23427,7 @@
               "type": "frame",
               "id": "wD2ex",
               "name": "行 · WindowsUpdate.log",
-              "context": "行高 32，圆角 6，选中底 #E3ECF1",
+              "context": "行高 32，圆角 6，选中底 #EAEAEA",
               "width": "fill_container",
               "height": 32,
               "fill": "#FFFFFF00",
@@ -23078,6 +23437,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -23104,7 +23464,10 @@
                   "id": "GM2wY",
                   "name": "说明",
                   "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "C:\\Windows",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -23115,7 +23478,7 @@
               "type": "frame",
               "id": "AxlMG",
               "name": "行 · 磁盘体检.txt",
-              "context": "行高 32，圆角 6，选中底 #E3ECF1",
+              "context": "行高 32，圆角 6，选中底 #EAEAEA",
               "width": "fill_container",
               "height": 32,
               "fill": "#FFFFFF00",
@@ -23125,6 +23488,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -23151,59 +23515,13 @@
                   "id": "c1Ycs",
                   "name": "说明",
                   "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "outbox\\",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
-                }
-              ]
-            },
-            {
-              "type": "frame",
-              "id": "MjcOz",
-              "name": "提示脚",
-              "width": "fill_container",
-              "layout": "vertical",
-              "gap": 4,
-              "padding": [
-                4,
-                2,
-                0,
-                2
-              ],
-              "children": [
-                {
-                  "type": "frame",
-                  "id": "Spjv9",
-                  "name": "发丝线",
-                  "width": "fill_container",
-                  "height": 1,
-                  "fill": "#F0F0F0"
-                },
-                {
-                  "type": "frame",
-                  "id": "JD45u",
-                  "name": "提示行",
-                  "width": "fill_container",
-                  "layout": "vertical",
-                  "padding": [
-                    2,
-                    0,
-                    2,
-                    6
-                  ],
-                  "children": [
-                    {
-                      "type": "text",
-                      "id": "vqvA3",
-                      "name": "快捷键提示",
-                      "fill": "#646464",
-                      "content": "↑↓ 选择 · 回车引用 · Esc 关闭",
-                      "fontFamily": "Inter",
-                      "fontSize": 11,
-                      "fontWeight": "normal"
-                    }
-                  ]
                 }
               ]
             }
@@ -26381,6 +26699,66 @@
                       "content": "开机要等三分钟",
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "2h99ch",
+                  "name": "一周内分组",
+                  "width": "fill_container",
+                  "padding": [
+                    16,
+                    12,
+                    4,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "xpadri",
+                      "name": "一周内",
+                      "fill": "#646464",
+                      "content": "一周内",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "2xfgde",
+                  "name": "A 会话 浏览器经常无响应",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "cornerRadius": "$radius-row",
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "omxv4r",
+                      "name": "图标",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "square-pen",
+                      "library": "lucide",
+                      "fill": "#202020"
+                    },
+                    {
+                      "type": "text",
+                      "id": "6w7nnk",
+                      "name": "文字",
+                      "fill": "#202020",
+                      "content": "浏览器经常无响应",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 20,
                       "fontWeight": "normal"
                     }
                   ]
@@ -30810,11 +31188,10 @@
       "name": "命令与技能补全 · 深色",
       "context": "深色版。背景 #0B1215、面板与卡片 #131A1D、正文与图标 #FFFFFF、次要 #AAB3B7、描边与分隔线 #2D3438、强调 #7785DE。结构与浅色版一致。",
       "width": 1176,
-      "height": 446,
       "fill": "#0B1215",
       "cornerRadius": 16,
       "layout": "vertical",
-      "gap": 4,
+      "gap": 8,
       "padding": 16,
       "children": [
         {
@@ -30824,7 +31201,7 @@
           "width": 400,
           "fill": "#131A1D",
           "cornerRadius": 12,
-          "stroke": "#4F575B",
+          "stroke": "#2D3438",
           "strokeWidth": 1,
           "effect": {
             "type": "shadow",
@@ -30871,13 +31248,14 @@
               "name": "行 · compact",
               "width": "fill_container",
               "height": 32,
-              "fill": "#1D2428",
+              "fill": "#242C2F",
               "cornerRadius": 6,
               "gap": 8,
               "padding": [
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -30904,7 +31282,10 @@
                   "id": "qGaEQ",
                   "name": "说明",
                   "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "压缩上下文",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -30924,6 +31305,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -30950,7 +31332,10 @@
                   "id": "u8BiK",
                   "name": "说明",
                   "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "派生当前会话",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -30970,6 +31355,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -30996,7 +31382,10 @@
                   "id": "GC6ai",
                   "name": "说明",
                   "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "打开分支树",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -31041,6 +31430,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -31067,7 +31457,10 @@
                   "id": "nSNkZ",
                   "name": "说明",
                   "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "磁盘容量、型号与健康",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -31087,6 +31480,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -31113,7 +31507,10 @@
                   "id": "p6i3O",
                   "name": "说明",
                   "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "设备识别与驱动状态",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -31133,6 +31530,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -31159,7 +31557,10 @@
                   "id": "FEtOE",
                   "name": "说明",
                   "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "崩溃、蓝屏与服务历史",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -31179,6 +31580,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -31205,7 +31607,10 @@
                   "id": "sb5sM",
                   "name": "说明",
                   "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "目录索引与文件列表",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -31225,6 +31630,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -31251,7 +31657,10 @@
                   "id": "rZnsK",
                   "name": "说明",
                   "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "手动修复命令清单",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -31271,6 +31680,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -31297,7 +31707,10 @@
                   "id": "k9slL",
                   "name": "说明",
                   "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "开机启动项",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -31317,6 +31730,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -31343,7 +31757,10 @@
                   "id": "UljUZ",
                   "name": "说明",
                   "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "系统概览",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -31370,7 +31787,7 @@
                   "name": "发丝线",
                   "width": "fill_container",
                   "height": 1,
-                  "fill": "#1D2428"
+                  "fill": "#2D3438"
                 },
                 {
                   "type": "frame",
@@ -31678,7 +32095,7 @@
       "fill": "#0B1215",
       "cornerRadius": 16,
       "layout": "vertical",
-      "gap": 4,
+      "gap": 8,
       "padding": 16,
       "children": [
         {
@@ -31688,7 +32105,7 @@
           "width": 400,
           "fill": "#131A1D",
           "cornerRadius": 12,
-          "stroke": "#4F575B",
+          "stroke": "#2D3438",
           "strokeWidth": 1,
           "effect": {
             "type": "shadow",
@@ -31735,13 +32152,14 @@
               "name": "行 · CBS.log",
               "width": "fill_container",
               "height": 32,
-              "fill": "#1D2428",
+              "fill": "#242C2F",
               "cornerRadius": 6,
               "gap": 8,
               "padding": [
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -31768,7 +32186,10 @@
                   "id": "sCRFB",
                   "name": "说明",
                   "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "C:\\Windows\\Logs",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -31788,6 +32209,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -31814,7 +32236,10 @@
                   "id": "OaUNf",
                   "name": "说明",
                   "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "C:\\Windows\\INF",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -31834,6 +32259,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -31860,7 +32286,10 @@
                   "id": "y9rbH",
                   "name": "说明",
                   "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "C:\\Windows",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -31880,6 +32309,7 @@
                 0,
                 8
               ],
+              "alignItems": "center",
               "children": [
                 {
                   "type": "icon",
@@ -31906,7 +32336,10 @@
                   "id": "uNtuW",
                   "name": "说明",
                   "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
                   "content": "outbox\\",
+                  "textAlign": "right",
                   "fontFamily": "Inter",
                   "fontSize": 12,
                   "fontWeight": "normal"
@@ -31933,7 +32366,7 @@
                   "name": "发丝线",
                   "width": "fill_container",
                   "height": 1,
-                  "fill": "#1D2428"
+                  "fill": "#2D3438"
                 },
                 {
                   "type": "frame",
@@ -44172,6 +44605,66 @@
                       "fontWeight": "normal"
                     }
                   ]
+                },
+                {
+                  "type": "frame",
+                  "id": "qup2w8",
+                  "name": "一周内分组",
+                  "width": "fill_container",
+                  "padding": [
+                    16,
+                    12,
+                    4,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "m86s3w",
+                      "name": "一周内",
+                      "fill": "#AAB3B7",
+                      "content": "一周内",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "855rvk",
+                  "name": "A 会话 浏览器经常无响应",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "cornerRadius": "$radius-row",
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "ebamkn",
+                      "name": "图标",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "square-pen",
+                      "library": "lucide",
+                      "fill": "#E0EAEE"
+                    },
+                    {
+                      "type": "text",
+                      "id": "9ugl5k",
+                      "name": "文字",
+                      "fill": "#E0EAEE",
+                      "content": "浏览器经常无响应",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 20,
+                      "fontWeight": "normal"
+                    }
+                  ]
                 }
               ]
             },
@@ -46097,6 +46590,66 @@
                       "fontWeight": "normal"
                     }
                   ]
+                },
+                {
+                  "type": "frame",
+                  "id": "xjw4qw",
+                  "name": "一周内分组",
+                  "width": "fill_container",
+                  "padding": [
+                    16,
+                    12,
+                    4,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "xr38n3",
+                      "name": "一周内",
+                      "fill": "#646464",
+                      "content": "一周内",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "u1p4hp",
+                  "name": "A 会话 浏览器经常无响应",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "cornerRadius": "$radius-row",
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "bdhsns",
+                      "name": "图标",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "square-pen",
+                      "library": "lucide",
+                      "fill": "#202020"
+                    },
+                    {
+                      "type": "text",
+                      "id": "4424f8",
+                      "name": "文字",
+                      "fill": "#202020",
+                      "content": "浏览器经常无响应",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 20,
+                      "fontWeight": "normal"
+                    }
+                  ]
                 }
               ]
             },
@@ -46327,7 +46880,7 @@
                                 },
                                 {
                                   "type": "text",
-                                  "id": "NvLuN",
+                                  "id": "LI2UI",
                                   "name": "说明",
                                   "fill": "#646464",
                                   "content": "选择浅色、深色或跟随系统。",
@@ -48180,6 +48733,66 @@
                       "fontWeight": "normal"
                     }
                   ]
+                },
+                {
+                  "type": "frame",
+                  "id": "lgcvc1",
+                  "name": "一周内分组",
+                  "width": "fill_container",
+                  "padding": [
+                    16,
+                    12,
+                    4,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "3adtau",
+                      "name": "一周内",
+                      "fill": "#AAB3B7",
+                      "content": "一周内",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "u0pn8a",
+                  "name": "A 会话 浏览器经常无响应",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "cornerRadius": "$radius-row",
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "jyjmdo",
+                      "name": "图标",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "square-pen",
+                      "library": "lucide",
+                      "fill": "#FFFFFF"
+                    },
+                    {
+                      "type": "text",
+                      "id": "he3u18",
+                      "name": "文字",
+                      "fill": "#FFFFFF",
+                      "content": "浏览器经常无响应",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 20,
+                      "fontWeight": "normal"
+                    }
+                  ]
                 }
               ]
             },
@@ -48410,7 +49023,7 @@
                                 },
                                 {
                                   "type": "text",
-                                  "id": "YA27D",
+                                  "id": "a0qYCc",
                                   "name": "说明",
                                   "fill": "#AAB3B7",
                                   "content": "选择浅色、深色或跟随系统。",
@@ -51541,6 +52154,66 @@
                       "fontWeight": "normal"
                     }
                   ]
+                },
+                {
+                  "type": "frame",
+                  "id": "k9nb6p",
+                  "name": "一周内分组",
+                  "width": "fill_container",
+                  "padding": [
+                    16,
+                    12,
+                    4,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "hh7zaz",
+                      "name": "一周内",
+                      "fill": "#646464",
+                      "content": "一周内",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "t1qswz",
+                  "name": "A 会话 浏览器经常无响应",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "cornerRadius": "$radius-row",
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "4wmjw4",
+                      "name": "图标",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "square-pen",
+                      "library": "lucide",
+                      "fill": "#202020"
+                    },
+                    {
+                      "type": "text",
+                      "id": "9y4j9l",
+                      "name": "文字",
+                      "fill": "#202020",
+                      "content": "浏览器经常无响应",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 20,
+                      "fontWeight": "normal"
+                    }
+                  ]
                 }
               ]
             },
@@ -53245,6 +53918,66 @@
                       "content": "开机要等三分钟",
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "fpyvf8",
+                  "name": "一周内分组",
+                  "width": "fill_container",
+                  "padding": [
+                    16,
+                    12,
+                    4,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "m42v3h",
+                      "name": "一周内",
+                      "fill": "#646464",
+                      "content": "一周内",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "flj2uj",
+                  "name": "A 会话 浏览器经常无响应",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "cornerRadius": "$radius-row",
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "wzxz9r",
+                      "name": "图标",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "square-pen",
+                      "library": "lucide",
+                      "fill": "#202020"
+                    },
+                    {
+                      "type": "text",
+                      "id": "tw98jg",
+                      "name": "文字",
+                      "fill": "#202020",
+                      "content": "浏览器经常无响应",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 20,
                       "fontWeight": "normal"
                     }
                   ]
@@ -54965,6 +55698,66 @@
                       "content": "开机要等三分钟",
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "fj248o",
+                  "name": "一周内分组",
+                  "width": "fill_container",
+                  "padding": [
+                    16,
+                    12,
+                    4,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "b8g6ju",
+                      "name": "一周内",
+                      "fill": "#646464",
+                      "content": "一周内",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "6p66u2",
+                  "name": "A 会话 浏览器经常无响应",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "cornerRadius": "$radius-row",
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "g2iuuw",
+                      "name": "图标",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "square-pen",
+                      "library": "lucide",
+                      "fill": "#202020"
+                    },
+                    {
+                      "type": "text",
+                      "id": "pt7iwh",
+                      "name": "文字",
+                      "fill": "#202020",
+                      "content": "浏览器经常无响应",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 20,
                       "fontWeight": "normal"
                     }
                   ]
@@ -56724,6 +57517,66 @@
                       "fontWeight": "normal"
                     }
                   ]
+                },
+                {
+                  "type": "frame",
+                  "id": "21ylcx",
+                  "name": "一周内分组",
+                  "width": "fill_container",
+                  "padding": [
+                    16,
+                    12,
+                    4,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "xz37yd",
+                      "name": "一周内",
+                      "fill": "#AAB3B7",
+                      "content": "一周内",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "vcc17l",
+                  "name": "A 会话 浏览器经常无响应",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "cornerRadius": "$radius-row",
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "55m2iw",
+                      "name": "图标",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "square-pen",
+                      "library": "lucide",
+                      "fill": "#FFFFFF"
+                    },
+                    {
+                      "type": "text",
+                      "id": "wns7im",
+                      "name": "文字",
+                      "fill": "#FFFFFF",
+                      "content": "浏览器经常无响应",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 20,
+                      "fontWeight": "normal"
+                    }
+                  ]
                 }
               ]
             },
@@ -58428,6 +59281,66 @@
                       "content": "开机要等三分钟",
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "pdggye",
+                  "name": "一周内分组",
+                  "width": "fill_container",
+                  "padding": [
+                    16,
+                    12,
+                    4,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "d04yv4",
+                      "name": "一周内",
+                      "fill": "#AAB3B7",
+                      "content": "一周内",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "aq1rj1",
+                  "name": "A 会话 浏览器经常无响应",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "cornerRadius": "$radius-row",
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "mfi6gq",
+                      "name": "图标",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "square-pen",
+                      "library": "lucide",
+                      "fill": "#FFFFFF"
+                    },
+                    {
+                      "type": "text",
+                      "id": "u3hjui",
+                      "name": "文字",
+                      "fill": "#FFFFFF",
+                      "content": "浏览器经常无响应",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 20,
                       "fontWeight": "normal"
                     }
                   ]
@@ -60148,6 +61061,66 @@
                       "content": "开机要等三分钟",
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "geuz6f",
+                  "name": "一周内分组",
+                  "width": "fill_container",
+                  "padding": [
+                    16,
+                    12,
+                    4,
+                    12
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "k8ekjh",
+                      "name": "一周内",
+                      "fill": "#AAB3B7",
+                      "content": "一周内",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 16,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "md029u",
+                  "name": "A 会话 浏览器经常无响应",
+                  "width": "fill_container",
+                  "fill": "#00000000",
+                  "cornerRadius": "$radius-row",
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    12
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "nwou1g",
+                      "name": "图标",
+                      "width": 18,
+                      "height": 18,
+                      "icon": "square-pen",
+                      "library": "lucide",
+                      "fill": "#FFFFFF"
+                    },
+                    {
+                      "type": "text",
+                      "id": "fzexl0",
+                      "name": "文字",
+                      "fill": "#FFFFFF",
+                      "content": "浏览器经常无响应",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 20,
                       "fontWeight": "normal"
                     }
                   ]
@@ -62160,6 +63133,414 @@
                   ]
                 }
               ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "q7WkxL",
+      "x": 8040,
+      "y": 10868,
+      "name": "消息弹窗 · 浅色",
+      "context": "树页选中当前叶（位置未变）时给出的消息弹窗，不出现选择对话框。位于页面底部居中、距底 32；高 44、内边距 0 16、圆角 16、白底、1px 中性 6 描边、投影 0,8 blur 24 中性 12 8%；图标 18 中性 11、文字 16 正文色，图标与文字相隔 8；2.6 秒后自动消失，进场 250ms 自下方 8px 淡入。",
+      "clip": true,
+      "width": 1920,
+      "height": 1080,
+      "fill": "#FAFDFF",
+      "layout": "none",
+      "children": [
+        {
+          "type": "text",
+          "id": "q7WkxLtitle",
+          "x": 36,
+          "y": 28,
+          "name": "标题栏",
+          "fill": "#1A2024",
+          "content": "会话标题 · 分支树",
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 20,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "q7WkxLrow1",
+          "x": 36,
+          "y": 96,
+          "name": "行 · user",
+          "width": 700,
+          "height": 40,
+          "gap": 6,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "q7WkxLi1",
+              "name": "图标",
+              "width": 16,
+              "height": 16,
+              "icon": "user",
+              "library": "lucide",
+              "fill": "#0665BE"
+            },
+            {
+              "type": "text",
+              "id": "q7WkxLt1",
+              "name": "文案",
+              "fill": "#1A2024",
+              "content": "user: 开场",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "q7WkxLrow2",
+          "x": 36,
+          "y": 136,
+          "name": "行 · assistant",
+          "width": 700,
+          "height": 40,
+          "gap": 6,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "q7WkxLi2",
+              "name": "图标",
+              "width": 16,
+              "height": 16,
+              "icon": "bot",
+              "library": "lucide",
+              "fill": "#5F676C"
+            },
+            {
+              "type": "text",
+              "id": "q7WkxLt2",
+              "name": "文案",
+              "fill": "#1A2024",
+              "content": "assistant: 回答 1",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "rectangle",
+          "id": "q7WkxLhl",
+          "x": 0,
+          "y": 176,
+          "name": "当前行底色",
+          "fill": "#EAEAEA",
+          "width": 1920,
+          "height": 40
+        },
+        {
+          "type": "frame",
+          "id": "q7WkxLrow3",
+          "x": 36,
+          "y": 176,
+          "name": "行 · 当前叶",
+          "width": 1848,
+          "height": 40,
+          "gap": 6,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "q7WkxLi3",
+              "name": "图标",
+              "width": 16,
+              "height": 16,
+              "icon": "user",
+              "library": "lucide",
+              "fill": "#0665BE"
+            },
+            {
+              "type": "text",
+              "id": "q7WkxLt3",
+              "name": "文案",
+              "fill": "#1A2024",
+              "content": "user: 消息 A",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "q7WkxLsp",
+              "name": "弹性间距",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "text",
+              "id": "q7WkxLcur",
+              "name": "当前位置",
+              "fill": "#0665BE",
+              "content": "当前位置",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "q7WkxLtoast",
+          "x": 854,
+          "y": 1004,
+          "name": "消息弹窗",
+          "width": 212,
+          "height": 44,
+          "fill": "#FFFFFF",
+          "cornerRadius": 16,
+          "stroke": "#D5DEE3",
+          "strokeWidth": 1,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "color": "#1A202414",
+            "offset": {
+              "x": 0,
+              "y": 8
+            },
+            "blur": 24
+          },
+          "gap": 8,
+          "padding": [
+            0,
+            16
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "q7WkxLti",
+              "name": "图标",
+              "width": 18,
+              "height": 18,
+              "icon": "info",
+              "library": "lucide",
+              "fill": "#5F676C"
+            },
+            {
+              "type": "text",
+              "id": "q7WkxLtt",
+              "name": "文案",
+              "fill": "#1A2024",
+              "content": "你已经在本消息处",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "q7WkxD",
+      "x": 8040,
+      "y": 12568,
+      "name": "消息弹窗 · 深色",
+      "context": "深色版：页面底色中性 1 #060B0E，当前行底色中性 5 #242C2F，「当前位置」#77B4FF；弹窗底中性 3 #131A1D、描边中性 6 #2D3438、文字 #E0EAEE、图标 #AAB3B7，投影同浅色。",
+      "clip": true,
+      "width": 1920,
+      "height": 1080,
+      "fill": "#060B0E",
+      "layout": "none",
+      "children": [
+        {
+          "type": "text",
+          "id": "q7WkxDtitle",
+          "x": 36,
+          "y": 28,
+          "name": "标题栏",
+          "fill": "#E0EAEE",
+          "content": "会话标题 · 分支树",
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 20,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "q7WkxDrow1",
+          "x": 36,
+          "y": 96,
+          "name": "行 · user",
+          "width": 700,
+          "height": 40,
+          "gap": 6,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "q7WkxDi1",
+              "name": "图标",
+              "width": 16,
+              "height": 16,
+              "icon": "user",
+              "library": "lucide",
+              "fill": "#77B4FF"
+            },
+            {
+              "type": "text",
+              "id": "q7WkxDt1",
+              "name": "文案",
+              "fill": "#E0EAEE",
+              "content": "user: 开场",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "q7WkxDrow2",
+          "x": 36,
+          "y": 136,
+          "name": "行 · assistant",
+          "width": 700,
+          "height": 40,
+          "gap": 6,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "q7WkxDi2",
+              "name": "图标",
+              "width": 16,
+              "height": 16,
+              "icon": "bot",
+              "library": "lucide",
+              "fill": "#AAB3B7"
+            },
+            {
+              "type": "text",
+              "id": "q7WkxDt2",
+              "name": "文案",
+              "fill": "#E0EAEE",
+              "content": "assistant: 回答 1",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "rectangle",
+          "id": "q7WkxDhl",
+          "x": 0,
+          "y": 176,
+          "name": "当前行底色",
+          "fill": "#242C2F",
+          "width": 1920,
+          "height": 40
+        },
+        {
+          "type": "frame",
+          "id": "q7WkxDrow3",
+          "x": 36,
+          "y": 176,
+          "name": "行 · 当前叶",
+          "width": 1848,
+          "height": 40,
+          "gap": 6,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "q7WkxDi3",
+              "name": "图标",
+              "width": 16,
+              "height": 16,
+              "icon": "user",
+              "library": "lucide",
+              "fill": "#77B4FF"
+            },
+            {
+              "type": "text",
+              "id": "q7WkxDt3",
+              "name": "文案",
+              "fill": "#E0EAEE",
+              "content": "user: 消息 A",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "q7WkxDsp",
+              "name": "弹性间距",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "text",
+              "id": "q7WkxDcur",
+              "name": "当前位置",
+              "fill": "#77B4FF",
+              "content": "当前位置",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "q7WkxDtoast",
+          "x": 854,
+          "y": 1004,
+          "name": "消息弹窗",
+          "width": 212,
+          "height": 44,
+          "fill": "#131A1D",
+          "cornerRadius": 16,
+          "stroke": "#2D3438",
+          "strokeWidth": 1,
+          "effect": {
+            "type": "shadow",
+            "shadowType": "outer",
+            "color": "#1A202414",
+            "offset": {
+              "x": 0,
+              "y": 8
+            },
+            "blur": 24
+          },
+          "gap": 8,
+          "padding": [
+            0,
+            16
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "q7WkxDti",
+              "name": "图标",
+              "width": 18,
+              "height": 18,
+              "icon": "info",
+              "library": "lucide",
+              "fill": "#AAB3B7"
+            },
+            {
+              "type": "text",
+              "id": "q7WkxDtt",
+              "name": "文案",
+              "fill": "#E0EAEE",
+              "content": "你已经在本消息处",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 16,
+              "fontWeight": "normal"
             }
           ]
         }

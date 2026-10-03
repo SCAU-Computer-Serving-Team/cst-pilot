@@ -7,6 +7,7 @@ import {
 	CornerUpLeft,
 	GitBranch,
 	HardDrive,
+	Info,
 	Minimize2,
 	PencilLine,
 	Search,
@@ -15,7 +16,7 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { apiJson } from "../app/api";
 import { branchSummaryHref } from "../app/branch-summary";
@@ -25,11 +26,15 @@ import {
 	collectToolCalls,
 	foldable,
 	layoutTree,
+	loadViewFilter,
 	matchesSearch,
 	type RowText,
 	rowText,
+	saveViewFilter,
 	slotMark,
 	type TreeRow,
+	VIEW_FILTERS,
+	type ViewFilter,
 } from "../app/branch-tree";
 import { sampleTree } from "../app/branch-tree-sample";
 import { useSessionTree } from "../app/web-state";
@@ -72,19 +77,56 @@ export default function SessionTree() {
 	const [title, setTitle] = useState(preview ? "checkpoint4 UI 精修" : "会话");
 	const [query, setQuery] = useState("");
 	const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
+	const [filter, setFilter] = useState<ViewFilter>(loadViewFilter);
+	// 视图过滤下拉弹层打开中：Esc 先关弹层，不退出树页。
+	const [filterOpen, setFilterOpen] = useState(false);
 	const [choice, setChoice] = useState("");
+	// 键盘光标在三个选项间的位置；对话框打开时重置。
+	const [choiceIndex, setChoiceIndex] = useState(0);
+	const [toast, setToast] = useState("");
 	const [actionError, setActionError] = useState("");
 	// 键盘游标：null 表示跟随当前叶（leafIndex）。
 	const [cursor, setCursor] = useState<number | null>(null);
 	const rowRefs = useRef(new Map<string, HTMLElement>());
+	// 选中一行：当前叶位置不变时只给消息弹窗，否则打开选择对话框。
+	const selectRow = useCallback(
+		(id: string) => {
+			if (preview) return;
+			if (id === leafId) setToast("你已经在本消息处");
+			else setChoice(id);
+		},
+		[preview, leafId],
+	);
+	useEffect(() => {
+		if (!toast) return;
+		const timer = window.setTimeout(() => setToast(""), 2600);
+		return () => window.clearTimeout(timer);
+	}, [toast]);
+	useEffect(() => {
+		if (choice) setChoiceIndex(0);
+	}, [choice]);
+	// 选择对话框的键盘操作：方向键移动光标，Enter 确认，Esc 关闭。
 	useEffect(() => {
 		if (!choice) return;
 		const onKey = (event: KeyboardEvent) => {
-			if (event.key === "Escape") setChoice("");
+			if (event.key === "Escape") {
+				setChoice("");
+				return;
+			}
+			if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+				event.preventDefault();
+				setChoiceIndex((index) => (event.key === "ArrowUp" ? (index + 2) % 3 : (index + 1) % 3));
+				return;
+			}
+			if (event.key === "Enter") {
+				event.preventDefault();
+				const mode = (["none", "summarize", "custom"] as const)[choiceIndex];
+				void choose(mode);
+			}
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [choice]);
+	});
 	useEffect(() => {
 		if (!sessionId || preview) return;
 		let active = true;
@@ -99,7 +141,10 @@ export default function SessionTree() {
 	}, [sessionId, preview]);
 
 	const toolCalls = useMemo(() => collectToolCalls(tree ?? []), [tree]);
-	const allRows = useMemo(() => layoutTree(buildVisibleTree(tree ?? [], leafId), leafId), [tree, leafId]);
+	const allRows = useMemo(
+		() => layoutTree(buildVisibleTree(tree ?? [], leafId, filter), leafId),
+		[tree, leafId, filter],
+	);
 	// 行文案预计算：搜索过滤与渲染复用，避免每次输入都重算整棵树的文案。
 	const rowTexts = useMemo(
 		() => new Map(allRows.map((row) => [row.node.entry.id, rowText(row.node, toolCalls)])),
@@ -113,13 +158,26 @@ export default function SessionTree() {
 	const leafIndex = useMemo(() => rows.findIndex((row) => row.node.entry.id === leafId), [rows, leafId]);
 	const cursorIndex = cursor ?? (leafIndex >= 0 ? leafIndex : rows.length - 1);
 
-	// 方向键移动游标，Enter 打开选择对话框；输入框、下拉与选择对话框打开时不接管。
+	// 方向键移动游标，Enter 选中行；输入框、下拉与选择对话框打开时不接管。
+	// Ctrl+O 循环切换视图过滤（Shift 反向），与 TUI 一致；换档时清空折叠集合。
+	const cycleFilter = useCallback(
+		(step: number) => {
+			const index = VIEW_FILTERS.findIndex((item) => item.id === filter);
+			const next = VIEW_FILTERS[(index + step + VIEW_FILTERS.length) % VIEW_FILTERS.length];
+			setFilter(next.id);
+			saveViewFilter(next.id);
+			setFolded(new Set());
+		},
+		[filter],
+	);
 	useEffect(() => {
 		if (preview) return;
 		const onKey = (event: KeyboardEvent) => {
 			if (choice) return;
 			const target = event.target as HTMLElement | null;
 			if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+			// 行自身聚焦时 Enter 由行的按键处理，避免同一按键选中两次。
+			if (target?.classList.contains("tree-row")) return;
 			if (event.key === "ArrowUp" || event.key === "ArrowDown") {
 				event.preventDefault();
 				setCursor((value) => {
@@ -131,12 +189,23 @@ export default function SessionTree() {
 			}
 			if (event.key === "Enter" && cursorIndex >= 0 && cursorIndex < rows.length) {
 				event.preventDefault();
-				setChoice(rows[cursorIndex].node.entry.id);
+				selectRow(rows[cursorIndex].node.entry.id);
+				return;
+			}
+			if (event.key === "Escape") {
+				if (filterOpen) return;
+				event.preventDefault();
+				navigate(`/s/${sessionId}`);
+				return;
+			}
+			if (event.key.toLowerCase() === "o" && event.ctrlKey && !event.altKey && !event.metaKey) {
+				event.preventDefault();
+				cycleFilter(event.shiftKey ? -1 : 1);
 			}
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [preview, choice, rows, leafIndex, cursorIndex]);
+	}, [preview, choice, rows, leafIndex, cursorIndex, selectRow, cycleFilter, filterOpen, navigate, sessionId]);
 
 	// 游标行滚动到可见区域。
 	useEffect(() => {
@@ -212,17 +281,29 @@ export default function SessionTree() {
 						onChange={(event) => setQuery(event.target.value)}
 					/>
 				</div>
-				<Select aria-label="视图过滤" selectedKey="default" isDisabled className="tree-filter">
+				<Select
+					aria-label="视图过滤"
+					className="tree-filter"
+					selectedKey={filter}
+					onOpenChange={setFilterOpen}
+					onSelectionChange={(key) => {
+						setFilter(key as ViewFilter);
+						saveViewFilter(key as ViewFilter);
+						setFolded(new Set());
+					}}
+				>
 					<Label className="visually-hidden">视图过滤</Label>
 					<Select.Trigger className="tree-filter-trigger">
-						<span>默认视图</span>
+						<span>{VIEW_FILTERS.find((item) => item.id === filter)?.label}</span>
 						<ChevronDown size={14} />
 					</Select.Trigger>
 					<Select.Popover>
 						<ListBox>
-							<ListBox.Item id="default" textValue="默认视图">
-								默认视图
-							</ListBox.Item>
+							{VIEW_FILTERS.map((item) => (
+								<ListBox.Item key={item.id} id={item.id} textValue={item.label}>
+									{item.label}
+								</ListBox.Item>
+							))}
 						</ListBox>
 					</Select.Popover>
 				</Select>
@@ -266,11 +347,9 @@ export default function SessionTree() {
 								className={`tree-row tree-row-${text.kind} ${id === leafId ? "tree-row-current" : ""} ${
 									index === cursorIndex ? "tree-row-cursor" : ""
 								}`}
-								onClick={() => {
-									if (!preview) setChoice(id);
-								}}
+								onClick={() => selectRow(id)}
 								onKeyDown={(event) => {
-									if (!preview && event.key === "Enter" && event.target === event.currentTarget) setChoice(id);
+									if (event.key === "Enter" && event.target === event.currentTarget) selectRow(id);
 								}}
 							>
 								<RowPrefix row={row} />
@@ -326,21 +405,31 @@ export default function SessionTree() {
 							</Button>
 						</div>
 						<div className="summary-dialog-options">
-							<button type="button" className="summary-option" onClick={() => void choose("none")}>
-								<CornerUpLeft size={18} aria-hidden="true" />
-								<span>不总结</span>
-							</button>
-							<button type="button" className="summary-option" onClick={() => void choose("summarize")}>
-								<Sparkles size={18} aria-hidden="true" />
-								<span>总结</span>
-							</button>
-							<button type="button" className="summary-option" onClick={() => void choose("custom")}>
-								<PencilLine size={18} aria-hidden="true" />
-								<span>用自定义提示词总结</span>
-							</button>
+							{[
+								{ mode: "none" as const, icon: CornerUpLeft, label: "不总结" },
+								{ mode: "summarize" as const, icon: Sparkles, label: "总结" },
+								{ mode: "custom" as const, icon: PencilLine, label: "用自定义提示词总结" },
+							].map((option, index) => (
+								<button
+									type="button"
+									key={option.mode}
+									className={`summary-option ${index === choiceIndex ? "summary-option-active" : ""}`}
+									onMouseEnter={() => setChoiceIndex(index)}
+									onClick={() => void choose(option.mode)}
+								>
+									<option.icon size={18} aria-hidden="true" />
+									<span>{option.label}</span>
+								</button>
+							))}
 						</div>
 					</div>
 				</div>
+			)}
+			{toast && (
+				<output className="tree-toast">
+					<Info size={18} aria-hidden="true" />
+					<span>{toast}</span>
+				</output>
 			)}
 		</main>
 	);

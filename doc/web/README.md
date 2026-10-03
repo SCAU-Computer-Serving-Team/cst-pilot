@@ -1,6 +1,6 @@
 # Web 端文档
 
-本页是 Web 文档索引。[MVP](MVP.md) 定义阶段范围，[SPEC](SPEC/) 定义行为与接口草案，[research](research/) 保存依据与实测。视觉规范和画布资产见 [DESIGN.md](../../DESIGN.md)；待验证事项与后续待决项统一列在[待处理议题](../issues.md)，SPEC 与详细设计的分类见该页 [D4](../issues.md#d4-规格与详细设计的分类)。
+本页是 Web 文档索引。[MVP](MVP.md) 定义阶段范围，[SPEC](SPEC/) 定义行为与接口草案，[research](research/) 保存依据与实测。视觉规范和画布资产见 [DESIGN.md](../../DESIGN.md)；待验证事项与后续待决项统一列在[待处理议题](../issues.md)，SPEC 与详细设计的分类见该页[文档分类](../issues.md#规格与详细设计的分类)。
 
 ## SPEC
 

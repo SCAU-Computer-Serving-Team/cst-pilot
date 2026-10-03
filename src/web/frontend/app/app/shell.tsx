@@ -24,10 +24,11 @@ export const sampleSessions = [
 	{ id: "preview", title: "C 盘空间与硬盘信息", group: "今天" },
 	{ id: "fan-preview", title: "风扇狂转还降频", group: "今天" },
 	{ id: "startup-preview", title: "开机要等三分钟", group: "昨天" },
+	{ id: "browser-preview", title: "浏览器经常无响应", group: "一周内" },
 ];
 
 // 画布按日期分组会话列表。
-const sessionGroups = ["今天", "昨天", "更早"];
+const sessionGroups = ["今天", "昨天", "一周内", "更早"];
 const dayGroup = (value?: string) => {
 	const target = value ? new Date(value) : undefined;
 	if (!target || Number.isNaN(target.getTime())) return "更早";
@@ -36,7 +37,7 @@ const dayGroup = (value?: string) => {
 	const day = new Date(target);
 	day.setHours(0, 0, 0, 0);
 	const days = Math.round((today.getTime() - day.getTime()) / 86400000);
-	return days <= 0 ? "今天" : days === 1 ? "昨天" : "更早";
+	return days <= 0 ? "今天" : days === 1 ? "昨天" : days <= 7 ? "一周内" : "更早";
 };
 
 type Theme = "system" | "light" | "dark";

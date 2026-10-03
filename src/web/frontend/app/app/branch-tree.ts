@@ -36,6 +36,37 @@ export type TreeNode = {
 
 const SETTINGS_TYPES = new Set(["label", "custom", "model_change", "thinking_level_change", "session_info"]);
 
+/** 视图过滤档位，与 TUI 的 filterMode 一一对应（ctrl+o 循环切换）。 */
+export type ViewFilter = "default" | "no-tools" | "user-only" | "labeled-only" | "all";
+
+export const VIEW_FILTERS: { id: ViewFilter; label: string }[] = [
+	{ id: "default", label: "默认视图" },
+	{ id: "no-tools", label: "无工具" },
+	{ id: "user-only", label: "仅用户" },
+	{ id: "labeled-only", label: "仅标记" },
+	{ id: "all", label: "全部" },
+];
+
+const FILTER_STORAGE_KEY = "cst-tree-view";
+
+export function loadViewFilter(): ViewFilter {
+	try {
+		const saved = localStorage.getItem(FILTER_STORAGE_KEY);
+		if (saved && VIEW_FILTERS.some((item) => item.id === saved)) return saved as ViewFilter;
+	} catch {
+		/* 隐私模式下 localStorage 不可用时用默认档 */
+	}
+	return "default";
+}
+
+export function saveViewFilter(filter: ViewFilter) {
+	try {
+		localStorage.setItem(FILTER_STORAGE_KEY, filter);
+	} catch {
+		/* 同 loadViewFilter */
+	}
+}
+
 export function textContent(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (!Array.isArray(content)) return "";
@@ -48,9 +79,8 @@ export function textContent(content: unknown): string {
 	return result;
 }
 
-/** 默认视图的可见性：隐藏设置类条目与无正文 assistant（错误、中止与当前叶除外）。 */
+/** 各档通用的可见性：隐藏无正文 assistant（错误、中止与当前叶除外）。设置类条目的隐藏是默认档的过滤，见 visibleByFilter。 */
 export function visibleByDefault(entry: TreeEntry, leafId: string | null): boolean {
-	if (SETTINGS_TYPES.has(entry.type)) return false;
 	if (entry.type === "message" && entry.message?.role === "assistant" && entry.id !== leafId) {
 		const hasText = textContent(entry.message.content).trim().length > 0;
 		const stop = entry.message.stopReason;
@@ -60,11 +90,28 @@ export function visibleByDefault(entry: TreeEntry, leafId: string | null): boole
 	return true;
 }
 
+/** 过滤档位内的可见性。无正文 assistant 的隐藏各档通用，先于档位过滤（与 TUI applyFilter 一致）。 */
+export function visibleByFilter(node: TreeNode, filter: ViewFilter): boolean {
+	const entry = node.entry;
+	switch (filter) {
+		case "user-only":
+			return entry.type === "message" && entry.message?.role === "user";
+		case "no-tools":
+			return !SETTINGS_TYPES.has(entry.type) && !(entry.type === "message" && entry.message?.role === "toolResult");
+		case "labeled-only":
+			return node.label !== undefined;
+		case "all":
+			return true;
+		default:
+			return !SETTINGS_TYPES.has(entry.type);
+	}
+}
+
 /** 过滤不可见条目；被隐藏条目的子条目挂到最近的可见祖先（TUI 的 findVisibleAncestor）。 */
-export function buildVisibleTree(roots: TreeNode[], leafId: string | null): TreeNode[] {
+export function buildVisibleTree(roots: TreeNode[], leafId: string | null, filter: ViewFilter = "default"): TreeNode[] {
 	const attach = (node: TreeNode): TreeNode[] => {
 		const children = node.children.flatMap(attach);
-		return visibleByDefault(node.entry, leafId) ? [{ ...node, children }] : children;
+		return visibleByDefault(node.entry, leafId) && visibleByFilter(node, filter) ? [{ ...node, children }] : children;
 	};
 	return roots.flatMap(attach);
 }

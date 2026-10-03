@@ -157,11 +157,10 @@ const COMPOSER_PROBE = `(async () => {
 		}
 		throw new Error("等待超时：" + label);
 	};
-	await until(() => document.querySelector("textarea.composer-input"), "消息编辑器");
-	const area = document.querySelector("textarea.composer-input");
-	const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
-	setValue.call(area, "/tree");
-	area.dispatchEvent(new Event("input", { bubbles: true }));
+	await until(() => document.querySelector(".composer-input"), "消息编辑器");
+	const area = document.querySelector(".composer-input");
+	area.textContent = "/tree";
+	area.dispatchEvent(new InputEvent("input", { bubbles: true }));
 	await until(() => document.querySelectorAll(".command-suggestions button").length > 0, "命令补全");
 	const labels = [...document.querySelectorAll(".command-suggestions button")].map((button) => button.textContent || "");
 	area.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -420,7 +419,7 @@ test("Web 分支树与 TUI 的树逐行一致", async () => {
 			`输入 /tree 并按回车后的地址：${jump.path}（期望 /s/${session.id}/tree）`,
 			`命令标记残留：${jump.chip ? "有" : "无"}`,
 		);
-		if (jump.path !== `/s/${session.id}/tree` || jump.chip || !jump.labels.some((label) => label.includes("/tree"))) {
+		if (jump.path !== `/s/${session.id}/tree` || jump.chip || !jump.labels.some((label) => label.includes("tree"))) {
 			failed = true;
 		}
 		lines.push("", `截图：${join(evidence, "tree.png")}`, "", failed ? "**结论：不一致**" : "结论：一致");

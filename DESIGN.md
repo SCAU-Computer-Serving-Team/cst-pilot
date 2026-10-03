@@ -103,8 +103,8 @@ omitted:
 | 文件 | 内容 |
 |---|---|
 | [cst-pilot-colors.pen](src/web/design/cst-pilot-colors.pen) | 12 步用途、中性与四组彩色色阶 |
-| [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) | 首页、聊天工作台、登录页、APIKEY 表单、仪表盘与设置页的浅深两版；另含 Provider 下拉、上下文、模型、账号、侧栏会话与消息等悬停面板，输入框补全面板、未发送图片、补全选中标记与排队组件的浅深两版，分支总结的确认、自定义提示词、生成中与完成四态（浅深两版），以及「规范 · 全部令牌」规范总板（尺寸、排版、对齐、状态、交互、动效、页面骨架） |
-| [cst-pilot-tools.pen](src/web/design/cst-pilot-tools.pen) | 工具调用画布。以「聊天工作台 · 浅色」一帧为参照，配工具卡片的三种通用渲染模式、「已发送（等待返回）」状态，以及 `sys overview`、`runbook` 两个例外；浅深两版齐备。逐工具帧只有浅色，深色按三个通用模板与色阶推导 |
+| [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) | 首页、聊天工作台、登录页、APIKEY 表单、仪表盘、设置页与分支树的浅深两版；另含 Provider 下拉、上下文、模型、账号、侧栏会话与消息等悬停面板，输入框补全面板、未发送图片、补全选中标记与排队组件的浅深两版，分支总结的确认、自定义提示词、生成中与完成四态，分支树、消息弹窗与派生选择（各浅深两版），以及「规范 · 全部令牌」规范总板（尺寸、排版、对齐、状态、交互、动效、页面骨架） |
+| [cst-pilot-tools.pen](src/web/design/cst-pilot-tools.pen) | 工具调用画布。以「聊天工作台 · 浅色」一帧为参照，配工具卡片的三种通用渲染模式（各浅深）、折叠层级、等待/成功/失败/降级/回退各态、多列排行行与逐工具示例（含 `sys overview`、`runbook`、`web_search` 与 `read` 图片例外）；逐工具帧只有浅色，深色按三个通用模板与色阶推导 |
 | [heroui-colors.pen](src/web/design/heroui-colors.pen) | HeroUI v3 默认主题对照 |
 | [asset/pencil-heroui.pen](src/web/design/asset/pencil-heroui.pen) | HeroUI 组件参考画布 |
 
@@ -401,15 +401,15 @@ Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用�
 | `--space-section` | 16px | 区块之间 |
 | `--space-group` | 24px | 分组之间、面板外边距 |
 
-命令、技能与文件引用补全的行高为 26px，相邻行间距为 0px。命令与技能分组间距为 4px。补全行的图标位不加内边距，名称和说明的行高为 1；三者在行内居中。
+命令、技能与文件引用补全的行高为 32px，相邻行间距为 2px（组标与行之间同样取 2px，分组不另加间距）。补全行的图标位不加内边距，图标与文字相隔 8px；名称和说明的行高为 1；三者在行内居中。名称不取定宽列，说明统一右对齐（贴行右缘）。
 
 **盒高。** 四档，按用途定死，不由内容撑开。控件纵向内边距一律为 0，居中交给 flex。
 
 | 令牌 | 值 | 用途 |
 |---|---|---|
 | `--control-inline` | 22px | 行内标签、徽标、字段行 |
-| `--control` | 26px | 聊天页操作栏、排队行按钮、补全选中标记、补全行 |
-| `--control-lg` | 32px | 首页操作栏、账号行按钮、下拉选项 |
+| `--control` | 26px | 聊天页操作栏、排队行按钮、补全选中标记 |
+| `--control-lg` | 32px | 首页操作栏、账号行按钮、下拉选项、补全行 |
 | `--control-menu` | 42px | 菜单项、侧栏条目 |
 
 **图标。** 四档，尺寸不小于同行文字。

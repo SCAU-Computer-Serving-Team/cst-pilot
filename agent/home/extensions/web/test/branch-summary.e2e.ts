@@ -140,8 +140,8 @@ const dialogPreamble = `
 		throw new Error("等待超时：" + label);
 	};
 	const setValue = (area, text) => {
-		Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set.call(area, text);
-		area.dispatchEvent(new Event("input", { bubbles: true }));
+		area.textContent = text;
+		area.dispatchEvent(new InputEvent("input", { bubbles: true }));
 	};
 	await until(() => document.querySelectorAll(".tree-row").length > 0, "分支树");
 	const rows = [...document.querySelectorAll(".tree-row")];
@@ -196,7 +196,7 @@ const customProbe = `(async () => {
 	// 等对话流渲染完再数块：否则基线是 0，后面的增量会多算。
 	await until(() => document.querySelector(".turn") || document.querySelector(".assistant-block"), "对话流");
 	const onChat = blocks();
-	const area = document.querySelector("textarea.composer-input");
+	const area = document.querySelector(".composer-input");
 	setValue(area, "保留报错原文与文件路径");
 	await new Promise((resolve) => setTimeout(resolve, 100));
 	area.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -211,7 +211,7 @@ const customProbe = `(async () => {
 		pendingBefore,
 		pendingSeen,
 		tagLeft: !!document.querySelector(".composer-command"),
-		draft: (document.querySelector("textarea.composer-input")?.value || ""),
+		draft: (document.querySelector(".composer-input")?.textContent || ""),
 		blocks: blocks(),
 		grew: blocks() - onChat,
 		path: location.pathname,
@@ -557,6 +557,8 @@ test("生成中提交树导航：先停生成再导航，不再 409", async () =
 				},
 				body: input === undefined ? undefined : JSON.stringify(input),
 			});
+		// 与树对照测试一致：先登录 probe provider 再建会话，否则请求会路由到本机全局配置的真实模型。
+		assert.equal((await call("/api/auth/probe/api-key", "PUT", { key: "mock-secret" })).status, 200, "登录失败");
 		const session = (await (await call("/api/sessions", "POST", {})).json()) as { id: string };
 		const detail = async () =>
 			(await (await fetch(`${origin}/api/sessions/${session.id}`)).json()) as {
