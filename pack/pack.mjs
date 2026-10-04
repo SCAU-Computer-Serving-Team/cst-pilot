@@ -20,7 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { supplementGoFlash } from "./model-catalog.mjs";
-import { RELEASE_SETTINGS } from "./release-settings.mjs";
+import { RELEASE_SETTINGS, RELEASE_TELEMETRY } from "./release-settings.mjs";
 import { checkReleaseContent, checkReleaseTree, sha256, verifyManifest } from "./release-checks.mjs";
 import { smokeRelease } from "./smoke.mjs";
 
@@ -297,8 +297,9 @@ fs.cpSync(path.join(scriptDir, "licenses"), path.join(out, "licenses"), { recurs
 
 // ---------- [4] 发行 settings.json ----------
 
-banner("生成发行 settings.json（本地路径扩展 + 遥测关闭）");
+banner("生成发行 settings.json 与 telemetry.json（pi 自带遥测关闭，项目遥测开启）");
 fs.writeFileSync(path.join(out, "agent", "home", "settings.json"), JSON.stringify(RELEASE_SETTINGS, null, 2) + "\n");
+fs.writeFileSync(path.join(out, "agent", "home", "telemetry.json"), JSON.stringify(RELEASE_TELEMETRY, null, 2) + "\n");
 
 fs.writeFileSync(path.join(out, "BUILD-INFO.json"), JSON.stringify({
   version: CONFIG.VERSION, piVersion: CONFIG.PI_VERSION, piExeSha256: CONFIG.PI_EXE_SHA256,

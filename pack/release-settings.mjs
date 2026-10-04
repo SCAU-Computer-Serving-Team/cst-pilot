@@ -11,3 +11,10 @@ export const RELEASE_SETTINGS = {
   theme: "dark",
   packages: ["./packages/pi-fff", "./packages/pi-open-tui", "./packages/pi-web-access"],
 };
+
+// 项目遥测与 pi 自带 install telemetry 是两条独立链路；后者始终关闭。
+export const RELEASE_TELEMETRY = {
+  enabled: true,
+  endpoint: "https://www.cstoa.top/api/telemetry",
+  authProvider: "cstoa",
+};

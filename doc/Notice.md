@@ -64,4 +64,4 @@ WizTree 在 NTFS 上可直读 MFT，其他文件系统采用目录遍历。`disk
 
 ## 本项目遥测独立于 pi 自带遥测
 
-`pi.cmd` 的 `PI_OFFLINE=1` 只关 pi 自身的启动联网（版本检查、包更新、模型目录、pi 自带遥测），不拦扩展请求。本项目遥测计划由 `agent\home\extensions\telemetry\` 扩展提供，目前仅有币种映射文件；采集与上报尚未实现。计划中的开关与端点位于 `agent\home\telemetry.json`，与 pi 自带遥测互不影响。pi 自带遥测已由 `PI_OFFLINE=1` 与 `settings.json` 的 `enableInstallTelemetry=false` 关闭。
+`pi.cmd` 的 `PI_OFFLINE=1` 只关 pi 自身的启动联网（版本检查、包更新、模型目录、pi 自带遥测），不拦扩展请求。项目遥测由 `agent\home\extensions\telemetry\` 扩展提供，发行包生成 `agent\home\telemetry.json`，上报端点为 `https://www.cstoa.top/api/telemetry`。它与 pi 自带遥测互不影响；pi 自带遥测已由 `PI_OFFLINE=1` 与 `settings.json` 的 `enableInstallTelemetry=false` 关闭。
