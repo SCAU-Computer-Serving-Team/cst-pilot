@@ -1,7 +1,7 @@
 import { Button, Checkbox, Input, Label, ListBox, Select, TextField } from "@heroui/react";
 import { Check, ChevronDown, Eye, EyeOff } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import {
 	apiJson,
@@ -40,6 +40,7 @@ export default function Login() {
 	const [expiresAt, setExpiresAt] = useState(0);
 	const [qrBusy, setQrBusy] = useState(false);
 	const [clock, setClock] = useState(() => Date.now());
+	const acceptedDeviceCodeRef = useRef("");
 
 	useEffect(() => {
 		const timer = window.setInterval(() => setClock(Date.now()), 1000);
@@ -107,6 +108,8 @@ export default function Login() {
 		const events = new EventSource("/api/events");
 		const acceptDeviceCode = (value: OauthDeviceCode) => {
 			if (disposed) return;
+			if (acceptedDeviceCodeRef.current === value.userCode) return;
+			acceptedDeviceCodeRef.current = value.userCode;
 			const seconds = value.expiresInSeconds || 300;
 			setDeviceCode(value);
 			setExpiresAt(Date.now() + seconds * 1000);
@@ -169,6 +172,7 @@ export default function Login() {
 		}, 2000);
 		return () => {
 			disposed = true;
+			acceptedDeviceCodeRef.current = "";
 			window.clearInterval(poll);
 			events.close();
 		};
@@ -182,6 +186,7 @@ export default function Login() {
 			await cancelOauthLogin(oauthProvider).catch(() => undefined);
 			setDeviceCode(null);
 			setExpiresAt(0);
+			acceptedDeviceCodeRef.current = "";
 			setQrState("starting");
 			const result = await startOauthLogin(oauthProvider);
 			if (result.deviceCode) {
@@ -199,6 +204,7 @@ export default function Login() {
 
 	const cancelQr = async () => {
 		if (!oauthProvider) return;
+		acceptedDeviceCodeRef.current = "";
 		setQrState("cancelled");
 		setDeviceCode(null);
 		await cancelOauthLogin(oauthProvider).catch(() => undefined);
