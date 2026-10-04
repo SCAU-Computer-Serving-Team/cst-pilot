@@ -148,7 +148,7 @@ Authorization: Bearer <OA 访问令牌>
 
 ## 身份与凭据
 
-**待 OAuth 落地。** 本节等 OAuth 实现完成后再定稿，以下为暂定。
+OAuth 已落地；发送端只被动读取 `auth.json` 中的团队 provider 凭据，不刷新、不写回。
 
 记录里不带任何身份字段，队员归属由接收端从上传凭据解析。
 
@@ -177,4 +177,4 @@ Authorization: Bearer <OA 访问令牌>
 
 `pi.cmd` 的 `PI_OFFLINE=1` 只关 pi 自身启动联网，不拦扩展请求（已在 0.85.1 的 dist 核对）。`settings.json` 的 `enableInstallTelemetry: false` 关的是 pi 自带遥测，与本扩展无关。
 
-发行改动（待做）：`pack/pack.mjs` 的 `REPO_HOME_FILES` 白名单目前是 `APPEND_SYSTEM.md`、`models-store.json`、`open-tui.json`，`telemetry.json` 不在其中，需要加进白名单，或像 `settings.json` 一样在打包时生成。`agent/home/extensions` 整目录复制，扩展代码与 `currency.json` 不用改白名单。
+发行配置：`pack/release-settings.mjs` 提供唯一取值，`pack/pack.mjs` 在发行树生成 `agent/home/telemetry.json`。`agent/home/extensions` 整目录复制，扩展代码与 `currency.json` 不用改白名单。
