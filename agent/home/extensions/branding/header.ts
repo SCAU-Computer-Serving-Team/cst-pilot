@@ -732,6 +732,10 @@ export function installBrandingHeader(pi: ExtensionAPI, ctx: ExtensionContext): 
 	return () => {
 		header?.dispose();
 		header = undefined;
-		ctx.ui.setHeader(undefined);
+		try {
+			ctx.ui.setHeader(undefined);
+		} catch {
+			// 会话替换后旧 ctx 会失效；清理只做 best-effort，不能让进程退出。
+		}
 	};
 }
