@@ -47,7 +47,7 @@ Authorization: Bearer <OA 访问令牌>
 
 ## 身份来源
 
-**待 OAuth 落地。** 本节等 OAuth 实现完成后再定稿，以下为暂定。
+**待 OA 内省接口。** OAuth 已落地，本节字段已定；接收端换取身份的接口待 OA 提供，见 [telemetry/receiver/SPEC.md](telemetry/receiver/SPEC.md)「依赖 OA 内省接口」。
 
 身份由上传凭据决定，客户端不计算、不携带。
 
@@ -58,7 +58,7 @@ Authorization: Bearer <OA 访问令牌>
 | `receivedAt` | 接收端时钟 | 时间基准，客户端时钟不可信 |
 | `ip` | 接收端从连接获取 | 来源统计。只存网段，见 [telemetry/receiver/SPEC.md](telemetry/receiver/SPEC.md)「接口」 |
 
-上传凭据是队员登录得到的 [OA 访问令牌](auth/README.md)，与模型调用共用同一个令牌。接收端不自己验签（令牌是 HMAC 签名，密钥不能外发），向 OA 内省令牌换取身份，取出 `mid` 与 `device_id` 写入记录；该接口待 OA 实现，见 [telemetry/receiver/SPEC.md](telemetry/receiver/SPEC.md)「依赖 OAuth 实现」。上传不设独立作用域：采不采由团队规定，不作为队员的可选项。
+上传凭据是队员登录得到的 [OA 访问令牌](auth/README.md)，与模型调用共用同一个令牌。接收端不自己验签（令牌是 HMAC 签名，密钥不能外发），向 OA 内省令牌换取身份，取出 `mid` 与 `device_id` 写入记录；该接口待 OA 实现，见 [telemetry/receiver/SPEC.md](telemetry/receiver/SPEC.md)「依赖 OA 内省接口」。上传不设独立作用域：采不采由团队规定，不作为队员的可选项。
 
 这条路线有两个结果：
 

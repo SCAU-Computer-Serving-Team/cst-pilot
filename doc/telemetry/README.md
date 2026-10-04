@@ -1,6 +1,6 @@
 # 使用情况遥测
 
-状态：sender 与 receiver 已实现并经本机 e2e 验证；部署与 OAuth 接入未做。契约版本 0.1。更新：2026-10-03。
+状态：sender 与 receiver 已实现并经本机 e2e 验证，OAuth 已落地；部署与 OA 内省接口未做。契约版本 0.1。更新：2026-10-04。
 
 遥测系统是工具包使用数据的收集管线：发送端在队员机器上采集并上报，接收端在队伍服务器上存储，供查询与报表。它回答一个问题：队员的工具包实际用得怎么样。
 
@@ -40,17 +40,15 @@ L1–L8 与各文档的议题编号（S / R）不通用。八条都已落成结�
 | 运维 | 谁负责部署、备份与恢复 | [receiver/SPEC.md](receiver/SPEC.md) 议题 R13 |
 | 数据定义 | 效果指标、报错组数上限 | [../contract.md](../contract.md) 议题 S1、S4 |
 | 发行 | `telemetry.json` 要进 `pack/pack.mjs` 白名单 | [sender/SPEC.md](sender/SPEC.md)「联网前提」 |
-| OAuth | 见下节 | — |
+| OA 内省接口 | 见下节 | — |
 
-### 等 OAuth 落地的部分
+### 等 OA 内省接口的部分
 
-OAuth 尚未实现。下表这些内容等它落地后再讨论定稿，现在按各自文中的暂定规则执行，不阻塞其余开发。
+OAuth 扩展与 Web 登录面板已实现，上传凭据可用。剩下的依赖是 OA 的令牌内省接口 `POST /api/oauth/introspect`，接收端用它把令牌换出队员身份。
 
 | 位置 | 等什么 |
 |---|---|
-| [../auth/README.md](../auth/README.md)、[pi-extension.md](../auth/pi-extension.md) | OAuth 登录与令牌方案本身 |
 | [../contract.md](../contract.md)「身份来源」 | 令牌怎么换出队员身份 |
-| [sender/SPEC.md](sender/SPEC.md)「身份与凭据」 | 凭据的存放位置与字段 |
-| [receiver/SPEC.md](receiver/SPEC.md)「身份解析」 | 内省接口，见该文「依赖 OAuth 实现」D1–D5 |
+| [receiver/SPEC.md](receiver/SPEC.md)「身份解析」 | 内省接口，见该文「依赖 OA 内省接口」D1–D5 |
 
 接收端身份解析用桩顶替，验收时换成真的内省调用。

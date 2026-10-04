@@ -1,6 +1,6 @@
 # OA 登录扩展
 
-状态：规格已定稿，骨架已建，待开发。更新：2026-10-03。适配项目锁定的 pi 0.85.1，业务约定见 [OA 登录与模型接入](README.md)，交接入口见 [handover.md](handover.md)。
+状态：已实现，待真机联调。更新：2026-10-04。适配项目锁定的 pi 0.85.1，业务约定见 [OA 登录与模型接入](README.md)，交接入口见 [handover.md](handover.md)。
 
 扩展通过 `pi.registerProvider("cstoa", { oauth })` 接入原生 `/login`，不修改 pi 内核。
 
@@ -23,7 +23,8 @@ agent/home/extensions/oauth/
 |-- index.ts       注册 provider
 |-- oa.ts          设备授权与令牌交换
 |-- device.ts      设备标识
-`-- package.json
+|-- package.json
+`-- test/          mock 单测与内核 e2e，运行 npm run test:oauth
 ```
 
 只使用 Node 内置模块与全局 `fetch`。

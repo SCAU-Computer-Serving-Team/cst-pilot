@@ -1,16 +1,16 @@
 # Todo
 
-更新：2026-10-03。
+更新：2026-10-04。
 
 ## 功能开发
 
 1. [ ] **自制 @cst-pilot/web**：按 [MVP](web/MVP.md) 推进，当前阶段为页面与画布的视觉对照；功能验收后接入发行包
 2. [x] 遥测发送端与发行配置：`telemetry.json` 由发行包生成，上报 `https://www.cstoa.top/api/telemetry`，OAuth 凭据从 `auth.json` 被动读取；待做：receiver rollup/cleanup 定时任务、从桩模式切到真实内省
-3. [ ] OAuth 扩展：规格已定稿，骨架与交接文档就绪（[doc/auth/handover.md](auth/handover.md)），待接手人开发
-3. [ ] 统一模型配置入口的需求文档
-4. [ ] cstoa 额度接口待确定；DeepSeek 余额与 OpenCode Go / Go Plus 用量已接入上下文面板，见 [聊天工作台](web/SPEC/chat-workspace.md)
-5. [ ] `SPEC` 与详细设计的目录分类暂缓，见[文档分类](issues.md#规格与详细设计的分类)
-6. [x] 补全面板按新画布重画（`x62krm`/`oBWkc` 浅深）：行高 32、说明右对齐、面板圆角 12 悬浮输入框上方 8，指标见 [DESIGN](../DESIGN.md)
+3. [x] OAuth 扩展与 Web 扫码登录：设备流、令牌轮换刷新、登录页扫码面板与 mock/e2e 测试已实现，见[交接文档](auth/handover.md)；待做：真机联调，OA 侧提供 `/api/oauth/introspect` 供遥测内省
+4. [ ] 统一模型配置入口的需求文档
+5. [ ] cstoa 额度接口待确定；DeepSeek 余额与 OpenCode Go / Go Plus 用量已接入上下文面板，见 [聊天工作台](web/SPEC/chat-workspace.md)
+6. [ ] `SPEC` 与详细设计的目录分类暂缓，见[文档分类](issues.md#规格与详细设计的分类)
+7. [x] 补全面板按新画布重画（`x62krm`/`oBWkc` 浅深）：行高 32、说明右对齐、面板圆角 12 悬浮输入框上方 8，指标见 [DESIGN](../DESIGN.md)
 
 
 ## ToDraw 画布
