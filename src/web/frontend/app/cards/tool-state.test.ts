@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ContentPart, Message } from "../app/web-state.ts";
+import type { ContentPart, Message } from "../data/web-state.ts";
 import { isStandaloneTool, splitToolCalls, toolState } from "./tool-state.ts";
 
 const call = (name: string, scope?: string): Extract<ContentPart, { type: "toolCall" }> => ({

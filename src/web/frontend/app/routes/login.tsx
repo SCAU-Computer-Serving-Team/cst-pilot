@@ -10,9 +10,9 @@ import {
 	type OauthDeviceCode,
 	type ProviderStatus,
 	startOauthLogin,
-} from "../app/api";
-import { BlueHour } from "../app/blue-hour";
-import { HomeSurface } from "../app/shell";
+} from "../data/api";
+import { BlueHour } from "../shell/blue-hour";
+import { HomeSurface } from "../shell/shell";
 
 function formatCountdown(seconds: number): string {
 	const minutes = Math.floor(seconds / 60);

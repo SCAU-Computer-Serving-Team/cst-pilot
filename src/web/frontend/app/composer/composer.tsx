@@ -14,12 +14,14 @@ import {
 } from "lucide-react";
 import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { apiJson } from "./api";
+import { apiJson } from "../data/api";
+import type { Model } from "../data/web-state";
 import { editorHtml, extractPayload, parseEditor } from "./composer-editor";
 import { ContextMeter } from "./context-meter";
 import { addImage, type DraftImage, encodeImages, loadImages } from "./draft-images";
+import { draftKey as makeDraftKey } from "./drafts";
+import { ImagePreview } from "./image-preview";
 
-type Model = { id: string; provider: string; name: string; reasoning: boolean };
 type Selection = { provider: string; id: string; thinkingLevel?: string } | null;
 // 档位与 pi 的 ThinkingLevel 一一对应（off/minimal/low/medium/high/xhigh/max），面板内用英文短名。
 const thinkingOptions = [
@@ -40,41 +42,18 @@ export type ComposerConfig = {
 	skill?: string;
 };
 const commandLabels: Record<string, string> = {
-	"/compact": "压缩会话",
-	"/fork": "派生会话",
+	"/compact": "压缩上下文",
+	"/fork": "派生当前会话",
 	"/tree": "打开分支树",
-	"/skill:disk": "磁盘诊断",
-	"/skill:driver": "驱动检查",
-	"/skill:eventlog": "事件日志",
-	"/skill:ls": "目录占用",
-	"/skill:runbook": "命令清单",
-	"/skill:startup": "开机自启",
-	"/skill:sys": "系统状态",
+	"/skill:disk": "磁盘容量、型号与健康",
+	"/skill:driver": "设备识别与驱动状态",
+	"/skill:eventlog": "崩溃、蓝屏与服务历史",
+	"/skill:ls": "目录索引与文件列表",
+	"/skill:runbook": "手动修复命令清单",
+	"/skill:startup": "开机启动项",
+	"/skill:sys": "系统概览",
 };
 const knownCommands = Object.keys(commandLabels);
-
-function ImagePreview({ src, onClose }: { src: string; onClose: () => void }) {
-	const dialog = useRef<HTMLDialogElement>(null);
-	useEffect(() => {
-		dialog.current?.showModal();
-	}, []);
-	return (
-		// biome-ignore lint/a11y/useKeyWithClickEvents: 键盘关闭由 dialog 原生 Escape 触发 onClose，这里的点击只处理鼠标点背景关闭
-		<dialog
-			ref={dialog}
-			className="image-preview"
-			onClose={onClose}
-			onClick={(event) => {
-				if (event.target === dialog.current) dialog.current?.close();
-			}}
-		>
-			<button type="button" aria-label="关闭图片预览" onClick={() => dialog.current?.close()}>
-				关闭
-			</button>
-			<img src={src} alt="待发送图片的大图预览" />
-		</dialog>
-	);
-}
 
 type SessionUsage = {
 	tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
@@ -106,7 +85,7 @@ export function Composer({
 	onFork?: () => void;
 	onSummary?: (instructions: string) => Promise<void>;
 }) {
-	const draftKey = `cst-draft:${sessionId ?? "new"}`;
+	const draftKey = makeDraftKey(sessionId);
 	const [text, setText] = useState(() =>
 		typeof window !== "undefined" ? (sessionStorage.getItem(draftKey) ?? "") : "",
 	);
@@ -624,7 +603,7 @@ export function Composer({
 											variant="ghost"
 											onPress={() => selectCommand(item)}
 										>
-											{skill ? <Sparkles size={16} /> : <Command size={16} />}
+											{skill ? <Sparkles size={14} /> : <Command size={14} />}
 											<span>{skill ? item.slice("/skill:".length) : item.slice(1)}</span>
 											<small>{commandLabels[item]}</small>
 										</Button>
@@ -645,7 +624,7 @@ export function Composer({
 									variant="ghost"
 									onPress={() => selectFile(file.path)}
 								>
-									<FileText size={16} />
+									<FileText size={14} />
 									<span>{file.path.split("/").pop()}</span>
 									<small>{file.dir}</small>
 								</Button>

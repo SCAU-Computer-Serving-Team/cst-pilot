@@ -59,7 +59,10 @@ Tailwind v4 要求 Chromium 111。兼容版推出前，先尝试 Edge；仍不�
 
 ```
 src/web/frontend/                    前端源码，不进发行包
-                                    页面外壳、路由表、组件、样式与构建配置
+├── app/                            应用源码，按功能域分文件夹（见下）
+├── public/、scripts/               静态资源与构建辅助
+└── vite.config.ts、react-router.config.ts、tsconfig.json
+
 agent/home/extensions/web/           扩展，进发行包
 ├── index.ts                         入口：起服务器、注册 /web 命令
 ├── server/                          服务器骨架、接口处理器、与 runtime 的对接
@@ -69,7 +72,19 @@ agent/home/extensions/web/           扩展，进发行包
 
 Web 后端测试运行 `npm --prefix agent run test:web`，格式与类型检查运行 `npm --prefix agent run check`。前端 lint、类型与测试分别运行 `npm run lint|typecheck|test --prefix src/web/frontend`，命令汇总见 [CONTRIBUTING](../../../CONTRIBUTING.md#检查与测试)。前端 lint 必须从 `src/web/frontend` 目录发起：biome 按运行目录识别 React 项目，换目录会漏掉 React 规则。
 
-源码目录内部按**功能**分层：`app/` 放页面外壳、路由、共用状态与输入框，`cards/` 放工具卡片的字段映射与渲染组件。不按「页面 / 组件 / 工具函数」这类技术类型分层。
+`app/` 内部按**功能域**分文件夹，域内文件不按「页面 / 组件 / 工具函数」这类技术类型再分：
+
+| 文件夹 | 内容 |
+|---|---|
+| `routes/` | 页面装配，每页一个文件，只做取数与组件接线 |
+| `cards/` | 工具卡片的字段映射与渲染组件 |
+| `conversation/` | 会话流渲染：轮次、Markdown、排队与提问面板，及分段解析纯函数 |
+| `composer/` | 输入框：编辑器、图片草稿、补全与上下文用量 |
+| `tree/` | 分支树：布局、总结与派生选择 |
+| `shell/` | 页面外壳：侧栏、首页、主题与动态背景 |
+| `data/` | 接口客户端、会话状态 hook 与流式节奏 |
+
+新增功能域按同样方式建文件夹：页面进 `routes/`，域内组件与纯函数进自己的文件夹。仪表盘（dashboard）落地时建 `app/dashboard/` 放指标卡片与取数 hook，`routes/dashboard.tsx` 只做装配。依赖方向单向：`routes` → 各域 → `data`；域之间尽量只依赖对方的纯函数与类型。
 
 ## 加载与依赖边界
 

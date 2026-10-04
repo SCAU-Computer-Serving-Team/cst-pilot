@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { ContentPart, Message } from "../data/web-state.ts";
 import {
 	activeTurnIndex,
 	formatDuration,
@@ -9,7 +10,6 @@ import {
 	type TurnEntry,
 	visibleQueueItems,
 } from "./conversation-parts.ts";
-import type { ContentPart, Message } from "./web-state.ts";
 
 const call = (id: string, name = "disk"): ContentPart => ({ type: "toolCall", id, name, arguments: {} });
 test("assistant prose stays before and after the corresponding tool calls", () => {
@@ -132,7 +132,19 @@ test("activeTurnIndex follows the running turn", () => {
 		entry("assistant", 2, [call("a")], "toolUse"),
 		entry("user", 3, "插话"),
 	]);
-	assert.equal(activeTurnIndex(steering, true), 0);
+	assert.equal(activeTurnIndex(steering, true), 1);
+});
+
+test("activeTurnIndex never hands the live turn to a truncated tail", () => {
+	// /tree 回退到工具调用节点后分支以 toolUse 收尾，接着发新消息：运行中的是新轮次，
+	// 旧轮次的计时从它自己的时间戳起算会横跨整段时间。
+	const truncated = groupTurns([
+		entry("user", 1_000, "先看一下磁盘"),
+		entry("assistant", 1_100, [call("a", "disk")], "toolUse"),
+		entry("user", 7_900_000, "继续"),
+	]);
+	assert.equal(activeTurnIndex(truncated, true), 1);
+	assert.equal(activeTurnIndex(truncated, false), -1);
 });
 
 test("formatDuration rounds to seconds and switches to minutes past sixty", () => {

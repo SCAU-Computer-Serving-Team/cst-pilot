@@ -1,6 +1,6 @@
 import { ChevronRight, Info } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
-import { apiJson } from "./api";
+import { apiJson } from "../data/api";
 
 type Quota = {
 	provider: string;

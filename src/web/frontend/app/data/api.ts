@@ -20,6 +20,9 @@ export type OauthStatus = {
 	error?: string;
 };
 
+/** 会话接口路径：id 统一编码，suffix 以 `/` 开头。 */
+export const sessionPath = (id: string, suffix = "") => `/api/sessions/${encodeURIComponent(id)}${suffix}`;
+
 type ApiError = { error?: { message?: string } };
 
 export async function apiJson<T>(

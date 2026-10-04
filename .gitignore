@@ -17,6 +17,7 @@ lhm/*.dll
 agent/home/auth.json
 agent/home/telemetry.json
 agent/home/device.json
+agent/home/telemetry/
 agent/home/models.json
 agent/home/models-store.json
 agent/home/web-search.json

@@ -13,7 +13,7 @@ import {
 	TriangleAlert,
 } from "lucide-react";
 import { memo, useEffect, useState } from "react";
-import type { ContentPart, Message } from "../app/web-state";
+import type { ContentPart, Message } from "../data/web-state";
 import { type Block, mapTool } from "./map-tool";
 import { isStandaloneTool, splitToolCalls, type ToolState, toolState } from "./tool-state";
 

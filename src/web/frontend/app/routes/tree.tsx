@@ -18,8 +18,10 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { apiJson } from "../app/api";
-import { branchSummaryHref } from "../app/branch-summary";
+import { draftKey } from "../composer/drafts";
+import { apiJson, sessionPath } from "../data/api";
+import { useSessionTitle, useSessionTree } from "../data/web-state";
+import { branchSummaryHref } from "../tree/branch-summary";
 import {
 	applyFold,
 	buildVisibleTree,
@@ -35,9 +37,8 @@ import {
 	type TreeRow,
 	VIEW_FILTERS,
 	type ViewFilter,
-} from "../app/branch-tree";
-import { sampleTree } from "../app/branch-tree-sample";
-import { useSessionTree } from "../app/web-state";
+} from "../tree/branch-tree";
+import { sampleTree } from "../tree/branch-tree-sample";
 
 const kindIcon = { user: User, assistant: Bot, tool: Wrench, info: Minimize2 } as const;
 
@@ -74,7 +75,7 @@ export default function SessionTree() {
 	const leafId = sample?.leafId ?? live.leafId;
 	const error = live.error;
 	const refresh = live.refresh;
-	const [title, setTitle] = useState(preview ? "checkpoint4 UI 精修" : "会话");
+	const title = useSessionTitle(sessionId, preview ? "checkpoint4 UI 精修" : "会话", !preview);
 	const [query, setQuery] = useState("");
 	const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
 	const [filter, setFilter] = useState<ViewFilter>(loadViewFilter);
@@ -127,19 +128,6 @@ export default function SessionTree() {
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
 	});
-	useEffect(() => {
-		if (!sessionId || preview) return;
-		let active = true;
-		apiJson<{ sessions: { id: string; title: string }[] }>("/api/sessions")
-			.then((data) => {
-				if (active) setTitle(data.sessions.find((item) => item.id === sessionId)?.title ?? "新对话");
-			})
-			.catch(() => undefined);
-		return () => {
-			active = false;
-		};
-	}, [sessionId, preview]);
-
 	const toolCalls = useMemo(() => collectToolCalls(tree ?? []), [tree]);
 	const allRows = useMemo(
 		() => layoutTree(buildVisibleTree(tree ?? [], leafId, filter), leafId),
@@ -217,11 +205,11 @@ export default function SessionTree() {
 		if (!sessionId || preview) return;
 		setActionError("");
 		try {
-			const result = await apiJson<{ editorText?: string }>(
-				`/api/sessions/${encodeURIComponent(sessionId)}/tree/navigate`,
-				{ method: "POST", body: { entryId } },
-			);
-			if (result.editorText) sessionStorage.setItem(`cst-draft:${sessionId}`, result.editorText);
+			const result = await apiJson<{ editorText?: string }>(sessionPath(sessionId, "/tree/navigate"), {
+				method: "POST",
+				body: { entryId },
+			});
+			if (result.editorText) sessionStorage.setItem(draftKey(sessionId), result.editorText);
 			navigate(`/s/${sessionId}`);
 		} catch (cause) {
 			setActionError(cause instanceof Error ? cause.message : "分支导航未完成");

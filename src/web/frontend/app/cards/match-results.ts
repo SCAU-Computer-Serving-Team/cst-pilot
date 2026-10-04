@@ -1,4 +1,4 @@
-import type { Message } from "../app/web-state";
+import type { Message } from "../data/web-state";
 
 type Entry = { id?: string; message: Message };
 

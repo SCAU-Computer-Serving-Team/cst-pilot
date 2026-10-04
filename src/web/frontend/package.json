@@ -10,7 +10,7 @@
     "build": "react-router build && node scripts/publish.mjs",
     "typecheck": "react-router typegen && tsc --noEmit",
     "lint": "node ../../../agent/node_modules/@biomejs/biome/bin/biome check app",
-    "test": "node --test app/app/*.test.ts app/cards/*.test.ts"
+    "test": "node --test \"app/**/*.test.ts\""
   },
   "dependencies": {
     "@fontsource/inter": "5.3.0",

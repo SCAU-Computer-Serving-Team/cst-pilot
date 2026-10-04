@@ -1,5 +1,5 @@
 import { useSearchParams } from "react-router";
-import { HomeSurface } from "../app/shell";
+import { HomeSurface } from "../shell/shell";
 
 export default function Home() {
 	const [params] = useSearchParams();

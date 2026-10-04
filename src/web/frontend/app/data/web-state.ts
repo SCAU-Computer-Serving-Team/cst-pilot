@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { TreeNode } from "../tree/branch-tree";
 import { apiJson } from "./api";
-import type { TreeNode } from "./branch-tree";
 import { StreamPacer } from "./stream-player";
 
 export type SessionRow = { id: string; title: string; updatedAt?: string; running: boolean };
+/** /api/models 返回的模型条目：reasoning 标记是否支持思考强度。 */
+export type Model = { id: string; provider: string; name: string; reasoning: boolean };
 export type ContentPart =
 	| { type: "text"; text: string }
 	| { type: "thinking"; thinking: string; redacted?: boolean }
@@ -49,6 +51,45 @@ export type SessionDetail = {
 	ui: Question[];
 };
 
+type GlobalEventName = "open" | "state" | "reset" | "error";
+type GlobalEventHandler = (name: GlobalEventName, event: MessageEvent | undefined) => void;
+
+// 全局事件流只开一条连接：多个 hook 各自订阅，全部退订后关闭（client-event-listeners）。
+const globalHandlers = new Set<GlobalEventHandler>();
+let globalSource: EventSource | null = null;
+let globalRefs = 0;
+function openGlobalEvents(): EventSource {
+	if (globalSource) return globalSource;
+	const source = new EventSource("/api/events");
+	globalSource = source;
+	for (const name of ["open", "state", "reset", "error"] as const)
+		source.addEventListener(name, (event) => {
+			for (const handler of globalHandlers) handler(name, event as MessageEvent);
+		});
+	return source;
+}
+
+/** 订阅全局 /api/events：回调存 ref，身份变化不重连；enabled 为 false 时不占连接。 */
+export function useGlobalEvents(onEvent: GlobalEventHandler, enabled = true) {
+	const handler = useRef(onEvent);
+	handler.current = onEvent;
+	useEffect(() => {
+		if (!enabled) return;
+		openGlobalEvents();
+		const listener: GlobalEventHandler = (name, event) => handler.current(name, event);
+		globalHandlers.add(listener);
+		globalRefs++;
+		return () => {
+			globalHandlers.delete(listener);
+			globalRefs--;
+			if (globalRefs === 0 && globalSource) {
+				globalSource.close();
+				globalSource = null;
+			}
+		};
+	}, [enabled]);
+}
+
 export function useSessions() {
 	const [sessions, setSessions] = useState<SessionRow[]>([]);
 	const [stage, setStage] = useState("");
@@ -66,23 +107,13 @@ export function useSessions() {
 	useEffect(() => {
 		void refresh();
 	}, [refresh]);
-	useEffect(() => {
-		if (!stage || stage === "preview") return;
-		const events = new EventSource("/api/events");
-		events.onopen = () => {
-			void refresh();
-		};
-		events.addEventListener("state", () => {
-			void refresh();
-		});
-		events.addEventListener("reset", () => {
-			void refresh();
-		});
-		events.onerror = () => {
-			setError("连接已断开。请确认 pi 仍在运行。");
-		};
-		return () => events.close();
-	}, [refresh, stage]);
+	useGlobalEvents(
+		(name) => {
+			if (name === "error") setError("连接已断开。请确认 pi 仍在运行。");
+			else void refresh();
+		},
+		!!stage && stage !== "preview",
+	);
 	return { sessions, stage, error, refresh };
 }
 
@@ -144,6 +175,24 @@ export function useSessionTree(id: string | undefined) {
 		};
 	}, [id, refresh]);
 	return { tree, leafId, error, refresh };
+}
+
+/** 会话标题：从会话列表里查当前会话的名字，找不到用「新对话」。 */
+export function useSessionTitle(sessionId: string | undefined, initial: string, enabled = true) {
+	const [title, setTitle] = useState(initial);
+	useEffect(() => {
+		if (!sessionId || !enabled) return;
+		let active = true;
+		apiJson<{ sessions: { id: string; title: string }[] }>("/api/sessions")
+			.then((data) => {
+				if (active) setTitle(data.sessions.find((item) => item.id === sessionId)?.title ?? "新对话");
+			})
+			.catch(() => undefined);
+		return () => {
+			active = false;
+		};
+	}, [sessionId, enabled]);
+	return title;
 }
 
 export function useSessionDetail(id: string | undefined) {

@@ -1,7 +1,16 @@
-import type { ContentPart, Message, QueueItem } from "./web-state";
+import type { ContentPart, Message, QueueItem } from "../data/web-state";
 
 type Thinking = Extract<ContentPart, { type: "thinking" }>;
 type Call = Extract<ContentPart, { type: "toolCall" }>;
+
+/** 消息的纯文本：字符串原样，数组取全部文本段拼接。 */
+export const textOf = (message: Message) =>
+	typeof message.content === "string"
+		? message.content
+		: message.content
+				.filter((part): part is Extract<ContentPart, { type: "text" }> => part.type === "text")
+				.map((part) => part.text)
+				.join("\n");
 export type ConversationPart =
 	| { kind: "thinking"; part: Thinking }
 	| { kind: "text"; text: string }
@@ -48,22 +57,15 @@ export function groupTurns(entries: TurnEntry[]): Turn[] {
 	return turns;
 }
 
-const settled = (turn: Turn | undefined): boolean => {
-	const stop = turn?.assistants.at(-1)?.message.stopReason;
-	return !!stop && stop !== "toolUse";
-};
-
-/** 运行中正在推进的一轮：最后一轮已有助手内容就是最后一轮；用户刚发的空轮次在上一轮已结束时亮出等待态，否则仍是上一轮（插话排队）。 */
+/**
+ * 运行中正在推进的一轮：始终是最新一轮，分支总结块不参与判定。
+ * 插话落盘后，运行中的就是这条新轮次；以 toolUse 收尾的旧轮次可能是 /tree 回退或中止留下的尾巴，不算运行中。
+ */
 export function activeTurnIndex(turns: Turn[], running: boolean): number {
-	if (!running || turns.length === 0) return -1;
+	if (!running) return -1;
 	let last = turns.length - 1;
 	while (last >= 0 && turns[last]!.summary) last -= 1; // 分支总结块不参与活动轮次判定
-	if (last < 0) return -1;
-	if (turns[last]!.assistants.length > 0) return last;
-	let previous = last - 1;
-	while (previous >= 0 && turns[previous]!.summary) previous -= 1;
-	if (previous < 0) return last;
-	return settled(turns[previous]) ? last : previous;
+	return last;
 }
 
 export type TurnPart = { entry: TurnEntry; final: boolean; part: ConversationPart };

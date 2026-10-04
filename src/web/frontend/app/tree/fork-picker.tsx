@@ -2,17 +2,10 @@ import { Button } from "@heroui/react";
 import { X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { apiJson } from "./api";
-import type { ContentPart, Message } from "./web-state";
-
-/** 与聊天页同规则：字符串原样，数组取全部文本段。 */
-const textOf = (message: Message) =>
-	typeof message.content === "string"
-		? message.content
-		: message.content
-				.filter((part): part is Extract<ContentPart, { type: "text" }> => part.type === "text")
-				.map((part) => part.text)
-				.join("\n");
+import { draftKey } from "../composer/drafts";
+import { textOf } from "../conversation/conversation-parts";
+import { apiJson, sessionPath } from "../data/api";
+import type { Message } from "../data/web-state";
 
 export type ForkTarget = { id: string; parentId?: string | null; text: string };
 
@@ -81,11 +74,11 @@ export function ForkPicker({
 			setBusy(true);
 			setError("");
 			try {
-				const created = await apiJson<{ id: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/fork`, {
+				const created = await apiJson<{ id: string }>(sessionPath(sessionId, "/fork"), {
 					method: "POST",
 					body: { entryId: target.parentId },
 				});
-				sessionStorage.setItem(`cst-draft:${created.id}`, target.text);
+				sessionStorage.setItem(draftKey(created.id), target.text);
 				onClose();
 				navigate(`/s/${created.id}`, { state: { forkSource: target.text } });
 			} catch (cause) {

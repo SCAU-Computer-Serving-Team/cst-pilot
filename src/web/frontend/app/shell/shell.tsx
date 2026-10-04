@@ -15,17 +15,12 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import { apiJson, type ProviderStatus } from "./api";
+import { Composer, type ComposerConfig } from "../composer/composer";
+import { apiJson, type ProviderStatus } from "../data/api";
+import { useGlobalEvents, useSessions } from "../data/web-state";
 import { BlueHour } from "./blue-hour";
-import { Composer, type ComposerConfig } from "./composer";
-import { useSessions } from "./web-state";
-
-export const sampleSessions = [
-	{ id: "preview", title: "C 盘空间与硬盘信息", group: "今天" },
-	{ id: "fan-preview", title: "风扇狂转还降频", group: "今天" },
-	{ id: "startup-preview", title: "开机要等三分钟", group: "昨天" },
-	{ id: "browser-preview", title: "浏览器经常无响应", group: "一周内" },
-];
+import { sampleSessions } from "./sample-sessions";
+import { currentTheme, nextTheme, type Theme, themeLabels } from "./theme";
 
 // 画布按日期分组会话列表。
 const sessionGroups = ["今天", "昨天", "一周内", "更早"];
@@ -40,15 +35,15 @@ const dayGroup = (value?: string) => {
 	return days <= 0 ? "今天" : days === 1 ? "昨天" : days <= 7 ? "一周内" : "更早";
 };
 
-type Theme = "system" | "light" | "dark";
-const themeLabels: Record<Theme, string> = { system: "跟随系统", light: "浅色", dark: "深色" };
-const nextTheme: Record<Theme, Theme> = { system: "light", light: "dark", dark: "system" };
-const currentTheme = (): Theme => {
-	const value = document.documentElement.dataset.theme;
-	return value === "light" || value === "dark" ? value : "system";
-};
-
-export function Sidebar({ preview = false }: { preview?: boolean }) {
+export function Sidebar({
+	preview = false,
+	onCollapse,
+	onNavigate,
+}: {
+	preview?: boolean;
+	onCollapse: () => void;
+	onNavigate?: () => void;
+}) {
 	const location = useLocation();
 	const state = useSessions();
 	const sessions: { id: string; title: string; group?: string; updatedAt?: string }[] = preview
@@ -173,22 +168,21 @@ export function Sidebar({ preview = false }: { preview?: boolean }) {
 	useEffect(() => {
 		void refreshAccount();
 		void refreshTheme();
-		if (preview) return;
-		const events = new EventSource("/api/events");
-		events.addEventListener("state", (event) => {
-			void refreshAccount();
-			try {
-				if (JSON.parse((event as MessageEvent).data)?.type === "settings_changed") void refreshTheme();
-			} catch {
-				/* 其他状态事件不影响当前主题。 */
-			}
-		});
-		events.addEventListener("reset", () => {
+	}, [refreshAccount, refreshTheme]);
+	useGlobalEvents((name, event) => {
+		if (name === "reset") {
 			void refreshAccount();
 			void refreshTheme();
-		});
-		return () => events.close();
-	}, [preview, refreshAccount, refreshTheme]);
+			return;
+		}
+		if (name !== "state") return;
+		void refreshAccount();
+		try {
+			if (JSON.parse(event?.data ?? "null")?.type === "settings_changed") void refreshTheme();
+		} catch {
+			/* 其他状态事件不影响当前主题。 */
+		}
+	}, !preview);
 	async function changeTheme() {
 		const value = nextTheme[theme];
 		if (preview) {
@@ -244,13 +238,14 @@ export function Sidebar({ preview = false }: { preview?: boolean }) {
 					<Link className="product-name" to={preview ? "/?preview=1" : "/"}>
 						CST Pilot
 					</Link>
-					<Button variant="ghost" isIconOnly isDisabled className="sidebar-icon" aria-label="会话搜索尚未开放">
+					<Button variant="ghost" isIconOnly className="sidebar-icon" aria-label="收起侧栏" onPress={onCollapse}>
 						<PanelLeft size={22} />
 					</Button>
 				</div>
 				<Link
 					className={`sidebar-new ${location.pathname === "/" ? "selected" : ""}`}
 					to={preview ? "/?preview=1" : "/"}
+					onClick={onNavigate}
 				>
 					<SquarePen size={18} />
 					新对话
@@ -266,6 +261,7 @@ export function Sidebar({ preview = false }: { preview?: boolean }) {
 										<Link
 											className={`sidebar-session ${location.pathname === `/s/${session.id}` ? "selected" : ""}`}
 											to={`/s/${session.id}${preview ? "?preview=1" : ""}`}
+											onClick={onNavigate}
 											onContextMenu={
 												preview
 													? undefined

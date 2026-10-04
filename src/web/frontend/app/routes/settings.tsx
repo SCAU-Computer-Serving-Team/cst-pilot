@@ -1,9 +1,10 @@
+import { Button, Checkbox, Kbd, SearchField, ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import { Check, GripVertical, Search, Settings as SettingsIcon } from "lucide-react";
 import { type DragEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { apiJson, type ProviderStatus } from "../app/api";
+import { apiJson, type ProviderStatus } from "../data/api";
+import type { Model } from "../data/web-state";
+import type { Theme } from "../shell/theme";
 
-type Theme = "light" | "dark" | "system";
-type Model = { provider: string; id: string; name: string };
 type ModelsPayload = { models: Model[]; enabled: string[] | null; unavailableEnabled: string[] };
 
 const fullId = (model: Model) => `${model.provider}/${model.id}`;
@@ -49,7 +50,7 @@ export default function Settings() {
 		const bar = segmentRef.current;
 		const pill = bar?.querySelector<HTMLElement>(".t-tabs-pill");
 		const tab =
-			bar?.querySelector<HTMLElement>('.t-tab[aria-selected="true"]') ?? bar?.querySelector<HTMLElement>(".t-tab");
+			bar?.querySelector<HTMLElement>('.t-tab[data-selected="true"]') ?? bar?.querySelector<HTMLElement>(".t-tab");
 		if (!pill || !tab) return;
 		if (!animate) {
 			const previous = pill.style.transition;
@@ -100,6 +101,7 @@ export default function Settings() {
 	}, [refresh]);
 
 	const allIds = useMemo(() => models.map(fullId), [models]);
+	const modelById = useMemo(() => new Map(models.map((model) => [fullId(model), model])), [models]);
 	const sortedIds = useMemo(() => {
 		if (selection === null) return allIds;
 		const enabledSet = new Set(selection);
@@ -109,14 +111,14 @@ export default function Settings() {
 		const needle = query.trim().toLowerCase();
 		const matches = (id: string) => {
 			if (!needle) return true;
-			const model = models.find((item) => fullId(item) === id);
+			const model = modelById.get(id);
 			return `${model?.provider ?? ""} ${model?.name ?? ""} ${id}`.toLowerCase().includes(needle);
 		};
 		return {
 			ids: sortedIds.filter(matches),
 			unavailable: unavailable.filter((pattern) => pattern.toLowerCase().includes(needle)),
 		};
-	}, [sortedIds, unavailable, query, models]);
+	}, [sortedIds, unavailable, query, modelById]);
 
 	const dirty = JSON.stringify(selection) !== JSON.stringify(saved);
 	const enabledCount = selection === null ? allIds.length : selection.filter((id) => allIds.includes(id)).length;
@@ -210,22 +212,26 @@ export default function Settings() {
 								<span>界面主题</span>
 								<small>选择浅色、深色或跟随系统。</small>
 							</div>
-							<div className="settings-segment t-tabs" role="tablist" aria-label="页面主题" ref={segmentRef}>
+							<ToggleButtonGroup
+								className="settings-segment t-tabs"
+								aria-label="页面主题"
+								selectionMode="single"
+								disallowEmptySelection
+								selectedKeys={[theme]}
+								isDisabled={working}
+								onSelectionChange={(keys) => {
+									const key = [...keys][0];
+									if (typeof key === "string") void updateTheme(key as Theme);
+								}}
+								ref={segmentRef}
+							>
 								<span className="t-tabs-pill" aria-hidden="true" />
 								{(["system", "light", "dark"] as const).map((value) => (
-									<button
-										key={value}
-										type="button"
-										role="tab"
-										className="t-tab"
-										aria-selected={theme === value}
-										disabled={working}
-										onClick={() => void updateTheme(value)}
-									>
+									<ToggleButton key={value} id={value} className="t-tab">
 										{{ system: "跟随系统", light: "浅色", dark: "深色" }[value]}
-									</button>
+									</ToggleButton>
 								))}
-							</div>
+							</ToggleButtonGroup>
 						</div>
 					</div>
 				</section>
@@ -255,14 +261,15 @@ export default function Settings() {
 										</a>
 									) : (
 										provider.type && (
-											<button
+											<Button
 												type="button"
+												variant="ghost"
 												className="settings-action settings-action-danger"
-												disabled={working}
-												onClick={() => void logout(provider.id)}
+												isDisabled={working}
+												onPress={() => void logout(provider.id)}
 											>
 												退出
-											</button>
+											</Button>
 										)
 									)}
 								</div>
@@ -325,26 +332,36 @@ export default function Settings() {
 							/scoped-models 一致。
 						</p>
 						<div className="settings-toolbar">
-							<label className="settings-search">
-								<Search size={16} aria-hidden="true" />
-								<input
-									type="search"
-									placeholder="搜索模型…"
-									value={query}
-									onChange={(event) => setQuery(event.target.value)}
-								/>
-							</label>
-							<button type="button" disabled={working || selection === null} onClick={selectAll}>
-								全选
-							</button>
-							<button type="button" disabled={working || enabledCount === 0} onClick={clearAll}>
-								清空
-							</button>
-							<button
+							<SearchField aria-label="搜索模型" className="settings-search" value={query} onChange={setQuery}>
+								<SearchField.Group>
+									<Search size={16} aria-hidden="true" />
+									<SearchField.Input placeholder="搜索模型…" type="search" />
+								</SearchField.Group>
+							</SearchField>
+							<Button
 								type="button"
-								className="settings-save"
-								disabled={working || !dirty || selection === null}
-								onClick={() => void saveScope()}
+								variant="ghost"
+								className="settings-tool-button"
+								isDisabled={working || selection === null}
+								onPress={selectAll}
+							>
+								全选
+							</Button>
+							<Button
+								type="button"
+								variant="ghost"
+								className="settings-tool-button"
+								isDisabled={working || enabledCount === 0}
+								onPress={clearAll}
+							>
+								清空
+							</Button>
+							<Button
+								type="button"
+								variant="ghost"
+								className="settings-tool-button settings-save"
+								isDisabled={working || !dirty || selection === null}
+								onPress={() => void saveScope()}
 							>
 								<span className="settings-save-label" key={savedFlash ? "saved" : "idle"}>
 									{savedFlash ? (
@@ -356,11 +373,11 @@ export default function Settings() {
 										"保存"
 									)}
 								</span>
-							</button>
+							</Button>
 						</div>
 						<ul className="settings-card settings-models">
 							{visibleIds.ids.map((id) => {
-								const model = models.find((item) => fullId(item) === id);
+								const model = modelById.get(id);
 								if (!model) return null;
 								const enabled = selection === null || selection.includes(id);
 								return (
@@ -370,28 +387,31 @@ export default function Settings() {
 										onDragOver={(event) => dragOver(event, id)}
 										onDrop={() => dropOn(id)}
 									>
-										<button
-											type="button"
-											aria-pressed={enabled}
+										<Checkbox
+											isSelected={enabled}
+											isDisabled={working}
 											aria-label={`启用 ${model.name}`}
-											className="settings-check t-check"
-											disabled={working}
-											onClick={() => setSelection(toggle(selection, allIds, id))}
+											className="settings-check-box"
+											onChange={() => setSelection(toggle(selection, allIds, id))}
 										>
-											<svg
-												viewBox="0 0 10.1668 10.1668"
-												width="12"
-												height="12"
-												fill="none"
-												stroke="#fff"
-												strokeWidth="1.6"
-												strokeLinecap="round"
-												strokeLinejoin="round"
-												aria-hidden="true"
-											>
-												<path d="M1 5.52L3.92 9.17L9.17 1" />
-											</svg>
-										</button>
+											<Checkbox.Content>
+												<Checkbox.Control>
+													<Checkbox.Indicator>
+														<svg
+															viewBox="0 0 10.1668 10.1668"
+															fill="none"
+															stroke="#fff"
+															strokeWidth="1.6"
+															strokeLinecap="round"
+															strokeLinejoin="round"
+															aria-hidden="true"
+														>
+															<path d="M1 5.52L3.92 9.17L9.17 1" />
+														</svg>
+													</Checkbox.Indicator>
+												</Checkbox.Control>
+											</Checkbox.Content>
+										</Checkbox>
 										<span className="settings-model-name">{model.name}</span>
 										<span className="settings-model-provider">[{model.provider}]</span>
 										<span className="settings-spacer" />
@@ -437,7 +457,7 @@ export default function Settings() {
 						{shortcuts.map((shortcut) => (
 							<div key={shortcut.keys} className="settings-key">
 								<span>{shortcut.command}</span>
-								<kbd>{shortcut.keys}</kbd>
+								<Kbd className="settings-key-kbd">{shortcut.keys}</Kbd>
 							</div>
 						))}
 					</div>

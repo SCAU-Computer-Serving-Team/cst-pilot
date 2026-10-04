@@ -29986,8 +29986,10 @@
                   "id": "b5lW3o",
                   "name": "标记块",
                   "height": 26,
-                  "fill": "#E8F1F6",
+                  "fill": "#00000000",
                   "cornerRadius": 6,
+                  "stroke": "#D5D5D5",
+                  "strokeWidth": 1,
                   "gap": 8,
                   "padding": [
                     0,
@@ -30294,8 +30296,10 @@
                   "id": "ucBnM",
                   "name": "标记块",
                   "height": 26,
-                  "fill": "#E8F1F6",
+                  "fill": "#00000000",
                   "cornerRadius": 6,
+                  "stroke": "#D5D5D5",
+                  "strokeWidth": 1,
                   "gap": 8,
                   "padding": [
                     0,
@@ -40231,9 +40235,8 @@
                       "name": "焦点环",
                       "width": "fill_container",
                       "cornerRadius": 8,
-                      "stroke": "#0665BE",
-                      "strokeWidth": 2,
-                      "padding": 2,
+                      "stroke": "#1A202414",
+                      "strokeWidth": 3,
                       "children": [
                         {
                           "type": "frame",
@@ -42863,9 +42866,8 @@
                       "name": "焦点环",
                       "width": "fill_container",
                       "cornerRadius": 8,
-                      "stroke": "#0665BE",
-                      "strokeWidth": 2,
-                      "padding": 2,
+                      "stroke": "#1A202414",
+                      "strokeWidth": 3,
                       "children": [
                         {
                           "type": "frame",

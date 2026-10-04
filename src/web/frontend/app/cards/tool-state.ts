@@ -1,4 +1,4 @@
-import type { ContentPart, Message } from "../app/web-state";
+import type { ContentPart, Message } from "../data/web-state";
 import type { CardView } from "./map-tool";
 
 type Call = Extract<ContentPart, { type: "toolCall" }>;

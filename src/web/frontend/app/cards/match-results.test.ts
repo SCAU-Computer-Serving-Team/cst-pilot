@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Message } from "../app/web-state.ts";
+import type { Message } from "../data/web-state.ts";
 import { matchToolResults } from "./match-results.ts";
 
 const call = (timestamp: number): Message => ({
