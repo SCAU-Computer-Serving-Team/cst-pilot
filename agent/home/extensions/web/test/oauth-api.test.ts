@@ -82,7 +82,7 @@ const oauthStatus = async () => {
 	const response = await fetch(`${origin}/api/auth/cstoa/oauth/status`);
 	return (await response.json()) as {
 		state: string;
-		deviceCode?: { userCode: string; verificationUri: string };
+		deviceCode?: { userCode: string; verificationUri: string; expiresInSeconds: number };
 		error?: string;
 	};
 };
@@ -154,6 +154,17 @@ test("扫码登录：device_code 事件经 /api/events 推送", async () => {
 		await reader.cancel().catch(() => undefined);
 		await post("/api/auth/cstoa/oauth/cancel", {});
 	}
+});
+
+test("扫码登录：status 返回真实剩余秒数而不是固定重置", async () => {
+	await post("/api/auth/cstoa/oauth/start", {});
+	const first = await oauthStatus();
+	await sleep(1_200);
+	const second = await oauthStatus();
+	assert.ok(first.deviceCode?.expiresInSeconds);
+	assert.ok(second.deviceCode?.expiresInSeconds);
+	assert.ok(second.deviceCode.expiresInSeconds < first.deviceCode.expiresInSeconds);
+	await post("/api/auth/cstoa/oauth/cancel", {});
 });
 
 test("扫码登录：取消后状态为 cancelled，可重新发起", async () => {

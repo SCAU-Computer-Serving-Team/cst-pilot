@@ -26,8 +26,18 @@ interface OauthFlow {
 		verificationUri: string;
 		intervalSeconds: number;
 		expiresInSeconds: number;
+		expiresAt: number;
 	};
 	error?: string;
+}
+
+function deviceCodeView(flow: OauthFlow): Omit<NonNullable<OauthFlow["deviceCode"]>, "expiresAt"> | undefined {
+	if (!flow.deviceCode) return undefined;
+	const { expiresAt, ...value } = flow.deviceCode;
+	return {
+		...value,
+		expiresInSeconds: Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)),
+	};
 }
 
 /** Credential management stays within the API's origin and idempotency checks. */
@@ -59,11 +69,13 @@ export function createAuthRoutes({
 				notify: (event) => {
 					if (!current()) return;
 					if (event.type === "device_code") {
+						const expiresInSeconds = event.expiresInSeconds ?? 300;
 						flow.deviceCode = {
 							userCode: event.userCode,
 							verificationUri: event.verificationUri,
 							intervalSeconds: event.intervalSeconds ?? 5,
-							expiresInSeconds: event.expiresInSeconds ?? 300,
+							expiresInSeconds,
+							expiresAt: Date.now() + expiresInSeconds * 1000,
 						};
 						globalEvents.publish("state", { type: "oauth_device_code", providerId, ...flow.deviceCode });
 					} else if (event.type === "progress") {
@@ -92,13 +104,14 @@ export function createAuthRoutes({
 		return flow;
 	}
 
-	async function waitForDeviceCode(flow: OauthFlow): Promise<NonNullable<OauthFlow["deviceCode"]>> {
+	async function waitForDeviceCode(flow: OauthFlow) {
 		const deadline = Date.now() + 10_000;
 		while (flow.state === "pending" && !flow.deviceCode) {
 			if (Date.now() >= deadline) throw new Error("获取二维码超时，请重试。");
 			await new Promise((resolve) => setTimeout(resolve, 50));
 		}
-		if (flow.deviceCode) return flow.deviceCode;
+		const value = deviceCodeView(flow);
+		if (value) return value;
 		if (flow.state === "cancelled") throw new Error("扫码登录已取消。");
 		throw new Error(flow.error || "扫码登录未完成，请重试。");
 	}
@@ -143,7 +156,11 @@ export function createAuthRoutes({
 					send(response, 200, { state: "idle" });
 					return true;
 				}
-				send(response, 200, { state: flow.state, deviceCode: flow.deviceCode, error: flow.error });
+				send(response, 200, {
+					state: flow.state,
+					deviceCode: deviceCodeView(flow),
+					error: flow.error,
+				});
 				return true;
 			}
 			if (action === "cancel" && method === "POST") {
