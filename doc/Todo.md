@@ -11,6 +11,7 @@
 5. [ ] cstoa 额度接口待确定；DeepSeek 余额与 OpenCode Go / Go Plus 用量已接入上下文面板，见 [聊天工作台](web/SPEC/chat-workspace.md)
 6. [ ] `SPEC` 与详细设计的目录分类暂缓，见[文档分类](issues.md#规格与详细设计的分类)
 7. [x] 补全面板按新画布重画（`x62krm`/`oBWkc` 浅深）：行高 32、说明右对齐、面板圆角 12 悬浮输入框上方 8，指标见 [DESIGN](../DESIGN.md)
+8. [x] Python 环境专项盘点：只读检测 Python、Conda、Miniconda、虚拟环境和包管理入口；清理继续走 `runbook`，见 [python](tool/python.md)
 
 
 ## ToDraw 画布
