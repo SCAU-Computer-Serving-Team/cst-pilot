@@ -1,10 +1,10 @@
 # 工具文档
 
-本目录说明七个注册工具的调用方式、返回字段和限制。设计理由见 [design](../design/tool/sys-design.md)，验证方法见 [测试指南](../test/README.md)。
+本目录说明八个注册工具的调用方式、返回字段和限制。设计理由见 [design](../design/tool/sys-design.md)，验证方法见 [测试指南](../test/README.md)。
 
 ## 分类
 
-现有 7 个注册工具，6 个查询类，1 个执行类。
+现有 8 个注册工具，7 个查询类，1 个执行类。
 
 1. 查询类：只读，不改注册表、设备状态、系统配置和用户文件。
 2. 执行类：调用会改动上述状态。
@@ -21,8 +21,9 @@
 4. 开机会启动什么：[startup](startup.md)，无参数，实现 [startup.ts](../../agent/home/extensions/diagnostics/startup.ts)
 5. 崩溃、蓝屏、服务与登录历史：[eventlog](eventlog.md)，`recent`、`boot`、`crash`、`service`、`disk`、`security`、`query`、`detail`，实现 [eventlog-core.ts](../../agent/home/extensions/diagnostics/eventlog-core.ts)
 6. 设备识别与驱动状态：[driver](driver.md)，`problem`、`core`、`external`、`find`，实现 [driver-core.ts](../../agent/home/extensions/diagnostics/driver-core.ts)
-7. 让队员手动执行修复命令：[runbook](runbook.md)，必填 `title`、`level`、`items`，可选 `sequence`，实现 [runbook.ts](../../agent/home/extensions/diagnostics/runbook.ts)
-8. 维护共享目录大小缓存：[wz-index](wz-index.md)（内部模块），无子功能、不注册为工具，实现 [wz-index.ts](../../agent/home/extensions/diagnostics/wz-index.ts)
+7. Python、Conda 与虚拟环境盘点：[python](python.md)，`overview`、`installations`、`environments`、`config`、`all`，实现 [python.ts](../../agent/home/extensions/diagnostics/python.ts)
+8. 让队员手动执行修复命令：[runbook](runbook.md)，必填 `title`、`level`、`items`，可选 `sequence`，实现 [runbook.ts](../../agent/home/extensions/diagnostics/runbook.ts)
+9. 维护共享目录大小缓存：[wz-index](wz-index.md)（内部模块），无子功能、不注册为工具，实现 [wz-index.ts](../../agent/home/extensions/diagnostics/wz-index.ts)
 
 ## 使用约定
 
@@ -72,9 +73,9 @@ Windows 原生数据通过仓库自带的 `pwsh/pwsh.exe` 采集，使用 `-NoPr
 
 ## 维护
 
-`agent/home/extensions/diagnostics/index.ts` 是唯一扩展入口，按 pi 的多文件扩展约定注册七个工具。辅助模块只导出实际使用的函数和类型。入口创建共享目录索引并传给 disk、ls，每次重新加载入口都会建立新状态，见 [wz-index](wz-index.md)。
+`agent/home/extensions/diagnostics/index.ts` 是唯一扩展入口，按 pi 的多文件扩展约定注册八个工具。辅助模块只导出实际使用的函数和类型。入口创建共享目录索引并传给 disk、ls，每次重新加载入口都会建立新状态，见 [wz-index](wz-index.md)。
 
-- `disk.ts`、`driver.ts`、`eventlog.ts`：工具注册和参数 schema；对应 core 文件负责采集与路由。
+- `disk.ts`、`driver.ts`、`eventlog.ts`、`python.ts`：工具注册和参数 schema；对应 core 文件负责采集与路由。
 - `sys.ts`：工具注册与采集；`sys-commands.ts`：PowerShell 查询模板。
 - `startup.ts`、`ls.ts`、`runbook.ts`：较小的独立工具模块。
 - `runtime.ts`：便携程序路径、子进程、解码与 JSON 边界；`pwsh-data.ts`：PowerShell 数据表达式和采集包装。

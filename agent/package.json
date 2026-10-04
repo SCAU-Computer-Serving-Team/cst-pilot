@@ -7,6 +7,7 @@
     "check": "biome check home/extensions && tsc --noEmit -p tsconfig.json",
     "test:oauth": "node --test home/extensions/oauth/test/*.test.ts",
     "test:web": "node --test home/extensions/web/test/*.test.ts",
+    "test:diagnostics": "node --test home/extensions/diagnostics/*.test.ts",
     "format": "biome check --write home/extensions",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
