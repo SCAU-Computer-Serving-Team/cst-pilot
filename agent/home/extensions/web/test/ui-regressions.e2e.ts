@@ -190,6 +190,7 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 			"新会话在今天分类中实时出现",
 		);
 		evidence.realtimeSidebar = true;
+		await browser.until("window.__transitions.length>0", "路由触发原生页面过渡");
 		evidence.nativeTransition = await browser.evaluate(
 			"(async()=>{if(!window.__transitions.length)return {supported:!!document.startViewTransition,count:0};await window.__transitions[0].ready;await window.__transitions[0].finished;return {supported:true,ready:true,count:window.__transitions.length};})()",
 		);
