@@ -12,7 +12,7 @@ import {
 	LoaderCircle,
 	TriangleAlert,
 } from "lucide-react";
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ContentPart, Message } from "../data/web-state";
 import { type Block, mapTool } from "./map-tool";
 import { isStandaloneTool, splitToolCalls, type ToolState, toolState } from "./tool-state";
@@ -211,6 +211,30 @@ export const ToolCard = memo(function ToolCard({
 		return () => window.clearInterval(timer);
 	}, [result, live, startedAt]);
 	const view = result ? mapTool(call, result) : undefined;
+	const fieldContainer = useRef<HTMLDivElement>(null);
+	useLayoutEffect(() => {
+		if (!open || !result) return;
+		const container = fieldContainer.current;
+		if (!container) return;
+		let active = true;
+		const measure = () => {
+			const labels = [...container.querySelectorAll(".tool-fields dt")];
+			if (!labels.length) return;
+			const context = document.createElement("canvas").getContext("2d");
+			if (!context) return;
+			const style = getComputedStyle(labels[0]);
+			context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+			const width = Math.max(...labels.map((label) => context.measureText(label.textContent ?? "").width));
+			container.style.setProperty("--tool-label-width", `${Math.ceil(width) + 22}px`);
+		};
+		measure();
+		void document.fonts.ready.then(() => {
+			if (active) measure();
+		});
+		return () => {
+			active = false;
+		};
+	}, [open, result]);
 	const details = result && "details" in result ? (result as Message & { details?: unknown }).details : undefined;
 	const state = toolState(result, view?.status, live);
 	if (call.name === "web_search") {
@@ -244,13 +268,13 @@ export const ToolCard = memo(function ToolCard({
 		</>
 	);
 	const content = (
-		<div className="tool-card-detail">
+		<div className="tool-card-detail" ref={fieldContainer}>
 			<Card.Content>
 				<div className="tool-card-body">
 					<code className="tool-invocation">{callText}</code>
 					{!view ? (
 						state === "running" ? null : (
-							<p>本次调用没有返回结果。</p>
+							<p>无返回结果</p>
 						)
 					) : (
 						view.blocks.map((block) => <div key={block.id}>{renderBlock(block)}</div>)

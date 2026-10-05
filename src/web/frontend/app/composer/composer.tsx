@@ -15,12 +15,22 @@ import {
 import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { apiJson } from "../data/api";
-import type { Model } from "../data/web-state";
-import { editorHtml, extractPayload, parseEditor } from "./composer-editor";
+import { type Model, useGlobalEvents } from "../data/web-state";
+import { usePanelDismiss } from "../shell/panel-dismiss";
+import { chipCaretSpace, editorHtml, extractPayload, fileReference, parseEditor } from "./composer-editor";
 import { ContextMeter } from "./context-meter";
-import { addImage, type DraftImage, encodeImages, loadImages } from "./draft-images";
+import { parseImageHashes } from "./draft-image-references";
+import {
+	addImage,
+	collectDraftImages,
+	type DraftImage,
+	encodeImages,
+	loadImages,
+	releaseImageHolds,
+} from "./draft-images";
 import { draftKey as makeDraftKey } from "./drafts";
 import { ImagePreview } from "./image-preview";
+import { scopedModels } from "./scoped-models";
 
 type Selection = { provider: string; id: string; thinkingLevel?: string } | null;
 // 档位与 pi 的 ThinkingLevel 一一对应（off/minimal/low/medium/high/xhigh/max），面板内用英文短名。
@@ -93,6 +103,10 @@ export function Composer({
 		typeof window !== "undefined" ? (sessionStorage.getItem(`${draftKey}:id`) ?? crypto.randomUUID()) : "",
 	);
 	const [images, setImages] = useState<DraftImage[]>([]);
+	const [imagesLoading, setImagesLoading] = useState(true);
+	const [attaching, setAttaching] = useState(false);
+	const attachmentBusy = useRef(false);
+	const imageGeneration = useRef(0);
 	const [previewImage, setPreviewImage] = useState<string | null>(null);
 	const imagesRef = useRef(images);
 	imagesRef.current = images;
@@ -100,6 +114,12 @@ export function Composer({
 	const [models, setModels] = useState<Model[]>([]);
 	const [enabled, setEnabled] = useState<string[] | null>(null);
 	const [modelQuery, setModelQuery] = useState("");
+	const [modelMenuOpen, setModelMenuOpen] = useState(false);
+	const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
+	usePanelDismiss(modelMenuOpen || thinkingMenuOpen, () => {
+		setModelMenuOpen(false);
+		setThinkingMenuOpen(false);
+	});
 	const [loadedContext, setLoadedContext] = useState<{
 		tokens: number | null;
 		contextWindow: number;
@@ -131,7 +151,10 @@ export function Composer({
 		let out = "";
 		const walk = (node: Node) => {
 			if (node.nodeType === Node.TEXT_NODE) {
-				out += node.textContent ?? "";
+				const value = node.textContent ?? "";
+				const afterChip =
+					node.previousSibling instanceof HTMLElement && node.previousSibling.classList.contains("composer-chip");
+				out += afterChip && value.startsWith(chipCaretSpace) ? value.slice(chipCaretSpace.length) : value;
 				return;
 			}
 			if (node.nodeType !== Node.ELEMENT_NODE) return;
@@ -188,6 +211,10 @@ export function Composer({
 		const parent = chip?.parentNode;
 		if (!chip || !parent) return;
 		const at = [...parent.childNodes].indexOf(chip);
+		const separator = chip.nextSibling;
+		if (separator?.nodeType === Node.TEXT_NODE && separator.textContent?.startsWith(chipCaretSpace)) {
+			separator.textContent = separator.textContent.slice(chipCaretSpace.length);
+		}
 		chip.remove();
 		const range = document.createRange();
 		range.setStart(parent, at);
@@ -234,7 +261,7 @@ export function Composer({
 	}
 	function selectFile(path: string) {
 		const trimmed = readEditor(false).replace(/@[^\s@]*$/u, "");
-		renderEditor(`${trimmed} @${path} `);
+		renderEditor(`${trimmed} ${fileReference(path)} `);
 		setFileIndex(0);
 		setFilesVisible(false);
 	}
@@ -261,26 +288,41 @@ export function Composer({
 	}, [draftKey, messageId]);
 	useEffect(() => {
 		let active = true;
-		const stored = JSON.parse(sessionStorage.getItem(`${draftKey}:images`) ?? "[]") as string[];
-		void loadImages(stored)
+		imageGeneration.current++;
+		imagesRef.current = [];
+		setImages([]);
+		setImagesLoading(true);
+		void Promise.resolve()
+			.then(() => parseImageHashes(sessionStorage.getItem(`${draftKey}:images`)))
+			.then(loadImages)
 			.then((loaded) => {
-				if (active) setImages(loaded);
-				else
+				if (active) {
+					imagesRef.current = loaded;
+					setImages(loaded);
+				} else
 					loaded.forEach((image) => {
 						URL.revokeObjectURL(image.url);
 					});
 			})
 			.catch(() => {
 				if (active) setError("无法恢复未发送的图片");
+			})
+			.finally(() => {
+				if (active) setImagesLoading(false);
 			});
 		return () => {
 			active = false;
+			imageGeneration.current++;
 			imagesRef.current.forEach((image) => {
 				URL.revokeObjectURL(image.url);
 			});
 		};
 	}, [draftKey]);
 	async function attach(files: File[]) {
+		if (attachmentBusy.current || imagesLoading || sending) return;
+		attachmentBusy.current = true;
+		setAttaching(true);
+		const generation = imageGeneration.current;
 		const added: DraftImage[] = [];
 		try {
 			let total = imagesRef.current.reduce((sum, image) => sum + image.blob.size, 0);
@@ -289,8 +331,15 @@ export function Composer({
 				total += file.size;
 				added.push(image);
 			}
+			if (generation !== imageGeneration.current) {
+				added.forEach((image) => {
+					URL.revokeObjectURL(image.url);
+				});
+				return;
+			}
 			const next = [...imagesRef.current, ...added];
 			sessionStorage.setItem(`${draftKey}:images`, JSON.stringify(next.map((image) => image.hash)));
+			imagesRef.current = next;
 			setImages(next);
 			setMessageId(crypto.randomUUID());
 			setError("");
@@ -298,17 +347,24 @@ export function Composer({
 			added.forEach((image) => {
 				URL.revokeObjectURL(image.url);
 			});
-			setError(cause instanceof Error ? cause.message : "无法添加图片");
+			if (generation === imageGeneration.current) setError(cause instanceof Error ? cause.message : "无法添加图片");
+		} finally {
+			await releaseImageHolds(added).catch(() => {});
+			attachmentBusy.current = false;
+			setAttaching(false);
 		}
 	}
 	function removeImage(index: number) {
+		if (sending || attaching) return;
 		const removed = imagesRef.current[index];
 		if (!removed) return;
 		if (previewImage === removed.url) setPreviewImage(null);
 		URL.revokeObjectURL(removed.url);
 		const next = imagesRef.current.filter((_, at) => at !== index);
 		sessionStorage.setItem(`${draftKey}:images`, JSON.stringify(next.map((image) => image.hash)));
+		imagesRef.current = next;
 		setImages(next);
+		void collectDraftImages().catch(() => {});
 		setMessageId(crypto.randomUUID());
 	}
 	function paste(event: ClipboardEvent<HTMLDivElement>) {
@@ -340,7 +396,20 @@ export function Composer({
 			active = false;
 		};
 	}, []);
+	const [modelRevision, setModelRevision] = useState(0);
+	useGlobalEvents((name, event) => {
+		if (name === "open" || name === "reset") setModelRevision((value) => value + 1);
+		if (name !== "state") return;
+		try {
+			const type = JSON.parse(event?.data ?? "null")?.type;
+			if (type === "auth_changed" || type === "settings_changed") setModelRevision((value) => value + 1);
+		} catch {
+			/* 后续重连重新读取。 */
+		}
+	}, !!onSend);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 全局登录和 scoped 事件通过版本号重新读取同一接口
 	useEffect(() => {
+		const controller = new AbortController();
 		let active = true;
 		apiJson<{
 			models: Model[];
@@ -349,12 +418,24 @@ export function Composer({
 			thinkingLevels?: string[];
 			contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
 			usage?: SessionUsage | null;
-		}>(`/api/models${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`)
+		}>(`/api/models${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`, { signal: controller.signal })
 			.then((data) => {
 				if (active) {
 					setModels(data.models);
-					setEnabled(data.enabled?.length ? data.enabled : null);
-					setSelected(data.selected);
+					setEnabled(data.enabled);
+					const choices = scopedModels(data.models, data.enabled);
+					const initial =
+						!sessionId &&
+						!choices.some((model) => model.provider === data.selected?.provider && model.id === data.selected?.id)
+							? (choices[0] ?? null)
+							: data.selected;
+					setSelected((current) =>
+						!sessionId &&
+						current &&
+						choices.some((model) => model.provider === current.provider && model.id === current.id)
+							? current
+							: initial,
+					);
 					setThinking(data.selected?.thinkingLevel ?? "off");
 					setThinkingLevels(data.thinkingLevels ?? []);
 					setLoadedContext(data.contextUsage ?? null);
@@ -362,12 +443,14 @@ export function Composer({
 				}
 			})
 			.catch((cause: unknown) => {
-				if (active) setError(cause instanceof Error ? cause.message : "模型列表加载失败");
+				if (active && !controller.signal.aborted)
+					setError(cause instanceof Error ? cause.message : "模型列表加载失败");
 			});
 		return () => {
 			active = false;
+			controller.abort();
 		};
-	}, [sessionId]);
+	}, [sessionId, modelRevision]);
 
 	const usage = contextUsage ?? loadedContext;
 	const cacheHitRate = usageStats?.cacheHitRate ?? null;
@@ -375,34 +458,25 @@ export function Composer({
 	const availableThinking = thinkingLevels.length
 		? thinkingOptions.filter((option) => thinkingLevels.includes(option.id))
 		: thinkingOptions;
-	const scoped =
-		enabled === null
-			? models
-			: models.filter(
-					(item) =>
-						enabled.includes(`${item.provider}/${item.id}`) ||
-						(selected && item.provider === selected.provider && item.id === selected.id),
-				);
+	const scoped = scopedModels(models, enabled);
 	const modelMatches = scoped.filter((item) =>
 		`${item.provider} ${item.name} ${item.id}`.toLowerCase().includes(modelQuery.toLowerCase()),
 	);
 	async function chooseModel(key: string) {
-		if (!sessionId && key === "auto") {
+		if (!sessionId && key === "auto" && enabled === null) {
 			setSelected(null);
 			setModelQuery("");
 			return;
 		}
-		const choice = models.find((item) => `${item.provider}/${item.id}` === key);
+		const choice = (home ? scoped : models).find((item) => `${item.provider}/${item.id}` === key);
 		if (!choice) return;
 		try {
-			if (sessionId) {
-				const changed = await apiJson<{ thinkingLevel?: string; thinkingLevels?: string[] }>("/api/models/select", {
-					method: "POST",
-					body: { sessionId, provider: choice.provider, modelId: choice.id },
-				});
-				if (changed.thinkingLevel) setThinking(changed.thinkingLevel);
-				if (changed.thinkingLevels) setThinkingLevels(changed.thinkingLevels);
-			}
+			const changed = await apiJson<{ thinkingLevel?: string; thinkingLevels?: string[] }>("/api/models/select", {
+				method: "POST",
+				body: { ...(sessionId ? { sessionId } : {}), provider: choice.provider, modelId: choice.id },
+			});
+			if (changed.thinkingLevel) setThinking(changed.thinkingLevel);
+			if (changed.thinkingLevels) setThinkingLevels(changed.thinkingLevels);
 			setSelected({ provider: choice.provider, id: choice.id });
 			setModelQuery("");
 			setError("");
@@ -420,7 +494,7 @@ export function Composer({
 		}
 	}
 	async function submit() {
-		if (sending) return;
+		if (sending || attaching || imagesLoading) return;
 		// 自定义总结提示词：回车不是发消息，而是带着这段提示词去发起导航与总结。
 		if (summaryTag) {
 			if (!text.trim() || !onSummary) return;
@@ -470,10 +544,17 @@ export function Composer({
 				await onCommand("compact", body);
 			} else {
 				if (!onSend) throw new Error("当前无法提交消息");
+				if (
+					home &&
+					(!scoped.length ||
+						(selected &&
+							!scoped.some((model) => model.provider === selected.provider && model.id === selected.id)))
+				)
+					throw new Error("当前范围没有可用模型，请在设置中调整范围或登录。");
 				await onSend(body, {
 					provider: selected?.provider,
 					modelId: selected?.id,
-					thinkingLevel: thinking,
+					thinkingLevel: home ? undefined : thinking,
 					messageId,
 					images: await encodeImages(images),
 					skill: command.startsWith("/skill:") ? command.slice(7) : undefined,
@@ -483,8 +564,10 @@ export function Composer({
 			images.forEach((image) => {
 				URL.revokeObjectURL(image.url);
 			});
+			imagesRef.current = [];
 			setImages([]);
 			sessionStorage.removeItem(`${draftKey}:images`);
+			void collectDraftImages().catch(() => {});
 			renderEditor("");
 			setMessageId(crypto.randomUUID());
 			sessionStorage.removeItem(draftKey);
@@ -497,6 +580,7 @@ export function Composer({
 	}
 	function keyDown(event: KeyboardEvent<HTMLDivElement>) {
 		if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+		if (event.key === "Enter" && event.target instanceof HTMLElement && event.target.closest(".chip-remove")) return;
 		if (fileSuggestions.length && ["ArrowUp", "ArrowDown", "Tab", "Enter", "Escape"].includes(event.key)) {
 			event.preventDefault();
 			if (event.key === "ArrowUp")
@@ -524,6 +608,11 @@ export function Composer({
 			void submit();
 		}
 	}
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 选项索引变化后滚动已渲染的高亮行。
+	useEffect(() => {
+		const panel = editorRef.current?.parentElement;
+		panel?.querySelector<HTMLElement>(".command-active")?.scrollIntoView({ block: "nearest" });
+	}, [commandIndex, fileIndex]);
 	const nothingToSend = !text.trim() && !images.length && chipCount === 0;
 
 	return (
@@ -655,6 +744,7 @@ export function Composer({
 						isIconOnly
 						className="composer-icon"
 						aria-label="添加图片"
+						isDisabled={sending || attaching || imagesLoading}
 						onPress={() => fileInput.current?.click()}
 					>
 						<Plus size={20} />
@@ -662,6 +752,11 @@ export function Composer({
 					<span className="composer-spacer" />
 					{!home && <ContextMeter usage={usage} cacheHitRate={cacheHitRate} provider={selected?.provider ?? ""} />}
 					<Select
+						isOpen={modelMenuOpen}
+						onOpenChange={(open) => {
+							setModelMenuOpen(open);
+							if (open) setThinkingMenuOpen(false);
+						}}
 						aria-label="模型"
 						selectedKey={modelKey}
 						onSelectionChange={(key) => {
@@ -673,7 +768,7 @@ export function Composer({
 						<Select.Trigger className="composer-model">
 							<span className="model-label">
 								{models.find((item) => `${item.provider}/${item.id}` === modelKey)?.name ?? "自动选择"}
-								<ChevronDown size={13} />
+								<ChevronDown size={14} />
 							</span>
 						</Select.Trigger>
 						<Select.Popover className="composer-popover model-popover" placement="top end">
@@ -684,18 +779,15 @@ export function Composer({
 									onChange={(event) => setModelQuery(event.target.value)}
 									placeholder="搜索 Provider 或模型名称"
 								/>
-								<small>
-									显示 {Math.min(modelMatches.length, 80)} / {modelMatches.length}
-								</small>
 							</div>
 							<ListBox>
-								{!sessionId && (
+								{!sessionId && enabled === null && (
 									<ListBox.Item id="auto" textValue="自动选择">
 										<Check className="model-option-check" size={16} aria-hidden="true" />
 										<span>自动选择</span>
 									</ListBox.Item>
 								)}
-								{modelMatches.slice(0, 80).map((model) => (
+								{modelMatches.map((model) => (
 									<ListBox.Item
 										key={`${model.provider}/${model.id}`}
 										id={`${model.provider}/${model.id}`}
@@ -710,6 +802,11 @@ export function Composer({
 					</Select>
 					{!home && (
 						<Select
+							isOpen={thinkingMenuOpen}
+							onOpenChange={(open) => {
+								setThinkingMenuOpen(open);
+								if (open) setModelMenuOpen(false);
+							}}
 							aria-label="思考强度"
 							selectedKey={thinking}
 							onSelectionChange={(key) => {
@@ -723,7 +820,7 @@ export function Composer({
 								{thinking === "off"
 									? "Off"
 									: (thinkingOptions.find((option) => option.id === thinking)?.label ?? thinking)}
-								<ChevronDown size={13} />
+								<ChevronDown size={14} />
 							</Select.Trigger>
 							<Select.Popover className="composer-popover thinking-popover" placement="top end">
 								<ListBox>
@@ -743,6 +840,8 @@ export function Composer({
 						isIconOnly
 						isDisabled={
 							sending ||
+							attaching ||
+							imagesLoading ||
 							(summaryTag ? !text.trim() : (nothingToSend && !running) || (!onSend && !onStop && !onCommand))
 						}
 						className="composer-send"

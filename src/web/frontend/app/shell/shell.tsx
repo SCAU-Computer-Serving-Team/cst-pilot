@@ -15,10 +15,12 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
+import { accountProvider, loginPath } from "../auth/providers";
 import { Composer, type ComposerConfig } from "../composer/composer";
 import { apiJson, type ProviderStatus } from "../data/api";
 import { useGlobalEvents, useSessions } from "../data/web-state";
 import { BlueHour } from "./blue-hour";
+import { usePanelDismiss } from "./panel-dismiss";
 import { sampleSessions } from "./sample-sessions";
 import { currentTheme, nextTheme, type Theme, themeLabels } from "./theme";
 
@@ -37,10 +39,12 @@ const dayGroup = (value?: string) => {
 
 export function Sidebar({
 	preview = false,
+	collapsed = false,
 	onCollapse,
 	onNavigate,
 }: {
 	preview?: boolean;
+	collapsed?: boolean;
 	onCollapse: () => void;
 	onNavigate?: () => void;
 }) {
@@ -53,8 +57,16 @@ export function Sidebar({
 		preview ? (session.group ?? "今天") : dayGroup(session.updatedAt);
 	const navigate = useNavigate();
 	const [providers, setProviders] = useState<ProviderStatus[]>([]);
+	const team = accountProvider(providers);
+	const teamSignedIn = team?.type === "oauth";
 	const [accountError, setAccountError] = useState("");
 	const [accountWorking, setAccountWorking] = useState(false);
+	const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+	usePanelDismiss(accountMenuOpen, () => setAccountMenuOpen(false));
+	function closeAccountMenu() {
+		setAccountMenuOpen(false);
+		onNavigate?.();
+	}
 	const [theme, setTheme] = useState<Theme>(currentTheme);
 	const [menu, setMenu] = useState<{ id: string; title: string; x: number; y: number } | null>(null);
 	const menuRef = useRef<HTMLDivElement>(null);
@@ -75,9 +87,7 @@ export function Sidebar({
 			if (!animate) selection.style.transition = "none";
 			const origin = top.getBoundingClientRect();
 			const target = active.getBoundingClientRect();
-			selection.style.width = `${target.width}px`;
-			selection.style.height = `${target.height}px`;
-			selection.style.transform = `translate3d(${target.left - origin.left + top.scrollLeft}px, ${target.top - origin.top + top.scrollTop}px, 0)`;
+			selection.style.transform = `translate3d(0, ${target.top - origin.top + top.scrollTop}px, 0)`;
 			selection.style.visibility = "visible";
 			if (!animate) {
 				void selection.offsetWidth;
@@ -176,9 +186,10 @@ export function Sidebar({
 			return;
 		}
 		if (name !== "state") return;
-		void refreshAccount();
 		try {
-			if (JSON.parse(event?.data ?? "null")?.type === "settings_changed") void refreshTheme();
+			const type = JSON.parse(event?.data ?? "null")?.type;
+			if (type === "auth_changed") void refreshAccount();
+			if (type === "settings_changed") void refreshTheme();
 		} catch {
 			/* 其他状态事件不影响当前主题。 */
 		}
@@ -203,18 +214,13 @@ export function Sidebar({
 		}
 	}
 	async function logout() {
+		if (!teamSignedIn || accountWorking) return;
 		setAccountWorking(true);
 		try {
-			const active = providers.filter((provider) => provider.type);
-			const results = await Promise.allSettled(
-				active.map((provider) =>
-					apiJson(`/api/auth/${encodeURIComponent(provider.id)}/logout`, { method: "POST" }),
-				),
-			);
+			await apiJson("/api/auth/cstoa/logout", { method: "POST" });
 			await refreshAccount();
-			if (results.some((result) => result.status === "rejected")) setAccountError("部分模型服务退出失败，请重试");
 		} catch (cause) {
-			setAccountError(cause instanceof Error ? cause.message : "退出登录失败");
+			setAccountError(cause instanceof Error ? cause.message : "退出账号失败，请重试");
 		} finally {
 			setAccountWorking(false);
 		}
@@ -231,11 +237,11 @@ export function Sidebar({
 		}
 	}
 	return (
-		<aside className="sidebar" aria-label="会话导航">
+		<aside className="sidebar" aria-label="会话导航" inert={collapsed} aria-hidden={collapsed}>
 			<div className="sidebar-top" ref={topRef}>
 				<span className="sidebar-selection" ref={selectionRef} aria-hidden="true" />
 				<div className="sidebar-brand">
-					<Link className="product-name" to={preview ? "/?preview=1" : "/"}>
+					<Link className="product-name" to={preview ? "/?preview=1" : "/"} viewTransition>
 						CST Pilot
 					</Link>
 					<Button variant="ghost" isIconOnly className="sidebar-icon" aria-label="收起侧栏" onPress={onCollapse}>
@@ -245,6 +251,7 @@ export function Sidebar({
 				<Link
 					className={`sidebar-new ${location.pathname === "/" ? "selected" : ""}`}
 					to={preview ? "/?preview=1" : "/"}
+					viewTransition
 					onClick={onNavigate}
 				>
 					<SquarePen size={18} />
@@ -261,6 +268,7 @@ export function Sidebar({
 										<Link
 											className={`sidebar-session ${location.pathname === `/s/${session.id}` ? "selected" : ""}`}
 											to={`/s/${session.id}${preview ? "?preview=1" : ""}`}
+											viewTransition
 											onClick={onNavigate}
 											onContextMenu={
 												preview
@@ -339,34 +347,43 @@ export function Sidebar({
 					<Monitor size={18} />
 				</div>
 				<div className="device-copy">
-					<span>{preview ? "Tim2354" : "当前电脑"}</span>
+					<span>{preview ? "Tim2354" : teamSignedIn ? "CSTOA 账号" : "当前电脑"}</span>
 					<small>
-						{preview ? "24宣传指导 · 设计预览" : state.stage === "preview" ? "页面预览模式" : "本机运行中"}
+						{preview
+							? "24宣传指导 · 设计预览"
+							: teamSignedIn
+								? team?.requiresLogin
+									? "需要重新登录"
+									: "已登录"
+								: state.stage === "preview"
+									? "页面预览模式"
+									: "CSTOA 未登录"}
 					</small>
 				</div>
-				<Popover>
+				<Popover isOpen={accountMenuOpen} onOpenChange={setAccountMenuOpen}>
 					<Button variant="ghost" isIconOnly className="sidebar-account-trigger" aria-label="账号菜单">
 						<Settings size={22} aria-hidden="true" />
 					</Button>
 					<Popover.Content placement="top end" className="sidebar-account-popover">
 						<Popover.Dialog aria-label="账号菜单" className="sidebar-account-menu">
-							{providers.some((provider) => provider.type) ? (
-								<>
-									<Link className="sidebar-account-item" to="/settings#accounts">
-										<CircleUserRound size={18} aria-hidden="true" />
-										账号信息
-									</Link>
-									<Link className="sidebar-account-item" to="/settings">
-										<Settings size={18} aria-hidden="true" />
-										设置
-									</Link>
-								</>
-							) : (
-								<Link className="sidebar-account-item" to="/login">
+							<Link className="sidebar-account-item" to="/account" onClick={closeAccountMenu}>
+								<CircleUserRound size={18} aria-hidden="true" />
+								账号信息
+							</Link>
+							{(!teamSignedIn || team?.requiresLogin) && (
+								<Link
+									className="sidebar-account-item"
+									to={loginPath("cstoa", "oauth", "/account")}
+									onClick={closeAccountMenu}
+								>
 									<LogIn size={18} aria-hidden="true" />
-									登录
+									{team?.requiresLogin ? "重新登录 CSTOA" : "登录 CSTOA"}
 								</Link>
 							)}
+							<Link className="sidebar-account-item" to="/settings" onClick={closeAccountMenu}>
+								<Settings size={18} aria-hidden="true" />
+								设置
+							</Link>
 							<Button
 								variant="ghost"
 								className="sidebar-account-item"
@@ -380,24 +397,28 @@ export function Sidebar({
 							</Button>
 							<a
 								className="sidebar-account-item"
-								href="https://github.com/SCAU-Computer-Serving-Team/cst-pilot/issues/new"
+								href="https://github.com/SCAU-CST/cst-pilot/issues/new"
+								onClick={closeAccountMenu}
 								target="_blank"
 								rel="noopener noreferrer"
 							>
 								<MessageSquareWarning size={18} aria-hidden="true" />
 								反馈问题
 							</a>
-							{providers.some((provider) => provider.type) && (
+							{teamSignedIn && (
 								<>
 									<hr className="session-menu-divider" />
 									<Button
 										variant="ghost"
 										className="sidebar-account-item"
 										isDisabled={accountWorking}
-										onPress={() => void logout()}
+										onPress={() => {
+											closeAccountMenu();
+											void logout();
+										}}
 									>
 										<LogOut size={18} aria-hidden="true" />
-										登出
+										退出 CSTOA
 									</Button>
 								</>
 							)}
@@ -430,7 +451,7 @@ export function BrandArcs() {
 	);
 }
 
-export function HomeSurface({ preview = false }: { preview?: boolean }) {
+export function HomeSurface({ preview = false, paused = false }: { preview?: boolean; paused?: boolean }) {
 	const navigate = useNavigate();
 	async function send(text: string, config: ComposerConfig) {
 		const session = await apiJson<{ id: string }>("/api/sessions", {
@@ -451,17 +472,19 @@ export function HomeSurface({ preview = false }: { preview?: boolean }) {
 				...(config.skill ? { skill: config.skill } : {}),
 			},
 		});
-		navigate(`/s/${session.id}`);
+		navigate(`/s/${session.id}`, { viewTransition: true });
 	}
 	return (
 		<main className="home-main">
-			<BlueHour kind="home" />
+			<div className="home-backdrop" aria-hidden="true">
+				<BlueHour kind="home" paused={paused} />
+			</div>
 			<div className="home-center">
 				<div className="home-greeting">
 					<BrandArcs />
 					<h1>我该如何协助您？</h1>
 				</div>
-				<Composer home onSend={preview ? undefined : send} />
+				<Composer home onSend={preview || paused ? undefined : send} />
 			</div>
 			<span className="home-footnote">@cst-pilot-web</span>
 		</main>

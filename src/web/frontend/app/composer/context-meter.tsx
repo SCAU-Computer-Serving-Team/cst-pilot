@@ -1,6 +1,7 @@
 import { ChevronRight, Info } from "lucide-react";
-import { type CSSProperties, useCallback, useEffect, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useId, useRef, useState } from "react";
 import { apiJson } from "../data/api";
+import { usePanelDismiss } from "../shell/panel-dismiss";
 
 type Quota = {
 	provider: string;
@@ -29,6 +30,17 @@ export function ContextMeter({
 	provider: string;
 }) {
 	const percent = usage?.percent ?? 0;
+	const panelId = useId();
+	const panel = useRef<HTMLElement>(null);
+	const trigger = useRef<HTMLButtonElement>(null);
+	const [hovered, setHovered] = useState(false);
+	const [focused, setFocused] = useState(false);
+	const [dismissed, setDismissed] = useState(false);
+	const open = (hovered || focused) && !dismissed;
+	usePanelDismiss(open, () => {
+		if (panel.current?.contains(document.activeElement)) trigger.current?.focus();
+		setDismissed(true);
+	});
 	const [quota, setQuota] = useState<Quota | null>(null);
 	const requestedAt = useRef(0);
 	const requestId = useRef(0);
@@ -62,12 +74,32 @@ export function ContextMeter({
 	};
 
 	return (
-		<span className="context-meter-wrap">
+		<fieldset
+			className="context-meter-wrap"
+			aria-label="上下文"
+			data-open={open}
+			onMouseEnter={() => {
+				setHovered(true);
+				setDismissed(false);
+			}}
+			onMouseLeave={() => setHovered(false)}
+			onFocusCapture={() => {
+				setFocused(true);
+				setDismissed(false);
+			}}
+			onBlurCapture={(event) => {
+				if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget))
+					setFocused(false);
+			}}
+		>
 			<button
+				ref={trigger}
 				type="button"
 				className="context-meter"
 				onMouseEnter={refreshQuota}
 				onFocus={refreshQuota}
+				aria-expanded={open}
+				aria-controls={panelId}
 				aria-label={usage?.percent == null ? "上下文用量未知" : `上下文用量 ${Math.round(percent)}%`}
 			>
 				<span
@@ -76,7 +108,7 @@ export function ContextMeter({
 					data-level={percent >= 90 ? "danger" : percent >= 75 ? "warning" : "normal"}
 				/>
 			</button>
-			<span className="context-panel" role="tooltip">
+			<section className="context-panel" ref={panel} id={panelId} aria-label="上下文信息">
 				<span className="context-row">
 					<span className="context-label">上下文容量</span>
 					<span className="context-value">
@@ -107,7 +139,7 @@ export function ContextMeter({
 										: "DeepSeek 账户可用余额"
 								}
 							>
-								<Info size={13} aria-hidden="true" />
+								<Info size={14} aria-hidden="true" />
 							</span>
 							<a
 								className="context-more"
@@ -147,7 +179,7 @@ export function ContextMeter({
 						)}
 					</>
 				)}
-			</span>
-		</span>
+			</section>
+		</fieldset>
 	);
 }

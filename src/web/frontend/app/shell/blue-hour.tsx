@@ -4,6 +4,7 @@ import airShader from "../../../design/asset/blue-hour-air.glsl?raw";
 import airDarkPalette from "../../../design/asset/blue-hour-air-dark-palette.png?url";
 import darkPalette from "../../../design/asset/blue-hour-dark-palette.png?url";
 import lightPalette from "../../../design/asset/blue-hour-palette.png?url";
+import { FrameClock } from "./frame-clock";
 
 const vertexShader = `attribute vec2 a_position;
 void main() { gl_Position = vec4(a_position, 0.0, 1.0); }`;
@@ -26,7 +27,7 @@ function prefersDark(): boolean {
 	return theme === "dark" || (theme !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 }
 
-export function BlueHour({ kind }: { kind: BackgroundKind }) {
+export function BlueHour({ kind, paused = false }: { kind: BackgroundKind; paused?: boolean }) {
 	const ref = useRef<HTMLCanvasElement>(null);
 
 	useEffect(() => {
@@ -85,8 +86,13 @@ export function BlueHour({ kind }: { kind: BackgroundKind }) {
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-		gl.uniform1i(gl.getUniformLocation(program, "u_palette"), 0);
-		const set = (key: string, value: number) => gl.uniform1f(gl.getUniformLocation(program, key), value);
+		const locations = new Map<string, WebGLUniformLocation | null>();
+		const location = (key: string) => {
+			if (!locations.has(key)) locations.set(key, gl.getUniformLocation(program, key));
+			return locations.get(key) ?? null;
+		};
+		gl.uniform1i(location("u_palette"), 0);
+		const set = (key: string, value: number) => gl.uniform1f(location(key), value);
 		let dark = prefersDark();
 		set("u_speed", 30);
 		set("u_phase", kind === "home" ? 20.75 : 0);
@@ -107,15 +113,15 @@ export function BlueHour({ kind }: { kind: BackgroundKind }) {
 		const image = new Image();
 		const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
 		let frame = 0;
-		let last = performance.now();
-		let elapsed = 0;
+		const clock = new FrameClock(performance.now());
+		let cssWidth = surface.clientWidth;
+		let cssHeight = surface.clientHeight;
 		let ready = false;
 		let live = true;
 		let painted = false;
 
 		function schedule() {
 			if (!live || !ready || (document.hidden && painted) || frame) return;
-			last = performance.now();
 			frame = requestAnimationFrame((now) => {
 				frame = 0;
 				draw(now);
@@ -124,20 +130,21 @@ export function BlueHour({ kind }: { kind: BackgroundKind }) {
 
 		function draw(now: number) {
 			if (!live || (document.hidden && painted)) return;
-			const width = Math.max(1, Math.round(surface.clientWidth * Math.min(devicePixelRatio, 2)));
-			const height = Math.max(1, Math.round(surface.clientHeight * Math.min(devicePixelRatio, 2)));
+			// Shader 为渐变背景：限制总像素，避免 4K × 高 DPR 在高刷屏逐帧填充过多像素。
+			const ratio = Math.min(devicePixelRatio, 2, Math.sqrt(2_500_000 / Math.max(1, cssWidth * cssHeight)));
+			const width = Math.max(1, Math.round(cssWidth * ratio));
+			const height = Math.max(1, Math.round(cssHeight * ratio));
 			if (surface.width !== width || surface.height !== height) {
 				surface.width = width;
 				surface.height = height;
 				context.viewport(0, 0, width, height);
 			}
-			if (!motion.matches) elapsed += Math.min(now - last, 100);
-			context.uniform2f(context.getUniformLocation(program, "u_resolution"), width, height);
-			set("u_time", elapsed / 1000);
+			context.uniform2f(location("u_resolution"), width, height);
+			set("u_time", clock.step(now, motion.matches || paused));
 			context.drawArrays(context.TRIANGLE_STRIP, 0, 4);
-			surface.style.opacity = "1";
+			if (!painted) surface.style.opacity = "1";
 			painted = true;
-			if (!motion.matches && !document.hidden) schedule();
+			if (!motion.matches && !paused && !document.hidden) schedule();
 		}
 
 		image.onload = () => {
@@ -145,6 +152,7 @@ export function BlueHour({ kind }: { kind: BackgroundKind }) {
 			gl.bindTexture(gl.TEXTURE_2D, palette);
 			gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
 			ready = true;
+			clock.resume(performance.now());
 			schedule();
 		};
 		image.onerror = () => console.error("Blue hour 色表加载失败：", image.src);
@@ -172,18 +180,29 @@ export function BlueHour({ kind }: { kind: BackgroundKind }) {
 		const themeObserver = new MutationObserver(syncTheme);
 		themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 		colorScheme.addEventListener("change", syncTheme);
-		const resize = new ResizeObserver(schedule);
+		const resize = new ResizeObserver((entries) => {
+			const size = entries[0]?.contentRect;
+			if (size) {
+				cssWidth = size.width;
+				cssHeight = size.height;
+			}
+			schedule();
+		});
 		resize.observe(canvas);
-		document.addEventListener("visibilitychange", schedule);
-		motion.addEventListener("change", schedule);
+		const resume = () => {
+			clock.resume(performance.now());
+			schedule();
+		};
+		document.addEventListener("visibilitychange", resume);
+		motion.addEventListener("change", resume);
 		return () => {
 			live = false;
 			cancelAnimationFrame(frame);
 			resize.disconnect();
 			themeObserver.disconnect();
 			colorScheme.removeEventListener("change", syncTheme);
-			document.removeEventListener("visibilitychange", schedule);
-			motion.removeEventListener("change", schedule);
+			document.removeEventListener("visibilitychange", resume);
+			motion.removeEventListener("change", resume);
 			image.onload = null;
 			image.onerror = null;
 			gl.deleteTexture(palette);
@@ -192,7 +211,7 @@ export function BlueHour({ kind }: { kind: BackgroundKind }) {
 			gl.deleteShader(vertex);
 			gl.deleteShader(fragment);
 		};
-	}, [kind]);
+	}, [kind, paused]);
 
 	return <canvas className={`blue-hour blue-hour--${kind}`} ref={ref} />;
 }

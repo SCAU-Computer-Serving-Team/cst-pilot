@@ -31,6 +31,7 @@ export type QueueItem = {
 	delivery: "direct" | "queue" | "steer";
 	images: { id: string; mimeType: string }[];
 	sequence: number;
+	error?: string;
 };
 export type InboxSnapshot = { version: number; paused: boolean; items: QueueItem[] };
 export type Question = {
@@ -94,23 +95,45 @@ export function useSessions() {
 	const [sessions, setSessions] = useState<SessionRow[]>([]);
 	const [stage, setStage] = useState("");
 	const [error, setError] = useState("");
+	const requestSequence = useRef(0);
+	const refreshTimer = useRef<number | undefined>(undefined);
 	const refresh = useCallback(async () => {
+		const sequence = ++requestSequence.current;
 		try {
 			const state = await apiJson<{ sessions: SessionRow[]; stage: string }>("/api/state");
+			if (sequence !== requestSequence.current) return;
 			setSessions(state.sessions);
 			setStage(state.stage);
 			setError("");
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : "会话列表加载失败");
+			if (sequence === requestSequence.current)
+				setError(cause instanceof Error ? cause.message : "会话列表加载失败");
 		}
 	}, []);
 	useEffect(() => {
 		void refresh();
+		return () => {
+			++requestSequence.current;
+			window.clearTimeout(refreshTimer.current);
+		};
 	}, [refresh]);
 	useGlobalEvents(
-		(name) => {
-			if (name === "error") setError("连接已断开。请确认 pi 仍在运行。");
-			else void refresh();
+		(name, event) => {
+			if (name === "error") {
+				setError("连接已断开。请确认 pi 仍在运行。");
+				return;
+			}
+			if (name === "state") {
+				try {
+					if (JSON.parse(event?.data ?? "null")?.type !== "sessions_changed") return;
+				} catch {
+					return;
+				}
+			}
+			window.clearTimeout(refreshTimer.current);
+			refreshTimer.current = window.setTimeout(() => {
+				void refresh();
+			}, 40);
 		},
 		!!stage && stage !== "preview",
 	);
@@ -180,6 +203,21 @@ export function useSessionTree(id: string | undefined) {
 /** 会话标题：从会话列表里查当前会话的名字，找不到用「新对话」。 */
 export function useSessionTitle(sessionId: string | undefined, initial: string, enabled = true) {
 	const [title, setTitle] = useState(initial);
+	const [revision, setRevision] = useState(0);
+	useGlobalEvents((name, event) => {
+		if (name === "open" || name === "reset") setRevision((value) => value + 1);
+		if (name !== "state") return;
+		try {
+			if (JSON.parse(event?.data ?? "null")?.type === "sessions_changed") setRevision((value) => value + 1);
+		} catch {
+			/* 下一次会话事件重新同步。 */
+		}
+	}, enabled && !!sessionId);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 会话 ID 变化时重置标题，即使占位文案相同
+	useEffect(() => {
+		setTitle(initial);
+	}, [initial, sessionId]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: sessions_changed 版本号触发标题同步
 	useEffect(() => {
 		if (!sessionId || !enabled) return;
 		let active = true;
@@ -191,7 +229,7 @@ export function useSessionTitle(sessionId: string | undefined, initial: string, 
 		return () => {
 			active = false;
 		};
-	}, [sessionId, enabled]);
+	}, [sessionId, enabled, revision]);
 	return title;
 }
 

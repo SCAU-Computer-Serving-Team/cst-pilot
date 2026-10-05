@@ -7,5 +7,7 @@ export default [
 		route("s/:sessionId", "routes/chat.tsx"),
 		route("s/:sessionId/tree", "routes/tree.tsx"),
 		route("settings", "routes/settings.tsx"),
+		route("settings/provider", "routes/provider.tsx"),
+		route("account", "routes/account.tsx"),
 	]),
 ] satisfies RouteConfig;

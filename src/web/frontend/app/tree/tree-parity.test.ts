@@ -3,7 +3,7 @@
 // 依赖 pi 发行包里未导出的内部组件，路径按 @earendil-works/pi-coding-agent 版本固定。
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildVisibleTree, layoutTree, type TreeEntry, type TreeNode } from "./branch-tree.ts";
+import { buildVisibleTree, layoutTree, type TreeEntry, type TreeNode, type ViewFilter } from "./branch-tree.ts";
 
 const DIST = new URL(
 	"../../../../../agent/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/",
@@ -13,7 +13,7 @@ const DIST = new URL(
 type Layout = { id: string; indent: number; square: number | null; lines: number[]; blanks: number[] };
 
 /** 交给 TUI 渲染，读回它算出的排版字段。 */
-async function tuiLayout(tree: TreeNode[], leafId: string | null) {
+async function tuiLayout(tree: TreeNode[], leafId: string | null, filter: ViewFilter = "default") {
 	const { TreeSelectorComponent } = await import(new URL("components/tree-selector.js", DIST).href);
 	const { initTheme } = await import(new URL("theme/theme.js", DIST).href);
 	initTheme("dark");
@@ -26,6 +26,8 @@ async function tuiLayout(tree: TreeNode[], leafId: string | null) {
 		async () => {},
 	);
 	const list = component.treeList as {
+		filterMode: ViewFilter;
+		applyFilter(): void;
 		multipleRoots: boolean;
 		filteredNodes: {
 			node: { entry: { id: string } };
@@ -35,6 +37,10 @@ async function tuiLayout(tree: TreeNode[], leafId: string | null) {
 			gutters: { position: number; show: boolean }[];
 		}[];
 	};
+	if (filter !== "default") {
+		list.filterMode = filter;
+		list.applyFilter();
+	}
 	const rows: Layout[] = list.filteredNodes.map((flat) => {
 		const displayIndent = list.multipleRoots ? Math.max(0, flat.indent - 1) : flat.indent;
 		const shown = flat.showConnector && !flat.isVirtualRootChild;
@@ -51,8 +57,8 @@ async function tuiLayout(tree: TreeNode[], leafId: string | null) {
 }
 
 /** 本项目前端算出的排版。 */
-function webLayout(tree: TreeNode[], leafId: string | null): Layout[] {
-	return layoutTree(buildVisibleTree(tree, leafId), leafId).map((row) => ({
+function webLayout(tree: TreeNode[], leafId: string | null, filter: ViewFilter = "default"): Layout[] {
+	return layoutTree(buildVisibleTree(tree, leafId, filter), leafId).map((row) => ({
 		id: row.node.entry.id,
 		indent: row.displayIndent,
 		square: row.showConnector ? row.connectorColumn : null,
@@ -61,9 +67,9 @@ function webLayout(tree: TreeNode[], leafId: string | null): Layout[] {
 	}));
 }
 
-async function assertSameLayout(tree: TreeNode[], leafId: string | null, name: string) {
-	const tui = await tuiLayout(tree, leafId);
-	const web = webLayout(tree, leafId);
+async function assertSameLayout(tree: TreeNode[], leafId: string | null, name: string, filter: ViewFilter = "default") {
+	const tui = await tuiLayout(tree, leafId, filter);
+	const web = webLayout(tree, leafId, filter);
 	assert.deepEqual(
 		{ rows: web },
 		{ rows: tui.rows },
@@ -193,7 +199,7 @@ test("多根按虚拟根处理", async () => {
 		link(user("u2", null, "第二条链"), assistant("a2", "u2", "回答")),
 	];
 	await assertSameLayout(tree, "a2", "多根");
-	// 虚拟根不注册竖线，多根时整棵树没有任何方块与竖线，只靠缩进区分层级。
+	// 虚拟根不注册竖线；各真实根内的分叉仍按通常规则绘制。
 	assert.deepEqual(
 		webLayout(tree, "a2").map((row) => [row.id, row.indent, row.square, row.lines, row.blanks]),
 		[
@@ -203,6 +209,47 @@ test("多根按虚拟根处理", async () => {
 			["a1", 1, null, [], []],
 		],
 	);
+});
+
+test("隐藏当前叶仍按其原始祖先路径排序", async () => {
+	const tree = [
+		link(
+			user("root", null, "开场"),
+			link(user("older", "root", "旧分支"), assistant("old-answer", "older", "旧回答")),
+			link(user("active", "root", "当前分支"), modelChange("hidden-leaf", "active")),
+		),
+	];
+	await assertSameLayout(tree, "hidden-leaf", "隐藏当前叶");
+});
+
+test("隐藏祖先后保持原树遍历次序，不按可见后代的时间重新排兄弟", async () => {
+	const root = user("root", null, "根");
+	const hidden = modelChange("hidden", "root");
+	const sibling = user("sibling", "root", "另一分支");
+	const laterChild = user("later-child", "hidden", "隐藏祖先的后代");
+	const tree = [link(root, link(hidden, laterChild), sibling)];
+	await assertSameLayout(tree, "root", "隐藏祖先的排序");
+});
+
+test("多根内部仍绘制真实分叉，连接符列可被不同分支点复用", async () => {
+	const tree = [
+		link(user("r1", null, "第一根"), user("r1a", "r1", "A"), user("r1b", "r1", "B")),
+		link(user("r2", null, "第二根"), user("r2a", "r2", "C"), user("r2b", "r2", "D")),
+	];
+	await assertSameLayout(tree, "r2b", "多根内分叉");
+	assert.equal(webLayout(tree, "r2b").filter((row) => row.square !== null).length, 4);
+});
+
+test("五档过滤均保持 Pi 的原始排序与可见结构", async () => {
+	const root = user("root", null, "开场");
+	const hidden = modelChange("settings", "root");
+	const other = link(user("other", "root", "另一分支"), toolResult("result", "other", "读取完成"));
+	const active = link(user("active", "settings", "当前分支"), assistant("leaf", "active", "结束"));
+	active.label = "重点";
+	other.children[0].label = "检查";
+	const tree = [link(root, link(hidden, active), other)];
+	for (const filter of ["default", "no-tools", "user-only", "labeled-only", "all"] as const)
+		await assertSameLayout(tree, "leaf", filter, filter);
 });
 
 test("打印一棵 TUI 的树，便于人工核对", async () => {

@@ -1,5 +1,5 @@
-import { Button, Input, Label, TextField } from "@heroui/react";
-import { ArrowUp, GripVertical, Pencil, Trash2 } from "lucide-react";
+import { Button, Input, Label, TextField, Tooltip } from "@heroui/react";
+import { ArrowUp, CircleHelp, GripVertical, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { apiJson, sessionPath } from "../data/api";
 import type { InboxSnapshot } from "../data/web-state";
@@ -10,6 +10,7 @@ export function QueuePanel({ id, queue, refresh }: { id: string; queue: InboxSna
 	const [editing, setEditing] = useState("");
 	const [text, setText] = useState("");
 	const pending = visibleQueueItems(queue.items);
+	const failed = pending.find((item) => item.status === "failed");
 	const queuedIds = pending
 		.filter((item) => item.status === "pending" && item.delivery === "queue")
 		.map((item) => item.id);
@@ -27,13 +28,21 @@ export function QueuePanel({ id, queue, refresh }: { id: string; queue: InboxSna
 	}
 	return (
 		<section className="queue-panel" aria-label="排队消息">
-			<strong>
-				{queue.paused
-					? "排队已暂停 · 发送新消息后继续"
-					: pending.every((item) => item.status === "failed")
-						? "投递失败"
-						: `排队 · ${pending.length} 条`}
-			</strong>
+			{failed ? (
+				<output className="queue-status">
+					<span>投递失败</span>
+					<Tooltip delay={80} closeDelay={0}>
+						<Tooltip.Trigger className="queue-error-info" aria-label="查看投递失败原因">
+							<CircleHelp size={16} aria-hidden="true" />
+						</Tooltip.Trigger>
+						<Tooltip.Content className="queue-error-tooltip" placement="top end">
+							{failed.error || "消息未能投递，请检查模型服务。"}
+						</Tooltip.Content>
+					</Tooltip>
+				</output>
+			) : queue.paused ? (
+				<strong className="queue-status">排队已暂停 · 发送新消息后继续</strong>
+			) : null}
 			<ul className="queue-list">
 				{pending.map((item) => (
 					<li
@@ -71,10 +80,7 @@ export function QueuePanel({ id, queue, refresh }: { id: string; queue: InboxSna
 						) : (
 							<>
 								<GripVertical size={16} aria-hidden="true" className="queue-grip" />
-								<span>
-									{item.status === "failed" ? "投递失败 · " : ""}
-									{item.text || "图片消息"}
-								</span>
+								<span>{item.text || "图片消息"}</span>
 								{item.status === "pending" && (
 									<>
 										<Button

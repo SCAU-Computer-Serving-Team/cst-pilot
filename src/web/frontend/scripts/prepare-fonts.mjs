@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFile, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { readFile, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { saveAsset as save } from "./asset-file.mjs";
+import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -42,22 +44,58 @@ async function verifiedFile(name, expected) {
   return { file, bytes, downloaded };
 }
 
-async function save(file, bytes) {
-  const temporary = `${file}.${process.pid}.tmp`;
-  try {
-    await writeFile(temporary, bytes);
-    await rename(temporary, file);
-  } finally {
-    await rm(temporary, { force: true });
-  }
-}
-
 await mkdir(source, { recursive: true });
 await mkdir(publicFonts, { recursive: true });
 for (const [name, checksum] of files) {
   const { file, bytes, downloaded } = await verifiedFile(name, checksum);
   // A failed download/checksum must not replace a previously verified file.
   if (downloaded) await save(file, bytes);
-  await save(resolve(publicFonts, name), bytes);
+  if (name === "LICENSE.txt") await save(resolve(publicFonts, name), bytes);
 }
-console.log("Web 字体和 OFL 许可文件已校验并准备就绪。");
+// 界面与诊断标签纳入字符集；用户消息不用作构建输入。
+async function collect(directory) {
+  const chunks = [];
+  for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+    const file = resolve(directory, entry.name);
+    if (entry.isDirectory()) chunks.push(...await collect(file));
+    else if (/\.(?:tsx?|css)$/.test(entry.name)) chunks.push(await readFile(file, "utf8"));
+  }
+  return chunks;
+}
+const text = [...await collect(resolve(frontend, "app")), ...await collect(resolve(frontend, "../../../agent/home/extensions/diagnostics"))].join("\n");
+const corpus = [...new Set(text)].sort().join("");
+const recipe = createHash("sha256").update(await readFile(resolve(frontend, "scripts/subset-fonts.py"))).update(await readFile(resolve(frontend, "scripts/font-requirements.txt"))).update(corpus).update(revision).digest("hex");
+let cached = false;
+try {
+  const manifest = JSON.parse(await readFile(resolve(publicFonts, "subset.json"), "utf8"));
+  cached = manifest.recipe === recipe && manifest.faces.length === 3;
+  for (const face of manifest.faces) {
+    const bytes = await readFile(resolve(publicFonts, face.file));
+    cached &&= createHash("sha256").update(bytes).digest("hex") === face.sha256;
+  }
+} catch { /* 字符集、配方或产物改变时重新生成。 */ }
+if (cached) {
+  console.log("Web 子集字体与 OFL 许可已校验，字符集未变。");
+} else {
+const temporary = resolve(source, `subset-${process.pid}`);
+await mkdir(temporary, { recursive: true });
+try {
+  const corpusPath = resolve(temporary, "corpus.txt");
+  await writeFile(corpusPath, corpus);
+  const result = spawnSync(process.env.CST_WEB_FONT_PYTHON || "python", [resolve(frontend, "scripts/subset-fonts.py"), source, temporary, corpusPath], { encoding: "utf8" });
+  if (result.error || result.status !== 0) throw new Error(`字体子集化失败。请安装 Python 与 scripts/font-requirements.txt。\n${result.stderr || result.error || ""}`);
+  const manifest = JSON.parse(await readFile(resolve(temporary, "subset.json"), "utf8"));
+  manifest.recipe = recipe;
+  manifest.sourceRevision = revision;
+  await writeFile(resolve(temporary, "subset.json"), JSON.stringify(manifest, null, 2) + "\n");
+  for (const name of ["CSTUISans-Regular.woff2", "CSTUISans-Medium.woff2", "CSTUISans-Bold.woff2", "subset.json"]) {
+    await save(resolve(publicFonts, name), await readFile(resolve(temporary, name)));
+  }
+  // 完整字体只用于画布，不进入 Web 静态产物。
+  for (const [name] of files) if (name.endsWith(".otf")) await rm(resolve(publicFonts, name), { force: true });
+  console.log(`Web 子集字体与 OFL 许可已准备就绪。${result.stdout.trim()}`);
+} finally {
+  await rm(temporary, { recursive: true, force: true });
+}
+}
+await save(resolve(publicFonts, "NOTICE.txt"), "CST UI Sans is a character subset of Adobe Source Han Sans CN, distributed under the SIL Open Font License 1.1. The modified font uses a new family name; glyph outlines are unchanged. Original copyright and license are retained in LICENSE.txt.\n");

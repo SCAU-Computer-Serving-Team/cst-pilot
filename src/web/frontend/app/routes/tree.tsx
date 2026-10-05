@@ -238,7 +238,7 @@ export default function SessionTree() {
 	return (
 		<main className="chat-main tree-main">
 			<header className="chat-header">
-				<HardDrive size={20} />
+				<HardDrive size={22} />
 				<h1>
 					{title}
 					<span className="tree-suffix">· 分支树</span>
