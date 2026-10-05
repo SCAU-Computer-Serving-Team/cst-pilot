@@ -129,12 +129,15 @@ test("empty Web sessions and create retries survive process restart", async () =
 		await writeFile(join(home, "settings.json"), JSON.stringify({ defaultTools: ["read", "ls"] }));
 		const first = new WebSessionPool(options);
 		const original = await first.createWithKey("same-request");
+		const initialRow = (await first.list()).find((item) => item.id === original.id);
+		assert.ok(initialRow?.updatedAt, "新会话立即具有日期，侧栏能归入今天");
+		assert.ok(Date.now() - Date.parse(initialRow.updatedAt) < 10_000);
 		assert.ok(original.file);
 		await assert.rejects(stat(original.file), { code: "ENOENT" });
 		await first.close();
 		const second = new WebSessionPool(options);
 		try {
-			assert.ok((await second.list()).some((item) => item.id === original.id));
+			assert.equal((await second.list()).find((item) => item.id === original.id)?.updatedAt, initialRow.updatedAt);
 			assert.equal((await second.createWithKey("same-request")).id, original.id);
 			assert.equal((await second.openSaved(original.id)).id, original.id);
 		} finally {

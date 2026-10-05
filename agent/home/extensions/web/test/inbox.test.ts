@@ -204,6 +204,7 @@ test("failed delivery is not replayed after restart", async () => {
 		steer: async () => {},
 	});
 	assert.equal((await restored.snapshot()).items[0].status, "failed");
+	assert.equal((await restored.snapshot()).items[0].error, "model unavailable");
 	assert.deepEqual(calls, []);
 	await assert.rejects(restored.accept("a", "changed", "queue"), InboxConflict);
 });
