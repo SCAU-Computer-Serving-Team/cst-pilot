@@ -86,6 +86,17 @@ export class BrowserProbe {
 			});
 			browser.session = attached.sessionId;
 			await browser.call("Page.enable");
+			const environment = await browser.evaluate<{ userAgent: string; reducedMotion: boolean }>(
+				"({userAgent:navigator.userAgent,reducedMotion:matchMedia('(prefers-reduced-motion: reduce)').matches})",
+			);
+			// CI 主机可能关闭系统动画；常规动效用固定偏好，降级用例再显式切换。
+			await browser.call("Emulation.setEmulatedMedia", {
+				features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
+			});
+			await writeFile(
+				join(root, "browser-environment.json"),
+				JSON.stringify({ ...environment, baselineReducedMotion: false }, null, 2),
+			);
 			return browser;
 		} catch (error) {
 			child.kill();
@@ -134,12 +145,30 @@ export class BrowserProbe {
 			`(() => { const element = document.querySelector(${JSON.stringify(selector)}); return !!element && !element.disabled && element.getAttribute("aria-disabled") !== "true" && element.getBoundingClientRect().width > 0 && element.getBoundingClientRect().height > 0; })()`,
 			`控件可操作：${selector}`,
 		);
-		const point = await this.evaluate<{ x: number; y: number }>(`(() => {
+		let point = await this.evaluate<{ x: number; y: number }>(`(() => {
 			const element = document.querySelector(${JSON.stringify(selector)});
 			if (!element) throw new Error("找不到可点击控件");
 			element.scrollIntoView({ block: "center" });
 			const rect = element.getBoundingClientRect();
 			return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+		})()`);
+		await this.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+		point = await this.evaluate<{ x: number; y: number }>(`(async () => {
+			const element = document.querySelector(${JSON.stringify(selector)});
+			let previous, stable = 0;
+			for (let frame = 0; frame < 90; frame++) {
+				await new Promise(resolve => requestAnimationFrame(resolve));
+				const rect = element.getBoundingClientRect();
+				stable = previous && Math.abs(rect.x - previous.x) < .25 && Math.abs(rect.y - previous.y) < .25 && Math.abs(rect.width - previous.width) < .25 && Math.abs(rect.height - previous.height) < .25 ? stable + 1 : 0;
+				previous = rect;
+				if (stable >= 2) {
+					const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+					const target = document.elementFromPoint(x, y);
+					if (!element.contains(target)) throw new Error("点击控件被遮挡");
+					return { x, y };
+				}
+			}
+			throw new Error("点击控件未停止移动");
 		})()`);
 		await this.call("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", clickCount: 1, ...point });
 		await this.call("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, ...point });
