@@ -203,10 +203,30 @@ async function readPage(pageUrl: string, probe: string, shotPath?: string) {
 			socket.addEventListener("error", () => reject(new Error("无法连接 Chrome")));
 		});
 		const cdp = new Cdp(socket);
-		const page = await cdp.send("Target.createTarget", { url: pageUrl });
+		const page = await cdp.send("Target.createTarget", { url: "about:blank" });
 		const attached = await cdp.send("Target.attachToTarget", { targetId: page.targetId, flatten: true });
 		const session = attached.sessionId as string;
 		await cdp.send("Page.enable", {}, session);
+		await cdp.send("Page.navigate", { url: pageUrl }, session);
+		let ready = false;
+		for (let attempt = 0; attempt < 150 && !ready; attempt++) {
+			try {
+				const state = await cdp.send(
+					"Runtime.evaluate",
+					{
+						expression: `location.href === ${JSON.stringify(pageUrl)} && document.readyState === "complete"`,
+						returnByValue: true,
+					},
+					session,
+				);
+				ready = state.result?.value === true;
+			} catch (error) {
+				if (!(error instanceof Error) || !/Execution context was destroyed|Cannot find context/.test(error.message))
+					throw error;
+			}
+			if (!ready) await new Promise((resolve) => setTimeout(resolve, 100));
+		}
+		assert.ok(ready, "页面导航未完成，不在即将销毁的 about:blank 上执行探针");
 		const evaluated = await cdp.send(
 			"Runtime.evaluate",
 			{ expression: probe, awaitPromise: true, returnByValue: true },

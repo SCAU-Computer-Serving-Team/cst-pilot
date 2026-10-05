@@ -14,10 +14,28 @@ export type OauthDeviceCode = {
 	expiresInSeconds: number;
 };
 
+export type OauthPrompt = { id: string; message: string; placeholder?: string } & (
+	| { type: "text" | "secret" | "manual_code" }
+	| { type: "select"; options: { id: string; label: string; description?: string }[] }
+);
 export type OauthStatus = {
+	authType?: "oauth" | "api_key";
 	state: "idle" | "pending" | "succeeded" | "failed" | "cancelled";
+	flowId?: string;
+	revision?: number;
 	deviceCode?: OauthDeviceCode;
+	authUrl?: { url: string; instructions?: string };
+	prompt?: OauthPrompt;
+	message?: string;
+	links?: { url: string; label?: string }[];
 	error?: string;
+};
+export type AccountStatus = {
+	providerId: "cstoa";
+	signedIn: boolean;
+	requiresLogin: boolean;
+	profile: { supported: boolean; studentId: string | null; name: string | null };
+	quota: { supported: boolean; balance: number | null };
 };
 
 /** 会话接口路径：id 统一编码，suffix 以 `/` 开头。 */
@@ -64,21 +82,52 @@ export async function apiJson<T>(
 	return data as T;
 }
 
-export function startOauthLogin(providerId: string): Promise<{ started: boolean; deviceCode?: OauthDeviceCode }> {
-	return apiJson<{ started: boolean; deviceCode?: OauthDeviceCode }>(
-		`/api/auth/${encodeURIComponent(providerId)}/oauth/start`,
+export function startOauthLogin(
+	providerId: string,
+	method: "oauth" | "api_key" = "oauth",
+	body: { key?: string; baseUrl?: string } = {},
+): Promise<OauthStatus & { started: boolean }> {
+	return apiJson<OauthStatus & { started: boolean }>(
+		`/api/auth/${encodeURIComponent(providerId)}/${method === "oauth" ? "oauth" : "api-key"}/start`,
 		{
 			method: "POST",
+			body,
 		},
 	);
 }
 
-export function getOauthStatus(providerId: string): Promise<OauthStatus> {
-	return apiJson<OauthStatus>(`/api/auth/${encodeURIComponent(providerId)}/oauth/status`);
+export function getOauthStatus(providerId: string, method: "oauth" | "api_key" = "oauth"): Promise<OauthStatus> {
+	return apiJson<OauthStatus>(
+		`/api/auth/${encodeURIComponent(providerId)}/${method === "oauth" ? "oauth" : "api-key"}/status`,
+	);
 }
 
-export function cancelOauthLogin(providerId: string): Promise<{ cancelled: boolean }> {
-	return apiJson<{ cancelled: boolean }>(`/api/auth/${encodeURIComponent(providerId)}/oauth/cancel`, {
-		method: "POST",
-	});
+export function cancelOauthLogin(
+	providerId: string,
+	flowId?: string,
+	method: "oauth" | "api_key" = "oauth",
+): Promise<{ cancelled: boolean }> {
+	return apiJson<{ cancelled: boolean }>(
+		`/api/auth/${encodeURIComponent(providerId)}/${method === "oauth" ? "oauth" : "api-key"}/cancel`,
+		{
+			method: "POST",
+			body: flowId ? { flowId } : {},
+		},
+	);
+}
+
+export function respondOauthLogin(
+	providerId: string,
+	flowId: string,
+	promptId: string,
+	value: string,
+	method: "oauth" | "api_key" = "oauth",
+) {
+	return apiJson<{ accepted: boolean }>(
+		`/api/auth/${encodeURIComponent(providerId)}/${method === "oauth" ? "oauth" : "api-key"}/respond`,
+		{
+			method: "POST",
+			body: { flowId, promptId, value },
+		},
+	);
 }

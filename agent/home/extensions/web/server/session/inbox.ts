@@ -16,6 +16,7 @@ export interface InboxItem {
 	images: ImageRef[];
 	skill?: string;
 	status: ItemStatus;
+	error?: string;
 	acceptedAt: number;
 }
 export interface InboxSnapshot {
@@ -296,13 +297,14 @@ export class SessionInbox {
 							),
 						});
 					});
-				} catch {
+				} catch (cause) {
+					const error = cause instanceof Error ? cause.message.slice(0, 500) : "消息未能投递，请检查模型服务。";
 					await this.transact(async (current) => {
 						await this.save({
 							...current,
 							version: current.version + 1,
 							items: current.items.map((entry) =>
-								entry.id === next.item.id ? { ...entry, status: "failed" } : entry,
+								entry.id === next.item.id ? { ...entry, status: "failed", error } : entry,
 							),
 						});
 					});
@@ -330,6 +332,7 @@ function validSnapshot(value: unknown): value is InboxSnapshot {
 				typeof item.acceptedText === "string" &&
 				(item.acceptedDelivery === "queue" || item.acceptedDelivery === "steer") &&
 				(item.skill === undefined || typeof item.skill === "string") &&
+				(item.error === undefined || typeof item.error === "string") &&
 				(item.images === undefined ||
 					(Array.isArray(item.images) &&
 						item.images.every(

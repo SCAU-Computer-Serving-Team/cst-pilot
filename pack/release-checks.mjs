@@ -16,6 +16,9 @@ export function checkReleaseTree(root, files) {
     if (/(^|\/)(\.state|\.git|sessions|\.cache)(\/|$)|^agent\/home\/(auth\.json|models\.json|web-search\.json|fff\/|npm\/)|^wiztree\/(tmp\/|WizTree3\.ini(?:\.bad)?$)|(^|\/)\.env(?:\.|$)/i.test(rel)) {
       throw new Error(`发行树含运行状态或凭据路径: ${rel}`);
     }
+    if (/^agent\/home\/extensions\/web\/static\/fonts\/.*\.otf$/i.test(rel)) {
+      throw new Error(`完整 OTF 不得进入 Web 分发包: ${rel}`);
+    }
     const buffer = fs.readFileSync(path.join(root, rel));
     if (/\b(?:sk-(?:proj-|ant-api\d+-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AIza[0-9A-Za-z_-]{30,}|AKIA[0-9A-Z]{16})\b|\beyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(buffer.toString('latin1'))) {
       throw new Error(`发行文件含疑似密钥，需人工检查（不回显值）: ${rel}`);
@@ -46,9 +49,11 @@ export const REQUIRED_RELEASE_FILES = [
   'wiztree/license.txt',
   `${WEB_STATIC}/index.html`,
   `${WEB_STATIC}/fonts/LICENSE.txt`,
-  `${WEB_STATIC}/fonts/SourceHanSansCN-Regular.otf`,
-  `${WEB_STATIC}/fonts/SourceHanSansCN-Medium.otf`,
-  `${WEB_STATIC}/fonts/SourceHanSansCN-Bold.otf`,
+  `${WEB_STATIC}/fonts/NOTICE.txt`,
+  `${WEB_STATIC}/fonts/subset.json`,
+  `${WEB_STATIC}/fonts/CSTUISans-Regular.woff2`,
+  `${WEB_STATIC}/fonts/CSTUISans-Medium.woff2`,
+  `${WEB_STATIC}/fonts/CSTUISans-Bold.woff2`,
   'agent/home/packages/pi-open-tui/LICENSE',
   'agent/home/packages/pi-web-access/LICENSE',
 ];

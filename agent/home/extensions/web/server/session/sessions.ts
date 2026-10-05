@@ -59,6 +59,7 @@ export class WebSessionPool {
 	private readonly removed = new Set<string>();
 	private createdWrites: Promise<void> = Promise.resolve();
 	private canonical?: Promise<AgentSessionServices>;
+	private refreshing?: Promise<AgentSessionServices>;
 	private closed = false;
 	private readonly options: WebSessionPoolOptions;
 
@@ -71,6 +72,23 @@ export class WebSessionPool {
 			createAgentSessionServices({ cwd: this.options.cwd, agentDir: this.options.agentDir }),
 		);
 		return this.canonical;
+	}
+
+	/** 页面重新进入时重读 TUI 共用的文件；并发页面请求共享一次刷新。 */
+	refreshServices(): Promise<AgentSessionServices> {
+		if (this.refreshing) return this.refreshing;
+		const task = this.getServices().then(async (services) => {
+			await services.settingsManager.reload();
+			await services.modelRuntime.refresh({ allowNetwork: false });
+			return services;
+		});
+		this.refreshing = task;
+		void task
+			.finally(() => {
+				if (this.refreshing === task) this.refreshing = undefined;
+			})
+			.catch(() => {});
+		return task;
 	}
 
 	private async build(manager: SessionManager, startReason: "new" | "resume" | "fork"): Promise<WebSessionSlot> {
@@ -225,8 +243,27 @@ export class WebSessionPool {
 		}
 	}
 
-	private async writeCreated(entries: Record<string, string | null>): Promise<void> {
-		const file = this.createdFile();
+	private async creationTimes(): Promise<Record<string, string>> {
+		try {
+			const data: unknown = JSON.parse(
+				await readFile(join(this.options.agentDir, "web-inbox", "created-times.json"), "utf8"),
+			);
+			if (
+				!data ||
+				typeof data !== "object" ||
+				Array.isArray(data) ||
+				!Object.values(data).every((value) => typeof value === "string" && Number.isFinite(Date.parse(value)))
+			)
+				throw new Error("会话日期索引损坏");
+			return data as Record<string, string>;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+			throw error;
+		}
+	}
+
+	private async writeCreated(entries: Record<string, string | null>, name = "created.json"): Promise<void> {
+		const file = join(this.options.agentDir, "web-inbox", name);
 		await mkdir(join(file, ".."), { recursive: true });
 		const temp = `${file}.${randomUUID()}.tmp`;
 		try {
@@ -248,6 +285,10 @@ export class WebSessionPool {
 				return entries[key]!;
 			}
 			const id = randomUUID();
+			await this.writeCreated(
+				{ ...(await this.creationTimes()), [id]: new Date().toISOString() },
+				"created-times.json",
+			);
 			await this.writeCreated({ ...entries, [key]: id });
 			return id;
 		});
@@ -312,16 +353,41 @@ export class WebSessionPool {
 			updatedAt: entry.modified.toISOString(),
 			running: this.slots.get(entry.id)?.session.isStreaming ?? false,
 		}));
+		const createdTimes = await this.creationTimes();
 		for (const id of new Set([...Object.values(await this.readCreated()), ...this.slots.keys()])) {
-			if (id && !this.removed.has(id) && !(await this.isDeleted(id)) && !rows.some((entry) => entry.id === id))
+			if (!id || this.removed.has(id) || (await this.isDeleted(id))) continue;
+			const live = this.slots.get(id)?.session;
+			const manager = live?.sessionManager;
+			const first = live?.messages.find((message) => message.role === "user");
+			const firstText =
+				first?.role === "user"
+					? (typeof first.content === "string"
+							? first.content
+							: first.content
+									.filter((part) => part.type === "text")
+									.map((part) => part.text)
+									.join(" ")
+						).trim()
+					: "";
+			const row = rows.find((entry) => entry.id === id);
+			const updatedAt = live?.messages.at(-1)?.timestamp;
+			const timestamp =
+				updatedAt && Number.isFinite(updatedAt)
+					? new Date(updatedAt).toISOString()
+					: (createdTimes[id] ?? manager?.getHeader()?.timestamp);
+			if (row) {
+				row.running = live?.isStreaming ?? false;
+				if (updatedAt && timestamp && timestamp > (row.updatedAt ?? "")) row.updatedAt = timestamp;
+				row.title = manager?.getSessionName() ?? (firstText ? firstText.slice(0, 160) : row.title);
+			} else
 				rows.push({
 					id,
-					title: "新对话",
-					updatedAt: undefined,
-					running: this.slots.get(id)?.session.isStreaming ?? false,
+					title: manager?.getSessionName() ?? (firstText ? firstText.slice(0, 160) : "新对话"),
+					updatedAt: timestamp,
+					running: live?.isStreaming ?? false,
 				});
 		}
-		// 最近更新的排最前：updatedAt 缺项（新建未落盘）沉底，其余按更新时间倒序。
+		// 新建未落盘会话按创建时间排序，历史记录仍按更新时间排序。
 		rows.sort((a, b) => {
 			if (!a.updatedAt && !b.updatedAt) return 0;
 			if (!a.updatedAt) return 1;

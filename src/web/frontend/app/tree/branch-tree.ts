@@ -32,6 +32,10 @@ export type TreeNode = {
 	children: TreeNode[];
 	label?: string;
 	labelTimestamp?: string;
+	/** 原始树中通往当前叶的路径；过滤后仍保留排序依据。 */
+	activePath?: boolean;
+	/** 过滤前的深度优先序号，防止隐藏祖先后重排其后代。 */
+	traversalOrder?: number;
 };
 
 const SETTINGS_TYPES = new Set(["label", "custom", "model_change", "thinking_level_change", "session_info"]);
@@ -109,9 +113,30 @@ export function visibleByFilter(node: TreeNode, filter: ViewFilter): boolean {
 
 /** 过滤不可见条目；被隐藏条目的子条目挂到最近的可见祖先（TUI 的 findVisibleAncestor）。 */
 export function buildVisibleTree(roots: TreeNode[], leafId: string | null, filter: ViewFilter = "default"): TreeNode[] {
+	const active = new Set<TreeNode>();
+	const mark = (node: TreeNode): boolean => {
+		let onPath = node.entry.id === leafId;
+		for (const child of node.children) if (mark(child)) onPath = true;
+		if (onPath) active.add(node);
+		return onPath;
+	};
+	roots.forEach(mark);
+	const ranks = new Map<TreeNode, number>();
+	let rank = 0;
+	const rankNodes = (nodes: TreeNode[]) => {
+		for (const node of [...nodes].sort(
+			(a, b) => Number(active.has(b)) - Number(active.has(a)) || byTimestamp(a, b),
+		)) {
+			ranks.set(node, rank++);
+			rankNodes(node.children);
+		}
+	};
+	rankNodes(roots);
 	const attach = (node: TreeNode): TreeNode[] => {
 		const children = node.children.flatMap(attach);
-		return visibleByDefault(node.entry, leafId) && visibleByFilter(node, filter) ? [{ ...node, children }] : children;
+		return visibleByDefault(node.entry, leafId) && visibleByFilter(node, filter)
+			? [{ ...node, activePath: active.has(node), traversalOrder: ranks.get(node), children }]
+			: children;
 	};
 	return roots.flatMap(attach);
 }
@@ -151,16 +176,18 @@ export function layoutTree(roots: TreeNode[], leafId: string | null): TreeRow[] 
 	if (roots.length === 0) return rows;
 	const containsLeaf = new Map<TreeNode, boolean>();
 	const mark = (node: TreeNode): boolean => {
-		let has = node.entry.id === leafId;
+		let has = node.entry.id === leafId || node.activePath === true;
 		for (const child of node.children) if (mark(child)) has = true;
 		containsLeaf.set(node, has);
 		return has;
 	};
 	roots.forEach(mark);
 	const order = (nodes: TreeNode[]) =>
-		[...nodes].sort(
-			(a, b) => Number(containsLeaf.get(b) ?? false) - Number(containsLeaf.get(a) ?? false) || byTimestamp(a, b),
-		);
+		[...nodes].sort((a, b) => {
+			if (a.traversalOrder !== undefined && b.traversalOrder !== undefined)
+				return a.traversalOrder - b.traversalOrder;
+			return Number(containsLeaf.get(b) ?? false) - Number(containsLeaf.get(a) ?? false) || byTimestamp(a, b);
+		});
 
 	type StackItem = {
 		node: TreeNode;

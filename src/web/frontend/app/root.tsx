@@ -1,5 +1,11 @@
+import { useEffect } from "react";
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
+import { collectDraftImages } from "./composer/draft-images";
 import stylesheet from "./styles.css?url";
+
+export function meta() {
+	return [{ title: "CST Pilot" }];
+}
 
 export function links() {
 	return [{ rel: "stylesheet", href: stylesheet }];
@@ -28,5 +34,10 @@ export function HydrateFallback() {
 }
 
 export default function App() {
+	useEffect(() => {
+		void collectDraftImages().catch(() => {
+			/* 引用无法核实时暂停回收。 */
+		});
+	}, []);
 	return <Outlet />;
 }

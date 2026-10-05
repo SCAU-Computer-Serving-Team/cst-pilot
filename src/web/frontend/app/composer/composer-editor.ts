@@ -2,9 +2,15 @@
 // chip 在数据里就是它的 token 加一个空格：命令 "/compact"、文件引用 "@磁盘体检.txt"。
 // 解析时把开头的命令 token、任意位置的 @文件 token 识别为 chip，其余保持纯文本。
 
+export const chipCaretSpace = "\u2002";
+
 export type EditorSegment =
 	| { kind: "text"; text: string }
 	| { kind: "chip"; token: string; label: string; icon: "command" | "file" };
+
+export function fileReference(path: string): string {
+	return `@${/[\s"@]/u.test(path) ? JSON.stringify(path) : path}`;
+}
 
 function chipLabel(token: string): string {
 	if (token.startsWith("/skill:")) return token.slice("/skill:".length);
@@ -20,15 +26,23 @@ export function parseEditor(value: string, commands: readonly string[]): EditorS
 		segments.push({ kind: "chip", token: lead[1] ?? "", label: chipLabel(lead[1] ?? ""), icon: "command" });
 		rest = rest.slice(lead[0].length);
 	}
-	const fileToken = /(^|\s)@([^\s@]+)/gm;
+	const fileToken = /(^|\s)@("(?:\\.|[^"\\])*"|[^\s@]+)/gm;
 	let cursor = 0;
 	for (const match of rest.matchAll(fileToken)) {
 		const at = match.index ?? 0;
 		const prefix = match[1] ?? "";
-		const path = match[2] ?? "";
-		if (at > cursor) segments.push({ kind: "text", text: rest.slice(cursor, at + prefix.length) });
-		segments.push({ kind: "chip", token: `@${path}`, label: path, icon: "file" });
-		cursor = at + prefix.length + path.length + 1;
+		const serialized = match[2] ?? "";
+		let path = serialized;
+		if (serialized.startsWith('"')) {
+			try {
+				path = JSON.parse(serialized);
+			} catch {
+				continue;
+			}
+		}
+		if (at + prefix.length > cursor) segments.push({ kind: "text", text: rest.slice(cursor, at + prefix.length) });
+		segments.push({ kind: "chip", token: `@${serialized}`, label: path.split(/[\\/]/u).pop() ?? path, icon: "file" });
+		cursor = at + prefix.length + serialized.length + 1;
 	}
 	if (cursor < rest.length) segments.push({ kind: "text", text: rest.slice(cursor) });
 	return segments;
@@ -61,13 +75,18 @@ function chipHtml(segment: Extract<EditorSegment, { kind: "chip" }>): string {
 			: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>';
 	// 纯拉丁标签的主体（x-height）在 em 盒内偏下，加光学修正；含 CJK 的标签本身居中，不动。
 	const latin = /^[\u0000-\u00ff]+$/u.test(segment.label);
-	return `<span class="composer-chip${latin ? " chip-latin" : ""}" contenteditable="false" data-token="${escapeHtml(segment.token)}">${icon}<span class="composer-chip-label">${escapeHtml(segment.label)}</span><button type="button" class="chip-remove" aria-label="移除标记" tabindex="-1">×</button></span>`;
+	return `<span class="composer-chip${latin ? " chip-latin" : ""}" contenteditable="false" title="${escapeHtml(segment.token)}" data-token="${escapeHtml(segment.token)}">${icon}<span class="composer-chip-label">${escapeHtml(segment.label)}</span><button type="button" class="chip-remove" aria-label="移除标记"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m18 6-12 12M6 6l12 12"/></svg></button></span>`;
 }
 
 /** 段列表 → 编辑器 HTML（草稿恢复、插入标记时用）。文本里的换行落成 <br>。 */
 export function editorHtml(segments: readonly EditorSegment[]): string {
 	return segments
-		.map((segment) => (segment.kind === "text" ? escapeHtml(segment.text).replace(/\n/g, "<br>") : chipHtml(segment)))
+		.map((segment, index) => {
+			if (segment.kind === "chip") return chipHtml(segment) + chipCaretSpace;
+			// 用半个 em 的可编辑空白承接光标，替换 token 自带的一个分隔空格。
+			const text = segments[index - 1]?.kind === "chip" ? segment.text.replace(/^[ \u2002]/u, "") : segment.text;
+			return escapeHtml(text).replace(/\n/g, "<br>");
+		})
 		.join("");
 }
 

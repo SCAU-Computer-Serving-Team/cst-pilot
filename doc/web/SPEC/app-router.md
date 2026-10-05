@@ -1,19 +1,6 @@
-# 页面地址与接口设计
-
-状态：MVP 后端接口已实现并完成本机联调；页面已接入接口，交互与视觉对照在 Checkpoint 4 完善。OAuth 与仪表盘接口属于后续阶段。更新：2026-09-29。
+# 页面地址与接口
 
 本文定义 Web 的地址空间与服务端接口。会话如何运行见[会话运行与并行](session-runtime.md)，前端工程见[前端工程](frontend.md)，视觉取值见 [DESIGN.md](../../../DESIGN.md)。
-
-## 请求入口
-
-扩展的 HTTP 服务器是唯一请求入口，直接处理接口与静态资源。
-
-| 路径 | 去向 |
-|---|---|
-| `/api/*` | 扩展同模块直接处理，不跨边界 |
-| 其余全部 | 静态文件；未命中且是导航请求时回退到 `index.html` |
-
-接口由本项目提供，通过进程内调用访问会话运行实例。
 
 ## 地址空间
 
@@ -25,29 +12,10 @@
 | `/dashboard` | 仪表盘 | MVP 后实现，字段口径见[仪表盘](dashboard.md) |
 | `/login` | 登录页 | 居中面板 |
 | `/settings` | 设置 | 入口在账号菜单 |
+| `/settings/provider` | 模型服务配置 | 接收 `provider`、`method`；使用设置行布局承载凭据表单 |
+| `/account` | CSTOA 账号信息 | 学号、姓名、额度与专属账号登录、退出 |
 
 导航行为：真实链接、可复制地址、可在新标签页打开、支持刷新与前进后退。地址只在本机服务运行时有效，不是公开分享链接。
-
-## 路由组织
-
-**服务器不认识页面地址。**
-
-| 地址 | 谁处理 | 怎么判断 |
-|---|---|---|
-| `/api/*` | 扩展的服务器 | 前缀 |
-| 静态文件 | 扩展的服务器 | 磁盘上找得到就发 |
-| 页面地址 | **浏览器** | 路由表匹配 |
-| 页面地址里的参数 | 该页面自己 | 从参数取 |
-
-服务器只有两条分支：`/api/` 开头走接口，其余查文件；查不到且是导航请求就发 `index.html`。
-
-兜底必须限定在导航请求上。所有未命中路径都返回 `index.html` 会掩盖缺失资源错误。按 `Accept` 是否含 `text/html`，或路径是否带扩展名判定。
-
-**服务器不区分 `/dashboard` 和 `/s/abc123`，两个都发给同一个页面入口**，所以新增页面不改服务器。
-
-页面地址表在浏览器代码里，构建期固定，列的是**页面**不是服务器的分支规则。加一个页面改这一处。
-
-接口不放在页面路由里，与页面产物分开。
 
 ## 接口
 
@@ -81,21 +49,33 @@
 
 ### 模型与登录
 
-模型服务登录支持 OAuth 与 API KEY 两种方式，与 pi 的 `/login` 一致；两种方式共用同一种模型服务登录状态，设置面板与登录页都能进入。有效期、刷新和失效方式按凭据类型处理；浏览器只展示状态，不保存凭据。本项目语境下的「账号」特指 cstoa 私有服务，与模型服务登录态是两回事。
+行为见[登录与模型配置](auth.md)。接口不返回已有凭据。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| GET | `/api/models` | 可用模型清单与启用范围：`enabled` 为 `null` 表示全启用，`unavailableEnabled` 列出已存储但未匹配的启用模式；指定 `sessionId` 时附该会话当前选择 |
-| POST | `/api/models/select` | 按 `sessionId` 切换模型；无会话的主页选择在新建会话时提交 |
+| GET | `/api/models` | 可用模型清单与启用范围：`enabled` 为 `null` 表示全启用，`unavailableEnabled` 列出未匹配的已保存启用模式；指定 `sessionId` 时附该会话当前选择 |
+| POST | `/api/models/select` | 保存 TUI 与 Web 共用的默认模型；提供 `sessionId` 时同时切换该会话，主页省略 `sessionId` |
+| POST | `/api/auth/<provider>/api-key/start` | 开始 Pi 原生 API KEY 交互，可选预填 key 与自定义 baseUrl |
+| GET | `/api/auth/<provider>/api-key/status` | 读取当前密钥登录步骤与版本 |
+| POST | `/api/auth/<provider>/api-key/respond`、`/cancel` | 回答当前步骤或取消，校验 flowId 与 promptId |
 | POST | `/api/models/scoped` | 改启用范围，对应 `/scoped-models`；覆盖全部可用模型时归一为默认范围（`null`） |
 | POST | `/api/models/thinking` | 按 `sessionId` 设置思考强度；无会话的主页选择在新建会话时提交 |
-| GET | `/api/auth` | 各 Provider 的登录状态、凭据类型、是否支持 API KEY 及 `requiresLogin`；不返回凭据。模型服务拒绝凭据后标记需重新登录 |
-| PUT | `/api/auth/<provider>/api-key` | 提交 `key`；可附 `baseUrl` 覆盖所选 Provider 的模型地址。地址写入 Pi 的 `models.json`，密钥由 Pi 写入 `auth.json`，响应不返回密钥 |
+| GET | `/api/auth` | 各 Provider 的登录状态、凭据类型、`supportsApiKey`、`supportsOAuth` 与 `requiresLogin`；不返回凭据。模型服务拒绝凭据后标记需重新登录 |
+| PUT | `/api/auth/<provider>/api-key` | 提交 `key`；可附 `baseUrl` 覆盖所选 Provider 的模型地址。配置与凭据由后端保存，响应不返回密钥 |
 | POST | `/api/auth/<provider>/logout` | 清除该 Provider 的本地登录状态 |
 
-自定义 BaseURL 沿用所选 Provider 在 Pi 中已有的模型与请求协议，不创建新模型。地址须为 HTTPS 或本机 HTTP；登录失败时恢复原模型配置。
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| POST | `/api/auth/<provider>/oauth/start` | 发起或复用该服务的进行中流程，返回 `flowId` 和首个交互步骤 |
+| GET | `/api/auth/<provider>/oauth/status` | 读取流程状态、递增 `revision`、设备码剩余时间、授权链接和当前输入步骤 |
+| POST | `/api/auth/<provider>/oauth/respond` | 提交 `{ flowId, promptId, value }`；过期步骤返回 409，无效选项返回 400 |
+| POST | `/api/auth/<provider>/oauth/cancel` | 取消流程；可携带 `flowId`，旧页面不能取消新流程 |
 
-OAuth 登录由后端调用 pi 的 `login(provider, "oauth")` 驱动，授权链接、设备码与进度经 `POST /api/auth/<provider>/oauth` 转发给页面，手动回贴码与取消随该接口一并定义。接口形状随登录页 OAuth 态落地。
+### 专属账号
+
+`GET /api/account` 只读取 cstoa OAuth 状态，返回 `signedIn`、`requiresLogin`、`profile` 与 `quota`。左下角「账号信息」进入 `/account`；账号退出只调用 cstoa 的 logout，其他模型服务保持登录。设置入口始终可用。
+
+学号和姓名的 Agent 资料接口尚未接入，`profile.supported=false`，`studentId` 与 `name` 为 `null`；额度同样为不支持和空值。界面明确标注未提供或未接入。现有 OA `/api/member/info` 使用浏览器 Cookie 鉴权，不能直接复用 Agent OAuth 凭据。
 
 ### 设置
 
@@ -112,17 +92,17 @@ cstoa 额度与仪表盘用量接口在后续阶段确定。
 |---|---|---|
 | GET | `/api/state` | 启动快照：版本、会话列表与运行状态、连接状态、可用命令；当前查看对象由页面地址决定 |
 | GET | `/api/events` | 全局事件流：会话列表变化、占用变化、设置变化 |
-| GET | `/api/files` | 项目文件清单，供输入框 `@` 引用补全；限深 6 层、最多 4000 条，结果缓存 30 秒 |
-| GET | `/api/quota` | 按 `provider` 查询额度：DeepSeek 返回账户余额，OpenCode Go / Go Plus 返回 5 小时、每周、每月用量窗口；成功结果按端点及凭据缓存 60 秒 |
+| GET | `/api/files` | 项目文件清单，供输入框 `@` 引用补全 |
+| GET | `/api/quota` | 按 `provider` 查询额度：DeepSeek 返回账户余额，OpenCode Go / Go Plus 返回 5 小时、每周、每月用量窗口 |
 
-`/api/state` 是页面首次加载的唯一入口。
+`/api/state` 提供启动快照；页面按需读取相关数据。
 
 ### 约定
 
 1. 错误统一为 `{ error: { code, message } }`，HTTP 状态表达语义。会话仍由 TUI 持有或正在被其他实例写入时返回 409。
-2. 会话 ID 用 Pi 的会话 ID。地址与响应都不出现记录文件的绝对路径。
+2. 会话 ID 使用稳定会话 ID。地址与响应都不出现记录文件的绝对路径。
 3. 写操作带 `Idempotency-Key`；消息提交另以消息 ID 去重。同一消息 ID 重复提交，只有会话、正文、图片与提交方式一致时才算重试，否则返回冲突。执行中断后的重复请求不会重新执行。
-4. 内置命令走对应接口。普通消息中的斜杠文本按原文交给模型。调用已开放的诊断技能时，消息体显式传 `skill`（disk、driver、eventlog、ls、runbook、startup、sys），后端才展开技能。逐条对照见[命令与功能对应](commands.md)。
+4. 内置命令走对应接口。普通消息中的斜杠文本按原文交给模型。调用已开放的诊断技能时，消息体显式传 `skill`（范围见命令规格），后端才展开技能。逐条对照见[命令与功能对应](commands.md)。
 5. Web 服务自身无访问账号；模型服务的登录状态由后端凭据决定。**仅监听本机回环地址**，不提供局域网或远程访问。
 6. 服务端控制允许的工具集合。新建、恢复、切换会话和修改设置时，前端都不能扩大这个集合。
 7. 凭据由后端保存与使用。浏览器只提交新凭据、读取状态；已有密钥不随会话快照返回，也不写进浏览器存储。失效时提示重新登录，不自动重试模型调用。
@@ -132,9 +112,9 @@ cstoa 额度与仪表盘用量接口在后续阶段确定。
 11. 事件流带递增序号。重连时用 `Last-Event-ID` 从断点续传；序号超出保留范围时返回信号，前端改为全量重取。
 12. 产物文件名带内容哈希，配长缓存；`index.html` 不缓存。本地回环不做压缩与 `Range`。
 13. 队列编辑、删除、排序和转为插话由后端串行处理。版本过期或条目已投递时返回 409，并要求重新读取队列；转为插话只投递一次，不中断当前输出。去重键不替代版本检查。
-14. 修改会话的接口都通过同一 Web 实例串行处理；被 TUI 持有时返回 409。删除、分支导航和压缩要求会话空闲，忙碌时返回 409，不隐式中断执行。
+14. 修改会话的接口串行处理；被 TUI 持有时返回 409。删除与压缩要求会话空闲；分支导航先停止当前生成，压缩期间拒绝导航。
 15. 扩展提问带 `requestId`，通过会话快照与事件流发布。后端只接受一次有效回答，失效请求不再投递给扩展。
-16. 消息提交的图片用 `{ mimeType, data }` 表示，`data` 为 Base64；只接受 PNG、JPEG、GIF、WebP，原始字节合计不超过 12 MiB，整条 JSON 请求不超过 17 MiB。后端按 SHA-256 保存原始字节。读取接口只接受该会话已引用的附件 ID；删除会话时清理附件目录。
+16. 消息提交的图片用 `{ mimeType, data }` 表示，`data` 为 Base64；只接受 PNG、JPEG、GIF、WebP，原始字节合计不超过 12 MiB，整条 JSON 请求不超过 17 MiB。后端保存原始字节。读取接口只接受该会话已引用的附件 ID；删除会话时清理附件目录。
 
 ## 双版本
 

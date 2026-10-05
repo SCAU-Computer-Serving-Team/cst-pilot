@@ -109,6 +109,10 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 			const stream = new SessionEvents(slot.session);
 			streams.set(id, stream);
 			slot.ui.onChange((questions) => stream.publish("session", { type: "ui_requests", questions }));
+			slot.session.subscribe((event) => {
+				if (["message_start", "message_end", "agent_start", "agent_end", "session_tree"].includes(event.type))
+					globalEvents.publish("state", { type: "sessions_changed", sessionId: id });
+			});
 		}
 		if (!instance) {
 			instance = new SessionInbox(
@@ -209,7 +213,7 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 				}
 			}
 			if (pathname === "/api/models" && method === "GET") {
-				const { modelRuntime, settingsManager } = await pool.getServices();
+				const { modelRuntime, settingsManager } = await pool.refreshServices();
 				const sessionId = new URL(request.url ?? "/", origin).searchParams.get("sessionId");
 				const slot = sessionId ? await pool.openSaved(sessionId) : undefined;
 				const stats = slot?.session.getSessionStats();
@@ -222,10 +226,8 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 						? { provider: fallbackProvider, id: fallbackModel }
 						: undefined);
 				// 与 /scoped-models 同口径：清单只含可用模型；存储的启用模式展开为具体 id，未匹配的单独返回
-				// Web 端只认「已登录」：以存储凭据（auth.json）为准，环境变量提供的可用性不进列表
-				const credentials = await modelRuntime.listCredentials();
-				const signedIn = new Set(credentials.map((credential) => credential.providerId));
-				const available = (await modelRuntime.getAvailable()).filter((model) => signedIn.has(model.provider));
+				// 模型可用性沿用 Pi，包含持久凭据、配置与环境变量；不增加 Web 专属过滤。
+				const available = await modelRuntime.getAvailable();
 				const patterns = settingsManager.getEnabledModels();
 				let enabled: string[] | null = null;
 				let unavailableEnabled: string[] = [];
@@ -299,23 +301,46 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 			if (pathname === "/api/models/select" && method === "POST") {
 				const input = await body(request);
 				if (
-					typeof input.sessionId !== "string" ||
+					(input.sessionId !== undefined && typeof input.sessionId !== "string") ||
 					typeof input.provider !== "string" ||
 					typeof input.modelId !== "string"
 				)
 					throw new Error("请求的模型选择无效");
-				const slot = await pool.openSaved(input.sessionId);
-				const model = slot.session.modelRuntime.getModel(input.provider, input.modelId);
+				const { modelRuntime, settingsManager } = await pool.getServices();
+				const slot = typeof input.sessionId === "string" ? await pool.openSaved(input.sessionId) : undefined;
+				const model = modelRuntime.getModel(input.provider, input.modelId);
 				if (!model) throw new Error("请求的模型不存在");
-				const result = await writeOnce(request, pathname, input, async () => {
-					await slot.session.setModel(model);
-					return {
-						provider: model.provider,
-						id: model.id,
-						thinkingLevel: slot.session.thinkingLevel,
-						thinkingLevels: slot.session.getAvailableThinkingLevels(),
-					};
-				});
+				const result = await writeOnce(request, pathname, input, () =>
+					serialize("model-default", async () => {
+						if (slot) await slot.session.setModel(model, { persist: true });
+						else {
+							if (!(await modelRuntime.checkAuth(model.provider))) throw new Error("请求的模型服务尚未配置凭据");
+							const patterns = settingsManager.getEnabledModels();
+							const scope = patterns?.length
+								? await resolveModelScopeWithDiagnostics(patterns, modelRuntime)
+								: undefined;
+							settingsManager.setDefaultModelAndProvider(model.provider, model.id);
+							if (
+								patterns?.length &&
+								scope &&
+								!scope.scopedModels.some(
+									(item) => item.model.provider === model.provider && item.model.id === model.id,
+								)
+							) {
+								settingsManager.setEnabledModels([...patterns, `${model.provider}/${model.id}`]);
+								pool.setScopedModels([...scope.scopedModels, { model }]);
+							}
+						}
+						globalEvents.publish("state", { type: "settings_changed" });
+						return {
+							provider: model.provider,
+							id: model.id,
+							thinkingLevel:
+								slot?.session.thinkingLevel ?? settingsManager.getModelThinkingLevel(model.provider, model.id),
+							thinkingLevels: slot?.session.getAvailableThinkingLevels() ?? [],
+						};
+					}),
+				);
 				send(response, 200, result);
 				return true;
 			}
@@ -346,12 +371,8 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 					const patterns = input.patterns as string[];
 					const scope = await resolveModelScopeWithDiagnostics(patterns, modelRuntime);
 					if (scope.diagnostics.length) throw new Error("请求的模型范围没有匹配项");
-					// 与 /scoped-models 的保存一致：覆盖全部可用模型时存为默认范围（不限制）。可用口径同上，只含已登录 Provider
-					const credentials = await modelRuntime.listCredentials();
-					const signedIn = new Set(credentials.map((credential) => credential.providerId));
-					const availableIds = (await modelRuntime.getAvailable())
-						.filter((model) => signedIn.has(model.provider))
-						.map((model) => `${model.provider}/${model.id}`);
+					// 与 /scoped-models 保存一致：全部可用模型使用默认范围，顺序由用户保存。
+					const availableIds = (await modelRuntime.getAvailable()).map((model) => `${model.provider}/${model.id}`);
 					const coversAll =
 						patterns.length > 0 &&
 						patterns.length === availableIds.length &&
@@ -391,7 +412,7 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 					if (typeof input.provider === "string" && typeof input.modelId === "string") {
 						const model = slot.session.modelRuntime.getModel(input.provider, input.modelId);
 						if (!model) throw new Error("请求的模型不存在");
-						await slot.session.setModel(model);
+						await serialize("model-default", () => slot.session.setModel(model, { persist: true }));
 					}
 					if (typeof input.thinkingLevel === "string") {
 						if (!slot.session.getAvailableThinkingLevels().includes(input.thinkingLevel as never))
@@ -647,6 +668,7 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 						input.skill as string | undefined,
 					);
 				});
+				globalEvents.publish("state", { type: "sessions_changed", sessionId: id });
 				send(response, 202, { item });
 				return true;
 			}
@@ -739,6 +761,7 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 	};
 	return Object.assign(handle, {
 		close: async () => {
+			await authRoutes.close();
 			await Promise.all([...inboxes.values()].map((box) => box.close()));
 			for (const stream of streams.values()) stream.close();
 			globalEvents.close();

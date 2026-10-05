@@ -17,6 +17,12 @@ const markdownComponents: Components = {
 		</a>
 	),
 	img: () => null,
+	table: ({ children }) => (
+		// biome-ignore lint/a11y/noNoninteractiveTabindex: 滚动区域支持键盘横向浏览宽表格。
+		<section className="markdown-table" tabIndex={0} aria-label="表格">
+			<table>{children}</table>
+		</section>
+	),
 };
 export const Markdown = memo(function Markdown({ text, live }: { text: string; live?: boolean }) {
 	return (

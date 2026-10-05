@@ -167,13 +167,22 @@ test("HTTP 端到端冒烟：并发会话与队列、幂等重放、模型范围
 			(model: { provider: string; id: string }) => `${model.provider}/${model.id}`,
 		);
 		assert.ok(allIds.includes("probe/mock") && allIds.includes("probe/mock2"));
-		assert.ok(scopedList.models.every((model: { provider: string }) => model.provider === "probe"));
+		assert.deepEqual(
+			allIds.slice().sort(),
+			(await (await pool.getServices()).modelRuntime.getAvailable())
+				.map((model) => `${model.provider}/${model.id}`)
+				.sort(),
+		);
 		const scopeAll = await send("/api/models/scoped", { patterns: allIds });
 		assert.equal(scopeAll.status, 200);
 		assert.deepEqual((await scopeAll.json()).enabled, null);
 		assert.equal(pool.get(one.id)?.session.scopedModels.length, 0);
 		const allList = await (await fetch(`${origin}/api/models`)).json();
 		assert.equal(allList.enabled, null);
+		const restoreDefault = await send("/api/models/scoped", { patterns: [] });
+		assert.equal(restoreDefault.status, 200);
+		assert.equal((await (await fetch(`${origin}/api/models`)).json()).enabled, null);
+		assert.equal(pool.get(one.id)?.session.scopedModels.length, 0);
 		const selected = await send("/api/models/select", { sessionId: one.id, provider: "probe", modelId: "mock" });
 		assert.equal(selected.status, 200);
 		const thinking = await send("/api/models/thinking", { sessionId: one.id, level: "off" });

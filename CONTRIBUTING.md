@@ -11,9 +11,10 @@ Windows 上开发，命令用 PowerShell 执行。需要 Node 22 以上，仓库
 ```powershell
 npm ci --prefix agent
 npm ci --prefix src/web/frontend
+python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 ```
 
-`agent` 是扩展与工具的后端，`src/web/frontend` 是 Web 前端源码。两处依赖各自独立，互不引用。
+`agent` 是扩展与工具的后端，`src/web/frontend` 是 Web 前端源码。两处依赖各自独立。Python 与 FontTools 仅用于开发和 CI 的字体生成，不进入现场运行链；详见[字体分发](doc/design/web/fonts.md)。
 
 ## 检查与测试
 
@@ -25,11 +26,14 @@ npm ci --prefix src/web/frontend
 | 前端格式与规则 | `npm run lint --prefix src/web/frontend` | biome 检查，规则与配置在仓库根 `biome.json` |
 | 前端类型 | `npm run typecheck --prefix src/web/frontend` | react-router 类型生成加 `tsc` |
 | 前端测试 | `npm run test --prefix src/web/frontend` | 工具卡片映射、分支树与流式渲染的纯函数测试 |
+| 画布与设计约束 | `node --test src/test/*.test.mjs` | 颜色、节点 ID、配置页布局与动效令牌 |
 | 前端构建 | `npm run build --prefix src/web/frontend` | 产物写入 `agent/home/extensions/web/static/` |
+| 分发字体 | `npm run test:fonts --prefix src/web/frontend` | 构建后检查覆盖、hash、回退与体积 |
+| 端到端验收 | `npm run test:web:e2e --prefix agent` | 先构建；真实浏览器、HTTP、Pi、持久化与重启，链路见[验收设计](doc/test/web-e2e.md) |
 
 前端 lint 必须从 `src/web/frontend` 目录发起：biome 按运行目录识别 React 项目，换目录会漏掉 React 相关规则。`npm --prefix` 已经处理，直接照表执行即可。
 
-提交前至少跑与改动相关的命令。改后端跑前三行，改前端跑后四行。CI 会跑完整表，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
+提交前运行与改动相关的检查。修改后端运行后端检查与测试；修改前端或画布运行前端格式、类型、测试、设计约束和构建。CI 覆盖上表，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
 
 ## 提交
 

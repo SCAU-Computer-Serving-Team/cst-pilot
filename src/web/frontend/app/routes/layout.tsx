@@ -1,7 +1,8 @@
 import { PanelLeft } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Outlet, useLocation, useSearchParams } from "react-router";
+import { Outlet, useLocation, useSearchParams, useViewTransitionState } from "react-router";
 import { Sidebar } from "../shell/shell";
+import { useSidebarMotion } from "../shell/sidebar-motion";
 
 /** 侧栏折叠偏好：1 = 收起，0 = 展开；无记录时按窗口宽度定初值。 */
 const SIDEBAR_KEY = "cst-ui-sidebar";
@@ -26,6 +27,7 @@ export default function WorkspaceLayout() {
 	const [params] = useSearchParams();
 	const preview = params.get("preview") === "1";
 	const home = pathname === "/";
+	const homeTransition = useViewTransitionState("/");
 	const narrow = useMediaQuery(NARROW_QUERY);
 	const [collapsed, setCollapsed] = useState(() => {
 		const stored = localStorage.getItem(SIDEBAR_KEY);
@@ -35,21 +37,39 @@ export default function WorkspaceLayout() {
 	useEffect(() => {
 		localStorage.setItem(SIDEBAR_KEY, collapsed ? "1" : "0");
 	}, [collapsed]);
+	const motion = useSidebarMotion(collapsed);
+	function changeCollapsed(value: boolean) {
+		motion.capture();
+		setCollapsed(value);
+	}
 	const overlay = narrow && !collapsed;
 	return (
-		<div className={`app-layout ${home ? "home-layout" : "chat-layout"} ${collapsed ? "sidebar-collapsed" : ""}`}>
-			{overlay && <div className="sidebar-backdrop" aria-hidden="true" onClick={() => setCollapsed(true)} />}
+		<div
+			ref={motion.root}
+			data-home-transition={homeTransition || undefined}
+			data-view-transitions={typeof document.startViewTransition === "function"}
+			className={`app-layout ${home ? "home-layout" : "chat-layout"} ${collapsed ? "sidebar-collapsed" : ""}`}
+		>
+			{overlay && <div className="sidebar-backdrop" aria-hidden="true" onClick={() => changeCollapsed(true)} />}
 			<Sidebar
 				preview={preview}
-				onCollapse={() => setCollapsed(true)}
-				onNavigate={overlay ? () => setCollapsed(true) : undefined}
+				collapsed={collapsed}
+				onCollapse={() => changeCollapsed(true)}
+				onNavigate={overlay ? () => changeCollapsed(true) : undefined}
 			/>
 			{collapsed && (
-				<button type="button" className="sidebar-restore" aria-label="展开侧栏" onClick={() => setCollapsed(false)}>
-					<PanelLeft size={20} aria-hidden="true" />
+				<button
+					type="button"
+					className="sidebar-restore"
+					aria-label="展开侧栏"
+					onClick={() => changeCollapsed(false)}
+				>
+					<PanelLeft size={22} aria-hidden="true" />
 				</button>
 			)}
-			<Outlet />
+			<div className="workspace-content">
+				<Outlet />
+			</div>
 		</div>
 	);
 }

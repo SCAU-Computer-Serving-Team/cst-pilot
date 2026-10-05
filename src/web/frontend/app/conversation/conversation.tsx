@@ -67,71 +67,64 @@ function AssistantTurnImpl({
 	const elapsed = formatDuration(Math.max((live ? now : (frozenAt ?? historyEnd)) - startedAt, live ? 1000 : 0));
 	return (
 		<article className="assistant-block assistant-turn" data-live={live || undefined}>
-			{(live || process.length > 0) && (
-				<Disclosure
-					className="turn-process"
-					isExpanded={open}
-					onExpandedChange={(value) => {
-						setTouched(true);
-						setOpen(value);
-					}}
-				>
-					<Disclosure.Heading>
-						<Disclosure.Trigger className="turn-process-head">
-							<span>{live ? `工作中 ${elapsed}` : `已工作 ${elapsed}`}</span>
-							<Disclosure.Indicator />
-						</Disclosure.Trigger>
-					</Disclosure.Heading>
-					<Disclosure.Content>
-						<div className="turn-process-body">
-							{process.map(({ entry, final, part }, partIndex) => {
-								const key = `part-${partIndex}`;
-								if (part.kind === "thinking")
-									return (
-										<Disclosure className="thinking-line" key={key} isDisabled={part.part.redacted}>
-											<Disclosure.Heading>
-												<Disclosure.Trigger className="thinking-trigger">
-													<Brain size={16} aria-hidden="true" />
-													<span>已思考{part.part.redacted ? " · 内容不可用" : ""}</span>
-													<Disclosure.Indicator />
-												</Disclosure.Trigger>
-											</Disclosure.Heading>
-											<Disclosure.Content>
-												{!part.part.redacted && (
-													<pre>
-														{live && final ? (
-															<StreamWords text={part.part.thinking} />
-														) : (
-															part.part.thinking
-														)}
-													</pre>
-												)}
-											</Disclosure.Content>
-										</Disclosure>
-									);
-								if (part.kind === "tools")
-									return (
-										<ToolGroup
-											key={key}
-											calls={part.calls}
-											results={
-												resultsByTurn.get(entry.id ?? `stamp:${entry.message.timestamp}`) ?? new Map()
-											}
-											live={live && final}
-											startedAt={entry.message.timestamp}
-										/>
-									);
-								return <Markdown key={key} text={part.text} />;
-							})}
-							{live && process.length === 0 && !finalText && (
-								<span className="t-shimmer" data-text="......">
-									......
-								</span>
-							)}
-						</div>
-					</Disclosure.Content>
-				</Disclosure>
-			)}
+			{/* 工作时长属于整轮回答；完成时保留过程头，只更新状态与折叠。 */}
+			<Disclosure
+				className="turn-process"
+				isExpanded={open}
+				onExpandedChange={(value) => {
+					setTouched(true);
+					setOpen(value);
+				}}
+			>
+				<Disclosure.Heading>
+					<Disclosure.Trigger className="turn-process-head">
+						<span>{live ? `工作中 ${elapsed}` : `已工作 ${elapsed}`}</span>
+						<Disclosure.Indicator />
+					</Disclosure.Trigger>
+				</Disclosure.Heading>
+				<Disclosure.Content>
+					<div className="turn-process-body">
+						{process.map(({ entry, final, part }, partIndex) => {
+							const key = `part-${partIndex}`;
+							if (part.kind === "thinking")
+								return (
+									<Disclosure className="thinking-line" key={key} isDisabled={part.part.redacted}>
+										<Disclosure.Heading>
+											<Disclosure.Trigger className="thinking-trigger">
+												<Brain size={16} aria-hidden="true" />
+												<span>已思考{part.part.redacted ? " · 内容不可用" : ""}</span>
+												<Disclosure.Indicator />
+											</Disclosure.Trigger>
+										</Disclosure.Heading>
+										<Disclosure.Content>
+											{!part.part.redacted && (
+												<pre>
+													{live && final ? <StreamWords text={part.part.thinking} /> : part.part.thinking}
+												</pre>
+											)}
+										</Disclosure.Content>
+									</Disclosure>
+								);
+							if (part.kind === "tools")
+								return (
+									<ToolGroup
+										key={key}
+										calls={part.calls}
+										results={resultsByTurn.get(entry.id ?? `stamp:${entry.message.timestamp}`) ?? new Map()}
+										live={live && final}
+										startedAt={entry.message.timestamp}
+									/>
+								);
+							return <Markdown key={key} text={part.text} />;
+						})}
+						{live && process.length === 0 && !finalText && (
+							<span className="t-shimmer" data-text="......">
+								......
+							</span>
+						)}
+					</div>
+				</Disclosure.Content>
+			</Disclosure>
 			{finalText && (live ? <LiveMarkdown text={finalText} /> : <Markdown text={finalText} />)}
 			{last?.message.stopReason === "error" && (
 				<p className="message-error" role="alert">
@@ -151,13 +144,13 @@ function AssistantTurnImpl({
 								.catch(() => onError("无法复制，请检查浏览器权限。"));
 						}}
 					>
-						<Copy size={15} />
+						<Copy size={16} />
 					</Button>
 					<Button variant="ghost" isIconOnly aria-label="派生会话" onPress={() => onFork()}>
-						<GitFork size={15} />
+						<GitFork size={16} />
 					</Button>
 					<a href={sessionPath(id, "/export")} download={`session-${id}.md`} aria-label="导出会话">
-						<Download size={15} />
+						<Download size={16} />
 					</a>
 					<span>
 						{new Date(last.message.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}
@@ -191,15 +184,15 @@ const SummaryEntry = memo(function SummaryEntry({ entry }: { entry: TurnEntry })
 					<Disclosure.Trigger className="summary-head">
 						<GitBranch size={18} aria-hidden="true" />
 						<span className="summary-title">分支已总结</span>
+						<Disclosure.Indicator>
+							<ChevronDown size={16} aria-hidden="true" />
+						</Disclosure.Indicator>
 						<span className="summary-time">
 							{new Date(entry.message.timestamp).toLocaleTimeString("zh-CN", {
 								hour: "2-digit",
 								minute: "2-digit",
 							})}
 						</span>
-						<Disclosure.Indicator>
-							<ChevronDown size={14} aria-hidden="true" />
-						</Disclosure.Indicator>
 					</Disclosure.Trigger>
 				</Disclosure.Heading>
 				<Disclosure.Content>

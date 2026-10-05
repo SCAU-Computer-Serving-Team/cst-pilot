@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 const frontend = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const source = resolve(frontend, "build/client");
 const target = resolve(frontend, "../../../agent/home/extensions/web/static");
-for (const name of ["SourceHanSansCN-Regular.otf", "SourceHanSansCN-Medium.otf", "SourceHanSansCN-Bold.otf", "LICENSE.txt"]) {
+for (const name of ["CSTUISans-Regular.woff2", "CSTUISans-Medium.woff2", "CSTUISans-Bold.woff2", "LICENSE.txt", "NOTICE.txt", "subset.json"]) {
   await access(resolve(source, "fonts", name));
 }
 await rm(target, { recursive: true, force: true });

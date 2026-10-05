@@ -9,6 +9,7 @@ import { QuestionPanel } from "../conversation/question-panel";
 import { QueuePanel } from "../conversation/queue-panel";
 import { apiJson, sessionPath } from "../data/api";
 import { useSessionDetail, useSessionTitle } from "../data/web-state";
+import { usePanelDismiss } from "../shell/panel-dismiss";
 import { sampleSessions } from "../shell/sample-sessions";
 import { branchSummaryChoice, type NavigateResult, summaryBody, summaryTagText } from "../tree/branch-summary";
 import { ForkPicker, forkTargets } from "../tree/fork-picker";
@@ -21,6 +22,8 @@ export default function Chat() {
 		params.get("preview") === "1" ? sampleSessions.find((session) => session.id === sessionId) : undefined;
 	const { detail, streaming, error, refresh } = useSessionDetail(example ? undefined : sessionId);
 	const [forkOpen, setForkOpen] = useState(false);
+	const [messageMenuOpen, setMessageMenuOpen] = useState(false);
+	usePanelDismiss(messageMenuOpen, () => setMessageMenuOpen(false));
 	const location = useLocation();
 	const [forkSource, setForkSource] = useState("");
 	// 派生跳转带入的来源提示：换路由即读取，读后立刻清掉历史状态避免刷新后复现
@@ -118,13 +121,13 @@ export default function Chat() {
 	return (
 		<main className="chat-main">
 			<header className="chat-header">
-				<HardDrive size={20} />
+				<HardDrive size={22} />
 				<h1>{title}</h1>
 				{example && <span className="preview-tag">设计预览 · 示例数据</span>}
 				{!example && (
-					<Popover>
+					<Popover isOpen={messageMenuOpen} onOpenChange={setMessageMenuOpen}>
 						<Button variant="ghost" isIconOnly className="chat-menu-trigger" aria-label="消息菜单">
-							<EllipsisVertical size={20} />
+							<EllipsisVertical size={22} />
 						</Button>
 						<Popover.Content placement="bottom end" className="sidebar-account-popover">
 							<Popover.Dialog aria-label="消息菜单" className="sidebar-account-menu">
@@ -144,7 +147,7 @@ export default function Chat() {
 			)}
 			{forkSource && (
 				<output className="fork-source-banner">
-					<span>{`已从此会话派生：「${forkSource}」，输入框已预填这条消息`}</span>
+					<span>{`派生自：${forkSource}`}</span>
 					<Button variant="ghost" isIconOnly aria-label="关闭提示" onPress={() => setForkSource("")}>
 						<X size={14} />
 					</Button>
