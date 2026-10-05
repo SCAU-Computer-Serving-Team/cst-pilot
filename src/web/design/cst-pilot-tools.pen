@@ -7,7 +7,7 @@
       "x": 0,
       "y": 0,
       "name": "聊天工作台 · 浅色",
-      "context": "1920×1080 浅色聊天工作页。对话内容节选自本地 2026-09-03 会话 01a06752-4756-7b8f-8b8e-d56749bb24d2，重排为已完成的 C 盘诊断与后续硬盘信息检索进行中；运行状态为设计时刻示意，并非正在执行诊断。状态行仅展示工作摘要，不展开原始思维过程。组件结构参考 asset/pencil-heroui.pen 的 Accordion、Button/Ghost/Icon/SM、Chip/Soft、Textarea/Primary 与 Table；彩色语义使用 cst-pilot-colors.pen；聊天页中性色采用无色偏灰白，例外值与布局见 DESIGN.md。",
+      "context": "聊天工作台 · 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1920,
       "height": 1080,
@@ -25,7 +25,7 @@
             "right": 1
           },
           "layout": "vertical",
-          "gap": 6,
+          "gap": 8,
           "padding": [
             20,
             12,
@@ -77,7 +77,7 @@
                       "fill": "#00000000",
                       "cornerRadius": "$radius-control",
                       "gap": 8,
-                      "padding": 6,
+                      "padding": 8,
                       "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
@@ -110,11 +110,8 @@
                   "width": "fill_container",
                   "fill": "#00000000",
                   "cornerRadius": "$radius-row",
-                  "gap": 10,
-                  "padding": [
-                    10,
-                    12
-                  ],
+                  "gap": 8,
+                  "padding": 12,
                   "alignItems": "center",
                   "children": [
                     {
@@ -145,11 +142,8 @@
                   "name": "仪表盘",
                   "width": "fill_container",
                   "cornerRadius": "$radius-row",
-                  "gap": 10,
-                  "padding": [
-                    10,
-                    12
-                  ],
+                  "gap": 8,
+                  "padding": 12,
                   "alignItems": "center",
                   "children": [
                     {
@@ -205,10 +199,7 @@
                   "width": "fill_container",
                   "fill": "#EAEAEA",
                   "cornerRadius": "$radius-row",
-                  "padding": [
-                    10,
-                    12
-                  ],
+                  "padding": 12,
                   "alignItems": "center",
                   "children": [
                     {
@@ -242,10 +233,7 @@
                   "name": "A 会话 风扇狂转还降频",
                   "width": "fill_container",
                   "cornerRadius": "$radius-row",
-                  "padding": [
-                    10,
-                    12
-                  ],
+                  "padding": 12,
                   "alignItems": "center",
                   "children": [
                     {
@@ -303,10 +291,7 @@
                   "name": "A 会话 开机要等三分钟",
                   "width": "fill_container",
                   "cornerRadius": "$radius-row",
-                  "padding": [
-                    10,
-                    12
-                  ],
+                  "padding": 12,
                   "alignItems": "center",
                   "children": [
                     {
@@ -357,8 +342,8 @@
                   "x": 2,
                   "y": 13,
                   "name": "设备图标容器",
-                  "width": 34,
-                  "height": 34,
+                  "width": 32,
+                  "height": 32,
                   "fill": "#DBE4E9",
                   "cornerRadius": "$radius-control",
                   "justifyContent": "center",
@@ -418,7 +403,7 @@
           "type": "frame",
           "id": "qQZXh",
           "name": "聊天主区 · 纯白背景",
-          "context": "聊天主区采用纯白#FFFFFF，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "聊天主区 · 纯白背景。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -447,8 +432,8 @@
                   "type": "icon",
                   "id": "t1R54",
                   "name": "会话图标",
-                  "width": 20,
-                  "height": 20,
+                  "width": 22,
+                  "height": 22,
                   "icon": "hard-drive",
                   "library": "lucide",
                   "fill": "#646464"
@@ -474,7 +459,7 @@
                   "type": "frame",
                   "id": "avrZg",
                   "name": "HeroUI Ghost Button · 消息菜单",
-                  "context": "Button/Ghost/Icon/SM",
+                  "context": "HeroUI Ghost Button · 消息菜单。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
                   "width": 32,
                   "height": 32,
                   "cornerRadius": 16,
@@ -502,7 +487,7 @@
               "x": 268,
               "y": 106,
               "name": "对话流 · 当前可见内容",
-              "context": "按Zcode参考图比例：正文宽占1656px主区的67.6%，左右各268px；不修改1920×1080画布与264px侧栏。",
+              "context": "对话流 · 当前可见内容。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
               "width": 1120,
               "layout": "vertical",
               "gap": 24,
@@ -522,7 +507,7 @@
                       "cornerRadius": 12,
                       "padding": [
                         11,
-                        18
+                        16
                       ],
                       "alignItems": "center",
                       "children": [
@@ -545,7 +530,7 @@
                   "type": "frame",
                   "id": "L69C5w",
                   "name": "助手 · C 盘诊断结果",
-                  "context": "摘编自会话消息 d1a5182e。仅保留原记录中的容量、硬盘型号、健康与扫描限制，未暴露序列号。",
+                  "context": "助手 · C 盘诊断结果。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
                   "width": "fill_container",
                   "layout": "vertical",
                   "gap": 12,
@@ -554,18 +539,18 @@
                       "type": "frame",
                       "id": "fz8vQ",
                       "name": "HeroUI Accordion · 已完成工作",
-                      "context": "Accordion/Closed trigger。默认折叠原始调用详情；展开可查看 disk 两次调用。",
+                      "context": "HeroUI Accordion · 已完成工作。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
                       "width": "fill_container",
                       "height": 28,
-                      "gap": 9,
+                      "gap": 8,
                       "alignItems": "center",
                       "children": [
                         {
                           "type": "icon",
                           "id": "mYhal",
                           "name": "完成图标",
-                          "width": 17,
-                          "height": 17,
+                          "width": 18,
+                          "height": 18,
                           "icon": "check-check",
                           "library": "lucide",
                           "fill": "#007B3A"
@@ -632,7 +617,7 @@
                       "type": "frame",
                       "id": "mxNh3",
                       "name": "Markdown 表格 · 设备与空间",
-                      "context": "HeroUI Table Header / Table Row / Table Cell。正文16px，表头14px，浅色中性背景。",
+                      "context": "Markdown 表格 · 设备与空间。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
                       "clip": true,
                       "width": 816,
                       "cornerRadius": 8,
@@ -1012,7 +997,7 @@
                           "id": "XGmFa",
                           "name": "列表项",
                           "width": "fill_container",
-                          "gap": 10,
+                          "gap": 8,
                           "alignItems": "center",
                           "children": [
                             {
@@ -1043,7 +1028,7 @@
                           "id": "c9WDr",
                           "name": "列表项",
                           "width": "fill_container",
-                          "gap": 10,
+                          "gap": 8,
                           "alignItems": "center",
                           "children": [
                             {
@@ -1076,15 +1061,15 @@
                       "id": "Ze4CL",
                       "name": "回答操作栏",
                       "width": "fill_container",
-                      "gap": 6,
+                      "gap": 8,
                       "alignItems": "center",
                       "children": [
                         {
                           "type": "frame",
                           "id": "ZWJMk",
                           "name": "HeroUI Ghost Button · 复制回答",
-                          "width": 28,
-                          "height": 28,
+                          "width": 26,
+                          "height": 26,
                           "cornerRadius": 14,
                           "justifyContent": "center",
                           "alignItems": "center",
@@ -1093,8 +1078,8 @@
                               "type": "icon",
                               "id": "iFRoh",
                               "name": "复制回答",
-                              "width": 15,
-                              "height": 15,
+                              "width": 16,
+                              "height": 16,
                               "icon": "copy",
                               "library": "lucide",
                               "fill": "#646464"
@@ -1105,8 +1090,8 @@
                           "type": "frame",
                           "id": "pbjDt",
                           "name": "HeroUI Ghost Button · 分叉",
-                          "width": 28,
-                          "height": 28,
+                          "width": 26,
+                          "height": 26,
                           "cornerRadius": 14,
                           "justifyContent": "center",
                           "alignItems": "center",
@@ -1115,8 +1100,8 @@
                               "type": "icon",
                               "id": "BPWeN",
                               "name": "分叉",
-                              "width": 15,
-                              "height": 15,
+                              "width": 16,
+                              "height": 16,
                               "icon": "git-fork",
                               "library": "lucide",
                               "fill": "#646464"
@@ -1127,8 +1112,8 @@
                           "type": "frame",
                           "id": "lHTye",
                           "name": "HeroUI Ghost Button · 导出",
-                          "width": 28,
-                          "height": 28,
+                          "width": 26,
+                          "height": 26,
                           "cornerRadius": 14,
                           "justifyContent": "center",
                           "alignItems": "center",
@@ -1137,8 +1122,8 @@
                               "type": "icon",
                               "id": "iwRjS",
                               "name": "导出",
-                              "width": 15,
-                              "height": 15,
+                              "width": 16,
+                              "height": 16,
                               "icon": "download",
                               "library": "lucide",
                               "fill": "#646464"
@@ -1181,7 +1166,7 @@
                       "cornerRadius": 12,
                       "padding": [
                         11,
-                        18
+                        16
                       ],
                       "alignItems": "center",
                       "children": [
@@ -1204,10 +1189,10 @@
                   "type": "frame",
                   "id": "s7XJk",
                   "name": "助手 · 查询进行中",
-                  "context": "回放会话消息 c10b6d33 的并行 disk/info、disk/health 与 web_search。思考已结束，工具与检索展示运行态；进度文案是简短行为摘要，不含原始思维过程。",
+                  "context": "助手 · 查询进行中。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
                   "width": "fill_container",
                   "layout": "vertical",
-                  "gap": 10,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -1215,7 +1200,7 @@
                       "name": "思考状态 · 已完成",
                       "width": "fill_container",
                       "height": 28,
-                      "gap": 10,
+                      "gap": 8,
                       "alignItems": "center",
                       "children": [
                         {
@@ -1256,7 +1241,7 @@
                       "name": "工具状态 · 运行中",
                       "width": "fill_container",
                       "height": 30,
-                      "gap": 10,
+                      "gap": 8,
                       "alignItems": "center",
                       "children": [
                         {
@@ -1287,7 +1272,7 @@
                       "name": "联网检索状态 · 运行中",
                       "width": "fill_container",
                       "layout": "vertical",
-                      "gap": 5,
+                      "gap": 4,
                       "children": [
                         {
                           "type": "frame",
@@ -1295,7 +1280,7 @@
                           "name": "联网检索标题行 · 图文垂直居中",
                           "width": "fill_container",
                           "height": 28,
-                          "gap": 10,
+                          "gap": 8,
                           "alignItems": "center",
                           "children": [
                             {
@@ -1385,7 +1370,7 @@
               "x": 256,
               "y": 935,
               "name": "HeroUI Textarea · 底部消息编辑器",
-              "context": "Textarea/Primary + Button/Ghost/Icon/SM + Select。执行中保留输入能力；右下停止按钮替代发送。Enter发送，Shift+Enter换行。画布仅呈现静态状态。",
+              "context": "HeroUI Textarea · 底部消息编辑器。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
               "width": 1144,
               "height": 105,
               "fill": "#FFFFFF",
@@ -1452,10 +1437,10 @@
                       "id": "eqIHc",
                       "name": "HeroUI Select · 模型",
                       "cornerRadius": 8,
-                      "gap": 10,
+                      "gap": 8,
                       "padding": [
                         2,
-                        6
+                        8
                       ],
                       "alignItems": "center",
                       "children": [
@@ -1497,7 +1482,7 @@
                           "type": "frame",
                           "id": "hMW4G",
                           "name": "模型文字组",
-                          "gap": 7,
+                          "gap": 8,
                           "alignItems": "center",
                           "children": [
                             {
@@ -1515,8 +1500,8 @@
                               "type": "icon",
                               "id": "Whtij",
                               "name": "模型下拉",
-                              "width": 13,
-                              "height": 13,
+                              "width": 14,
+                              "height": 14,
                               "icon": "chevron-down",
                               "library": "lucide",
                               "fill": "#646464"
@@ -1530,10 +1515,10 @@
                       "id": "X6pVaM",
                       "name": "HeroUI Select · 思考强度",
                       "cornerRadius": 8,
-                      "gap": 5,
+                      "gap": 4,
                       "padding": [
                         2,
-                        6
+                        8
                       ],
                       "alignItems": "center",
                       "children": [
@@ -1541,8 +1526,8 @@
                           "type": "icon",
                           "id": "yAdhh",
                           "name": "思考强度图标",
-                          "width": 17,
-                          "height": 17,
+                          "width": 18,
+                          "height": 18,
                           "icon": "brain",
                           "library": "lucide",
                           "fill": "#646464"
@@ -1562,8 +1547,8 @@
                           "type": "icon",
                           "id": "U5gsIc",
                           "name": "思考强度下拉",
-                          "width": 13,
-                          "height": 13,
+                          "width": 14,
+                          "height": 14,
                           "icon": "chevron-down",
                           "library": "lucide",
                           "fill": "#646464"
@@ -1574,7 +1559,7 @@
                       "type": "frame",
                       "id": "jWZo3",
                       "name": "HeroUI Button · 停止生成",
-                      "context": "aria-label: 停止生成。任务运行中显示停止，完成后恢复发送箭头。",
+                      "context": "HeroUI Button · 停止生成。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
                       "width": 26,
                       "height": 26,
                       "fill": "#465A9F",
@@ -1607,7 +1592,7 @@
       "x": 3600,
       "y": 1240,
       "name": "工具调用 · 已发送（等待返回）浅色",
-      "context": "工具调用聚合消息 · 已发送态。触发条（折叠 Accordion 头）spinner + 已发送条数；面板内为调用条列表：16px 工具图标（#0665BE）+ 13px JetBrains Mono 调用语句（灰底片 #F0F0F0 r4 pad[2,6]）+ 12px 目的 + 12px 等宽耗时，条间 28px 留白 + #F0F0F0 发丝线。文字一律 #646464（聊天页浅色例外灰）。收起态与交互原件见主画布 bGurw 的 Accordion；配色语义同三模式画布。",
+      "context": "工具调用 · 已发送（等待返回）浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -1625,7 +1610,7 @@
           "strokeWidth": 1,
           "gap": 8,
           "padding": [
-            5,
+            4,
             16
           ],
           "alignItems": "center",
@@ -1666,7 +1651,7 @@
           "strokeWidth": 1,
           "gap": 8,
           "padding": [
-            5,
+            4,
             16
           ],
           "alignItems": "center",
@@ -1704,12 +1689,12 @@
       "x": 3600,
       "y": 2711,
       "name": "工具调用 · sys overview · 例外 浅色",
-      "context": "sys overview 与 runbook 是特殊工具。卡片与普通工具同一骨架（状态行 + 缩进 24 + #F0F0F0 竖线）和同一字号阶梯（13 顶 / 12 标签）；「特殊」由出现时机表达：当轮调用含特殊工具时，折叠条默认展开，普通调用保持默认折叠。本卡含负载与系统两个字段组。",
+      "context": "工具调用 · sys overview · 例外 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
       "layout": "vertical",
-      "gap": 20,
+      "gap": 24,
       "padding": [
         4,
         32
@@ -1719,7 +1704,7 @@
           "type": "frame",
           "id": "LGbuP",
           "name": "调用卡片 · sys overview（醒目）",
-          "context": "sys overview 与通用卡片同骨架、同字号阶梯：字段名 12px、字段值 13px，字色 #646464（深色版 #AAB3B7）。「醒目」由出现时机表达——当轮含特殊工具时折叠条默认展开。本卡含负载与系统两个字段组。",
+          "context": "调用卡片 · sys overview（醒目）。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
           "width": "fill_container",
           "fill": "#FFFFFF00",
           "cornerRadius": 8,
@@ -1733,7 +1718,7 @@
               "id": "I9t4XI",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 32,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -1798,7 +1783,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -2079,7 +2064,7 @@
                       "name": "原始数据切换条",
                       "width": "fill_container",
                       "height": 28,
-                      "gap": 6,
+                      "gap": 8,
                       "alignItems": "center",
                       "children": [
                         {
@@ -2146,7 +2131,7 @@
       "x": 0,
       "y": 1240,
       "name": "工具调用 · 模板 · 概览组 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · 模板 · 概览组 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -2169,7 +2154,7 @@
               "id": "UmYkf",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -2234,7 +2219,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -2823,7 +2808,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -2888,7 +2873,7 @@
       "x": 1200,
       "y": 1240,
       "name": "工具调用 · 模板 · 排行组 浅色",
-      "context": "通用渲染模式 2 · 排行列表：有序数组输出（sys proc/io/gpu、disk usage、ls、eventlog 场景、startup、driver core、sensor）。骨架/配色/字号同模式 1（见字段行画布）。概览层 = 排行列表：无表头、行间无横线、行高 22px；行 = 名次 12px Inter + 名称 13px（名称列宽 = 最长名称 +16px，实测 153px）+ 指标双合一「CPU% · 工作集」13px Inter 紧跟名称列；组内行距 10px。组标题 12px fw500（如 Top 5 · 按 CPU，16 逻辑核 · 双采样 1.2s）；样本偏差与省略说明为 12px 普通行，黄点 = 语义亮黄 #E4A247（彩色仅允许图标/点缀）。实例为 2026-09-20 本机真实进程 Top5（wetype_renderer / node / WindowsTerminal / herdr / wetype_server）。",
+      "context": "工具调用 · 模板 · 排行组 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -2911,7 +2896,7 @@
               "id": "T7c01m",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -2976,7 +2961,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -3207,7 +3192,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -3272,7 +3257,7 @@
       "x": 2400,
       "y": 1240,
       "name": "工具调用 · 模板 · 原文块 浅色",
-      "context": "通用渲染模式 3 · 原文块：长文本输出（eventlog detail、read、fetch_content）。骨架/配色同模式 1（见字段行画布）。概览层 = 事件字段行 + 灰底原文块（#F6F6F6 r6 pad12，保留原始换行，等宽 11px）；密集长文取色阶画布中性 10 步 #757D82（次要文字档往白一档，用户指定），其余文字 #646464。实例为 2026-09-20 本机 eventlog({scope:'detail', recordId:384389878})——WHEA-Logger 17 警告（黄色图标 #E4A247 表达语义级别）。",
+      "context": "工具调用 · 模板 · 原文块 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -3295,7 +3280,7 @@
               "id": "ViAJX",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -3360,7 +3345,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -3540,10 +3525,7 @@
                   "width": "fill_container",
                   "fill": "#F6F6F6",
                   "cornerRadius": 6,
-                  "padding": [
-                    10,
-                    12
-                  ],
+                  "padding": 12,
                   "children": [
                     {
                       "type": "text",
@@ -3564,7 +3546,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -3629,7 +3611,7 @@
       "x": 1200,
       "y": 5761,
       "name": "工具调用 · runbook · 例外 浅色",
-      "context": "runbook 是唯一的写工具（只写工具包 outbox 的 txt 清单），与 sys overview 同为特殊工具。醒目由出现时机表达（当轮含特殊工具则折叠条默认展开）；骨架（状态行 + 缩进 24 + #F0F0F0 竖线）与通用卡一致。概览层 = 交付信息字段行（13px 数据 / 12px 标签）+ 命令组：每条 = 「环境 ｜ 说明」合并行 11px + 命令灰块等宽 11px + 右侧复制按钮（hover #EAEAEA）；命令区与原文块同为密集文字，取 11px。风险档仅以文字呈现。",
+      "context": "工具调用 · runbook · 例外 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -3653,7 +3635,7 @@
               "id": "yWxQL",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 32,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -3719,7 +3701,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -3990,7 +3972,7 @@
                               "type": "frame",
                               "id": "VBQKL",
                               "name": "复制按钮",
-                              "context": "Ghost Button/Icon。hover 底色 #EAEAEA（聊天页选中色），图标 #646464；点击复制命令正文到剪贴板。常显还是 hover 显现由实现定，画布呈默认态。",
+                              "context": "复制按钮。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
                               "width": 24,
                               "height": 24,
                               "cornerRadius": 6,
@@ -4066,7 +4048,7 @@
                               "type": "frame",
                               "id": "t1pFZN",
                               "name": "复制按钮",
-                              "context": "Ghost Button/Icon。hover 底色 #EAEAEA（聊天页选中色），图标 #646464；点击复制命令正文到剪贴板。常显还是 hover 显现由实现定，画布呈默认态。",
+                              "context": "复制按钮。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
                               "width": 24,
                               "height": 24,
                               "cornerRadius": 6,
@@ -4096,7 +4078,7 @@
                   "id": "sBHYY",
                   "name": "提示条 · notice",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -4139,7 +4121,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -4204,7 +4186,7 @@
       "x": 0,
       "y": 8969,
       "name": "工具调用 · 模板 · 概览组 深色",
-      "context": "深色版，结构/字号/数据同浅色帧「Z47Y6t」。颜色映射：页面 #0B1215、卡片 #131A1D、调用语句片与竖线 #1D2428、原文/命令灰块 #0B1215、文字 #AAB3B7（密集长文 #7F888C）、语义图标 主色 #1B85F2 / 成功 #20A655 / 警告 #ED9F26。对应浅色规则见原帧 context。",
+      "context": "工具调用 · 模板 · 概览组 深色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#0B1215",
@@ -4227,7 +4209,7 @@
               "id": "hzoLX",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -4292,7 +4274,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -4881,7 +4863,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -4946,7 +4928,7 @@
       "x": 1200,
       "y": 8969,
       "name": "工具调用 · 模板 · 排行组 深色",
-      "context": "深色版，结构/字号/数据同浅色帧「aFpEL」。颜色映射：页面 #0B1215、卡片 #131A1D、调用语句片与竖线 #1D2428、原文/命令灰块 #0B1215、文字 #AAB3B7（密集长文 #7F888C）、语义图标 主色 #1B85F2 / 成功 #20A655 / 警告 #ED9F26。对应浅色规则见原帧 context。",
+      "context": "工具调用 · 模板 · 排行组 深色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#0B1215",
@@ -4969,7 +4951,7 @@
               "id": "xEOpM",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -5034,7 +5016,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -5265,7 +5247,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -5330,7 +5312,7 @@
       "x": 2400,
       "y": 8969,
       "name": "工具调用 · 模板 · 原文块 深色",
-      "context": "深色版，结构/字号/数据同浅色帧「s4U5w」。颜色映射：页面 #0B1215、卡片 #131A1D、调用语句片与竖线 #1D2428、原文/命令灰块 #0B1215、文字 #AAB3B7（密集长文 #7F888C）、语义图标 主色 #1B85F2 / 成功 #20A655 / 警告 #ED9F26。对应浅色规则见原帧 context。",
+      "context": "工具调用 · 模板 · 原文块 深色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#0B1215",
@@ -5353,7 +5335,7 @@
               "id": "Jl5DK",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -5418,7 +5400,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -5598,10 +5580,7 @@
                   "width": "fill_container",
                   "fill": "#0B1215",
                   "cornerRadius": 6,
-                  "padding": [
-                    10,
-                    12
-                  ],
+                  "padding": 12,
                   "children": [
                     {
                       "type": "text",
@@ -5622,7 +5601,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -5687,7 +5666,7 @@
       "x": 0,
       "y": 2024,
       "name": "工具调用 · disk · 等待返回 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · disk · 等待返回 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -5710,7 +5689,7 @@
               "id": "DbZh7",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -5778,7 +5757,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -5816,7 +5795,7 @@
       "x": 1200,
       "y": 2024,
       "name": "工具调用 · disk · 成功 浅色",
-      "context": "通用渲染模式 2 · 排行列表：有序数组输出（sys proc/io/gpu、disk usage、ls、eventlog 场景、startup、driver core、sensor）。骨架/配色/字号同模式 1（见字段行画布）。概览层 = 排行列表：无表头、行间无横线、行高 22px；行 = 名次 12px Inter + 名称 13px（名称列宽 = 最长名称 +16px，实测 153px）+ 指标双合一「CPU% · 工作集」13px Inter 紧跟名称列；组内行距 10px。组标题 12px fw500（如 Top 5 · 按 CPU，16 逻辑核 · 双采样 1.2s）；样本偏差与省略说明为 12px 普通行，黄点 = 语义亮黄 #E4A247（彩色仅允许图标/点缀）。实例为 2026-09-20 本机真实进程 Top5（wetype_renderer / node / WindowsTerminal / herdr / wetype_server）。",
+      "context": "工具调用 · disk · 成功 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -5839,7 +5818,7 @@
               "id": "Pn7Je",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -5904,7 +5883,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -6255,7 +6234,7 @@
                   "id": "CMimW",
                   "name": "提示条 · notice",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -6298,7 +6277,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -6363,7 +6342,7 @@
       "x": 2400,
       "y": 2024,
       "name": "工具调用 · disk · 失败 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · disk · 失败 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -6386,7 +6365,7 @@
               "id": "cASn4",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -6451,7 +6430,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -6471,7 +6450,7 @@
                   "id": "gqPde",
                   "name": "提示条 · 失败原因",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -6512,7 +6491,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -6728,7 +6707,7 @@
                       "id": "nST7W",
                       "name": "状态行",
                       "width": "fill_container",
-                      "height": 24,
+                      "height": 26,
                       "gap": 8,
                       "alignItems": "center",
                       "children": [
@@ -6796,7 +6775,7 @@
                           "cornerRadius": 4,
                           "padding": [
                             2,
-                            6
+                            8
                           ],
                           "children": [
                             {
@@ -6942,7 +6921,7 @@
           "type": "frame",
           "id": "PCPFu",
           "name": "折叠行 · 完成",
-          "context": "Accordion/Closed trigger。默认折叠原始调用详情；展开可查看 disk 两次调用。",
+          "context": "折叠行 · 完成。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
           "width": "fill_container",
           "height": 28,
           "gap": 8,
@@ -7048,7 +7027,7 @@
                       "id": "uVZfT",
                       "name": "状态行",
                       "width": "fill_container",
-                      "height": 24,
+                      "height": 26,
                       "gap": 8,
                       "alignItems": "center",
                       "children": [
@@ -7113,7 +7092,7 @@
                           "cornerRadius": 4,
                           "padding": [
                             2,
-                            6
+                            8
                           ],
                           "children": [
                             {
@@ -7464,7 +7443,7 @@
                           "id": "l4b9x",
                           "name": "提示条 · notice",
                           "width": "fill_container",
-                          "gap": 6,
+                          "gap": 8,
                           "children": [
                             {
                               "type": "frame",
@@ -7507,7 +7486,7 @@
                           "name": "原始数据切换条",
                           "width": "fill_container",
                           "height": 24,
-                          "gap": 6,
+                          "gap": 8,
                           "alignItems": "center",
                           "children": [
                             {
@@ -7578,8 +7557,8 @@
                   "type": "icon",
                   "id": "EWtxN",
                   "name": "状态图标",
-                  "width": 13,
-                  "height": 13,
+                  "width": 14,
+                  "height": 14,
                   "icon": "circle-check",
                   "library": "lucide",
                   "fill": "#007B3A"
@@ -7625,8 +7604,8 @@
                   "type": "icon",
                   "id": "k8UxQ",
                   "name": "状态图标",
-                  "width": 13,
-                  "height": 13,
+                  "width": 14,
+                  "height": 14,
                   "icon": "circle-check",
                   "library": "lucide",
                   "fill": "#007B3A"
@@ -7681,7 +7660,7 @@
       "x": 3600,
       "y": 2024,
       "name": "工具调用 · disk · 降级 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · disk · 降级 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -7704,7 +7683,7 @@
               "id": "S4I0JC",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -7769,7 +7748,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -8273,7 +8252,7 @@
                   "id": "HP1qq",
                   "name": "提示条 · smartNotice",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -8316,7 +8295,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -8381,7 +8360,7 @@
       "x": 4800,
       "y": 2024,
       "name": "工具调用 · disk · 多排行 浅色",
-      "context": "通用渲染模式 2 · 排行列表：有序数组输出（sys proc/io/gpu、disk usage、ls、eventlog 场景、startup、driver core、sensor）。骨架/配色/字号同模式 1（见字段行画布）。概览层 = 排行列表：无表头、行间无横线、行高 22px；行 = 名次 12px Inter + 名称 13px（名称列宽 = 最长名称 +16px，实测 153px）+ 指标双合一「CPU% · 工作集」13px Inter 紧跟名称列；组内行距 10px。组标题 12px fw500（如 Top 5 · 按 CPU，16 逻辑核 · 双采样 1.2s）；样本偏差与省略说明为 12px 普通行，黄点 = 语义亮黄 #E4A247（彩色仅允许图标/点缀）。实例为 2026-09-20 本机真实进程 Top5（wetype_renderer / node / WindowsTerminal / herdr / wetype_server）。",
+      "context": "工具调用 · disk · 多排行 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -8404,7 +8383,7 @@
               "id": "f4dNDU",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -8469,7 +8448,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -9170,7 +9149,7 @@
                   "id": "PXE4F",
                   "name": "提示条 · notice",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -9213,7 +9192,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -9278,7 +9257,7 @@
       "x": 6000,
       "y": 2024,
       "name": "工具调用 · disk · 回退 浅色",
-      "context": "通用渲染模式 2 · 排行列表：有序数组输出（sys proc/io/gpu、disk usage、ls、eventlog 场景、startup、driver core、sensor）。骨架/配色/字号同模式 1（见字段行画布）。概览层 = 排行列表：无表头、行间无横线、行高 22px；行 = 名次 12px Inter + 名称 13px（名称列宽 = 最长名称 +16px，实测 153px）+ 指标双合一「CPU% · 工作集」13px Inter 紧跟名称列；组内行距 10px。组标题 12px fw500（如 Top 5 · 按 CPU，16 逻辑核 · 双采样 1.2s）；样本偏差与省略说明为 12px 普通行，黄点 = 语义亮黄 #E4A247（彩色仅允许图标/点缀）。实例为 2026-09-20 本机真实进程 Top5（wetype_renderer / node / WindowsTerminal / herdr / wetype_server）。",
+      "context": "工具调用 · disk · 回退 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -9301,7 +9280,7 @@
               "id": "jFiM4",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -9366,7 +9345,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -9754,7 +9733,7 @@
                   "id": "a03G5S",
                   "name": "提示条 · 降级原因",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -9796,7 +9775,7 @@
                   "id": "LSfEH",
                   "name": "提示条 · notice",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -9839,7 +9818,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -9904,7 +9883,7 @@
       "x": 0,
       "y": 2711,
       "name": "工具调用 · sys · 等待返回 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · sys · 等待返回 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -9927,7 +9906,7 @@
               "id": "ZJupH",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -9995,7 +9974,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -10033,7 +10012,7 @@
       "x": 2400,
       "y": 2711,
       "name": "工具调用 · sys · 失败 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · sys · 失败 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -10056,7 +10035,7 @@
               "id": "WFWtK",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -10121,7 +10100,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -10141,7 +10120,7 @@
                   "id": "eApVn",
                   "name": "提示条 · 失败原因",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -10182,7 +10161,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -10247,7 +10226,7 @@
       "x": 1200,
       "y": 2711,
       "name": "工具调用 · sys · 成功 浅色",
-      "context": "通用渲染模式 2 · 排行列表：有序数组输出（sys proc/io/gpu、disk usage、ls、eventlog 场景、startup、driver core、sensor）。骨架/配色/字号同模式 1（见字段行画布）。概览层 = 排行列表：无表头、行间无横线、行高 22px；行 = 名次 12px Inter + 名称 13px（名称列宽 = 最长名称 +16px，实测 153px）+ 指标双合一「CPU% · 工作集」13px Inter 紧跟名称列；组内行距 10px。组标题 12px fw500（如 Top 5 · 按 CPU，16 逻辑核 · 双采样 1.2s）；样本偏差与省略说明为 12px 普通行，黄点 = 语义亮黄 #E4A247（彩色仅允许图标/点缀）。实例为 2026-09-20 本机真实进程 Top5（wetype_renderer / node / WindowsTerminal / herdr / wetype_server）。",
+      "context": "工具调用 · sys · 成功 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -10270,7 +10249,7 @@
               "id": "dbzp6",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -10335,7 +10314,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -10853,7 +10832,7 @@
                   "id": "cnogf",
                   "name": "提示条 · nvidia 状态",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -10896,7 +10875,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -10961,7 +10940,7 @@
       "x": 0,
       "y": 3256,
       "name": "工具调用 · driver · 等待返回 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · driver · 等待返回 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -10984,7 +10963,7 @@
               "id": "fLVWO",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -11052,7 +11031,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -11090,7 +11069,7 @@
       "x": 2400,
       "y": 3256,
       "name": "工具调用 · driver · 失败 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · driver · 失败 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -11113,7 +11092,7 @@
               "id": "Qj8JR",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -11178,7 +11157,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -11198,7 +11177,7 @@
                   "id": "oekSQ",
                   "name": "提示条 · 失败原因",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -11239,7 +11218,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -11304,7 +11283,7 @@
       "x": 1200,
       "y": 3256,
       "name": "工具调用 · driver · 成功 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · driver · 成功 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -11327,7 +11306,7 @@
               "id": "rN7Gu",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -11392,7 +11371,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -11822,7 +11801,7 @@
                   "id": "v0GMTY",
                   "name": "提示条 · notice",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -11865,7 +11844,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -11930,7 +11909,7 @@
       "x": 0,
       "y": 3770,
       "name": "工具调用 · eventlog · 等待返回 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · eventlog · 等待返回 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -11953,7 +11932,7 @@
               "id": "Q5o0E",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -12021,7 +12000,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -12059,7 +12038,7 @@
       "x": 2400,
       "y": 3770,
       "name": "工具调用 · eventlog · 失败 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · eventlog · 失败 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -12082,7 +12061,7 @@
               "id": "I92ZXP",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -12147,7 +12126,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -12167,7 +12146,7 @@
                   "id": "P6mjOz",
                   "name": "提示条 · 失败原因",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -12208,7 +12187,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -12273,7 +12252,7 @@
       "x": 1200,
       "y": 3770,
       "name": "工具调用 · eventlog · 成功 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · eventlog · 成功 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -12296,7 +12275,7 @@
               "id": "Nlmwv",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -12361,7 +12340,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -13089,7 +13068,7 @@
                   "id": "GiUHm",
                   "name": "提示条 · notice",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -13132,7 +13111,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -13197,7 +13176,7 @@
       "x": 0,
       "y": 4466,
       "name": "工具调用 · startup · 等待返回 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · startup · 等待返回 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -13220,7 +13199,7 @@
               "id": "s9fmt",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -13288,7 +13267,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -13326,7 +13305,7 @@
       "x": 2400,
       "y": 4466,
       "name": "工具调用 · startup · 失败 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · startup · 失败 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -13349,7 +13328,7 @@
               "id": "ej7Kv",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -13414,7 +13393,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -13434,7 +13413,7 @@
                   "id": "HtPMl",
                   "name": "提示条 · 失败原因",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -13475,7 +13454,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -13540,7 +13519,7 @@
       "x": 1200,
       "y": 4466,
       "name": "工具调用 · startup · 成功 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · startup · 成功 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -13563,7 +13542,7 @@
               "id": "lUIhX",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -13628,7 +13607,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -14434,7 +14413,7 @@
                   "id": "IasrG",
                   "name": "提示条 · notice",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -14477,7 +14456,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -14542,7 +14521,7 @@
       "x": 0,
       "y": 5281,
       "name": "工具调用 · ls · 等待返回 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · ls · 等待返回 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -14565,7 +14544,7 @@
               "id": "GSigu",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -14633,7 +14612,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -14671,7 +14650,7 @@
       "x": 2400,
       "y": 5281,
       "name": "工具调用 · ls · 失败 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · ls · 失败 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -14694,7 +14673,7 @@
               "id": "Pdf3i",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -14759,7 +14738,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -14779,7 +14758,7 @@
                   "id": "NhKfP",
                   "name": "提示条 · 失败原因",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -14820,7 +14799,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -14885,7 +14864,7 @@
       "x": 1200,
       "y": 5281,
       "name": "工具调用 · ls · 成功 浅色",
-      "context": "通用渲染模式 2 · 排行列表：有序数组输出（sys proc/io/gpu、disk usage、ls、eventlog 场景、startup、driver core、sensor）。骨架/配色/字号同模式 1（见字段行画布）。概览层 = 排行列表：无表头、行间无横线、行高 22px；行 = 名次 12px Inter + 名称 13px（名称列宽 = 最长名称 +16px，实测 153px）+ 指标双合一「CPU% · 工作集」13px Inter 紧跟名称列；组内行距 10px。组标题 12px fw500（如 Top 5 · 按 CPU，16 逻辑核 · 双采样 1.2s）；样本偏差与省略说明为 12px 普通行，黄点 = 语义亮黄 #E4A247（彩色仅允许图标/点缀）。实例为 2026-09-20 本机真实进程 Top5（wetype_renderer / node / WindowsTerminal / herdr / wetype_server）。",
+      "context": "工具调用 · ls · 成功 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -14908,7 +14887,7 @@
               "id": "DOc1p",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -14973,7 +14952,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -15371,7 +15350,7 @@
                   "id": "dc84T",
                   "name": "提示条 · omitted",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -15414,7 +15393,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -15479,7 +15458,7 @@
       "x": 0,
       "y": 5761,
       "name": "工具调用 · runbook · 等待返回 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · runbook · 等待返回 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -15502,7 +15481,7 @@
               "id": "bmiMw",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 32,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -15570,7 +15549,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -15608,7 +15587,7 @@
       "x": 2400,
       "y": 5761,
       "name": "工具调用 · runbook · 失败 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · runbook · 失败 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -15631,7 +15610,7 @@
               "id": "UAysH",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 32,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -15696,7 +15675,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -15716,7 +15695,7 @@
                   "id": "qRrZx",
                   "name": "提示条 · 失败原因",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -15757,7 +15736,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -15822,7 +15801,7 @@
       "x": 3600,
       "y": 3770,
       "name": "工具调用 · eventlog · detail 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · eventlog · detail 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -15845,7 +15824,7 @@
               "id": "w1MOw",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -15910,7 +15889,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -16137,10 +16116,7 @@
                   "width": "fill_container",
                   "fill": "#F6F6F6",
                   "cornerRadius": 6,
-                  "padding": [
-                    10,
-                    12
-                  ],
+                  "padding": 12,
                   "children": [
                     {
                       "type": "text",
@@ -16161,7 +16137,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -16226,7 +16202,7 @@
       "x": 4800,
       "y": 3770,
       "name": "工具调用 · eventlog · 权限降级 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · eventlog · 权限降级 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -16249,7 +16225,7 @@
               "id": "HshN0",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -16314,7 +16290,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -16334,7 +16310,7 @@
                   "id": "cY9ey",
                   "name": "提示条 · 失败原因",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -16375,7 +16351,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -16440,7 +16416,7 @@
       "x": 0,
       "y": 6536,
       "name": "工具调用 · source_check · 等待返回 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · source_check · 等待返回 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -16463,7 +16439,7 @@
               "id": "qjaqx",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -16531,7 +16507,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -16569,7 +16545,7 @@
       "x": 2400,
       "y": 6536,
       "name": "工具调用 · source_check · 失败 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · source_check · 失败 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -16592,7 +16568,7 @@
               "id": "gXmWl",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -16657,7 +16633,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -16677,7 +16653,7 @@
                   "id": "bh3tf",
                   "name": "提示条 · 失败原因",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -16718,7 +16694,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -16783,7 +16759,7 @@
       "x": 1200,
       "y": 6536,
       "name": "工具调用 · source_check · 成功 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · source_check · 成功 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -16806,7 +16782,7 @@
               "id": "mKAiE",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -16871,7 +16847,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -17317,7 +17293,7 @@
                   "id": "kXmWy",
                   "name": "提示条 · 引文",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -17360,7 +17336,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -17425,7 +17401,7 @@
       "x": 0,
       "y": 7051,
       "name": "工具调用 · fetch_content · 等待返回 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · fetch_content · 等待返回 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -17448,7 +17424,7 @@
               "id": "yN6y4",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -17516,7 +17492,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -17554,7 +17530,7 @@
       "x": 2400,
       "y": 7051,
       "name": "工具调用 · fetch_content · 失败 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · fetch_content · 失败 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -17577,7 +17553,7 @@
               "id": "n7ltg",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -17642,7 +17618,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -17662,7 +17638,7 @@
                   "id": "WGq8b",
                   "name": "提示条 · 失败原因",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -17703,7 +17679,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -17768,7 +17744,7 @@
       "x": 1200,
       "y": 7051,
       "name": "工具调用 · fetch_content · 成功 浅色",
-      "context": "通用渲染模式 3 · 原文块：长文本输出（eventlog detail、read、fetch_content）。骨架/配色同模式 1（见字段行画布）。概览层 = 事件字段行 + 灰底原文块（#F6F6F6 r6 pad12，保留原始换行，等宽 11px）；密集长文取色阶画布中性 10 步 #757D82（次要文字档往白一档，用户指定），其余文字 #646464。实例为 2026-09-20 本机 eventlog({scope:'detail', recordId:384389878})——WHEA-Logger 17 警告（黄色图标 #E4A247 表达语义级别）。",
+      "context": "工具调用 · fetch_content · 成功 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -17791,7 +17767,7 @@
               "id": "ExDyA",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -17856,7 +17832,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -18036,10 +18012,7 @@
                   "width": "fill_container",
                   "fill": "#F6F6F6",
                   "cornerRadius": 6,
-                  "padding": [
-                    10,
-                    12
-                  ],
+                  "padding": 12,
                   "children": [
                     {
                       "type": "text",
@@ -18060,7 +18033,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -18125,7 +18098,7 @@
       "x": 0,
       "y": 7429,
       "name": "工具调用 · get_search_content · 等待返回 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · get_search_content · 等待返回 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -18148,7 +18121,7 @@
               "id": "lsMmI",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -18216,7 +18189,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -18254,7 +18227,7 @@
       "x": 2400,
       "y": 7429,
       "name": "工具调用 · get_search_content · 失败 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · get_search_content · 失败 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -18277,7 +18250,7 @@
               "id": "iVEwu",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -18342,7 +18315,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -18362,7 +18335,7 @@
                   "id": "v8xA2",
                   "name": "提示条 · 失败原因",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -18403,7 +18376,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -18468,7 +18441,7 @@
       "x": 1200,
       "y": 7429,
       "name": "工具调用 · get_search_content · 成功 浅色",
-      "context": "通用渲染模式 3 · 原文块：长文本输出（eventlog detail、read、fetch_content）。骨架/配色同模式 1（见字段行画布）。概览层 = 事件字段行 + 灰底原文块（#F6F6F6 r6 pad12，保留原始换行，等宽 11px）；密集长文取色阶画布中性 10 步 #757D82（次要文字档往白一档，用户指定），其余文字 #646464。实例为 2026-09-20 本机 eventlog({scope:'detail', recordId:384389878})——WHEA-Logger 17 警告（黄色图标 #E4A247 表达语义级别）。",
+      "context": "工具调用 · get_search_content · 成功 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -18491,7 +18464,7 @@
               "id": "LNjSM",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -18556,7 +18529,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -18736,10 +18709,7 @@
                   "width": "fill_container",
                   "fill": "#F6F6F6",
                   "cornerRadius": 6,
-                  "padding": [
-                    10,
-                    12
-                  ],
+                  "padding": 12,
                   "children": [
                     {
                       "type": "text",
@@ -18759,7 +18729,7 @@
                   "id": "U3SU7r",
                   "name": "提示条 · 续读",
                   "width": "fill_container",
-                  "gap": 6,
+                  "gap": 8,
                   "children": [
                     {
                       "type": "frame",
@@ -18802,7 +18772,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -18867,7 +18837,7 @@
       "x": 0,
       "y": 7800,
       "name": "工具调用 · ffgrep · 等待返回 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · ffgrep · 等待返回 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -18890,7 +18860,7 @@
               "id": "TNqc2",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -18958,7 +18928,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -18996,7 +18966,7 @@
       "x": 1200,
       "y": 7800,
       "name": "工具调用 · ffgrep · 成功 浅色",
-      "context": "通用渲染模式 3 · 原文块：长文本输出（eventlog detail、read、fetch_content）。骨架/配色同模式 1（见字段行画布）。概览层 = 事件字段行 + 灰底原文块（#F6F6F6 r6 pad12，保留原始换行，等宽 11px）；密集长文取色阶画布中性 10 步 #757D82（次要文字档往白一档，用户指定），其余文字 #646464。实例为 2026-09-20 本机 eventlog({scope:'detail', recordId:384389878})——WHEA-Logger 17 警告（黄色图标 #E4A247 表达语义级别）。",
+      "context": "工具调用 · ffgrep · 成功 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -19019,7 +18989,7 @@
               "id": "jAS7i",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -19084,7 +19054,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -19190,10 +19160,7 @@
                   "width": "fill_container",
                   "fill": "#F6F6F6",
                   "cornerRadius": 6,
-                  "padding": [
-                    10,
-                    12
-                  ],
+                  "padding": 12,
                   "children": [
                     {
                       "type": "text",
@@ -19214,7 +19181,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -19279,7 +19246,7 @@
       "x": 2400,
       "y": 7800,
       "name": "工具调用 · ffgrep · 零匹配 浅色",
-      "context": "通用渲染模式 3 · 原文块：长文本输出（eventlog detail、read、fetch_content）。骨架/配色同模式 1（见字段行画布）。概览层 = 事件字段行 + 灰底原文块（#F6F6F6 r6 pad12，保留原始换行，等宽 11px）；密集长文取色阶画布中性 10 步 #757D82（次要文字档往白一档，用户指定），其余文字 #646464。实例为 2026-09-20 本机 eventlog({scope:'detail', recordId:384389878})——WHEA-Logger 17 警告（黄色图标 #E4A247 表达语义级别）。",
+      "context": "工具调用 · ffgrep · 零匹配 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -19302,7 +19269,7 @@
               "id": "N9Q0AK",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -19367,7 +19334,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -19473,10 +19440,7 @@
                   "width": "fill_container",
                   "fill": "#F6F6F6",
                   "cornerRadius": 6,
-                  "padding": [
-                    10,
-                    12
-                  ],
+                  "padding": 12,
                   "children": [
                     {
                       "type": "text",
@@ -19497,7 +19461,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -19562,7 +19526,7 @@
       "x": 0,
       "y": 8172,
       "name": "工具调用 · fffind · 等待返回 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · fffind · 等待返回 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -19585,7 +19549,7 @@
               "id": "uVGn9",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -19653,7 +19617,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -19691,7 +19655,7 @@
       "x": 1200,
       "y": 8172,
       "name": "工具调用 · fffind · 成功 浅色",
-      "context": "通用渲染模式 3 · 原文块：长文本输出（eventlog detail、read、fetch_content）。骨架/配色同模式 1（见字段行画布）。概览层 = 事件字段行 + 灰底原文块（#F6F6F6 r6 pad12，保留原始换行，等宽 11px）；密集长文取色阶画布中性 10 步 #757D82（次要文字档往白一档，用户指定），其余文字 #646464。实例为 2026-09-20 本机 eventlog({scope:'detail', recordId:384389878})——WHEA-Logger 17 警告（黄色图标 #E4A247 表达语义级别）。",
+      "context": "工具调用 · fffind · 成功 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -19714,7 +19678,7 @@
               "id": "GdrpO",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -19779,7 +19743,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -19959,10 +19923,7 @@
                   "width": "fill_container",
                   "fill": "#F6F6F6",
                   "cornerRadius": 6,
-                  "padding": [
-                    10,
-                    12
-                  ],
+                  "padding": 12,
                   "children": [
                     {
                       "type": "text",
@@ -19983,7 +19944,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -20048,7 +20009,7 @@
       "x": 2400,
       "y": 8172,
       "name": "工具调用 · fffind · 无结果 浅色",
-      "context": "通用渲染模式 3 · 原文块：长文本输出（eventlog detail、read、fetch_content）。骨架/配色同模式 1（见字段行画布）。概览层 = 事件字段行 + 灰底原文块（#F6F6F6 r6 pad12，保留原始换行，等宽 11px）；密集长文取色阶画布中性 10 步 #757D82（次要文字档往白一档，用户指定），其余文字 #646464。实例为 2026-09-20 本机 eventlog({scope:'detail', recordId:384389878})——WHEA-Logger 17 警告（黄色图标 #E4A247 表达语义级别）。",
+      "context": "工具调用 · fffind · 无结果 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -20071,7 +20032,7 @@
               "id": "GVkDT",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -20136,7 +20097,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -20316,10 +20277,7 @@
                   "width": "fill_container",
                   "fill": "#F6F6F6",
                   "cornerRadius": 6,
-                  "padding": [
-                    10,
-                    12
-                  ],
+                  "padding": 12,
                   "children": [
                     {
                       "type": "text",
@@ -20340,7 +20298,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -20405,7 +20363,7 @@
       "x": 0,
       "y": 8568,
       "name": "工具调用 · read · 等待返回 浅色",
-      "context": "通用渲染模式 1 · 字段行：扁平对象输出（disk info/health、driver problem/find）。共享骨架：状态行（16px 语义图标 + 13px 等宽调用语句片 #F0F0F0 + 12px 目的 + 12px 耗时）→ 概览层 → 原始数据层（默认折叠）。概览层 = 字段行：字段名 12px / 字段值 13px，标签列宽 64px（auto 文本 + 透明补位帧对齐，禁用定宽文本），数字西文 Inter。展开内容缩进 24px 与语句片左缘对齐；卡片左缘 x=7 起 2px #F0F0F0 竖线，自状态行图标下方 y=20 垂至卡底。文字一律 #646464；语义色只给图标：成功 #007B3A、警告 #8C5A00、主色 #0665BE；无彩色边框/底色。字号天花板 13px；多次调用聚合于一条 Accordion。实例为 2026-09-20 本机真实数据（C: 299.1GB 剩 60.9GB / Samsung 970 EVO + WD SN580）。",
+      "context": "工具调用 · read · 等待返回 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -20428,7 +20386,7 @@
               "id": "x6P3su",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -20496,7 +20454,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -20534,7 +20492,7 @@
       "x": 1200,
       "y": 8568,
       "name": "工具调用 · read · 成功 浅色",
-      "context": "通用渲染模式 3 · 原文块：长文本输出（eventlog detail、read、fetch_content）。骨架/配色同模式 1（见字段行画布）。概览层 = 事件字段行 + 灰底原文块（#F6F6F6 r6 pad12，保留原始换行，等宽 11px）；密集长文取色阶画布中性 10 步 #757D82（次要文字档往白一档，用户指定），其余文字 #646464。实例为 2026-09-20 本机 eventlog({scope:'detail', recordId:384389878})——WHEA-Logger 17 警告（黄色图标 #E4A247 表达语义级别）。",
+      "context": "工具调用 · read · 成功 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -20557,7 +20515,7 @@
               "id": "ULklJ",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -20622,7 +20580,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -20691,10 +20649,7 @@
                   "width": "fill_container",
                   "fill": "#F6F6F6",
                   "cornerRadius": 6,
-                  "padding": [
-                    10,
-                    12
-                  ],
+                  "padding": 12,
                   "children": [
                     {
                       "type": "text",
@@ -20715,7 +20670,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -20780,7 +20735,7 @@
       "x": 2400,
       "y": 8568,
       "name": "工具调用 · read · 例外 · 图片 浅色",
-      "context": "通用渲染模式 3 · 原文块：长文本输出（eventlog detail、read、fetch_content）。骨架/配色同模式 1（见字段行画布）。概览层 = 事件字段行 + 灰底原文块（#F6F6F6 r6 pad12，保留原始换行，等宽 11px）；密集长文取色阶画布中性 10 步 #757D82（次要文字档往白一档，用户指定），其余文字 #646464。实例为 2026-09-20 本机 eventlog({scope:'detail', recordId:384389878})——WHEA-Logger 17 警告（黄色图标 #E4A247 表达语义级别）。",
+      "context": "工具调用 · read · 例外 · 图片 浅色。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
       "clip": true,
       "width": 1120,
       "fill": "#FFFFFF",
@@ -20804,7 +20759,7 @@
               "id": "EI1IA",
               "name": "状态行",
               "width": "fill_container",
-              "height": 24,
+              "height": 26,
               "gap": 8,
               "alignItems": "center",
               "children": [
@@ -20870,7 +20825,7 @@
                   "cornerRadius": 4,
                   "padding": [
                     2,
-                    6
+                    8
                   ],
                   "children": [
                     {
@@ -20941,7 +20896,7 @@
                   "name": "原始数据切换条",
                   "width": "fill_container",
                   "height": 24,
-                  "gap": 6,
+                  "gap": 8,
                   "alignItems": "center",
                   "children": [
                     {
@@ -21017,7 +20972,7 @@
           "name": "联网检索行 · 运行中",
           "width": "fill_container",
           "layout": "vertical",
-          "gap": 5,
+          "gap": 4,
           "children": [
             {
               "type": "frame",
@@ -21025,7 +20980,7 @@
               "name": "联网检索标题行 · 图文垂直居中",
               "width": "fill_container",
               "height": 28,
-              "gap": 10,
+              "gap": 8,
               "alignItems": "center",
               "children": [
                 {
@@ -21123,7 +21078,7 @@
           "name": "联网检索行 · 已完成",
           "width": "fill_container",
           "layout": "vertical",
-          "gap": 5,
+          "gap": 4,
           "children": [
             {
               "type": "frame",
@@ -21131,7 +21086,7 @@
               "name": "联网检索标题行 · 图文垂直居中",
               "width": "fill_container",
               "height": 28,
-              "gap": 10,
+              "gap": 8,
               "alignItems": "center",
               "children": [
                 {
@@ -21215,7 +21170,7 @@
           "name": "联网检索行 · 失败",
           "width": "fill_container",
           "layout": "vertical",
-          "gap": 5,
+          "gap": 4,
           "children": [
             {
               "type": "frame",
@@ -21223,7 +21178,7 @@
               "name": "联网检索标题行 · 图文垂直居中",
               "width": "fill_container",
               "height": 28,
-              "gap": 10,
+              "gap": 8,
               "alignItems": "center",
               "children": [
                 {

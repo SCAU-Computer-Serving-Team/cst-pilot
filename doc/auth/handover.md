@@ -42,13 +42,15 @@ Web UI 的 OAuth 登录面板已实现；取设备码信息的方式：Web serve
 
 ## 外部依赖
 
-OA 服务端在独立仓库 [cstoa-api-fastapi](https://github.com/SCAU-Computer-Serving-Team/cstoa-api-fastapi)，任务拆分见其 `docs/oa-tasks.md`。有一处缺口要 OA 侧补：
+OA 服务端在独立仓库 [cstoa-api-fastapi](https://github.com/SCAU-Computer-Serving-Team/cstoa-api-fastapi)，任务拆分见其 `docs/oa-tasks.md`。对接边界：
 
-- `POST /api/oauth/introspect`：遥测接收端（cst-pilot-server 仓库）靠它解析上报者身份，尚未列入 README「OA 接口」表。对接时向 OA 侧提出，响应需区分 `active`、`mid`、`device_id` 与 `expired` / `invalid` / `revoked` / `password-changed`。
+- `POST /api/oauth/introspect` 已在 OA 远端源码提供，部署与遥测接收端联调仍需确认。该接口用于服务间鉴权，本机工具不持有内省服务密钥。
+- 本人学号、姓名需要接受 Agent 令牌的资料接口；现有浏览器 Cookie 接口无法直接复用。
 
 ## 实现进度
 
 1. 扩展已完成：设备标识（device.json）、RFC 8628 设备流、令牌轮换刷新、mock 单测与内核 e2e。
-2. Web 面板已完成：登录页扫码 tab（进入即申请、二维码 + 倒计时 + 刷新/取消）、服务端 `oauth/start|status|cancel` 路由、`/api/events` 事件（`oauth_device_code` / `oauth_result`）。测试见 `agent/home/extensions/web/test/oauth-api.test.ts`。
+2. Web 面板已完成：cstoa 优先扫码；Pi 其他 OAuth 的授权链接、设备码、回贴码和选择步骤接入同一登录流程。接口与账号边界见 [页面地址与接口](../web/SPEC/app-router.md#模型与登录)。测试见 `agent/home/extensions/web/test/oauth-api.test.ts` 与 `oauth-flows.test.ts`。
 3. 真机联调：需 OA 测试账号 + 手机 TOTP 完成一次真实设备授权；生产写操作前先报主审查。
-4. 已知外部依赖：OA 模型代理当前要求 `X-CSTOA-Session`（修机会话），未接入会话前扫码登录只能到"凭据签发"，模型调用会被 400 拒绝；见 [README.md](README.md) 的模型接入说明。
+4. 账号资料：OA `/api/member/info` 已有学号和姓名，但使用浏览器 Cookie 鉴权；需提供接受 Agent 访问令牌的本人资料接口。账号页先显示明确的未接入状态，额度保留占位。
+5. OA 远端源码已提供无修机会话的模型代理路径。生产部署与真实登录后的模型调用仍需联调确认。
