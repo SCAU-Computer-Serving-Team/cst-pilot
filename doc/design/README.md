@@ -4,7 +4,7 @@
 
 | 子目录 | 内容 |
 |---|---|
-| [tool/](tool/) | `sys`、`driver`、`eventlog` 的设计理由 |
+| [tool/](tool/) | `sys`、`driver`、`eventlog`、`python` 的设计理由 |
 | [web/tool/](web/tool/) | 工具调用卡片的组件组织和逐工具返回形态 |
 
 Web 产品与工程文档见 [../web/](../web/)，视觉规范见 [DESIGN.md](../../DESIGN.md)。
