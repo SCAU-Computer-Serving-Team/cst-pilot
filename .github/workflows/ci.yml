@@ -41,7 +41,36 @@ jobs:
       # biome 由 agent 侧安装，前端的 lint 脚本直接调用它，保证格式规则只有一份。
       - run: npm ci --prefix agent --ignore-scripts
       - run: npm ci --prefix src/web/frontend --ignore-scripts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r src/web/frontend/scripts/font-requirements.txt
       - run: npm run lint --prefix src/web/frontend
       - run: npm run typecheck --prefix src/web/frontend
       - run: npm run test --prefix src/web/frontend
+      - run: node --test src/test/*.test.mjs
       - run: npm run build --prefix src/web/frontend
+      - run: npm run test:fonts --prefix src/web/frontend
+      - name: 浏览器与跨端用户链路 E2E
+        run: npm run test:web:e2e --prefix agent
+        env:
+          CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
+      - name: 保存 E2E 验证证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-e2e-evidence
+          path: |
+            ${{ runner.temp }}/**/ui-regressions/*.png
+            ${{ runner.temp }}/**/ui-regressions/report.json
+            ${{ runner.temp }}/**/shared-configuration-e2e/*.png
+            ${{ runner.temp }}/**/shared-configuration-e2e/report.json
+            ${{ runner.temp }}/**/page-motion/**/*.png
+            ${{ runner.temp }}/**/page-motion/report.json
+            ${{ runner.temp }}/**/first-turn-status/*.png
+            ${{ runner.temp }}/**/first-turn-status/report.json
+            ${{ runner.temp }}/**/first-turn-status/first-observation.json
+            ${{ runner.temp }}/**/composer-caret/*.png
+            ${{ runner.temp }}/**/composer-caret/*.json
+          if-no-files-found: ignore
+          retention-days: 7

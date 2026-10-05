@@ -105,10 +105,29 @@ async function readPage(pageUrl: string, probe: string, shotPath?: string) {
 			socket.addEventListener("error", () => reject(new Error("无法连接 Chrome")));
 		});
 		const cdp = new Cdp(socket);
-		const page = await cdp.send("Target.createTarget", { url: pageUrl });
+		const page = await cdp.send("Target.createTarget", { url: "about:blank" });
 		const attached = await cdp.send("Target.attachToTarget", { targetId: page.targetId, flatten: true });
 		const session = attached.sessionId as string;
 		await cdp.send("Page.enable", {}, session);
+		await cdp.send("Page.navigate", { url: pageUrl }, session);
+		let ready = false;
+		for (let attempt = 0; attempt < 150 && !ready; attempt++) {
+			try {
+				const result = await cdp.send(
+					"Runtime.evaluate",
+					{
+						expression: `location.href === ${JSON.stringify(pageUrl)} && document.readyState === "complete"`,
+						returnByValue: true,
+					},
+					session,
+				);
+				ready = result.result?.value === true;
+			} catch (error) {
+				if (!(error instanceof Error) || !error.message.includes("Execution context was destroyed")) throw error;
+			}
+			if (!ready) await new Promise((resolve) => setTimeout(resolve, 80));
+		}
+		assert.ok(ready, "测试页面未完成导航");
 		const evaluated = await cdp.send(
 			"Runtime.evaluate",
 			{ expression: probe, awaitPromise: true, returnByValue: true },
@@ -206,7 +225,27 @@ const customProbe = `(async () => {
 	await until(() => !document.querySelector(".composer-command"), "标记块撤掉");
 	await until(() => blocks() > onChat, "分支总结消息");
 	await new Promise((resolve) => setTimeout(resolve, 200));
+	document.querySelector(".composer-model").click();
+	await until(() => document.querySelector(".model-popover"), "模型面板");
+	await new Promise((resolve) => setTimeout(resolve, 50));
+	document.querySelector(".model-popover [data-slot='list-box']").dispatchEvent(new Event("scroll"));
+	const internalScrollPreserved = !!document.querySelector(".model-popover");
+	window.dispatchEvent(new Event("scroll"));
+	await until(() => !document.querySelector(".model-popover"), "页面滚动关闭模型面板");
+	document.querySelector(".sidebar-account-trigger").click();
+	await until(() => document.querySelector(".sidebar-account-popover"), "账号面板");
+	await new Promise((resolve) => setTimeout(resolve, 50));
+	window.dispatchEvent(new Event("scroll"));
+	await until(() => !document.querySelector(".sidebar-account-popover"), "页面滚动关闭账号面板");
+	document.querySelector(".context-meter").focus();
+	await until(() => getComputedStyle(document.querySelector(".context-panel")).display !== "none", "上下文面板");
+	await new Promise((resolve) => setTimeout(resolve, 50));
+	document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+	await until(() => getComputedStyle(document.querySelector(".context-panel")).display === "none", "Esc 关闭上下文面板");
 	return JSON.stringify({
+		internalScrollPreserved,
+		pageScrollClosesPanels: true,
+		contextEscapeCloses: true,
 		tag,
 		pendingBefore,
 		pendingSeen,
@@ -264,6 +303,7 @@ const dropTagProbe = `(async () => {
 	${dialogPreamble}
 	pick("用自定义提示词总结");
 	await until(() => document.querySelector(".composer-command"), "提示词标记块");
+	await until(() => document.querySelector(".turn") || document.querySelector(".assistant-block"), "对话流");
 	const onChat = blocks();
 	document.querySelector(".composer-command button").click();
 	await until(() => !document.querySelector(".composer-command"), "标记块撤掉");
@@ -430,6 +470,7 @@ test("分支总结：总结、自定义提示词与取消", async () => {
 			`| 总结：消息块 | ${JSON.stringify({ title: scenarioOne.title, body: scenarioOne.body, blocks: scenarioOne.blocks, pendingLeft: scenarioOne.pendingLeft })} |`,
 			`| 自定义：输入框标记块 | ${JSON.stringify({ tag: scenarioTwo.tag, pendingBefore: scenarioTwo.pendingBefore, tagLeft: scenarioTwo.tagLeft, draft: scenarioTwo.draft })} |`,
 			`| 自定义：待总结与消息块 | ${JSON.stringify({ pendingSeen: scenarioTwo.pendingSeen, blocks: scenarioTwo.blocks })} |`,
+			`| 悬停面板关闭规则 | ${JSON.stringify({ internalScrollPreserved: scenarioTwo.internalScrollPreserved, pageScrollClosesPanels: scenarioTwo.pageScrollClosesPanels, contextEscapeCloses: scenarioTwo.contextEscapeCloses })} |`,
 			`| 标记块样子 | ${JSON.stringify(scenarioThree)} |`,
 			`| 标记块去掉 | ${JSON.stringify(scenarioFour)} |`,
 			`| 生成中状态行 | ${JSON.stringify(scenarioFive)} |`,
@@ -452,6 +493,9 @@ test("分支总结：总结、自定义提示词与取消", async () => {
 			"会话里没有分支总结条目",
 		);
 
+		assert.equal(scenarioTwo.internalScrollPreserved, true, "面板内部滚动不应关闭模型列表");
+		assert.equal(scenarioTwo.pageScrollClosesPanels, true, "页面滚动没有关闭面板");
+		assert.equal(scenarioTwo.contextEscapeCloses, true, "Esc 没有关闭上下文面板");
 		assert.equal(scenarioTwo.tag, "自定义总结提示词", "输入框标记块文案不对");
 		assert.equal(scenarioTwo.pendingBefore, false, "输入提示词前就开始了总结");
 		assert.equal(scenarioTwo.pendingSeen, true, "回车后没有开始总结");
