@@ -173,6 +173,37 @@ export class BrowserProbe {
 		await this.call("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", clickCount: 1, ...point });
 		await this.call("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, ...point });
 	}
+	async holdAnimations(selector: string): Promise<void> {
+		await this.evaluate(`(() => {
+			window.__heldAnimations = [];
+			window.__holdSelector = ${JSON.stringify(selector)};
+			if (!window.__nativeAnimate) {
+				window.__nativeAnimate = Element.prototype.animate;
+				Element.prototype.animate = function(...args) {
+					const animation = window.__nativeAnimate.apply(this, args);
+					if (window.__holdSelector && this.matches(window.__holdSelector)) {
+						animation.pause(); animation.currentTime = 0;
+						window.__heldAnimations.push(animation);
+					}
+					return animation;
+				};
+				const holdCss = event => {
+					if (!window.__holdSelector || !event.target.matches(window.__holdSelector)) return;
+					for (const animation of event.target.getAnimations()) {
+						if (!window.__heldAnimations.includes(animation)) {
+							animation.pause(); animation.currentTime = 0;
+							window.__heldAnimations.push(animation);
+						}
+					}
+				};
+				document.addEventListener('transitionrun', holdCss, true);
+				document.addEventListener('animationstart', holdCss, true);
+			}
+		})()`);
+	}
+	async releaseAnimations(): Promise<void> {
+		await this.evaluate("window.__holdSelector=null;window.__heldAnimations.forEach(a=>a.finish())");
+	}
 	async fill(selector: string, value: string): Promise<void> {
 		await this.evaluate(`(() => {
 			const element = document.querySelector(${JSON.stringify(selector)});
@@ -190,7 +221,22 @@ export class BrowserProbe {
 		await writeFile(path, Buffer.from(result.data, "base64"));
 	}
 	async close(): Promise<void> {
+		const exited = new Promise<void>((resolve) => {
+			if (this.child.exitCode !== null) resolve();
+			else this.child.once("exit", () => resolve());
+		});
+		// Browser.close 关闭整个隔离实例；单独终止主进程可能残留 renderer/GPU 子进程。
+		const id = ++this.sequence;
+		this.socket.send(JSON.stringify({ id, method: "Browser.close" }));
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		await Promise.race([
+			exited,
+			new Promise<void>((resolve) => {
+				timer = setTimeout(resolve, 5000);
+			}),
+		]);
+		clearTimeout(timer);
+		if (this.child.exitCode === null) this.child.kill();
 		this.socket.close();
-		this.child.kill();
 	}
 }

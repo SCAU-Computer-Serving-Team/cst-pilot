@@ -15,6 +15,7 @@ test("首轮工作时长：主页发送、纯正文回复完成、后续对话�
 	await mkdir(root, { recursive: true });
 	const home = await mkdtemp(join(root, "home-"));
 	let requests = 0;
+	let releaseReply: (() => void) | undefined;
 	const model = createServer(async (request, response) => {
 		for await (const _chunk of request) {
 			/* 外部模型边界，其余使用真实产品实现。 */
@@ -22,7 +23,10 @@ test("首轮工作时长：主页发送、纯正文回复完成、后续对话�
 		const turn = ++requests;
 		response.writeHead(200, { "Content-Type": "text/event-stream" });
 		response.flushHeaders();
-		await new Promise((resolve) => setTimeout(resolve, 1800));
+		// 外部模型保持运行，直到浏览器已观察到运行态。
+		await new Promise<void>((resolve) => {
+			releaseReply = resolve;
+		});
 		response.write(
 			`data: ${JSON.stringify({ id: `turn-${turn}`, choices: [{ index: 0, delta: { role: "assistant", content: `第${turn}轮纯正文回答。` }, finish_reason: null }] })}\n\n`,
 		);
@@ -94,6 +98,8 @@ test("首轮工作时长：主页发送、纯正文回复完成、后续对话�
 			"window.__processTransitions=[];window.__observedProcess=document.querySelector('.turn-process-head');window.__processObserver=new MutationObserver(()=>window.__processTransitions.push({connected:window.__observedProcess.isConnected,labels:[...document.querySelectorAll('.turn-process-head')].map(e=>e.textContent)}));window.__processObserver.observe(document.querySelector('.conversation'),{childList:true,subtree:true});",
 		);
 		await browser.screenshot(join(root, "first-running.png"));
+		assert.ok(releaseReply, "外部模型已接受首轮请求");
+		releaseReply();
 		await browser.until(
 			"document.querySelector('.conversation')?.textContent.includes('第1轮纯正文回答。') && !!document.querySelector('[aria-label=发送消息]')",
 			"首轮回复结束",
@@ -129,6 +135,8 @@ test("首轮工作时长：主页发送、纯正文回复完成、后续对话�
 			"[...document.querySelectorAll('.turn-process-head')].some(e=>e.textContent.includes('工作中'))",
 			"第二轮运行",
 		);
+		assert.ok(releaseReply, "外部模型已接受第二轮请求");
+		releaseReply();
 		await browser.until(
 			"document.querySelector('.conversation')?.textContent.includes('第2轮纯正文回答。') && !!document.querySelector('[aria-label=发送消息]')",
 			"第二轮回复完成",
@@ -187,6 +195,7 @@ test("首轮工作时长：主页发送、纯正文回复完成、后续对话�
 			),
 		);
 	} finally {
+		releaseReply?.();
 		await browser?.close();
 		await api.close();
 		await pool.close();

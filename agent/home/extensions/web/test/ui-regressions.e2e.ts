@@ -241,14 +241,16 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		const startRight = await browser.evaluate<number>(
 			"document.querySelector('.sidebar').getBoundingClientRect().right",
 		);
+		await browser.holdAnimations(".sidebar");
 		await browser.click('[aria-label="收起侧栏"]');
+		await browser.until("window.__heldAnimations.length>0", "侧栏开始退场");
 		const motion = await browser.evaluate<{ middleRight: number; width: number }>(
-			"(async()=>{const side=document.querySelector('.sidebar');let animations=[];for(let i=0;i<20&&!animations.length;i++){await new Promise(r=>requestAnimationFrame(r));animations=side.getAnimations().filter(a=>a.effect.target===side);}if(!animations.length)throw new Error('未观察到侧栏过渡');for(const animation of animations){animation.pause();animation.currentTime=175;}const rect=side.getBoundingClientRect();return {middleRight:rect.right,width:rect.width};})()",
+			"(()=>{const side=document.querySelector('.sidebar');window.__heldAnimations.forEach(a=>a.currentTime=175);const rect=side.getBoundingClientRect();return {middleRight:rect.right,width:rect.width};})()",
 		);
 		assert.equal(motion.width, 264, "过渡期间侧栏保持原宽度");
 		assert.ok(motion.middleRight > 0 && motion.middleRight < startRight, "侧栏经过可见的中间位置");
 		await browser.screenshot(join(root, "sidebar-transition-midpoint.png"));
-		await browser.evaluate("document.querySelector('.sidebar').getAnimations().forEach(a=>a.play())");
+		await browser.releaseAnimations();
 		await browser.until("document.querySelector('.sidebar').getBoundingClientRect().right<=0.5", "侧栏完整退场");
 		evidence.sidebarMotion = {
 			startRight,

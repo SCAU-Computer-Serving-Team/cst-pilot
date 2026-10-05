@@ -170,10 +170,13 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 			const before = await browser!.evaluate<number[]>(
 				`[${homeSelectors.map((s) => `document.querySelector(${JSON.stringify(s)})`).join(",")}].map(e=>{const r=e.getBoundingClientRect();return r.left+r.width/2;})`,
 			);
+			await browser!.holdAnimations(".sidebar, .home-main *");
 			await browser!.click(selector);
-			await browser!.evaluate(
-				"window.__sidebarAnimations=document.getAnimations().filter(a=>!a.effect?.pseudoElement&&(a.effect?.target?.closest?.('.home-main')||a.effect?.target?.matches?.('.sidebar')));window.__sidebarAnimations.forEach(a=>{a.pause();a.currentTime=0});",
+			await browser!.until(
+				"window.__heldAnimations.some(a=>a.effect.target.matches('.sidebar'))",
+				"捕获侧栏动画开始",
 			);
+			await browser!.evaluate("window.__sidebarAnimations=window.__heldAnimations");
 			async function sample(time: number) {
 				return browser!.evaluate<number[]>(
 					`(()=>{window.__sidebarAnimations.forEach(a=>a.currentTime=${time});return [${homeSelectors.map((s) => `document.querySelector(${JSON.stringify(s)})`).join(",")}].map(e=>{const r=e.getBoundingClientRect();return r.left+r.width/2;});})()`,
@@ -194,7 +197,7 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 			}
 			await sample(80);
 			await browser!.screenshot(join(root, `${label}-middle.png`));
-			await browser!.evaluate("window.__sidebarAnimations.forEach(a=>a.finish())");
+			await browser!.releaseAnimations();
 			return { before, start, middle, end };
 		}
 		const collapse = await sidebarMotion('[aria-label="收起侧栏"]', "home-sidebar-collapse");
@@ -202,10 +205,10 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 		async function sidebarCoverage(theme: string) {
 			await browser!.click('[aria-label="收起侧栏"]');
 			await browser!.evaluate("Promise.all(document.querySelector('.sidebar').getAnimations().map(a=>a.finished))");
+			await browser!.holdAnimations(".sidebar, .home-main *");
 			await browser!.click('[aria-label="展开侧栏"]');
-			await browser!.evaluate(
-				"window.__openingAnimations=document.getAnimations().filter(a=>!a.effect?.pseudoElement&&(a.effect?.target?.closest?.('.home-main')||a.effect?.target?.matches?.('.sidebar')));window.__openingAnimations.forEach(a=>{a.pause();a.currentTime=0});",
-			);
+			await browser!.until("window.__heldAnimations.some(a=>a.effect.target.matches('.sidebar'))", "捕获侧栏展开");
+			await browser!.evaluate("window.__openingAnimations=window.__heldAnimations");
 			const frames: {
 				time: number;
 				sidebarRight: number;
@@ -228,12 +231,13 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 				frames.every((frame) => frame.covered),
 				`${theme} 侧栏展开时蓝白背景持续覆盖未被侧栏占据的区域：${JSON.stringify(frames)}`,
 			);
-			await browser!.evaluate("window.__openingAnimations.forEach(a=>a.finish())");
+			await browser!.releaseAnimations();
 			await browser!.until("!document.querySelector('[data-sidebar-reveal]')", `${theme} 背景越界绘制状态清理`);
 			return frames;
 		}
 		const lightOpeningCoverage = await sidebarCoverage("light");
 		// 在动画中途反向，新的首帧必须衔接当前可见位置。
+		await browser.holdAnimations(".sidebar, .home-main *");
 		await browser.click('[aria-label="收起侧栏"]');
 		await browser.until("document.querySelector('.home-center').getAnimations().length>0", "中途反向前的布局动画");
 		await browser.evaluate(
