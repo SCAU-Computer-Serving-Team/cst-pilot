@@ -12,9 +12,15 @@ test('Web backend tests are rejected from release trees', () => {
   );
 });
 
+test('完整 OTF 字体不得进入 Web 发行树', () => {
+  assert.throws(() => checkReleaseTree('.', ['agent/home/extensions/web/static/fonts/SourceHanSansCN-Regular.otf']), /完整 OTF 不得进入 Web 分发包/);
+});
+
 // 造一棵最小发行树：必需文件全部就位，入口页与样式表各自引用一个真实产物。
 function makeTree() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cst-release-'));
+  const base = process.env.CST_WEB_TEST_TMPDIR ? path.join(process.env.CST_WEB_TEST_TMPDIR, new Date().toISOString().slice(0, 10)) : os.tmpdir();
+  fs.mkdirSync(base, { recursive: true });
+  const root = fs.mkdtempSync(path.join(base, 'cst-release-'));
   const write = (rel, body) => {
     const file = path.join(root, rel);
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -28,7 +34,7 @@ function makeTree() {
   write('agent/home/extensions/web/static/assets/extra.js', 'x');
   write(
     'agent/home/extensions/web/static/assets/styles-abc.css',
-    '@font-face{src:url(/fonts/SourceHanSansCN-Regular.otf)}',
+    '@font-face{src:url(/fonts/CSTUISans-Regular.woff2)}',
   );
   return root;
 }
