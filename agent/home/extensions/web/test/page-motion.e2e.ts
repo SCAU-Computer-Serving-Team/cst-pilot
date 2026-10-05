@@ -240,9 +240,7 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 		await browser.holdAnimations(".sidebar, .home-main *");
 		await browser.click('[aria-label="收起侧栏"]');
 		await browser.until("document.querySelector('.home-center').getAnimations().length>0", "中途反向前的布局动画");
-		await browser.evaluate(
-			"document.querySelectorAll('.home-center,.home-footnote,.home-backdrop').forEach(e=>e.getAnimations().forEach(a=>{a.pause();a.currentTime=80}))",
-		);
+		await browser.evaluate("window.__heldAnimations.forEach(a=>a.currentTime=80)");
 		const reversal = await sidebarMotion('[aria-label="展开侧栏"]', "home-sidebar-reversal");
 		await browser.click(".sidebar-account-trigger");
 		await browser.until("!!document.querySelector('[aria-label^=\"主题，当前\"]')", "主题菜单");

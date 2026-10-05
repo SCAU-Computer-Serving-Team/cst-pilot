@@ -21,7 +21,9 @@ export class BrowserProbe {
 	private session = "";
 	private readonly socket: WebSocket;
 	private readonly child: ChildProcess;
-	private constructor(socket: WebSocket, child: ChildProcess) {
+	private readonly root: string;
+	private constructor(socket: WebSocket, child: ChildProcess, root: string) {
+		this.root = root;
 		this.socket = socket;
 		this.child = child;
 		socket.addEventListener("message", (event) => {
@@ -58,7 +60,7 @@ export class BrowserProbe {
 				"--no-default-browser-check",
 				"--disable-background-networking",
 				"--enable-unsafe-swiftshader",
-				"--use-angle=swiftshader",
+				"--use-angle=swiftshader-webgl",
 				"--window-size=1600,1000",
 				"about:blank",
 			],
@@ -78,7 +80,7 @@ export class BrowserProbe {
 				socket.addEventListener("open", () => resolve());
 				socket.addEventListener("error", () => reject(new Error("Chrome 调试连接失败")));
 			});
-			const browser = new BrowserProbe(socket, child);
+			const browser = new BrowserProbe(socket, child, root);
 			const target = await browser.call<{ targetId: string }>("Target.createTarget", { url: "about:blank" });
 			const attached = await browser.call<{ sessionId: string }>("Target.attachToTarget", {
 				targetId: target.targetId,
@@ -131,7 +133,15 @@ export class BrowserProbe {
 			}
 			await new Promise((resolve) => setTimeout(resolve, 40));
 		}
-		throw new Error(`${label} 未出现：${await this.evaluate("document.body.innerText.slice(0, 1200)")}`);
+		const diagnostic = await this.evaluate(`(() => ({
+			label: ${JSON.stringify(label)}, url: location.pathname, hidden: document.hidden,
+			layout: document.querySelector('.app-layout')?.className,
+			transition: document.querySelector('.app-layout')?.dataset.homeTransition,
+			animations: document.getAnimations().map(a=>({state:a.playState,time:a.currentTime,pseudo:a.effect?.pseudoElement,target:a.effect?.target?.className})),
+			body: document.body.innerText.slice(0,1200)
+		}))()`);
+		await writeFile(join(this.root, "failure-state.json"), JSON.stringify(diagnostic, null, 2));
+		throw new Error(`${label} 未出现：${JSON.stringify(diagnostic)}`);
 	}
 	async navigate(url: string): Promise<void> {
 		await this.call("Page.navigate", { url });

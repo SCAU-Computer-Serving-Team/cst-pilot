@@ -62,6 +62,7 @@ jobs:
           name: web-e2e-evidence
           path: |
             ${{ runner.temp }}/**/browser-environment.json
+            ${{ runner.temp }}/**/failure-state.json
             ${{ runner.temp }}/**/ui-regressions/*.png
             ${{ runner.temp }}/**/ui-regressions/report.json
             ${{ runner.temp }}/**/shared-configuration-e2e/*.png
