@@ -36,6 +36,7 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		const delta = hasToolResult
 			? {
 					role: "assistant",
+					reasoning_content: `${"这是用于检查思考正文排版的文本。\n".repeat(45)}`,
 					content: `测试回答：检查后的正文。\n\n${"长摘要与当前位置标记应当互不遮挡。".repeat(20)}`,
 				}
 			: {
@@ -218,6 +219,36 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		assert.ok(Math.abs(alignment.tool - alignment.prose) < 1, JSON.stringify(alignment));
 		assert.equal(alignment.width, alignment.proseWidth);
 		evidence.toolAlignment = alignment;
+		await browser.click(".tool-group-heading");
+		await browser.click(".tool-card-heading");
+		await browser.evaluate(
+			"Promise.all([...document.querySelectorAll('.disclosure__content')].flatMap(e=>e.getAnimations()).map(a=>a.finished))",
+		);
+		await browser.click(".tool-raw-toggle");
+		await browser.click(".thinking-trigger");
+		await browser.evaluate(
+			"Promise.all([...document.querySelectorAll('.disclosure__content')].flatMap(e=>e.getAnimations()).map(a=>a.finished))",
+		);
+		const detailGeometry = await browser.evaluate<{
+			rawOffset: number;
+			toggleOffset: number;
+			guideGap: number;
+			thinkingFont: string;
+			toolFont: string;
+			thinkingOverflow: boolean;
+		}>(`(()=>{
+			const card=document.querySelector('.tool-card-detail'),raw=card.querySelector('.disclosure .tool-raw'),invocation=card.querySelector('.tool-invocation'),toggle=card.querySelector('.tool-raw-toggle');
+			const outer=getComputedStyle(document.querySelector('.tool-group > .disclosure__content'),'::before');
+			const thinking=document.querySelector('.thinking-line pre'),style=getComputedStyle(thinking);
+			return {rawOffset:raw.getBoundingClientRect().left-invocation.getBoundingClientRect().left,toggleOffset:toggle.getBoundingClientRect().left-invocation.getBoundingClientRect().left,guideGap:parseFloat(outer.bottom),thinkingFont:style.fontSize,toolFont:getComputedStyle(raw).fontSize,thinkingOverflow:thinking.scrollHeight>thinking.clientHeight};
+		})()`);
+		await browser.screenshot(join(root, "details-expanded-light.png"));
+		assert.ok(Math.abs(detailGeometry.rawOffset) < 1, "原始数据与字段左缘对齐");
+		assert.ok(Math.abs(detailGeometry.toggleOffset) < 1, "原始数据入口与字段左缘对齐");
+		assert.equal(detailGeometry.guideGap, 0, "外层引导线延伸到内容底部");
+		assert.equal(detailGeometry.thinkingFont, detailGeometry.toolFont, "思考与工具文本使用相同字号");
+		assert.equal(detailGeometry.thinkingOverflow, false, "思考内容完整展开，不设内部高度限制");
+		evidence.detailGeometry = detailGeometry;
 		await browser.screenshot(join(root, "workspace-light.png"));
 		await browser.evaluate("document.querySelector('.sidebar-account-trigger').click()");
 		await browser.until("!!document.querySelector('.sidebar-account-menu button[aria-label^=主题]')", "账号菜单");
