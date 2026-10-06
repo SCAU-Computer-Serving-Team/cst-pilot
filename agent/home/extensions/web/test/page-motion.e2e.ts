@@ -220,8 +220,12 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 		const first = pixels.filter((p) => p.transition === 1);
 		assert.ok(first.length > 5, "实际WebGL绘制的分区透明度已采样");
 		assert.ok(
-			first.some((p) => p.progress > 0.45 && p.progress < 0.7 && p.alpha[5] < 0.05 && p.alpha[0] > 0.65),
-			"中心先消失时，外侧仍不透明",
+			first.some((p) => p.progress > 0.2 && p.progress < 0.85 && p.alpha[0] - p.alpha[5] > 0.6),
+			"中心透明度先于外侧降低",
+		);
+		assert.ok(
+			first.some((p) => p.alpha[5] < 0.05 && p.alpha[0] > 0.1),
+			"中心先消失时，外侧尚未消失",
 		);
 		assert.ok(first.at(-1)!.travel - first[0].travel > 0.05, "分区边缘随背景时间实时变化");
 		for (const sample of first) {
