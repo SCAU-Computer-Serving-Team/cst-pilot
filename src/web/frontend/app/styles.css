@@ -1255,7 +1255,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 ::view-transition-group(home-composer), ::view-transition-group(workspace-composer) { z-index: 5; animation: none; }
 ::view-transition-group(workspace-header), ::view-transition-group(workspace-messages) { z-index: 4; animation: none; }
 ::view-transition-old(home-background), ::view-transition-old(home-curtain-left), ::view-transition-old(home-curtain-right) { animation: none; opacity: 0; }
-::view-transition-group(home-curtain-left), ::view-transition-group(home-curtain-right) { z-index: 1; animation: none; }
+::view-transition-group(home-curtain-left), ::view-transition-group(home-curtain-right) { z-index: 1; animation: none; overflow: hidden; }
 @property --curtain-erasure { syntax: "<length-percentage>"; inherits: false; initial-value: -64px; }
 ::view-transition-new(home-curtain-left), ::view-transition-new(home-curtain-right) {
   --curtain-erasure: -64px;

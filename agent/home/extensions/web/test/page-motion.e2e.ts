@@ -17,6 +17,7 @@ type Snapshot = {
 	erasure: string;
 	blur: number;
 	group: string;
+	clipping: string;
 	duration: number;
 	delay: number;
 };
@@ -37,7 +38,7 @@ async function transition(browser: BrowserProbe, selector: string, direction: st
 				const s=getComputedStyle(document.documentElement,'::view-transition-'+side+'('+name+')');
 				const g=getComputedStyle(document.documentElement,'::view-transition-group('+name+')');
 				const timing=animations.find(a=>a.effect.pseudoElement==='::view-transition-'+side+'('+name+')')?.effect.getTiming();
-				result[name]={opacity:parseFloat(s.opacity),x:s.transform==='none'?0:new DOMMatrixReadOnly(s.transform).m41,mask:s.maskImage,erasure:s.getPropertyValue('--curtain-erasure'),y:s.transform==='none'?0:new DOMMatrixReadOnly(s.transform).m42,blur:s.filter.startsWith('blur(')?parseFloat(s.filter.slice(5)):0,group:g.transform,duration:Number(timing?.duration),delay:timing?.delay??0};
+				result[name]={opacity:parseFloat(s.opacity),x:s.transform==='none'?0:new DOMMatrixReadOnly(s.transform).m41,mask:s.maskImage,erasure:s.getPropertyValue('--curtain-erasure'),y:s.transform==='none'?0:new DOMMatrixReadOnly(s.transform).m42,blur:s.filter.startsWith('blur(')?parseFloat(s.filter.slice(5)):0,group:g.transform,clipping:g.overflow,duration:Number(timing?.duration),delay:timing?.delay??0};
 			}return result;
 		}
 		const curtains=[...document.querySelectorAll('.home-exit-curtain')].map(e=>{const c=e.querySelector('canvas'),r=e.getBoundingClientRect();return {left:r.left,top:r.top,width:r.width,height:r.height,background:getComputedStyle(e).backgroundImage,bitmapWidth:c.width,alpha:c.getContext('2d').getImageData(Math.floor(c.width/2),Math.floor(c.height/2),1,1).data[3]};});
@@ -194,6 +195,7 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 			assert.notEqual(intoWorkspace.middle[name].erasure, intoWorkspace.start[name].erasure, "内側遮罩先推进透明度");
 			assert.equal(intoWorkspace.middle[name].opacity, 1, "外侧早期保持不透明");
 			assert.ok(intoWorkspace.late[name].opacity < 1, "接近末尾时外侧才淡出");
+			assert.equal(intoWorkspace.middle[name].clipping, "hidden", "滑动片限制在自身主区边界内，不覆盖侧栏");
 			assert.equal(intoWorkspace.middle[name].y, 0, "背景不再上下移动");
 			assert.equal(intoWorkspace.end[name].opacity, 0);
 		}
