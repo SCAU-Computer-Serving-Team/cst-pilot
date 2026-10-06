@@ -218,7 +218,13 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 			>("window.__regionPixels");
 		await writeFile(join(root, "region-fade-pixels.json"), JSON.stringify(pixels, null, 2));
 		const first = pixels.filter((p) => p.transition === 1);
-		assert.ok(first.length > 5, "实际WebGL绘制的分区透明度已采样");
+		// 不以云端软件WebGL的帧数判定动效；实际像素必须覆盖起始、中间与末段。
+		assert.ok(
+			first.some((p) => p.progress < 0.3) &&
+				first.some((p) => p.progress >= 0.3 && p.progress < 0.85) &&
+				first.some((p) => p.progress >= 0.85),
+			"实际GPU采样覆盖完整退场时间阶段",
+		);
 		assert.ok(
 			first.some((p) => p.progress > 0.2 && p.progress < 0.85 && p.alpha[0] - p.alpha[5] > 0.6),
 			"中心透明度先于外侧降低",
