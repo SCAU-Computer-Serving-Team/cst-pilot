@@ -153,20 +153,22 @@ export default function Chat() {
 					</Button>
 				</output>
 			)}
-			{detail ? (
-				<Conversation
-					id={detail.id}
-					entries={entries}
-					streaming={streaming}
-					running={!!detail.running}
-					summarizing={summarizing}
-					refresh={refresh}
-					onCancelSummary={cancelSummary}
-					onFork={example ? () => undefined : () => setForkOpen(true)}
-				/>
-			) : (
-				<div className="chat-empty">{example ? "此会话暂无对话示例。" : error || "正在读取会话…"}</div>
-			)}
+			<div className="chat-message-surface">
+				{detail ? (
+					<Conversation
+						id={detail.id}
+						entries={entries}
+						streaming={streaming}
+						running={!!detail.running}
+						summarizing={summarizing}
+						refresh={refresh}
+						onCancelSummary={cancelSummary}
+						onFork={example ? () => undefined : () => setForkOpen(true)}
+					/>
+				) : (
+					<div className="chat-empty">{example ? "此会话暂无对话示例。" : error || "正在读取会话…"}</div>
+				)}
+			</div>
 			<div className="chat-composer-area">
 				{detail?.ui.map((question) => (
 					<QuestionPanel key={question.requestId} id={detail.id} question={question} refresh={refresh} />
