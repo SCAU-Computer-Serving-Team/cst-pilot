@@ -451,7 +451,15 @@ export function BrandArcs() {
 	);
 }
 
-export function HomeSurface({ preview = false, paused = false }: { preview?: boolean; paused?: boolean }) {
+export function HomeSurface({
+	preview = false,
+	paused = false,
+	externalBackground = false,
+}: {
+	preview?: boolean;
+	paused?: boolean;
+	externalBackground?: boolean;
+}) {
 	const navigate = useNavigate();
 	async function send(text: string, config: ComposerConfig) {
 		const session = await apiJson<{ id: string }>("/api/sessions", {
@@ -475,10 +483,12 @@ export function HomeSurface({ preview = false, paused = false }: { preview?: boo
 		navigate(`/s/${session.id}`, { viewTransition: true });
 	}
 	return (
-		<main className="home-main">
-			<div className="home-backdrop" aria-hidden="true">
-				<BlueHour kind="home" paused={paused} />
-			</div>
+		<main className={`home-main ${externalBackground ? "home-main--external-background" : ""}`}>
+			{!externalBackground && (
+				<div className="home-backdrop" aria-hidden="true">
+					<BlueHour kind="home" paused={paused} />
+				</div>
+			)}
 			<div className="home-center">
 				<div className="home-greeting">
 					<BrandArcs />

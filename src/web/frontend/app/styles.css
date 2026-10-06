@@ -82,6 +82,9 @@
   --icon-body: 16px;
   --icon-menu: 18px;
   --icon-header: 22px;
+  --page-transition-time-scale: 1;
+  --page-transition-blur-small: var(--blur-small);
+  --page-transition-blur-medium: var(--blur-medium);
   --duration-micro: 80ms;
   --duration-very-slow: 500ms;
   --duration-fast: 250ms;
@@ -232,7 +235,7 @@ a { color: inherit; text-decoration: none; }
 a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
 ::selection { background: #ddecff; color: #001f42; }
 .app-layout { display: flex; min-height: 100vh; width: 100%; position: relative; overflow: clip; }
-.workspace-content { display: flex; flex: 1; min-width: 0; margin-left: 264px; }
+.workspace-content { position: relative; display: flex; flex: 1; min-width: 0; margin-left: 264px; }
 .sidebar-collapsed > .workspace-content { margin-left: 0; }
 .sidebar { width: 264px; height: 100vh; position: absolute; top: 0; left: 0; display: flex; flex-direction: column; justify-content: space-between; gap: var(--space-inline); padding: 20px 12px 16px; background: var(--app-sidebar); border-right: 1px solid var(--app-sidebar-border); z-index: 2; transform: translate3d(0, 0, 0); transition: transform var(--duration-slow) var(--ease-smooth-out), visibility 0s; }
 .sidebar-top, .sidebar-footer { min-width: 0; }
@@ -284,10 +287,9 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .device-copy small { font-size: 10px; color: var(--app-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .home-main { flex: 1; min-width: 0; min-height: 100vh; position: relative; background: var(--chat-bg); overflow: hidden; }
 .app-layout[data-sidebar-reveal] .home-main { overflow: visible; }
-.home-backdrop { position: absolute; inset: 0; background: var(--home-fallback); transform-origin: left top; }
-.home-exit-curtain { display: none; position: fixed; pointer-events: none; z-index: 1; }
-.home-exit-curtain canvas { width: 100%; height: 100%; }
-.app-layout[data-home-exit] .home-exit-curtain { display: block; }
+.home-backdrop { position: absolute; inset: 0; pointer-events: none; background: var(--home-fallback); transform-origin: left top; }
+.home-main--external-background { background: transparent; }
+.home-backdrop:has(.blue-hour[data-renderer="webgl"]) { background: transparent; }
 .blue-hour { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; opacity: 0; pointer-events: none; }
 .home-center { position: absolute; z-index: 1; top: calc(50% - 207px); left: 50%; transform: translateX(-50%); width: min(800px, calc(100% - 48px)); height: 400px; }
 .home-greeting { position: absolute; left: 20px; top: 0; width: calc(100% - 40px); height: 400px; }
@@ -473,6 +475,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .model-search input { width: 100%; height: var(--control-lg); padding: 0 var(--space-inline); border: 1px solid var(--chat-border); border-radius: 6px; background: var(--chat-bg); color: var(--chat-ink); }
 .model-search small { color: var(--chat-muted); font-size: 12px; }
 .chat-main { display: flex; flex-direction: column; }
+.chat-message-surface { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .conversation { flex: 1; height: auto; max-height: none; min-height: 60px; }
 .chat-composer-area { position: relative; left: auto; bottom: auto; transform: none; margin: auto auto 12px; flex: 0 0 auto; }
 .markdown { display: flex; flex-direction: column; gap: var(--space-component); font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; max-width: 100%; }
@@ -1234,80 +1237,77 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
   .tree-counter { flex: 0 0 auto; }
 }
 
+/* 主页进入工作区缩短到 400ms，返回主页使用基础时间。 */
+:root:has(.app-layout[data-home-exit]),
+:root:has(.app-layout[data-view-transitions="false"].chat-layout) {
+  --page-transition-time-scale: 0.8;
+  --page-transition-blur-small: calc(var(--blur-small) / 2);
+  --page-transition-blur-medium: calc(var(--blur-medium) / 2);
+}
 /* 首页与工作台输入框各自入退场，避免共享快照将底部聊天框拉到中心。 */
 .app-layout[data-home-transition] .home-backdrop { view-transition-name: home-background; }
-.app-layout[data-home-exit] .home-backdrop { view-transition-name: none; }
-.app-layout[data-home-exit] .home-exit-curtain--left { view-transition-name: home-curtain-left; }
-.app-layout[data-home-exit] .home-exit-curtain--right { view-transition-name: home-curtain-right; }
+.app-layout[data-home-exit] .home-backdrop { view-transition-name: home-regions; }
 .app-layout[data-home-transition] .brand-arcs { view-transition-name: home-mark; }
 .app-layout[data-home-transition] .home-greeting h1 { view-transition-name: home-greeting; }
 .app-layout[data-home-transition] .home-footnote { view-transition-name: home-footer; }
 .app-layout[data-home-transition] .composer-shell--home { view-transition-name: home-composer; }
 .app-layout[data-home-transition] .chat-composer-area { view-transition-name: workspace-composer; }
 .app-layout[data-home-transition] .chat-header { view-transition-name: workspace-header; }
-.app-layout[data-home-transition] :is(.conversation, .chat-empty) { view-transition-name: workspace-messages; }
+.app-layout[data-home-transition] .chat-message-surface { view-transition-name: workspace-messages; }
 :root:has([data-home-transition])::view-transition-old(root),
 :root:has([data-home-transition])::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
-/* 固定各自的终点几何。背景在内容下方，两处聊天框没有位置插值或横向变形。 */
+/* 固定各自的终点几何，两处聊天框没有位置插值或横向变形。返回时背景在内容下方。 */
 ::view-transition-group(home-background) { z-index: 1; animation: none; }
 ::view-transition-group(home-mark) { z-index: 2; animation: none; }
 ::view-transition-group(home-greeting), ::view-transition-group(home-footer) { z-index: 3; animation: none; }
 ::view-transition-group(home-composer), ::view-transition-group(workspace-composer) { z-index: 5; animation: none; }
 ::view-transition-group(workspace-header), ::view-transition-group(workspace-messages) { z-index: 4; animation: none; }
-::view-transition-old(home-background), ::view-transition-old(home-curtain-left), ::view-transition-old(home-curtain-right) { animation: none; opacity: 0; }
-::view-transition-group(home-curtain-left), ::view-transition-group(home-curtain-right) { z-index: 1; animation: none; overflow: hidden; }
-@property --curtain-erasure { syntax: "<length-percentage>"; inherits: false; initial-value: -64px; }
-::view-transition-new(home-curtain-left), ::view-transition-new(home-curtain-right) {
-  --curtain-erasure: -64px;
+::view-transition-old(home-background), ::view-transition-old(home-regions) { animation: none; opacity: 0; }
+/* 退出背景覆盖工作区全部组件；主页退场内容仍在背景上方。 */
+::view-transition-group(home-regions) { z-index: 6; animation: none; overflow: hidden; }
+:root:has(.app-layout[data-home-exit])::view-transition-group(home-mark) { z-index: 7; }
+:root:has(.app-layout[data-home-exit])::view-transition-group(home-greeting),
+:root:has(.app-layout[data-home-exit])::view-transition-group(home-footer) { z-index: 8; }
+:root:has(.app-layout[data-home-exit])::view-transition-group(home-composer) { z-index: 9; }
+@property --home-exit-progress { syntax: "<number>"; inherits: false; initial-value: 0; }
+::view-transition-new(home-regions) {
+  pointer-events: none;
+  animation: home-region-fade calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-linear) both;
   mix-blend-mode: normal;
-  mask-image: linear-gradient(var(--curtain-mask-direction), #000 calc(100% - var(--curtain-erasure) - 64px), transparent calc(100% - var(--curtain-erasure)));
-  animation-duration: var(--duration-very-slow);
-  animation-timing-function: var(--ease-smooth-out);
-  animation-fill-mode: both;
 }
-::view-transition-new(home-curtain-left) { --curtain-mask-direction: to right; animation-name: home-curtain-left-out; }
-::view-transition-new(home-curtain-right) { --curtain-mask-direction: to left; animation-name: home-curtain-right-out; }
-::view-transition-new(home-background) { animation: home-background-in var(--duration-very-slow) var(--ease-smooth-out) both; }
-::view-transition-old(home-mark) { animation: home-mark-out var(--duration-medium) var(--ease-smooth-out) both; }
-::view-transition-new(home-mark) { animation: home-mark-in var(--duration-very-slow) var(--ease-smooth-out) both; }
-::view-transition-old(home-greeting) { animation: home-text-out var(--duration-fast) var(--ease-smooth-out) both; }
-::view-transition-new(home-greeting) { animation: home-text-in var(--duration-very-slow) var(--ease-smooth-out) both; }
-::view-transition-old(home-composer), ::view-transition-old(workspace-composer) { animation: composer-out var(--duration-medium) var(--ease-smooth-out) both; }
-::view-transition-new(home-composer) { animation: composer-in var(--duration-very-slow) var(--ease-smooth-out) var(--duration-stagger) both; }
-::view-transition-new(workspace-composer) { animation: composer-in var(--duration-slow) var(--ease-smooth-out) both; }
-::view-transition-old(home-footer) { animation: composer-out var(--duration-fast) var(--ease-smooth-out) both; }
-::view-transition-new(home-footer) { animation: composer-in var(--duration-very-slow) var(--ease-smooth-out) var(--duration-micro) both; }
-::view-transition-new(workspace-header) { animation: workspace-header-in var(--duration-fast) var(--ease-smooth-out) both; }
-::view-transition-old(workspace-header) { animation: workspace-header-out var(--duration-fast) var(--ease-smooth-out) both; }
-::view-transition-new(workspace-messages) { animation: workspace-messages-in var(--duration-fast) var(--ease-smooth-out) var(--duration-stagger) both; }
-::view-transition-old(workspace-messages) { animation: workspace-messages-out var(--duration-fast) var(--ease-smooth-out) both; }
-@keyframes home-curtain-left-out {
-  0% { transform: translateX(0); opacity: 1; --curtain-erasure: -64px; }
-  75% { opacity: 1; --curtain-erasure: 45%; }
-  100% { transform: translateX(-100%); opacity: 0; --curtain-erasure: calc(100% + 64px); }
-}
-@keyframes home-curtain-right-out {
-  0% { transform: translateX(0); opacity: 1; --curtain-erasure: -64px; }
-  75% { opacity: 1; --curtain-erasure: 45%; }
-  100% { transform: translateX(100%); opacity: 0; --curtain-erasure: calc(100% + 64px); }
-}
+::view-transition-new(home-background) { animation: home-background-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(home-mark) { animation: home-mark-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-new(home-mark) { animation: home-mark-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(home-greeting) { animation: home-text-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-new(home-greeting) { animation: home-text-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(home-composer) { animation: composer-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(workspace-composer) { animation: composer-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-new(home-composer) { animation: composer-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) calc(var(--duration-stagger) * var(--page-transition-time-scale)) both; }
+::view-transition-new(workspace-composer) { animation: composer-in calc(var(--duration-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(home-footer) { animation: composer-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-new(home-footer) { animation: composer-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) calc(var(--duration-micro) * var(--page-transition-time-scale)) both; }
+::view-transition-new(workspace-header) { animation: workspace-header-in calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(workspace-header) { animation: workspace-header-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-new(workspace-messages) { animation: workspace-messages-in calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) calc(var(--duration-stagger) * var(--page-transition-time-scale)) both; }
+::view-transition-old(workspace-messages) { animation: workspace-messages-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+@keyframes home-region-fade { from { --home-exit-progress: 0; } to { --home-exit-progress: 1; } }
 @keyframes home-background-in { from { transform: translate3d(0, -100%, 0); opacity: 0; } }
 @keyframes home-mark-out { to { opacity: 0; } }
 @keyframes home-mark-in { from { transform: translate3d(0, calc(-1 * var(--distance-large)), 0); opacity: 0; } }
 @keyframes home-text-out { to { opacity: 0; } }
-@keyframes home-text-in { from { transform: translateY(calc(-1 * var(--distance-medium))); opacity: 0; filter: blur(var(--blur-small)); } }
-@keyframes composer-out { to { transform: translateY(var(--distance-medium)); opacity: 0; filter: blur(var(--blur-small)); } }
-@keyframes composer-in { from { transform: translateY(var(--distance-medium)); opacity: 0; filter: blur(var(--blur-small)); } }
-@keyframes workspace-header-in { from { transform: translateY(calc(-1 * var(--distance-base))); opacity: 0; filter: blur(var(--blur-small)); } }
-@keyframes workspace-header-out { to { transform: translateY(calc(-1 * var(--distance-base))); opacity: 0; filter: blur(var(--blur-small)); } }
-@keyframes workspace-messages-in { from { transform: translateY(var(--distance-base)); opacity: 0; filter: blur(var(--blur-medium)); } }
-@keyframes workspace-messages-out { to { transform: translateY(var(--distance-base)); opacity: 0; filter: blur(var(--blur-medium)); } }
+@keyframes home-text-in { from { transform: translateY(calc(-1 * var(--distance-medium))); opacity: 0; filter: blur(var(--page-transition-blur-small)); } }
+@keyframes composer-out { to { transform: translateY(var(--distance-medium)); opacity: 0; filter: blur(var(--page-transition-blur-small)); } }
+@keyframes composer-in { from { transform: translateY(var(--distance-medium)); opacity: 0; filter: blur(var(--page-transition-blur-small)); } }
+@keyframes workspace-header-in { from { transform: translateY(calc(-1 * var(--distance-base))); opacity: 0; filter: blur(var(--page-transition-blur-small)); } }
+@keyframes workspace-header-out { to { transform: translateY(calc(-1 * var(--distance-base))); opacity: 0; filter: blur(var(--page-transition-blur-small)); } }
+@keyframes workspace-messages-in { from { transform: translateY(var(--distance-base)); opacity: 0; filter: blur(var(--page-transition-blur-medium)); } }
+@keyframes workspace-messages-out { to { transform: translateY(var(--distance-base)); opacity: 0; filter: blur(var(--page-transition-blur-medium)); } }
 /* 不支持原生快照时保持导航即时可用，只对新页面局部入场。 */
-.app-layout[data-view-transitions="false"] .chat-header { animation: workspace-header-in var(--duration-fast) var(--ease-smooth-out) both; }
-.app-layout[data-view-transitions="false"] .chat-composer-area { animation: composer-in var(--duration-slow) var(--ease-smooth-out) both; }
-.app-layout[data-view-transitions="false"] .conversation { animation: workspace-messages-in var(--duration-fast) var(--ease-smooth-out) both; }
+.app-layout[data-view-transitions="false"] .chat-header { animation: workspace-header-in calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+.app-layout[data-view-transitions="false"] .chat-composer-area { animation: composer-in calc(var(--duration-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+.app-layout[data-view-transitions="false"] .conversation { animation: workspace-messages-in calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
 .app-layout[data-view-transitions="false"] .composer-shell--home,
-.app-layout[data-view-transitions="false"] .home-footnote { animation: composer-in var(--duration-very-slow) var(--ease-smooth-out) both; }
+.app-layout[data-view-transitions="false"] .home-footnote { animation: composer-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation-duration: 0s !important; animation-delay: 0s !important; }
   .app-layout[data-view-transitions="false"] :is(.chat-header, .chat-composer-area, .conversation, .composer-shell--home, .home-footnote) { animation: none; }

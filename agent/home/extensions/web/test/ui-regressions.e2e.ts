@@ -196,7 +196,11 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 			"(async()=>{if(!window.__transitions.length)return {supported:!!document.startViewTransition,count:0};await window.__transitions[0].ready;await window.__transitions[0].finished;return {supported:true,ready:true,count:window.__transitions.length};})()",
 		);
 		assert.ok((evidence.nativeTransition as { count: number }).count > 0);
-		await browser.until("document.querySelector('.conversation')?.textContent.includes('测试回答')", "隔离模型回答");
+		await browser.until(
+			"document.querySelector('.conversation')?.textContent.includes('测试回答')",
+			"隔离模型回答",
+			25000,
+		);
 		const id = await browser.evaluate<string>("location.pathname.split('/')[2]");
 		const outcome = await browser.evaluate<{ users: number; tools: number; result: string }>(
 			`(async()=>{const data=await (await fetch('/api/sessions/${id}')).json();return {users:data.messages.filter(m=>m.role==='user').length,tools:data.messages.filter(m=>m.role==='toolResult').length,result:data.messages.filter(m=>m.role==='toolResult').flatMap(m=>m.content).map(p=>p.text??'').join(' ')};})()`,

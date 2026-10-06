@@ -1,13 +1,13 @@
 # Todo
 
-更新：2026-10-05。Web 阶段范围与验收见 [MVP](web/MVP.md)，待决问题见[议题清单](issues.md)。
+更新：2026-10-07。Web 阶段范围与验收见 [MVP](web/MVP.md)，待决问题见[议题清单](issues.md)。
 
 ## 功能与资源
 
 | 待办 | 依据 |
 |---|---|
-| Checkpoint 5：实际窗口、输入法、网络与 TUI 待机联调 | [MVP](web/MVP.md#八实施-checkpoint) |
-| 功能 MVP 验收后接入便携发行包，执行发行副本冒烟 | [前端设计](design/web/frontend.md#打包接入) |
+| Checkpoint 5：持续联调；问题仅报告，待机、断线、失效提示与退出尚未通过；系统输入法等范围待测 | [计划与报告](test/checkpoint5-report.md)、[MVP](web/MVP.md#八实施-checkpoint) |
+| 准备发行验收：现有架构与Web后端单文件实验均可运行；补Web发行冒烟及跨机/介质验证，暂不重写脚本 | [可行性分析](web/research/release-feasibility.md)、[前端设计](design/web/frontend.md#打包接入) |
 | 遥测接收端增加 rollup、cleanup 定时任务，并使用真实 OAuth 内省 | [遥测](telemetry/) |
 | OAuth 真机联调；OA 提供 `/api/oauth/introspect` | [认证交接](auth/handover.md) |
 | 接入 cstoa 学号、姓名的 Agent 资料接口与额度查询 | [专属账号](web/SPEC/app-router.md#专属账号) |

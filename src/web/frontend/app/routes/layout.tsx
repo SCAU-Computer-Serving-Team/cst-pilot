@@ -1,6 +1,7 @@
 import { PanelLeft } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Outlet, useLocation, useSearchParams, useViewTransitionState } from "react-router";
+import { BlueHour } from "../shell/blue-hour";
 import { Sidebar } from "../shell/shell";
 import { useSidebarMotion } from "../shell/sidebar-motion";
 
@@ -33,35 +34,6 @@ export default function WorkspaceLayout() {
 	useEffect(() => {
 		if (!homeTransition) setSettledHome(home);
 	}, [home, homeTransition]);
-	const curtainLeft = useRef<HTMLCanvasElement>(null);
-	const curtainRight = useRef<HTMLCanvasElement>(null);
-	useLayoutEffect(() => {
-		if (!homeExit || !home) return;
-		const backdrop = document.querySelector<HTMLElement>(".home-backdrop");
-		if (!backdrop) return;
-		const rect = backdrop.getBoundingClientRect();
-		for (const [target, side] of [
-			[curtainLeft.current, "left"],
-			[curtainRight.current, "right"],
-		] as const) {
-			if (!target) continue;
-			const slice = target.parentElement!;
-			slice.style.top = `${rect.top}px`;
-			slice.style.left = `${side === "left" ? rect.left : rect.left + rect.width / 2 - 32}px`;
-			slice.style.width = `${rect.width / 2 + 32}px`;
-			slice.style.height = `${rect.height}px`;
-			slice.style.backgroundImage = getComputedStyle(backdrop).backgroundImage;
-			slice.style.backgroundSize = `${rect.width}px ${rect.height}px`;
-			slice.style.backgroundPosition = side === "left" ? "0 0" : `${-rect.width / 2 + 32}px 0`;
-			target.width = 1;
-			target.height = 1;
-		}
-		window.dispatchEvent(
-			new CustomEvent("cst-home-curtain-capture", {
-				detail: { left: curtainLeft.current, right: curtainRight.current },
-			}),
-		);
-	}, [homeExit, home]);
 	const narrow = useMediaQuery(NARROW_QUERY);
 	const [collapsed, setCollapsed] = useState(() => {
 		const stored = localStorage.getItem(SIDEBAR_KEY);
@@ -102,13 +74,12 @@ export default function WorkspaceLayout() {
 					<PanelLeft size={22} aria-hidden="true" />
 				</button>
 			)}
-			<div className="home-exit-curtain home-exit-curtain--left" aria-hidden="true">
-				<canvas ref={curtainLeft} />
-			</div>
-			<div className="home-exit-curtain home-exit-curtain--right" aria-hidden="true">
-				<canvas ref={curtainRight} />
-			</div>
 			<div className="workspace-content">
+				{(home || homeExit) && (
+					<div className="home-backdrop" aria-hidden="true">
+						<BlueHour kind="home" fading={homeExit} />
+					</div>
+				)}
 				<Outlet />
 			</div>
 		</div>
