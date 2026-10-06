@@ -563,18 +563,15 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 		if (await browser.evaluate("document.querySelector('.sidebar').inert"))
 			await browser.click('[aria-label="展开侧栏"]');
 		await browser.evaluate(
-			"(()=>{const native=document.startViewTransition.bind(document);document.startViewTransition=(...args)=>{window.__cssTransition=native(...args);return window.__cssTransition;};})()",
+			"(()=>{const native=document.startViewTransition.bind(document);document.startViewTransition=(...args)=>{const t=native(...args);window.__cssTransition=t;t.ready.then(()=>{function sample(){const e=document.querySelector('.home-backdrop'),progress=Number.parseFloat(getComputedStyle(document.documentElement,'::view-transition-new(home-regions)').getPropertyValue('--home-exit-progress'));if(!window.__cssRegions&&e&&progress>=.55&&progress<=.75&&e.style.maskImage.includes('gradient'))window.__cssRegions={mask:e.style.maskImage,transform:getComputedStyle(e).transform,renderer:e.querySelector('canvas').dataset.renderer,progress};if(progress<1&&document.querySelector('[data-home-transition]'))requestAnimationFrame(sample);}sample();});return t;};})()",
 		);
 		await browser.click(".sidebar-new");
 		await browser.until("location.pathname==='/'&&!!window.__cssTransition", "无WebGL主页入场");
 		await browser.evaluate("window.__cssTransition.finished");
 		await browser.click(`.sidebar-session[href="/s/${id}"]`);
-		await browser.until(
-			"Number.parseFloat(getComputedStyle(document.documentElement,'::view-transition-new(home-regions)').getPropertyValue('--home-exit-progress'))>.65 && document.querySelector('.home-backdrop')?.style.maskImage.includes('gradient')",
-			"无WebGL按区域淡出",
-		);
+		await browser.until("!!window.__cssRegions", "无WebGL按区域淡出");
 		const cssRegions = await browser.evaluate<{ mask: string; transform: string; renderer: string | undefined }>(
-			"(()=>{const e=document.querySelector('.home-backdrop');return {mask:e.style.maskImage,transform:getComputedStyle(e).transform,renderer:e.querySelector('canvas').dataset.renderer};})()",
+			"window.__cssRegions",
 		);
 		assert.ok(cssRegions.mask.includes("rgba(0, 0, 0, 0)"), "降级中心区域已透明");
 		assert.ok(
