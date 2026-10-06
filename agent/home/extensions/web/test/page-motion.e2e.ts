@@ -154,8 +154,9 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 								const previous=window.__regionPixels.at(-1);
 								if(progress>0.01&&(!previous||progress<previous.progress||progress-previous.progress>=0.04)){
 									const width=canvas.width,height=canvas.height,rect=canvas.getBoundingClientRect(),count=uniform('u_count'),travel=(uniform('u_phase')+uniform('u_time')*uniform('u_speed')/100*1.2)*0.48;
-									const alpha=[.005,.08,.18,.3,.4,.5,.6,.7,.82,.92,.995].map(x=>{const p=new Uint8Array(4);gl.readPixels(Math.floor(x*width),Math.floor(height/2),1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);return p[3]/255;});
-									const readAlpha=x=>{const p=new Uint8Array(4);gl.readPixels(Math.max(0,Math.min(width-1,Math.floor(x*width))),Math.floor(height/2),1,1,gl.RGBA,gl.UNSIGNED_BYTE,p);return p[3]/255;};
+									const row=new Uint8Array(width*4);gl.readPixels(0,Math.floor(height/2),width,1,gl.RGBA,gl.UNSIGNED_BYTE,row);
+									const readAlpha=x=>row[Math.max(0,Math.min(width-1,Math.floor(x*width)))*4+3]/255;
+									const alpha=[.005,.08,.18,.3,.4,.5,.6,.7,.82,.92,.995].map(readAlpha);
 									const bands=[];for(let lane=Math.floor(-travel);lane<Math.ceil(count-travel);lane++){const inner=Math.max(0,(lane+travel)/count),outer=Math.min(1,(lane+1+travel)/count),radius=(inner+outer)/2;bands.push({lane,inner,outer,left:readAlpha((1-radius)/2),right:readAlpha((1+radius)/2)});}
 									const rowAlpha=Array.from({length:101},(_,i)=>readAlpha(i/100));
 									window.__regionPixels.push({transition:window.__naturalTransitions.length-1,progress,travel,origin:uniform('u_exit_origin'),width:rect.width,left:rect.left,transform:getComputedStyle(canvas.parentElement).transform,alpha,count,bands,rowAlpha});
