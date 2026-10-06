@@ -98,9 +98,15 @@ function AssistantTurnImpl({
 										</Disclosure.Heading>
 										<Disclosure.Content>
 											{!part.part.redacted && (
-												<pre>
-													{live && final ? <StreamWords text={part.part.thinking} /> : part.part.thinking}
-												</pre>
+												<section className="tool-text">
+													<pre className="tool-raw">
+														{live && final ? (
+															<StreamWords text={part.part.thinking} />
+														) : (
+															part.part.thinking
+														)}
+													</pre>
+												</section>
 											)}
 										</Disclosure.Content>
 									</Disclosure>

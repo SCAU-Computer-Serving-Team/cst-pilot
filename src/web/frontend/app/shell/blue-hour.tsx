@@ -189,6 +189,48 @@ export function BlueHour({ kind, paused = false }: { kind: BackgroundKind; pause
 			schedule();
 		});
 		resize.observe(canvas);
+		// 离开首页时从同一帧裁出两片，交给持续挂载的布局保存；常态不复制像素。
+		function captureCurtains(event: Event) {
+			if (kind !== "home" || !ready) return;
+			draw(performance.now());
+			const targets = (event as CustomEvent<{ left: HTMLCanvasElement | null; right: HTMLCanvasElement | null }>)
+				.detail;
+			if (!targets) return;
+			const width = surface.clientWidth;
+			const height = surface.clientHeight;
+			if (!width || !height) return;
+			for (const [target, side] of [
+				[targets.left, "left"],
+				[targets.right, "right"],
+			] as const) {
+				if (!target) continue;
+				const slice = target.parentElement!;
+				const sliceWidth = width / 2 + 32;
+				const start = side === "left" ? 0 : width - sliceWidth;
+				slice.style.backgroundSize = `${width}px ${height}px`;
+				slice.style.backgroundPosition = `${-start}px 0`;
+				if (!painted) continue;
+				const ratio = surface.width / width;
+				const targetWidth = Math.max(1, Math.round(sliceWidth * ratio));
+				if (target.width !== targetWidth) target.width = targetWidth;
+				if (target.height !== surface.height) target.height = surface.height;
+				target
+					.getContext("2d")
+					?.drawImage(
+						surface,
+						start * ratio,
+						0,
+						sliceWidth * ratio,
+						surface.height,
+						0,
+						0,
+						target.width,
+						target.height,
+					);
+				target.style.opacity = "1";
+			}
+		}
+		window.addEventListener("cst-home-curtain-capture", captureCurtains);
 		const resume = () => {
 			clock.resume(performance.now());
 			schedule();
@@ -201,6 +243,7 @@ export function BlueHour({ kind, paused = false }: { kind: BackgroundKind; pause
 			resize.disconnect();
 			themeObserver.disconnect();
 			colorScheme.removeEventListener("change", syncTheme);
+			window.removeEventListener("cst-home-curtain-capture", captureCurtains);
 			document.removeEventListener("visibilitychange", resume);
 			motion.removeEventListener("change", resume);
 			image.onload = null;

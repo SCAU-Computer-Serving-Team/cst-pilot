@@ -134,7 +134,8 @@ const TREE_PROBE = `(async () => {
 			return JSON.stringify({ rows: rows.map((row) => {
 				const slots = [...row.querySelectorAll(".tree-slot")];
 				return {
-					slots: slots.length,
+				iconLeft: row.querySelector('.tree-icon').getBoundingClientRect().left,
+				slots: slots.length,
 					square: slots.findIndex((slot) => !!slot.querySelector(".tree-square")),
 					lines: slots.map((slot, index) => (slot.querySelector(".tree-line") ? index : -1)).filter((index) => index >= 0),
 					fold: !!row.querySelector(".tree-fold"),
@@ -382,7 +383,7 @@ test("Web 分支树与 TUI 的树逐行一致", async () => {
 		const treePage = JSON.parse(
 			await readPage(`${origin}/s/${session.id}/tree`, TREE_PROBE, join(evidence, "tree.png")),
 		) as {
-			rows: { slots: number; square: number; lines: number[]; fold: boolean; text: string }[];
+			rows: { slots: number; square: number; lines: number[]; fold: boolean; text: string; iconLeft: number }[];
 		};
 		const page = { page: treePage };
 		const lines: string[] = [
@@ -403,6 +404,7 @@ test("Web 分支树与 TUI 的树逐行一致", async () => {
 			"|---|---|---|---|---|---|---|",
 		];
 		let failed = false;
+		let alignedBranchSegments = 0;
 		assert.equal(
 			page.page.rows.length,
 			tui.rows.length,
@@ -413,6 +415,20 @@ test("Web 分支树与 TUI 的树逐行一致", async () => {
 			const actual = page.page.rows[index];
 			const body = entryText(final.tree, tui.ids[index]);
 			const reasons: string[] = [];
+			const node = findEntry(final.tree, (entry) => entry.id === tui.ids[index]);
+			if (
+				expected.square !== null &&
+				node &&
+				page.page.rows[index + 1] &&
+				expected.indent < tui.rows[index + 1].indent &&
+				tui.rows[index + 1].square === null
+			) {
+				alignedBranchSegments++;
+				assert.ok(
+					Math.abs(actual.iconLeft - page.page.rows[index + 1].iconLeft) < 1,
+					"分支起始行与后续单链内容图标对齐",
+				);
+			}
 			if (actual.slots !== expected.indent) reasons.push(`缩进 ${actual.slots}≠${expected.indent}`);
 			if ((actual.square === -1 ? null : actual.square) !== expected.square)
 				reasons.push(`方块 ${actual.square}≠${expected.square ?? "无"}`);
@@ -425,6 +441,8 @@ test("Web 分支树与 TUI 的树逐行一致", async () => {
 				`| ${index + 1} | ${tui.ids[index]} | ${expected.indent} / ${expected.square ?? "-"} / ${expected.lines.join(",") || "-"} / ${tui.foldable[index] ? "是" : "否"} | ${actual.slots} / ${actual.square === -1 ? "-" : actual.square} / ${actual.lines.join(",") || "-"} / ${actual.fold ? "是" : "否"} | ${body} | ${actual.text} | ${reasons.length ? `**${reasons.join("；")}**` : "一致"} |`,
 			);
 		}
+		assert.ok(alignedBranchSegments > 0, "已实际覆盖分支起始行与单链内容的对齐");
+		lines.push("", `分支内容列对齐：${alignedBranchSegments} 组通过。`);
 		// 斜杠命令的入口：在聊天工作台输入 /tree，选中即跳转，不留命令标记。
 		const jump = JSON.parse(await readPage(`${origin}/s/${session.id}`, COMPOSER_PROBE)) as {
 			path: string;

@@ -341,6 +341,9 @@ export default function SessionTree() {
 								}}
 							>
 								<RowPrefix row={row} />
+								{row.showConnector && row.childCount > 0 && (
+									<span className="tree-branch-offset" aria-hidden="true" />
+								)}
 								<RowIcon kind={text.kind} summary={summary} />
 								{text.role && <span className="tree-role">{text.role}</span>}
 								<span

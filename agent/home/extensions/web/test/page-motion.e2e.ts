@@ -9,7 +9,17 @@ import { WebSessionPool } from "../server/session/sessions.ts";
 import { BrowserProbe, freePort } from "./browser.ts";
 import { testRoot } from "./support.ts";
 
-type Snapshot = { opacity: number; y: number; blur: number; group: string; duration: number; delay: number };
+type Snapshot = {
+	opacity: number;
+	x: number;
+	y: number;
+	mask: string;
+	erasure: string;
+	blur: number;
+	group: string;
+	duration: number;
+	delay: number;
+};
 type Frame = Record<string, Snapshot>;
 
 /** 在真实过渡的 ready 回调中同帧采样，截图耗时不参与采样时间。 */
@@ -22,20 +32,48 @@ async function transition(browser: BrowserProbe, selector: string, direction: st
 		const animations=document.getAnimations().filter(a=>a.effect?.pseudoElement&&a.playState!=='finished');
 		function frame(time){
 			animations.forEach(a=>a.currentTime=time);
-			const result={};for(const name of ['home-background','home-mark','home-greeting','home-composer','home-footer','workspace-composer']){
-				const side=name==='workspace-composer'?${JSON.stringify(direction === "to-home" ? "old" : "new")}:${JSON.stringify(direction === "to-home" ? "new" : "old")};
+			const result={};for(const name of ['home-background','home-curtain-left','home-curtain-right','home-mark','home-greeting','home-composer','home-footer','workspace-composer']){
+				const side=name.startsWith('home-curtain-')?'new':name==='workspace-composer'?${JSON.stringify(direction === "to-home" ? "old" : "new")}:${JSON.stringify(direction === "to-home" ? "new" : "old")};
 				const s=getComputedStyle(document.documentElement,'::view-transition-'+side+'('+name+')');
 				const g=getComputedStyle(document.documentElement,'::view-transition-group('+name+')');
 				const timing=animations.find(a=>a.effect.pseudoElement==='::view-transition-'+side+'('+name+')')?.effect.getTiming();
-				result[name]={opacity:parseFloat(s.opacity),y:s.transform==='none'?0:new DOMMatrixReadOnly(s.transform).m42,blur:s.filter.startsWith('blur(')?parseFloat(s.filter.slice(5)):0,group:g.transform,duration:Number(timing?.duration),delay:timing?.delay??0};
+				result[name]={opacity:parseFloat(s.opacity),x:s.transform==='none'?0:new DOMMatrixReadOnly(s.transform).m41,mask:s.maskImage,erasure:s.getPropertyValue('--curtain-erasure'),y:s.transform==='none'?0:new DOMMatrixReadOnly(s.transform).m42,blur:s.filter.startsWith('blur(')?parseFloat(s.filter.slice(5)):0,group:g.transform,duration:Number(timing?.duration),delay:timing?.delay??0};
 			}return result;
 		}
-		const start=frame(0),middle=frame(80),end=frame(600);
-		window.__motion={transition:t,animations,frames:{start,middle,end}};
+		const curtains=[...document.querySelectorAll('.home-exit-curtain')].map(e=>{const c=e.querySelector('canvas'),r=e.getBoundingClientRect();return {left:r.left,top:r.top,width:r.width,height:r.height,background:getComputedStyle(e).backgroundImage,bitmapWidth:c.width,alpha:c.getContext('2d').getImageData(Math.floor(c.width/2),Math.floor(c.height/2),1,1).data[3]};});
+		const start=frame(0),middle=frame(80),late=frame(400),end=frame(600);
+		window.__motion={transition:t,animations,frames:{start,middle,late,end},curtains};
 	};`);
 	await browser.click(selector);
 	await browser.until("!!window.__motion", `${direction} 产生原生过渡`);
-	const frames = await browser.evaluate<{ start: Frame; middle: Frame; end: Frame }>("window.__motion.frames");
+	const frames = await browser.evaluate<{ start: Frame; middle: Frame; late: Frame; end: Frame }>(
+		"window.__motion.frames",
+	);
+	if (direction === "to-workspace") {
+		const curtains =
+			await browser.evaluate<
+				{
+					left: number;
+					top: number;
+					width: number;
+					height: number;
+					background: string;
+					bitmapWidth: number;
+					alpha: number;
+				}[]
+			>("window.__motion.curtains");
+		assert.equal(curtains.length, 2);
+		assert.ok(
+			Math.abs(curtains[0].left + curtains[0].width - 32 - (curtains[1].left + 32)) < 1,
+			"两片以主区中线切分",
+		);
+		for (const slice of curtains) {
+			assert.ok(slice.width > 0 && slice.height > 0);
+			assert.ok(slice.background.includes("gradient"), "没有WebGL首帧时使用同一CSS背景");
+			if (slice.bitmapWidth > 1) assert.equal(slice.alpha, 255, "WebGL帧实际复制到背景片");
+		}
+		await writeFile(join(root, `${direction}-geometry.json`), JSON.stringify(curtains, null, 2));
+	}
 	await browser.evaluate("window.__motion.transition.finished");
 	await browser.until("!document.querySelector('[data-home-transition]')", `${direction} 路由过渡清理`);
 	await browser.evaluate(
@@ -150,9 +188,26 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 		assert.equal(intoHome.end["home-composer"].opacity, 1);
 		assert.equal(intoHome.end["home-composer"].y, 0);
 		const intoWorkspace = await transition(browser, `.sidebar-session[href="/s/${id}"]`, "to-workspace", root);
-		assert.equal(intoWorkspace.start["home-background"].duration, 400, "进入工作区背景仍为 400ms");
+		for (const name of ["home-curtain-left", "home-curtain-right"]) {
+			assert.equal(intoWorkspace.start[name].duration, 500, "背景两片使用500ms退场");
+			assert.ok(intoWorkspace.middle[name].mask.includes("linear-gradient"), "中缝采用柔化透明遮罩");
+			assert.notEqual(intoWorkspace.middle[name].erasure, intoWorkspace.start[name].erasure, "内側遮罩先推进透明度");
+			assert.equal(intoWorkspace.middle[name].opacity, 1, "外侧早期保持不透明");
+			assert.ok(intoWorkspace.late[name].opacity < 1, "接近末尾时外侧才淡出");
+			assert.equal(intoWorkspace.middle[name].y, 0, "背景不再上下移动");
+			assert.equal(intoWorkspace.end[name].opacity, 0);
+		}
+		assert.ok(
+			intoWorkspace.middle["home-curtain-left"].x < 0 && intoWorkspace.middle["home-curtain-right"].x > 0,
+			"左右向外滑出",
+		);
+		assert.equal(intoWorkspace.middle["home-mark"].y, 0, "LOGO原位淡出");
+		assert.equal(intoWorkspace.middle["home-greeting"].y, 0, "大字原位淡出");
 		assert.equal(intoWorkspace.start["workspace-composer"].duration, 400, "进入工作区输入区仍为 400ms");
-		assert.ok(intoWorkspace.middle["home-background"].y < 0, `背景反向上滑退场：${JSON.stringify(intoWorkspace)}`);
+		assert.ok(
+			intoWorkspace.middle["home-mark"].opacity < 1 && intoWorkspace.middle["home-greeting"].opacity < 1,
+			"LOGO与大字淡出",
+		);
 		assert.ok(intoWorkspace.middle["home-composer"].y > 0 && intoWorkspace.middle["home-composer"].opacity < 1);
 		assert.ok(
 			intoWorkspace.start["workspace-composer"].y > 0 && intoWorkspace.start["workspace-composer"].opacity < 0.01,
@@ -273,7 +328,9 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 		);
 		const narrowHome = await transition(browser, ".sidebar-new", "to-home", narrowRoot);
 		assert.ok(
-			narrowWorkspace.middle["home-background"].y < 0 && narrowHome.start["home-composer"].y > 0,
+			narrowWorkspace.middle["home-curtain-left"].x < 0 &&
+				narrowWorkspace.middle["home-curtain-right"].x > 0 &&
+				narrowHome.start["home-composer"].y > 0,
 			JSON.stringify({ narrowWorkspace, narrowHome }),
 		);
 		assert.equal(
