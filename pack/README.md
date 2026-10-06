@@ -1,5 +1,7 @@
 # 构建发行版
 
+加入Web后的隔离装配、官方可执行文件与后端单文件实验见[可行性分析](../doc/web/research/release-feasibility.md)。实验不替代正式发行验收，当前脚本保持。
+
 在项目根目录运行：
 
 ```powershell
