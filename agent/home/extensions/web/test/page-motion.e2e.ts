@@ -233,7 +233,7 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 			first.some((p) => p.alpha[5] < 0.05 && p.alpha[0] > 0.1),
 			"中心先消失时，外侧尚未消失",
 		);
-		assert.ok(first.at(-1)!.travel - first[0].travel > 0.05, "分区边缘随背景时间实时变化");
+		assert.ok(first.at(-1)!.travel > first[0].travel, "分区边缘随背景时间实时变化");
 		for (const sample of first) {
 			for (let x = 1; x < sample.rowAlpha.length; x++)
 				assert.ok(Math.abs(sample.rowAlpha[x] - sample.rowAlpha[x - 1]) < 0.06, "实际GPU透明度跨区域平滑叠加");
@@ -256,6 +256,16 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 			"外侧在末段淡出",
 		);
 		for (let i = 1; i < first.length; i++) {
+			// 进度到1后，原背景仍可运行到React清理；只核查未完成阶段的线性速度。
+			if (first[i].progress < 1)
+				assert.ok(
+					Math.abs(
+						first[i].travel -
+							first[i - 1].travel -
+							0.4 * 0.36 * 0.48 * (first[i].progress - first[i - 1].progress),
+					) < 0.002,
+					"400ms内边缘沿原背景速度连续移动",
+				);
 			assert.equal(first[i].left, first[0].left, "背景矩形不平移");
 			assert.equal(first[i].width, first[0].width, "背景矩形不拉伸");
 			assert.equal(first[i].transform, "none");
