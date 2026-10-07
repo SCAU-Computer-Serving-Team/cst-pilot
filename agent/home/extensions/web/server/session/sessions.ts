@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentSession, AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import {
@@ -8,6 +8,7 @@ import {
 	createAgentSessionServices,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { replaceFile } from "./replace-file.ts";
 import { WebUiBridge } from "./ui.ts";
 
 /** 遥测扩展挂在 globalThis 的定稿入口；扩展未启用时无副作用。 */
@@ -268,7 +269,7 @@ export class WebSessionPool {
 		const temp = `${file}.${randomUUID()}.tmp`;
 		try {
 			await writeFile(temp, JSON.stringify(entries), { flag: "wx" });
-			await rename(temp, file);
+			await replaceFile(temp, file);
 		} catch (error) {
 			await rm(temp, { force: true }).catch(() => undefined);
 			throw error;

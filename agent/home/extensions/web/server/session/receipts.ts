@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { InboxConflict } from "./inbox.ts";
+import { replaceFile } from "./replace-file.ts";
 
 type Receipt<T> = { signature: string; status: "started" | "done"; result?: T };
 
@@ -67,7 +68,7 @@ export class MutationReceipts {
 		const temp = `${file}.${randomUUID()}.tmp`;
 		try {
 			await writeFile(temp, JSON.stringify(entry), { flag: "wx" });
-			await rename(temp, file);
+			await replaceFile(temp, file);
 		} catch (error) {
 			await rm(temp, { force: true }).catch(() => undefined);
 			throw error;

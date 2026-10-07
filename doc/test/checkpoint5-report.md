@@ -20,6 +20,7 @@
 | TUI待机 | 在会话切换后重新安装原始终端输入拦截，保留待机编辑器。实际文字、`/new`、`/quit`、Ctrl+N/L/D/C、Esc未发送到模型、未改写会话、未关闭服务 |
 | 持续失联 | SSE错误与短超时健康检查共同驱动提示；离线3.5秒观察到持续bar，恢复后撤下；自动回归核查恢复不重发消息 |
 | 模型401 | 显示“模型服务需要重新登录”，提供重新登录入口，技术详情默认收起；原始模型错误保留用于排查 |
+| 短暂文件占用 | Windows替换收件箱时的EPERM曾阻止队列状态保存；文件替换增加有界重试，保留原文件，不重发模型/工具；单元覆盖短暂恢复和永久失败，实际副本重新验证 |
 | 提交失败 | 主提示与详情分离；响应丢失显示“提交结果尚未确认”，草稿和原提交ID保留，再次发送核查已有提交，真实read只执行一次 |
 | 安全退出 | 账号菜单“退出CST Pilot”与退出CSTOA分开；列出实际运行会话。默认聚焦继续使用，Esc取消不停止任务；确认后暂停队列、停止任务、完成保存，再调用宿主退出 |
 | 两场任务退出 | 官方TUI发行副本中同时运行两场慢模型任务，从Web确认停止并退出；两个任务终止、TUI进程退出、HTTP关闭 |
@@ -51,10 +52,10 @@
 
 | 路径 | 内容 |
 |---|---|
-| `headed/results.json`、`headed/run.log` | 15组实际发行副本联调结果、真实模型请求与未验证项 |
-| `headed/tui-keys.json` | 8组原始终端输入，进程与HTTP保持可用 |
-| `headed/offline.png`、`auth-expired.png`、`exit-actual-running.png` | 持续bar、认证提示与两任务退出确认 |
-| `headed/*-light.png`、`*-dark.png` | 六页面浅深窗口 |
+| `final-validation/results.json`、`final-validation/run.log` | 16组实际发行副本联调结果、真实模型请求与未验证项 |
+| `final-validation/tui-keys.json` | 8组原始终端输入，进程与HTTP保持可用 |
+| `final-validation/offline.png`、`auth-expired.png`、`exit-actual-running.png` | 持续bar、认证提示与两任务退出确认 |
+| `final-validation/*-light.png`、`*-dark.png` | 六页面浅深窗口 |
 | `e2e-final.log`、`checks.json` | 顺序E2E与各类检查；以最后一次运行及交付报告为准 |
 | `smoke-confirm/` | 官方exe首次/再次启动及Web实际read续答、退出的自动冒烟 |
 
