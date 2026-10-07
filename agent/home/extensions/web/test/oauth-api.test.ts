@@ -157,14 +157,26 @@ test("扫码登录：device_code 事件经 /api/events 推送", async () => {
 });
 
 test("扫码登录：status 返回真实剩余秒数而不是固定重置", async () => {
-	await post("/api/auth/cstoa/oauth/start", {});
-	const first = await oauthStatus();
-	await sleep(1_200);
-	const second = await oauthStatus();
-	assert.ok(first.deviceCode?.expiresInSeconds);
-	assert.ok(second.deviceCode?.expiresInSeconds);
-	assert.ok(second.deviceCode.expiresInSeconds < first.deviceCode.expiresInSeconds);
-	await post("/api/auth/cstoa/oauth/cancel", {});
+	// 倒计时期间保持待批准，避免自动批准先清除设备码。
+	const pending = await startMockOa({ pendingTimes: 1000 });
+	const previousHost = process.env.CSTOA_OA_HOST;
+	process.env.CSTOA_OA_HOST = pending.host;
+	try {
+		await post("/api/auth/cstoa/oauth/start", {});
+		const first = await oauthStatus();
+		await sleep(1_200);
+		const second = await oauthStatus();
+		assert.equal(first.state, "pending");
+		assert.equal(second.state, "pending");
+		assert.ok(first.deviceCode?.expiresInSeconds);
+		assert.ok(second.deviceCode?.expiresInSeconds);
+		assert.ok(second.deviceCode.expiresInSeconds < first.deviceCode.expiresInSeconds);
+	} finally {
+		await post("/api/auth/cstoa/oauth/cancel", {});
+		if (previousHost === undefined) delete process.env.CSTOA_OA_HOST;
+		else process.env.CSTOA_OA_HOST = previousHost;
+		await pending.close();
+	}
 });
 
 test("扫码登录：取消后状态为 cancelled，可重新发起", async () => {
