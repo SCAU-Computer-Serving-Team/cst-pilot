@@ -30,6 +30,7 @@ export default function web(pi: ExtensionAPI): void {
 
 	pi.on("session_start", (_event, ctx) => {
 		if (container.parked && ctx.mode === "tui") {
+			ctx.ui.onTerminalInput(() => ({ consume: container.parked }));
 			ctx.ui.setEditorComponent((tui, theme, keys) => new ParkedEditor(tui, theme, keys));
 			ctx.ui.setWidget("cst-web-parked", ["会话已由 Web 接管，请在浏览器中操作。关闭终端将结束服务。"]);
 		}
@@ -95,7 +96,7 @@ export default function web(pi: ExtensionAPI): void {
 				});
 				container.pool = pool;
 				// Bind the socket before releasing TUI; a failed port bind must not park it.
-				const api = createWebApi(pool, agentDir, WEB_PORT);
+				const api = createWebApi(pool, agentDir, WEB_PORT, () => parkedContext?.shutdown());
 				setHttpAccessLog(join(agentDir, "web-access.log"));
 				const server = createWebServer(
 					staticDirectory,
@@ -119,6 +120,8 @@ export default function web(pi: ExtensionAPI): void {
 					});
 					if (result.cancelled) throw new Error("TUI 会话切换被取消");
 					switched = true;
+					// 其他扩展可能在session_start后覆盖编辑器；原始输入监听先于所有快捷键。
+					parkedContext?.ui.onTerminalInput(() => ({ consume: container.parked }));
 					if (oldFile) await pool.openHandoff(oldId, oldFile);
 					else await pool.create();
 				} catch (error) {

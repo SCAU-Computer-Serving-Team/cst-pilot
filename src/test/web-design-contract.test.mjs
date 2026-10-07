@@ -35,9 +35,9 @@ test("四个模型服务配置帧使用 816 设置内容列，保持页面节点
   }
 });
 
-test("画布导航覆盖八个主题，浅深配置帧成对排列", () => {
+test("画布导航覆盖九个主题，浅深配置帧成对排列", () => {
   assert.ok(web.children.some((node) => node.name === "00 · 画布导航"));
-  assert.equal(web.children.filter((node) => node.name?.includes("分区标题")).length, 8);
+  assert.equal(web.children.filter((node) => node.name?.includes("分区标题")).length, 9);
   for (const [lightId, darkId] of [["rdTGN", "n3jW1"], ["i1jzTi", "LfOD8"]]) {
     const light = web.children.find((node) => node.id === lightId);
     const dark = web.children.find((node) => node.id === darkId);

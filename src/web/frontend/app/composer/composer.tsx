@@ -16,6 +16,7 @@ import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState } 
 import { useNavigate } from "react-router";
 import { apiJson } from "../data/api";
 import { type Model, useGlobalEvents } from "../data/web-state";
+import { ErrorNotice } from "../shell/error-notice";
 import { usePanelDismiss } from "../shell/panel-dismiss";
 import { chipCaretSpace, editorHtml, extractPayload, fileReference, parseEditor } from "./composer-editor";
 import { ContextMeter } from "./context-meter";
@@ -721,11 +722,7 @@ export function Composer({
 						</div>
 					</fieldset>
 				)}
-				{error && (
-					<p className="composer-error" role="alert">
-						{error}
-					</p>
-				)}
+				{error && <ErrorNotice input message={error} />}
 				<div className="composer-actions">
 					<input
 						ref={fileInput}

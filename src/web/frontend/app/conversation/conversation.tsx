@@ -5,6 +5,7 @@ import { matchToolResults } from "../cards/match-results";
 import { ToolGroup } from "../cards/tool-card";
 import { sessionPath } from "../data/api";
 import type { Message } from "../data/web-state";
+import { ErrorNotice } from "../shell/error-notice";
 import {
 	activeTurnIndex,
 	formatDuration,
@@ -133,9 +134,7 @@ function AssistantTurnImpl({
 			</Disclosure>
 			{finalText && (live ? <LiveMarkdown text={finalText} /> : <Markdown text={finalText} />)}
 			{last?.message.stopReason === "error" && (
-				<p className="message-error" role="alert">
-					{last.message.errorMessage || "模型调用失败，请检查登录状态和模型设置。"}
-				</p>
+				<ErrorNotice model message={last.message.errorMessage || "模型调用失败，请检查登录状态和模型设置。"} />
 			)}
 			{last?.message.stopReason === "aborted" && <p className="message-warning">已停止生成</p>}
 			{last?.id && last.message.stopReason != null && last.message.stopReason !== "toolUse" && (

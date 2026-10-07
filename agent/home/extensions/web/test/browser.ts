@@ -174,7 +174,7 @@ export class BrowserProbe {
 				if (stable >= 2) {
 					const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
 					const target = document.elementFromPoint(x, y);
-					if (!element.contains(target)) throw new Error("点击控件被遮挡");
+					if (!element.contains(target)) throw new Error("点击控件被遮挡："+${JSON.stringify(selector)}+"；遮挡元素："+target?.outerHTML.slice(0,600));
 					return { x, y };
 				}
 			}

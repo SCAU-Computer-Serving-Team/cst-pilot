@@ -148,6 +148,9 @@ function argOf(name) {
 const official = argOf("--official");
 const outRoot = argOf("--out");
 const esbuildPath = argOf("--esbuild");
+const releaseVersion = argOf("--version") ?? CONFIG.VERSION;
+if(!/^[a-zA-Z0-9][a-zA-Z0-9.-]{0,63}$/.test(releaseVersion))die("发行版本格式无效");
+CONFIG.VERSION=releaseVersion;
 const wantZip = argv.includes("--zip");
 if (!official || !outRoot) {
   console.error("用法: node\\node.exe pack\\pack.mjs --official <官方zip或目录> --out <新目录> [--zip]");
@@ -205,6 +208,12 @@ for (const [name, version] of Object.entries(CONFIG.EXT_VERSIONS)) {
   const npmName = name === "pi-fff" ? "@ff-labs/pi-fff" : name;
   if (installedPackages[`node_modules/${npmName}`]?.version !== version) die(`扩展版本不符: ${npmName}，需要 ${version}`);
 }
+
+// 每次从当前源码重建Web，避免发行陈旧静态产物。开发工具仅在构建机使用。
+banner("构建并校验当前Web静态资源");
+const npmCli=path.join(repoRoot,"node/node_modules/npm/bin/npm-cli.js");
+if(!fs.existsSync(npmCli))die("缺少开发侧npm入口，不能校验当前前端构建");
+for(const command of ["build","test:fonts"])run(process.execPath,[npmCli,"run",command,"--prefix",path.join(repoRoot,"src/web/frontend")]);
 
 // ---------- [2] esbuild 预打包扩展 ----------
 
@@ -303,6 +312,8 @@ fs.writeFileSync(path.join(out, "agent", "home", "telemetry.json"), JSON.stringi
 
 fs.writeFileSync(path.join(out, "BUILD-INFO.json"), JSON.stringify({
   version: CONFIG.VERSION, piVersion: CONFIG.PI_VERSION, piExeSha256: CONFIG.PI_EXE_SHA256,
+  sourceRevision: spawnSync("git",["rev-parse","HEAD"],{cwd:repoRoot,encoding:"utf8"}).stdout?.trim() ?? null,
+  sourceDirty: Boolean(spawnSync("git",["status","--porcelain"],{cwd:repoRoot,encoding:"utf8"}).stdout?.trim()),
   esbuildVersion: CONFIG.ESBUILD_VERSION, extensionLockSha256: sha256(fs.readFileSync(sourceLockPath)), installedPackages,
 }, null, 2) + "\n");
 

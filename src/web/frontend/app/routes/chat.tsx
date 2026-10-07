@@ -8,7 +8,9 @@ import { visibleQueueItems } from "../conversation/conversation-parts";
 import { QuestionPanel } from "../conversation/question-panel";
 import { QueuePanel } from "../conversation/queue-panel";
 import { apiJson, sessionPath } from "../data/api";
+import { presentError } from "../data/error-presenter";
 import { useSessionDetail, useSessionTitle } from "../data/web-state";
+import { ErrorNotice } from "../shell/error-notice";
 import { usePanelDismiss } from "../shell/panel-dismiss";
 import { sampleSessions } from "../shell/sample-sessions";
 import { branchSummaryChoice, type NavigateResult, summaryBody, summaryTagText } from "../tree/branch-summary";
@@ -140,10 +142,13 @@ export default function Chat() {
 					</Popover>
 				)}
 			</header>
-			{(error || summaryNote) && (
+			{summaryNote && (
 				<div className="connection-banner" role="alert">
-					{summaryNote || error}
+					{summaryNote}
 				</div>
+			)}
+			{error && detail && presentError(error).kind !== "connection" && (
+				<ErrorNotice message={error} onRetry={() => void refresh()} />
 			)}
 			{forkSource && (
 				<output className="fork-source-banner">
@@ -166,7 +171,15 @@ export default function Chat() {
 						onFork={example ? () => undefined : () => setForkOpen(true)}
 					/>
 				) : (
-					<div className="chat-empty">{example ? "此会话暂无对话示例。" : error || "正在读取会话…"}</div>
+					<div className="chat-empty">
+						{example ? (
+							"此会话暂无对话示例。"
+						) : error ? (
+							<ErrorNotice message={error} onRetry={() => void refresh()} />
+						) : (
+							"正在读取会话…"
+						)}
+					</div>
 				)}
 			</div>
 			<div className="chat-composer-area">

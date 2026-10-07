@@ -51,7 +51,10 @@ function accessLog(line: string): void {
 }
 
 /** A deliberately narrow first API slice: unsupported operations remain 404. */
-export function createWebApi(pool: WebSessionPool, agentDir: string, port: number) {
+export function createWebApi(pool: WebSessionPool, agentDir: string, port: number, shutdown?: () => void) {
+	let stopping = false;
+	let exitTask: Promise<void> | undefined;
+	let shutdownScheduled = false;
 	accessLogPath = join(agentDir, "web-access.log");
 	const inboxes = new Map<string, SessionInbox>();
 	const streams = new Map<string, SessionEvents>();
@@ -188,6 +191,52 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 			return true;
 		}
 		try {
+			if (pathname === "/api/health" && method === "GET") {
+				send(response, 200, { connected: true, stopping });
+				return true;
+			}
+			if (pathname === "/api/lifecycle" && method === "GET") {
+				const rows = stopping ? [] : await pool.list();
+				send(response, 200, {
+					stopping,
+					sessions: pool
+						.snapshot()
+						.map((slot) => ({ ...slot, title: rows.find((row) => row.id === slot.id)?.title ?? "会话" })),
+				});
+				return true;
+			}
+			if (pathname === "/api/lifecycle/exit" && method === "POST") {
+				const input = await body(request);
+				if (input.confirm !== "stop") throw new Error("请求须明确确认停止任务");
+				if (!shutdown) {
+					problem(response, 503, "exit_unavailable", "当前运行环境不支持退出程序");
+					return true;
+				}
+				if (!exitTask) {
+					stopping = true;
+					exitTask = (async () => {
+						await Promise.all([...inboxes.values()].map((box) => box.pause()));
+						await pool.close();
+					})().catch((error) => {
+						stopping = false;
+						exitTask = undefined;
+						throw error;
+					});
+				}
+				await exitTask;
+				if (!shutdownScheduled) {
+					shutdownScheduled = true;
+					response.once("finish", () => {
+						setTimeout(shutdown, 100);
+					});
+				}
+				send(response, 200, { exited: true });
+				return true;
+			}
+			if (stopping) {
+				problem(response, 409, "stopping", "程序正在退出，请勿继续提交操作");
+				return true;
+			}
 			if (pathname === "/api/events" && method === "GET") {
 				globalEvents.serve(request, response);
 				return true;

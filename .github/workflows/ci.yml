@@ -69,7 +69,7 @@ jobs:
             ${{ runner.temp }}/**/shared-configuration-e2e/report.json
             ${{ runner.temp }}/**/page-motion/**/*.png
             ${{ runner.temp }}/**/page-motion/report.json
-            ${{ runner.temp }}/**/page-motion/region-fade-pixels.json
+            ${{ runner.temp }}/**/error-states/*.png
             ${{ runner.temp }}/**/page-motion/natural-direction-timing.json
             ${{ runner.temp }}/**/first-turn-status/*.png
             ${{ runner.temp }}/**/first-turn-status/report.json

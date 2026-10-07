@@ -402,7 +402,7 @@ export class WebSessionPool {
 	}
 
 	snapshot(): { id: string; running: boolean }[] {
-		return [...this.slots.values()].map(({ id, session }) => ({ id, running: session.isStreaming }));
+		return [...this.slots.values()].map(({ id, session }) => ({ id, running: !session.isIdle }));
 	}
 
 	/** Never dispose a writer while it is still running. */
@@ -410,7 +410,14 @@ export class WebSessionPool {
 		this.closed = true;
 		await this.createdWrites;
 		await Promise.allSettled([...this.opening.values()]);
-		await Promise.allSettled([...this.slots.values()].map(({ session }) => session.abort()));
+		const stopped = await Promise.allSettled([...this.slots.values()].map(({ session }) => session.abort()));
+		if (
+			stopped.some((result) => result.status === "rejected") ||
+			[...this.slots.values()].some(({ session }) => !session.isIdle)
+		) {
+			this.closed = false;
+			throw new Error("会话尚未停止，未关闭程序。请稍后重试。");
+		}
 		for (const { session, ui, id } of this.slots.values()) {
 			finalizeTelemetrySession(id, "quit");
 			ui.close();

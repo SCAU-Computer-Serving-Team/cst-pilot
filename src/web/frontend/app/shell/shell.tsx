@@ -8,6 +8,7 @@ import {
 	Monitor,
 	PanelLeft,
 	Pencil,
+	Power,
 	Settings,
 	SquarePen,
 	SunMoon,
@@ -20,6 +21,7 @@ import { Composer, type ComposerConfig } from "../composer/composer";
 import { apiJson, type ProviderStatus } from "../data/api";
 import { useGlobalEvents, useSessions } from "../data/web-state";
 import { BlueHour } from "./blue-hour";
+import { ExitDialog } from "./exit-dialog";
 import { usePanelDismiss } from "./panel-dismiss";
 import { sampleSessions } from "./sample-sessions";
 import { currentTheme, nextTheme, type Theme, themeLabels } from "./theme";
@@ -62,6 +64,7 @@ export function Sidebar({
 	const [accountError, setAccountError] = useState("");
 	const [accountWorking, setAccountWorking] = useState(false);
 	const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+	const [exitOpen, setExitOpen] = useState(false);
 	usePanelDismiss(accountMenuOpen, () => setAccountMenuOpen(false));
 	function closeAccountMenu() {
 		setAccountMenuOpen(false);
@@ -422,6 +425,18 @@ export function Sidebar({
 									</Button>
 								</>
 							)}
+							<hr className="session-menu-divider" />
+							<Button
+								variant="ghost"
+								className="sidebar-account-item"
+								onPress={() => {
+									closeAccountMenu();
+									setExitOpen(true);
+								}}
+							>
+								<Power size={18} aria-hidden="true" />
+								退出 CST Pilot
+							</Button>
 							{accountError && (
 								<p role="alert" className="sidebar-error">
 									{accountError}
@@ -431,6 +446,7 @@ export function Sidebar({
 					</Popover.Content>
 				</Popover>
 			</div>
+			{exitOpen && <ExitDialog onClose={() => setExitOpen(false)} />}
 		</aside>
 	);
 }
