@@ -25,7 +25,7 @@ CST Pilot 是计算机维护队的便携诊断 Agent，基于 [Pi](https://githu
 3. 使用 TUI，或执行 `/web` 在本机浏览器继续操作。接管后原终端待机；关闭终端会结束服务。
 4. Web 退出使用账号菜单的“退出 CST Pilot”。“退出 CSTOA”只退出账号。
 
-发行包内置 Pi、PowerShell 和必要诊断程序，现场无需安装 Node、Python 或 npm。`prev0.5` 是试用版本；当前测试结果与未验证范围见[联调报告](doc/test/checkpoint5-report.md)和[跨端报告](doc/test/shared-backend-report.md)，正式发行验收仍未完成。
+发行包内置 Pi、PowerShell 和必要诊断程序，现场无需安装 Node、Python 或 npm。默认发行版本为 `v0.5`。当前测试结果与未验证范围见[联调报告](doc/test/checkpoint5-report.md)和[跨端报告](doc/test/shared-backend-report.md)，目标设备与完整Checkpoint5验收仍未完成。
 
 ## 目录
 

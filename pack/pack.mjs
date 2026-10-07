@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // ============================================================
-// pack.mjs — cst-pilot 0.4 发行构建脚本
+// pack.mjs — cst-pilot 发行构建脚本
 //
 // 官方 pi.exe + 本仓库内容。测试使用副本，ZIP 按清单生成。
 //
@@ -20,14 +20,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { supplementGoFlash } from "./model-catalog.mjs";
-import { RELEASE_SETTINGS, RELEASE_TELEMETRY } from "./release-settings.mjs";
+import { RELEASE_SETTINGS, RELEASE_TELEMETRY, RELEASE_WEB_SEARCH } from "./release-settings.mjs";
 import { checkReleaseContent, checkReleaseTree, sha256, verifyManifest } from "./release-checks.mjs";
 import { smokeRelease } from "./smoke.mjs";
 
 // ---------- 构建配置（发行工程单一事实源） ----------
 
 const CONFIG = {
-  VERSION: "0.4.0",
+  VERSION: "v0.5",
   PI_VERSION: "0.85.1",
   PI_EXE_SHA256: "2d4d351da30bfe23a473032e66a571b238763565aa93754e74f4a939de13f195",
   ESBUILD_VERSION: "0.25.10",
@@ -309,6 +309,7 @@ fs.cpSync(path.join(scriptDir, "licenses"), path.join(out, "licenses"), { recurs
 banner("生成发行 settings.json 与 telemetry.json（pi 自带遥测关闭，项目遥测开启）");
 fs.writeFileSync(path.join(out, "agent", "home", "settings.json"), JSON.stringify(RELEASE_SETTINGS, null, 2) + "\n");
 fs.writeFileSync(path.join(out, "agent", "home", "telemetry.json"), JSON.stringify(RELEASE_TELEMETRY, null, 2) + "\n");
+fs.writeFileSync(path.join(out, "agent", "home", "web-search.json"), JSON.stringify(RELEASE_WEB_SEARCH, null, 2) + "\n");
 
 fs.writeFileSync(path.join(out, "BUILD-INFO.json"), JSON.stringify({
   version: CONFIG.VERSION, piVersion: CONFIG.PI_VERSION, piExeSha256: CONFIG.PI_EXE_SHA256,

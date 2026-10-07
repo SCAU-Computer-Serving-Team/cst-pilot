@@ -1,6 +1,6 @@
 # fetch_content 工具卡片
 
-项目安装的 `pi-web-access@0.18.0` 支持单 URL、多 URL、`readable/raw/answer` 模式。2026-09-23 通过项目扩展直接调用；测试配置仅在 `E:\tmp` 中放行本机 TUN 的假 IP 段，项目配置未修改。
+项目安装的 `pi-web-access@0.18.0` 支持单 URL、多 URL、`readable/raw/answer` 模式。发行包在 `web-search.json` 中仅放行TUN假IP段 `198.18.0.0/15`，其他私网与重定向检查保留，见[运行注意事项](../../../Notice.md#网页抓取与tun代理)。
 
 ## 主模板与字段组
 
@@ -27,4 +27,4 @@
 
 独立脚本没有当前模型，`answer` 模式实测返回 `content:"Error: Page answer failed: No current model available for page answering"` 与上述 `details.error`，主模板改为错误原文块；这不代表正常 Pi 会话的问答必然失败。
 
-项目默认网络配置下，IANA 页曾实测触发内网地址检查：`details.successful:0`、`details.error` 指明假 IP `198.18.0.0/15`。临时配置放行该段后取得上方正文。单 URL 的 `details.error`、多 URL 的 `successful < urlCount` 都须保留失败原因。图片块是代码支持的形态，此次未实测图片 URL。
+TUN代理可将公开域名解析到 `198.18.0.0/15`；发行配置允许该段，未配置放行策略时工具会报告内网地址检查失败。单 URL 的 `details.error`、多 URL 的 `successful < urlCount` 都须保留失败原因。图片块是代码支持的形态，此次未实测图片 URL。

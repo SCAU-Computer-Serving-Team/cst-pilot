@@ -16,10 +16,12 @@ TUI 默认主题由 Pi 设置管理。Web 默认浅色，运行后保存到独�
 
 发行配置默认使用 OpenCode Go 的 `deepseek-v4.1-flash`（DeepSeek V4.1 Flash）。离线目录沿用 Pi 上游 `https://pi.dev/api/models`；打包时保留已有上游条目，缺少默认模型时补全。不复制本机 `auth.json`；运行时由队员在本机登录。
 
-`--version prev0.5` 指定试用包版本，VERSION、ZIP和BUILD-INFO同步；默认版本保持正式构建配置。
+默认构建版本为 `v0.5`，VERSION、ZIP和BUILD-INFO同步。`--version <版本>` 可显式指定其他版本。
+
+发行树生成最小 `agent/home/web-search.json`，仅配置 `ssrf.allowRanges: ["198.18.0.0/15"]`，用于TUN假IP代理。`trustEnvProxy`保持false，本机地址、其他私网及重定向检查保留；发行检查拒绝额外字段、密钥或扩大放行范围，不复制构建机同名配置。
 
 `--esbuild <本地esbuild入口>` 可复用已安装的 0.25.10。未指定时使用固定版本的 npx。`--skip-smoke` 仅用于检查装配目录，不能同时生成 ZIP。
 
-扩展依赖锁在 `extensions.package.json` 和 `extensions.package-lock.json`。新环境将它们分别复制到 `agent/home/npm/package.json`、`package-lock.json`，再运行 `npm ci --ignore-scripts --prefix agent/home/npm`。升级依赖时一起更新锁文件并重新验收。
+扩展依赖锁在 `extensions.package.json` 和 `extensions.package-lock.json`。新环境将它们分别复制到 `agent/home/npm/package.json`、`package-lock.json`，再运行 `npm ci --ignore-scripts --legacy-peer-deps --prefix agent/home/npm`。共享Pi SDK由官方运行时提供；安装采用锁文件生成时的peer依赖模式，防止npm另装最新SDK。升级依赖时一起更新锁文件并重新验收。
 
 发布输出目录中的 ZIP、VERSION 和 SHA256SUMS。不要再次压缩运行过的目录。自动冒烟覆盖启动、工具注册与Web API实际工具链路，实际TUI待机/浏览器与跨机诊断仍需按 `doc/test/README.md` 验收。

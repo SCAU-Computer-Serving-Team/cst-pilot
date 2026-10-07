@@ -19,6 +19,12 @@ AGENTS.md（加载逻辑在 `noContextFiles` 时直接返回空列表）。Agent
 从 `PI_CODING_AGENT_DIR` 自动发现并附加到默认系统提示词之后，不受该开关影响，
 也无需改动 `pi.cmd` 的启动参数。
 
+## 网页抓取与TUN代理
+
+发行包的 `agent/home/web-search.json` 仅放行 `198.18.0.0/15`，供使用TUN假IP代理时抓取公开网页。配置不含服务密钥或代理地址，`trustEnvProxy`保持false；localhost、本机回环、其他私网地址及指向这些地址的重定向仍被拒绝。
+
+若现场代理使用其他地址段，需先确认用途再显式调整 `ssrf.allowRanges`。放行不保证目标站点可访问，HTTP错误、反爬和模型回答错误仍单独报告。
+
 ## 双端共享与独立主题
 
 模型范围、默认模型、凭据与历史由 TUI 和 Web 共用。打开模型菜单、循环模型或发送新输入时重读共享配置；当前会话与全局默认的区别见[模型规格](web/SPEC/auth.md)。

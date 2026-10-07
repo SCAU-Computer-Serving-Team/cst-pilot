@@ -12,17 +12,17 @@
 | Web前端 | 每次装配前从当前源码重建，再校验字体和引用资源 | 防止带入旧产物；发行不包含前端源码、测试或构建工具 |
 | Web后端与项目扩展 | 保留当前精简TS扩展文件，由官方程序加载 | 保持扩展装配与运行协调模块一致，不引入第二条后端运行链 |
 | 外部诊断程序 | 保留PowerShell、WizTree和LHM资源 | 遵循零宿主安装和现有工具能力边界 |
-| 配置 | 生成 Pi 默认设置与离线模型目录；Web 外观独立保存，缺省浅色 | 不复制开发机密钥、真实会话或运行日志 |
+| 配置 | 生成 Pi 默认设置、离线模型目录及无密钥TUN放行策略；Web 外观独立保存，缺省浅色 | 不复制开发机密钥、真实会话或运行日志 |
 | 校验 | 干净树、资源/许可、SHA256SUMS、冒烟副本、ZIP解压复核 | 测试运行态与发布目录分开，禁止压缩使用过的目录 |
 
 官方可执行文件已实测使用Bun1.3.14及Node兼容接口24.3.0。前端开发用Node只留在构建机；浏览器负责运行静态页面。
 
-## prev0.5预览包
+## v0.5发行包
 
-`prev0.5` 为现场试用版本，不等同完整MVP或正式发行验收。TUI页眉读取包内VERSION；VERSION、ZIP名称和BUILD-INFO版本一致，BUILD-INFO记录源码提交及是否包含未提交改动。
+默认生成 `v0.5` 发行包，版本标识不改变测试覆盖边界。TUI页眉读取包内VERSION；VERSION、ZIP名称和BUILD-INFO版本一致，BUILD-INFO记录源码提交及是否包含未提交改动。
 
 ```powershell
-node\node.exe pack\pack.mjs --official <官方0.85.1目录或ZIP> --out <新输出目录> --version prev0.5 --zip
+node\node.exe pack\pack.mjs --official <官方0.85.1目录或ZIP> --out <新输出目录> --zip
 ```
 
 装配拒绝覆盖非空目录，ZIP不能跳过冒烟。原始干净包保持不运行；实际TUI、浏览器、工具、待机与安全退出验证在另一个副本中完成。
@@ -36,4 +36,4 @@ node\node.exe pack\pack.mjs --official <官方0.85.1目录或ZIP> --out <新输�
 5. 非headless浏览器中的真实read、401、断线恢复、并发队列、取消退出与确认退出。
 6. ZIP清单与解压后逐文件hash一致；没有项目AGENTS.md、密钥、会话、缓存与实验占位配置；保留APPEND_SYSTEM.md作为运行指令。
 
-Windows系统输入法、真实图片剪贴板与Explorer拖拽、Windows10/最低Chromium111、跨机与实际U盘、生产OA及供应商授权需另行验证。预览包允许试用，不把这些项目标为通过。
+Windows系统输入法、真实图片剪贴板与Explorer拖拽、Windows10/最低Chromium111、跨机与实际U盘、生产OA及供应商授权需另行验证。未验证的项目不随版本标识变化而标为通过。
