@@ -8,7 +8,7 @@ export const RELEASE_SETTINGS = {
   defaultProjectTrust: "never",
   enableInstallTelemetry: false,
   lastChangelogVersion: "0.85.1",
-  theme: "dark",
+  theme: "light",
   packages: ["./packages/pi-fff", "./packages/pi-open-tui", "./packages/pi-web-access"],
 };
 

@@ -3,5 +3,5 @@ export const themeLabels: Record<Theme, string> = { system: "跟随系统", ligh
 export const nextTheme: Record<Theme, Theme> = { system: "light", light: "dark", dark: "system" };
 export const currentTheme = (): Theme => {
 	const value = document.documentElement.dataset.theme;
-	return value === "light" || value === "dark" ? value : "system";
+	return value === "dark" || value === "system" ? value : "light";
 };

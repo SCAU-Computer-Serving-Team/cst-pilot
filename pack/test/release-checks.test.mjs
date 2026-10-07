@@ -12,6 +12,8 @@ test('Web backend tests are rejected from release trees', () => {
   );
 });
 
+test("项目AGENTS.md不得进入任何发行目录",()=>{for(const file of ["AGENTS.md","doc/AGENTS.md","agent/home/agents.md"]){assert.throws(()=>checkReleaseTree(".",[file]),/AGENTS.md/);}});
+
 test('完整 OTF 字体不得进入 Web 发行树', () => {
   assert.throws(() => checkReleaseTree('.', ['agent/home/extensions/web/static/fonts/SourceHanSansCN-Regular.otf']), /完整 OTF 不得进入 Web 分发包/);
 });

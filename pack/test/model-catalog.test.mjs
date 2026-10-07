@@ -3,8 +3,8 @@ import { test } from "node:test";
 import { goFlash, supplementGoFlash } from "../model-catalog.mjs";
 import { RELEASE_SETTINGS } from "../release-settings.mjs";
 
-test("portable startup selects a readable dark theme and the Go Flash default", () => {
-  assert.equal(RELEASE_SETTINGS.theme, "dark");
+test("portable startup selects the light theme and the Go Flash default", () => {
+  assert.equal(RELEASE_SETTINGS.theme, "light");
   assert.equal(RELEASE_SETTINGS.defaultProvider, "opencode-go");
   assert.equal(RELEASE_SETTINGS.defaultModel, goFlash.id);
   assert.deepEqual(RELEASE_SETTINGS.packages, ["./packages/pi-fff", "./packages/pi-open-tui", "./packages/pi-web-access"]);

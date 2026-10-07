@@ -40,7 +40,7 @@ const shortcuts: { command: string; keys: string }[] = [
 ];
 
 export default function Settings() {
-	const [theme, setTheme] = useState<Theme>("system");
+	const [theme, setTheme] = useState<Theme>("light");
 	const [providers, setProviders] = useState<ProviderStatus[]>([]);
 	const [models, setModels] = useState<Model[]>([]);
 	const [unavailable, setUnavailable] = useState<string[]>([]);

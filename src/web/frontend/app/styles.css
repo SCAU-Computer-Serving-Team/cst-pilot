@@ -1267,6 +1267,8 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 @keyframes exit-modal-in { from { opacity:0; transform:translateY(var(--distance-base)); } }
 @media (prefers-reduced-motion:reduce) { .exit-dialog { animation:none; } }
 @media (max-width:960px) { .connection-status { left:12px; right:12px; flex-wrap:wrap; } }
+/* 返回主页按1.4倍播放（主入场700ms），离开主页保持500ms；基础令牌不变。 */
+:root:has(.home-layout:not([data-home-exit])) { --page-transition-time-scale: 1.4; }
 /* 首页与工作台输入框各自入退场，避免共享快照将底部聊天框拉到中心。 */
 .app-layout[data-home-transition] .home-backdrop { view-transition-name: home-background; }
 .app-layout[data-home-transition] .brand-arcs { view-transition-name: home-mark; }

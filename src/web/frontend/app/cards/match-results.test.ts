@@ -28,6 +28,18 @@ test("reused provider call IDs map to their own assistant turns", () => {
 	assert.equal(matches.get("turn-2")?.get("reused"), second);
 });
 
+test("独立工具结束事件结果立即对应当前调用，后续落盘结果替换它", () => {
+	const fast = result(2, "fast");
+	const message = call(1);
+	if (Array.isArray(message.content) && message.content[0]?.type === "toolCall")
+		message.content[0].execution = { startedAt: 1, endedAt: 2, result: fast };
+	const live = matchToolResults([{ id: "turn", message }]);
+	assert.equal(live.get("turn")?.get("reused"), fast);
+	const persisted = result(5, "fast");
+	const done = matchToolResults([{ id: "turn", message }, { message: persisted }]);
+	assert.equal(done.get("turn")?.get("reused"), persisted);
+});
+
 test("unmatched results do not attach to an unrelated later turn", () => {
 	const matches = matchToolResults([{ message: result(1, "orphan") }, { id: "turn", message: call(2) }]);
 	assert.equal(matches.get("turn")?.size, 0);

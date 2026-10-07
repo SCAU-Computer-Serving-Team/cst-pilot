@@ -42,7 +42,7 @@ async function transition(browser: BrowserProbe, selector: string, direction: st
 				result[name]={opacity:parseFloat(s.opacity),x:s.transform==='none'?0:new DOMMatrixReadOnly(s.transform).m41,mask:s.maskImage,progress:Number.parseFloat(s.getPropertyValue('--home-exit-progress'))||0,y:s.transform==='none'?0:new DOMMatrixReadOnly(s.transform).m42,blur:s.filter.startsWith('blur(')?parseFloat(s.filter.slice(5)):0,group:g.transform,clipping:g.overflow,zIndex:Number(g.zIndex),duration:Number(timing?.duration),delay:timing?.delay??0};
 			}return result;
 		}
-		const scale=1;
+		const scale=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--page-transition-time-scale'))||1;
 		const start=frame(0),middle=frame(80*scale),late=frame(400*scale),end=frame(600*scale);
 		window.__motion={transition:t,animations,frames:{start,middle,late,end}};
 	};`);
@@ -152,7 +152,9 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 				"window.__naturalTransitions",
 			);
 		assert.ok(
-			natural.every((t) => t.elapsed >= 450 && t.animationResults.every((a) => a === "finished")),
+			natural.every(
+				(t) => t.elapsed >= (t.to === "home" ? 750 : 450) && t.animationResults.every((a) => a === "finished"),
+			),
 			"所有入口自然播放，加载容器替换不取消快照",
 		);
 		await writeFile(join(root, "natural-direction-timing.json"), JSON.stringify(natural, null, 2));
@@ -161,13 +163,13 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 		);
 		const intoHome = await transition(browser, ".sidebar-new", "to-home", root);
 		for (const name of ["home-background", "home-mark", "home-greeting", "home-composer", "home-footer"]) {
-			assert.equal(intoHome.start[name].duration, 500, `返回主页 ${name} 使用 500ms 入场`);
+			assert.equal(intoHome.start[name].duration, 700, `返回主页 ${name} 使用 700ms 入场`);
 		}
-		assert.equal(intoHome.start["home-composer"].delay, 40);
-		assert.equal(intoHome.start["home-footer"].delay, 80);
-		assert.equal(intoHome.start["workspace-composer"].duration, 350);
-		assert.equal(intoHome.start["workspace-header"].duration, 250);
-		assert.equal(intoHome.start["workspace-messages"].duration, 250);
+		assert.equal(Math.round(intoHome.start["home-composer"].delay), 56);
+		assert.equal(Math.round(intoHome.start["home-footer"].delay), 112);
+		assert.equal(Math.round(intoHome.start["workspace-composer"].duration), 490);
+		assert.equal(intoHome.start["workspace-header"].duration, 350);
+		assert.equal(intoHome.start["workspace-messages"].duration, 350);
 		assert.ok(
 			intoHome.start["home-composer"].y > 0 && intoHome.start["home-composer"].opacity < 0.01,
 			"首页聊天框从终点下方淡入",

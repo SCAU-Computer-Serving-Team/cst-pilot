@@ -244,7 +244,7 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 			if (pathname === "/api/settings") {
 				const { settingsManager } = await pool.getServices();
 				if (method === "GET") {
-					send(response, 200, { theme: settingsManager.getThemeSetting() ?? "system" });
+					send(response, 200, { theme: settingsManager.getThemeSetting() ?? "light" });
 					return true;
 				}
 				if (method === "PATCH") {
@@ -491,7 +491,7 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 				const slot = await pool.openSaved(id);
 				send(response, 200, {
 					id,
-					messages: slot.session.messages,
+					messages: slot.session.messages.map((message) => slot.execution.decorate(message)),
 					entries: slot.session.sessionManager
 						.getBranch()
 						// 分支总结条目的 type 是 branch_summary，得单独转成前端认识的消息，否则正文里看不到它。
@@ -508,7 +508,7 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 											timestamp: new Date(entry.timestamp).getTime(),
 										},
 									}
-								: { id: entry.id, parentId: entry.parentId, message: entry.message },
+								: { id: entry.id, parentId: entry.parentId, message: slot.execution.decorate(entry.message) },
 						),
 					running: slot.session.isStreaming,
 					contextUsage: slot.session.getSessionStats().contextUsage ?? null,

@@ -7,7 +7,11 @@
 默认工具不修改系统配置，系统仍按当前进程权限允许操作。未知扩展与手动命令需单独核查其读写行为。
 配置与会话保存在 `agent/home`，临时状态保存在 `.state`。Windows 日志和 PowerShell 原生缓存不保证完全留在 U 盘。
 
-## AGENTS.md 不会生效
+## AGENTS.md 不参与发行
+
+项目开发用的`AGENTS.md`不进入发行包。装配白名单与发行树校验共同排除所有目录下的该文件。
+
+### 上下文加载
 
 `--no-context-files` 关闭的不只是项目上下文文件，也包括 `agent\home` 下的全局
 AGENTS.md（加载逻辑在 `noContextFiles` 时直接返回空列表）。Agent 指令放在

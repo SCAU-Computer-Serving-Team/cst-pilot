@@ -6,6 +6,7 @@ import {
 	CircleCheck,
 	CirclePause,
 	CircleX,
+	Clock3,
 	Copy,
 	Globe,
 	Info,
@@ -21,6 +22,7 @@ type Call = Extract<ContentPart, { type: "toolCall" }>;
 const summary = (args: unknown) =>
 	typeof args === "string" ? args : Array.isArray(args) ? args.join(" · ") : "未提供关键词";
 const stateLabels: Record<ToolState, string> = {
+	pending: "等待执行",
 	running: "执行中",
 	interrupted: "未完成或已中断",
 	error: "执行失败",
@@ -30,15 +32,17 @@ const stateLabels: Record<ToolState, string> = {
 
 function StatusIcon({ state, size = 16 }: { state: ToolState; size?: number }) {
 	const Icon =
-		state === "running"
-			? LoaderCircle
-			: state === "interrupted"
-				? CirclePause
-				: state === "success"
-					? CircleCheck
-					: state === "degraded"
-						? TriangleAlert
-						: CircleX;
+		state === "pending"
+			? Clock3
+			: state === "running"
+				? LoaderCircle
+				: state === "interrupted"
+					? CirclePause
+					: state === "success"
+						? CircleCheck
+						: state === "degraded"
+							? TriangleAlert
+							: CircleX;
 	return (
 		<Icon
 			aria-hidden="true"
@@ -139,29 +143,29 @@ function renderBlock(block: Block) {
 function SearchRow({
 	call,
 	result,
-	live,
 	state,
 	failed,
 }: {
 	call: Call;
 	result?: Message;
-	live?: boolean;
 	state: ToolState;
 	failed: boolean;
 }) {
 	const details = result && "details" in result ? (result as Message & { details?: unknown }).details : undefined;
 	const data = details && typeof details === "object" ? (details as Record<string, unknown>) : {};
-	const status = !result ? (live ? "running" : "interrupted") : failed ? "error" : state;
+	const status = failed ? "error" : state;
 	const label =
-		status === "running"
-			? "正在联网检索…"
-			: status === "interrupted"
-				? "联网检索未完成"
-				: status === "error"
-					? "联网检索失败"
-					: status === "degraded"
-						? "部分检索结果"
-						: "已联网检索";
+		status === "pending"
+			? "等待联网检索"
+			: status === "running"
+				? "正在联网检索…"
+				: status === "interrupted"
+					? "联网检索未完成"
+					: status === "error"
+						? "联网检索失败"
+						: status === "degraded"
+							? "部分检索结果"
+							: "已联网检索";
 	return (
 		<Disclosure className="search-tool">
 			<Disclosure.Heading>
@@ -190,13 +194,13 @@ export const ToolCard = memo(function ToolCard({
 	call,
 	result,
 	live,
-	startedAt,
 }: {
 	call: Call;
 	result?: Message;
 	live?: boolean;
-	startedAt?: number;
 }) {
+	const startedAt = call.execution?.startedAt;
+	const endedAt = call.execution?.endedAt;
 	const special = isStandaloneTool(call, result);
 	const [open, setOpen] = useState(special || !!live);
 	const [touched, setTouched] = useState(false);
@@ -206,10 +210,11 @@ export const ToolCard = memo(function ToolCard({
 	const [raw, setRaw] = useState(false);
 	const [now, setNow] = useState(Date.now());
 	useEffect(() => {
-		if (result || !live || !startedAt) return;
+		if (result || endedAt !== undefined || !live || startedAt === undefined) return;
+		setNow(Date.now());
 		const timer = window.setInterval(() => setNow(Date.now()), 1000);
 		return () => window.clearInterval(timer);
-	}, [result, live, startedAt]);
+	}, [result, live, startedAt, endedAt]);
 	const view = result ? mapTool(call, result) : undefined;
 	const fieldContainer = useRef<HTMLDivElement>(null);
 	useLayoutEffect(() => {
@@ -236,13 +241,13 @@ export const ToolCard = memo(function ToolCard({
 		};
 	}, [open, result]);
 	const details = result && "details" in result ? (result as Message & { details?: unknown }).details : undefined;
-	const state = toolState(result, view?.status, live);
+	const state = toolState(result, view?.status, live && endedAt === undefined, startedAt !== undefined);
 	if (call.name === "web_search") {
 		const data = details && typeof details === "object" ? (details as Record<string, unknown>) : {};
 		const failed =
 			!!result &&
 			(view?.status === "error" || (typeof data.successfulQueries === "number" && data.successfulQueries === 0));
-		return <SearchRow call={call} result={result} live={live} state={state} failed={failed} />;
+		return <SearchRow call={call} result={result} state={state} failed={failed} />;
 	}
 	const status = stateLabels[state];
 	const scope = typeof call.arguments.scope === "string" ? call.arguments.scope : undefined;
@@ -257,8 +262,8 @@ export const ToolCard = memo(function ToolCard({
 			", ",
 		)}${Array.isArray(call.arguments.items) ? `${Object.keys(argumentSummary).length ? ", " : ""}items: ${call.arguments.items.length}` : ""})`;
 	const elapsed =
-		startedAt && (result?.timestamp ?? (live ? now : 0)) >= startedAt
-			? `${(((result?.timestamp ?? now) - startedAt) / 1000).toFixed(1)}s`
+		startedAt !== undefined && (endedAt !== undefined || (live && !result))
+			? `${(Math.max(0, (endedAt ?? now) - startedAt) / 1000).toFixed(1)}s`
 			: undefined;
 	const heading = (
 		<>
@@ -273,7 +278,7 @@ export const ToolCard = memo(function ToolCard({
 				<div className="tool-card-body">
 					<code className="tool-invocation">{callText}</code>
 					{!view ? (
-						state === "running" ? null : (
+						state === "running" || state === "pending" ? null : (
 							<p>无返回结果</p>
 						)
 					) : (
@@ -339,12 +344,10 @@ function CollapsedToolGroup({
 	calls,
 	results,
 	live,
-	startedAt,
 }: {
 	calls: Call[];
 	results: Map<string, Message>;
 	live?: boolean;
-	startedAt?: number;
 }) {
 	const [open, setOpen] = useState(false);
 	const states = calls.map((call) => {
@@ -384,26 +387,16 @@ function CollapsedToolGroup({
 			</Disclosure.Heading>
 			<Disclosure.Content>
 				{calls.map((call) => (
-					<ToolCard key={call.id} call={call} result={results.get(call.id)} live={live} startedAt={startedAt} />
+					<ToolCard key={call.id} call={call} result={results.get(call.id)} live={live} />
 				))}
 			</Disclosure.Content>
 		</Disclosure>
 	);
 }
 
-// 调用数组由 splitTurn 每次重建，按内容引用逐项比较；结果表、live、起始时间不变则跳过。
+// 调用数组含单次执行时间，逐项引用和结果表不变时跳过重绘。
 export const ToolGroup = memo(
-	function ToolGroup({
-		calls,
-		results,
-		live,
-		startedAt,
-	}: {
-		calls: Call[];
-		results: Map<string, Message>;
-		live?: boolean;
-		startedAt?: number;
-	}) {
+	function ToolGroup({ calls, results, live }: { calls: Call[]; results: Map<string, Message>; live?: boolean }) {
 		return (
 			<>
 				{splitToolCalls(calls, results).map((segment, index) =>
@@ -413,7 +406,6 @@ export const ToolGroup = memo(
 							call={segment.calls[0]}
 							result={results.get(segment.calls[0].id)}
 							live={live}
-							startedAt={startedAt}
 						/>
 					) : (
 						<CollapsedToolGroup
@@ -421,7 +413,6 @@ export const ToolGroup = memo(
 							calls={segment.calls}
 							results={results}
 							live={live}
-							startedAt={startedAt}
 						/>
 					),
 				)}
@@ -431,7 +422,6 @@ export const ToolGroup = memo(
 	(prev, next) =>
 		prev.results === next.results &&
 		prev.live === next.live &&
-		prev.startedAt === next.startedAt &&
 		prev.calls.length === next.calls.length &&
 		prev.calls.every((call, index) => call === next.calls[index]),
 );

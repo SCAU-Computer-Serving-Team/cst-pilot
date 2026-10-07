@@ -74,7 +74,6 @@ const CONFIG = {
     { p: "pi.cmd", f: true },
     { p: "LICENSE", f: true },
     { p: "README.md", f: true },
-    { p: "AGENTS.md", f: true },
     { p: "biome.json", f: true },
     { p: "THIRD-PARTY-NOTICES.md", f: true },
   ],
@@ -121,6 +120,7 @@ function copyFiltered(src, dst, exclude) {
     filter: (s) => {
       const rel = path.relative(src, s).replaceAll("\\", "/");
       if (rel === "") return true;
+      if (path.basename(s).toLowerCase() === "agents.md") return false;
       return !exclude.some((x) => (x.endsWith("/") ? rel === x.slice(0, -1) || rel.startsWith(x) : rel === x));
     },
   });

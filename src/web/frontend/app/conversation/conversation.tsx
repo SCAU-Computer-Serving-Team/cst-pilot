@@ -119,7 +119,6 @@ function AssistantTurnImpl({
 										calls={part.calls}
 										results={resultsByTurn.get(entry.id ?? `stamp:${entry.message.timestamp}`) ?? new Map()}
 										live={live && final}
-										startedAt={entry.message.timestamp}
 									/>
 								);
 							return <Markdown key={key} text={part.text} />;

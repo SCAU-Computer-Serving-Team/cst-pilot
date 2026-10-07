@@ -10,7 +10,9 @@ node\node.exe pack\pack.mjs --official <官方ZIP或目录> --out <新的输出�
 
 脚本核对官方文件和扩展版本，从当前源码构建Web并检查字体，再在副本中验证首次/再次启动、模型工具注册及Web真实read续答，按清单生成ZIP并解压校验。无需真实密钥；测试副本保留在输出目录的 `_smoke` 下，不进入 ZIP。
 
-发行树校验分两类：`checkReleaseTree` 拒绝运行态、凭据与密钥；`checkReleaseContent` 要求 Web 入口页与样式表引用的资源、随包许可证文件齐备，缺一即拒绝打包。装配完成后 `SHA256SUMS` 覆盖全部发行文件，并在打包后复核。
+发行树校验分两类：`checkReleaseTree` 拒绝项目`AGENTS.md`、运行态、凭据与密钥；`checkReleaseContent` 要求 Web 入口页与样式表引用的资源、随包许可证文件齐备，缺一即拒绝打包。装配完成后 `SHA256SUMS` 覆盖全部发行文件，并在打包后复核。
+
+发行配置默认浅色；已保存的主题选择继续生效。项目`AGENTS.md`不参与发行，运行指令由`agent/home/APPEND_SYSTEM.md`提供，见[运行注意事项](../doc/Notice.md)。
 
 发行配置默认使用 OpenCode Go 的 `deepseek-flash`（DeepSeek V4.1 Flash）。打包时补全离线模型目录，不复制本机 `auth.json`；运行时由队员在本机登录。
 

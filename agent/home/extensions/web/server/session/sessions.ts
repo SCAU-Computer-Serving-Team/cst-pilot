@@ -9,6 +9,7 @@ import {
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { replaceFile } from "./replace-file.ts";
+import { ToolExecutions } from "./tool-executions.ts";
 import { WebUiBridge } from "./ui.ts";
 
 /** 遥测扩展挂在 globalThis 的定稿入口；扩展未启用时无副作用。 */
@@ -42,6 +43,7 @@ const WEB_TOOLS = [
 export interface WebSessionSlot {
 	readonly session: AgentSession;
 	readonly ui: WebUiBridge;
+	readonly execution: ToolExecutions;
 	readonly id: string;
 	readonly file?: string;
 }
@@ -117,7 +119,13 @@ export class WebSessionPool {
 			if (extensionsResult.errors.length) throw new Error("Web 会话扩展加载失败");
 			await session.bindExtensions({ uiContext: ui.context(), mode: "rpc" });
 			if (this.closed) throw new Error("Web 已退出");
-			return { session, ui, id: session.sessionId, file: session.sessionFile };
+			return {
+				session,
+				ui,
+				execution: new ToolExecutions(session),
+				id: session.sessionId,
+				file: session.sessionFile,
+			};
 		} catch (error) {
 			ui.close();
 			session.dispose();
@@ -138,6 +146,7 @@ export class WebSessionPool {
 		const task = (async () => {
 			const slot = await this.build(manager(), startReason);
 			if (slot.id !== key) {
+				slot.execution.close();
 				slot.session.dispose();
 				throw new Error("会话 ID 与记录不一致");
 			}
@@ -325,6 +334,7 @@ export class WebSessionPool {
 			tombstoned = true;
 			finalizeTelemetrySession(id, "delete");
 			slot.ui.close();
+			slot.execution.close();
 			slot.session.dispose();
 			this.slots.delete(id);
 			if (matches.length === 1) await rm(matches[0].path, { force: true });
@@ -419,7 +429,8 @@ export class WebSessionPool {
 			this.closed = false;
 			throw new Error("会话尚未停止，未关闭程序。请稍后重试。");
 		}
-		for (const { session, ui, id } of this.slots.values()) {
+		for (const { session, ui, id, execution } of this.slots.values()) {
+			execution.close();
 			finalizeTelemetrySession(id, "quit");
 			ui.close();
 			session.dispose();

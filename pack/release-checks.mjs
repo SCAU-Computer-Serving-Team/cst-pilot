@@ -7,6 +7,7 @@ export const sha256 = (data) => crypto.createHash('sha256').update(data).digest(
 // 运行态只能出现在测试副本；干净发行树出现这些路径就拒绝打包。
 export function checkReleaseTree(root, files) {
   for (const rel of files) {
+    if (path.posix.basename(rel).toLowerCase() === 'agents.md') throw new Error(`项目 AGENTS.md 不得进入发行包: ${rel}`);
     if (/^pi\.exe$/i.test(rel)) {
       throw new Error(`pi.exe 不得位于发行根（应装配为 agent/.runtime/prx.bin）: ${rel}`);
     }
@@ -41,6 +42,7 @@ export function checkReleaseTree(root, files) {
 // Web 静态产物与随包许可证的固定清单。缺失即拒绝打包，避免发行包静默少文件。
 const WEB_STATIC = 'agent/home/extensions/web/static';
 export const REQUIRED_RELEASE_FILES = [
+  'agent/home/APPEND_SYSTEM.md',
   'LICENSE',
   'THIRD-PARTY-NOTICES.md',
   'licenses/pi-LICENSE.txt',
