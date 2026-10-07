@@ -19,7 +19,8 @@ export class WebSettings {
 				!value ||
 				typeof value !== "object" ||
 				!("theme" in value) ||
-				!["light", "dark", "system"].includes(String(value.theme))
+				typeof value.theme !== "string" ||
+				!["light", "dark", "system"].includes(value.theme)
 			)
 				throw new ConfigurationUnavailable("Web外观配置无法读取，请检查 web-settings.json 后重试。");
 			return { theme: value.theme as WebTheme };
