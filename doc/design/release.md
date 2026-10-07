@@ -19,7 +19,7 @@
 
 ## prev0.5预览包
 
-`prev0.5` 为现场试用版本，不等同完整MVP或正式发行验收。包内VERSION、ZIP名称和BUILD-INFO版本一致，BUILD-INFO记录源码提交及是否包含未提交改动。
+`prev0.5` 为现场试用版本，不等同完整MVP或正式发行验收。TUI页眉读取包内VERSION；VERSION、ZIP名称和BUILD-INFO版本一致，BUILD-INFO记录源码提交及是否包含未提交改动。
 
 ```powershell
 node\node.exe pack\pack.mjs --official <官方0.85.1目录或ZIP> --out <新输出目录> --version prev0.5 --zip
