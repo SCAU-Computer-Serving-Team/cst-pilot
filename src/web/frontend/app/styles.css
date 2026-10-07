@@ -93,7 +93,6 @@
   --duration-fast: 250ms;
   --duration-quick: 150ms;
   --ease-smooth-out: cubic-bezier(.22, 1, .36, 1);
-  --ease-smooth-in: cubic-bezier(.64, 0, .78, 0);
   --ease-linear: linear;
   --ease-out: ease-out;
   --ease-bounce: cubic-bezier(.34, 1.36, .64, 1);
@@ -1268,8 +1267,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 @keyframes exit-modal-in { from { opacity:0; transform:translateY(var(--distance-base)); } }
 @media (prefers-reduced-motion:reduce) { .exit-dialog { animation:none; } }
 @media (max-width:960px) { .connection-status { left:12px; right:12px; flex-wrap:wrap; } }
-/* 返回主页按1.4倍播放（主入场700ms），离开主页保持500ms；基础令牌不变。 */
-:root:has(.home-layout:not([data-home-exit])) { --page-transition-time-scale: 1.4; }
+/* 双向总400ms；主页背景实色滑出，150ms开始工作区入场，重叠100ms避免白屏。 */
 /* 首页与工作台输入框各自入退场，避免共享快照将底部聊天框拉到中心。 */
 .app-layout[data-home-transition] .home-backdrop { view-transition-name: home-background; }
 .app-layout[data-home-transition] .brand-arcs { view-transition-name: home-mark; }
@@ -1281,29 +1279,34 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .app-layout[data-home-transition] .chat-message-surface { view-transition-name: workspace-messages; }
 :root:has([data-home-transition])::view-transition-old(root),
 :root:has([data-home-transition])::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
-/* 固定各自的终点几何，两处聊天框没有位置插值或横向变形。返回时背景在内容下方。 */
+/* 固定快照几何；返回时蓝白覆盖旧工作区，主页内容保留在背景上方。 */
 ::view-transition-group(home-background) { z-index: 1; animation: none; }
 ::view-transition-group(home-mark) { z-index: 2; animation: none; }
 ::view-transition-group(home-greeting), ::view-transition-group(home-footer) { z-index: 3; animation: none; }
 ::view-transition-group(home-composer), ::view-transition-group(workspace-composer) { z-index: 5; animation: none; }
 ::view-transition-group(workspace-header), ::view-transition-group(workspace-messages) { z-index: 4; animation: none; }
-::view-transition-old(home-background) { animation: home-background-out var(--duration-very-slow) var(--ease-smooth-in) both; }
-::view-transition-new(home-background) { animation: home-background-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(home-mark) { animation: home-mark-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
-::view-transition-new(home-mark) { animation: home-mark-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(home-greeting) { animation: home-text-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
-::view-transition-new(home-greeting) { animation: home-text-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(home-composer) { animation: composer-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
-::view-transition-old(workspace-composer) { animation: composer-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
-::view-transition-new(home-composer) { animation: composer-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) calc(var(--duration-stagger) * var(--page-transition-time-scale)) both; }
-::view-transition-new(workspace-composer) { animation: composer-in calc(var(--duration-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(home-footer) { animation: composer-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
-::view-transition-new(home-footer) { animation: composer-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) calc(var(--duration-micro) * var(--page-transition-time-scale)) both; }
-::view-transition-new(workspace-header) { animation: workspace-header-in calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(workspace-header) { animation: workspace-header-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
-::view-transition-new(workspace-messages) { animation: workspace-messages-in calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) calc(var(--duration-stagger) * var(--page-transition-time-scale)) both; }
-::view-transition-old(workspace-messages) { animation: workspace-messages-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
-@keyframes home-background-out { to { transform: translate3d(0, -100%, 0); opacity: 0; } }
+:root:has(.home-layout:not([data-home-exit]))::view-transition-group(home-background) { z-index: 6; }
+:root:has(.home-layout:not([data-home-exit]))::view-transition-group(home-mark) { z-index: 7; }
+:root:has(.home-layout:not([data-home-exit]))::view-transition-group(home-greeting),
+:root:has(.home-layout:not([data-home-exit]))::view-transition-group(home-footer) { z-index: 8; }
+:root:has(.home-layout:not([data-home-exit]))::view-transition-group(home-composer) { z-index: 9; }
+::view-transition-old(home-background) { animation: home-background-out var(--duration-fast) var(--ease-in-out) both; }
+::view-transition-new(home-background) { animation: home-background-in var(--duration-fast) var(--ease-smooth-out) var(--duration-quick) both; }
+::view-transition-old(home-mark) { animation: home-mark-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-in-out) both; }
+::view-transition-new(home-mark) { animation: home-mark-in var(--duration-fast) var(--ease-smooth-out) var(--duration-quick) both; }
+::view-transition-old(home-greeting) { animation: home-text-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-in-out) both; }
+::view-transition-new(home-greeting) { animation: home-text-in var(--duration-fast) var(--ease-smooth-out) var(--duration-quick) both; }
+::view-transition-old(home-composer) { animation: composer-out var(--duration-quick) var(--ease-in-out) both; }
+::view-transition-old(workspace-composer) { animation: composer-out var(--duration-quick) var(--ease-smooth-out) both; }
+::view-transition-new(home-composer) { animation: composer-in var(--duration-fast) var(--ease-smooth-out) var(--duration-quick) both; }
+::view-transition-new(workspace-composer) { animation: composer-in var(--duration-fast) var(--ease-smooth-out) var(--duration-quick) both; }
+::view-transition-old(home-footer) { animation: composer-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-in-out) both; }
+::view-transition-new(home-footer) { animation: composer-in var(--duration-fast) var(--ease-smooth-out) var(--duration-quick) both; }
+::view-transition-new(workspace-header) { animation: workspace-header-in var(--duration-fast) var(--ease-smooth-out) var(--duration-quick) both; }
+::view-transition-old(workspace-header) { animation: workspace-header-out var(--duration-quick) var(--ease-smooth-out) both; }
+::view-transition-new(workspace-messages) { animation: workspace-messages-in var(--duration-fast) var(--ease-smooth-out) var(--duration-quick) both; }
+::view-transition-old(workspace-messages) { animation: workspace-messages-out var(--duration-quick) var(--ease-smooth-out) both; }
+@keyframes home-background-out { to { transform: translate3d(0, -100%, 0); } }
 @keyframes home-background-in { from { transform: translate3d(0, -100%, 0); opacity: 0; } }
 @keyframes home-mark-out { to { transform: translate3d(0, calc(-1 * var(--distance-large)), 0); opacity: 0; } }
 @keyframes home-mark-in { from { transform: translate3d(0, calc(-1 * var(--distance-large)), 0); opacity: 0; } }
@@ -1320,7 +1323,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .app-layout[data-view-transitions="false"] .chat-composer-area { animation: composer-in calc(var(--duration-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
 .app-layout[data-view-transitions="false"] .conversation { animation: workspace-messages-in calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
 .app-layout[data-view-transitions="false"] .composer-shell--home,
-.app-layout[data-view-transitions="false"] .home-footnote { animation: composer-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+.app-layout[data-view-transitions="false"] .home-footnote { animation: composer-in var(--duration-fast) var(--ease-smooth-out) both; }
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation-duration: 0s !important; animation-delay: 0s !important; }
   .app-layout[data-view-transitions="false"] :is(.chat-header, .chat-composer-area, .conversation, .composer-shell--home, .home-footnote) { animation: none; }

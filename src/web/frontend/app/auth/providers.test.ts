@@ -8,6 +8,7 @@ import {
 	initialLogin,
 	loginMethods,
 	loginPath,
+	loginSuccessPath,
 	loginTabs,
 	providerGroups,
 	returnPath,
@@ -101,6 +102,17 @@ test("设置配置使用独立表单页，账号登录保留登录页", () => {
 	assert.equal(url.searchParams.get("method"), "oauth");
 	assert.equal(url.searchParams.get("returnTo"), "/settings#accounts");
 	assert.equal(new URL(loginPath("cstoa", "oauth"), "http://localhost").pathname, "/login");
+});
+
+test("登录成功按实际服务和方式返回：CSTOA OAuth到账号，其他方式到模型服务", () => {
+	assert.equal(loginSuccessPath("cstoa", "oauth", "/account"), "/account");
+	assert.equal(loginSuccessPath("cstoa", "oauth", "/settings#accounts"), "/account");
+	assert.equal(loginSuccessPath("kimi-coding", "oauth", "/account"), "/settings#accounts");
+	assert.equal(loginSuccessPath("openai", "api_key", "/account"), "/settings#accounts");
+	assert.equal(loginSuccessPath("cstoa", "api_key", "/account"), "/settings#accounts");
+	assert.equal(loginSuccessPath("openai", "api_key", "/settings#accounts"), "/settings#accounts");
+	assert.equal(loginSuccessPath("openai", "api_key", "/"), "/");
+	assert.equal(loginSuccessPath("openai", "api_key", "https://example.com"), "/");
 });
 
 test("模型 API Key 不建立专属账号态，返回地址只允许本应用页面", () => {

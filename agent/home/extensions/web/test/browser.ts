@@ -17,6 +17,7 @@ export async function freePort(): Promise<number> {
 /** 隔离 Chrome 配置，浏览器验证不接触用户的标签页、账号或 Cookie。 */
 export class BrowserProbe {
 	private sequence = 0;
+	private readonly observers = new Map<string, Set<(params: unknown) => void>>();
 	private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
 	private session = "";
 	private readonly socket: WebSocket;
@@ -28,10 +29,13 @@ export class BrowserProbe {
 		this.child = child;
 		socket.addEventListener("message", (event) => {
 			const message = JSON.parse(String((event as MessageEvent).data)) as {
+				method?: string;
+				params?: unknown;
 				id?: number;
 				result?: unknown;
 				error?: { message: string };
 			};
+			if (message.method) for (const listener of this.observers.get(message.method) ?? []) listener(message.params);
 			if (!message.id) return;
 			const request = this.pending.get(message.id);
 			if (!request) return;
@@ -104,6 +108,15 @@ export class BrowserProbe {
 			child.kill();
 			throw error;
 		}
+	}
+	onEvent(method: string, listener: (params: unknown) => void): () => void {
+		const listeners = this.observers.get(method) ?? new Set();
+		listeners.add(listener);
+		this.observers.set(method, listeners);
+		return () => {
+			listeners.delete(listener);
+			if (!listeners.size) this.observers.delete(method);
+		};
 	}
 	async call<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
 		const id = ++this.sequence;

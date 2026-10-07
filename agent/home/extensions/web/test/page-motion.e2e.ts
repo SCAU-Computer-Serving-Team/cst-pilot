@@ -33,6 +33,7 @@ async function transition(browser: BrowserProbe, selector: string, direction: st
 	}
 	await browser.evaluate(`window.__motion=null;window.__pauseNext=true;window.__captureMotion=(t)=>{
 		const animations=document.getAnimations().filter(a=>a.effect?.pseudoElement&&a.playState!=='finished');
+        animations.forEach(a=>a.pause());
 		function frame(time){
 			animations.forEach(a=>a.currentTime=time);
 			const result={};for(const name of ['home-background','home-mark','home-greeting','home-composer','home-footer','workspace-composer','workspace-header','workspace-messages']){
@@ -45,15 +46,26 @@ async function transition(browser: BrowserProbe, selector: string, direction: st
 				result[name]={opacity:parseFloat(s.opacity),x:s.transform==='none'?0:new DOMMatrixReadOnly(s.transform).m41,mask:s.maskImage,progress:Number.parseFloat(s.getPropertyValue('--home-exit-progress'))||0,y:s.transform==='none'?0:new DOMMatrixReadOnly(s.transform).m42,blur:s.filter.startsWith('blur(')?parseFloat(s.filter.slice(5)):0,group:g.transform,clipping:g.overflow,zIndex:Number(g.zIndex),duration:Number(timing?.duration),easing,delay:timing?.delay??0};
 			}return result;
 		}
-		const scale=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--page-transition-time-scale'))||1;
-		const start=frame(0),middle=frame(80*scale),late=frame(400*scale),end=frame(600*scale);
-		window.__motion={transition:t,animations,frames:{start,middle,late,end}};
+		const start=frame(0),middle=frame(80),afterExit=frame(150),beforeHandoff=frame(200),late=frame(320),end=frame(400);
+		window.__motion={transition:t,animations,frames:{start,middle,afterExit,beforeHandoff,late,end}};
 	};`);
 	await browser.click(selector);
 	await browser.until("!!window.__motion", `${direction} 产生原生过渡`);
-	const frames = await browser.evaluate<{ start: Frame; middle: Frame; late: Frame; end: Frame }>(
-		"window.__motion.frames",
-	);
+	const frames = await browser.evaluate<{
+		start: Frame;
+		middle: Frame;
+		afterExit: Frame;
+		beforeHandoff: Frame;
+		late: Frame;
+		end: Frame;
+	}>("window.__motion.frames");
+	if (!root.endsWith("dark") && !root.endsWith("narrow")) {
+		for (const time of [80, 250, 400]) {
+			await browser.evaluate(`window.__motion.animations.forEach(a=>a.currentTime=${time})`);
+			await browser.screenshot(join(root, `${direction}-${time}ms.png`));
+		}
+	}
+	await browser.evaluate("window.__motion.animations.forEach(a=>a.finish())");
 	await browser.evaluate("window.__motion.transition.finished");
 	await browser.until("!document.querySelector('[data-home-transition]')", `${direction} 路由过渡清理`);
 	await browser.evaluate(
@@ -122,6 +134,38 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 		});
 		assert.equal(response.status, 201);
 		const { id } = await response.json();
+		const slot = pool.get(id);
+		assert.ok(slot);
+		const user = {
+			role: "user" as const,
+			content: [{ type: "text" as const, text: "工作区文字层核查" }],
+			timestamp: Date.now(),
+		};
+		const reply = {
+			role: "assistant" as const,
+			content: [
+				{
+					type: "text" as const,
+					text: "### 工作区旧文字\n\n蓝白背景滑入时，这段文字应当已退出，并始终位于背景快照下方。\n\n- 第一条诊断内容\n- 第二条诊断内容\n\n**不可与主页欢迎语混在同一层显示。**",
+				},
+			],
+			api: "openai-completions" as const,
+			provider: "probe",
+			model: "one",
+			stopReason: "stop" as const,
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			timestamp: Date.now(),
+		};
+		slot.session.sessionManager.appendMessage(user);
+		slot.session.sessionManager.appendMessage(reply);
+		slot.session.agent.state.messages = [user, reply];
 		browser = await BrowserProbe.launch(root);
 		await browser.call("Emulation.setDeviceMetricsOverride", {
 			width: 1600,
@@ -155,35 +199,50 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 				"window.__naturalTransitions",
 			);
 		assert.ok(
-			natural.every(
-				(t) => t.elapsed >= (t.to === "home" ? 750 : 450) && t.animationResults.every((a) => a === "finished"),
-			),
+			natural.every((t) => t.elapsed >= 350 && t.animationResults.every((a) => a === "finished")),
 			"所有入口自然播放，加载容器替换不取消快照",
 		);
 		await writeFile(join(root, "natural-direction-timing.json"), JSON.stringify(natural, null, 2));
+		await browser.navigate(`http://127.0.0.1:${port}/s/${id}`);
+		await browser.until(
+			"document.querySelector('.conversation')?.textContent.includes('工作区旧文字')",
+			"带正文的工作区用于层级核查",
+		);
 		await browser.evaluate(
 			`(()=>{const native=document.startViewTransition.bind(document);document.startViewTransition=(...args)=>{const t=native(...args);window.__latestMotionTransition=t;if(window.__pauseNext){window.__pauseNext=false;t.ready.then(()=>window.__captureMotion(t));}return t;};})()`,
 		);
 		const intoHome = await transition(browser, ".sidebar-new", "to-home", root);
-		for (const name of ["home-background", "home-mark", "home-greeting", "home-composer", "home-footer"]) {
-			assert.equal(intoHome.start[name].duration, 700, `返回主页 ${name} 使用 700ms 入场`);
+		assert.equal(intoHome.start["home-background"].duration, 250);
+		assert.equal(intoHome.start["home-background"].delay, 150, "先退出工作区白条和输入框，再滑入背景");
+		for (const name of ["home-mark", "home-greeting", "home-composer", "home-footer"]) {
+			assert.equal(intoHome.start[name].duration, 250);
+			assert.equal(intoHome.start[name].delay, 150);
 		}
-		assert.equal(Math.round(intoHome.start["home-composer"].delay), 56);
-		assert.equal(Math.round(intoHome.start["home-footer"].delay), 112);
-		assert.equal(Math.round(intoHome.start["workspace-composer"].duration), 490);
-		assert.equal(intoHome.start["workspace-header"].duration, 350);
-		assert.equal(intoHome.start["workspace-messages"].duration, 350);
+		for (const name of ["workspace-composer", "workspace-header", "workspace-messages"]) {
+			assert.equal(intoHome.start[name].duration, 150);
+			assert.equal(intoHome.start[name].delay, 0);
+			assert.ok(intoHome.start["home-background"].zIndex > intoHome.start[name].zIndex, `背景快照覆盖旧${name}`);
+			assert.equal(intoHome.afterExit[name].opacity, 0, "150ms旧工作区完整退出");
+		}
+		assert.ok(
+			intoHome.start["home-composer"].zIndex > intoHome.start["home-background"].zIndex,
+			"主页输入框在自己的背景上方",
+		);
+		assert.equal(intoHome.middle["home-background"].opacity, 0, "旧工作区退出前背景保持未入场");
 		assert.ok(
 			intoHome.start["home-composer"].y > 0 && intoHome.start["home-composer"].opacity < 0.01,
 			"首页聊天框从终点下方淡入",
 		);
+		assert.ok(intoHome.beforeHandoff["home-composer"].opacity > 0, "主页聊天框从150ms开始进入，不拖到尾段");
+		assert.ok(intoHome.middle["workspace-composer"].y > 0, "工作区底部框立即向下退出");
+		assert.ok(intoHome.middle["workspace-header"].y < 0, "工作区白条立即向上退出");
 		assert.ok(
-			intoHome.middle["home-composer"].y > 0 &&
-				intoHome.middle["home-composer"].y < intoHome.start["home-composer"].y,
+			intoHome.late["home-composer"].y < intoHome.start["home-composer"].y &&
+				intoHome.late["home-composer"].opacity > 0,
 		);
 		assert.ok(
-			intoHome.middle["workspace-composer"].y > 0 && intoHome.middle["workspace-composer"].opacity < 1,
-			"工作台聊天框向下淡出",
+			intoHome.late["workspace-composer"].y > 0 && intoHome.late["workspace-composer"].opacity < 1,
+			"工作台聊天框在背景进入前完整退出",
 		);
 		assert.equal(
 			intoHome.start["workspace-composer"].group,
@@ -203,11 +262,11 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 			["to-workspace", intoWorkspace.start],
 		] as const) {
 			for (const [name, snapshot] of Object.entries(frame)) {
-				const exiting = name.startsWith("workspace-") ? direction === "to-home" : direction === "to-workspace";
+				const homeExit = direction === "to-workspace" && name.startsWith("home-");
 				assert.equal(
 					snapshot.easing,
-					exiting ? "cubic-bezier(0.64, 0, 0.78, 0)" : "cubic-bezier(0.22, 1, 0.36, 1)",
-					`${direction} ${name}退出时间反向、进入smooth-out`,
+					homeExit ? "ease-in-out" : "cubic-bezier(0.22, 1, 0.36, 1)",
+					`${direction} ${name}曲线`,
 				);
 			}
 		}
@@ -216,8 +275,31 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 			JSON.stringify({ intoHome: intoHome.start, intoWorkspace: intoWorkspace.start }, null, 2),
 		);
 		const bg = intoWorkspace.middle["home-background"];
-		assert.equal(intoWorkspace.start["home-background"].duration, 500);
-		assert.ok(bg.y < 0 && bg.opacity < 1, "背景向上slide退出");
+		for (const [direction, frames] of [
+			["to-home", intoHome],
+			["to-workspace", intoWorkspace],
+		] as const) {
+			assert.equal(
+				Math.max(...Object.values(frames.start).map((s) => s.duration + s.delay)),
+				400,
+				`${direction}包含延迟总400ms`,
+			);
+			for (const name of ["workspace-header", "workspace-composer", "workspace-messages"]) {
+				assert.equal(frames.start[name].delay, direction === "to-home" ? 0 : 150);
+				assert.equal(frames.start[name].duration, direction === "to-home" ? 150 : 250);
+				if (direction === "to-workspace")
+					assert.ok(frames.beforeHandoff[name].opacity > 0.2, "背景滑出末段已出现工作区控件");
+			}
+		}
+		assert.equal(intoWorkspace.afterExit["home-composer"].opacity, 0, "主页聊天框150ms内退完，不叠到工作区");
+		assert.equal(intoWorkspace.start["home-composer"].delay, 0);
+		assert.equal(intoWorkspace.start["home-composer"].duration, 150);
+		assert.ok(intoWorkspace.beforeHandoff["workspace-header"].opacity > 0.2);
+		assert.ok(intoWorkspace.beforeHandoff["workspace-composer"].opacity > 0.2);
+		assert.equal(intoWorkspace.end["home-background"].opacity, 1, "背景保持实色，通过滑出结束");
+		assert.ok(intoWorkspace.end["home-background"].y < bg.y);
+		assert.equal(intoWorkspace.start["home-background"].duration, 250);
+		assert.ok(bg.y < 0 && bg.opacity === 1, "背景保持实色向上slide退出");
 		assert.ok(
 			intoHome.start["home-background"].y < bg.y && intoHome.end["home-background"].y === 0,
 			"背景从相同方向反向进入",
@@ -227,7 +309,7 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 			"弧线与欢迎语反向上移",
 		);
 		assert.ok(
-			intoWorkspace.middle["home-composer"].y > 0 && intoWorkspace.start["workspace-composer"].y > 0,
+			intoWorkspace.late["home-composer"].y > 0 && intoWorkspace.start["workspace-composer"].y > 0,
 			"两个输入框各自原位下方入退场",
 		);
 		assert.equal(intoWorkspace.end["workspace-composer"].opacity, 1);
@@ -324,7 +406,7 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 		const darkWorkspace = await transition(browser, `.sidebar-session[href="/s/${id}"]`, "to-workspace", darkRoot);
 		const darkHome = await transition(browser, ".sidebar-new", "to-home", darkRoot);
 		assert.ok(
-			darkHome.middle["workspace-composer"].y > 0 && darkWorkspace.start["workspace-composer"].opacity < 0.01,
+			darkHome.late["workspace-composer"].y > 0 && darkWorkspace.start["workspace-composer"].opacity < 0.01,
 			JSON.stringify({ darkHome, darkWorkspace }),
 		);
 		const darkOpeningCoverage = await sidebarCoverage("dark");

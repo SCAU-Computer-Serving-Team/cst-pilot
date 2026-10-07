@@ -53,6 +53,12 @@ export function returnPath(value: string | null): string {
 export function loginPath(providerId: string, method: LoginMethod, destination = "/settings#accounts"): string {
 	return `/login?${new URLSearchParams({ provider: providerId, method, returnTo: returnPath(destination) })}`;
 }
+/** 登录成功依据实际完成的服务/方式，取消仍使用原returnTo。 */
+export function loginSuccessPath(providerId: string, method: LoginMethod, destination: string): string {
+	if (providerId === CSTOA_PROVIDER && method === "oauth") return "/account";
+	const path = returnPath(destination);
+	return path === "/account" ? "/settings#accounts" : path;
+}
 export function configurationPath(providerId: string, method: LoginMethod): string {
 	return `/settings/provider?${new URLSearchParams({ provider: providerId, method, returnTo: "/settings#accounts" })}`;
 }
