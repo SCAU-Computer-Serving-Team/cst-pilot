@@ -33,7 +33,7 @@ jobs:
           New-Item -ItemType Directory -Force agent/home/npm | Out-Null
           Copy-Item pack/extensions.package.json agent/home/npm/package.json
           Copy-Item pack/extensions.package-lock.json agent/home/npm/package-lock.json
-          npm ci --ignore-scripts --prefix agent/home/npm
+          npm ci --ignore-scripts --legacy-peer-deps --prefix agent/home/npm
       - run: node --test pack/test/*.test.mjs
         env:
           CST_WEB_TEST_TMPDIR: ${{ runner.temp }}

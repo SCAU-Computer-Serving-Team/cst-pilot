@@ -22,6 +22,6 @@ TUI 默认主题由 Pi 设置管理。Web 默认浅色，运行后保存到独�
 
 `--esbuild <本地esbuild入口>` 可复用已安装的 0.25.10。未指定时使用固定版本的 npx。`--skip-smoke` 仅用于检查装配目录，不能同时生成 ZIP。
 
-扩展依赖锁在 `extensions.package.json` 和 `extensions.package-lock.json`。新环境将它们分别复制到 `agent/home/npm/package.json`、`package-lock.json`，再运行 `npm ci --ignore-scripts --prefix agent/home/npm`。升级依赖时一起更新锁文件并重新验收。
+扩展依赖锁在 `extensions.package.json` 和 `extensions.package-lock.json`。新环境将它们分别复制到 `agent/home/npm/package.json`、`package-lock.json`，再运行 `npm ci --ignore-scripts --legacy-peer-deps --prefix agent/home/npm`。共享Pi SDK由官方运行时提供；安装采用锁文件生成时的peer依赖模式，防止npm另装最新SDK。升级依赖时一起更新锁文件并重新验收。
 
 发布输出目录中的 ZIP、VERSION 和 SHA256SUMS。不要再次压缩运行过的目录。自动冒烟覆盖启动、工具注册与Web API实际工具链路，实际TUI待机/浏览器与跨机诊断仍需按 `doc/test/README.md` 验收。
