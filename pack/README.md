@@ -14,7 +14,7 @@ node\node.exe pack\pack.mjs --official <官方ZIP或目录> --out <新的输出�
 
 TUI 默认主题由 Pi 设置管理。Web 默认浅色，运行后保存到独立 `web-settings.json`，不复制构建机的外观选择。项目`AGENTS.md`不参与发行，运行指令由`agent/home/APPEND_SYSTEM.md`提供，见[运行注意事项](../doc/Notice.md)。
 
-发行配置默认使用 OpenCode Go 的 `deepseek-flash`（DeepSeek V4.1 Flash）。打包时补全离线模型目录，不复制本机 `auth.json`；运行时由队员在本机登录。
+发行配置默认使用 OpenCode Go 的 `deepseek-v4.1-flash`（DeepSeek V4.1 Flash）。离线目录沿用 Pi 上游 `https://pi.dev/api/models`；打包时保留已有上游条目，缺少默认模型时补全。不复制本机 `auth.json`；运行时由队员在本机登录。
 
 `--version prev0.5` 指定试用包版本，VERSION、ZIP和BUILD-INFO同步；默认版本保持正式构建配置。
 
