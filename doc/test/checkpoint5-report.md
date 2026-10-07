@@ -31,12 +31,13 @@
 
 - TUI先完成一轮并落盘，Web接管相同会话ID和消息；空会话启动另有自动与实际副本覆盖。
 - 模型提出read调用，实际读取隔离文件并续答；完整发行配置保留14个开放工具。
-- 六页面浅深窗口、字体就绪与横向溢出检查；标题中线多时刻背景采样只作辅助，不推广为全部字形对比度验收。
-- 慢模型刷新保留运行态、停止可用；两会话并发、A停止不影响B、队列暂停与恢复。
+- 六页面浅深窗口、字体就绪与横向溢出检查；本轮标题中线采样因CDP调试调用超时未完成，不声明对比度通过。
+- 两会话并发、A停止不影响B、队列暂停与恢复通过；本轮慢模型刷新/停止的可见窗口操作因CDP调试调用超时未完成。
 - 收件箱写失败返回失败，不接受输入、不调用模型。故障仅注入隔离副本。
 - 双向slide自然播放、独立输入框、稳定消息快照、浅深/窄屏、侧栏中途反向、减少动态与缺少WebGL/原生快照。
 - 浏览器组合输入Enter不发送；CDP组合输入不等同Windows系统输入法。
-- 当前顺序端到端回归包含9项，其中新增错误/断线/退出完整浏览器链路；接口与纯函数测试作辅助。
+- 当前顺序端到端回归包含10项，覆盖错误/断线/退出与单工具时序。实际read先完成，受控慢目录工具继续运行；计时独立冻结，刷新/重开保留，同ID跨轮不覆盖。目录工具的等待由测试扩展控制，该用例不计为WizTree扫描性能验收。
+- 官方exe副本联调14组通过、2组未完成。失败保留为CDP调用超时，尚未定位具体原因，不直接归因产品。
 
 ## 未验证
 
@@ -48,15 +49,15 @@
 
 ## 证据
 
-本机`E:/tmp/2026-10-07/prev05/`：
+本机`E:/tmp/2026-10-07/prev05-fixes/`：
 
 | 路径 | 内容 |
 |---|---|
-| `final-validation/results.json`、`final-validation/run.log` | 16组实际发行副本联调结果、真实模型请求与未验证项 |
-| `final-validation/tui-keys.json` | 8组原始终端输入，进程与HTTP保持可用 |
-| `final-validation/offline.png`、`auth-expired.png`、`exit-actual-running.png` | 持续bar、认证提示与两任务退出确认 |
-| `final-validation/*-light.png`、`*-dark.png` | 六页面浅深窗口 |
-| `e2e-final.log`、`checks.json` | 顺序E2E与各类检查；以最后一次运行及交付报告为准 |
-| `smoke-confirm/` | 官方exe首次/再次启动及Web实际read续答、退出的自动冒烟 |
+| `headed-retry/results.json`、`headed-retry/run.log` | 14组通过、2组未完成的实际发行副本联调结果、真实模型请求与未验证项 |
+| `headed-retry/tui-keys.json` | 8组原始终端输入，进程与HTTP保持可用 |
+| `headed-retry/offline.png`、`auth-expired.png`、`exit-actual-running.png` | 持续bar、认证提示与两任务退出确认 |
+| `headed-retry/*-light.png`、`*-dark.png` | 六页面浅深窗口 |
+| `final-11.log`、`final-checks.json` | 顺序E2E与各类检查；以最后一次运行及交付报告为准 |
+| `release-final/_smoke/` | 官方exe首次/再次启动及Web实际read续答、退出的自动冒烟 |
 
 浏览器自动化证据另保留在当天`error-states/`和`page-motion/`。隔离home、profile、占位密钥和会话不提交或进入发行ZIP。
