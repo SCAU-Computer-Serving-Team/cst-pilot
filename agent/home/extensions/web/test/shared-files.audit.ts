@@ -301,6 +301,10 @@ test("独立主题：TUI更改主题不影响Web，Web保存不修改Pi", { time
 		const broken = await api("/api/settings");
 		assert.equal(broken.status, 503);
 		assert.ok(!JSON.stringify(broken.body).includes("invalid-private-value"));
+		for (const theme of [["dark"], null, 42, {}, "invalid"]) {
+			await writeFile(join(home, "web-settings.json"), JSON.stringify({ theme }));
+			assert.equal((await api("/api/settings")).status, 503, "主题必须是合法字符串，不能接受类型转换");
+		}
 		assert.equal((await api("/api/settings", "PATCH", { theme: "light" })).status, 200);
 		assert.equal((await api("/api/settings")).body.theme, "light");
 	}),
