@@ -22,6 +22,8 @@ python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 |---|---|---|
 | 后端格式与类型 | `npm run check --prefix agent` | biome 检查加 `tsc` |
 | 后端测试 | `npm run test:web --prefix agent` | Web 扩展的接口、会话与事件测试 |
+| 跨端共享验收 | `npm run test:web:shared-audit --prefix agent` | 独立 Pi 进程、真实工具、写权、上下文、配置与独立主题；CI 必跑 |
+| OAuth 测试 | `npm run test:oauth --prefix agent` | 模拟 OA 与真实 Pi 认证链路 |
 | 发行脚本测试 | `node --test pack/test/*.test.mjs` | 发行树校验与模型目录 |
 | 前端格式与规则 | `npm run lint --prefix src/web/frontend` | biome 检查，规则与配置在仓库根 `biome.json` |
 | 前端类型 | `npm run typecheck --prefix src/web/frontend` | react-router 类型生成加 `tsc` |
@@ -41,7 +43,7 @@ python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 
 改动的代码与文档同步提交：行为变了就更新对应 SPEC，待办完成了就更新 [doc/Todo.md](doc/Todo.md)。
 
-不要提交密钥与运行态。`.gitignore` 已覆盖 `auth.json`、`models.json`、`sessions/`、`web-access.log` 与便携运行时目录；新出现的运行产物也要一并加进去。
+不要提交密钥与运行态。`.gitignore` 已覆盖 `auth.json`、`models.json`、`web-settings.json`、`sessions/`、`web-access.log` 与便携运行时目录；新出现的运行产物也要一并加进去。
 
 ## 提交到上游
 

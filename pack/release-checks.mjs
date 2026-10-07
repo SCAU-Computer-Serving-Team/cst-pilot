@@ -7,13 +7,14 @@ export const sha256 = (data) => crypto.createHash('sha256').update(data).digest(
 // 运行态只能出现在测试副本；干净发行树出现这些路径就拒绝打包。
 export function checkReleaseTree(root, files) {
   for (const rel of files) {
+    if (path.posix.basename(rel).toLowerCase() === 'agents.md') throw new Error(`项目 AGENTS.md 不得进入发行包: ${rel}`);
     if (/^pi\.exe$/i.test(rel)) {
       throw new Error(`pi.exe 不得位于发行根（应装配为 agent/.runtime/prx.bin）: ${rel}`);
     }
     if (/^agent\/home\/extensions\/web\/test\//i.test(rel)) {
       throw new Error(`Web 测试文件不得进入发行包: ${rel}`);
     }
-    if (/(^|\/)(\.state|\.git|sessions|\.cache)(\/|$)|^agent\/home\/(auth\.json|models\.json|web-search\.json|fff\/|npm\/)|^wiztree\/(tmp\/|WizTree3\.ini(?:\.bad)?$)|(^|\/)\.env(?:\.|$)/i.test(rel)) {
+    if (/(^|\/)(\.state|\.git|sessions|\.cache)(\/|$)|^agent\/home\/(auth\.json|models\.json|web-settings\.json|web-search\.json|fff\/|npm\/)|^wiztree\/(tmp\/|WizTree3\.ini(?:\.bad)?$)|(^|\/)\.env(?:\.|$)/i.test(rel)) {
       throw new Error(`发行树含运行状态或凭据路径: ${rel}`);
     }
     if (/^agent\/home\/extensions\/web\/static\/fonts\/.*\.otf$/i.test(rel)) {
@@ -41,6 +42,13 @@ export function checkReleaseTree(root, files) {
 // Web 静态产物与随包许可证的固定清单。缺失即拒绝打包，避免发行包静默少文件。
 const WEB_STATIC = 'agent/home/extensions/web/static';
 export const REQUIRED_RELEASE_FILES = [
+  'agent/home/APPEND_SYSTEM.md',
+  'agent/home/extensions/runtime/index.ts',
+  'agent/home/extensions/runtime/adapter.ts',
+  'agent/home/extensions/runtime/owner.ts',
+  'agent/home/extensions/runtime/configuration.ts',
+  'agent/home/extensions/runtime/package.json',
+  'agent/home/extensions/web/server/session/web-settings.ts',
   'LICENSE',
   'THIRD-PARTY-NOTICES.md',
   'licenses/pi-LICENSE.txt',

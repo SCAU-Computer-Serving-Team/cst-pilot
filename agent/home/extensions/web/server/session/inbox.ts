@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ImageRef } from "./attachments.ts";
+import { replaceFile } from "./replace-file.ts";
 
 export type Delivery = "queue" | "steer";
 export type ItemDelivery = Delivery | "direct";
@@ -74,7 +75,7 @@ export class SessionInbox {
 		const temp = `${this.file}.${randomUUID()}.tmp`;
 		try {
 			await writeFile(temp, JSON.stringify(next), { flag: "wx" });
-			await rename(temp, this.file);
+			await replaceFile(temp, this.file);
 		} catch (error) {
 			await rm(temp, { force: true }).catch(() => undefined);
 			throw error;

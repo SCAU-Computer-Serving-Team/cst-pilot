@@ -12,6 +12,7 @@ export function matchToolResults(entries: Entry[]): Map<string, Map<string, Mess
 			for (const call of message.content) {
 				if (call.type !== "toolCall") continue;
 				if (!groups.has(key)) groups.set(key, new Map());
+				if (call.execution?.result) groups.get(key)!.set(call.id, call.execution.result);
 				pending.set(call.id, [...(pending.get(call.id) ?? []), key]);
 			}
 		} else if (message.role === "toolResult" && message.toolCallId) {

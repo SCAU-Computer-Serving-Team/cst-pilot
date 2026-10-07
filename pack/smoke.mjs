@@ -2,12 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
+import {smokeWeb} from './web-smoke.mjs';
 
 // 在独立副本启动实际发行程序；模拟模型只检查工具注册，不执行系统诊断。
 export async function smokeRelease(source, workDir) {
   if (fs.existsSync(workDir)) throw new Error(`冒烟目录已存在，拒绝覆盖: ${workDir}`);
   const root = path.join(workDir, 'cst-pilot');
   fs.cpSync(source, root, { recursive: true });
+  fs.writeFileSync(path.join(root,'agent/home/telemetry.json'),JSON.stringify({enabled:false}));
+  const fixture=path.join(root,'web-smoke-fixture.txt');fs.writeFileSync(fixture,'CST_WEB_FIXTURE_OK');
   const seen = new Set();
   let requests = 0;
   const server = http.createServer(async (req, res) => {
@@ -18,7 +21,9 @@ export async function smokeRelease(source, workDir) {
       requests++;
       for (const tool of body.tools ?? []) seen.add(tool.function.name);
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-      for (const choice of [{ delta: { role: 'assistant', content: 'CST_SMOKE_OK' }, finish_reason: null }, { delta: {}, finish_reason: 'stop' }]) {
+      const web=raw.includes('CST_WEB_SMOKE'),tool=web&&body.messages.at(-1)?.role!=='tool';
+      const delta=tool?{role:'assistant',tool_calls:[{index:0,id:'pack-read',type:'function',function:{name:'read',arguments:JSON.stringify({path:fixture})}}]}:{role:'assistant',content:web?'CST_WEB_SMOKE_OK':'CST_SMOKE_OK'};
+      for (const choice of [{ delta, finish_reason: null }, { delta: {}, finish_reason: tool?'tool_calls':'stop' }]) {
         res.write(`data: ${JSON.stringify({ id: 'smoke', object: 'chat.completion.chunk', created: 1, model: 'smoke', choices: [{ index: 0, ...choice }] })}\n\n`);
       }
       res.end('data: [DONE]\n\n');
@@ -65,6 +70,7 @@ export async function smokeRelease(source, workDir) {
     for (const name of ['write', 'edit', 'bash', 'powershell']) {
       if (seen.has(name)) throw new Error(`冒烟发现不应向模型开放的工具: ${name}`);
     }
+    await smokeWeb(root,workDir,env);
     fs.writeFileSync(path.join(workDir, 'smoke-result.json'), JSON.stringify({ passed: true, requests, tools: [...seen] }, null, 2));
   } finally {
     server.closeAllConnections();

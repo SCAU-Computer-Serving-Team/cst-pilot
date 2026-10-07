@@ -35,9 +35,9 @@ test("四个模型服务配置帧使用 816 设置内容列，保持页面节点
   }
 });
 
-test("画布导航覆盖八个主题，浅深配置帧成对排列", () => {
+test("画布导航覆盖九个主题，浅深配置帧成对排列", () => {
   assert.ok(web.children.some((node) => node.name === "00 · 画布导航"));
-  assert.equal(web.children.filter((node) => node.name?.includes("分区标题")).length, 8);
+  assert.equal(web.children.filter((node) => node.name?.includes("分区标题")).length, 9);
   for (const [lightId, darkId] of [["rdTGN", "n3jW1"], ["i1jzTi", "LfOD8"]]) {
     const light = web.children.find((node) => node.id === lightId);
     const dark = web.children.find((node) => node.id === darkId);
@@ -88,17 +88,17 @@ test("主页切换拆分背景、品牌、欢迎语、页脚及两处输入区�
   assert.match(css, /::view-transition-group\(\*\).*animation-duration: 0s !important/su);
 });
 
-test("动效令牌与 DESIGN.md 的 25 项刻度一致", () => {
+test("动效令牌与 DESIGN.md 的 26 项刻度一致", () => {
   const values = {
     "duration-stagger": "40ms", "duration-micro": "80ms", "duration-quick": "150ms",
     "duration-fast": "250ms", "duration-medium": "350ms", "duration-slow": "400ms", "duration-very-slow": "500ms",
-    "ease-smooth-out": "cubic-bezier(.22, 1, .36, 1)", "ease-in-out": "ease-in-out", "ease-out": "ease-out",
+    "ease-smooth-out": "cubic-bezier(.22, 1, .36, 1)", "ease-smooth-in": "cubic-bezier(.64, 0, .78, 0)", "ease-in-out": "ease-in-out", "ease-out": "ease-out",
     "ease-linear": "linear", "ease-bounce": "cubic-bezier(.34, 1.36, .64, 1)", "ease-bounce-strong": "cubic-bezier(.34, 3.85, .64, 1)",
     "distance-micro": "4px", "distance-small": "6px", "distance-base": "8px", "distance-medium": "12px", "distance-large": "30px",
     "scale-large": ".96", "scale-medium": ".97", "scale-small": ".98", "scale-tiny": ".99",
     "blur-small": "2px", "blur-medium": "3px", "blur-large": "8px",
   };
-  assert.equal(Object.keys(values).length, 25);
+  assert.equal(Object.keys(values).length, 26);
   for (const [name, value] of Object.entries(values)) {
     assert.ok(css.includes(`--${name}: ${value};`), name);
     assert.ok(rules.includes(`\`--${name}\``), name);

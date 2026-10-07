@@ -175,7 +175,7 @@ test("an extension question can be answered once from another browser request", 
 test("settings expose only supported fields and persist theme changes", async () => {
 	const initial = await fetch(`${origin}/api/settings`);
 	assert.equal(initial.status, 200);
-	assert.deepEqual(Object.keys(await initial.json()).sort(), ["theme"]);
+	assert.deepEqual(await initial.json(), { theme: "light" });
 	const changed = await fetch(`${origin}/api/settings`, {
 		method: "PATCH",
 		headers: {

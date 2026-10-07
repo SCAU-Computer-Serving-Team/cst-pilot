@@ -13,6 +13,8 @@ const result: Message = { role: "toolResult", timestamp: 1, content: [{ type: "t
 
 test("only a live call with no result spins", () => {
 	assert.equal(toolState(undefined, undefined, true), "running");
+	assert.equal(toolState(undefined, undefined, true, false), "pending");
+	assert.equal(toolState(result, "success", true, false), "success");
 	assert.equal(toolState(undefined, undefined, false), "interrupted");
 	assert.equal(toolState(undefined, undefined), "interrupted");
 	assert.equal(toolState(result, "success", true), "success");

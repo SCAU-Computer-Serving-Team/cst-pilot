@@ -2,14 +2,15 @@ import type { ContentPart, Message } from "../data/web-state";
 import type { CardView } from "./map-tool";
 
 type Call = Extract<ContentPart, { type: "toolCall" }>;
-export type ToolState = CardView["status"] | "running" | "interrupted";
+export type ToolState = CardView["status"] | "pending" | "running" | "interrupted";
 
 export function toolState(
 	result: Message | undefined,
 	status: CardView["status"] | undefined,
 	live = false,
+	started = true,
 ): ToolState {
-	if (!result) return live ? "running" : "interrupted";
+	if (!result) return live ? (started ? "running" : "pending") : "interrupted";
 	return result.isError ? "error" : (status ?? "success");
 }
 

@@ -44,7 +44,7 @@
 | 通道 | 入口 | 说明 |
 |---|---|---|
 | TUI | `pi.cmd` | 当前可用通道；启动 Web 后留作待机宿主，停止接收交互 |
-| Web | 启动 pi 后执行 `/web` | 开发版默认接管会话并提供本机回环接口；六个页面与工具卡片已接入，现场联调与发行接入待完成 |
+| Web | 启动 pi 后执行 `/web` | 提供本机回环接口与六个页面，预构建资源已接入便携试用包；正式发行与目标环境验收待完成 |
 
 ## Web 通道需求
 
@@ -56,11 +56,12 @@
 | W4 | 兼容版以 2020 年内核（Chromium 86 级）为目标，**排在 MVP 之后**；React 19 与 react-router 的产物已实测通过，Tailwind 需分两版 |
 | W5 | 在本项目开放的能力范围内完整替代 TUI 操作界面，包括会话管理、模型与凭据配置，以及 `/new`、`/resume`、`/model`、`/tree`、`/settings`、`/login`、`/compact` 等内置命令；TUI 通道保留 |
 | W6 | 基于 pi 内核，在 TUI 中执行 `/web` 后由 Web 接管操作；TUI 进程和窗口保留待机，禁用输入。Web 共用会话记录、模型配置与凭据；同一会话只有一个执行实例，工具权限由后端控制 |
+| W10 | TUI 与 Web 主题分别保存、互不覆盖；Web 默认浅色 |
 | W7 | 随便携发行版提供预构建产物，现场无需安装运行时或执行构建命令 |
 | W8 | 遵循现代本地 Web 的导航行为，支持页面地址、刷新与前进后退；Web 内切换会话不中断任务，不同会话可以同时执行 |
 | W9 | TUI 先释放已落盘的原会话，Web 再接管；页面关闭或断连不释放仍在执行的会话。Web 各端可同时打开同一会话，执行状态共享 |
 
-页面与多会话要求见 [会话运行与并行](web/SPEC/session-runtime.md)，地址与接口见 [页面地址与接口设计](web/SPEC/app-router.md)，工程组织见 [前端设计](design/web/frontend.md)。工程约束见 [Web 技术决策](web/research/tech-decisions.md)：在 pi 进程内自建 runtime 承载 Web 会话，不新增进程、不改 Pi 内核；页面为静态产物，运行期只有一个服务器；两版共用 React 19，Tailwind 分版。Web 使用机主电脑上的浏览器；系统范围保持 Windows 10/11 x64，PE 等环境单独验证。
+页面与多会话要求见 [会话运行与并行](web/SPEC/session-runtime.md)，地址与接口见 [页面地址与接口设计](web/SPEC/app-router.md)，工程组织见 [前端设计](design/web/frontend.md)。工程约束见 [Web 技术决策](web/research/tech-decisions.md)：在 pi 进程内自建 runtime 承载 Web 会话，不新增宿主进程、不修改 Pi 源码或官方可执行文件；页面为静态产物，运行期只有一个服务器；两版共用 React 19，Tailwind 分版。Web 使用机主电脑上的浏览器；系统范围保持 Windows 10/11 x64，PE 等环境单独验证。
 
 ## 约束
 

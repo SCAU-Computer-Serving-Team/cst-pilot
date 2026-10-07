@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentSession, AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import {
@@ -8,6 +8,11 @@ import {
 	createAgentSessionServices,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { installRuntimeAdapter, registerRuntimeSession } from "../../../runtime/adapter.ts";
+import { checkSharedConfiguration } from "../../../runtime/configuration.ts";
+import { ownSession } from "../../../runtime/owner.ts";
+import { replaceFile } from "./replace-file.ts";
+import { ToolExecutions } from "./tool-executions.ts";
 import { WebUiBridge } from "./ui.ts";
 
 /** 遥测扩展挂在 globalThis 的定稿入口；扩展未启用时无副作用。 */
@@ -41,6 +46,7 @@ const WEB_TOOLS = [
 export interface WebSessionSlot {
 	readonly session: AgentSession;
 	readonly ui: WebUiBridge;
+	readonly execution: ToolExecutions;
 	readonly id: string;
 	readonly file?: string;
 }
@@ -65,11 +71,24 @@ export class WebSessionPool {
 
 	constructor(options: WebSessionPoolOptions) {
 		this.options = options;
+		installRuntimeAdapter();
+	}
+
+	get cwd(): string {
+		return this.options.cwd;
 	}
 
 	getServices(): Promise<AgentSessionServices> {
 		this.canonical ??= this.options.withLoader(() =>
-			createAgentSessionServices({ cwd: this.options.cwd, agentDir: this.options.agentDir }),
+			createAgentSessionServices({
+				cwd: this.options.cwd,
+				agentDir: this.options.agentDir,
+				resourceLoaderOptions: {
+					noContextFiles: true,
+					noSkills: true,
+					additionalSkillPaths: [join(this.options.agentDir, "skills")],
+				},
+			}),
 		);
 		return this.canonical;
 	}
@@ -80,6 +99,7 @@ export class WebSessionPool {
 		const task = this.getServices().then(async (services) => {
 			await services.settingsManager.reload();
 			await services.modelRuntime.refresh({ allowNetwork: false });
+			checkSharedConfiguration(services.settingsManager, services.modelRuntime);
 			return services;
 		});
 		this.refreshing = task;
@@ -92,11 +112,30 @@ export class WebSessionPool {
 	}
 
 	private async build(manager: SessionManager, startReason: "new" | "resume" | "fork"): Promise<WebSessionSlot> {
+		const release = await ownSession(this.options.agentDir, manager.getSessionId());
+		try {
+			return await this.buildOwned(manager, startReason, release);
+		} catch (error) {
+			release();
+			throw error;
+		}
+	}
+
+	private async buildOwned(
+		manager: SessionManager,
+		startReason: "new" | "resume" | "fork",
+		release: () => void,
+	): Promise<WebSessionSlot> {
 		const canonical = await this.getServices();
 		const services = await this.options.withLoader(() =>
 			createAgentSessionServices({
-				cwd: this.options.cwd,
+				cwd: manager.getCwd(),
 				agentDir: this.options.agentDir,
+				resourceLoaderOptions: {
+					noContextFiles: true,
+					noSkills: true,
+					additionalSkillPaths: [join(this.options.agentDir, "skills")],
+				},
 				settingsManager: canonical.settingsManager,
 				modelRuntime: canonical.modelRuntime,
 			}),
@@ -111,12 +150,19 @@ export class WebSessionPool {
 			// 遥测按会话起因分类；缺省会是 startup，丢失 new/resume/fork 语义。
 			sessionStartEvent: { type: "session_start", reason: startReason },
 		});
+		registerRuntimeSession(session, this.options.agentDir, release);
 		const ui = new WebUiBridge();
 		try {
 			if (extensionsResult.errors.length) throw new Error("Web 会话扩展加载失败");
 			await session.bindExtensions({ uiContext: ui.context(), mode: "rpc" });
 			if (this.closed) throw new Error("Web 已退出");
-			return { session, ui, id: session.sessionId, file: session.sessionFile };
+			return {
+				session,
+				ui,
+				execution: new ToolExecutions(session),
+				id: session.sessionId,
+				file: session.sessionFile,
+			};
 		} catch (error) {
 			ui.close();
 			session.dispose();
@@ -137,6 +183,7 @@ export class WebSessionPool {
 		const task = (async () => {
 			const slot = await this.build(manager(), startReason);
 			if (slot.id !== key) {
+				slot.execution.close();
 				slot.session.dispose();
 				throw new Error("会话 ID 与记录不一致");
 			}
@@ -268,7 +315,7 @@ export class WebSessionPool {
 		const temp = `${file}.${randomUUID()}.tmp`;
 		try {
 			await writeFile(temp, JSON.stringify(entries), { flag: "wx" });
-			await rename(temp, file);
+			await replaceFile(temp, file);
 		} catch (error) {
 			await rm(temp, { force: true }).catch(() => undefined);
 			throw error;
@@ -303,9 +350,11 @@ export class WebSessionPool {
 		const source = await this.openSaved(id);
 		if (source.session.isStreaming) throw new Error("会话正在执行");
 		if (!source.session.sessionManager.getEntry(entryId)) throw new Error("分支节点不存在");
-		const file = source.session.sessionManager.createBranchedSession(entryId);
+		if (!source.file) throw new Error("会话尚未保存");
+		// 在独立管理器上创建分支，源实例及其写权保持原ID。
+		const manager = SessionManager.open(source.file);
+		const file = manager.createBranchedSession(entryId);
 		if (!file) throw new Error("会话尚未保存");
-		const manager = SessionManager.open(file, this.options.sessionDir);
 		return this.open(manager.getSessionId(), () => manager, "fork");
 	}
 
@@ -324,6 +373,7 @@ export class WebSessionPool {
 			tombstoned = true;
 			finalizeTelemetrySession(id, "delete");
 			slot.ui.close();
+			slot.execution.close();
 			slot.session.dispose();
 			this.slots.delete(id);
 			if (matches.length === 1) await rm(matches[0].path, { force: true });
@@ -402,7 +452,7 @@ export class WebSessionPool {
 	}
 
 	snapshot(): { id: string; running: boolean }[] {
-		return [...this.slots.values()].map(({ id, session }) => ({ id, running: session.isStreaming }));
+		return [...this.slots.values()].map(({ id, session }) => ({ id, running: !session.isIdle }));
 	}
 
 	/** Never dispose a writer while it is still running. */
@@ -410,8 +460,16 @@ export class WebSessionPool {
 		this.closed = true;
 		await this.createdWrites;
 		await Promise.allSettled([...this.opening.values()]);
-		await Promise.allSettled([...this.slots.values()].map(({ session }) => session.abort()));
-		for (const { session, ui, id } of this.slots.values()) {
+		const stopped = await Promise.allSettled([...this.slots.values()].map(({ session }) => session.abort()));
+		if (
+			stopped.some((result) => result.status === "rejected") ||
+			[...this.slots.values()].some(({ session }) => !session.isIdle)
+		) {
+			this.closed = false;
+			throw new Error("会话尚未停止，未关闭程序。请稍后重试。");
+		}
+		for (const { session, ui, id, execution } of this.slots.values()) {
+			execution.close();
 			finalizeTelemetrySession(id, "quit");
 			ui.close();
 			session.dispose();

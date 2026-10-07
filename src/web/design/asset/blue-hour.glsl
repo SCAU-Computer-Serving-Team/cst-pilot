@@ -8,11 +8,6 @@ precision highp float;
 uniform vec2 u_resolution;
 /** @time */
 uniform float u_time;
-/** Region fade progress; 0 leaves the background unchanged. */
-uniform float u_exit_progress;
-/** Initial lane offset, held while the animated edges continue moving. */
-uniform float u_exit_origin;
-uniform float u_css_width;
 /**
  * @label Animation speed (0 = still)
  * @default 30
@@ -83,11 +78,6 @@ vec3 gradientSample(float y, float ridge, float facet) {
     return palette(clamp(0.02 + 0.96 * shaped + facet, 0.0, 1.0));
 }
 
-float bandOpacity(float order, float count) {
-    float delay = clamp(order, 0.0, count) / count * 0.45;
-    return 1.0 - smoothstep(0.0, 1.0, (u_exit_progress - delay) / 0.55);
-}
-
 void main() {
     vec2 uv = vec2(gl_FragCoord.x / u_resolution.x, 1.0 - gl_FragCoord.y / u_resolution.y);
     float time = u_phase + u_time * (u_speed / 100.0) * 1.2;
@@ -112,22 +102,5 @@ void main() {
     // Static grain: no flicker. Matches the SVG's overlay opacity, not its noise bitmap.
     float grain = fract(sin(dot(floor(gl_FragCoord.xy), vec2(12.9898, 78.233))) * 43758.5453);
     vec3 overlay = mix(2.0 * color * grain, 1.0 - 2.0 * (1.0 - color) * (1.0 - grain), step(vec3(0.5), color));
-    float alpha = 1.0;
-    if (u_exit_progress > 0.0) {
-        float order = lane + u_exit_origin;
-        alpha = bandOpacity(order, count);
-        float cssWidth = u_css_width > 0.0 ? u_css_width : u_resolution.x;
-        float feather = min(4.0 / max(1.0, cssWidth), 0.2 / count);
-        if (inner > 0.0 && fromCenter - inner < feather) {
-            float previous = bandOpacity(order - 1.0, count);
-            alpha = mix((previous + alpha) * 0.5, alpha, smoothstep(0.0, feather, fromCenter - inner));
-        } else if (outer < 1.0 && outer - fromCenter < feather) {
-            float next = bandOpacity(order + 1.0, count);
-            alpha = mix((alpha + next) * 0.5, alpha, smoothstep(0.0, feather, outer - fromCenter));
-        }
-        // Overlap a continuous radial envelope with the low-weight animated bands.
-        float envelopeAlpha = 1.0 - smoothstep(0.0, 1.0, (u_exit_progress - fromCenter * 0.45) / 0.55);
-        alpha = mix(envelopeAlpha, alpha, 0.2);
-    }
-    gl_FragColor = vec4(mix(color, overlay, u_grain), alpha);
+    gl_FragColor = vec4(mix(color, overlay, u_grain), 1.0);
 }

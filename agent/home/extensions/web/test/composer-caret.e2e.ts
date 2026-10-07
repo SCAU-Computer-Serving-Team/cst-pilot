@@ -14,6 +14,8 @@ test("TAG 光标：选择命令、继续输入、草稿恢复、移除和文件�
 	const root = join(await testRoot(), "composer-caret");
 	await mkdir(root, { recursive: true });
 	const home = await mkdtemp(join(root, "home-"));
+	await writeFile(join(home, "package-caret.txt"), "FILE_REFERENCE_FIXTURE");
+	await writeFile(join(home, "web-settings.json"), JSON.stringify({ theme: "dark" }));
 	const received: string[] = [];
 	const model = createServer(async (request, response) => {
 		const chunks: Buffer[] = [];

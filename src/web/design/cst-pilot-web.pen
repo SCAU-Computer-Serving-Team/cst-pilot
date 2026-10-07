@@ -229,6 +229,16 @@
           "fontFamily": "Source Han Sans CN",
           "fontSize": 20,
           "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "w50YMP",
+          "name": "09导航项",
+          "fill": "#1A2024",
+          "content": "09  错误与退出    ·    x 0 / y 23026",
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 20,
+          "fontWeight": "normal"
         }
       ]
     },
@@ -7388,7 +7398,7 @@
                   "fill": "#5F676C",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "离开主页：时长倍率 0.8，背景原位平滑淡出 400ms，连续中心向外透明度包络与实时色带遮罩按 80% / 20% 叠加，单区域淡出占 55%，前 45% 依次开始，边界两侧各约 2px 柔化，无转场位移；背景覆盖工作区顶栏、正文和输入框，主页退场内容保留在背景上方。弧线原位淡出 280ms。返回主页：背景下落、弧线上方 30px 入场，均 500ms。\n聊天框各自独立：向下 12px；主页退出 280ms / 工作台进入 320ms，局部模糊 1px；返回工作台退出 350ms / 主页入场 500ms，局部模糊 2px。\n主页页脚、欢迎语返回入场 500ms；页脚下方 12px、欢迎语上方 12px，2px 模糊；分区推进 linear，其余动效 smooth-out。\n标题栏上方 8px、消息下方 8px：进入 200ms，局部模糊 1px / 1.5px；返回退出 250ms。返回主页聊天框错位 40ms、页脚 80ms，总时长 580ms，退出无延迟。\n侧栏固定宽度位移：开 400ms / 关 350ms；主页元素平滑重新居中，支持中途反向；展开全程背景覆盖空隙。\n背景不额外模糊；减少动态停用位移，缺少原生快照时保留局部入场。",
+                  "content": "双向切页：背景向上slide退出500ms / 从上方反向进入700ms，位移覆盖整个主区高度；弧线退出上移30px / 入场从上方30px，欢迎语上方12px。切页元素进入使用smooth-out cubic-bezier(0.22,1,0.36,1)，退出使用时间反向smooth-in cubic-bezier(0.64,0,0.78,0)；时长与错位保持独立，背景不额外模糊。输入框各自向下12px退出 / 从下方12px进入：主页退出350ms、工作区进入400ms，返回工作区退出490ms、主页进入700ms；局部模糊2px。页脚退出下移12px，返回700ms、错位112ms；主页输入框错位56ms，返回总812ms。标题栏上方8px、消息下方8px，前向250ms、返回350ms，消息入场错位40ms；退出无延迟。侧栏固定宽度位移：开400ms / 关350ms，连续居中，支持中途反向。减少动态停用位移，缺少原生快照时保留局部入场。",
                   "lineHeight": 1.5,
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 13,
@@ -87247,6 +87257,1295 @@
               ]
             }
           ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "q6c4dk",
+      "x": 0,
+      "y": 23202,
+      "name": "09 · 错误与退出 · 浅色",
+      "clip": true,
+      "width": 1240,
+      "height": 1680,
+      "fill": "#FFFFFF",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 32,
+      "children": [
+        {
+          "type": "text",
+          "id": "Yopsv",
+          "name": "标题",
+          "fill": "#202020",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "错误、连接与安全退出",
+          "lineHeight": 1.5,
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 24,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "T8pvl",
+          "name": "说明",
+          "fill": "#646464",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "提示说明原因与恢复动作；技术详情默认收起。断线提示持续显示，重连成功后撤下。",
+          "lineHeight": 1.5,
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "R6gB1D",
+          "name": "断线横幅",
+          "width": "fill_container",
+          "height": 100,
+          "fill": "#F6F6F6",
+          "cornerRadius": 8,
+          "stroke": "#E0E0E0",
+          "strokeWidth": 1,
+          "gap": 12,
+          "padding": 16,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "SyNub",
+              "name": "状态图标",
+              "width": 18,
+              "height": 18,
+              "icon": "wifi-off",
+              "library": "lucide",
+              "fill": "#8C5A00"
+            },
+            {
+              "type": "frame",
+              "id": "PSji9",
+              "name": "内容",
+              "width": "fill_container",
+              "height": 60,
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "FMv3Z",
+                  "name": "主提示",
+                  "fill": "#202020",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "与 CST Pilot 的连接已断开",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 16,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "B6yN8u",
+                  "name": "恢复说明",
+                  "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "正在重连。请确认终端仍在运行；未发送内容会保留。",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "zU9wH",
+              "name": "重新连接",
+              "height": 32,
+              "fill": "#F6F6F6",
+              "cornerRadius": 6,
+              "gap": 8,
+              "padding": [
+                0,
+                12
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "LOk8h",
+                  "name": "按钮文字",
+                  "fill": "#0665BE",
+                  "content": "重新连接",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Zq11L",
+          "name": "认证失效",
+          "width": "fill_container",
+          "height": 100,
+          "fill": "#F6F6F6",
+          "cornerRadius": 8,
+          "stroke": "#E0E0E0",
+          "strokeWidth": 1,
+          "gap": 12,
+          "padding": 16,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "TSYmz",
+              "name": "状态图标",
+              "width": 18,
+              "height": 18,
+              "icon": "key-round",
+              "library": "lucide",
+              "fill": "#8C5A00"
+            },
+            {
+              "type": "frame",
+              "id": "T0UTM",
+              "name": "内容",
+              "width": "fill_container",
+              "height": 60,
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Tn3tF",
+                  "name": "主提示",
+                  "fill": "#202020",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "模型服务需要重新登录",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 16,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "QGiYP",
+                  "name": "恢复说明",
+                  "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "当前服务拒绝了凭据。请重新登录后再发送消息。",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "C30Tkb",
+              "name": "重新登录",
+              "height": 32,
+              "fill": "#F6F6F6",
+              "cornerRadius": 6,
+              "gap": 8,
+              "padding": [
+                0,
+                12
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "nPpXC",
+                  "name": "按钮文字",
+                  "fill": "#0665BE",
+                  "content": "重新登录",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "tGpNY",
+          "name": "写入失败",
+          "width": "fill_container",
+          "height": 100,
+          "fill": "#F6F6F6",
+          "cornerRadius": 8,
+          "stroke": "#E0E0E0",
+          "strokeWidth": 1,
+          "gap": 12,
+          "padding": 16,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "qUnDA",
+              "name": "状态图标",
+              "width": 18,
+              "height": 18,
+              "icon": "circle-alert",
+              "library": "lucide",
+              "fill": "#BF091B"
+            },
+            {
+              "type": "frame",
+              "id": "sWbUy",
+              "name": "内容",
+              "width": "fill_container",
+              "height": 60,
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Jw04l",
+                  "name": "主提示",
+                  "fill": "#202020",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "消息未能保存",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 16,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "o3Lifi",
+                  "name": "恢复说明",
+                  "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "请检查工具包是否可写或空间是否充足。输入内容已保留。",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "lOJZs",
+              "name": "重试",
+              "height": 32,
+              "fill": "#F6F6F6",
+              "cornerRadius": 6,
+              "gap": 8,
+              "padding": [
+                0,
+                12
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "P3X4y",
+                  "name": "按钮文字",
+                  "fill": "#0665BE",
+                  "content": "重试",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "u08Pi",
+          "name": "模型失败",
+          "width": "fill_container",
+          "height": 100,
+          "fill": "#F6F6F6",
+          "cornerRadius": 8,
+          "stroke": "#E0E0E0",
+          "strokeWidth": 1,
+          "gap": 12,
+          "padding": 16,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "Ln29a",
+              "name": "状态图标",
+              "width": 18,
+              "height": 18,
+              "icon": "circle-alert",
+              "library": "lucide",
+              "fill": "#BF091B"
+            },
+            {
+              "type": "frame",
+              "id": "nacmI",
+              "name": "内容",
+              "width": "fill_container",
+              "height": 60,
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "FcxO3",
+                  "name": "主提示",
+                  "fill": "#202020",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "模型请求未完成",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 16,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "nM8RF",
+                  "name": "恢复说明",
+                  "fill": "#646464",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "服务暂时不可用。消息已保存，可检查模型设置后重试。",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "O8jTP6",
+              "name": "模型设置",
+              "height": 32,
+              "fill": "#F6F6F6",
+              "cornerRadius": 6,
+              "gap": 8,
+              "padding": [
+                0,
+                12
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "F3zhb",
+                  "name": "按钮文字",
+                  "fill": "#0665BE",
+                  "content": "模型设置",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "h9kPtv",
+          "name": "错误详情 · 展开示例",
+          "width": "fill_container",
+          "height": 100,
+          "fill": "#F6F6F6",
+          "cornerRadius": 8,
+          "layout": "vertical",
+          "gap": 12,
+          "padding": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "QtwFm",
+              "name": "详情入口",
+              "fill": "#646464",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "技术详情 ▾",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "l74458",
+              "name": "错误原文",
+              "fill": "#646464",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "HTTP 401 · Authentication failed — 示例技术信息，仅用于排查。",
+              "lineHeight": 1.6,
+              "fontFamily": "JetBrains Mono",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "W5GZ9",
+          "name": "退出菜单说明",
+          "fill": "#202020",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "账号菜单底部：退出 CST Pilot（与退出 CSTOA 分开）",
+          "lineHeight": 1.5,
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 16,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "TTena",
+          "name": "退出确认弹窗",
+          "width": 520,
+          "height": 330,
+          "fill": "#FFFFFF",
+          "cornerRadius": 16,
+          "stroke": "#E0E0E0",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 16,
+          "padding": 24,
+          "children": [
+            {
+              "type": "text",
+              "id": "za2BH",
+              "name": "弹窗标题",
+              "fill": "#202020",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "退出 CST Pilot？",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 20,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "tVsIn",
+              "name": "任务说明",
+              "fill": "#202020",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "还有 2 个会话正在运行。退出将停止这些任务，并暂停未发送队列。",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "DN3rH",
+              "name": "会话列表",
+              "fill": "#646464",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "硬件检查、启动项诊断",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "fPVm6",
+              "name": "保存说明",
+              "fill": "#646464",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "已完成的消息会保留。再次启动后，未确认的任务不会自动重放。",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "b6xT4I",
+              "name": "确认操作",
+              "width": "fill_container",
+              "height": 32,
+              "gap": 12,
+              "justifyContent": "end",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "AJlvN",
+                  "name": "继续使用",
+                  "height": 32,
+                  "fill": "#F6F6F6",
+                  "cornerRadius": 6,
+                  "gap": 8,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "FjMkY",
+                      "name": "按钮文字",
+                      "fill": "#202020",
+                      "content": "继续使用",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "sF39n",
+                  "name": "停止任务并退出",
+                  "height": 32,
+                  "fill": "#F6F6F6",
+                  "cornerRadius": 6,
+                  "gap": 8,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "dbcou",
+                      "name": "按钮文字",
+                      "fill": "#BF091B",
+                      "content": "停止任务并退出",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "MZmzG",
+          "name": "空闲退出规则",
+          "fill": "#646464",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "无运行任务：显示“退出将关闭本机服务和待机终端，已保存的会话会保留。”，确认按钮为“退出程序”。",
+          "lineHeight": 1.5,
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "RcNVM",
+          "name": "退出完成页",
+          "fill": "#202020",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "CST Pilot 已退出。会话已保存。需要继续时，请重新运行工具包中的 pi.cmd。",
+          "lineHeight": 1.5,
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 16,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "rxrXu",
+          "name": "交互规范",
+          "fill": "#646464",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "弹窗打开聚焦取消按钮；Esc关闭；Tab限制在弹窗内；确认期间禁用重复点击；失败显示原因并允许重试。提示条不自动重发消息；断线不弹强制模态；技术详情默认收起。",
+          "lineHeight": 1.5,
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "xsI8b",
+      "x": 1360,
+      "y": 23202,
+      "name": "09 · 错误与退出 · 深色",
+      "clip": true,
+      "width": 1240,
+      "height": 1680,
+      "fill": "#0B1215",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 32,
+      "children": [
+        {
+          "type": "text",
+          "id": "a7l9rN",
+          "name": "标题",
+          "fill": "#E0EAEE",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "错误、连接与安全退出",
+          "lineHeight": 1.5,
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 24,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "Vyqzx",
+          "name": "说明",
+          "fill": "#AAB3B7",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "提示说明原因与恢复动作；技术详情默认收起。断线提示持续显示，重连成功后撤下。",
+          "lineHeight": 1.5,
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "L7ZQ5V",
+          "name": "断线横幅",
+          "width": "fill_container",
+          "height": 100,
+          "fill": "#131A1D",
+          "cornerRadius": 8,
+          "stroke": "#2D3438",
+          "strokeWidth": 1,
+          "gap": 12,
+          "padding": 16,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "YOjy7",
+              "name": "状态图标",
+              "width": 18,
+              "height": 18,
+              "icon": "wifi-off",
+              "library": "lucide",
+              "fill": "#E4A247"
+            },
+            {
+              "type": "frame",
+              "id": "ZTeoB",
+              "name": "内容",
+              "width": "fill_container",
+              "height": 60,
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "zyShz",
+                  "name": "主提示",
+                  "fill": "#E0EAEE",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "与 CST Pilot 的连接已断开",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 16,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "ohRJE",
+                  "name": "恢复说明",
+                  "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "正在重连。请确认终端仍在运行；未发送内容会保留。",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "ZIgYh",
+              "name": "重新连接",
+              "height": 32,
+              "fill": "#131A1D",
+              "cornerRadius": 6,
+              "gap": 8,
+              "padding": [
+                0,
+                12
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "DCRUf",
+                  "name": "按钮文字",
+                  "fill": "#77B4FF",
+                  "content": "重新连接",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "w6gl9C",
+          "name": "认证失效",
+          "width": "fill_container",
+          "height": 100,
+          "fill": "#131A1D",
+          "cornerRadius": 8,
+          "stroke": "#2D3438",
+          "strokeWidth": 1,
+          "gap": 12,
+          "padding": 16,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "UJVx8",
+              "name": "状态图标",
+              "width": 18,
+              "height": 18,
+              "icon": "key-round",
+              "library": "lucide",
+              "fill": "#E4A247"
+            },
+            {
+              "type": "frame",
+              "id": "z2Y08",
+              "name": "内容",
+              "width": "fill_container",
+              "height": 60,
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "zE4wG",
+                  "name": "主提示",
+                  "fill": "#E0EAEE",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "模型服务需要重新登录",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 16,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "KzE09",
+                  "name": "恢复说明",
+                  "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "当前服务拒绝了凭据。请重新登录后再发送消息。",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "s2B83q",
+              "name": "重新登录",
+              "height": 32,
+              "fill": "#131A1D",
+              "cornerRadius": 6,
+              "gap": 8,
+              "padding": [
+                0,
+                12
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "O5dH7",
+                  "name": "按钮文字",
+                  "fill": "#77B4FF",
+                  "content": "重新登录",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Snm9g",
+          "name": "写入失败",
+          "width": "fill_container",
+          "height": 100,
+          "fill": "#131A1D",
+          "cornerRadius": 8,
+          "stroke": "#2D3438",
+          "strokeWidth": 1,
+          "gap": 12,
+          "padding": 16,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "F754nk",
+              "name": "状态图标",
+              "width": 18,
+              "height": 18,
+              "icon": "circle-alert",
+              "library": "lucide",
+              "fill": "#FF8A80"
+            },
+            {
+              "type": "frame",
+              "id": "wSqPH",
+              "name": "内容",
+              "width": "fill_container",
+              "height": 60,
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "kDRLO",
+                  "name": "主提示",
+                  "fill": "#E0EAEE",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "消息未能保存",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 16,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "IwO2V",
+                  "name": "恢复说明",
+                  "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "请检查工具包是否可写或空间是否充足。输入内容已保留。",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "prr8N",
+              "name": "重试",
+              "height": 32,
+              "fill": "#131A1D",
+              "cornerRadius": 6,
+              "gap": 8,
+              "padding": [
+                0,
+                12
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "ThqMI",
+                  "name": "按钮文字",
+                  "fill": "#77B4FF",
+                  "content": "重试",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "M0Wdr",
+          "name": "模型失败",
+          "width": "fill_container",
+          "height": 100,
+          "fill": "#131A1D",
+          "cornerRadius": 8,
+          "stroke": "#2D3438",
+          "strokeWidth": 1,
+          "gap": 12,
+          "padding": 16,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "jvMs7",
+              "name": "状态图标",
+              "width": 18,
+              "height": 18,
+              "icon": "circle-alert",
+              "library": "lucide",
+              "fill": "#FF8A80"
+            },
+            {
+              "type": "frame",
+              "id": "y4XwKh",
+              "name": "内容",
+              "width": "fill_container",
+              "height": 60,
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "lL5pq",
+                  "name": "主提示",
+                  "fill": "#E0EAEE",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "模型请求未完成",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 16,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "k4COHM",
+                  "name": "恢复说明",
+                  "fill": "#AAB3B7",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "服务暂时不可用。消息已保存，可检查模型设置后重试。",
+                  "lineHeight": 1.5,
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "eBFzQ",
+              "name": "模型设置",
+              "height": 32,
+              "fill": "#131A1D",
+              "cornerRadius": 6,
+              "gap": 8,
+              "padding": [
+                0,
+                12
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "VXO8L",
+                  "name": "按钮文字",
+                  "fill": "#77B4FF",
+                  "content": "模型设置",
+                  "fontFamily": "Source Han Sans CN",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "tKIpA",
+          "name": "错误详情 · 展开示例",
+          "width": "fill_container",
+          "height": 100,
+          "fill": "#131A1D",
+          "cornerRadius": 8,
+          "layout": "vertical",
+          "gap": 12,
+          "padding": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "QXiyR",
+              "name": "详情入口",
+              "fill": "#AAB3B7",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "技术详情 ▾",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "qaVAz",
+              "name": "错误原文",
+              "fill": "#AAB3B7",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "HTTP 401 · Authentication failed — 示例技术信息，仅用于排查。",
+              "lineHeight": 1.6,
+              "fontFamily": "JetBrains Mono",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "n1Ezn",
+          "name": "退出菜单说明",
+          "fill": "#E0EAEE",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "账号菜单底部：退出 CST Pilot（与退出 CSTOA 分开）",
+          "lineHeight": 1.5,
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 16,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "bqa4m",
+          "name": "退出确认弹窗",
+          "width": 520,
+          "height": 330,
+          "fill": "#0B1215",
+          "cornerRadius": 16,
+          "stroke": "#2D3438",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 16,
+          "padding": 24,
+          "children": [
+            {
+              "type": "text",
+              "id": "l0Z9w5",
+              "name": "弹窗标题",
+              "fill": "#E0EAEE",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "退出 CST Pilot？",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 20,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "PenYs",
+              "name": "任务说明",
+              "fill": "#E0EAEE",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "还有 2 个会话正在运行。退出将停止这些任务，并暂停未发送队列。",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "g6IE4",
+              "name": "会话列表",
+              "fill": "#AAB3B7",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "硬件检查、启动项诊断",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "yUBQ3",
+              "name": "保存说明",
+              "fill": "#AAB3B7",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "已完成的消息会保留。再次启动后，未确认的任务不会自动重放。",
+              "lineHeight": 1.5,
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "a0Nbc5",
+              "name": "确认操作",
+              "width": "fill_container",
+              "height": 32,
+              "gap": 12,
+              "justifyContent": "end",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "ImzaS",
+                  "name": "继续使用",
+                  "height": 32,
+                  "fill": "#131A1D",
+                  "cornerRadius": 6,
+                  "gap": 8,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "RB0a9",
+                      "name": "按钮文字",
+                      "fill": "#E0EAEE",
+                      "content": "继续使用",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "hwjtu",
+                  "name": "停止任务并退出",
+                  "height": 32,
+                  "fill": "#131A1D",
+                  "cornerRadius": 6,
+                  "gap": 8,
+                  "padding": [
+                    0,
+                    12
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "szOaJ",
+                      "name": "按钮文字",
+                      "fill": "#FF8A80",
+                      "content": "停止任务并退出",
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "znIen",
+          "name": "空闲退出规则",
+          "fill": "#AAB3B7",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "无运行任务：显示“退出将关闭本机服务和待机终端，已保存的会话会保留。”，确认按钮为“退出程序”。",
+          "lineHeight": 1.5,
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "IAJBF",
+          "name": "退出完成页",
+          "fill": "#E0EAEE",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "CST Pilot 已退出。会话已保存。需要继续时，请重新运行工具包中的 pi.cmd。",
+          "lineHeight": 1.5,
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 16,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "Xmphz",
+          "name": "交互规范",
+          "fill": "#AAB3B7",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "弹窗打开聚焦取消按钮；Esc关闭；Tab限制在弹窗内；确认期间禁用重复点击；失败显示原因并允许重试。提示条不自动重发消息；断线不弹强制模态；技术详情默认收起。",
+          "lineHeight": 1.5,
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "cmf6I",
+      "x": 0,
+      "y": 23026,
+      "name": "09 · 错误与退出 · 分区标题",
+      "width": 2600,
+      "height": 144,
+      "fill": "#FAFDFF",
+      "layout": "vertical",
+      "gap": 8,
+      "padding": 24,
+      "children": [
+        {
+          "type": "text",
+          "id": "Hf3yD",
+          "name": "分区标题",
+          "fill": "#1A2024",
+          "content": "09 · 错误与退出",
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 24,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "vMrjz",
+          "name": "说明",
+          "fill": "#5F676C",
+          "content": "持续连接提示、认证失效、操作失败、技术详情与任务退出确认，浅深对照。",
+          "fontFamily": "Source Han Sans CN",
+          "fontSize": 16,
+          "fontWeight": "normal"
         }
       ]
     }

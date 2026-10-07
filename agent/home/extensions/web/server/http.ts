@@ -52,7 +52,7 @@ function fail(response: ServerResponse, status: number, code: string, message: s
 
 function themeFromCookie(cookie: string | undefined): "light" | "dark" | "system" {
 	const value = cookie?.match(/(?:^|;\s*)cst-theme=(light|dark|system)(?:;|$)/)?.[1];
-	return value === "light" || value === "dark" ? value : "system";
+	return value === "dark" || value === "system" ? value : "light";
 }
 
 function isInside(root: string, file: string): boolean {

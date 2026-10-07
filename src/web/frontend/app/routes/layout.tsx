@@ -2,6 +2,7 @@ import { PanelLeft } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Outlet, useLocation, useSearchParams, useViewTransitionState } from "react-router";
 import { BlueHour } from "../shell/blue-hour";
+import { ConnectionStatus } from "../shell/connection-status";
 import { Sidebar } from "../shell/shell";
 import { useSidebarMotion } from "../shell/sidebar-motion";
 
@@ -75,11 +76,12 @@ export default function WorkspaceLayout() {
 				</button>
 			)}
 			<div className="workspace-content">
-				{(home || homeExit) && (
+				{home && (
 					<div className="home-backdrop" aria-hidden="true">
-						<BlueHour kind="home" fading={homeExit} />
+						<BlueHour kind="home" />
 					</div>
 				)}
+				<ConnectionStatus enabled={!preview} />
 				<Outlet />
 			</div>
 		</div>

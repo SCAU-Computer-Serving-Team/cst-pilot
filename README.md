@@ -1,121 +1,50 @@
 # CST Pilot
 
-> Computer Service Team · Portable Diagnostics Kit
+<p align="center"><img src="assets/logo.png" alt="CST Pilot" width="820"></p>
 
-<p align="center">
-  <img src="assets/logo.png" alt="CST Pilot" width="820">
-</p>
+CST Pilot 是计算机维护队的便携诊断 Agent，基于 [Pi](https://github.com/earendil-works/pi)。默认开放读取、检索和诊断工具，修复命令由队员确认后手动执行。
 
-<p align="center">
-  <b>下载</b>：<a href="https://github.com/SCAU-CST/cst-pilot/releases/latest">最新发行版</a> · <a href="https://github.com/SCAU-CST/cst-pilot/releases">全部版本</a>
-</p>
+[发行下载](https://github.com/SCAU-Computer-Serving-Team/cst-pilot/releases) · [产品需求](doc/PRD.md) · [开发规范](CONTRIBUTING.md) · [文档索引](doc/README.md)
 
-**CST Pilot** 是计算机维护队（Computer Service Team, **CST**）的便携式专用Agent。
+## 能力
 
-特点：
+| 能力 | 内容 |
+|---|---|
+| 磁盘与目录 | 空间、健康、文件占用、目录排行；WizTree 加速扫描 |
+| 系统状态 | 进程、CPU、内存、GPU、传感器与整机负载 |
+| 启动与故障 | 自启、设备与驱动、Windows 事件日志 |
+| 命令交付 | 在工具包 `outbox/` 生成 txt 清单，按风险分档，供队员逐条执行 |
+| TUI 与 Web | `pi.cmd` 启动 TUI，`/web` 接管当前会话；Web 支持历史、分支树、模型、授权、图片与队列 |
 
-1. **基于热门开源项目**。基于Pi改的定制Agent，专门用于给计维队员提供便捷的AI技术支持。
-2. **充足的定制**。定制Agent有专门的提示词和SKILLS。并且有专用的工具获取磁盘状态，进程占用状态等。
-3. **安全**：默认只向模型开放读取、检索与诊断工具。高度可控。
-4. **高效**：使用 WizTree 等第三方工具加速磁盘扫描
-5. **即插即用**。本项目发行版可存放在U盘，内置所有所需的环境。不必在机主电脑上安装任何东西。
+配置、凭据与会话共用 `agent/home`。同一会话只允许一个运行实例；TUI 和 Web 的主题独立保存。诊断返回的降级、权限与准确性限制见[工具文档](doc/tool/README.md)。
 
-## 功能
+## 使用
 
-### 当前已实现
+1. 完整解压发行 ZIP，运行 `pi.cmd`。
+2. 首次使用执行 `/login`，选择模型服务并登录。发行包不提供密钥。
+3. 使用 TUI，或执行 `/web` 在本机浏览器继续操作。接管后原终端待机；关闭终端会结束服务。
+4. Web 退出使用账号菜单的“退出 CST Pilot”。“退出 CSTOA”只退出账号。
 
-1. 扫描机主的磁盘状态，分析C盘等磁盘的文件占用情况，AI分析后可给出清理建议
-2. 分析机主当前进程的运行状态，给出占用CPU，内存，GPU等状态
-3. 获取机主硬件参数，以及温度、风扇、电压、降频等
-4. 整机负载概况：物理内存、CPU 总占用率、页面文件、开机时长
-5. 开机自启盘点：注册表 Run 键（含任务管理器禁用状态）、启动文件夹、自启服务
-6. 获取Windows事件日志：最近错误/警告、开关机·蓝屏历史、应用崩溃、服务故障、登录审计，可自定义查询
-7. 设备与驱动健康：异常设备定位、网卡/蓝牙/音频/显示现状与驱动版本、外接设备识别
-8. 命令交付：把需要队员手动执行的修复命令写成 txt 清单，落在工具包 `outbox\` 下，按风险分档并按序号排列，供逐条复制执行
+发行包内置 Pi、PowerShell 和必要诊断程序，现场无需安装 Node、Python 或 npm。`prev0.5` 是试用版本；当前测试结果与未验证范围见[联调报告](doc/test/checkpoint5-report.md)和[跨端报告](doc/test/shared-backend-report.md)，正式发行验收仍未完成。
 
-## 服务端相关
+## 目录
 
-1. 遥测。
+| 路径 | 职责 |
+|---|---|
+| `pi.cmd` | 隔离启动器 |
+| `agent/home/extensions/` | 品牌、诊断、认证、运行协调、Web 与遥测 |
+| `agent/home/skills/` | 诊断工具说明 |
+| `src/web/frontend/` | Web 源码与构建工具 |
+| `src/web/design/`、`DESIGN.md` | 画布、视觉资产与设计规范 |
+| `doc/` | 需求、规格、设计、工具、认证、遥测与测试文档 |
+| `pack/` | 官方运行时与白名单装配、校验、发行冒烟 |
 
-### 未来计划
+开发仓库不包含完整便携运行时。开发依赖与现场运行链分开，准备方法见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-自制 Web 操作界面已接入六个页面与工具卡片。执行 `/web` 后默认接管会话并启用业务接口；当前进行现场联调。MVP 验收后接入便携发行版，保留 TUI 通道。
+发行目录包含 `agent/.runtime/`、预构建 Web、必要扩展与原生依赖、`pwsh/`、`wiztree/`、`lhm/`、许可、`VERSION`、`BUILD-INFO.json` 和 `SHA256SUMS`。开发 `AGENTS.md`、源码测试、机主数据、密钥和会话不进入发行包；运行指令由 `agent/home/APPEND_SYSTEM.md` 提供。
 
-使用情况遥测已实现：采集端为工具包扩展，接收端在独立仓库 cst-pilot-server。待发行接入与服务器部署后启用。
+## 边界与许可
 
-## 目录结构
-
-### 开发版（本仓库）
-
-```
-cst-pilot/
-|-- pi.cmd                     TUI 入口（发行版同款）
-|-- assets/                    品牌资源：logo.png 及其生成脚本
-|-- doc/                       产品、Web、遥测、工具与测试文档，索引见 doc/README.md
-|-- pack/                      发行版构建脚本
-|-- src/
-|   |-- web/                    Web 前端源码及 Pen 画布、色表、字体与动态背景
-|   `-- test/                   设计资产的校验测试
-|-- agent/
-|   |-- node_modules/          pi 及依赖（不入库）
-|   `-- home/
-|       |-- extensions/        扩展：branding 品牌页眉、diagnostics 诊断工具、web 本机页面、telemetry 使用情况遥测
-|       |-- skills/            诊断工具的使用说明
-|       `-- bin/, npm/, fff/, sessions/, *.json   运行产物与密钥（不入库）
-|-- node/                      Node.js（不入库）
-|-- pwsh/, wiztree/, lhm/      便携运行时（不入库）
-`-- README.md, CONTRIBUTING.md, AGENTS.md, LICENSE, THIRD-PARTY-NOTICES.md, biome.json, .gitignore, .github/
-```
-
-### 发行版（pack 产出）
-
-```
-cst-pilot/
-|-- pi.cmd
-|-- assets/                    品牌资源（README 插图）
-|-- agent/
-|   |-- .runtime/              pi 官方二进制与运行资源（隐藏；经 pi.cmd 调用）
-|   `-- home/
-|       |-- extensions/, packages/, skills/, bin/
-|       `-- APPEND_SYSTEM.md, settings.json, models-store.json, open-tui.json
-|-- pwsh/, wiztree/, lhm/
-|-- doc/                       不含 test/
-|-- licenses/
-|-- README.md, AGENTS.md, LICENSE, THIRD-PARTY-NOTICES.md, biome.json
-`-- VERSION, SHA256SUMS, BUILD-INFO.json
-```
-
-发行包不含密钥与运行态；首跑在 pi 内执行 `/login` 填写 key。
-
-
-## 注意事项
-
-1. 本仓库只含源码与文档，完整运行环境由 `pack/pack.mjs` 构建。
-2. 当前实现中，提示词用 `APPEND_SYSTEM.md`，与常见的 `AGENTS.md` 不同，原因见 [doc/Notice.md](doc/Notice.md)
-3. 模型URL和API当然是不包括的。如果你是CST的队员且需要相关资源，请联系你们的委员。
-4. WizTree 仅个人使用免费、商业使用需授权，见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
-
-
-## 使用方式
-
-从 [Releases](https://github.com/SCAU-CST/cst-pilot/releases/latest) 下载最新的发行版（`cst-pilot-<version>.zip`），把整个目录拷到电脑/U盘或者任何地方，然后双击运行：
-
-```
-pi.cmd
-```
-
-**首次运行**需在 pi 内执行 `/login` 选择 provider 并填写 API key（凭据写入本机 `agent/home/auth.json`）。
-
-开发版仅代码开发。需要自备环境。
-
-## 开发
-
-本地开发、检查与提交规范见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-## 许可证
-
-本项目以 [MIT](LICENSE) 分发。发行版内含第三方组件，各自的许可证与条款见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) 与发行包 `licenses/`。
-
-## 致谢
-
-名称中的 **pilot** 致敬本项目所基于的 [pi coding agent](https://github.com/earendil-works/pi)。感谢这一伟大的开源项目。
+- 配置、凭据与会话写入工具包，临时状态在 `.state/`。Windows 日志与原生缓存的边界见[运行注意事项](doc/Notice.md)。
+- 模型服务与联网工具按配置访问网络。项目遥测由独立配置控制，OA 生产授权与接收端部署仍需验收。
+- WizTree 个人使用免费，商业使用需授权。本项目以 [MIT](LICENSE) 分发；第三方条款见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。

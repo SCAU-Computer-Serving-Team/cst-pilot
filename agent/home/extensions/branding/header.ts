@@ -1,10 +1,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { readKitVersion } from "./version.ts";
 
 // ---------------------------------------------------------------- 品牌常量
 const BRAND = "cst-pilot";
-const VERSION = "0.4.0";
+const VERSION = readKitVersion();
 const TAGLINE = "用心服务，真诚为您";
 const ASK_LINE = "CST-pilot on your side";
 const TIP_COMMANDS = ["/login", "/scoped-models", "/model", "/resume", "/tree"];

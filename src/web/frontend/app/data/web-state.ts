@@ -10,7 +10,13 @@ export type ContentPart =
 	| { type: "text"; text: string }
 	| { type: "thinking"; thinking: string; redacted?: boolean }
 	| { type: "image"; mimeType: string; data: string }
-	| { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> };
+	| {
+			type: "toolCall";
+			id: string;
+			name: string;
+			arguments: Record<string, unknown>;
+			execution?: { startedAt: number; endedAt?: number; result?: Message };
+	  };
 export type Message = {
 	role: "user" | "assistant" | "toolResult" | "branchSummary";
 	content: string | ContentPart[];
@@ -285,7 +291,17 @@ export function useSessionDetail(id: string | undefined) {
 				if (change.type === "message_update" && change.message?.role === "assistant") pacer.update(change.message);
 				if (change.type === "ui_requests")
 					setDetail((state) => (state ? { ...state, ui: change.questions } : state));
-				if (["message_start", "message_end", "agent_end", "agent_start", "session_tree"].includes(change.type)) {
+				if (
+					[
+						"message_start",
+						"message_end",
+						"agent_end",
+						"agent_start",
+						"session_tree",
+						"tool_execution_start",
+						"tool_execution_end",
+					].includes(change.type)
+				) {
 					if (change.type === "message_end" || change.type === "agent_end") {
 						pacer.flush();
 						setStreaming(undefined);

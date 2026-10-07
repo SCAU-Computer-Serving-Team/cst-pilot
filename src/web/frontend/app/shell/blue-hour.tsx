@@ -1,18 +1,10 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import homeShader from "../../../design/asset/blue-hour.glsl?raw";
 import airShader from "../../../design/asset/blue-hour-air.glsl?raw";
 import airDarkPalette from "../../../design/asset/blue-hour-air-dark-palette.png?url";
 import darkPalette from "../../../design/asset/blue-hour-dark-palette.png?url";
 import lightPalette from "../../../design/asset/blue-hour-palette.png?url";
 import { FrameClock } from "./frame-clock";
-import { regionFadeMask } from "./region-fade";
-
-function exitProgress() {
-	const value = getComputedStyle(document.documentElement, "::view-transition-new(home-regions)").getPropertyValue(
-		"--home-exit-progress",
-	);
-	return Math.max(0, Math.min(1, Number.parseFloat(value) || 0));
-}
 
 const vertexShader = `attribute vec2 a_position;
 void main() { gl_Position = vec4(a_position, 0.0, 1.0); }`;
@@ -35,60 +27,13 @@ function prefersDark(): boolean {
 	return theme === "dark" || (theme !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 }
 
-export function BlueHour({
-	kind,
-	paused = false,
-	fading = false,
-}: {
-	kind: BackgroundKind;
-	paused?: boolean;
-	fading?: boolean;
-}) {
+export function BlueHour({ kind, paused = false }: { kind: BackgroundKind; paused?: boolean }) {
 	const ref = useRef<HTMLCanvasElement>(null);
-	const fade = useRef(fading);
-	const restart = useRef<(() => void) | null>(null);
-	useLayoutEffect(() => {
-		fade.current = fading;
-		restart.current?.();
-	}, [fading]);
-
 	useEffect(() => {
 		const canvas = ref.current;
 		if (!canvas) return;
 		const gl = canvas.getContext("webgl", { alpha: true, antialias: false, premultipliedAlpha: false });
-		if (!gl) {
-			const clock = new FrameClock(performance.now());
-			const fallbackMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-			let frame = 0;
-			let origin: number | undefined;
-			const draw = (now: number) => {
-				frame = 0;
-				if (!fade.current || document.hidden) return;
-				const travel = (20.75 + clock.step(now, paused || fallbackMotion.matches) * 0.36) * 0.48;
-				origin ??= Math.ceil(travel);
-				canvas.parentElement!.style.maskImage = regionFadeMask(travel, origin, exitProgress(), canvas.clientWidth);
-				frame = requestAnimationFrame(draw);
-			};
-			restart.current = () => {
-				if (!fade.current) {
-					origin = undefined;
-					canvas.parentElement!.style.maskImage = "";
-				} else if (!frame) frame = requestAnimationFrame(draw);
-			};
-			const resume = () => {
-				clock.resume(performance.now());
-				restart.current?.();
-			};
-			document.addEventListener("visibilitychange", resume);
-			fallbackMotion.addEventListener("change", resume);
-			restart.current();
-			return () => {
-				cancelAnimationFrame(frame);
-				document.removeEventListener("visibilitychange", resume);
-				fallbackMotion.removeEventListener("change", resume);
-				restart.current = null;
-			};
-		}
+		if (!gl) return;
 		const vertex = compile(gl, gl.VERTEX_SHADER, vertexShader);
 		const fragment = compile(gl, gl.FRAGMENT_SHADER, kind === "home" ? homeShader : airShader);
 		if (!vertex || !fragment) {
@@ -173,17 +118,9 @@ export function BlueHour({
 		let ready = false;
 		let live = true;
 		let painted = false;
-		let exitOrigin: number | undefined;
-		restart.current = () => {
-			if (!fade.current) {
-				exitOrigin = undefined;
-				surface.parentElement!.style.maskImage = "";
-			}
-			schedule();
-		};
 
 		function schedule() {
-			if (!live || (!ready && !fade.current) || (document.hidden && painted) || frame) return;
+			if (!live || !ready || (document.hidden && painted) || frame) return;
 			frame = requestAnimationFrame((now) => {
 				frame = 0;
 				draw(now);
@@ -192,16 +129,7 @@ export function BlueHour({
 
 		function draw(now: number) {
 			if (!live || (document.hidden && painted)) return;
-			if (!ready) {
-				if (fade.current) {
-					const travel = (20.75 + clock.step(now, motion.matches || paused) * 0.36) * 0.48;
-					exitOrigin ??= Math.ceil(travel);
-					surface.parentElement!.style.maskImage = regionFadeMask(travel, exitOrigin, exitProgress(), cssWidth);
-					schedule();
-				}
-				return;
-			}
-			if (surface.parentElement!.style.maskImage) surface.parentElement!.style.maskImage = "";
+			if (!ready) return;
 			// Shader 为渐变背景：限制总像素，避免 4K × 高 DPR 在高刷屏逐帧填充过多像素。
 			const ratio = Math.min(devicePixelRatio, 2, Math.sqrt(2_500_000 / Math.max(1, cssWidth * cssHeight)));
 			const width = Math.max(1, Math.round(cssWidth * ratio));
@@ -214,15 +142,6 @@ export function BlueHour({
 			context.uniform2f(location("u_resolution"), width, height);
 			const elapsed = clock.step(now, motion.matches || paused);
 			set("u_time", elapsed);
-			if (kind === "home" && fade.current) {
-				exitOrigin ??= Math.ceil((20.75 + elapsed * 0.36) * 0.48);
-				set("u_exit_origin", exitOrigin);
-				set("u_exit_progress", exitProgress());
-			} else {
-				exitOrigin = undefined;
-				set("u_exit_progress", 0);
-			}
-			set("u_css_width", cssWidth);
 			context.drawArrays(context.TRIANGLE_STRIP, 0, 4);
 			if (!painted) {
 				surface.style.opacity = "1";
@@ -282,7 +201,6 @@ export function BlueHour({
 		motion.addEventListener("change", resume);
 		return () => {
 			live = false;
-			restart.current = null;
 			delete surface.dataset.renderer;
 			cancelAnimationFrame(frame);
 			resize.disconnect();

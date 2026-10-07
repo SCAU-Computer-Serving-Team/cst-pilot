@@ -203,7 +203,9 @@ test("two SDK sessions run concurrently and abort stays within one session", asy
 			const [a, b] = await Promise.all([parallel.create(), parallel.create()]);
 			const runA = a.session.prompt("A", { expandPromptTemplates: false });
 			const runB = b.session.prompt("B", { expandPromptTemplates: false });
-			await new Promise((resolve) => setTimeout(resolve, 100));
+			const deadline = Date.now() + 5000;
+			while (Date.now() < deadline && (!a.session.isStreaming || !b.session.isStreaming))
+				await new Promise((resolve) => setTimeout(resolve, 10));
 			assert.equal(a.session.isStreaming, true);
 			assert.equal(b.session.isStreaming, true);
 			await a.session.abort();

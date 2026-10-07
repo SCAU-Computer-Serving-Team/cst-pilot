@@ -50,6 +50,9 @@
   --chat-row: #fff;
   --chat-tool: #0665be;
   --chat-success: #007b3a;
+  --notice-bg: #f6f6f6;
+  --notice-danger: #bf091b;
+  --notice-warning: #8c5a00;
   --login-card: #fff;
   --login-switch: #f0f0f0;
   --login-selected: #fff;
@@ -90,6 +93,7 @@
   --duration-fast: 250ms;
   --duration-quick: 150ms;
   --ease-smooth-out: cubic-bezier(.22, 1, .36, 1);
+  --ease-smooth-in: cubic-bezier(.64, 0, .78, 0);
   --ease-linear: linear;
   --ease-out: ease-out;
   --ease-bounce: cubic-bezier(.34, 1.36, .64, 1);
@@ -1237,16 +1241,37 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
   .tree-counter { flex: 0 0 auto; }
 }
 
-/* 主页进入工作区缩短到 400ms，返回主页使用基础时间。 */
-:root:has(.app-layout[data-home-exit]),
-:root:has(.app-layout[data-view-transitions="false"].chat-layout) {
-  --page-transition-time-scale: 0.8;
-  --page-transition-blur-small: calc(var(--blur-small) / 2);
-  --page-transition-blur-medium: calc(var(--blur-medium) / 2);
-}
+.error-notice, .connection-status { display:flex; align-items:flex-start; gap:var(--space-component); padding:var(--space-section); border:1px solid var(--chat-border); border-radius:var(--radius-row); background:var(--notice-bg); color:var(--chat-ink); font-size:14px; line-height:1.5; }
+:root[data-theme="dark"] { --notice-bg:#131a1d; --notice-danger:#ff8a80; --notice-warning:#e4a247; }
+@media (prefers-color-scheme:dark) { :root:not([data-theme="light"]) { --notice-bg:#131a1d; --notice-danger:#ff8a80; --notice-warning:#e4a247; } }
+.error-notice { width:100%; min-width:0; margin-block:var(--space-section); }
+.error-notice > svg { flex:none; margin-top:3px; color:var(--notice-danger); }
+.error-notice[data-kind="auth"] > svg, .connection-status > svg { color:var(--notice-warning); }
+.error-notice-body, .connection-status > div { flex:1; min-width:0; }
+.error-notice strong, .connection-status strong { font-size:16px; font-weight:500; }
+.error-notice p, .connection-status p { margin:4px 0 0; color:var(--chat-muted); }
+.error-notice details { margin-top:12px; color:var(--chat-muted); }
+.error-notice summary { cursor:pointer; }
+.error-notice pre { margin:8px 0 0; white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; max-height:240px; overflow:auto; }
+.notice-action { flex:none; display:inline-flex; align-items:center; min-height:32px; padding:0 12px; border:0; border-radius:6px; background:transparent; color:var(--chat-tool); text-decoration:none; cursor:pointer; }
+.connection-status { position:absolute; z-index:35; top:12px; left:24px; right:24px; background:var(--chat-bg); }
+.exit-dialog { position:fixed; inset:0; margin:auto; width:min(520px, calc(100vw - 48px)); max-height:calc(100vh - 48px); overflow:auto; padding:24px; border:1px solid var(--chat-border); border-radius:16px; background:var(--chat-bg); color:var(--chat-ink); animation:exit-modal-in var(--duration-fast) var(--ease-smooth-out); }
+.exit-dialog::backdrop { background:#060b0e40; }
+.exit-dialog h2 { margin:0 0 16px; font-size:20px; font-weight:600; }
+.exit-dialog p { margin:0 0 16px; font-size:16px; line-height:1.5; }
+.exit-dialog .exit-description { color:var(--chat-muted); font-size:14px; }
+.exit-session-list { margin:0 0 16px; max-height:180px; overflow:auto; color:var(--chat-muted); font-size:14px; line-height:1.5; }
+.exit-actions { display:flex; justify-content:flex-end; gap:12px; flex-wrap:wrap; }
+.exit-actions button { min-height:32px; border:0; border-radius:6px; padding:0 12px; background:var(--notice-bg); cursor:pointer; }
+.exit-confirm { color:var(--notice-danger); }
+.exit-actions button:disabled { opacity:.45; cursor:default; }
+@keyframes exit-modal-in { from { opacity:0; transform:translateY(var(--distance-base)); } }
+@media (prefers-reduced-motion:reduce) { .exit-dialog { animation:none; } }
+@media (max-width:960px) { .connection-status { left:12px; right:12px; flex-wrap:wrap; } }
+/* 返回主页按1.4倍播放（主入场700ms），离开主页保持500ms；基础令牌不变。 */
+:root:has(.home-layout:not([data-home-exit])) { --page-transition-time-scale: 1.4; }
 /* 首页与工作台输入框各自入退场，避免共享快照将底部聊天框拉到中心。 */
 .app-layout[data-home-transition] .home-backdrop { view-transition-name: home-background; }
-.app-layout[data-home-exit] .home-backdrop { view-transition-name: home-regions; }
 .app-layout[data-home-transition] .brand-arcs { view-transition-name: home-mark; }
 .app-layout[data-home-transition] .home-greeting h1 { view-transition-name: home-greeting; }
 .app-layout[data-home-transition] .home-footnote { view-transition-name: home-footer; }
@@ -1262,39 +1287,27 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 ::view-transition-group(home-greeting), ::view-transition-group(home-footer) { z-index: 3; animation: none; }
 ::view-transition-group(home-composer), ::view-transition-group(workspace-composer) { z-index: 5; animation: none; }
 ::view-transition-group(workspace-header), ::view-transition-group(workspace-messages) { z-index: 4; animation: none; }
-::view-transition-old(home-background), ::view-transition-old(home-regions) { animation: none; opacity: 0; }
-/* 退出背景覆盖工作区全部组件；主页退场内容仍在背景上方。 */
-::view-transition-group(home-regions) { z-index: 6; animation: none; overflow: hidden; }
-:root:has(.app-layout[data-home-exit])::view-transition-group(home-mark) { z-index: 7; }
-:root:has(.app-layout[data-home-exit])::view-transition-group(home-greeting),
-:root:has(.app-layout[data-home-exit])::view-transition-group(home-footer) { z-index: 8; }
-:root:has(.app-layout[data-home-exit])::view-transition-group(home-composer) { z-index: 9; }
-@property --home-exit-progress { syntax: "<number>"; inherits: false; initial-value: 0; }
-::view-transition-new(home-regions) {
-  pointer-events: none;
-  animation: home-region-fade calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-linear) both;
-  mix-blend-mode: normal;
-}
+::view-transition-old(home-background) { animation: home-background-out var(--duration-very-slow) var(--ease-smooth-in) both; }
 ::view-transition-new(home-background) { animation: home-background-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(home-mark) { animation: home-mark-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(home-mark) { animation: home-mark-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
 ::view-transition-new(home-mark) { animation: home-mark-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(home-greeting) { animation: home-text-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(home-greeting) { animation: home-text-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
 ::view-transition-new(home-greeting) { animation: home-text-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(home-composer) { animation: composer-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(workspace-composer) { animation: composer-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(home-composer) { animation: composer-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
+::view-transition-old(workspace-composer) { animation: composer-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
 ::view-transition-new(home-composer) { animation: composer-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) calc(var(--duration-stagger) * var(--page-transition-time-scale)) both; }
 ::view-transition-new(workspace-composer) { animation: composer-in calc(var(--duration-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(home-footer) { animation: composer-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(home-footer) { animation: composer-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
 ::view-transition-new(home-footer) { animation: composer-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) calc(var(--duration-micro) * var(--page-transition-time-scale)) both; }
 ::view-transition-new(workspace-header) { animation: workspace-header-in calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(workspace-header) { animation: workspace-header-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(workspace-header) { animation: workspace-header-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
 ::view-transition-new(workspace-messages) { animation: workspace-messages-in calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) calc(var(--duration-stagger) * var(--page-transition-time-scale)) both; }
-::view-transition-old(workspace-messages) { animation: workspace-messages-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-@keyframes home-region-fade { from { --home-exit-progress: 0; } to { --home-exit-progress: 1; } }
+::view-transition-old(workspace-messages) { animation: workspace-messages-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
+@keyframes home-background-out { to { transform: translate3d(0, -100%, 0); opacity: 0; } }
 @keyframes home-background-in { from { transform: translate3d(0, -100%, 0); opacity: 0; } }
-@keyframes home-mark-out { to { opacity: 0; } }
+@keyframes home-mark-out { to { transform: translate3d(0, calc(-1 * var(--distance-large)), 0); opacity: 0; } }
 @keyframes home-mark-in { from { transform: translate3d(0, calc(-1 * var(--distance-large)), 0); opacity: 0; } }
-@keyframes home-text-out { to { opacity: 0; } }
+@keyframes home-text-out { to { transform: translateY(calc(-1 * var(--distance-medium))); opacity: 0; filter: blur(var(--page-transition-blur-small)); } }
 @keyframes home-text-in { from { transform: translateY(calc(-1 * var(--distance-medium))); opacity: 0; filter: blur(var(--page-transition-blur-small)); } }
 @keyframes composer-out { to { transform: translateY(var(--distance-medium)); opacity: 0; filter: blur(var(--page-transition-blur-small)); } }
 @keyframes composer-in { from { transform: translateY(var(--distance-medium)); opacity: 0; filter: blur(var(--page-transition-blur-small)); } }
