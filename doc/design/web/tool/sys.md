@@ -1,6 +1,6 @@
 # sys 工具卡片
 
-[sys.ts](../../../../agent/home/extensions/diagnostics/sys.ts) 返回 `details[scope]`，默认 `overview`。2026-09-23 逐 scope 直接调用项目扩展；以下均为实际 `details` 节选，列表只列首项及其真实字段。诊断工具的 `content` 是同一结果的 JSON 文本。
+[sys.ts](../../../../agent/home/extensions/diagnostics/sys.ts) 返回 `details[scope]`，默认 `overview`。2026-09-23 逐 scope 直接调用项目扩展；以下为 `details` 字段示例，应用名称与安装路径使用示例值。诊断工具的 `content` 是同一结果的 JSON 文本。
 
 ## 主模板与字段组
 
@@ -27,7 +27,7 @@
 输入 `top:2`；实测 `totalProcs:351`、`cores:16`、`intervalSec:1.24`，两份排行各返回 2 项：
 
 ```json
-{"proc":{"byCpu":[{"name":"node","pid":33844,"wsMB":364,"cpuPct":1.5,"path":"C:\\Program Files\\nodejs\\node.exe"}],"byMem":[{"name":"SlayTheSpire2","pid":52208,"wsMB":578,"cpuPct":0.7,"path":"G:\\SteamLibrary\\steamapps\\common\\Slay the Spire 2\\SlayTheSpire2.exe"}]}}
+{"proc":{"byCpu":[{"name":"node","pid":33844,"wsMB":364,"cpuPct":1.5,"path":"C:\\Program Files\\nodejs\\node.exe"}],"byMem":[{"name":"SampleApp","pid":52208,"wsMB":578,"cpuPct":0.7,"path":"C:\\Example\\SampleApp.exe"}]}}
 ```
 
 ### io
@@ -43,7 +43,7 @@
 输入 `top:2`；实测两份排行各 2 项，2 个适配器、1 条 NVIDIA 状态：
 
 ```json
-{"gpu":{"byGpuPct":[{"pid":52208,"name":"SlayTheSpire2","gpuPct":5,"engtypes":"3d+copy+jpeg+ofa+security+videodecode+videoencode+vr"}],"byDedicatedMB":[{"pid":1680,"name":"dwm","dedicatedMB":20224}],"adapters":[{"name":"GameViewer Virtual Display Adapter","vendor":"GameViewer","driver":"15.6.5.199","status":"OK","bus":"ROOT"}],"nvidia":[{"name":"NVIDIA GeForce RTX 5070 Ti","tempC":50,"powerW":37.51,"vramUsedMB":12881,"vramTotalMB":16303,"utilPct":9,"driver":"591.86"}],"counterErrors":{"engine":null,"memory":null}}}
+{"gpu":{"byGpuPct":[{"pid":52208,"name":"SampleApp","gpuPct":5,"engtypes":"3d+copy+jpeg+ofa+security+videodecode+videoencode+vr"}],"byDedicatedMB":[{"pid":1680,"name":"dwm","dedicatedMB":20224}],"adapters":[{"name":"GameViewer Virtual Display Adapter","vendor":"GameViewer","driver":"15.6.5.199","status":"OK","bus":"ROOT"}],"nvidia":[{"name":"NVIDIA GeForce RTX 5070 Ti","tempC":50,"powerW":37.51,"vramUsedMB":12881,"vramTotalMB":16303,"utilPct":9,"driver":"591.86"}],"counterErrors":{"engine":null,"memory":null}}}
 ```
 
 ### sensor

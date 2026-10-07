@@ -1,6 +1,6 @@
 # startup 工具卡片
 
-[startup.ts](../../../../agent/home/extensions/diagnostics/startup.ts) 无参数，返回 `details.startup`。2026-09-23 直接调用项目扩展；以下保留本机自启项名称与执行路径；账户名局部遮盖。
+[startup.ts](../../../../agent/home/extensions/diagnostics/startup.ts) 无参数，返回 `details.startup`。2026-09-23 直接调用项目扩展；以下为字段示例，账户路径使用占位值。
 
 ## 主模板与字段组
 
@@ -16,7 +16,7 @@
 实测数组为 28 条注册表项、2 个启动文件夹、101 条自启服务。样本只列每类一项：
 
 ```json
-{"startup":{"regItems":[{"source":"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run","name":"SecurityHealth","command":"C:\\WINDOWS\\system32\\SecurityHealthSystray.exe","disabled":false}],"startupFolders":[{"scope":"user","path":"C:\\Users\\Timxxxx\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup","items":[{"name":"mouse-map.ahk.lnk","disabled":null},{"name":"Snipaste.lnk","disabled":true}]}],"services":[{"name":"AudioEndpointBuilder","display":"Windows Audio Endpoint Builder","state":"Running","path":"C:\\WINDOWS\\System32\\svchost.exe -k LocalSystemNetworkRestricted -p"}]}}
+{"startup":{"regItems":[{"source":"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run","name":"SecurityHealth","command":"C:\\WINDOWS\\system32\\SecurityHealthSystray.exe","disabled":false}],"startupFolders":[{"scope":"user","path":"C:\\Users\\<用户>\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup","items":[{"name":"mouse-map.ahk.lnk","disabled":null},{"name":"Snipaste.lnk","disabled":true}]}],"services":[{"name":"AudioEndpointBuilder","display":"Windows Audio Endpoint Builder","state":"Running","path":"C:\\WINDOWS\\System32\\svchost.exe -k LocalSystemNetworkRestricted -p"}]}}
 ```
 
 ## 特殊情况

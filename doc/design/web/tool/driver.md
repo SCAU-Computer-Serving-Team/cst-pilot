@@ -1,6 +1,6 @@
 # driver 工具卡片
 
-[driver.ts](../../../../agent/home/extensions/diagnostics/driver.ts) 返回 `details[scope]`，默认 `problem`。2026-09-23 逐 scope 调用项目扩展；以下 JSON 为实测结果节选，设备名称保留原值，唯一设备标识局部遮盖。
+[driver.ts](../../../../agent/home/extensions/diagnostics/driver.ts) 返回 `details[scope]`，默认 `problem`。2026-09-23 逐 scope 调用项目扩展；以下 JSON 为实测结果节选，设备名称用于字段展示，唯一设备标识使用示例值。
 
 ## 主模板与字段组
 
@@ -34,7 +34,7 @@
 ### external
 
 ```json
-{"external":{"devices":[{"name":"BESOTA","class":null,"status":"OK","errorCode":0,"deviceId":"BTHENUM\\{66666666-6666-6666-6666-666666666666}_VID&000102B0_PID&0000\\7&xxxxxxx&0&0812xxxxxxxx_C00000000"}],"removable":[]}}
+{"external":{"devices":[{"name":"BESOTA","class":null,"status":"OK","errorCode":0,"deviceId":"<示例设备ID>"}],"removable":[]}}
 ```
 
 实测 `devices.length:49`、`removable.length:0`；示例只列首个设备。

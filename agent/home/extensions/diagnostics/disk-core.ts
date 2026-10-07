@@ -520,7 +520,7 @@ export async function collectDisk(
 		const inputPath = (params.path ?? "").trim();
 		const rootPath = inputPath ? resolve(cwd, inputPath) : "";
 		if (!rootPath) {
-			result.usage = { error: 'scope=usage 需要提供 path，如 "C:\\" 或 "C:\\Users\\Tim2354"' };
+			result.usage = { error: 'scope=usage 需要提供 path，如 "C:\\" 或 "D:\\Data"' };
 		} else if (!existsSync(rootPath)) {
 			result.usage = { error: `路径不存在: ${rootPath}` };
 		} else {
