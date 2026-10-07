@@ -14,6 +14,11 @@ export const RELEASE_SETTINGS = {
   packages: ["./packages/pi-fff", "./packages/pi-open-tui", "./packages/pi-web-access"],
 };
 
+// 只允许TUN/fake-IP保留段；不含代理地址、服务密钥或本机网页工具配置。
+export const RELEASE_WEB_SEARCH = {
+  ssrf: { allowRanges: ["198.18.0.0/15"], trustEnvProxy: false },
+};
+
 // 项目遥测与 pi 自带 install telemetry 是两条独立链路；后者始终关闭。
 export const RELEASE_TELEMETRY = {
   enabled: true,

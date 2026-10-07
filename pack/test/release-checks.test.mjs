@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { checkReleaseContent, checkReleaseTree, REQUIRED_RELEASE_FILES } from '../release-checks.mjs';
+import { RELEASE_WEB_SEARCH } from '../release-settings.mjs';
 
 test('Web backend tests are rejected from release trees', () => {
   assert.throws(
@@ -53,6 +54,23 @@ const filesOf = (root) => {
   walk(root);
   return out.sort();
 };
+
+test('only the generated credential-free web-search policy enters a release', () => {
+  const root=makeTree(),file='agent/home/web-search.json';
+  try {
+    fs.writeFileSync(path.join(root,file),JSON.stringify(RELEASE_WEB_SEARCH));
+    assert.doesNotThrow(()=>checkReleaseTree(root,[file]));
+    for(const value of [{ssrf:{allowRanges:['0.0.0.0/0']}},{...RELEASE_WEB_SEARCH,proxy:'http://local-proxy'},{...RELEASE_WEB_SEARCH,apiKey:'do-not-distribute'},{ssrf:{allowRanges:['198.18.0.0/15'],trustEnvProxy:true}},{},[]]) {
+      fs.writeFileSync(path.join(root,file),JSON.stringify(value));
+      assert.throws(()=>checkReleaseTree(root,[file]),/必须严格匹配/);
+    }
+  } finally { fs.rmSync(root,{recursive:true,force:true}); }
+});
+
+test('a release without its generated TUN policy is rejected',()=>{
+  const root=makeTree();
+  try{fs.rmSync(path.join(root,'agent/home/web-search.json'));assert.throws(()=>checkReleaseContent(root,filesOf(root)),/缺少必需文件.*web-search/);}finally{fs.rmSync(root,{recursive:true,force:true});}
+});
 
 test('a complete release tree passes the content check', () => {
   const root = makeTree();
