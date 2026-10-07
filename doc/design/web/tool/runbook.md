@@ -1,6 +1,6 @@
 # runbook 工具卡片
 
-[runbook.ts](../../../../agent/home/extensions/diagnostics/runbook.ts) 生成供人工执行的文本清单。2026-09-23 在 `E:\tmp` 的隔离副本中调用相同的注册工具与 `execute`；测试没有写入项目的 `outbox`。
+[runbook.ts](../../../../agent/home/extensions/diagnostics/runbook.ts) 生成供人工执行的文本清单。2026-09-23 在隔离副本中调用相同的注册工具与 `execute`；测试没有写入项目的 `outbox`。
 
 ## 主模板与字段组
 
@@ -15,7 +15,7 @@
 实测传入 `title:"工具卡片验证"`、`level:"safe"` 和一条 `cmd` 命令；返回的 `details` 节选：
 
 ```json
-{"runbook":{"name":"01-安全-工具卡片验证.txt","sequence":1,"level":"safe","levelLabel":"安全","items":1,"encoding":"utf-8-bom","file":"E:\\tmp\\2026-09-23\\cst-tool-capture\\sandbox\\outbox\\2026-09-23\\01-安全-工具卡片验证.txt"}}
+{"runbook":{"name":"01-安全-工具卡片验证.txt","sequence":1,"level":"safe","levelLabel":"安全","items":1,"encoding":"utf-8-bom","file":"E:\\Example\\outbox\\2026-09-23\\01-安全-工具卡片验证.txt"}}
 ```
 
 ## 特殊情况

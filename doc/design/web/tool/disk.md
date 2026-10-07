@@ -2,7 +2,7 @@
 
 数据来自 [disk.ts](../../../../agent/home/extensions/diagnostics/disk.ts) 的实际 `execute` 调用；分支以 [disk-core.ts](../../../../agent/home/extensions/diagnostics/disk-core.ts) 为准。画布：[cst-pilot-tools.pen](../../../../src/web/design/cst-pilot-tools.pen)。以下是 2026-09-23 Windows 普通权限的本机样本。
 
-成功返回 `{content:[{type:"text",text:JSON.stringify(result)}],details:result}`。各 scope 的 JSON 保留 `details` 完整字段，设备序列号局部遮盖；特殊情况中另列相关字段节选。卡片优先读 `details`。模型文本超限时可带 `outputTruncated`，`details` 仍保留完整数据。整次失败时 `execute` 抛错，没有业务 JSON；界面按 `isError` 显示错误文本。
+成功返回 `{content:[{type:"text",text:JSON.stringify(result)}],details:result}`。各 scope 的 JSON 保留 `details` 完整字段，设备序列号与路径使用示例值；特殊情况中另列相关字段节选。卡片优先读 `details`。模型文本超限时可带 `outputTruncated`，`details` 仍保留完整数据。整次失败时 `execute` 抛错，没有业务 JSON；界面按 `isError` 显示错误文本。
 
 ## 各 scope 的返回
 
@@ -22,8 +22,8 @@
 
 ```json
 {
-  "physicalDisks":[{"FriendlyName":"WD Blue SN580 1TB","SerialNumber":"E823_8FA6_BF53_0001_xxxx_xxxx_xxxx_xxxx.","MediaType":"SSD","BusType":"NVMe","HealthStatus":"Healthy","OperationalStatus":"OK","DeviceId":"1","sizeGB":931.5}],
-  "volumes":[{"drive":"E:","label":"Learn","fs":"NTFS","driveType":"Fixed","totalGB":331.2,"freeGB":64.9}]
+  "physicalDisks":[{"FriendlyName":"WD Blue SN580 1TB","SerialNumber":"<示例序列号>","MediaType":"SSD","BusType":"NVMe","HealthStatus":"Healthy","OperationalStatus":"OK","DeviceId":"1","sizeGB":931.5}],
+  "volumes":[{"drive":"E:","label":"示例卷","fs":"NTFS","driveType":"Fixed","totalGB":331.2,"freeGB":64.9}]
 }
 ```
 
@@ -37,14 +37,14 @@
 
 ### usage
 
-`disk({scope:"usage",path:"E:\\Learning\\Programming\\cst-pilot\\doc\\design",top:1})`，WizTree 实测：
+`disk({scope:"usage",path:"E:\\Example\\diagnostics",top:1})`，WizTree 实测：
 
 ```json
 {
   "usage":{
-    "method":"wiztree-mft","root":"E:\\Learning\\Programming\\cst-pilot\\doc\\design","totalGB":0.00002,
-    "topDirs":[{"path":"E:\\Learning\\Programming\\cst-pilot\\doc\\design\\tool\\","sizeGB":0.00001,"pct":50.7}],
-    "topFiles":[{"path":"E:\\Learning\\Programming\\cst-pilot\\doc\\design\\web\\tool\\disk.md","sizeGB":0.000009,"pct":45.8}],
+    "method":"wiztree-mft","root":"E:\\Example\\diagnostics","totalGB":0.00002,
+    "topDirs":[{"path":"E:\\Example\\diagnostics\\tool\\","sizeGB":0.00001,"pct":50.7}],
+    "topFiles":[{"path":"E:\\Example\\diagnostics\\web\\tool\\disk.md","sizeGB":0.000009,"pct":45.8}],
     "extAgg":[{"ext":"md","files":6,"sizeGB":0.00002}],"staleFiles":[],
     "notice":"WizTree 全量 MFT 导出（10 行，其中文件 6 个）。topDirs=目录排行；topFiles=单个大文件；extAgg=按扩展名聚合（含文件数）；staleFiles=≥50MB 且 ≥1 年未修改的文件（大者优先）。全部只读统计。"
   }
@@ -60,8 +60,8 @@
 ```json
 {
   "space":[{"drive":"E:","totalGB":331.2,"freeGB":64.9,"usedPct":80.4}],
-  "physicalDisks":[{"FriendlyName":"WD Blue SN580 1TB","SerialNumber":"E823_8FA6_BF53_0001_xxxx_xxxx_xxxx_xxxx.","MediaType":"SSD","BusType":"NVMe","HealthStatus":"Healthy","OperationalStatus":"OK","DeviceId":"1","sizeGB":931.5}],
-  "volumes":[{"drive":"E:","label":"Learn","fs":"NTFS","driveType":"Fixed","totalGB":331.2,"freeGB":64.9}],
+  "physicalDisks":[{"FriendlyName":"WD Blue SN580 1TB","SerialNumber":"<示例序列号>","MediaType":"SSD","BusType":"NVMe","HealthStatus":"Healthy","OperationalStatus":"OK","DeviceId":"1","sizeGB":931.5}],
+  "volumes":[{"drive":"E:","label":"示例卷","fs":"NTFS","driveType":"Fixed","totalGB":331.2,"freeGB":64.9}],
   "smart":null,
   "smartErrors":[{"deviceId":"1","error":"无法从客户端中访问 CIM 资源。"}],
   "smartNotice":"SMART 部分或全部采集失败，原因见 smartErrors。检测到访问拒绝，可尝试以管理员身份重试。",
@@ -91,7 +91,7 @@
 
 ### 查无盘符与设备关联失败
 
-查询不存在的 Z: 时，`space` 实测返回 `{"space":[]}`。同一盘符的 `info` 实测返回节选 `{"physicalDisks":[{"FriendlyName":"Samsung SSD 970 EVO 1TB","SerialNumber":"0025_3852_xxxx_xxxx."},{"FriendlyName":"WD Blue SN580 1TB","SerialNumber":"E823_8FA6_BF53_0001_xxxx_xxxx_xxxx_xxxx."}],"volumes":[],"infoNotice":"盘符关联失败（无法确定目标卷对应的物理盘），physicalDisks 为未过滤全量清单；volumes 仍按盘符过滤","degraded":true}`。`space` 显示空结果；`info` 保留未过滤设备组，同时标明关联失败，不能把两台物理盘都当作 Z: 的设备。
+查询不存在的 Z: 时，`space` 实测返回 `{"space":[]}`。同一盘符的 `info` 实测返回节选 `{"physicalDisks":[{"FriendlyName":"Samsung SSD 970 EVO 1TB","SerialNumber":"<示例序列号>"},{"FriendlyName":"WD Blue SN580 1TB","SerialNumber":"<示例序列号>"}],"volumes":[],"infoNotice":"盘符关联失败（无法确定目标卷对应的物理盘），physicalDisks 为未过滤全量清单；volumes 仍按盘符过滤","degraded":true}`。`space` 显示空结果；`info` 保留未过滤设备组，同时标明关联失败，不能把两台物理盘都当作 Z: 的设备。
 
 ### SMART 采集失败
 
@@ -108,7 +108,7 @@ SMART 部分或全部采集失败，原因见 smartErrors。检测到访问拒�
 临时副本中模拟 WizTree 无法启动，实测：
 
 ```json
-{"usage":{"method":"node-walk","totalGB":0.00002,"topDirs":[{"path":"E:\\Learning\\Programming\\cst-pilot\\doc\\design\\tool","sizeGB":0.00001,"pct":50.7}],"stats":{"filesScanned":9,"elapsedSec":0,"budget":500000},"truncated":false,"degradedFrom":"wiztree: spawn UNKNOWN","notice":"逐文件统计完成，数值为遍历所得（系统拒绝访问的目录未计入）。"}}
+{"usage":{"method":"node-walk","totalGB":0.00002,"topDirs":[{"path":"E:\\Example\\diagnostics\\tool","sizeGB":0.00001,"pct":50.7}],"stats":{"filesScanned":9,"elapsedSec":0,"budget":500000},"truncated":false,"degradedFrom":"wiztree: spawn UNKNOWN","notice":"逐文件统计完成，数值为遍历所得（系统拒绝访问的目录未计入）。"}}
 ```
 
 沿用排行组，另附扫描统计和降级原因。`node-walk` 无文件排行、扩展名和旧文件列表；`denied` 只在目录读取被拒绝时出现。WizTree 程序缺失时不会给出 `degradedFrom`。缺少 `path` 或路径不存在会整次抛错，不返回 `usage`。
