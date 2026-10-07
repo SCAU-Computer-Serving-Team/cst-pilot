@@ -37,10 +37,4 @@
 
 完整packages下的TUI接管、待机、写权、cwd、范围与独立主题由[跨端联调](../../test/shared-backend-report.md)覆盖。该结论限定于本机隔离环境；Windows10、最低浏览器、真实U盘/跨机、普通权限、杀毒软件、生产授权与全部系统交互仍需按[Checkpoint5](../../test/checkpoint5-report.md)验证。
 
-## 本机证据
-
-- `E:/tmp/2026-10-07/pack-metrics.json`：基线开发与发行文件统计。
-- `E:/tmp/2026-10-07/official-runtime-versions.json`：官方内置运行时。
-- `E:/tmp/2026-10-07/shared-fixes/`：本轮修复、实际双端回归与装配验证。
-
-正式发布须完成[发行前检查](../../design/release.md#发布前检查)，试用包和实验副本不能代替目标环境验收。
+现场验证范围见[发行前检查](../../design/release.md#发布前检查)。版本号不代表全部目标环境已验证。

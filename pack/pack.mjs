@@ -74,6 +74,7 @@ const CONFIG = {
     { p: "pi.cmd", f: true },
     { p: "LICENSE", f: true },
     { p: "README.md", f: true },
+    { p: "CHANGELOG.md", f: true },
     { p: "biome.json", f: true },
     { p: "THIRD-PARTY-NOTICES.md", f: true },
   ],
@@ -87,7 +88,7 @@ const CONFIG = {
     { src: "lhm", dst: "lhm", exclude: [] },
     { src: "agent/home/bin", dst: "agent/home/bin", exclude: [] },
     { src: "agent/home/skills", dst: "agent/home/skills", exclude: [] },
-    { src: "agent/home/extensions", dst: "agent/home/extensions", exclude: ["web/test/"] },
+    { src: "agent/home/extensions", dst: "agent/home/extensions", exclude: ["web/test/", "oauth/test/"] },
   ],
 
   // agent/home 散文件（发行版白名单；排除运行态与开发态：npm/、sessions/、fff/、

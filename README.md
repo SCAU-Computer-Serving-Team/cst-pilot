@@ -4,7 +4,9 @@
 
 CST Pilot 是计算机维护队的便携诊断 Agent，基于 [Pi](https://github.com/earendil-works/pi)。默认开放读取、检索和诊断工具，修复命令由队员确认后手动执行。
 
-[发行下载](https://github.com/SCAU-Computer-Serving-Team/cst-pilot/releases) · [产品需求](doc/PRD.md) · [开发规范](CONTRIBUTING.md) · [文档索引](doc/README.md)
+**Web 端为实验性质。**
+
+[发行下载](https://github.com/SCAU-Computer-Serving-Team/cst-pilot/releases) · [更新记录](CHANGELOG.md) · [产品需求](doc/PRD.md) · [开发规范](CONTRIBUTING.md) · [文档索引](doc/README.md)
 
 ## 能力
 
@@ -14,7 +16,8 @@ CST Pilot 是计算机维护队的便携诊断 Agent，基于 [Pi](https://githu
 | 系统状态 | 进程、CPU、内存、GPU、传感器与整机负载 |
 | 启动与故障 | 自启、设备与驱动、Windows 事件日志 |
 | 命令交付 | 在工具包 `outbox/` 生成 txt 清单，按风险分档，供队员逐条执行 |
-| TUI 与 Web | `pi.cmd` 启动 TUI，`/web` 接管当前会话；Web 支持历史、分支树、模型、授权、图片与队列 |
+| TUI | `pi.cmd` 启动命令行界面 |
+| Web（实验性质） | `/web` 接管当前会话；支持历史、分支树、模型、授权、图片与队列 |
 
 配置、凭据与会话共用 `agent/home`。同一会话只允许一个运行实例；TUI 和 Web 的主题独立保存。诊断返回的降级、权限与准确性限制见[工具文档](doc/tool/README.md)。
 
@@ -46,5 +49,6 @@ CST Pilot 是计算机维护队的便携诊断 Agent，基于 [Pi](https://githu
 ## 边界与许可
 
 - 配置、凭据与会话写入工具包，临时状态在 `.state/`。Windows 日志与原生缓存的边界见[运行注意事项](doc/Notice.md)。
-- 模型服务与联网工具按配置访问网络。项目遥测由独立配置控制，OA 生产授权与接收端部署仍需验收。
+- 模型服务与联网工具按配置访问网络。网页抓取仅放行 TUN 假 IP 段 `198.18.0.0/15`，其他私网与本机回环仍被拒绝。
+- 项目遥测默认启用，上传需有效 CSTOA 登录；可在 `agent/home/telemetry.json` 将 `enabled` 设为 `false`。生产授权与接收端部署仍需验收。
 - WizTree 个人使用免费，商业使用需授权。本项目以 [MIT](LICENSE) 分发；第三方条款见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
