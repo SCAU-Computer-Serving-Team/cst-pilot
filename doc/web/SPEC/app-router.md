@@ -92,7 +92,7 @@ cstoa 额度与仪表盘用量接口在后续阶段确定。
 |---|---|---|
 | GET | `/api/state` | 启动快照：版本、会话列表与运行状态、连接状态、可用命令；当前查看对象由页面地址决定 |
 | GET | `/api/events` | 全局事件流：会话列表变化、占用变化、设置变化 |
-| GET | `/api/files` | 项目文件清单，供输入框 `@` 引用补全 |
+| GET | `/api/files?sessionId=<id>` | 项目文件清单，供输入框 `@` 引用补全 |
 | GET | `/api/quota` | 按 `provider` 查询额度：DeepSeek 返回账户余额，OpenCode Go / Go Plus 返回 5 小时、每周、每月用量窗口 |
 
 `/api/state` 提供启动快照；页面按需读取相关数据。

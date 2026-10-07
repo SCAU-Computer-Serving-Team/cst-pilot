@@ -19,6 +19,14 @@ AGENTS.md（加载逻辑在 `noContextFiles` 时直接返回空列表）。Agent
 从 `PI_CODING_AGENT_DIR` 自动发现并附加到默认系统提示词之后，不受该开关影响，
 也无需改动 `pi.cmd` 的启动参数。
 
+## 双端共享与独立主题
+
+模型范围、默认模型、凭据与历史由 TUI 和 Web 共用。打开模型菜单、循环模型或发送新输入时重读共享配置；当前会话与全局默认的区别见[模型规格](web/SPEC/auth.md)。
+
+TUI 主题保存在 Pi 的 `settings.json`；Web 主题保存在 `web-settings.json`，默认浅色。两端互不覆盖，TUI Automatic 由 Pi 自行处理。
+
+同一会话只允许一个参与运行协调的实例。另一端持有记录时先退出该端，再打开；手动脚本或未加载运行协调扩展的外部 Pi 不能同时改写同一记录。原会话目录、AGENTS 禁用与写权实现见[运行设计](design/web/runtime.md)。
+
 ## 覆盖内置工具须提供提示词片段
 
 自定义 `ls` 覆盖内置工具后，若不自带 `promptSnippet`，`ls` 会从

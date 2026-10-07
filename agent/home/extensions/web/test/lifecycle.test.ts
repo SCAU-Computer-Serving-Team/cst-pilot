@@ -58,7 +58,7 @@ test("退出须可信来源与明确确认；关闭会话后响应，再请求�
 	);
 	await listenWebServer(server, port);
 	const post = (confirm: string, source = origin) =>
-		fetch(origin + "/api/lifecycle/exit", {
+		fetch(`${origin}/api/lifecycle/exit`, {
 			method: "POST",
 			headers: {
 				Origin: source,
@@ -73,7 +73,7 @@ test("退出须可信来源与明确确认；关闭会话后响应，再请求�
 		assert.equal((await post("")).status, 400);
 		assert.ok(pool.get(slot.id));
 		assert.equal(stopped, 0);
-		const state = await (await fetch(origin + "/api/lifecycle")).json();
+		const state = await (await fetch(`${origin}/api/lifecycle`)).json();
 		assert.ok(state.sessions.some((s: { id: string }) => s.id === slot.id));
 		const response = await post("stop");
 		assert.equal(response.status, 200);
@@ -84,7 +84,7 @@ test("退出须可信来源与明确确认；关闭会话后响应，再请求�
 		assert.equal((await post("stop")).status, 200);
 		await new Promise((r) => setTimeout(r, 150));
 		assert.equal(stopped, 1);
-		assert.equal((await fetch(origin + "/api/sessions")).status, 409);
+		assert.equal((await fetch(`${origin}/api/sessions`)).status, 409);
 	} finally {
 		await api.close();
 		await pool.close();

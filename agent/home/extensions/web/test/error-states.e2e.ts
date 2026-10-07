@@ -84,7 +84,7 @@ test("错误状态：真实401、持续断线、恢复不重发与运行任务�
 	let browser: BrowserProbe | undefined;
 	try {
 		browser = await BrowserProbe.launch(root);
-		await browser.navigate(origin + "/");
+		await browser.navigate(`${origin}/`);
 		await browser.fill(".composer-input", "AUTH_FAIL");
 		await browser.click('[aria-label="发送消息"]');
 		await browser.until("!!document.querySelector('.error-notice[data-kind=auth]')", "401提供重新登录");

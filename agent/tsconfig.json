@@ -30,6 +30,7 @@
 		"noUnusedParameters": true
 	},
 	"include": [
+		"home/extensions/runtime/**/*.ts",
 		"home/extensions/diagnostics/**/*.ts",
 		"home/extensions/oauth/**/*.ts",
 		"home/extensions/telemetry/**/*.ts",

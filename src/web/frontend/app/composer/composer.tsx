@@ -135,6 +135,7 @@ export function Composer({
 	const [commandIndex, setCommandIndex] = useState(0);
 	const [suggestionsVisible, setSuggestionsVisible] = useState(true);
 	const [files, setFiles] = useState<{ path: string; dir: string }[]>([]);
+	const [fileScope, setFileScope] = useState<string | undefined>();
 	const [fileIndex, setFileIndex] = useState(0);
 	const [filesVisible, setFilesVisible] = useState(true);
 	const [chipCount, setChipCount] = useState(0);
@@ -225,16 +226,22 @@ export function Composer({
 		selection?.addRange(range);
 		syncFromEditor();
 	}
-	const fileSuggestions = fileMatch
-		? files.filter((file) => file.path.toLowerCase().includes((fileMatch[1] ?? "").toLowerCase())).slice(0, 40)
-		: [];
+	const fileSuggestions =
+		fileMatch && fileScope === sessionId
+			? files.filter((file) => file.path.toLowerCase().includes((fileMatch[1] ?? "").toLowerCase())).slice(0, 40)
+			: [];
 	const filesOpen = !!fileMatch;
 	useEffect(() => {
-		if (!filesOpen || files.length) return;
+		if (!filesOpen || (files.length && fileScope === sessionId)) return;
 		let active = true;
-		apiJson<{ files: { path: string; dir: string }[] }>("/api/files")
+		apiJson<{ files: { path: string; dir: string }[] }>(
+			`/api/files${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`,
+		)
 			.then((data) => {
-				if (active) setFiles(data.files);
+				if (active) {
+					setFiles(data.files);
+					setFileScope(sessionId);
+				}
 			})
 			.catch((cause: unknown) => {
 				if (active) setError(cause instanceof Error ? cause.message : "文件列表加载失败");
@@ -242,7 +249,7 @@ export function Composer({
 		return () => {
 			active = false;
 		};
-	}, [filesOpen, files.length]);
+	}, [filesOpen, files.length, fileScope, sessionId]);
 	// 视图类命令（/tree、/fork）在补全面板里选中即执行，不折叠成标记，也不等回车。
 	function selectCommand(name: string) {
 		setSuggestionsVisible(false);

@@ -4,6 +4,7 @@ import { rm } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { resolveModelScopeWithDiagnostics } from "@earendil-works/pi-coding-agent";
+import { SessionOwnerConflict } from "../../runtime/owner.ts";
 import { createAuthRoutes } from "./api/auth.ts";
 import { listProjectFiles } from "./api/project-files.ts";
 import { getProviderQuota } from "./api/quota.ts";
@@ -12,6 +13,7 @@ import { SessionEvents } from "./session/events.ts";
 import { type Delivery, InboxConflict, SessionInbox } from "./session/inbox.ts";
 import { MutationReceipts } from "./session/receipts.ts";
 import type { WebSessionPool } from "./session/sessions.ts";
+import { WebSettings, type WebTheme } from "./session/web-settings.ts";
 
 function send(response: ServerResponse, status: number, body: unknown): void {
 	// Connection close：短响应用完即断，避免与 SSE 长连接争抢浏览器每域 6 连接限制（同 http.ts）。
@@ -56,6 +58,7 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 	let exitTask: Promise<void> | undefined;
 	let shutdownScheduled = false;
 	accessLogPath = join(agentDir, "web-access.log");
+	const webSettings = new WebSettings(agentDir);
 	const inboxes = new Map<string, SessionInbox>();
 	const streams = new Map<string, SessionEvents>();
 	const globalEvents = new SessionEvents();
@@ -242,9 +245,8 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 				return true;
 			}
 			if (pathname === "/api/settings") {
-				const { settingsManager } = await pool.getServices();
 				if (method === "GET") {
-					send(response, 200, { theme: settingsManager.getThemeSetting() ?? "light" });
+					send(response, 200, await webSettings.read());
 					return true;
 				}
 				if (method === "PATCH") {
@@ -252,7 +254,7 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 					if (Object.keys(input).length !== 1 || !["light", "dark", "system"].includes(input.theme as string))
 						throw new Error("请求的主题设置无效");
 					const result = await writeOnce(request, pathname, input, async () => {
-						settingsManager.setTheme(input.theme as string);
+						await webSettings.save(input.theme as WebTheme);
 						globalEvents.publish("state", { type: "settings_changed" });
 						return { theme: input.theme };
 					});
@@ -335,8 +337,12 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 				return true;
 			}
 			if (pathname === "/api/files" && method === "GET") {
-				const query = (new URL(request.url ?? "/", origin).searchParams.get("query") ?? "").toLowerCase();
-				const all = listProjectFiles(process.cwd());
+				const params = new URL(request.url ?? "/", origin).searchParams;
+				const query = (params.get("query") ?? "").toLowerCase();
+				const sessionId = params.get("sessionId");
+				if (sessionId && !/^[a-zA-Z0-9_-]{1,128}$/.test(sessionId)) throw new Error("请求的会话ID无效");
+				const slot = sessionId ? await pool.openSaved(sessionId) : undefined;
+				const all = listProjectFiles(slot?.session.sessionManager.getCwd() ?? pool.cwd);
 				const matches = (query ? all.filter((file) => file.toLowerCase().includes(query)) : all).slice(0, 50);
 				send(response, 200, {
 					total: all.length,
@@ -794,6 +800,15 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 				problem(response, 500, "storage_unavailable", "工具包目录无法写入，输入未被接受");
 			else if (error instanceof Error && /Nothing to compact|Already compacted/.test(error.message))
 				problem(response, 409, "nothing_to_compact", "当前会话无需压缩");
+			else if (diskCode === "CST_CONFIGURATION_UNAVAILABLE" && error instanceof Error)
+				problem(response, 503, "configuration_unavailable", error.message);
+			else if (error instanceof SessionOwnerConflict || diskCode === "CST_SESSION_OWNED")
+				problem(
+					response,
+					409,
+					"session_owned",
+					error instanceof Error ? error.message : "该会话正由另一端使用，请先关闭持有该会话的程序。",
+				);
 			else if (error instanceof InboxConflict) problem(response, 409, "conflict", error.message);
 			else if (
 				error instanceof SyntaxError ||

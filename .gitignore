@@ -20,6 +20,7 @@ agent/home/device.json
 agent/home/telemetry/
 agent/home/models.json
 agent/home/models-store.json
+agent/home/web-settings.json
 agent/home/web-search.json
 agent/home/pi-web-session-index.json
 agent/home/open-tui.json

@@ -24,6 +24,9 @@ jobs:
       - run: npm run test:web --prefix agent
         env:
           CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
+      - run: npm run test:web:shared-audit --prefix agent
+        env:
+          CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
       - run: node --test pack/test/*.test.mjs
 
   web:
@@ -69,6 +72,8 @@ jobs:
             ${{ runner.temp }}/**/shared-configuration-e2e/report.json
             ${{ runner.temp }}/**/page-motion/**/*.png
             ${{ runner.temp }}/**/page-motion/report.json
+            ${{ runner.temp }}/**/page-motion/curve-timing.json
+            ${{ runner.temp }}/**/cwd-completion/*.png
             ${{ runner.temp }}/**/error-states/*.png
             ${{ runner.temp }}/**/page-motion/natural-direction-timing.json
             ${{ runner.temp }}/**/first-turn-status/*.png

@@ -8,6 +8,7 @@
     "test:oauth": "node --test home/extensions/oauth/test/*.test.ts",
     "test:web": "node --test --test-concurrency=1 home/extensions/web/test/*.test.ts",
     "test:web:e2e": "node --test --test-concurrency=1 home/extensions/web/test/*.e2e.ts",
+    "test:web:shared-audit": "node --test --test-concurrency=1 home/extensions/web/test/*.audit.ts",
     "format": "biome check --write home/extensions",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

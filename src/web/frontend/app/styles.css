@@ -93,6 +93,7 @@
   --duration-fast: 250ms;
   --duration-quick: 150ms;
   --ease-smooth-out: cubic-bezier(.22, 1, .36, 1);
+  --ease-smooth-in: cubic-bezier(.64, 0, .78, 0);
   --ease-linear: linear;
   --ease-out: ease-out;
   --ease-bounce: cubic-bezier(.34, 1.36, .64, 1);
@@ -1286,22 +1287,22 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 ::view-transition-group(home-greeting), ::view-transition-group(home-footer) { z-index: 3; animation: none; }
 ::view-transition-group(home-composer), ::view-transition-group(workspace-composer) { z-index: 5; animation: none; }
 ::view-transition-group(workspace-header), ::view-transition-group(workspace-messages) { z-index: 4; animation: none; }
-::view-transition-old(home-background) { animation: home-background-out var(--duration-very-slow) var(--ease-smooth-out) both; }
+::view-transition-old(home-background) { animation: home-background-out var(--duration-very-slow) var(--ease-smooth-in) both; }
 ::view-transition-new(home-background) { animation: home-background-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(home-mark) { animation: home-mark-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(home-mark) { animation: home-mark-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
 ::view-transition-new(home-mark) { animation: home-mark-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(home-greeting) { animation: home-text-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(home-greeting) { animation: home-text-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
 ::view-transition-new(home-greeting) { animation: home-text-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(home-composer) { animation: composer-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(workspace-composer) { animation: composer-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(home-composer) { animation: composer-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
+::view-transition-old(workspace-composer) { animation: composer-out calc(var(--duration-medium) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
 ::view-transition-new(home-composer) { animation: composer-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) calc(var(--duration-stagger) * var(--page-transition-time-scale)) both; }
 ::view-transition-new(workspace-composer) { animation: composer-in calc(var(--duration-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(home-footer) { animation: composer-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(home-footer) { animation: composer-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
 ::view-transition-new(home-footer) { animation: composer-in calc(var(--duration-very-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) calc(var(--duration-micro) * var(--page-transition-time-scale)) both; }
 ::view-transition-new(workspace-header) { animation: workspace-header-in calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
-::view-transition-old(workspace-header) { animation: workspace-header-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(workspace-header) { animation: workspace-header-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
 ::view-transition-new(workspace-messages) { animation: workspace-messages-in calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) calc(var(--duration-stagger) * var(--page-transition-time-scale)) both; }
-::view-transition-old(workspace-messages) { animation: workspace-messages-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
+::view-transition-old(workspace-messages) { animation: workspace-messages-out calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-in) both; }
 @keyframes home-background-out { to { transform: translate3d(0, -100%, 0); opacity: 0; } }
 @keyframes home-background-in { from { transform: translate3d(0, -100%, 0); opacity: 0; } }
 @keyframes home-mark-out { to { transform: translate3d(0, calc(-1 * var(--distance-large)), 0); opacity: 0; } }

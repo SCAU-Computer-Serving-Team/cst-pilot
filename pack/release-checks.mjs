@@ -14,7 +14,7 @@ export function checkReleaseTree(root, files) {
     if (/^agent\/home\/extensions\/web\/test\//i.test(rel)) {
       throw new Error(`Web 测试文件不得进入发行包: ${rel}`);
     }
-    if (/(^|\/)(\.state|\.git|sessions|\.cache)(\/|$)|^agent\/home\/(auth\.json|models\.json|web-search\.json|fff\/|npm\/)|^wiztree\/(tmp\/|WizTree3\.ini(?:\.bad)?$)|(^|\/)\.env(?:\.|$)/i.test(rel)) {
+    if (/(^|\/)(\.state|\.git|sessions|\.cache)(\/|$)|^agent\/home\/(auth\.json|models\.json|web-settings\.json|web-search\.json|fff\/|npm\/)|^wiztree\/(tmp\/|WizTree3\.ini(?:\.bad)?$)|(^|\/)\.env(?:\.|$)/i.test(rel)) {
       throw new Error(`发行树含运行状态或凭据路径: ${rel}`);
     }
     if (/^agent\/home\/extensions\/web\/static\/fonts\/.*\.otf$/i.test(rel)) {
@@ -43,6 +43,12 @@ export function checkReleaseTree(root, files) {
 const WEB_STATIC = 'agent/home/extensions/web/static';
 export const REQUIRED_RELEASE_FILES = [
   'agent/home/APPEND_SYSTEM.md',
+  'agent/home/extensions/runtime/index.ts',
+  'agent/home/extensions/runtime/adapter.ts',
+  'agent/home/extensions/runtime/owner.ts',
+  'agent/home/extensions/runtime/configuration.ts',
+  'agent/home/extensions/runtime/package.json',
+  'agent/home/extensions/web/server/session/web-settings.ts',
   'LICENSE',
   'THIRD-PARTY-NOTICES.md',
   'licenses/pi-LICENSE.txt',

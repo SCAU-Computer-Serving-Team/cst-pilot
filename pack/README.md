@@ -1,6 +1,6 @@
 # 构建发行版
 
-加入Web后的隔离装配、官方可执行文件与后端单文件实验见[可行性分析](../doc/web/research/release-feasibility.md)。发行方案见[便携发行方案](../doc/design/release.md)。实验不替代正式发行验收。
+本页说明装配命令、输入与校验。运行组成见[便携发行方案](../doc/design/release.md)，体积与运行时依据见[可行性分析](../doc/web/research/release-feasibility.md)。
 
 在项目根目录运行：
 
@@ -12,7 +12,7 @@ node\node.exe pack\pack.mjs --official <官方ZIP或目录> --out <新的输出�
 
 发行树校验分两类：`checkReleaseTree` 拒绝项目`AGENTS.md`、运行态、凭据与密钥；`checkReleaseContent` 要求 Web 入口页与样式表引用的资源、随包许可证文件齐备，缺一即拒绝打包。装配完成后 `SHA256SUMS` 覆盖全部发行文件，并在打包后复核。
 
-发行配置默认浅色；已保存的主题选择继续生效。项目`AGENTS.md`不参与发行，运行指令由`agent/home/APPEND_SYSTEM.md`提供，见[运行注意事项](../doc/Notice.md)。
+TUI 默认主题由 Pi 设置管理。Web 默认浅色，运行后保存到独立 `web-settings.json`，不复制构建机的外观选择。项目`AGENTS.md`不参与发行，运行指令由`agent/home/APPEND_SYSTEM.md`提供，见[运行注意事项](../doc/Notice.md)。
 
 发行配置默认使用 OpenCode Go 的 `deepseek-flash`（DeepSeek V4.1 Flash）。打包时补全离线模型目录，不复制本机 `auth.json`；运行时由队员在本机登录。
 

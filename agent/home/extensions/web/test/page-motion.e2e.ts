@@ -20,6 +20,7 @@ type Snapshot = {
 	clipping: string;
 	zIndex: number;
 	duration: number;
+	easing: string;
 	delay: number;
 };
 type Frame = Record<string, Snapshot>;
@@ -38,8 +39,10 @@ async function transition(browser: BrowserProbe, selector: string, direction: st
 				const side=name.startsWith('workspace-')?${JSON.stringify(direction === "to-home" ? "old" : "new")}:${JSON.stringify(direction === "to-home" ? "new" : "old")};
 				const s=getComputedStyle(document.documentElement,'::view-transition-'+side+'('+name+')');
 				const g=getComputedStyle(document.documentElement,'::view-transition-group('+name+')');
-				const timing=animations.find(a=>a.effect.pseudoElement==='::view-transition-'+side+'('+name+')')?.effect.getTiming();
-				result[name]={opacity:parseFloat(s.opacity),x:s.transform==='none'?0:new DOMMatrixReadOnly(s.transform).m41,mask:s.maskImage,progress:Number.parseFloat(s.getPropertyValue('--home-exit-progress'))||0,y:s.transform==='none'?0:new DOMMatrixReadOnly(s.transform).m42,blur:s.filter.startsWith('blur(')?parseFloat(s.filter.slice(5)):0,group:g.transform,clipping:g.overflow,zIndex:Number(g.zIndex),duration:Number(timing?.duration),delay:timing?.delay??0};
+				const effect=animations.find(a=>a.effect.pseudoElement==='::view-transition-'+side+'('+name+')')?.effect;
+				const timing=effect?.getTiming();
+				const easing=effect?.getKeyframes().find(frame=>frame.offset===0)?.easing??timing?.easing;
+				result[name]={opacity:parseFloat(s.opacity),x:s.transform==='none'?0:new DOMMatrixReadOnly(s.transform).m41,mask:s.maskImage,progress:Number.parseFloat(s.getPropertyValue('--home-exit-progress'))||0,y:s.transform==='none'?0:new DOMMatrixReadOnly(s.transform).m42,blur:s.filter.startsWith('blur(')?parseFloat(s.filter.slice(5)):0,group:g.transform,clipping:g.overflow,zIndex:Number(g.zIndex),duration:Number(timing?.duration),easing,delay:timing?.delay??0};
 			}return result;
 		}
 		const scale=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--page-transition-time-scale'))||1;
@@ -195,6 +198,23 @@ test("双向页面动效：聊天框各自在原位下方入退场，页脚与�
 		assert.equal(intoHome.end["home-composer"].opacity, 1);
 		assert.equal(intoHome.end["home-composer"].y, 0);
 		const intoWorkspace = await transition(browser, `.sidebar-session[href="/s/${id}"]`, "to-workspace", root);
+		for (const [direction, frame] of [
+			["to-home", intoHome.start],
+			["to-workspace", intoWorkspace.start],
+		] as const) {
+			for (const [name, snapshot] of Object.entries(frame)) {
+				const exiting = name.startsWith("workspace-") ? direction === "to-home" : direction === "to-workspace";
+				assert.equal(
+					snapshot.easing,
+					exiting ? "cubic-bezier(0.64, 0, 0.78, 0)" : "cubic-bezier(0.22, 1, 0.36, 1)",
+					`${direction} ${name}退出时间反向、进入smooth-out`,
+				);
+			}
+		}
+		await writeFile(
+			join(root, "curve-timing.json"),
+			JSON.stringify({ intoHome: intoHome.start, intoWorkspace: intoWorkspace.start }, null, 2),
+		);
 		const bg = intoWorkspace.middle["home-background"];
 		assert.equal(intoWorkspace.start["home-background"].duration, 500);
 		assert.ok(bg.y < 0 && bg.opacity < 1, "背景向上slide退出");

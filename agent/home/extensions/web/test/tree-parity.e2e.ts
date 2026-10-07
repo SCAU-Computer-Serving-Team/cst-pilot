@@ -329,10 +329,20 @@ test("Web 分支树与 TUI 的树逐行一致", async () => {
 		assert.equal(login.status, 200, "登录失败");
 		const session = (await (await call("/api/sessions", "POST", {})).json()) as { id: string };
 		const snapshot = async () => (await (await fetch(`${origin}/api/sessions/${session.id}`)).json()) as unknown;
-		const replies = async () => {
+		const replies = async (text: string) => {
 			for (let attempt = 0; attempt < 200; attempt++) {
-				const state = (await snapshot()) as { messages: { role: string }[] };
-				if (state.messages.some((message) => message.role === "assistant")) return;
+				const state = (await snapshot()) as { running: boolean; messages: { role: string; content?: unknown }[] };
+				const user = state.messages.findIndex(
+					(message) =>
+						message.role === "user" &&
+						JSON.stringify(message.content).includes(JSON.stringify(text).slice(1, -1)),
+				);
+				if (
+					!state.running &&
+					user >= 0 &&
+					state.messages.slice(user + 1).some((message) => message.role === "assistant")
+				)
+					return;
 				await new Promise((resolve) => setTimeout(resolve, 50));
 			}
 			throw new Error("模型回复没有到达");
@@ -344,7 +354,7 @@ test("Web 分支树与 TUI 的树逐行一致", async () => {
 				delivery: "queue",
 			});
 			assert.equal(response.status, 202, `提交“${text}”失败`);
-			await replies();
+			await replies(text);
 		};
 		// 先铺一条主干，再回到同一个父条目下分三次岔开，最后在分支 A 里再分一次。
 		await send("开场");

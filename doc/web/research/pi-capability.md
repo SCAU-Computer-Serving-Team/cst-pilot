@@ -1,6 +1,6 @@
 # Pi 能力清单
 
-状态：已按 0.85.1 核对；官方 Windows 二进制已验证接管和浏览器接口提交。更新：2026-09-26。
+状态：已按 0.85.1 核对；官方 Windows 二进制已验证接管和浏览器接口提交。更新：2026-10-07。
 
 本文记录本项目实际依赖的 Pi 能力，作为实现依据。依据项目安装的 `@earendil-works/pi-coding-agent` 0.85.1，不以全局 Pi 版本作为依据。设计见[会话运行与并行](../SPEC/session-runtime.md)与[页面地址与接口设计](../SPEC/app-router.md)，决策见[技术决策](tech-decisions.md)。
 
@@ -42,7 +42,7 @@ TUI 的内置命令只存在于 `interactive-mode` 的编辑器提交回调里�
 | `/tree` | `session.navigateTree` | 同名方法，加 `sessionManager.getTree` | A | B |
 | `/compact` | `session.compact(instructions)` | 同名方法；扩展另有 `ctx.compact` | A | A |
 | `/reload` | `session.reload` | 同名方法 | A | B |
-| `/model` | `session.setModel` + 持久化默认模型 | `session.setModel`、`settingsManager.setDefaultModelAndProvider` | A | B |
+| `/model` | 直接指定与Enter更新当前会话，Ctrl+S持久化默认 | `session.setModel`、`settingsManager.setDefaultModelAndProvider` | A | B |
 | `/scoped-models` | `session.setScopedModels` + `settingsManager.setEnabledModels` | 同名方法 | A | B |
 | 模型循环 `Ctrl+P` | `session.cycleModel` | 同名方法 | A | C |
 | 思考强度 | `session.setThinkingLevel` / `cycleThinkingLevel` | 同名方法；扩展另有 `pi.getThinkingLevel` / `setThinkingLevel` | A | A |
@@ -57,7 +57,7 @@ TUI 的内置命令只存在于 `interactive-mode` 的编辑器提交回调里�
 
 A = 有公开 API 可直接实现；B = 只有命令上下文或内核内部拿得到；C = 内核无语义入口，自己重写。
 
-关键结论：**宿主身份能把 B 全部转成 A**。纯扩展身份覆盖不了设置、凭据与大部分会话生命周期操作。设置类还有一个限制：另建 `SettingsManager` 实例写盘对运行中的会话不可见，只有同进程的 live 实例立即生效。
+关键结论：**宿主身份能把 B 全部转成 A**。纯扩展身份覆盖不了设置、凭据与大部分会话生命周期操作。另一个设置实例写盘后，运行实例须调用 `reload()` 才能看到变更。本项目运行协调扩展在菜单、模型循环与新输入前重读，主题按端独立。
 
 ## 扩展运行约定
 
@@ -88,14 +88,14 @@ Web 扩展怎么被加载、什么时间能做什么，看下表。其中重载�
 
 ## 运行承载
 
-TUI 待机会话与 Web 使用独立的会话实例，不改 Pi 内核。`/web` 先切换 TUI，再由 Web 打开它原先保存的会话。Web 运行层按会话 ID 管理实例，各实例共用设置与模型服务，分别加载扩展资源。
+TUI 待机会话与 Web 使用独立的会话实例，不修改 Pi 源码或官方可执行文件；公开方法适配集中在运行协调扩展。`/web` 先切换 TUI，再由 Web 打开它原先保存的会话。Web 运行层按会话 ID 管理实例，各实例共用设置与模型服务，分别加载扩展资源。
 
 | 项 | 决定 |
 |---|---|
 | Pi 自带 runtime | 启动时承载 TUI 会话；接管后切换为待机会话并保持进程 |
 | Web 运行层 | Web 扩展在 `pi.exe` 进程内创建，按会话 ID 管理多个独立执行实例 |
 | 服务实例 | 共用一个 `settingsManager` 和 `modelRuntime`；每场会话独立创建 `resourceLoader`，避免扩展实例串用 |
-| 内核改动 | 不做 |
+| 版本适配 | 公开方法适配集中在运行协调扩展；SDK源码与官方程序保持原样 |
 | 新进程 | 不新增 |
 | 发行链 | 不变，继续用官方 `pi.exe` |
 
@@ -111,35 +111,13 @@ TUI 待机会话与 Web 使用独立的会话实例，不改 Pi 内核。`/web` 
 
 第一方可用的宿主接口只有两组：本地 SDK（`createAgentSession` / `createAgentSessionRuntime` / `AgentSessionRuntime`）与 `--mode rpc` 加 `RpcClient`。RPC 有 `set_model`、`compact`、`bash`、`new_session`、`fork`、`clone`、`switch_session`、`set_session_name`、`get_tree` 等，缺 `list_sessions`、`navigate_tree`、settings、trust、login、reload、scoped models。
 
-## 版本基线
+## 版本与验证边界
 
-以上结论以项目安装的 0.85.1 构建产物为准。本机 pi 源码仓库已领先该版本，三处相关差异：`user_bash` 失败语义（0.85.1 下拦截抛错不会阻断本地执行）、`ModelRegistry` 缺 `stream` / `streamSimple`、RPC 的 `steer` / `follow_up` 不经过扩展 `input` 事件。写实现前重新核对。
+能力结论以项目锁定的0.85.1构建产物为准。`user_bash` 拦截抛错的阻断、RPC steer/follow_up 的输入事件，以及扩展公开API都应按该版本核对，不由开发机全局Pi推断。
 
-## 最小验证
+当前官方可执行文件、完整扩展、实际Herdr TUI与Web验证见[跨端报告](../../test/shared-backend-report.md)。基础SDK用例验证不同会话并发与取消隔离，发行副本验证接管、写权、cwd、上下文、范围、凭据与主题；两类环境分别记录。
 
-2026-09-21，Windows，Node 24.15.0，Pi 0.85.1。使用两个真实 SDK 会话与模拟模型输出，不联网，不加载项目扩展，记录仅写临时目录。
-
-| 验证项 | 结果 |
-|---|---|
-| 两个会话同时处于执行中 | 通过 |
-| 会话 ID 与记录文件独立 | 通过 |
-| 停止 A 后 B 仍在执行 | 通过 |
-| B 随后正常完成，消息归属互不混入 | 通过 |
-| 同一会话拒绝没有排队方式的重复并发输入 | 通过 |
-
-本机验证脚本：`E:\tmp\2026-09-21\cst-web-session-probe\probe.mjs`。这是 SDK 基础能力验证，覆盖范围到多会话并发为止。
-
-2026-09-23，在 `E:\tmp\2026-09-23\cst-web-runtime-probe\` 用经 SHA256 校验的官方 Windows 0.85.1 二进制、独立 home、项目诊断扩展及本机模拟模型验证：
-
-| 验证项 | 结果 |
-|---|---|
-| 二进制扩展导入 SDK、创建独立会话、加载七个诊断工具并完成模拟模型回合 | 通过 |
-| 扩展经 `pi.sendUserMessage` 向原 Pi 会话提交输入 | 通过；TUI 换会话后旧扩展上下文失效，旧回调不能继续使用 |
-| TUI 执行 `/web`，切到独立待机会话，Web SDK 打开原会话并完成回合 | 通过；原会话文件只由 Web 实例继续写入 |
-| 待机编辑器拒绝键入 `/quit`、`/new` 和 Ctrl+D | 本次 TUI 实测通过；全量快捷键与窗口关闭行为待验证 |
-| 新建但尚未收到 assistant 消息的会话文件 | Pi 尚未生成文件；预建空文件再打开会重新分配会话 ID，不能据此接管原会话 |
-
-实测脚本与结果只存于该临时目录。窗口被直接关闭仍会结束整个 Pi 进程；完整生命周期、扩展交互和多会话管理见 [待处理议题](../../issues.md)。
+Pi在尚无assistant回复时延迟创建JSONL，分支也保留该规则。不能预建空文件再打开；SDK会重新分配身份。Web新输入与身份由收件箱持久化，运行装配见[设计](../../design/web/runtime.md)。
 
 ## 用量与费用字段
 

@@ -17,6 +17,18 @@ test("写失败、限流与网络错误分类，未知错误不伪造原因", ()
 	assert.equal(e.kind, "general");
 	assert.equal(e.detail, "provider internal exception");
 });
+test("会话占用与配置损坏给出对应恢复步骤", () => {
+	const owned = presentError(
+		"session_owned: 该会话正由另一端使用，请先关闭持有该会话的 TUI 或 Web 服务，再重新打开。",
+	);
+	assert.equal(owned.kind, "owner");
+	assert.match(owned.description, /关闭.*TUI/);
+	const config = presentError("configuration_unavailable: 设置文件无法读取，请检查 settings.json 后重试。");
+	assert.equal(config.kind, "configuration");
+	assert.match(config.description, /settings.json/);
+	assert.equal(config.action, "重试");
+});
+
 test("详情遮蔽密钥，不将技术文本放主提示", () => {
 	const e = presentError("500 apiKey=private-placeholder-token Authorization: Bearer example-secret");
 	assert.ok(!e.title.includes("500"));

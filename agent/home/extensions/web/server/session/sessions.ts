@@ -8,6 +8,9 @@ import {
 	createAgentSessionServices,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { installRuntimeAdapter, registerRuntimeSession } from "../../../runtime/adapter.ts";
+import { checkSharedConfiguration } from "../../../runtime/configuration.ts";
+import { ownSession } from "../../../runtime/owner.ts";
 import { replaceFile } from "./replace-file.ts";
 import { ToolExecutions } from "./tool-executions.ts";
 import { WebUiBridge } from "./ui.ts";
@@ -68,11 +71,24 @@ export class WebSessionPool {
 
 	constructor(options: WebSessionPoolOptions) {
 		this.options = options;
+		installRuntimeAdapter();
+	}
+
+	get cwd(): string {
+		return this.options.cwd;
 	}
 
 	getServices(): Promise<AgentSessionServices> {
 		this.canonical ??= this.options.withLoader(() =>
-			createAgentSessionServices({ cwd: this.options.cwd, agentDir: this.options.agentDir }),
+			createAgentSessionServices({
+				cwd: this.options.cwd,
+				agentDir: this.options.agentDir,
+				resourceLoaderOptions: {
+					noContextFiles: true,
+					noSkills: true,
+					additionalSkillPaths: [join(this.options.agentDir, "skills")],
+				},
+			}),
 		);
 		return this.canonical;
 	}
@@ -83,6 +99,7 @@ export class WebSessionPool {
 		const task = this.getServices().then(async (services) => {
 			await services.settingsManager.reload();
 			await services.modelRuntime.refresh({ allowNetwork: false });
+			checkSharedConfiguration(services.settingsManager, services.modelRuntime);
 			return services;
 		});
 		this.refreshing = task;
@@ -95,11 +112,30 @@ export class WebSessionPool {
 	}
 
 	private async build(manager: SessionManager, startReason: "new" | "resume" | "fork"): Promise<WebSessionSlot> {
+		const release = await ownSession(this.options.agentDir, manager.getSessionId());
+		try {
+			return await this.buildOwned(manager, startReason, release);
+		} catch (error) {
+			release();
+			throw error;
+		}
+	}
+
+	private async buildOwned(
+		manager: SessionManager,
+		startReason: "new" | "resume" | "fork",
+		release: () => void,
+	): Promise<WebSessionSlot> {
 		const canonical = await this.getServices();
 		const services = await this.options.withLoader(() =>
 			createAgentSessionServices({
-				cwd: this.options.cwd,
+				cwd: manager.getCwd(),
 				agentDir: this.options.agentDir,
+				resourceLoaderOptions: {
+					noContextFiles: true,
+					noSkills: true,
+					additionalSkillPaths: [join(this.options.agentDir, "skills")],
+				},
 				settingsManager: canonical.settingsManager,
 				modelRuntime: canonical.modelRuntime,
 			}),
@@ -114,6 +150,7 @@ export class WebSessionPool {
 			// 遥测按会话起因分类；缺省会是 startup，丢失 new/resume/fork 语义。
 			sessionStartEvent: { type: "session_start", reason: startReason },
 		});
+		registerRuntimeSession(session, this.options.agentDir, release);
 		const ui = new WebUiBridge();
 		try {
 			if (extensionsResult.errors.length) throw new Error("Web 会话扩展加载失败");
@@ -313,9 +350,11 @@ export class WebSessionPool {
 		const source = await this.openSaved(id);
 		if (source.session.isStreaming) throw new Error("会话正在执行");
 		if (!source.session.sessionManager.getEntry(entryId)) throw new Error("分支节点不存在");
-		const file = source.session.sessionManager.createBranchedSession(entryId);
+		if (!source.file) throw new Error("会话尚未保存");
+		// 在独立管理器上创建分支，源实例及其写权保持原ID。
+		const manager = SessionManager.open(source.file);
+		const file = manager.createBranchedSession(entryId);
 		if (!file) throw new Error("会话尚未保存");
-		const manager = SessionManager.open(file, this.options.sessionDir);
 		return this.open(manager.getSessionId(), () => manager, "fork");
 	}
 
