@@ -72,6 +72,10 @@ jobs:
             ${{ runner.temp }}/**/shared-configuration-e2e/report.json
             ${{ runner.temp }}/**/page-motion/**/*.png
             ${{ runner.temp }}/**/page-motion/report.json
+            ${{ runner.temp }}/**/page-sequence/**/*.png
+            ${{ runner.temp }}/**/page-sequence/**/*.json
+            ${{ runner.temp }}/**/login-navigation/**/*.png
+            ${{ runner.temp }}/**/login-navigation/report.json
             ${{ runner.temp }}/**/page-motion/curve-timing.json
             ${{ runner.temp }}/**/cwd-completion/*.png
             ${{ runner.temp }}/**/error-states/*.png

@@ -10,6 +10,7 @@ import {
 	chooseLoginTab,
 	initialLogin,
 	type LoginTab,
+	loginSuccessPath,
 	loginTabs,
 	orderedProviders,
 	returnPath,
@@ -189,7 +190,9 @@ export function ProviderLoginForm({ standalone = false }: { standalone?: boolean
 						providerName={selectedOAuth.name}
 						standalone={standalone}
 						onCancel={close}
-						onSuccess={() => navigate(destination)}
+						onSuccess={() => {
+							if (!exited.current) void navigate(loginSuccessPath(oauthProvider, "oauth", destination));
+						}}
 					/>
 				</div>
 			) : apiFlow ? (
@@ -204,7 +207,7 @@ export function ProviderLoginForm({ standalone = false }: { standalone?: boolean
 						standalone={standalone}
 						onCancel={close}
 						onSuccess={() => {
-							if (!exited.current) void navigate(destination);
+							if (!exited.current) void navigate(loginSuccessPath(provider, "api_key", destination));
 						}}
 					/>
 				</div>
