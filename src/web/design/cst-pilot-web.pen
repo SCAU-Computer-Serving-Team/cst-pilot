@@ -1,119 +1,5 @@
 {
   "version": "2.19",
-  "variables": {
-    "radius-control": {
-      "type": "number",
-      "value": 6
-    },
-    "radius-row": {
-      "type": "number",
-      "value": 8
-    },
-    "radius-menu": {
-      "type": "number",
-      "value": 12
-    },
-    "radius-composer": {
-      "type": "number",
-      "value": 16
-    },
-    "dash-bg": {
-      "type": "color",
-      "value": "#FAFDFF"
-    },
-    "dash-ink": {
-      "type": "color",
-      "value": "#1A2024"
-    },
-    "dash-muted": {
-      "type": "color",
-      "value": "#5F676C"
-    },
-    "dash-border": {
-      "type": "color",
-      "value": "#D5DEE3"
-    },
-    "dash-surface": {
-      "type": "color",
-      "value": "#FFFFFF"
-    },
-    "dash-soft": {
-      "type": "color",
-      "value": "#F2FAFF"
-    },
-    "dash-control": {
-      "type": "color",
-      "value": "#E8F1F6"
-    },
-    "dash-blue": {
-      "type": "color",
-      "value": "#1B85F2"
-    },
-    "dash-blue-text": {
-      "type": "color",
-      "value": "#0665BE"
-    },
-    "dash-green": {
-      "type": "color",
-      "value": "#20A655"
-    },
-    "dash-green-text": {
-      "type": "color",
-      "value": "#007B3A"
-    },
-    "dash-amber": {
-      "type": "color",
-      "value": "#ED9F26"
-    },
-    "dash-amber-text": {
-      "type": "color",
-      "value": "#8C5A00"
-    },
-    "dash-red-text": {
-      "type": "color",
-      "value": "#BF091B"
-    },
-    "space-micro": {
-      "type": "number",
-      "value": 2
-    },
-    "space-tight": {
-      "type": "number",
-      "value": 4
-    },
-    "space-inline": {
-      "type": "number",
-      "value": 8
-    },
-    "space-component": {
-      "type": "number",
-      "value": 12
-    },
-    "space-section": {
-      "type": "number",
-      "value": 16
-    },
-    "space-group": {
-      "type": "number",
-      "value": 24
-    },
-    "control-inline": {
-      "type": "number",
-      "value": 22
-    },
-    "control": {
-      "type": "number",
-      "value": 26
-    },
-    "control-lg": {
-      "type": "number",
-      "value": 32
-    },
-    "control-menu": {
-      "type": "number",
-      "value": 42
-    }
-  },
   "children": [
     {
       "type": "frame",
@@ -4017,10 +3903,8 @@
                   "type": "text",
                   "id": "WKFJW",
                   "name": "文字",
-                  "textGrowth": "fixed-width",
-                  "width": "fill_container",
                   "fill": "#5F676C",
-                  "content": "思考折叠只写「已思考」；展开为工具介绍块同款灰底正文：11px / 1.6、内边距 12px，全文自然增高，无内部高度上限。",
+                  "content": "思考过程折叠只写「已思考」，展开后才展示推理内容。",
                   "lineHeight": 1.5,
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 12,
@@ -88550,6 +88434,120 @@
       ]
     }
   ],
+  "variables": {
+    "radius-control": {
+      "type": "number",
+      "value": 6
+    },
+    "radius-row": {
+      "type": "number",
+      "value": 8
+    },
+    "radius-menu": {
+      "type": "number",
+      "value": 12
+    },
+    "radius-composer": {
+      "type": "number",
+      "value": 16
+    },
+    "dash-bg": {
+      "type": "color",
+      "value": "#FAFDFF"
+    },
+    "dash-ink": {
+      "type": "color",
+      "value": "#1A2024"
+    },
+    "dash-muted": {
+      "type": "color",
+      "value": "#5F676C"
+    },
+    "dash-border": {
+      "type": "color",
+      "value": "#D5DEE3"
+    },
+    "dash-surface": {
+      "type": "color",
+      "value": "#FFFFFF"
+    },
+    "dash-soft": {
+      "type": "color",
+      "value": "#F2FAFF"
+    },
+    "dash-control": {
+      "type": "color",
+      "value": "#E8F1F6"
+    },
+    "dash-blue": {
+      "type": "color",
+      "value": "#1B85F2"
+    },
+    "dash-blue-text": {
+      "type": "color",
+      "value": "#0665BE"
+    },
+    "dash-green": {
+      "type": "color",
+      "value": "#20A655"
+    },
+    "dash-green-text": {
+      "type": "color",
+      "value": "#007B3A"
+    },
+    "dash-amber": {
+      "type": "color",
+      "value": "#ED9F26"
+    },
+    "dash-amber-text": {
+      "type": "color",
+      "value": "#8C5A00"
+    },
+    "dash-red-text": {
+      "type": "color",
+      "value": "#BF091B"
+    },
+    "space-micro": {
+      "type": "number",
+      "value": 2
+    },
+    "space-tight": {
+      "type": "number",
+      "value": 4
+    },
+    "space-inline": {
+      "type": "number",
+      "value": 8
+    },
+    "space-component": {
+      "type": "number",
+      "value": 12
+    },
+    "space-section": {
+      "type": "number",
+      "value": 16
+    },
+    "space-group": {
+      "type": "number",
+      "value": 24
+    },
+    "control-inline": {
+      "type": "number",
+      "value": 22
+    },
+    "control": {
+      "type": "number",
+      "value": 26
+    },
+    "control-lg": {
+      "type": "number",
+      "value": 32
+    },
+    "control-menu": {
+      "type": "number",
+      "value": 42
+    }
+  },
   "fileToken": "122df986-407d-4181-834a-dfe6271f67ab",
   "fonts": [
     {
