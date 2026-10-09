@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { SessionEvents } from "../session/events.ts";
 import { InboxConflict } from "../session/inbox.ts";
 import type { WebSessionPool } from "../session/sessions.ts";
-import { getCstoaAccount } from "./account.ts";
+import type { CstoaAccount } from "./account.ts";
 import { OAuthFlows } from "./oauth-flow.ts";
 import { withProviderEndpoint } from "./provider-endpoint.ts";
 
@@ -11,6 +11,7 @@ interface AuthRoutesOptions {
 	agentDir: string;
 	invalidAuth: Set<string>;
 	globalEvents: SessionEvents;
+	account: CstoaAccount;
 	body(request: IncomingMessage): Promise<Record<string, unknown>>;
 	writeOnce<T>(request: IncomingMessage, pathname: string, input: unknown, action: () => Promise<T>): Promise<T>;
 	serialize<T>(id: string, action: () => Promise<T>): Promise<T>;
@@ -23,6 +24,7 @@ export function createAuthRoutes({
 	agentDir,
 	invalidAuth,
 	globalEvents,
+	account,
 	body,
 	writeOnce,
 	serialize,
@@ -33,6 +35,7 @@ export function createAuthRoutes({
 		if (view.deviceCode) globalEvents.publish("state", { type: "oauth_device_code", providerId, ...view.deviceCode });
 		if (view.state === "succeeded") {
 			invalidAuth.delete(providerId);
+			if (providerId === "cstoa") account.invalidate();
 			globalEvents.publish("state", { type: "oauth_result", providerId, ok: true });
 			globalEvents.publish("state", { type: "auth_changed", providerId });
 		}
@@ -61,9 +64,8 @@ export function createAuthRoutes({
 		}
 		if (pathname === "/api/account" && method === "GET") {
 			const { modelRuntime } = await pool.refreshServices();
-			const account = await getCstoaAccount(modelRuntime, invalidAuth.has("cstoa"));
-			response.setHeader("Cache-Control", "no-store");
-			send(response, 200, account);
+			if (new URL(request.url ?? "/", "http://localhost").searchParams.get("refresh") === "1") account.invalidate();
+			send(response, 200, await account.getAccount(modelRuntime, invalidAuth.has("cstoa")));
 			return true;
 		}
 		const oauth = /^\/api\/auth\/([a-zA-Z0-9_-]{1,128})\/(oauth|api-key)\/(start|status|cancel|respond)$/.exec(
@@ -221,6 +223,7 @@ export function createAuthRoutes({
 								})
 							: await login();
 					invalidAuth.delete(providerId);
+					if (providerId === "cstoa") account.invalidate();
 					globalEvents.publish("state", { type: "auth_changed", providerId });
 					return responseBody;
 				}),
@@ -235,6 +238,7 @@ export function createAuthRoutes({
 					await oauthFlows.cancelAndWait(providerId);
 					await modelRuntime.logout(providerId);
 					invalidAuth.delete(providerId);
+					if (providerId === "cstoa") account.invalidate();
 					globalEvents.publish("state", { type: "auth_changed", providerId });
 					return { providerId, type: null };
 				}),

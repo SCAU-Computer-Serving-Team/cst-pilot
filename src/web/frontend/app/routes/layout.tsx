@@ -1,6 +1,7 @@
 import { PanelLeft } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Outlet, useLocation, useSearchParams, useViewTransitionState } from "react-router";
+import { AccountProvider } from "../account/use-account";
 import { BlueHour } from "../shell/blue-hour";
 import { ConnectionStatus } from "../shell/connection-status";
 import { Sidebar } from "../shell/shell";
@@ -51,39 +52,41 @@ export default function WorkspaceLayout() {
 	}
 	const overlay = narrow && !collapsed;
 	return (
-		<div
-			ref={motion.root}
-			data-home-transition={homeTransition || undefined}
-			data-home-exit={homeExit || undefined}
-			data-view-transitions={typeof document.startViewTransition === "function"}
-			className={`app-layout ${home ? "home-layout" : "chat-layout"} ${collapsed ? "sidebar-collapsed" : ""}`}
-		>
-			{overlay && <div className="sidebar-backdrop" aria-hidden="true" onClick={() => changeCollapsed(true)} />}
-			<Sidebar
-				preview={preview}
-				collapsed={collapsed}
-				onCollapse={() => changeCollapsed(true)}
-				onNavigate={overlay ? () => changeCollapsed(true) : undefined}
-			/>
-			{collapsed && (
-				<button
-					type="button"
-					className="sidebar-restore"
-					aria-label="展开侧栏"
-					onClick={() => changeCollapsed(false)}
-				>
-					<PanelLeft size={22} aria-hidden="true" />
-				</button>
-			)}
-			<div className="workspace-content">
-				{home && (
-					<div className="home-backdrop" aria-hidden="true">
-						<BlueHour kind="home" />
-					</div>
+		<AccountProvider enabled={!preview}>
+			<div
+				ref={motion.root}
+				data-home-transition={homeTransition || undefined}
+				data-home-exit={homeExit || undefined}
+				data-view-transitions={typeof document.startViewTransition === "function"}
+				className={`app-layout ${home ? "home-layout" : "chat-layout"} ${collapsed ? "sidebar-collapsed" : ""}`}
+			>
+				{overlay && <div className="sidebar-backdrop" aria-hidden="true" onClick={() => changeCollapsed(true)} />}
+				<Sidebar
+					preview={preview}
+					collapsed={collapsed}
+					onCollapse={() => changeCollapsed(true)}
+					onNavigate={overlay ? () => changeCollapsed(true) : undefined}
+				/>
+				{collapsed && (
+					<button
+						type="button"
+						className="sidebar-restore"
+						aria-label="展开侧栏"
+						onClick={() => changeCollapsed(false)}
+					>
+						<PanelLeft size={22} aria-hidden="true" />
+					</button>
 				)}
-				<ConnectionStatus enabled={!preview} />
-				<Outlet />
+				<div className="workspace-content">
+					{home && (
+						<div className="home-backdrop" aria-hidden="true">
+							<BlueHour kind="home" />
+						</div>
+					)}
+					<ConnectionStatus enabled={!preview} />
+					<Outlet />
+				</div>
 			</div>
-		</div>
+		</AccountProvider>
 	);
 }

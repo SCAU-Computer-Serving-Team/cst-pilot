@@ -15194,7 +15194,7 @@
                                   "id": "fMuKR",
                                   "name": "Provider 名",
                                   "fill": "#202020",
-                                  "content": "CSTOA OA",
+                                  "content": "CSTOA API",
                                   "fontFamily": "Inter",
                                   "fontSize": 14,
                                   "fontWeight": "normal"
@@ -15305,6 +15305,46 @@
                                       "fontWeight": "normal"
                                     }
                                   ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "cst-settings-AAc7y",
+                              "name": "CSTOA 账号身份",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 4,
+                              "padding": [
+                                12,
+                                16,
+                                12,
+                                32
+                              ],
+                              "stroke": "#E0E0E0",
+                              "strokeWidth": {
+                                "bottom": 1
+                              },
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "cst-settings-label-AAc7y",
+                                  "name": "账号小标题",
+                                  "content": "账号",
+                                  "fontFamily": "Source Han Sans CN",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal",
+                                  "fill": "#646464"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "cst-settings-value-AAc7y",
+                                  "name": "姓名与学号",
+                                  "content": "测试队员（20230001）",
+                                  "fontFamily": "Source Han Sans CN",
+                                  "fontSize": 14,
+                                  "fontWeight": "normal",
+                                  "fill": "#202020"
                                 }
                               ]
                             },
@@ -18624,7 +18664,7 @@
                                   "id": "koXE4",
                                   "name": "Provider 名",
                                   "fill": "#E0EAEE",
-                                  "content": "CSTOA OA",
+                                  "content": "CSTOA API",
                                   "fontFamily": "Inter",
                                   "fontSize": 14,
                                   "fontWeight": "normal"
@@ -18735,6 +18775,46 @@
                                       "fontWeight": "normal"
                                     }
                                   ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "cst-settings-Dkpxg",
+                              "name": "CSTOA 账号身份",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 4,
+                              "padding": [
+                                12,
+                                16,
+                                12,
+                                32
+                              ],
+                              "stroke": "#2D3438",
+                              "strokeWidth": {
+                                "bottom": 1
+                              },
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "cst-settings-label-Dkpxg",
+                                  "name": "账号小标题",
+                                  "content": "账号",
+                                  "fontFamily": "Source Han Sans CN",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal",
+                                  "fill": "#AAB3B7"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "cst-settings-value-Dkpxg",
+                                  "name": "姓名与学号",
+                                  "content": "测试队员（20230001）",
+                                  "fontFamily": "Source Han Sans CN",
+                                  "fontSize": 14,
+                                  "fontWeight": "normal",
+                                  "fill": "#E0EAEE"
                                 }
                               ]
                             },
@@ -21351,7 +21431,7 @@
                           "id": "C9uJk",
                           "name": "Provider 名",
                           "fill": "#202020",
-                          "content": "CSTOA OA",
+                          "content": "CSTOA API",
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
@@ -21462,6 +21542,46 @@
                               "fontWeight": "normal"
                             }
                           ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "cst-settings-MorgV",
+                      "name": "CSTOA 账号身份",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 4,
+                      "padding": [
+                        12,
+                        16,
+                        12,
+                        32
+                      ],
+                      "stroke": "#E0E0E0",
+                      "strokeWidth": {
+                        "bottom": 1
+                      },
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "cst-settings-label-MorgV",
+                          "name": "账号小标题",
+                          "content": "账号",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 12,
+                          "fontWeight": "normal",
+                          "fill": "#646464"
+                        },
+                        {
+                          "type": "text",
+                          "id": "cst-settings-value-MorgV",
+                          "name": "姓名与学号",
+                          "content": "测试队员（20230001）",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "normal",
+                          "fill": "#202020"
                         }
                       ]
                     },
@@ -23775,7 +23895,7 @@
                           "id": "T4RJBS",
                           "name": "Provider 名",
                           "fill": "#E0EAEE",
-                          "content": "CSTOA OA",
+                          "content": "CSTOA API",
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
@@ -23886,6 +24006,46 @@
                               "fontWeight": "normal"
                             }
                           ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "cst-settings-oJ0E1",
+                      "name": "CSTOA 账号身份",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 4,
+                      "padding": [
+                        12,
+                        16,
+                        12,
+                        32
+                      ],
+                      "stroke": "#2D3438",
+                      "strokeWidth": {
+                        "bottom": 1
+                      },
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "cst-settings-label-oJ0E1",
+                          "name": "账号小标题",
+                          "content": "账号",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 12,
+                          "fontWeight": "normal",
+                          "fill": "#AAB3B7"
+                        },
+                        {
+                          "type": "text",
+                          "id": "cst-settings-value-oJ0E1",
+                          "name": "姓名与学号",
+                          "content": "测试队员（20230001）",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "normal",
+                          "fill": "#E0EAEE"
                         }
                       ]
                     },
@@ -26202,7 +26362,7 @@
                           "id": "ZuIna",
                           "name": "Provider 名",
                           "fill": "#202020",
-                          "content": "CSTOA OA",
+                          "content": "CSTOA API",
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
@@ -29547,7 +29707,7 @@
                           "id": "T6cXoq",
                           "name": "Provider 名",
                           "fill": "#E0EAEE",
-                          "content": "CSTOA OA",
+                          "content": "CSTOA API",
                           "fontFamily": "Inter",
                           "fontSize": 14,
                           "fontWeight": "normal"
@@ -37167,7 +37327,7 @@
                           "fill": "#646464",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "暂未提供",
+                          "content": "20230001",
                           "lineHeight": 1.5,
                           "textAlign": "right",
                           "fontFamily": "Source Han Sans CN",
@@ -37182,10 +37342,6 @@
                       "name": "账号字段 · 姓名",
                       "width": "fill_container",
                       "height": 56,
-                      "stroke": "#E0E0E0",
-                      "strokeWidth": {
-                        "bottom": 1
-                      },
                       "gap": 16,
                       "padding": [
                         0,
@@ -37210,47 +37366,7 @@
                           "fill": "#646464",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "暂未提供",
-                          "lineHeight": 1.5,
-                          "textAlign": "right",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "B5FDg",
-                      "name": "账号字段 · 额度",
-                      "width": "fill_container",
-                      "height": 56,
-                      "stroke": "#E0E0E0",
-                      "gap": 16,
-                      "padding": [
-                        0,
-                        16
-                      ],
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "od4W2",
-                          "name": "额度标签",
-                          "fill": "#202020",
-                          "content": "额度",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "type": "text",
-                          "id": "BKkdH",
-                          "name": "额度值",
-                          "fill": "#646464",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "暂未接入",
+                          "content": "测试队员",
                           "lineHeight": 1.5,
                           "textAlign": "right",
                           "fontFamily": "Source Han Sans CN",
@@ -37965,7 +38081,7 @@
                           "fill": "#AAB3B7",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "暂未提供",
+                          "content": "20230001",
                           "lineHeight": 1.5,
                           "textAlign": "right",
                           "fontFamily": "Source Han Sans CN",
@@ -37980,10 +38096,6 @@
                       "name": "账号字段 · 姓名",
                       "width": "fill_container",
                       "height": 56,
-                      "stroke": "#2D3438",
-                      "strokeWidth": {
-                        "bottom": 1
-                      },
                       "gap": 16,
                       "padding": [
                         0,
@@ -38008,47 +38120,7 @@
                           "fill": "#AAB3B7",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "暂未提供",
-                          "lineHeight": 1.5,
-                          "textAlign": "right",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "B0pgcD",
-                      "name": "账号字段 · 额度",
-                      "width": "fill_container",
-                      "height": 56,
-                      "stroke": "#2D3438",
-                      "gap": 16,
-                      "padding": [
-                        0,
-                        16
-                      ],
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "uBpgm",
-                          "name": "额度标签",
-                          "fill": "#E0EAEE",
-                          "content": "额度",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "type": "text",
-                          "id": "lxqbB",
-                          "name": "额度值",
-                          "fill": "#AAB3B7",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "暂未接入",
+                          "content": "测试队员",
                           "lineHeight": 1.5,
                           "textAlign": "right",
                           "fontFamily": "Source Han Sans CN",
@@ -38778,10 +38850,6 @@
                       "name": "账号字段 · 姓名",
                       "width": "fill_container",
                       "height": 56,
-                      "stroke": "#E0E0E0",
-                      "strokeWidth": {
-                        "bottom": 1
-                      },
                       "gap": 16,
                       "padding": [
                         0,
@@ -38807,46 +38875,6 @@
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
                           "content": "登录后查看",
-                          "lineHeight": 1.5,
-                          "textAlign": "right",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "h6MoXV",
-                      "name": "账号字段 · 额度",
-                      "width": "fill_container",
-                      "height": 56,
-                      "stroke": "#E0E0E0",
-                      "gap": 16,
-                      "padding": [
-                        0,
-                        16
-                      ],
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "uijPf",
-                          "name": "额度标签",
-                          "fill": "#202020",
-                          "content": "额度",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "type": "text",
-                          "id": "s5IbM",
-                          "name": "额度值",
-                          "fill": "#646464",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "暂未接入",
                           "lineHeight": 1.5,
                           "textAlign": "right",
                           "fontFamily": "Source Han Sans CN",
@@ -39539,10 +39567,6 @@
                       "name": "账号字段 · 姓名",
                       "width": "fill_container",
                       "height": 56,
-                      "stroke": "#2D3438",
-                      "strokeWidth": {
-                        "bottom": 1
-                      },
                       "gap": 16,
                       "padding": [
                         0,
@@ -39568,46 +39592,6 @@
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
                           "content": "登录后查看",
-                          "lineHeight": 1.5,
-                          "textAlign": "right",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "fAi4Y",
-                      "name": "账号字段 · 额度",
-                      "width": "fill_container",
-                      "height": 56,
-                      "stroke": "#2D3438",
-                      "gap": 16,
-                      "padding": [
-                        0,
-                        16
-                      ],
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "TocPd",
-                          "name": "额度标签",
-                          "fill": "#E0EAEE",
-                          "content": "额度",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "type": "text",
-                          "id": "HIOEi",
-                          "name": "额度值",
-                          "fill": "#AAB3B7",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "暂未接入",
                           "lineHeight": 1.5,
                           "textAlign": "right",
                           "fontFamily": "Source Han Sans CN",
@@ -56397,7 +56381,7 @@
                       "fill": "#202020",
                       "textGrowth": "fixed-width",
                       "width": "fill_container",
-                      "content": "CSTOA OA",
+                      "content": "CSTOA API",
                       "lineHeight": 1.5,
                       "fontFamily": "Inter",
                       "fontSize": 14,
@@ -56855,7 +56839,7 @@
                       "fill": "#E0EAEE",
                       "textGrowth": "fixed-width",
                       "width": "fill_container",
-                      "content": "CSTOA OA",
+                      "content": "CSTOA API",
                       "lineHeight": 1.5,
                       "fontFamily": "Inter",
                       "fontSize": 14,
@@ -61201,8 +61185,8 @@
       "id": "oVwiy",
       "x": 4640,
       "y": 7376,
-      "name": "上下文面板 · 悬停",
-      "context": " · 画布分区：06 · 悬停与菜单",
+      "name": "上下文面板 · CSTOA · 悬停",
+      "context": "CSTOA 上下文与账号额度；示例身份与额度仅用于设计。0 是有效额度，失败时显示短说明与重试。",
       "width": 360,
       "fill": "#FFFFFF",
       "cornerRadius": "$radius-menu",
@@ -61220,10 +61204,7 @@
       },
       "layout": "vertical",
       "gap": 16,
-      "padding": [
-        24,
-        28
-      ],
+      "padding": 24,
       "children": [
         {
           "type": "frame",
@@ -61362,7 +61343,7 @@
                   "id": "WlKvJ",
                   "name": "更多文字",
                   "fill": "#5F676C",
-                  "content": "更多",
+                  "content": "账号信息",
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -61393,8 +61374,8 @@
               "id": "Fdajl",
               "name": "余额数值",
               "fill": "#1A2024",
-              "content": "¥ 42.00",
-              "fontFamily": "Inter",
+              "content": "12,345 额度点",
+              "fontFamily": "Source Han Sans CN",
               "fontSize": 20,
               "fontWeight": "500"
             }
@@ -61407,8 +61388,8 @@
       "id": "z0lQt",
       "x": 5960,
       "y": 7376,
-      "name": "上下文面板 · 悬停 · 深色",
-      "context": "深色版。大面积背景 #0B1215、卡片式面板 #131A1D、正文与图标 #FFFFFF、次要 #AAB3B7、描边与分隔线 #2D3438、选中行 #242C2F、对勾与强调 #7785DE。结构与浅色版一致。 · 画布分区：06 · 悬停与菜单",
+      "name": "上下文面板 · CSTOA · 悬停 · 深色",
+      "context": "CSTOA 上下文与账号额度；示例身份与额度仅用于设计。0 是有效额度，失败时显示短说明与重试。",
       "width": 360,
       "fill": "#131A1D",
       "cornerRadius": "$radius-menu",
@@ -61426,10 +61407,7 @@
       },
       "layout": "vertical",
       "gap": 16,
-      "padding": [
-        24,
-        28
-      ],
+      "padding": 24,
       "children": [
         {
           "type": "frame",
@@ -61568,7 +61546,7 @@
                   "id": "CzUkE",
                   "name": "更多文字",
                   "fill": "#AAB3B7",
-                  "content": "更多",
+                  "content": "账号信息",
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 14,
                   "fontWeight": "normal"
@@ -61599,8 +61577,8 @@
               "id": "E3uoK",
               "name": "余额数值",
               "fill": "#FFFFFF",
-              "content": "¥ 42.00",
-              "fontFamily": "Inter",
+              "content": "12,345 额度点",
+              "fontFamily": "Source Han Sans CN",
               "fontSize": 20,
               "fontWeight": "500"
             }
@@ -62260,6 +62238,50 @@
       "children": [
         {
           "type": "frame",
+          "id": "cst-identity-n26gq",
+          "name": "账号身份",
+          "width": "fill_container",
+          "padding": [
+            8,
+            12
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "cst-identity-text-n26gq",
+              "name": "姓名与学号",
+              "content": "测试队员（20230001）",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 14,
+              "fontWeight": "500",
+              "fill": "#1A2024",
+              "width": "fill_container",
+              "textGrowth": "fixed-width"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "cst-identity-divider-n26gq",
+          "name": "身份分隔线",
+          "width": "fill_container",
+          "padding": [
+            8,
+            0
+          ],
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "cst-identity-rule-n26gq",
+              "name": "分隔线",
+              "width": "fill_container",
+              "height": 1,
+              "fill": "#D5DEE3"
+            }
+          ]
+        },
+        {
+          "type": "frame",
           "id": "gzqvc",
           "name": "菜单项 · 账号信息",
           "width": "fill_container",
@@ -62484,6 +62506,50 @@
       "gap": 2,
       "padding": 12,
       "children": [
+        {
+          "type": "frame",
+          "id": "cst-identity-TvNKY",
+          "name": "账号身份",
+          "width": "fill_container",
+          "padding": [
+            8,
+            12
+          ],
+          "children": [
+            {
+              "type": "text",
+              "id": "cst-identity-text-TvNKY",
+              "name": "姓名与学号",
+              "content": "测试队员（20230001）",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 14,
+              "fontWeight": "500",
+              "fill": "#E0EAEE",
+              "width": "fill_container",
+              "textGrowth": "fixed-width"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "cst-identity-divider-TvNKY",
+          "name": "身份分隔线",
+          "width": "fill_container",
+          "padding": [
+            8,
+            0
+          ],
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "cst-identity-rule-TvNKY",
+              "name": "分隔线",
+              "width": "fill_container",
+              "height": 1,
+              "fill": "#2D3438"
+            }
+          ]
+        },
         {
           "type": "frame",
           "id": "NQln8",
@@ -63704,7 +63770,7 @@
               "id": "Vj936",
               "name": "Provider 名",
               "fill": "#1A2024",
-              "content": "CSTOA OA",
+              "content": "CSTOA API",
               "fontFamily": "Inter",
               "fontSize": 14,
               "fontWeight": "normal"
@@ -63939,7 +64005,7 @@
               "id": "Te2yv",
               "name": "Provider 名",
               "fill": "#E0EAEE",
-              "content": "CSTOA OA",
+              "content": "CSTOA API",
               "fontFamily": "Inter",
               "fontSize": 14,
               "fontWeight": "normal"

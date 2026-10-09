@@ -20,7 +20,8 @@ export function AccountView({
 	onLogout: () => void;
 }) {
 	const usable = account?.signedIn && !account.requiresLogin;
-	const loginLabel = account?.requiresLogin ? "重新扫码登录" : account?.signedIn ? "重新扫码登录" : "扫码登录";
+	const notice = error || (usable ? account.profile.reason : "");
+	const placeholder = error ? "暂不可用" : usable ? "暂未提供" : "登录后查看";
 	return (
 		<div className="settings-content account-content">
 			<header className="settings-group-head">
@@ -28,66 +29,61 @@ export function AccountView({
 			</header>
 			{loading ? (
 				<output className="settings-note">正在读取账号信息…</output>
-			) : error ? (
-				<div className="account-notice">
-					<p className="message-error" role="alert">
-						{error}
-					</p>
-					<Button type="button" variant="ghost" className="settings-action" onPress={onRetry}>
-						重试
-					</Button>
-				</div>
 			) : (
-				account && (
-					<>
-						<dl className="settings-card account-fields">
-							{[
-								["学号", usable ? (account.profile.studentId ?? "暂未提供") : "登录后查看"],
-								["姓名", usable ? (account.profile.name ?? "暂未提供") : "登录后查看"],
-								["额度", "暂未接入"],
-							].map(([label, value]) => (
-								<div className="settings-row account-field" key={label}>
-									<dt>{label}</dt>
-									<dd>{value}</dd>
-								</div>
-							))}
-						</dl>
+				<>
+					<dl className="settings-card account-fields">
+						{[
+							["学号", usable ? (account.profile.studentId ?? placeholder) : placeholder],
+							["姓名", usable ? (account.profile.name ?? placeholder) : placeholder],
+						].map(([label, value]) => (
+							<div className="settings-row account-field" key={label}>
+								<dt>{label}</dt>
+								<dd title={value}>{value}</dd>
+							</div>
+						))}
+					</dl>
+					{notice || account?.requiresLogin ? (
 						<div className="account-notice">
-							{account.profile.reason && usable ? (
+							{notice ? (
 								<>
 									<p className="message-error" role="alert">
-										{account.profile.reason}
+										{notice}
 									</p>
-									<Button type="button" variant="ghost" className="settings-action" onPress={onRetry}>
+									<Button
+										type="button"
+										variant="ghost"
+										className="settings-action"
+										isDisabled={working}
+										onPress={onRetry}
+									>
 										重试
 									</Button>
 								</>
-							) : null}
-							{account.requiresLogin ? (
+							) : (
 								<output className="settings-note account-warning">登录已失效</output>
-							) : null}
-						</div>
-						<div className="account-actions">
-							<Link className="settings-action" to={loginPath("cstoa", "oauth", "/account")}>
-								<ScanQrCode size={16} aria-hidden="true" />
-								{loginLabel}
-							</Link>
-							{account.signedIn && (
-								<Button
-									type="button"
-									variant="ghost"
-									className="settings-action settings-action-danger"
-									isDisabled={working}
-									onPress={onLogout}
-								>
-									<LogOut size={16} aria-hidden="true" />
-									{working ? "正在退出…" : "退出 CSTOA"}
-								</Button>
 							)}
 						</div>
-					</>
-				)
+					) : null}
+				</>
 			)}
+			<div className="account-actions">
+				<Link className="settings-action" to={loginPath("cstoa", "oauth", "/account")}>
+					<ScanQrCode size={16} aria-hidden="true" />
+					{account?.signedIn ? "重新扫码登录" : "扫码登录"}
+				</Link>
+				{account?.signedIn ? (
+					<Button
+						type="button"
+						variant="ghost"
+						className="settings-action settings-action-danger"
+						isDisabled={working}
+						onPress={onLogout}
+					>
+						<LogOut size={16} aria-hidden="true" />
+						{working ? "正在退出…" : "退出 CSTOA"}
+					</Button>
+				) : null}
+			</div>
 		</div>
 	);
 }

@@ -182,7 +182,7 @@ test("登出会取消进行中的 OAuth，避免授权完成后恢复已退出�
 	assert.equal((await until((value) => value.state === "cancelled")).prompt, undefined);
 });
 
-test("账号信息只取 cstoa 状态，未登录时资料为空，额度未接入", async () => {
+test("账号信息只取 cstoa 状态，未登录时资料为空且不包含额度", async () => {
 	await modelRuntime.login("openai", "api_key", { prompt: async () => "other-provider-key", notify: () => {} });
 	const account = await fetch(`${origin}/api/account`);
 	assert.equal(account.status, 200);
@@ -192,8 +192,7 @@ test("账号信息只取 cstoa 状态，未登录时资料为空，额度未接�
 	assert.equal(value.profile.studentId, null);
 	assert.equal(value.profile.name, null);
 	assert.equal(value.profile.supported, true);
-	assert.equal(value.quota.supported, false);
-	assert.equal(value.quota.balance, null);
+	assert.equal("quota" in value, false);
 });
 
 test("cstoa OAuth 与其他服务 API Key 共存，退出专属账号不清除其他凭据", async () => {

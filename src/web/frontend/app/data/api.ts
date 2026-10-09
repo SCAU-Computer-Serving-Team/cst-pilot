@@ -35,7 +35,6 @@ export type AccountStatus = {
 	signedIn: boolean;
 	requiresLogin: boolean;
 	profile: { supported: boolean; studentId: string | null; name: string | null; reason?: string };
-	quota: { supported: boolean; balance: number | null };
 };
 
 /** 会话接口路径：id 统一编码，suffix 以 `/` 开头。 */

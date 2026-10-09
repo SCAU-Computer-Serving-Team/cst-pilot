@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
+import { describeAccount } from "../account/format";
+import { useAccount } from "../account/use-account";
 import { accountProvider, loginPath } from "../auth/providers";
 import { Composer, type ComposerConfig } from "../composer/composer";
 import { apiJson, type ProviderStatus } from "../data/api";
@@ -65,6 +67,10 @@ export function Sidebar({
 	const [accountWorking, setAccountWorking] = useState(false);
 	const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 	const [exitOpen, setExitOpen] = useState(false);
+	// 账号菜单只显示身份；打开时按缓存时效同步。
+	const { account: cstoaAccount, refresh: refreshCstoaAccount } = useAccount();
+	const cstoaSummary = describeAccount(cstoaAccount);
+	const teamRequiresLogin = team?.requiresLogin || cstoaAccount?.requiresLogin;
 	usePanelDismiss(accountMenuOpen, () => setAccountMenuOpen(false));
 	function closeAccountMenu() {
 		setAccountMenuOpen(false);
@@ -355,7 +361,7 @@ export function Sidebar({
 						{preview
 							? "24宣传指导 · 设计预览"
 							: teamSignedIn
-								? team?.requiresLogin
+								? teamRequiresLogin
 									? "需要重新登录"
 									: "已登录"
 								: state.stage === "preview"
@@ -363,24 +369,38 @@ export function Sidebar({
 									: "CSTOA 未登录"}
 					</small>
 				</div>
-				<Popover isOpen={accountMenuOpen} onOpenChange={setAccountMenuOpen}>
+				<Popover
+					isOpen={accountMenuOpen}
+					onOpenChange={(open) => {
+						setAccountMenuOpen(open);
+						if (open) void refreshCstoaAccount();
+					}}
+				>
 					<Button variant="ghost" isIconOnly className="sidebar-account-trigger" aria-label="账号菜单">
 						<Settings size={22} aria-hidden="true" />
 					</Button>
 					<Popover.Content placement="top end" className="sidebar-account-popover">
 						<Popover.Dialog aria-label="账号菜单" className="sidebar-account-menu">
+							{cstoaSummary && (
+								<>
+									<div className="sidebar-account-identity">
+										<strong title={cstoaSummary.identity}>{cstoaSummary.identity}</strong>
+									</div>
+									<hr className="session-menu-divider" />
+								</>
+							)}
 							<Link className="sidebar-account-item" to="/account" onClick={closeAccountMenu}>
 								<CircleUserRound size={18} aria-hidden="true" />
 								账号信息
 							</Link>
-							{(!teamSignedIn || team?.requiresLogin) && (
+							{(!teamSignedIn || teamRequiresLogin) && (
 								<Link
 									className="sidebar-account-item"
 									to={loginPath("cstoa", "oauth", "/account")}
 									onClick={closeAccountMenu}
 								>
 									<LogIn size={18} aria-hidden="true" />
-									{team?.requiresLogin ? "重新登录 CSTOA" : "登录 CSTOA"}
+									{teamRequiresLogin ? "重新登录 CSTOA" : "登录 CSTOA"}
 								</Link>
 							)}
 							<Link className="sidebar-account-item" to="/settings" onClick={closeAccountMenu}>

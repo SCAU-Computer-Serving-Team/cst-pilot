@@ -10,7 +10,7 @@ import { WebSessionPool } from "../server/session/sessions.ts";
 import { BrowserProbe, freePort } from "./browser.ts";
 import { testRoot } from "./support.ts";
 
-test("账号页面：学号姓名、接口未上线提示、重试与退出", { timeout: 60_000 }, async () => {
+test("CSTOA：身份展示、上下文额度、零值、重试、模型隔离与退出", { timeout: 120_000 }, async () => {
 	const root = join(await testRoot(), "account-profile");
 	await mkdir(root, { recursive: true });
 	const home = await mkdtemp(join(root, "home-"));
@@ -36,6 +36,14 @@ test("账号页面：学号姓名、接口未上线提示、重试与退出", { 
 		sessionDir: join(home, "sessions"),
 		withLoader: (load) => load(),
 	});
+	const { modelRuntime } = await pool.getServices();
+	const model = modelRuntime.getModels("cstoa")[0];
+	assert.ok(model);
+	await modelRuntime.login("openai", "api_key", { prompt: async () => "test-other-key", notify: () => {} });
+	const other = modelRuntime.getModels("openai")[0];
+	assert.ok(other);
+	const slot = await pool.create();
+	await slot.session.setModel(model);
 	const port = await freePort();
 	const origin = `http://127.0.0.1:${port}`;
 	const api = createWebApi(pool, home, port);
@@ -47,6 +55,18 @@ test("账号页面：学号姓名、接口未上线提示、重试与退出", { 
 	);
 	await listenWebServer(server, port);
 	const browser = await BrowserProbe.launch(root);
+	let observer: BrowserProbe | undefined;
+	const openContext = async () => {
+		await browser.until("!!document.querySelector('.context-meter')", "上下文入口");
+		await browser.evaluate("document.querySelector('.context-meter').focus()");
+		await browser.until("document.querySelector('.context-meter-wrap')?.dataset.open==='true'", "键盘打开上下文");
+	};
+	const hideSidebar = async () => {
+		if (await browser.evaluate("document.querySelector('.sidebar')?.getAttribute('aria-hidden')==='false'")) {
+			await browser.click('button[aria-label="收起侧栏"]');
+			await browser.until("document.querySelector('.sidebar').getBoundingClientRect().right<=0", "侧栏收起");
+		}
+	};
 	try {
 		for (const [theme, width, height] of [
 			["light", 1440, 1000],
@@ -63,45 +83,135 @@ test("账号页面：学号姓名、接口未上线提示、重试与退出", { 
 			});
 			await writeFile(join(home, "web-settings.json"), JSON.stringify({ theme }));
 			await browser.navigate(`${origin}/account`);
-			if (width < 900) {
-				await browser.click('button[aria-label="收起侧栏"]');
-				await browser.until('document.querySelector(".sidebar").getBoundingClientRect().right <= 0', "侧栏关闭");
-			}
+			if (width < 900) await hideSidebar();
 			await browser.until(
-				`document.querySelector(".account-fields")?.innerText.includes("20230001") && document.querySelector(".account-fields")?.innerText.includes("测试队员")`,
+				"document.querySelector('.account-fields')?.innerText.includes('20230001')&&document.querySelector('.account-fields')?.innerText.includes('测试队员')",
 				"学号姓名显示",
 			);
 			assert.equal(
-				await browser.evaluate(`document.querySelector(".account-fields").innerText.includes("access-1")`),
+				await browser.evaluate("document.querySelector('.account-fields').innerText.includes('额度')"),
 				false,
 			);
 			assert.equal(
-				await browser.evaluate(
-					`document.querySelector(".account-fields").scrollWidth <= document.querySelector(".account-fields").clientWidth`,
-				),
-				true,
+				await browser.evaluate("document.querySelector('.account-fields').innerText.includes('access-1')"),
+				false,
 			);
 			await browser.screenshot(join(root, `account-${theme}.png`));
+			await browser.navigate(`${origin}/settings`);
+			if (width < 900) await hideSidebar();
+			await browser.until(
+				"document.querySelector('.settings-account')?.innerText.includes('测试队员')",
+				"设置页身份显示",
+			);
+			assert.equal(
+				await browser.evaluate("document.querySelector('.settings-account').innerText.includes('额度')"),
+				false,
+			);
+			await browser.evaluate("document.querySelector('.settings-account').scrollIntoView({block:'center'})");
+			await browser.screenshot(join(root, `settings-${theme}.png`));
+			await browser.navigate(`${origin}/s/${slot.id}`);
+			if (width < 900) await hideSidebar();
+			await openContext();
+			await browser.until(
+				"document.querySelector('.context-balance')?.innerText==='12,345 额度点'",
+				"上下文 CSTOA 额度",
+			);
+			const geometry = await browser.evaluate<{ left: number; right: number; top: number; width: number }>(
+				"(()=>{const r=document.querySelector('.context-panel').getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,width:innerWidth}})()",
+			);
+			await browser.screenshot(join(root, `context-${theme}.png`));
+			assert.ok(
+				geometry.left >= 0 && geometry.right <= geometry.width && geometry.top >= 0,
+				JSON.stringify(geometry),
+			);
+			await browser.call("Input.dispatchKeyEvent", {
+				type: "keyDown",
+				key: "Escape",
+				code: "Escape",
+				windowsVirtualKeyCode: 27,
+			});
+			await browser.until("document.querySelector('.context-meter-wrap')?.dataset.open==='false'", "Esc关闭上下文");
 		}
-		options.profileStatus = 404;
+		await browser.call("Emulation.setDeviceMetricsOverride", {
+			width: 1440,
+			height: 1000,
+			deviceScaleFactor: 1,
+			mobile: false,
+		});
 		await browser.navigate(`${origin}/account`);
-		if (await browser.evaluate(`document.querySelector(".sidebar")?.getAttribute("aria-hidden") === "false"`))
-			await browser.click('button[aria-label="收起侧栏"]');
-		await browser.until(`document.querySelector(".account-notice")?.innerText.includes("尚未上线")`, "未上线提示");
-		assert.ok(await browser.evaluate(`document.querySelector(".account-actions")?.innerText.includes("退出 CSTOA")`));
+		if (await browser.evaluate("document.querySelector('.sidebar')?.getAttribute('aria-hidden')==='true'"))
+			await browser.click('button[aria-label="展开侧栏"]');
+		await browser.click('button[aria-label="账号菜单"]');
+		await browser.until(
+			"document.querySelector('.sidebar-account-identity')?.innerText.includes('测试队员')",
+			"菜单身份",
+		);
+		assert.equal(
+			await browser.evaluate("document.querySelector('.sidebar-account-menu').innerText.includes('额度')"),
+			false,
+		);
+		await browser.screenshot(join(root, "menu-dark.png"));
+		options.profile = { balance: 0 };
+		await fetch(`${origin}/api/quota?provider=cstoa&refresh=1`);
+		await browser.navigate(`${origin}/s/${slot.id}`);
+		await openContext();
+		await browser.until("document.querySelector('.context-balance')?.innerText==='0 额度点'", "零额度");
+		// 更换为其他已登录服务，验证其上下文面板不会沿用 CSTOA 数字。
+		await slot.session.setModel(other);
+		await browser.navigate(`${origin}/s/${slot.id}`);
+		await openContext();
+		await browser.until("!document.querySelector('.context-title')", "其他服务不显示 CSTOA 额度");
+		await slot.session.setModel(model);
+		options.profile = { balance: null, balanceAvailable: false };
+		await fetch(`${origin}/api/quota?provider=cstoa&refresh=1`);
+		await browser.navigate(`${origin}/s/${slot.id}`);
+		await openContext();
+		await browser.until(
+			"document.querySelector('.context-quota-notice')?.innerText.includes('额度暂不可用')",
+			"额度故障",
+		);
+		options.profile = { balance: 100 };
+		await browser.click(".context-quota-notice button");
+		await browser.until("document.querySelector('.context-balance')?.innerText==='100 额度点'", "额度重试");
+		options.profileStatus = 404;
+		await fetch(`${origin}/api/account?refresh=1`);
+		await browser.navigate(`${origin}/account`);
+		await browser.until("document.querySelector('.account-notice')?.innerText.includes('暂不可用')", "资料故障提示");
+		assert.ok(await browser.evaluate("document.querySelector('.account-actions')?.innerText.includes('退出 CSTOA')"));
 		options.profileStatus = 200;
+		options.profile = { name: "测试队员".repeat(40) };
 		await browser.click(".account-notice button");
-		await browser.until(`document.querySelector(".account-fields")?.innerText.includes("测试队员")`, "资料重试成功");
+		await browser.until("document.querySelector('.account-fields')?.innerText.includes('测试队员')", "资料重试");
+		assert.equal(await browser.evaluate("document.documentElement.scrollWidth<=innerWidth"), true);
+		observer = await BrowserProbe.launch(root);
+		await observer.navigate(`${origin}/s/${slot.id}`);
+		await observer.until("!!document.querySelector('.context-meter')", "另一浏览器上下文入口");
+		await observer.evaluate("document.querySelector('.context-meter').focus()");
+		await observer.until("!!document.querySelector('.context-balance')", "另一浏览器已有额度");
 		await browser.click(".account-actions button");
 		await browser.until(
-			`document.querySelector(".account-fields")?.innerText.includes("登录后查看")`,
+			"document.querySelector('.account-fields')?.innerText.includes('登录后查看')",
 			"退出清除资料",
 		);
 		assert.equal(
-			await browser.evaluate(`document.querySelector(".account-fields").innerText.includes("测试队员")`),
+			await browser.evaluate("document.querySelector('.account-fields').innerText.includes('测试队员')"),
 			false,
 		);
+		assert.ok((await modelRuntime.listCredentials()).some((item) => item.providerId === "openai"));
+		await observer.until(
+			"document.querySelector('.context-quota-notice')?.innerText.includes('登录后查看')",
+			"另一浏览器同步退出",
+		);
+		assert.equal(await observer.evaluate("!!document.querySelector('.context-balance')"), false);
+		await browser.navigate(`${origin}/s/${slot.id}`);
+		await openContext();
+		await browser.until(
+			"document.querySelector('.context-quota-notice')?.innerText.includes('登录后查看')",
+			"退出清除额度",
+		);
+		assert.equal(await browser.evaluate("!!document.querySelector('.context-balance')"), false);
 	} finally {
+		await observer?.close();
 		await browser.close();
 		server.closeAllConnections();
 		await new Promise<void>((resolve) => server.close(() => resolve()));

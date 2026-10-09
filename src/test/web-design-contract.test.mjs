@@ -105,3 +105,25 @@ test("动效令牌与 DESIGN.md 的 25 项刻度一致", () => {
   }
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/u);
 });
+
+test("账号页只保留身份字段，CSTOA 额度只放上下文面板", () => {
+  for (const id of ["bOVBg", "UsSrK", "XmU65", "iUIzN"]) {
+    const fields = [];
+    walk(web.children.find((node) => node.id === id), (node) => { if (node.name?.startsWith("账号字段 ·")) fields.push(node.name); });
+    assert.deepEqual(fields, ["账号字段 · 学号", "账号字段 · 姓名"]);
+  }
+  for (const id of ["oVwiy", "z0lQt"]) {
+    const root = web.children.find((node) => node.id === id), values = [];
+    assert.ok(root.name.includes("CSTOA"));
+    assert.equal(root.padding, 24);
+    walk(root, (node) => { if (node.content) values.push(node.content); });
+    assert.ok(values.includes("12,345 额度点"));
+    assert.ok(values.includes("账号信息"));
+  }
+  for (const id of ["CMIkr", "l0Wrr4"]) {
+    const rows = [];
+    walk(web.children.find((node) => node.id === id), (node) => { if (node.name === "CSTOA 账号身份") rows.push(node); });
+    assert.equal(rows.length, 1);
+    assert.ok(!JSON.stringify(rows).includes("额度"));
+  }
+});

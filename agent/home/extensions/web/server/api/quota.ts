@@ -1,18 +1,20 @@
 import { createHash } from "node:crypto";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
-type Quota = {
+export type ProviderQuota = {
 	provider: string;
 	supported: boolean;
 	reason?: string;
 	windows?: Record<string, { status: string; percent: number; resetsAt: string | null }>;
 	balance?: number | null;
 	currency?: string | null;
+	unit?: "credit";
+	requiresLogin?: boolean;
 	fetchedAt?: string;
 };
 
 const TTL_MS = 60_000;
-const cache = new Map<string, { at: number; value: Quota }>();
+const cache = new Map<string, { at: number; value: ProviderQuota }>();
 
 function object(value: unknown): Record<string, unknown> | null {
 	return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -36,10 +38,10 @@ function quotaEndpoint(provider: string, baseUrl: string): URL | null {
 	return null;
 }
 
-function parseGo(payload: unknown): Pick<Quota, "windows" | "balance" | "currency"> {
+function parseGo(payload: unknown): Pick<ProviderQuota, "windows" | "balance" | "currency"> {
 	const usage = object(object(payload)?.usage);
 	if (!usage) throw new Error("额度响应格式无效");
-	const windows: NonNullable<Quota["windows"]> = {};
+	const windows: NonNullable<ProviderQuota["windows"]> = {};
 	for (const name of ["rolling", "weekly", "monthly"]) {
 		const window = object(usage[name]);
 		if (
@@ -58,7 +60,7 @@ function parseGo(payload: unknown): Pick<Quota, "windows" | "balance" | "currenc
 	return { windows, balance: null, currency: null };
 }
 
-function parseDeepSeek(payload: unknown): Pick<Quota, "balance" | "currency"> {
+function parseDeepSeek(payload: unknown): Pick<ProviderQuota, "balance" | "currency"> {
 	const data = object(payload);
 	if (!data || typeof data.is_available !== "boolean" || !Array.isArray(data.balance_infos))
 		throw new Error("余额响应格式无效");
@@ -85,8 +87,8 @@ export async function getProviderQuota(
 	provider: string,
 	runtime: ModelRuntime,
 	fetcher: typeof fetch = fetch,
-): Promise<Quota> {
-	const unsupported = (reason: string): Quota => ({ provider, supported: false, reason });
+): Promise<ProviderQuota> {
+	const unsupported = (reason: string): ProviderQuota => ({ provider, supported: false, reason });
 	const model = runtime.getModels(provider).find((item) => quotaEndpoint(provider, item.baseUrl));
 	const endpoint = model && quotaEndpoint(provider, model.baseUrl);
 	if (!endpoint || !model) return unsupported("该模型服务未提供额度查询接口");
@@ -104,7 +106,7 @@ export async function getProviderQuota(
 		if (!upstream.ok) return unsupported(`额度接口返回 ${upstream.status}`);
 		const payload: unknown = await upstream.json();
 		const fields = provider === "deepseek" ? parseDeepSeek(payload) : parseGo(payload);
-		const result: Quota = { provider, supported: true, ...fields, fetchedAt: new Date().toISOString() };
+		const result: ProviderQuota = { provider, supported: true, ...fields, fetchedAt: new Date().toISOString() };
 		cache.set(cacheKey, { at: Date.now(), value: result });
 		return result;
 	} catch {

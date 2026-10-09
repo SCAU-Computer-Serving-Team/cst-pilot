@@ -1,24 +1,12 @@
 import { ChevronRight, Info } from "lucide-react";
-import { type CSSProperties, useCallback, useEffect, useId, useRef, useState } from "react";
-import { apiJson } from "../data/api";
+import { type CSSProperties, useId, useLayoutEffect, useRef, useState } from "react";
+import { Link } from "react-router";
 import { usePanelDismiss } from "../shell/panel-dismiss";
-
-type Quota = {
-	provider: string;
-	supported: boolean;
-	reason?: string;
-	windows?: Record<string, { status: string; percent: number; resetsAt: string | null }>;
-	balance?: number | null;
-	currency?: string | null;
-};
+import { formatQuotaBalance, quotaProviders } from "./quota-format";
+import { useProviderQuota } from "./use-quota";
 
 type ContextUsage = { tokens: number | null; contextWindow: number; percent: number | null } | null;
 const windowNames = { rolling: "5 小时", weekly: "本周", monthly: "本月" } as const;
-const supportedProviders = new Set(["deepseek", "opencode-go"]);
-
-function amount(balance: number, currency: string | null | undefined): string {
-	return `${currency === "USD" ? "US$" : "¥"} ${balance.toFixed(2)}`;
-}
 
 export function ContextMeter({
 	usage,
@@ -41,37 +29,29 @@ export function ContextMeter({
 		if (panel.current?.contains(document.activeElement)) trigger.current?.focus();
 		setDismissed(true);
 	});
-	const [quota, setQuota] = useState<Quota | null>(null);
-	const requestedAt = useRef(0);
-	const requestId = useRef(0);
-	// provider 变化或手动重取（refreshQuota）都走同一次加载，回调身份随 provider 变化。
-	const loadQuota = useCallback(async () => {
-		if (!supportedProviders.has(provider)) {
-			setQuota(null);
-			return;
-		}
-		requestId.current += 1;
-		const id = requestId.current;
-		requestedAt.current = Date.now();
-		try {
-			const data = await apiJson<Quota>(`/api/quota?provider=${encodeURIComponent(provider)}`);
-			if (requestId.current === id) setQuota(data);
-		} catch {
-			if (requestId.current === id) setQuota({ provider, supported: false, reason: "额度查询失败" });
-		}
-	}, [provider]);
-	useEffect(() => {
-		setQuota(null);
-		void loadQuota();
-		return () => {
-			requestId.current += 1;
+	const { quota: current, loading, retry } = useProviderQuota(provider, open);
+	const showQuota = quotaProviders.has(provider);
+	const balance = formatQuotaBalance(current);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 模型服务变化会移动触发按钮，打开面板时重新计算视口边界。
+	useLayoutEffect(() => {
+		if (!open) return;
+		const place = () => {
+			const element = panel.current;
+			if (!element) return;
+			element.style.removeProperty("--context-shift");
+			const rect = element.getBoundingClientRect();
+			const shift =
+				rect.left < 16
+					? 16 - rect.left
+					: rect.right > window.innerWidth - 16
+						? window.innerWidth - 16 - rect.right
+						: 0;
+			element.style.setProperty("--context-shift", `${shift}px`);
 		};
-	}, [loadQuota]);
-	const current = quota?.provider === provider ? quota : null;
-	const showQuota = supportedProviders.has(provider);
-	const refreshQuota = () => {
-		if (showQuota && Date.now() - requestedAt.current >= 60_000) void loadQuota();
-	};
+		place();
+		window.addEventListener("resize", place);
+		return () => window.removeEventListener("resize", place);
+	}, [open, provider]);
 
 	return (
 		<fieldset
@@ -96,8 +76,6 @@ export function ContextMeter({
 				ref={trigger}
 				type="button"
 				className="context-meter"
-				onMouseEnter={refreshQuota}
-				onFocus={refreshQuota}
 				aria-expanded={open}
 				aria-controls={panelId}
 				aria-label={usage?.percent == null ? "上下文用量未知" : `上下文用量 ${Math.round(percent)}%`}
@@ -136,23 +114,36 @@ export function ContextMeter({
 								title={
 									provider === "opencode-go"
 										? "额度按 5 小时、每周、每月三个窗口计算"
-										: "DeepSeek 账户可用余额"
+										: provider === "cstoa"
+											? "CSTOA 账号额度；10,000 额度点 = ¥1"
+											: "DeepSeek 账户可用余额"
 								}
 							>
 								<Info size={14} aria-hidden="true" />
 							</span>
-							<a
-								className="context-more"
-								href={provider === "deepseek" ? "https://platform.deepseek.com/" : "https://opencode.ai/auth"}
-								target="_blank"
-								rel="noreferrer"
-							>
-								更多
-								<ChevronRight size={14} aria-hidden="true" />
-							</a>
+							{provider === "cstoa" ? (
+								<Link className="context-more" to="/account">
+									账号信息
+									<ChevronRight size={14} aria-hidden="true" />
+								</Link>
+							) : (
+								<a
+									className="context-more"
+									href={
+										provider === "deepseek" ? "https://platform.deepseek.com/" : "https://opencode.ai/auth"
+									}
+									target="_blank"
+									rel="noreferrer"
+								>
+									更多
+									<ChevronRight size={14} aria-hidden="true" />
+								</a>
+							)}
 						</span>
-						{provider === "deepseek" && typeof current?.balance === "number" && current.supported ? (
-							<span className="context-balance">{amount(current.balance, current.currency)}</span>
+						{balance !== null ? (
+							<span className="context-balance" data-unit={current?.unit}>
+								{balance}
+							</span>
 						) : null}
 						{provider === "opencode-go" && current?.supported && current.windows
 							? (Object.keys(windowNames) as (keyof typeof windowNames)[])
@@ -175,7 +166,14 @@ export function ContextMeter({
 									})
 							: null}
 						{!current?.supported && (
-							<span className="context-quota-notice">{current?.reason ?? "正在查询额度…"}</span>
+							<div className="context-quota-notice" aria-live="polite">
+								<span>{loading ? "正在查询额度…" : (current?.reason ?? "暂无额度数据")}</span>
+								{current && !current.requiresLogin ? (
+									<button type="button" className="context-more" disabled={loading} onClick={retry}>
+										重试
+									</button>
+								) : null}
+							</div>
 						)}
 					</>
 				)}

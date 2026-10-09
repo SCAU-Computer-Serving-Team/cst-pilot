@@ -5,6 +5,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import { resolveModelScopeWithDiagnostics } from "@earendil-works/pi-coding-agent";
 import { SessionOwnerConflict } from "../../runtime/owner.ts";
+import { CstoaAccount } from "./api/account.ts";
 import { createAuthRoutes } from "./api/auth.ts";
 import { listProjectFiles } from "./api/project-files.ts";
 import { getProviderQuota } from "./api/quota.ts";
@@ -98,7 +99,18 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 				: undefined);
 		return receipts.once(key, signature, () => (sessionId ? serialize(sessionId, action) : action()));
 	}
-	const authRoutes = createAuthRoutes({ pool, agentDir, invalidAuth, globalEvents, body, writeOnce, serialize, send });
+	const account = new CstoaAccount();
+	const authRoutes = createAuthRoutes({
+		pool,
+		agentDir,
+		invalidAuth,
+		globalEvents,
+		account,
+		body,
+		writeOnce,
+		serialize,
+		send,
+	});
 	const imageContent = async (id: string, refs: ImageRef[]) =>
 		Promise.all(
 			refs.map(async (ref) => ({
@@ -116,6 +128,10 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 			streams.set(id, stream);
 			slot.ui.onChange((questions) => stream.publish("session", { type: "ui_requests", questions }));
 			slot.session.subscribe((event) => {
+				if (event.type === "agent_end" && slot.session.model?.provider === "cstoa") {
+					account.invalidate();
+					globalEvents.publish("state", { type: "quota_changed", providerId: "cstoa" });
+				}
 				if (["message_start", "message_end", "agent_start", "agent_end", "session_tree"].includes(event.type))
 					globalEvents.publish("state", { type: "sessions_changed", sessionId: id });
 			});
@@ -331,9 +347,17 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 				return true;
 			}
 			if (pathname === "/api/quota" && method === "GET") {
-				const providerId = new URL(request.url ?? "/", origin).searchParams.get("provider") ?? "";
-				const { modelRuntime } = await pool.getServices();
-				send(response, 200, await getProviderQuota(providerId, modelRuntime));
+				const params = new URL(request.url ?? "/", origin).searchParams;
+				const providerId = params.get("provider") ?? "";
+				const { modelRuntime } = await pool.refreshServices();
+				if (providerId === "cstoa" && params.get("refresh") === "1") account.invalidate();
+				send(
+					response,
+					200,
+					providerId === "cstoa"
+						? await account.getQuota(modelRuntime, invalidAuth.has("cstoa"))
+						: await getProviderQuota(providerId, modelRuntime),
+				);
 				return true;
 			}
 			if (pathname === "/api/files" && method === "GET") {
@@ -825,6 +849,7 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 	};
 	return Object.assign(handle, {
 		close: async () => {
+			account.invalidate();
 			await authRoutes.close();
 			await Promise.all([...inboxes.values()].map((box) => box.close()));
 			for (const stream of streams.values()) stream.close();

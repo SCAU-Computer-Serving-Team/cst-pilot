@@ -73,11 +73,15 @@
 
 ### 专属账号
 
-`GET /api/account` 读取 cstoa OAuth 状态，已登录时由本机后端复用 Pi 管理的访问令牌查询 OA `GET /api/agent/me`。响应返回 `signedIn`、`requiresLogin`、`profile` 与 `quota`，并禁用缓存。浏览器不接触已有访问令牌。
+`GET /api/account` 读取 cstoa OAuth 状态，返回 `signedIn`、`requiresLogin` 与 `profile`。已登录时，本机后端复用 Pi 管理的访问令牌查询 OA `GET /api/agent/profile`。浏览器不接触已有令牌，响应禁用浏览器缓存。
 
-`profile.studentId` 对应 OA 的 `data.id`，`profile.name` 对应 `data.name`。未登录或凭据失效时资料为空；接口未上线、格式无效或网络故障时用 `profile.reason` 说明，并保留重试、登录和退出入口。额度仍为不支持和空值。资料不落盘、不进入遥测记录。
+`profile.studentId` 对应 OA 的 `data.memberId`，`profile.name` 对应 `data.name`。未登录或凭据失效时资料为空；接口、格式和网络错误由 `profile.reason` 说明，页面保留重试、登录与退出入口。资料只保存在内存，不落盘、不进入遥测。
 
-左下角「账号信息」进入 `/account`；账号退出只调用 cstoa 的 logout，其他模型服务保持登录。设置入口始终可用。生产资料接口的发布状态与验证边界见[接入与遥测验证](../../test/telemetry-report.md)。
+设置页和账号菜单只展示姓名与学号。账号页提供身份资料及登录、退出操作。退出 CSTOA 仅清除该服务凭据，其他模型服务保持登录。
+
+CSTOA 额度只在当前模型服务为 cstoa 的上下文面板显示，使用 `/api/quota?provider=cstoa` 查询。成功返回 `supported=true`、`balance` 与 `unit=credit`；0 是有效额度。额度服务不可用时，姓名仍可展示。10,000 额度点对应 ¥1。
+
+账号与额度共用 60 秒上游缓存。显式重试使用 `refresh=1`。登录、退出、令牌变化和 CSTOA 请求结束后清除缓存；查询失败可立即重试。异步结果不得恢复已退出或已切换账号的资料。
 
 ### 设置
 
@@ -86,7 +90,7 @@
 | GET | `/api/settings` | 读设置 |
 | PATCH | `/api/settings` | 改设置 |
 
-cstoa 额度与仪表盘用量接口在后续阶段确定。
+仪表盘用量接口在后续阶段确定。
 
 ### 运行时
 
@@ -95,7 +99,7 @@ cstoa 额度与仪表盘用量接口在后续阶段确定。
 | GET | `/api/state` | 启动快照：版本、会话列表与运行状态、连接状态、可用命令；当前查看对象由页面地址决定 |
 | GET | `/api/events` | 全局事件流：会话列表变化、占用变化、设置变化 |
 | GET | `/api/files?sessionId=<id>` | 项目文件清单，供输入框 `@` 引用补全 |
-| GET | `/api/quota` | 按 `provider` 查询额度：DeepSeek 返回账户余额，OpenCode Go / Go Plus 返回 5 小时、每周、每月用量窗口 |
+| GET | `/api/quota` | 按 `provider` 查询额度：CSTOA 返回额度点，DeepSeek 返回账户余额，OpenCode Go / Go Plus 返回 5 小时、每周、每月用量窗口 |
 
 `/api/state` 提供启动快照；页面按需读取相关数据。
 

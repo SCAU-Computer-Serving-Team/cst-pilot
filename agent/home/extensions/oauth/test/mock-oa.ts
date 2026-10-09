@@ -13,6 +13,12 @@ export interface MockOptions {
 	outcome?: "approve" | "deny" | "expire";
 	/** 账号接口状态，可在浏览器测试中切换以覆盖重试。 */
 	profileStatus?: number;
+	profile?: {
+		memberId?: string;
+		name?: string;
+		balance?: number | null;
+		balanceAvailable?: boolean;
+	};
 }
 
 export interface MockOa {
@@ -43,20 +49,6 @@ export async function startMockOa(options: MockOptions = {}): Promise<MockOa> {
 					interval: 1,
 				}),
 			);
-			return;
-		}
-		if (request.url === "/api/agent/me") {
-			if (options.profileStatus && options.profileStatus !== 200) {
-				response.statusCode = options.profileStatus;
-				response.end("{}");
-				return;
-			}
-			if (!["Bearer access-1", "Bearer access-2"].includes(request.headers.authorization ?? "")) {
-				response.statusCode = 401;
-				response.end("{}");
-				return;
-			}
-			response.end(JSON.stringify({ result: true, data: { id: "20230001", name: "测试队员" } }));
 			return;
 		}
 		if (request.url === "/api/oauth/token") {
@@ -102,6 +94,38 @@ export async function startMockOa(options: MockOptions = {}): Promise<MockOa> {
 					refresh_token: "refresh-1",
 					token_type: "Bearer",
 					expires_in: 7200,
+				}),
+			);
+			return;
+		}
+		if (request.url === "/api/agent/llm/v1/chat/completions") {
+			response.setHeader("Content-Type", "text/event-stream");
+			response.end(
+				`data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", choices: [{ index: 0, delta: { role: "assistant", content: "测试完成" }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+			);
+			return;
+		}
+		if (request.url === "/api/agent/profile") {
+			if (options.profileStatus && options.profileStatus !== 200) {
+				response.statusCode = options.profileStatus;
+				response.end("{}");
+				return;
+			}
+			if (!["Bearer access-1", "Bearer access-2"].includes(request.headers.authorization ?? "")) {
+				response.statusCode = 401;
+				response.end("{}");
+				return;
+			}
+			response.end(
+				JSON.stringify({
+					result: true,
+					data: {
+						memberId: "20230001",
+						name: "测试队员",
+						balance: 12345,
+						balanceAvailable: true,
+						...options.profile,
+					},
 				}),
 			);
 			return;

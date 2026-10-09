@@ -1,6 +1,6 @@
 # Todo
 
-更新：2026-10-07。Web 阶段范围与验收见 [MVP](web/MVP.md)，待决问题见[议题清单](issues.md)。
+更新：2026-10-09。Web 阶段范围与验收见 [MVP](web/MVP.md)，待决问题见[议题清单](issues.md)。
 
 ## 功能与资源
 
@@ -11,7 +11,7 @@
 | v0.5发行包：官方exe、白名单装配、TUN假IP放行、当前Web构建/字体检查与实际Web发行冒烟；跨机/介质待验证 | [可行性分析](web/research/release-feasibility.md)、[前端设计](design/web/frontend.md#打包接入) |
 | 遥测真实队员双端入库验收；两端异机备份与完整恢复验证；清理和汇总监控 | [遥测验证](test/telemetry-report.md) |
 | OAuth 真机联调；验证真实登录、模型调用与遥测身份 | [认证交接](auth/handover.md) |
-| OA 发布 Agent 本人资料接口并完成生产账号展示验收；额度查询待接入 | [专属账号](web/SPEC/app-router.md#专属账号) |
+| CSTOA 资料与上下文额度的多队员生产验收 | [账号验证](test/account-report.md) |
 
 ## 待补画布
 
