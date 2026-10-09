@@ -53,6 +53,16 @@ export function AccountView({
 							))}
 						</dl>
 						<div className="account-notice">
+							{account.profile.reason && usable ? (
+								<>
+									<p className="message-error" role="alert">
+										{account.profile.reason}
+									</p>
+									<Button type="button" variant="ghost" className="settings-action" onPress={onRetry}>
+										重试
+									</Button>
+								</>
+							) : null}
 							{account.requiresLogin ? (
 								<output className="settings-note account-warning">登录已失效</output>
 							) : null}

@@ -6,18 +6,16 @@
  */
 
 export interface TelemetryShared {
-	/** pending.jsonl 的串行队列尾。 */
+	/** 各端点队列的串行文件操作尾。 */
 	fileQueue: Promise<unknown>;
-	/** 发送单飞：进程内同时只有一个在途批次。 */
-	inflight: boolean;
+	/** 每个 home 与端点独立发送，互不阻塞。 */
+	deliveries: Map<string, { inflight: boolean; stopped: boolean; rerun: boolean }>;
 	/** 恢复单次：进程内首个初始化的实例执行草稿恢复。 */
 	recovered: boolean;
-	/** 收到 404 / 410 后置位，视为停采指令。 */
-	stopped: boolean;
 	/** 管理员探测单飞：进程内只发一次，定稿时取结果。 */
 	adminProbe?: Promise<boolean>;
 	/** 会话定稿入口，按 sessionId 注册；TUI 由 shutdown 事件触发，Web 由运行层触发。 */
-	finalizers: Map<string, (reason: string) => void>;
+	finalizers: Map<string, (reason: string) => Promise<void> | void>;
 }
 
 export const TELEMETRY_SHARED_KEY = Symbol.for("cst-pilot/telemetry");
@@ -26,9 +24,8 @@ export function shared(): TelemetryShared {
 	const holder = globalThis as { [TELEMETRY_SHARED_KEY]?: TelemetryShared };
 	holder[TELEMETRY_SHARED_KEY] ??= {
 		fileQueue: Promise.resolve(),
-		inflight: false,
+		deliveries: new Map(),
 		recovered: false,
-		stopped: false,
 		finalizers: new Map(),
 	};
 	return holder[TELEMETRY_SHARED_KEY]!;
@@ -43,9 +40,9 @@ export function enqueue<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 /** Web 运行层销毁会话实例时调用：定稿该会话并注销入口。 */
-export function finalizeSession(sessionId: string, reason: string): void {
+export async function finalizeSession(sessionId: string, reason: string): Promise<void> {
 	try {
-		shared().finalizers.get(sessionId)?.(reason);
+		await shared().finalizers.get(sessionId)?.(reason);
 	} catch {
 		// 定稿失败不影响销毁流程。
 	}

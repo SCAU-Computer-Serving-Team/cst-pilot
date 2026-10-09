@@ -38,6 +38,8 @@ test("登录返回：CSTOA入口切换APIKEY/其他OAuth回模型服务，CSTOA�
 	const externalPort = await freePort();
 	await new Promise<void>((r) => external.listen(externalPort, "127.0.0.1", r));
 	const externalOrigin = `http://127.0.0.1:${externalPort}`;
+	const previousHost = process.env.CSTOA_OA_HOST;
+	process.env.CSTOA_OA_HOST = externalOrigin;
 	const pool = new WebSessionPool({
 		cwd: home,
 		agentDir: home,
@@ -67,7 +69,7 @@ test("登录返回：CSTOA入口切换APIKEY/其他OAuth回模型服务，CSTOA�
 						});
 						input.signal?.addEventListener("abort", cancel, { once: true });
 						input.onAuth({
-							url: `${externalOrigin}/authorize?state=${token}&redirect_uri=${encodeURIComponent(externalOrigin + "/callback")}`,
+							url: `${externalOrigin}/authorize?state=${token}&redirect_uri=${encodeURIComponent(`${externalOrigin}/callback`)}`,
 							instructions: "完成本机模拟授权",
 						});
 					});
@@ -159,5 +161,7 @@ test("登录返回：CSTOA入口切换APIKEY/其他OAuth回模型服务，CSTOA�
 		external.closeAllConnections();
 		await new Promise<void>((r) => external.close(() => r()));
 		await rm(home, { recursive: true, force: true });
+		if (previousHost === undefined) delete process.env.CSTOA_OA_HOST;
+		else process.env.CSTOA_OA_HOST = previousHost;
 	}
 });

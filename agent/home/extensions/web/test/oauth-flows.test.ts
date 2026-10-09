@@ -50,6 +50,8 @@ await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
 const { port } = probe.address() as AddressInfo;
 await new Promise<void>((resolve) => probe.close(() => resolve()));
 const origin = `http://127.0.0.1:${port}`;
+const previousHost = process.env.CSTOA_OA_HOST;
+process.env.CSTOA_OA_HOST = origin;
 const api = createWebApi(pool, home, port);
 const server = createWebServer(
 	fileURLToPath(new URL("../static/", import.meta.url)),
@@ -64,6 +66,8 @@ after(async () => {
 	server.closeAllConnections();
 	await new Promise<void>((resolve) => server.close(() => resolve()));
 	await rm(home, { recursive: true, force: true });
+	if (previousHost === undefined) delete process.env.CSTOA_OA_HOST;
+	else process.env.CSTOA_OA_HOST = previousHost;
 });
 const post = (path: string, value: unknown = {}, key = randomUUID()) =>
 	fetch(`${origin}${path}`, {
@@ -178,7 +182,7 @@ test("登出会取消进行中的 OAuth，避免授权完成后恢复已退出�
 	assert.equal((await until((value) => value.state === "cancelled")).prompt, undefined);
 });
 
-test("账号信息只取 cstoa 状态，资料与额度未接入时明确返回空值", async () => {
+test("账号信息只取 cstoa 状态，未登录时资料为空，额度未接入", async () => {
 	await modelRuntime.login("openai", "api_key", { prompt: async () => "other-provider-key", notify: () => {} });
 	const account = await fetch(`${origin}/api/account`);
 	assert.equal(account.status, 200);
@@ -187,7 +191,7 @@ test("账号信息只取 cstoa 状态，资料与额度未接入时明确返回�
 	assert.equal(value.signedIn, false);
 	assert.equal(value.profile.studentId, null);
 	assert.equal(value.profile.name, null);
-	assert.equal(value.profile.supported, false);
+	assert.equal(value.profile.supported, true);
 	assert.equal(value.quota.supported, false);
 	assert.equal(value.quota.balance, null);
 });

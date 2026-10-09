@@ -6,7 +6,7 @@
  * - shutdown：定稿。TUI 走 pi 的 session_shutdown 事件；Web 由运行层销毁实例时经
  *   globalThis 入口调用（见 WebSessionPool 的 deleteSaved 与 close）。
  * - 进程启动：首个实例执行草稿恢复，补 endReason = crash 的记录。
- * 全程不阻塞会话、不抛错、不向队员输出。
+ * 正常退出等待各端点队列落盘；网络异步，不抛错、不向队员输出。
  */
 
 import { dirname } from "node:path";
@@ -16,14 +16,10 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import * as collect from "./collect.ts";
 import { type CurrencyMap, loadConfig, loadCurrency, type TelemetryConfig } from "./config.ts";
 import { readCredential } from "./credential.ts";
+import { flushEndpoints, migratePending, queueRecord } from "./delivery.ts";
 import { recoverDrafts, removeDraft, writeDraft } from "./draft.ts";
-import { appendRecord, BATCH_MAX_RECORDS, readAll, removeRecords } from "./outbox.ts";
 import { buildRecord, cachedAdmin, detectAdmin, kitVersion } from "./record.ts";
 import { shared } from "./shared.ts";
-import { sendBatch } from "./transport.ts";
-
-/** 单批次字节预算：留出信封开销，避免触发接收端 1 MB 整批拒绝。 */
-const BATCH_MAX_BYTES = 900 * 1024;
 
 export default function telemetry(pi: ExtensionAPI): void {
 	const agentDir = getAgentDir();
@@ -42,21 +38,22 @@ export default function telemetry(pi: ExtensionAPI): void {
 	 * 管理员探测耗时秒级，不进这里：session_start 是会话关键路径，只发探测不等待，定稿时取结果。 */
 	function ensureReady(): Promise<void> {
 		ready ??= (async () => {
-			s.adminProbe ??= detectAdmin();
 			[config, currency, version] = await Promise.all([
 				loadConfig(agentDir),
 				loadCurrency(extensionDir),
 				kitVersion(extensionDir, process.cwd()),
 			]);
+			if (config?.enabled && config.endpoints.length) s.adminProbe ??= detectAdmin();
 		})();
 		return ready;
 	}
 
-	const active = () => config?.enabled === true && config.endpoint !== "";
+	const active = () => config?.enabled === true && config.endpoints.length > 0;
 
 	async function recoverAndFlush(): Promise<void> {
 		try {
-			for (const record of await recoverDrafts(agentDir)) await appendRecord(agentDir, record);
+			await migratePending(agentDir, config!.endpoints);
+			for (const record of await recoverDrafts(agentDir)) await queueRecord(agentDir, record, config!.endpoints);
 		} catch {
 			// 恢复失败不阻塞上报。
 		}
@@ -101,7 +98,7 @@ export default function telemetry(pi: ExtensionAPI): void {
 				version,
 				adminNow === true,
 			);
-			await appendRecord(agentDir, record);
+			await queueRecord(agentDir, record, config!.endpoints);
 			await removeDraft(agentDir, current.sessionId);
 		} catch {
 			// 定稿失败丢弃本场记录，不影响退出流程。
@@ -134,40 +131,9 @@ export default function telemetry(pi: ExtensionAPI): void {
 	}
 
 	async function flush(): Promise<void> {
-		if (!active() || s.stopped || s.inflight) return;
+		if (!active()) return;
 		const credential = await readCredential(agentDir, config!.authProvider);
-		if (!credential) return;
-		s.inflight = true;
-		try {
-			for (;;) {
-				const pending = await readAll(agentDir);
-				if (pending.length === 0) return;
-				const batch: typeof pending = [];
-				let bytes = 0;
-				for (const record of pending) {
-					const size = Buffer.byteLength(JSON.stringify(record), "utf8");
-					if (batch.length >= BATCH_MAX_RECORDS || bytes + size > BATCH_MAX_BYTES) break;
-					batch.push(record);
-					bytes += size;
-				}
-				if (batch.length === 0) {
-					// 首条就超预算：单条丢弃，继续处理其余。
-					await removeRecords(agentDir, new Set([pending[0].recordId]));
-					continue;
-				}
-				const outcome = await sendBatch(config!.endpoint, credential.access, batch);
-				if (outcome.kind === "accepted" || outcome.kind === "bad") {
-					await removeRecords(agentDir, new Set(batch.map((record) => record.recordId)));
-				}
-				if (outcome.kind === "stop") s.stopped = true;
-				if (outcome.kind === "accepted") continue;
-				return; // bad / auth / retry / stop：本轮结束。
-			}
-		} catch {
-			// 上报路径不抛错。
-		} finally {
-			s.inflight = false;
-		}
+		if (credential) await flushEndpoints(agentDir, credential.access, config!.endpoints);
 	}
 
 	pi.on("session_start", async (event, context) => {
@@ -182,7 +148,7 @@ export default function telemetry(pi: ExtensionAPI): void {
 			context.mode === "tui" ? "tui" : "web",
 		);
 		finalized = false;
-		s.finalizers.set(state.sessionId, (reason: string) => void finalize(reason));
+		s.finalizers.set(state.sessionId, (reason: string) => finalize(reason));
 		if (!s.recovered) {
 			s.recovered = true;
 			void recoverAndFlush();
@@ -191,8 +157,8 @@ export default function telemetry(pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("session_shutdown", (event) => {
-		if (state) void finalize(event.reason);
+	pi.on("session_shutdown", async (event) => {
+		if (state) await finalize(event.reason);
 	});
 
 	pi.on("input", (event) => {

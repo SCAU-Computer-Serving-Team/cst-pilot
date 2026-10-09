@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { checkReleaseContent, checkReleaseTree, REQUIRED_RELEASE_FILES } from '../release-checks.mjs';
-import { RELEASE_WEB_SEARCH } from '../release-settings.mjs';
+import { RELEASE_TELEMETRY, RELEASE_WEB_SEARCH } from '../release-settings.mjs';
 
 test('Web backend tests are rejected from release trees', () => {
   assert.throws(
@@ -14,6 +14,11 @@ test('Web backend tests are rejected from release trees', () => {
 });
 
 test("项目AGENTS.md不得进入任何发行目录",()=>{for(const file of ["AGENTS.md","doc/AGENTS.md","agent/home/agents.md"]){assert.throws(()=>checkReleaseTree(".",[file]),/AGENTS.md/);}});
+
+test('遥测测试和待发队列不得进入发行树', () => {
+  assert.throws(()=>checkReleaseTree('.', ['agent/home/extensions/telemetry/test/sender.test.ts']), /Telemetry 测试文件/);
+  assert.throws(()=>checkReleaseTree('.', ['agent/home/telemetry/pending-target.jsonl']), /运行状态或凭据路径/);
+});
 
 test('完整 OTF 字体不得进入 Web 发行树', () => {
   assert.throws(() => checkReleaseTree('.', ['agent/home/extensions/web/static/fonts/SourceHanSansCN-Regular.otf']), /完整 OTF 不得进入 Web 分发包/);
@@ -70,6 +75,18 @@ test('only the generated credential-free web-search policy enters a release', ()
 test('a release without its generated TUN policy is rejected',()=>{
   const root=makeTree();
   try{fs.rmSync(path.join(root,'agent/home/web-search.json'));assert.throws(()=>checkReleaseContent(root,filesOf(root)),/缺少必需文件.*web-search/);}finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('发行遥测配置固定双端，CA 文件缺失时拒绝发行', () => {
+  const root=makeTree(), file='agent/home/telemetry.json';
+  try {
+    fs.writeFileSync(path.join(root,file), JSON.stringify(RELEASE_TELEMETRY));
+    assert.doesNotThrow(()=>checkReleaseTree(root,[file]));
+    fs.writeFileSync(path.join(root,file), JSON.stringify({...RELEASE_TELEMETRY,endpoints:RELEASE_TELEMETRY.endpoints.slice(0,1)}));
+    assert.throws(()=>checkReleaseTree(root,[file]), /双端上报配置/);
+    fs.rmSync(path.join(root,'agent/home/extensions/telemetry/timserver_1.crt'));
+    assert.throws(()=>checkReleaseContent(root,filesOf(root)), /缺少必需文件.*timserver_1/);
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
 
 test('a complete release tree passes the content check', () => {

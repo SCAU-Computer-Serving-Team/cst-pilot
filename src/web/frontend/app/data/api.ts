@@ -34,7 +34,7 @@ export type AccountStatus = {
 	providerId: "cstoa";
 	signedIn: boolean;
 	requiresLogin: boolean;
-	profile: { supported: boolean; studentId: string | null; name: string | null };
+	profile: { supported: boolean; studentId: string | null; name: string | null; reason?: string };
 	quota: { supported: boolean; balance: number | null };
 };
 

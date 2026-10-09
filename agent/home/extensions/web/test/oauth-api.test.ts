@@ -129,6 +129,14 @@ test("扫码登录：start 后 device_code 可查，批准后凭据写入 auth.j
 	};
 	assert.equal(stored.cstoa?.access, "access-1");
 	assert.equal(stored.cstoa?.refresh, "refresh-1");
+
+	const response = await fetch(`${origin}/api/account`);
+	assert.equal(response.headers.get("Cache-Control"), "no-store");
+	const account = await response.json();
+	assert.equal(account.signedIn, true);
+	assert.equal(account.requiresLogin, false);
+	assert.deepEqual(account.profile, { supported: true, studentId: "20230001", name: "测试队员" });
+	assert.equal(JSON.stringify(account).includes("access-1"), false);
 });
 
 test("扫码登录：device_code 事件经 /api/events 推送", async () => {

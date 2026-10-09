@@ -16,10 +16,13 @@ import { ToolExecutions } from "./tool-executions.ts";
 import { WebUiBridge } from "./ui.ts";
 
 /** 遥测扩展挂在 globalThis 的定稿入口；扩展未启用时无副作用。 */
-function finalizeTelemetrySession(sessionId: string, reason: string): void {
-	const holder = globalThis as Record<symbol, { finalizers?: Map<string, (r: string) => void> } | undefined>;
+async function finalizeTelemetrySession(sessionId: string, reason: string): Promise<void> {
+	const holder = globalThis as Record<
+		symbol,
+		{ finalizers?: Map<string, (r: string) => Promise<void> | void> } | undefined
+	>;
 	try {
-		holder[Symbol.for("cst-pilot/telemetry")]?.finalizers?.get(sessionId)?.(reason);
+		await holder[Symbol.for("cst-pilot/telemetry")]?.finalizers?.get(sessionId)?.(reason);
 	} catch {
 		// 遥测定稿失败不影响销毁流程。
 	}
@@ -371,7 +374,7 @@ export class WebSessionPool {
 			await mkdir(join(tombstone, ".."), { recursive: true });
 			await writeFile(tombstone, "deleted", { flag: "wx" });
 			tombstoned = true;
-			finalizeTelemetrySession(id, "delete");
+			await finalizeTelemetrySession(id, "delete");
 			slot.ui.close();
 			slot.execution.close();
 			slot.session.dispose();
@@ -470,7 +473,7 @@ export class WebSessionPool {
 		}
 		for (const { session, ui, id, execution } of this.slots.values()) {
 			execution.close();
-			finalizeTelemetrySession(id, "quit");
+			await finalizeTelemetrySession(id, "quit");
 			ui.close();
 			session.dispose();
 		}

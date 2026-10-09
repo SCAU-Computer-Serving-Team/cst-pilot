@@ -1,6 +1,6 @@
 # 接收端
 
-状态：设计稿，已实现并经本机 e2e 验证（systemd 部署、Caddy、members 导入未做）。契约版本 0.1。更新：2026-10-03。会话记录字段见 [schema.md](../schema.md)，共用字段、身份来源与计费币种见 [../../contract.md](../../contract.md)，系统切块见 [../architecture.md](../architecture.md)。
+状态：Go 接收端已部署，真实 OA 内省已配置；本机发送端与接收端联调通过，真实队员公网上传和备份恢复待验收。契约版本 0.1。更新：2026-10-08。会话记录字段见 [schema.md](../schema.md)，共用字段、身份来源与计费币种见 [../../contract.md](../../contract.md)，系统切块见 [../architecture.md](../architecture.md)。
 
 ## 结论
 
@@ -9,7 +9,7 @@
 3. 一场会话一条记录，原始记录整条存 `payload`，常用字段抽成列。
 4. 身份由队员的 OA 登录决定：接收端拿上传的令牌向 OA 内省，取 `mid` 与 `device_id`。
 5. 除标准库外只依赖纯 Go 的 SQLite 驱动：免运行时安装、免漏洞扫描、交叉编译单二进制部署。
-6. **身份解析依赖 OA 的内省接口，该接口尚未实现**，见「依赖 OA 内省接口」。
+6. 身份解析使用已部署的 OA 内省接口。接收端服务凭据仅保存于服务器，不进入工具包。
 
 ## 接口
 
@@ -39,7 +39,7 @@ Authorization: Bearer <OA 访问令牌>
 
 ## 身份解析
 
-**待 OAuth 落地。** 本节等 OAuth 实现完成后再定稿，以下为暂定。
+OA 设备授权与内省接口已部署。接收端使用服务凭据调用内省，工具包只上传 Agent 访问令牌。
 
 上传令牌的载荷里有 `mid`、`typ`、`scope`、`device_id`、`pv`、`exp`、`jti`，见 [../../auth/README.md](../../auth/README.md)「令牌与设备标识」。
 
@@ -209,13 +209,13 @@ Authorization: Bearer <服务凭据>
 | 数据库 | modernc.org/sqlite（纯 Go，无 cgo） | WAL；页缓存上限 2MB、不开 mmap |
 | 令牌内省 | `net/http` 客户端 | 60 秒缓存，SHA-256 键 |
 | 内存上限 | `debug.SetMemoryLimit(24MiB)` | GC 软上限，超限加速回收 |
-| 测试 | 主仓库 e2e 拉起二进制做 HTTP 集成 | 测试侧用 node:test + 只读 SQLite 连接断言库内数据 |
+| 测试 | 主仓库 e2e 拉起二进制做 HTTP 集成 | node:test 验证内省协议、入库计数、去重与发送端确认 |
 | 进程 | systemd | 单进程常驻 |
-| 定时任务 | systemd timer | 任务在独立进程跑，崩了不拖累服务 |
-| HTTPS | Caddy 反代 | 自动申请与续期证书，服务只监听 `127.0.0.1` |
-| 日志 | `console` 到 journald | |
+| 定时任务 | 服务内置启动执行和 24 小时定时执行 | 清理保留期与重算汇总；失败写日志 |
+| HTTPS | nginx 反代 | 服务只监听 `127.0.0.1` |
+| 日志 | 标准输出与错误输出到 journald | |
 
-子命令：`serve`（默认）、`export-csv`、`rollup`、`delete`。members 导入与独立进程的 cleanup/backup 未实现，归「议题」。
+子命令：`serve`（默认）、`export-csv`、`rollup`、`delete`。members 导入、备份与恢复验证未完成。
 
 代码在独立仓库 `cst-pilot-server` 的 `src/`，不随工具包发行，部署到服务器上单独运行；契约文档随主仓库。五个源文件加 go.mod：
 
@@ -233,30 +233,32 @@ cst-pilot-server/
 配置用环境变量：
 
 ```
-TELEMETRY_PORT=8080
+TELEMETRY_PORT=8787
 TELEMETRY_HOST=127.0.0.1
 TELEMETRY_DB=/var/lib/cst-telemetry/telemetry.db
-OA_INTROSPECT_URL=https://cstoa.top/api/oauth/introspect   # 未配置时用桩（令牌格式 stub-<mid>-<device>）
+OA_INTROSPECT_URL=http://127.0.0.1:8080/api/oauth/introspect   # 生产必须配置真实内省
 OA_SERVICE_TOKEN=<接收端服务凭据>
 ```
 
-## 依赖 OA 内省接口
+## OA 内省接口
 
-以下各项要等 OA 的内省接口就绪才能定稿。开发期用桩顶替，接口形状先按本节定死。
+线上 OA 使用 `CSTOA_OA_INTROSPECT_SERVICE_TOKEN` 校验服务调用方，接收端使用 `OA_SERVICE_TOKEN` 发送该凭据。成功响应提供 `active`、`mid`、`device_id` 与 `scope`，不返回姓名。
 
-| # | 依赖项 | 阻塞什么 | 现在怎么做 |
-|---|---|---|---|
-| D1 | OA 提供 `POST /api/oauth/introspect` | 身份解析整步 | `auth.ts` 的 `introspect(token)` 返回固定测试身份 |
-| D2 | 内省响应区分 `expired`、`invalid`、`revoked`、`password-changed` | 401 与 403 的分法 | 按本文件的四个 reason 约定，等 OA 对齐 |
-| D3 | 内省端点的调用方鉴权方式 | `OA_INTROSPECT_TOKEN` 这一项配置 | 先读环境变量，端点定了再改配置项 |
-| D4 | `mid` 与 `device_id` 的最终字段名与格式 | `sessions` 表的列定义 | 照契约用 `mid` 与 `deviceId` |
-| D5 | 内省的超时与失败语义 | 接收端回 503 还是别的 5xx | 暂定 503 |
+| 项 | 当前行为 |
+|---|---|
+| 服务未配置凭据 | OA 返回 503 |
+| 服务凭据缺失或不匹配 | OA 返回 401 |
+| Agent 令牌签名、类型或有效期无效 | `active=false, reason=invalid` |
+| 设备、成员或密码版本校验失败 | `active=false, reason=revoked` |
+| 正常令牌 | `active=true`，接收端将学号与设备标识写入记录 |
+
+服务内省超时为 5 秒。接收端不向工具包暴露服务凭据。
 
 访问令牌的有效期（默认 2 小时）与「记住 7 天」只影响发送端的补发时机，不阻塞接收端。
 
 ## 部署
 
-已部署到 cstoa 服务器（2026-10-03，8.138.170.239，Alibaba Cloud Linux 3；与 cstoa OA、nginx 共存，未动既有服务）：
+运行于 cstoa 服务器（8.138.170.239，Alibaba Cloud Linux 3），与 OA、nginx 共存。2026-10-08 已只读核查运行状态：
 
 | 项 | 实际值 |
 |---|---|
@@ -264,22 +266,37 @@ OA_SERVICE_TOKEN=<接收端服务凭据>
 | 数据库 | `/var/lib/cst-telemetry/telemetry.db`，属主系统用户 `csttele`（无 shell） |
 | 服务 | systemd `cst-telemetry.service`，`ProtectSystem=strict` + `ReadWritePaths=/var/lib/cst-telemetry`，开机自启 |
 | 内部监听 | `127.0.0.1:8787`，路径 `POST /v1/sessions`、`GET /healthz` |
-| 公网入口 | nginx（改前备份 `nginx.conf.bak-telemetry-20261003`）：`location = /api/telemetry` → `127.0.0.1:8787/v1/sessions` |
+| 公网入口 | nginx：`location = /api/telemetry` → `127.0.0.1:8787/v1/sessions` |
 | 上报地址 | `https://www.cstoa.top/api/telemetry`。裸域 cstoa.top 301 到 www，POST 跟随重定向会丢包，endpoint 必须带 www |
-| 身份 | 桩模式（`OA_INTROSPECT_URL` 未配置），令牌格式 `stub-<mid>-<device>` |
+| 身份 | 真实内省，地址 `http://127.0.0.1:8080/api/oauth/introspect`；OA 与接收端服务凭据一致 |
 | 内存 | 常驻约 11MB |
 
-上线验证：healthz、公网 HTTPS 桩令牌上报 202（accepted=1）、export-csv 出记录、delete 清理、重启持久。运维提示：交互 shell 跑 export-csv / delete 要带 `TELEMETRY_DB=/var/lib/cst-telemetry/telemetry.db`（systemd 环境变量不进 shell）。
+当前验证范围见[接入与遥测验证](../../test/telemetry-report.md)。真实队员扫码授权后的公网上传仍待验收。交互 shell 运行导出或删除时，须显式设置 `TELEMETRY_DB`；systemd 环境变量不自动进入 shell。
 
-待接：
+接收端在启动时执行一次保留期清理与汇总，此后每 24 小时执行。生产汇总表已有数据；清理效果、错误告警与长期运行仍需运维验证。
 
-1. `cst-telemetry-rollup.timer` 每天 03:00 聚合前一天
-2. `cst-telemetry-cleanup.timer` 每天 04:00 清理保留期，并做一次 `VACUUM INTO` 备份，保留 30 天
-3. OAuth 落地后配 `OA_INTROSPECT_URL` 与 `OA_SERVICE_TOKEN` 换真内省
+遥测 SQLite 库使用独立的每日一致性备份，`cst-telemetry-backup.timer` 已启用，CSTOA 使用 Python 3.11。备份保存在 `/var/lib/cst-telemetry/backups`，保留 30 天。异机保存和完整恢复验证待完成。
 
-备份落在同一块盘上只防误删，不防机器丢失。跨机备份列入待办。
+`GET /healthz` 返回 `ok`、会话条数、提交版本 `version` 与构建时间 `builtAt`。磁盘容量、定时任务和备份成功状态需额外监控，日志走 journald。
 
-监控靠 `GET /healthz`：返回进程、数据库、磁盘与最近入库时间，交给外部探测。日志走 journald。
+### Tim 接收端
+
+`timserver_1` 已部署同款 Go 二进制，独立 Docker Compose 项目 `cst-pilot-telemetry`。源码与部署文件位于独立仓库 `cst-pilot-server/deploy/timserver_1/`。
+
+| 项 | 实际值 |
+|---|---|
+| 服务器 | `8.163.28.9` |
+| 部署目录 | `/srv/cst-pilot-server` |
+| 公网上传 | `https://8.163.28.9:8445/api/telemetry` |
+| 内部监听 | Docker 网络 `receiver:8787`，不映射宿主端口 |
+| 数据库 | `/srv/cst-pilot-server/data/telemetry.db` |
+| 身份 | 真实 OA HTTPS 内省；服务凭据仅保存在服务器 |
+| HTTPS | 独立 Caddy 网关；专用公开 CA 随扩展发行，CA 私钥不外发 |
+| 证书续期 | `cst-telemetry-tls.timer` 每日检查，证书剩余不足 30 天时续签并重启本项目网关 |
+| 备份 | `cst-telemetry-backup.timer` 每日在线一致性备份，保留 30 天 |
+| 安全组 | 仅新增 TCP 8445 入站规则，不改现有服务端口 |
+
+两端独立存储，不互相复制数据库。客户端发送相同记录，各端分别确认、去重。两端已部署 `ecc1526de415`，二进制 SHA-256 一致；更新前已有会话、凭据与 Tim CA 均保留。两端每日同机备份已启用并执行成功；异机备份、完整恢复和真实队员双端入库仍待验收。
 
 ## 报表
 
@@ -291,7 +308,6 @@ OA_SERVICE_TOKEN=<接收端服务凭据>
 
 | 编号 | 议题 | 状态 |
 |---|---|---|
-| R1 | 具体部署机器与域名 | 待定 |
 | R13 | 运维归属，谁负责部署、备份与恢复 | 待定 |
 
-其余 R 议题已有结论，写进本文正文。等 OA 内省接口的项见「依赖 OA 内省接口」。
+其余 R 议题已有结论，写进本文正文。生产验收与备份安排见「部署」。

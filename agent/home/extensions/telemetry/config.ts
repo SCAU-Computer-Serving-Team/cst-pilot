@@ -1,25 +1,75 @@
-/**
- * 配置读取：agent/home/telemetry.json 与扩展目录下的 currency.json。
- * 全部被动读取，读不到就按禁用或空映射处理，不抛错。
- */
-
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+export interface TelemetryEndpoint {
+	url: string;
+	/** 仅用于该端点的公开 CA 证书。 */
+	ca?: string;
+	/** CA 配置无效时保留队列，不向该端点发送凭据。 */
+	unavailable?: boolean;
+}
 
 export interface TelemetryConfig {
 	enabled: boolean;
-	endpoint: string;
+	endpoints: TelemetryEndpoint[];
 	authProvider: string;
 }
 
 export type CurrencyMap = Record<string, "CNY" | "USD">;
 
-export async function loadConfig(agentDir: string): Promise<TelemetryConfig | undefined> {
+/** 被动读取配置；单端点配置也可读取，队列迁移由 delivery 处理。 */
+export async function loadConfig(
+	agentDir: string,
+	extensionDir = dirname(fileURLToPath(import.meta.url)),
+): Promise<TelemetryConfig | undefined> {
 	try {
 		const raw = JSON.parse(await readFile(join(agentDir, "telemetry.json"), "utf8")) as Record<string, unknown>;
+		const candidates: unknown[] = Array.isArray(raw.endpoints)
+			? raw.endpoints
+			: typeof raw.endpoint === "string" && raw.endpoint
+				? [{ url: raw.endpoint }]
+				: [];
+		const endpoints: TelemetryEndpoint[] = [];
+		for (const value of candidates) {
+			const input = typeof value === "string" ? { url: value } : value;
+			if (!input || typeof input !== "object" || !("url" in input) || typeof input.url !== "string") continue;
+			let url: URL;
+			try {
+				url = new URL(input.url);
+			} catch {
+				continue;
+			}
+			if (
+				url.username ||
+				url.password ||
+				url.hash ||
+				!(
+					url.protocol === "https:" ||
+					(url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname))
+				)
+			)
+				continue;
+			if (endpoints.some((endpoint) => endpoint.url === url.href)) continue;
+			const endpoint: TelemetryEndpoint = { url: url.href };
+			if ("caFile" in input) {
+				const file = input.caFile;
+				if (typeof file !== "string" || !/^[a-zA-Z0-9_-]+\.crt$/.test(file) || url.protocol !== "https:") {
+					endpoint.unavailable = true;
+				} else {
+					try {
+						endpoint.ca = await readFile(join(extensionDir, file), "utf8");
+						if (!endpoint.ca.includes("-----BEGIN CERTIFICATE-----")) endpoint.unavailable = true;
+					} catch {
+						endpoint.unavailable = true;
+					}
+				}
+			}
+			endpoints.push(endpoint);
+		}
 		return {
 			enabled: raw.enabled !== false,
-			endpoint: typeof raw.endpoint === "string" ? raw.endpoint : "",
+			endpoints,
 			authProvider: typeof raw.authProvider === "string" ? raw.authProvider : "cstoa",
 		};
 	} catch {
@@ -41,7 +91,6 @@ export async function loadCurrency(extensionDir: string): Promise<CurrencyMap | 
 	}
 }
 
-/** 该 provider 的计费币种：映射可用但缺项按 USD，映射不可用留空。 */
 export function currencyOf(currency: CurrencyMap | undefined, provider: string): string {
 	if (!currency) return "";
 	return currency[provider] ?? "USD";

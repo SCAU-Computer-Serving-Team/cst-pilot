@@ -15,7 +15,9 @@
 
 ## 上传信封
 
-只有 `session` 记录上传。一次 POST 带一批记录，形状如下。发送端构造，接收端按此校验。
+只有 `session` 记录上传。同一记录同时发送到 CSTOA 服务器与 Tim 的 `timserver_1`，两端分别确认和存储。上传字段与收集边界一致，`recordId` 相同；发送状态只留在本地，不进入信封。
+
+一次 POST 带一批记录，形状如下。发送端构造，接收端按此校验。
 
 ```
 POST /v1/sessions
@@ -47,7 +49,7 @@ Authorization: Bearer <OA 访问令牌>
 
 ## 身份来源
 
-**待 OA 内省接口。** OAuth 已落地，本节字段已定；接收端换取身份的接口待 OA 提供，见 [telemetry/receiver/SPEC.md](telemetry/receiver/SPEC.md)「依赖 OA 内省接口」。
+OAuth 与 OA `POST /api/oauth/introspect` 已部署，接收端已配置真实内省。运行与验证边界见[接收端](telemetry/receiver/SPEC.md)及[验证报告](test/telemetry-report.md)。
 
 身份由上传凭据决定，客户端不计算、不携带。
 
@@ -58,7 +60,7 @@ Authorization: Bearer <OA 访问令牌>
 | `receivedAt` | 接收端时钟 | 时间基准，客户端时钟不可信 |
 | `ip` | 接收端从连接获取 | 来源统计。只存网段，见 [telemetry/receiver/SPEC.md](telemetry/receiver/SPEC.md)「接口」 |
 
-上传凭据是队员登录得到的 [OA 访问令牌](auth/README.md)，与模型调用共用同一个令牌。接收端不自己验签（令牌是 HMAC 签名，密钥不能外发），向 OA 内省令牌换取身份，取出 `mid` 与 `device_id` 写入记录；该接口待 OA 实现，见 [telemetry/receiver/SPEC.md](telemetry/receiver/SPEC.md)「依赖 OA 内省接口」。上传不设独立作用域：采不采由团队规定，不作为队员的可选项。
+上传凭据是队员登录得到的 [OA 访问令牌](auth/README.md)，与模型调用共用同一个令牌。接收端不自己验签（令牌是 HMAC 签名，密钥不能外发），向 OA 内省令牌换取身份，取出 `mid` 与 `device_id` 写入记录；接口与服务鉴权见[接收端](telemetry/receiver/SPEC.md#oa-内省接口)。上传不设独立作用域：采不采由团队规定，不作为队员的可选项。
 
 这条路线有两个结果：
 

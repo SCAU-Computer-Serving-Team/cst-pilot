@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { SessionEvents } from "../session/events.ts";
 import { InboxConflict } from "../session/inbox.ts";
 import type { WebSessionPool } from "../session/sessions.ts";
+import { getCstoaAccount } from "./account.ts";
 import { OAuthFlows } from "./oauth-flow.ts";
 import { withProviderEndpoint } from "./provider-endpoint.ts";
 
@@ -59,18 +60,10 @@ export function createAuthRoutes({
 			return true;
 		}
 		if (pathname === "/api/account" && method === "GET") {
-			const { modelRuntime } = await pool.getServices();
-			const credentials = await modelRuntime.listCredentials();
-			const signedIn = credentials.some(
-				(credential) => credential.providerId === "cstoa" && credential.type === "oauth",
-			);
-			send(response, 200, {
-				providerId: "cstoa",
-				signedIn,
-				requiresLogin: signedIn && invalidAuth.has("cstoa"),
-				profile: { supported: false, studentId: null, name: null },
-				quota: { supported: false, balance: null },
-			});
+			const { modelRuntime } = await pool.refreshServices();
+			const account = await getCstoaAccount(modelRuntime, invalidAuth.has("cstoa"));
+			response.setHeader("Cache-Control", "no-store");
+			send(response, 200, account);
 			return true;
 		}
 		const oauth = /^\/api\/auth\/([a-zA-Z0-9_-]{1,128})\/(oauth|api-key)\/(start|status|cancel|respond)$/.exec(

@@ -21,6 +21,9 @@ jobs:
       - run: npm ci --prefix agent --ignore-scripts
       - run: npm run check --prefix agent
       - run: npm run test:oauth --prefix agent
+      - run: npm run test:telemetry --prefix agent
+        env:
+          CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
       - run: npm run test:web --prefix agent
         env:
           CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
@@ -94,5 +97,6 @@ jobs:
             ${{ runner.temp }}/**/first-turn-status/first-observation.json
             ${{ runner.temp }}/**/composer-caret/*.png
             ${{ runner.temp }}/**/composer-caret/*.json
+            ${{ runner.temp }}/**/account-profile/*.png
           if-no-files-found: ignore
           retention-days: 7

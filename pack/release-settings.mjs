@@ -22,6 +22,9 @@ export const RELEASE_WEB_SEARCH = {
 // 项目遥测与 pi 自带 install telemetry 是两条独立链路；后者始终关闭。
 export const RELEASE_TELEMETRY = {
   enabled: true,
-  endpoint: "https://www.cstoa.top/api/telemetry",
+  endpoints: [
+    { url: "https://www.cstoa.top/api/telemetry" },
+    { url: "https://8.163.28.9:8445/api/telemetry", caFile: "timserver_1.crt" },
+  ],
   authProvider: "cstoa",
 };

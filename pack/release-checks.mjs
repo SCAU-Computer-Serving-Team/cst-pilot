@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { RELEASE_WEB_SEARCH } from './release-settings.mjs';
+import { RELEASE_TELEMETRY, RELEASE_WEB_SEARCH } from './release-settings.mjs';
 
 export const sha256 = (data) => crypto.createHash('sha256').update(data).digest('hex');
 
@@ -13,11 +13,11 @@ export function checkReleaseTree(root, files) {
     if (/^pi\.exe$/i.test(rel)) {
       throw new Error(`pi.exe 不得位于发行根（应装配为 agent/.runtime/prx.bin）: ${rel}`);
     }
-    if (/^agent\/home\/extensions\/(?:web|oauth)\/test\//i.test(rel)) {
-      const name = rel.split('/')[3].toLowerCase() === 'oauth' ? 'OAuth' : 'Web';
+    if (/^agent\/home\/extensions\/(?:web|oauth|telemetry)\/test\//i.test(rel)) {
+      const name = {oauth:'OAuth',web:'Web',telemetry:'Telemetry'}[rel.split('/')[3].toLowerCase()];
       throw new Error(`${name} 测试文件不得进入发行包: ${rel}`);
     }
-    if (/(^|\/)(\.state|\.git|sessions|\.cache)(\/|$)|^agent\/home\/(auth\.json|models\.json|web-settings\.json|fff\/|npm\/)|^wiztree\/(tmp\/|WizTree3\.ini(?:\.bad)?$)|(^|\/)\.env(?:\.|$)/i.test(rel)) {
+    if (/(^|\/)(\.state|\.git|sessions|\.cache)(\/|$)|^agent\/home\/(auth\.json|models\.json|web-settings\.json|fff\/|npm\/|telemetry\/)|^wiztree\/(tmp\/|WizTree3\.ini(?:\.bad)?$)|(^|\/)\.env(?:\.|$)/i.test(rel)) {
       throw new Error(`发行树含运行状态或凭据路径: ${rel}`);
     }
     if (/^agent\/home\/extensions\/web\/static\/fonts\/.*\.otf$/i.test(rel)) {
@@ -26,6 +26,9 @@ export function checkReleaseTree(root, files) {
     const buffer = fs.readFileSync(path.join(root, rel));
     if (rel.toLowerCase() === 'agent/home/web-search.json' && !isDeepStrictEqual(JSON.parse(buffer.toString('utf8')), RELEASE_WEB_SEARCH)) {
       throw new Error('发行web-search.json必须严格匹配生成的TUN放行策略，禁止复制本机配置');
+    }
+    if (rel.toLowerCase() === 'agent/home/telemetry.json' && !isDeepStrictEqual(JSON.parse(buffer.toString('utf8')), RELEASE_TELEMETRY)) {
+      throw new Error('发行telemetry.json必须严格匹配生成的双端上报配置');
     }
     if (/\b(?:sk-(?:proj-|ant-api\d+-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|AIza[0-9A-Za-z_-]{30,}|AKIA[0-9A-Z]{16})\b|\beyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(buffer.toString('latin1'))) {
       throw new Error(`发行文件含疑似密钥，需人工检查（不回显值）: ${rel}`);
@@ -50,6 +53,10 @@ const WEB_STATIC = 'agent/home/extensions/web/static';
 export const REQUIRED_RELEASE_FILES = [
   'agent/home/APPEND_SYSTEM.md',
   'agent/home/web-search.json',
+  'agent/home/telemetry.json',
+  'agent/home/extensions/telemetry/index.ts',
+  'agent/home/extensions/telemetry/delivery.ts',
+  'agent/home/extensions/telemetry/timserver_1.crt',
   'agent/home/extensions/runtime/index.ts',
   'agent/home/extensions/runtime/adapter.ts',
   'agent/home/extensions/runtime/owner.ts',

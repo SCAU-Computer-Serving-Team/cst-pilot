@@ -9,9 +9,9 @@
 | Checkpoint 5：待机、断线、失效提示与退出已完成本机隔离回归；系统输入法、真实粘贴拖拽与最低版本继续验证 | [计划与报告](test/checkpoint5-report.md)、[MVP](web/MVP.md#八实施-checkpoint) |
 | 共享后端：本机修复回归完成；继续补离线目录独立变更、全部技能/附件组合、多用户和目标系统验证 | [共享联调报告](test/shared-backend-report.md) |
 | v0.5发行包：官方exe、白名单装配、TUN假IP放行、当前Web构建/字体检查与实际Web发行冒烟；跨机/介质待验证 | [可行性分析](web/research/release-feasibility.md)、[前端设计](design/web/frontend.md#打包接入) |
-| 遥测接收端增加 rollup、cleanup 定时任务，并使用真实 OAuth 内省 | [遥测](telemetry/) |
-| OAuth 真机联调；OA 提供 `/api/oauth/introspect` | [认证交接](auth/handover.md) |
-| 接入 cstoa 学号、姓名的 Agent 资料接口与额度查询 | [专属账号](web/SPEC/app-router.md#专属账号) |
+| 遥测真实队员双端入库验收；两端异机备份与完整恢复验证；清理和汇总监控 | [遥测验证](test/telemetry-report.md) |
+| OAuth 真机联调；验证真实登录、模型调用与遥测身份 | [认证交接](auth/handover.md) |
+| OA 发布 Agent 本人资料接口并完成生产账号展示验收；额度查询待接入 | [专属账号](web/SPEC/app-router.md#专属账号) |
 
 ## 待补画布
 

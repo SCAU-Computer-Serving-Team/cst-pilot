@@ -11,6 +11,8 @@ export interface MockOptions {
 	slowDownOnce?: boolean;
 	/** 授权结果；默认 approve。 */
 	outcome?: "approve" | "deny" | "expire";
+	/** 账号接口状态，可在浏览器测试中切换以覆盖重试。 */
+	profileStatus?: number;
 }
 
 export interface MockOa {
@@ -41,6 +43,20 @@ export async function startMockOa(options: MockOptions = {}): Promise<MockOa> {
 					interval: 1,
 				}),
 			);
+			return;
+		}
+		if (request.url === "/api/agent/me") {
+			if (options.profileStatus && options.profileStatus !== 200) {
+				response.statusCode = options.profileStatus;
+				response.end("{}");
+				return;
+			}
+			if (!["Bearer access-1", "Bearer access-2"].includes(request.headers.authorization ?? "")) {
+				response.statusCode = 401;
+				response.end("{}");
+				return;
+			}
+			response.end(JSON.stringify({ result: true, data: { id: "20230001", name: "测试队员" } }));
 			return;
 		}
 		if (request.url === "/api/oauth/token") {

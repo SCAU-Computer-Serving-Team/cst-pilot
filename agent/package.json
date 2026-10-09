@@ -6,6 +6,8 @@
   "scripts": {
     "check": "biome check home/extensions && tsc --noEmit -p tsconfig.json",
     "test:oauth": "node --test home/extensions/oauth/test/*.test.ts",
+    "test:telemetry": "node --test home/extensions/telemetry/test/*.test.ts",
+    "test:telemetry:e2e": "node --test home/extensions/telemetry/test/*.e2e.ts",
     "test:web": "node --test --test-concurrency=1 home/extensions/web/test/*.test.ts",
     "test:web:e2e": "node --test --test-concurrency=1 home/extensions/web/test/*.e2e.ts",
     "test:web:shared-audit": "node --test --test-concurrency=1 home/extensions/web/test/*.audit.ts",

@@ -73,9 +73,11 @@
 
 ### 专属账号
 
-`GET /api/account` 只读取 cstoa OAuth 状态，返回 `signedIn`、`requiresLogin`、`profile` 与 `quota`。左下角「账号信息」进入 `/account`；账号退出只调用 cstoa 的 logout，其他模型服务保持登录。设置入口始终可用。
+`GET /api/account` 读取 cstoa OAuth 状态，已登录时由本机后端复用 Pi 管理的访问令牌查询 OA `GET /api/agent/me`。响应返回 `signedIn`、`requiresLogin`、`profile` 与 `quota`，并禁用缓存。浏览器不接触已有访问令牌。
 
-学号和姓名的 Agent 资料接口尚未接入，`profile.supported=false`，`studentId` 与 `name` 为 `null`；额度同样为不支持和空值。界面明确标注未提供或未接入。现有 OA `/api/member/info` 使用浏览器 Cookie 鉴权，不能直接复用 Agent OAuth 凭据。
+`profile.studentId` 对应 OA 的 `data.id`，`profile.name` 对应 `data.name`。未登录或凭据失效时资料为空；接口未上线、格式无效或网络故障时用 `profile.reason` 说明，并保留重试、登录和退出入口。额度仍为不支持和空值。资料不落盘、不进入遥测记录。
+
+左下角「账号信息」进入 `/account`；账号退出只调用 cstoa 的 logout，其他模型服务保持登录。设置入口始终可用。生产资料接口的发布状态与验证边界见[接入与遥测验证](../../test/telemetry-report.md)。
 
 ### 设置
 

@@ -45,12 +45,12 @@ Web UI 的 OAuth 登录面板已实现；取设备码信息的方式：Web serve
 OA 服务端在独立仓库 [cstoa-api-fastapi](https://github.com/SCAU-Computer-Serving-Team/cstoa-api-fastapi)，任务拆分见其 `docs/oa-tasks.md`。对接边界：
 
 - `POST /api/oauth/introspect` 已在 OA 远端源码提供，部署与遥测接收端联调仍需确认。该接口用于服务间鉴权，本机工具不持有内省服务密钥。
-- 本人学号、姓名需要接受 Agent 令牌的资料接口；现有浏览器 Cookie 接口无法直接复用。
+- 本人资料使用 `GET /api/agent/me`，返回 `id` 与 `name`。本项目调用与 OA 本地接口代码已完成，OA 生产发布待确认。
 
 ## 实现进度
 
 1. 扩展已完成：设备标识（device.json）、RFC 8628 设备流、令牌轮换刷新、mock 单测与内核 e2e。
 2. Web 面板已完成：cstoa 优先扫码；Pi 其他 OAuth 的授权链接、设备码、回贴码和选择步骤接入同一登录流程。接口与账号边界见 [页面地址与接口](../web/SPEC/app-router.md#模型与登录)。测试见 `agent/home/extensions/web/test/oauth-api.test.ts` 与 `oauth-flows.test.ts`。
 3. 真机联调：需 OA 测试账号 + 手机 TOTP 完成一次真实设备授权；生产写操作前先报主审查。
-4. 账号资料：OA `/api/member/info` 已有学号和姓名，但使用浏览器 Cookie 鉴权；需提供接受 Agent 访问令牌的本人资料接口。账号页先显示明确的未接入状态，额度保留占位。
+4. 账号资料：本项目本机后端已接入 OA `GET /api/agent/me`，账号页显示学号与姓名，并处理未上线、凭据失效与网络失败。OA 接口代码与测试已在本地完成，生产尚未发布；额度保留占位。验证见[接入与遥测验证](../test/telemetry-report.md)。
 5. OA 远端源码已提供无修机会话的模型代理路径。生产部署与真实登录后的模型调用仍需联调确认。
