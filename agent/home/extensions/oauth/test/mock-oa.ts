@@ -11,6 +11,15 @@ export interface MockOptions {
 	slowDownOnce?: boolean;
 	/** 授权结果；默认 approve。 */
 	outcome?: "approve" | "deny" | "expire";
+	/** GET /api/agent/profile 的响应；未设置时返回 404，模拟 OA 尚未提供资料接口。 */
+	profile?: {
+		memberId?: string;
+		name?: string;
+		groupName?: string;
+		balance?: number;
+		usedQuota?: number;
+		requestCount?: number;
+	};
 }
 
 export interface MockOa {
@@ -86,6 +95,30 @@ export async function startMockOa(options: MockOptions = {}): Promise<MockOa> {
 					refresh_token: "refresh-1",
 					token_type: "Bearer",
 					expires_in: 7200,
+				}),
+			);
+			return;
+		}
+		if (request.url === "/api/agent/profile") {
+			const profile = options.profile;
+			if (!profile) {
+				response.statusCode = 404;
+				response.end("{}");
+				return;
+			}
+			// 与 OA 真实契约一致：所有接口都包 {result, data}。
+			response.end(
+				JSON.stringify({
+					result: true,
+					data: {
+						memberId: profile.memberId ?? "20230001",
+						name: profile.name ?? "",
+						groupName: profile.groupName ?? "",
+						balance: profile.balance ?? 0,
+						usedQuota: profile.usedQuota ?? 0,
+						requestCount: profile.requestCount ?? 0,
+						balanceAvailable: true,
+					},
 				}),
 			);
 			return;

@@ -1,11 +1,13 @@
 import { Button } from "@heroui/react";
 import { ChevronRight, CircleCheck, ExternalLink, Pencil, TriangleAlert } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Link } from "react-router";
+import { describeAccount } from "../account/format";
+import { useAccount } from "../account/use-account";
 import type { ProviderStatus } from "../data/api";
 import { SettingsSegment } from "../settings/settings-segment";
 import { LoginMethods } from "./login-methods";
-import { configurationPath, type ProviderFilter, providerGroups } from "./providers";
+import { CSTOA_PROVIDER, configurationPath, type ProviderFilter, providerGroups } from "./providers";
 
 const filters = [
 	{ id: "all", label: "全部" },
@@ -95,6 +97,9 @@ export function ProviderServices({
 	const [open, setOpen] = useState(false);
 	const [filter, setFilter] = useState<ProviderFilter>("all");
 	const { primary, others } = providerGroups(providers, filter);
+	// 专属账号挂在 cstoa 服务行下面；登录态变化由 useAccount 自身订阅刷新。
+	const { account } = useAccount();
+	const summary = describeAccount(account);
 	return (
 		<>
 			<div className="settings-provider-head">
@@ -113,7 +118,24 @@ export function ProviderServices({
 			</div>
 			<div className="settings-card">
 				{primary.map((provider) => (
-					<ProviderRow key={provider.id} provider={provider} working={working} onLogout={onLogout} />
+					<Fragment key={provider.id}>
+						<ProviderRow provider={provider} working={working} onLogout={onLogout} />
+						{/* 账号从属于上面的服务：加小标题并缩进，排在服务行下面。 */}
+						{provider.id === CSTOA_PROVIDER && summary && (
+							<div className="settings-account">
+								<span className="settings-account-title">账号</span>
+								<div className="settings-account-line">
+									<span className="settings-provider-name">{summary.identity}</span>
+									<span
+										className={`settings-badge ${summary.expired ? "settings-badge-warning" : "settings-badge-success"}`}
+									>
+										{summary.quota}
+									</span>
+									<span className="settings-spacer" />
+								</div>
+							</div>
+						)}
+					</Fragment>
 				))}
 				{primary.length === 0 && others.length === 0 && <p className="settings-empty">没有匹配的模型服务</p>}
 				{others.length > 0 && (

@@ -75,7 +75,7 @@
 
 `GET /api/account` 只读取 cstoa OAuth 状态，返回 `signedIn`、`requiresLogin`、`profile` 与 `quota`。左下角「账号信息」进入 `/account`；账号退出只调用 cstoa 的 logout，其他模型服务保持登录。设置入口始终可用。
 
-学号和姓名的 Agent 资料接口尚未接入，`profile.supported=false`，`studentId` 与 `name` 为 `null`；额度同样为不支持和空值。界面明确标注未提供或未接入。现有 OA `/api/member/info` 使用浏览器 Cookie 鉴权，不能直接复用 Agent OAuth 凭据。
+学号、姓名与额度来自 OA `GET /api/agent/profile`（agent 访问令牌鉴权，响应包 `{result, data}`）：学号从令牌载荷本地解析，姓名与额度取接口结果。取不到时 `profile.supported` 为 false、字段为 `null`，界面显示「暂未提供」，不伪造数值；凭据过期时 `requiresLogin` 为 true。额度单位为额度点（10000 credit = ¥1）。现有 OA `/api/member/info` 使用浏览器 Cookie 鉴权，不能直接复用 Agent OAuth 凭据。
 
 ### 设置
 

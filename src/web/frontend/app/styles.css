@@ -276,6 +276,9 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .sidebar-account-item svg { flex: 0 0 var(--icon-menu); color: var(--app-muted); }
 .sidebar-account-item:hover { color: var(--app-ink); }
 .sidebar-account-item[aria-disabled="true"] { opacity: .45; }
+.sidebar-account-identity { display: flex; flex-direction: column; gap: 2px; padding: 6px var(--space-component); border-radius: var(--radius-row); }
+.sidebar-account-identity strong { color: var(--app-ink); font-size: var(--font-body); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-account-identity small { color: var(--app-muted); font-size: var(--font-small); }
 .sidebar-theme-value { margin-left: auto; color: var(--app-muted); font-size: var(--font-small); font-weight: 400; }
 .session-menu { --session-menu-hover: #e3ecf1; position: fixed; z-index: 30; display: flex; flex-direction: column; gap: 2px; width: 240px; padding: var(--space-component); border: 1px solid var(--app-sidebar-border); border-radius: var(--radius-menu); background: var(--login-card); box-shadow: var(--shadow-menu); }
 :root[data-theme="dark"] .session-menu { --session-menu-hover: #1d2428; }
@@ -816,6 +819,10 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .settings-collapse[data-open="true"] .settings-provider-chevron { transform: rotate(90deg); }
 .t-acc-panel-inner.settings-other-providers { max-height: 448px; overflow-y: auto; overscroll-behavior-y: auto; }
 .settings-spacer { flex: 1; }
+.settings-account { display: flex; flex-direction: column; gap: 4px; padding: 10px 16px 12px 32px; border-bottom: 1px solid var(--chat-border); }
+.settings-card > .settings-account:last-child { border-bottom: 0; }
+.settings-account-title { font-size: var(--font-small); color: var(--chat-muted); }
+.settings-account-line { display: flex; align-items: center; gap: 16px; }
 .settings-action { display: inline-flex; align-items: center; gap: var(--space-inline); height: 32px; padding: 0 12px; border: 1px solid var(--chat-input-border); border-radius: var(--radius-control); background: transparent; color: var(--chat-ink); font-size: 13px; text-decoration: none; cursor: pointer; }
 .settings-action:is(:hover, [data-hovered="true"]) { background: var(--app-hover); }
 .settings-action:is(:focus-visible, [data-focus-visible="true"]) { outline: none; box-shadow: var(--focus-shadow); }
