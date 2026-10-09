@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { SessionEvents } from "../session/events.ts";
 import { InboxConflict } from "../session/inbox.ts";
 import type { WebSessionPool } from "../session/sessions.ts";
+import { getCstoaProfile } from "./account.ts";
 import { OAuthFlows } from "./oauth-flow.ts";
 import { withProviderEndpoint } from "./provider-endpoint.ts";
 
@@ -59,17 +60,21 @@ export function createAuthRoutes({
 			return true;
 		}
 		if (pathname === "/api/account" && method === "GET") {
-			const { modelRuntime } = await pool.getServices();
+			// 与 /api/auth 同源：刷新后再取服务，保证新注册的 provider 可见。
+			const { modelRuntime } = await pool.refreshServices();
 			const credentials = await modelRuntime.listCredentials();
 			const signedIn = credentials.some(
 				(credential) => credential.providerId === "cstoa" && credential.type === "oauth",
 			);
+			// 学号、姓名与额度来自 OA 资料接口；取不到时保持占位，不伪造数值。
+			const cstoa = await getCstoaProfile("cstoa", modelRuntime, fetch, agentDir);
 			send(response, 200, {
 				providerId: "cstoa",
 				signedIn,
-				requiresLogin: signedIn && invalidAuth.has("cstoa"),
-				profile: { supported: false, studentId: null, name: null },
-				quota: { supported: false, balance: null },
+				requiresLogin: signedIn && (invalidAuth.has("cstoa") || cstoa.expired),
+				profile: { supported: cstoa.supported, studentId: cstoa.studentId, name: cstoa.name },
+				quota: { supported: cstoa.balanceSupported, balance: cstoa.balance },
+				reason: cstoa.reason,
 			});
 			return true;
 		}

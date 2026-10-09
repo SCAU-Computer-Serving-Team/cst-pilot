@@ -3,6 +3,7 @@ import { LogOut, ScanQrCode } from "lucide-react";
 import { Link } from "react-router";
 import { loginPath } from "../auth/providers";
 import type { AccountStatus } from "../data/api";
+import { formatCredit } from "./format";
 
 export function AccountView({
 	account,
@@ -44,7 +45,14 @@ export function AccountView({
 							{[
 								["学号", usable ? (account.profile.studentId ?? "暂未提供") : "登录后查看"],
 								["姓名", usable ? (account.profile.name ?? "暂未提供") : "登录后查看"],
-								["额度", "暂未接入"],
+								[
+									"额度",
+									usable && account.quota.supported && account.quota.balance !== null
+										? formatCredit(account.quota.balance)
+										: usable
+											? "暂未提供"
+											: "登录后查看",
+								],
 							].map(([label, value]) => (
 								<div className="settings-row account-field" key={label}>
 									<dt>{label}</dt>

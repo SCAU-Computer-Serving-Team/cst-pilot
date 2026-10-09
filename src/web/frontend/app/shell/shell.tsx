@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
+import { describeAccount } from "../account/format";
+import { useAccount } from "../account/use-account";
 import { accountProvider, loginPath } from "../auth/providers";
 import { Composer, type ComposerConfig } from "../composer/composer";
 import { apiJson, type ProviderStatus } from "../data/api";
@@ -65,6 +67,9 @@ export function Sidebar({
 	const [accountWorking, setAccountWorking] = useState(false);
 	const [accountMenuOpen, setAccountMenuOpen] = useState(false);
 	const [exitOpen, setExitOpen] = useState(false);
+	// 账号菜单顶部显示本人姓名与剩余额度点；打开菜单时重取一次。
+	const { account: cstoaAccount, refresh: refreshCstoaAccount } = useAccount();
+	const cstoaSummary = describeAccount(cstoaAccount);
 	usePanelDismiss(accountMenuOpen, () => setAccountMenuOpen(false));
 	function closeAccountMenu() {
 		setAccountMenuOpen(false);
@@ -363,12 +368,27 @@ export function Sidebar({
 									: "CSTOA 未登录"}
 					</small>
 				</div>
-				<Popover isOpen={accountMenuOpen} onOpenChange={setAccountMenuOpen}>
+				<Popover
+					isOpen={accountMenuOpen}
+					onOpenChange={(open) => {
+						setAccountMenuOpen(open);
+						if (open) void refreshCstoaAccount();
+					}}
+				>
 					<Button variant="ghost" isIconOnly className="sidebar-account-trigger" aria-label="账号菜单">
 						<Settings size={22} aria-hidden="true" />
 					</Button>
 					<Popover.Content placement="top end" className="sidebar-account-popover">
 						<Popover.Dialog aria-label="账号菜单" className="sidebar-account-menu">
+							{cstoaSummary && (
+								<>
+									<div className="sidebar-account-identity">
+										<strong>{cstoaSummary.identity}</strong>
+										<small>{cstoaSummary.quota}</small>
+									</div>
+									<hr className="session-menu-divider" />
+								</>
+							)}
 							<Link className="sidebar-account-item" to="/account" onClick={closeAccountMenu}>
 								<CircleUserRound size={18} aria-hidden="true" />
 								账号信息
