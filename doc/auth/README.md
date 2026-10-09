@@ -6,7 +6,7 @@ OAuth 负责队员登录认证和接入团队模型服务。登录态随 U 盘�
 
 ## 范围与流程
 
-1. 队员在 pi 执行 `/login`，选择 CSTOA OA。
+1. 队员在 pi 执行 `/login`，选择 CSTOA API。
 2. Agent 申请设备码，按形态显示授权入口，见「登录形态」。
 3. 队员在手机打开授权页（扫码或输入数字码），完成 OA 登录、TOTP 校验并确认设备与作用域。
 4. Agent 轮询令牌端点，取得访问令牌，由 pi 保存到 U 盘的 `agent/home/auth.json`。
@@ -117,6 +117,7 @@ TOTP 在本期实现绑定和校验，授权页强制校验（Authenticator 应�
 | GET | `/api/agent/devices` | OA 会话 | 查询本人设备 |
 | DELETE | `/api/agent/devices/{id}` | OA 会话 | 移除设备 |
 | ANY | `/api/agent/llm/v1/*` | access_token | OpenAI 兼容模型代理 |
+| GET | `/api/agent/profile` | access_token | 本人学号、姓名、分组与剩余额度点，供 Web 账号页与菜单显示 |
 
 设备授权请求包含设备名、平台、Agent 版本和作用域。响应包含 `device_code`、`user_code`、`verification_uri`、`verification_uri_complete`、`expires_in=300`、`interval=5`。
 

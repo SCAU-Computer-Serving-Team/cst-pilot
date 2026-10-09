@@ -39,7 +39,7 @@
 | 分支树 | `/s/<sessionId>/tree` | 页面已接入；浅深画布已按 pi TUI 的行结构重画；排版与 TUI 的对照已可自动跑 |
 | 设置 | `/settings` | 主题、服务筛选、启用模型与保存已接入；模型服务配置使用 `/settings/provider` 的设置行布局 |
 | 登录页 | `/login` | cstoa 优先扫码，其他 Pi OAuth 和 APIKEY 均已接入；浅深画布已备 |
-| 账号信息 | `/account` | 专属账号状态与退出已接入；学号、姓名和额度明确占位，浅深画布已备 |
+| 账号信息 | `/account` | 专属账号状态与退出已接入；学号、姓名与剩余额度点来自 OA `GET /api/agent/profile`，浅深画布已备 |
 
 ## 四、聊天工作台要渲染的部分
 
@@ -72,7 +72,7 @@
 |---|---|
 | 兼容版 | Chromium 86 与 Tailwind 3.4；单独构建、选择入口并验证浏览器交互，见[浏览器基线](SPEC/frontend.md#浏览器基线) |
 | 发行接入 | 功能 MVP 验收后把 Web 通道并入发行版。静态产物、许可证与文件清单校验已建立（`pack/release-checks.mjs`），前端 lint、类型、测试与构建已进 CI；剩验收后的发行副本冒烟 |
-| cstoa 资料与额度 | 接入接受 Agent 令牌的学号、姓名接口与额度查询；账号页和扫码授权已实现 |
+| cstoa 资料与额度 | 已接入：OA `GET /api/agent/profile` 提供学号、姓名与剩余额度点，账号页、账号菜单与设置页登录状态显示；扫码授权已实现 |
 | 仪表盘 | 结构与口径已定，画布已备，见[仪表盘](SPEC/dashboard.md) |
 
 **一条硬约束现在就要守**：前端依赖放 `src/web/frontend/` 自己的 `package.json`，不能进 `agent/home/npm/`，否则会触发 `pack` 的扩展锁文件校验。

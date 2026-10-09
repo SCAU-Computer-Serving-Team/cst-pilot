@@ -11,7 +11,6 @@
 | v0.5发行包：官方exe、白名单装配、TUN假IP放行、当前Web构建/字体检查与实际Web发行冒烟；跨机/介质待验证 | [可行性分析](web/research/release-feasibility.md)、[前端设计](design/web/frontend.md#打包接入) |
 | 遥测接收端增加 rollup、cleanup 定时任务，并使用真实 OAuth 内省 | [遥测](telemetry/) |
 | OAuth 真机联调；OA 提供 `/api/oauth/introspect` | [认证交接](auth/handover.md) |
-| 接入 cstoa 学号、姓名的 Agent 资料接口与额度查询 | [专属账号](web/SPEC/app-router.md#专属账号) |
 
 ## 待补画布
 
