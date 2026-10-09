@@ -11,7 +11,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { login, refresh } from "./oa.ts";
 
 export const PROVIDER_ID = "cstoa";
-export const PROVIDER_NAME = "CSTOA OA";
+export const PROVIDER_NAME = "CSTOA API";
 const BASE_URL = "https://www.cstoa.top/api/agent/llm/v1";
 
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
