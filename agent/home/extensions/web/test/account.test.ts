@@ -10,11 +10,19 @@ after(() => {
 	if (previousHost === undefined) delete process.env.CSTOA_OA_HOST;
 	else process.env.CSTOA_OA_HOST = previousHost;
 });
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((done) => {
+		resolve = done;
+	});
+	return { promise, resolve };
+}
+
 function runtime(signedIn = true, access = "test-agent-token"): Runtime {
 	return {
 		listCredentials: async () => (signedIn ? [{ providerId: "cstoa", type: "oauth" }] : []),
 		getAuth: async () => ({ auth: { apiKey: access } }),
-	} as unknown as Runtime;
+	};
 }
 const profile = (patch: Record<string, unknown> = {}) =>
 	Response.json({
@@ -174,6 +182,43 @@ test("退出发生在请求期间时，迟到资料不恢复账号，也不写�
 	const account = await pending;
 	assert.equal(account.signedIn, false);
 	assert.equal(account.profile.name, null);
+});
+
+test("外部退出未触发 Web 事件时，迟到响应仍清空身份与额度", async () => {
+	const started = deferred<void>();
+	const response = deferred<Response>();
+	const service = new CstoaAccount(async () => {
+		started.resolve();
+		return response.promise;
+	});
+	const current = runtime();
+	const pending = service.getAccount(current);
+	await started.promise;
+	current.listCredentials = async () => [];
+	response.resolve(profile());
+	const account = await pending;
+	assert.equal(account.signedIn, false);
+	assert.equal(account.profile.name, null);
+	assert.equal((await service.getQuota(current)).supported, false);
+});
+
+test("外部切换账号未触发 Web 事件时，迟到响应改读当前凭据", async () => {
+	const started = deferred<void>();
+	const response = deferred<Response>();
+	const service = new CstoaAccount(async (_url, options) => {
+		if (new Headers(options?.headers).get("Authorization") === "Bearer first") {
+			started.resolve();
+			return response.promise;
+		}
+		return profile({ memberId: "20230002", name: "第二队员", balance: 200 });
+	});
+	const current = runtime(true, "first");
+	const pending = service.getAccount(current);
+	await started.promise;
+	current.getAuth = runtime(true, "second").getAuth;
+	response.resolve(profile());
+	assert.equal((await pending).profile.name, "第二队员");
+	assert.equal((await service.getQuota(current)).balance, 200);
 });
 
 test("不同账号并发时旧请求不覆盖新账号缓存", async () => {

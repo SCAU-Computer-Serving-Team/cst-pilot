@@ -13,7 +13,7 @@
 | `/login` | 登录页 | 居中面板 |
 | `/settings` | 设置 | 入口在账号菜单 |
 | `/settings/provider` | 模型服务配置 | 接收 `provider`、`method`；使用设置行布局承载凭据表单 |
-| `/account` | CSTOA 账号信息 | 学号、姓名、额度与专属账号登录、退出 |
+| `/account` | CSTOA 账号信息 | 学号、姓名与专属账号登录、退出 |
 
 导航行为：真实链接、可复制地址、可在新标签页打开、支持刷新与前进后退。地址只在本机服务运行时有效，不是公开分享链接。
 
@@ -73,15 +73,26 @@
 
 ### 专属账号
 
-`GET /api/account` 读取 cstoa OAuth 状态，返回 `signedIn`、`requiresLogin` 与 `profile`。已登录时，本机后端复用 Pi 管理的访问令牌查询 OA `GET /api/agent/profile`。浏览器不接触已有令牌，响应禁用浏览器缓存。
+账号页、设置页和账号菜单只展示姓名与学号。CSTOA 额度集中在当前 CSTOA 模型的上下文面板。退出 CSTOA 仅清除该服务凭据，其他模型服务保持登录。
 
-`profile.studentId` 对应 OA 的 `data.memberId`，`profile.name` 对应 `data.name`。未登录或凭据失效时资料为空；接口、格式和网络错误由 `profile.reason` 说明，页面保留重试、登录与退出入口。资料只保存在内存，不落盘、不进入遥测。
+| 本机接口 | 返回字段 | 约定 |
+|---|---|---|
+| `GET /api/account` | `providerId`、`signedIn`、`requiresLogin`、`profile` | 未登录或凭据失效时资料为空；`profile.reason` 说明资料查询失败原因 |
+| `GET /api/quota?provider=cstoa` | `provider`、`supported`、`balance`、`unit`、`requiresLogin`、`reason`、`fetchedAt` | 成功时 `supported=true`、`unit=credit`；0 是有效额度，失败时不返回虚构余额 |
 
-设置页和账号菜单只展示姓名与学号。账号页提供身份资料及登录、退出操作。退出 CSTOA 仅清除该服务凭据，其他模型服务保持登录。
+本机后端使用 Pi 管理的令牌查询 OA `GET /api/agent/profile`。字段映射如下，10,000 额度点对应 ¥1。
 
-CSTOA 额度只在当前模型服务为 cstoa 的上下文面板显示，使用 `/api/quota?provider=cstoa` 查询。成功返回 `supported=true`、`balance` 与 `unit=credit`；0 是有效额度。额度服务不可用时，姓名仍可展示。10,000 额度点对应 ¥1。
+| OA 字段 | 本机字段 | 有效条件 |
+|---|---|---|
+| `data.memberId` | `profile.studentId` | 非空字符串 |
+| `data.name` | `profile.name` | 姓名为空时保留学号，并说明姓名暂未提供 |
+| `data.balance` | `balance` | `balanceAvailable=true` 且余额为非负安全整数 |
 
-账号与额度共用 60 秒上游缓存。显式重试使用 `refresh=1`。登录、退出、令牌变化和 CSTOA 请求结束后清除缓存；查询失败可立即重试。异步结果不得恢复已退出或已切换账号的资料。
+资料与额度响应禁用浏览器缓存。令牌只由后端使用；资料不落盘、不进入遥测。额度不可用时，身份资料仍可展示。
+
+显式重试附加 `refresh=1`，查询失败可立即重试。登录、退出、令牌变化和 CSTOA 请求结束后，后续查询使用更新结果。迟到响应不得恢复已退出或已切换账号的资料，包括外部 Pi 进程修改凭据的情况。
+
+缓存与凭据复核的实现见[请求缓存](../../design/web/runtime.md#请求缓存)。
 
 ### 设置
 

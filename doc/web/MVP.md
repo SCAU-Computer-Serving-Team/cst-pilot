@@ -1,6 +1,6 @@
 # MVP 要做的内容
 
-状态：Checkpoint 4 已完成本机验收，当前进入 Checkpoint 5。页面、工具卡片、交互与画布已对照；Checkpoint 5 已执行隔离发行副本、实际浏览器窗口与 TUI 联调，验收尚未完成。待机、断线、认证、退出和[共享边界专项](../test/shared-backend-report.md)已有本机回归；主题按端独立，运行中配置重读和写权由共同协调模块处理；结果与未验证项见[联调报告](../test/checkpoint5-report.md)。待决项见[议题清单](../issues.md)，补画项见 [Todo](../Todo.md#待补画布)。更新：2026-10-07。
+状态：Checkpoint 4 已完成本机验收，当前进入 Checkpoint 5。页面、工具卡片、交互与画布已对照；Checkpoint 5 已执行隔离发行副本、实际浏览器窗口与 TUI 联调，验收尚未完成。待机、断线、认证、退出和[共享边界专项](../test/shared-backend-report.md)已有本机回归；主题按端独立，运行中配置重读和写权由共同协调模块处理；结果与未验证项见[联调报告](../test/checkpoint5-report.md)。待决项见[议题清单](../issues.md)，补画项见 [Todo](../Todo.md#待补画布)。更新：2026-10-10。
 
 [PRD](../PRD.md) 的 W1–W9 定义 Web 的总体目标。本文划定首版交付范围，兼容版与仪表盘列在后续阶段；具体行为引用各规格。
 
@@ -39,7 +39,7 @@
 | 分支树 | `/s/<sessionId>/tree` | 页面已接入；浅深画布已按 pi TUI 的行结构重画；排版与 TUI 的对照已可自动跑 |
 | 设置 | `/settings` | 主题、服务筛选、启用模型与保存已接入；模型服务配置使用 `/settings/provider` 的设置行布局 |
 | 登录页 | `/login` | cstoa 优先扫码，其他 Pi OAuth 和 APIKEY 均已接入；浅深画布已备 |
-| 账号信息 | `/account` | 专属账号状态与退出已接入；学号、姓名与剩余额度点来自 OA `GET /api/agent/profile`，浅深画布已备 |
+| 账号信息 | `/account` | 学号、姓名、登录与退出已接入；额度集中在上下文面板，隔离验收见[账号验证](../test/account-report.md) |
 
 ## 四、聊天工作台要渲染的部分
 
@@ -72,7 +72,7 @@
 |---|---|
 | 兼容版 | Chromium 86 与 Tailwind 3.4；单独构建、选择入口并验证浏览器交互，见[浏览器基线](SPEC/frontend.md#浏览器基线) |
 | 发行接入 | 功能 MVP 验收后把 Web 通道并入发行版。静态产物、许可证与文件清单校验已建立（`pack/release-checks.mjs`），前端 lint、类型、测试与构建已进 CI；剩验收后的发行副本冒烟 |
-| cstoa 资料与额度 | 已接入：OA `GET /api/agent/profile` 提供学号、姓名与剩余额度点，账号页、账号菜单与设置页登录状态显示；扫码授权已实现 |
+| CSTOA 生产验收 | 资料与上下文额度已接入；多队员身份和实际扣减后的额度待验证，见[账号验证](../test/account-report.md#未验证边界) |
 | 仪表盘 | 结构与口径已定，画布已备，见[仪表盘](SPEC/dashboard.md) |
 
 **一条硬约束现在就要守**：前端依赖放 `src/web/frontend/` 自己的 `package.json`，不能进 `agent/home/npm/`，否则会触发 `pack` 的扩展锁文件校验。

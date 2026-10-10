@@ -117,7 +117,7 @@ TOTP 在本期实现绑定和校验，授权页强制校验（Authenticator 应�
 | GET | `/api/agent/devices` | OA 会话 | 查询本人设备 |
 | DELETE | `/api/agent/devices/{id}` | OA 会话 | 移除设备 |
 | ANY | `/api/agent/llm/v1/*` | access_token | OpenAI 兼容模型代理 |
-| GET | `/api/agent/profile` | access_token | 本人学号、姓名、分组与额度点；身份用于账号页、设置及菜单，额度用于上下文面板 |
+| GET | `/api/agent/profile` | access_token | 本人学号、姓名、分组与额度点；客户端字段映射见[专属账号](../web/SPEC/app-router.md#专属账号) |
 
 设备授权请求包含设备名、平台、Agent 版本和作用域。响应包含 `device_code`、`user_code`、`verification_uri`、`verification_uri_complete`、`expires_in=300`、`interval=5`。
 

@@ -64,24 +64,23 @@ export class CstoaAccount {
 		return (await this.read(runtime, invalidAuth)).quota;
 	}
 
-	private async read(runtime: AccountRuntime, invalidAuth: boolean, attempt = 0): Promise<Snapshot> {
-		const generation = this.generation;
+	private async readAccess(runtime: AccountRuntime, invalidAuth: boolean): Promise<string | Snapshot> {
 		const credentials = await runtime.listCredentials();
 		const signedIn = credentials.some((entry) => entry.providerId === "cstoa" && entry.type === "oauth");
-		if (!signedIn || invalidAuth) {
-			this.invalidate();
-			return empty(signedIn, signedIn && invalidAuth);
-		}
-		let access: string | undefined;
+		if (!signedIn || invalidAuth) return empty(signedIn, signedIn && invalidAuth);
 		try {
-			access = (await runtime.getAuth("cstoa"))?.auth?.apiKey;
+			return (await runtime.getAuth("cstoa"))?.auth?.apiKey || empty(true, true);
 		} catch {
-			this.invalidate();
 			return empty(true, true);
 		}
-		if (!access) {
+	}
+
+	private async read(runtime: AccountRuntime, invalidAuth: boolean, attempt = 0): Promise<Snapshot> {
+		const generation = this.generation;
+		const access = await this.readAccess(runtime, invalidAuth);
+		if (typeof access !== "string") {
 			this.invalidate();
-			return empty(true, true);
+			return access;
 		}
 		let endpoint: URL;
 		try {
@@ -112,6 +111,16 @@ export class CstoaAccount {
 		}
 		const value = await task;
 		if (epoch !== this.generation) {
+			return attempt < 1 ? this.read(runtime, invalidAuth, attempt + 1) : empty(false);
+		}
+		// 外部 Pi 进程修改凭据时，Web 可能没有收到事件；返回资料前再核对当前身份。
+		const currentAccess = await this.readAccess(runtime, invalidAuth);
+		if (typeof currentAccess !== "string") {
+			this.invalidate();
+			return currentAccess;
+		}
+		if (epoch !== this.generation || currentAccess !== access) {
+			if (currentAccess !== access) this.invalidate();
 			return attempt < 1 ? this.read(runtime, invalidAuth, attempt + 1) : empty(false);
 		}
 		if (this.inflight?.task === task) this.inflight = undefined;

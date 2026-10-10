@@ -10,11 +10,11 @@ const design = resolve(root, 'doc/design/web');
 const files = [
   ...await readdir(spec).then(names => names.filter(name => name.endsWith('.md')).map(name => resolve(spec, name))),
   ...await readdir(design).then(names => names.filter(name => name.endsWith('.md')).map(name => resolve(design, name))),
-  ...['doc/web/README.md', 'doc/web/MVP.md', 'doc/design/README.md', 'doc/design/web/tool/mapping.md', 'doc/Todo.md', 'doc/issues.md', 'DESIGN.md', 'CONTRIBUTING.md'].map(name => resolve(root, name)),
+  ...['doc/web/README.md', 'doc/web/MVP.md', 'doc/design/README.md', 'doc/design/web/tool/mapping.md', 'doc/Todo.md', 'doc/issues.md', 'doc/auth/README.md', 'doc/auth/handover.md', 'doc/test/README.md', 'doc/test/account-report.md', 'doc/test/telemetry-report.md', 'DESIGN.md', 'CONTRIBUTING.md'].map(name => resolve(root, name)),
 ];
 const slug = text => text.toLowerCase().replace(/`/g, '').replace(/[^\p{L}\p{N}_\- ]/gu, '').replace(/ /g, '-');
 
-test('Web 规格与设计的本地 Markdown 链接及锚点可用', async () => {
+test('Web、认证与验收文档的本地 Markdown 链接及锚点可用', async () => {
   const failures = [];
   for (const file of files) {
     const content = await readFile(file, 'utf8');
