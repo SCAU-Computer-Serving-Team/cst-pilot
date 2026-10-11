@@ -42,7 +42,7 @@ TUI 的内置命令只存在于 `interactive-mode` 的编辑器提交回调里�
 | `/tree` | `session.navigateTree` | 同名方法，加 `sessionManager.getTree` | A | B |
 | `/compact` | `session.compact(instructions)` | 同名方法；扩展另有 `ctx.compact` | A | A |
 | `/reload` | `session.reload` | 同名方法 | A | B |
-| `/model` | 直接指定与Enter更新当前会话，Ctrl+S持久化默认 | `session.setModel`、`settingsManager.setDefaultModelAndProvider` | A | B |
+| `/model` | 直接指定与 Enter 更新当前会话，Ctrl+S 持久化默认 | `session.setModel`、`settingsManager.setDefaultModelAndProvider` | A | B |
 | `/scoped-models` | `session.setScopedModels` + `settingsManager.setEnabledModels` | 同名方法 | A | B |
 | 模型循环 `Ctrl+P` | `session.cycleModel` | 同名方法 | A | C |
 | 思考强度 | `session.setThinkingLevel` / `cycleThinkingLevel` | 同名方法；扩展另有 `pi.getThinkingLevel` / `setThinkingLevel` | A | A |
@@ -95,7 +95,7 @@ TUI 待机会话与 Web 使用独立的会话实例，不修改 Pi 源码或官�
 | Pi 自带 runtime | 启动时承载 TUI 会话；接管后切换为待机会话并保持进程 |
 | Web 运行层 | Web 扩展在 `pi.exe` 进程内创建，按会话 ID 管理多个独立执行实例 |
 | 服务实例 | 共用一个 `settingsManager` 和 `modelRuntime`；每场会话独立创建 `resourceLoader`，避免扩展实例串用 |
-| 版本适配 | 公开方法适配集中在运行协调扩展；SDK源码与官方程序保持原样 |
+| 版本适配 | 公开方法适配集中在运行协调扩展；SDK 源码与官方程序保持原样 |
 | 新进程 | 不新增 |
 | 发行链 | 不变，继续用官方 `pi.exe` |
 
@@ -113,11 +113,11 @@ TUI 待机会话与 Web 使用独立的会话实例，不修改 Pi 源码或官�
 
 ## 版本与验证边界
 
-能力结论以项目锁定的0.85.1构建产物为准。`user_bash` 拦截抛错的阻断、RPC steer/follow_up 的输入事件，以及扩展公开API都应按该版本核对，不由开发机全局Pi推断。
+能力结论以项目锁定的 0.85.1 构建产物为准。`user_bash` 拦截抛错的阻断、RPC steer/follow_up 的输入事件，以及扩展公开 API 都应按该版本核对，不由开发机全局 Pi 推断。
 
-当前官方可执行文件、完整扩展、实际Herdr TUI与Web验证见[跨端报告](../../test/shared-backend-report.md)。基础SDK用例验证不同会话并发与取消隔离，发行副本验证接管、写权、cwd、上下文、范围、凭据与主题；两类环境分别记录。
+当前官方可执行文件、完整扩展、实际 Herdr TUI 与 Web 验证见[跨端报告](../../test/shared-backend-report.md)。基础 SDK 用例验证不同会话并发与取消隔离，发行副本验证接管、写权、cwd、上下文、范围、凭据与主题；两类环境分别记录。
 
-Pi在尚无assistant回复时延迟创建JSONL，分支也保留该规则。不能预建空文件再打开；SDK会重新分配身份。Web新输入与身份由收件箱持久化，运行装配见[设计](../../design/web/runtime.md)。
+Pi 在尚无 assistant 回复时延迟创建 JSONL，分支也保留该规则。不能预建空文件再打开；SDK 会重新分配身份。Web 新输入与身份由收件箱持久化，运行装配见[设计](../../design/web/runtime.md)。
 
 ## 用量与费用字段
 

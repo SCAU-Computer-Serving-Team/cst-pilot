@@ -24,7 +24,6 @@
 - 实现参考：站点公开分发的 [`JapaneseGradients-BRFKYYZf.js`](https://feralui.dev/assets/JapaneseGradients-BRFKYYZf.js)，2026-09-16 查阅。
 - 对应类型：`PRISM2`。该类型原实现是 Canvas 2D，不是 GLSL；板条采样与绘制函数在此构建中分别命名为 `T8`、`H8`，SVG 导出为 `Md`。
 - [用户确认的 Blue hour 预设](https://feralui.dev/gradients?g=2.JY9Lb8IwEIT_Chque0gCAbo3QoNaqVUrKk4VB5NsHmqwI9uhD5T_XjncZmc-aWZvqME3OG96B_7EPEmSVZqDMF9ky3y7CWq93qSPk5ftdst9HFS-zB_2W5wI_rcXMN4Pzx-vCQiVVZdgfLelgPAFBggWjOzlmM-e3o4HEAKRdYPMGjNYEM7KurCkMIP24Dgm1KoHRwTRV-nMVGLVpQ8Vg2uNnoY3agpcp7QHoWytFH4KI4Jr_wQcRxGhkbZuPHgVESpTDA6cRoTeuPaOh-vciS7Bq5RQqUK8Ay9SwsXcEchPr3QZvpGrWCfgSnVOxpFQW9Vq8GIkePDnafwH)：`PRISM2 / slant / expand`，grain=3。链接未保存播放速度，稿件默认采用 30。
-
 - [深色版用户预设](https://feralui.dev/gradients?g=2.JY7NisJAEITfpbw2MjHRxL5pUNjDwrJ7FA9j0okDcSbMjO6P5N2XiZfmo6uoqid68BMhujGAT1ioStX5EYTFqszLapVocyj3dZ1oX9fFMUt0KA7b4w5nQvwdBYyPz7ev92TvvL6lx7dpBYTWPFKyWq5VQWpZ5ulWW1LL7fpMuGgf0oLG3W0EZxmh1yNYEcQ-ZHBzuNe3MUXfg3F2HnzVsxAGbePc4qWJs6gIwfwJOFOKcBXTXyO4VITONfcA3uSE0QXzsm8KwmUQ24KrjNDpRmIA52vCzb0skJ9R2xYELw_xQcCdHoJME6H32lhwPhEi-HSe_gE)：保持 `PRISM2 / slant / expand`，独立调色板；沿用稿件速度 30。
 
 ## 主题参数
@@ -54,7 +53,7 @@
 
 ## 页面转场
 
-背景由浏览器独立快照承载，退出向上slide，返回从上方反向进入，均500ms；Shader只负责常态背景，不计算退出透明度。无WebGL时同样使用整幅CSS背景快照。具体组件时间与空间规则见[DESIGN](../../../../DESIGN.md#页面衔接与绘制)。
+背景由浏览器独立快照承载，退出向上 slide，返回从上方反向进入，均 500ms；Shader 只负责常态背景，不计算退出透明度。无 WebGL 时同样使用整幅 CSS 背景快照。具体组件时间与空间规则见[DESIGN](../../../../DESIGN.md#页面衔接与绘制)。
 
 ## 授权范围
 

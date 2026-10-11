@@ -55,21 +55,18 @@
 |---|---|---|
 | GET | `/api/models` | 可用模型清单与启用范围：`enabled` 为 `null` 表示全启用，`unavailableEnabled` 列出未匹配的已保存启用模式；指定 `sessionId` 时附该会话当前选择 |
 | POST | `/api/models/select` | 保存 TUI 与 Web 共用的默认模型；提供 `sessionId` 时同时切换该会话，主页省略 `sessionId` |
-| POST | `/api/auth/<provider>/api-key/start` | 开始 Pi 原生 API KEY 交互，可选预填 key 与自定义 baseUrl |
-| GET | `/api/auth/<provider>/api-key/status` | 读取当前密钥登录步骤与版本 |
-| POST | `/api/auth/<provider>/api-key/respond`、`/cancel` | 回答当前步骤或取消，校验 flowId 与 promptId |
 | POST | `/api/models/scoped` | 改启用范围，对应 `/scoped-models`；覆盖全部可用模型时归一为默认范围（`null`） |
 | POST | `/api/models/thinking` | 按 `sessionId` 设置思考强度；无会话的主页选择在新建会话时提交 |
 | GET | `/api/auth` | 各 Provider 的登录状态、凭据类型、`supportsApiKey`、`supportsOAuth` 与 `requiresLogin`；不返回凭据。模型服务拒绝凭据后标记需重新登录 |
+| POST | `/api/auth/<provider>/api-key/start` | 开始 Pi 原生 API KEY 交互，可选预填 key 与自定义 baseUrl |
+| GET | `/api/auth/<provider>/api-key/status` | 读取当前密钥登录步骤与版本 |
+| POST | `/api/auth/<provider>/api-key/respond`、`/cancel` | 回答当前步骤或取消，校验 flowId 与 promptId |
 | PUT | `/api/auth/<provider>/api-key` | 提交 `key`；可附 `baseUrl` 覆盖所选 Provider 的模型地址。配置与凭据由后端保存，响应不返回密钥 |
-| POST | `/api/auth/<provider>/logout` | 清除该 Provider 的本地登录状态 |
-
-| 方法 | 路径 | 用途 |
-|---|---|---|
 | POST | `/api/auth/<provider>/oauth/start` | 发起或复用该服务的进行中流程，返回 `flowId` 和首个交互步骤 |
 | GET | `/api/auth/<provider>/oauth/status` | 读取流程状态、递增 `revision`、设备码剩余时间、授权链接和当前输入步骤 |
 | POST | `/api/auth/<provider>/oauth/respond` | 提交 `{ flowId, promptId, value }`；过期步骤返回 409，无效选项返回 400 |
 | POST | `/api/auth/<provider>/oauth/cancel` | 取消流程；可携带 `flowId`，旧页面不能取消新流程 |
+| POST | `/api/auth/<provider>/logout` | 清除该 Provider 的本地登录状态 |
 
 ### 专属账号
 

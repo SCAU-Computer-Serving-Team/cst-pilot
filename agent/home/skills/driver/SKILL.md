@@ -24,7 +24,7 @@ description: driver 工具的参数与返回字段说明。四个 scope 的查�
 
 1. `problem`：Status 为 Error / Unknown 的全部 PnP 设备
 2. `core`：Net（网络连接面板真实条目，虚拟网卡不剔除）/ Bluetooth / Audio / 显示四类硬件现状 + 两个关键服务状态 + 驱动版本日期表
-3. `external`：DeviceID 前缀白名单 `USB\`（连带 `USBSTOR\`）/ `BTHENUM\`（蓝牙外设）/ `DISPLAY\`（显示器）+ 可移动存储（U盘 / 移动硬盘 / SD 卡）
+3. `external`：DeviceID 前缀白名单 `USB\`（连带 `USBSTOR\`）/ `BTHENUM\`（蓝牙外设）/ `DISPLAY\`（显示器）+ 可移动存储（U 盘 / 移动硬盘 / SD 卡）
 4. `find`：全量 PnP 设备按条件定位
 
 ## 通用约定

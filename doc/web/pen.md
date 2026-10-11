@@ -1,6 +1,6 @@
 # Pen 操作建议
 
-本文档记录MCP和SKILLS之外的操作建议。
+本文档记录 MCP 和 SKILLS 之外的操作建议。
 
 ## 建议
 
@@ -22,7 +22,7 @@
    确认干净用 `Get-Process Pen` 看进程数归零。
 
 8. 通过 MCP/CLI 改完画布后，可用 CLI 直接保存：
-   `"save()`nexit()" | pen interactive --app desktop`。
+   ``"save()`nexit()" | pen interactive --app desktop``。
    连上正在运行的应用执行 save()，无需在窗口里按 Ctrl+S。
 9. `TakeScreenshot`/`Export` 导出的图片里 icon 节点渲染为问号，是导出缺陷，画布实际正常。
     若画布上也显示问号，是运行实例的图标渲染缓存未刷新，重启应用重新打开文件即可。

@@ -1,8 +1,12 @@
 # MVP 要做的内容
 
-状态：Checkpoint 4 已完成本机验收，当前进入 Checkpoint 5。页面、工具卡片、交互与画布已对照；Checkpoint 5 已执行隔离发行副本、实际浏览器窗口与 TUI 联调，验收尚未完成。待机、断线、认证、退出和[共享边界专项](../test/shared-backend-report.md)已有本机回归；主题按端独立，运行中配置重读和写权由共同协调模块处理；结果与未验证项见[联调报告](../test/checkpoint5-report.md)。待决项见[议题清单](../issues.md)，补画项见 [Todo](../Todo.md#待补画布)。更新：2026-10-10。
+状态：Checkpoint 4 已完成本机验收，当前进入 Checkpoint 5，整体验收尚未完成。更新：2026-10-10。
 
-[PRD](../PRD.md) 的 W1–W9 定义 Web 的总体目标。本文划定首版交付范围，兼容版与仪表盘列在后续阶段；具体行为引用各规格。
+- 页面、工具卡片、交互与画布已对照；Checkpoint 5 已执行隔离发行副本、实际浏览器窗口与 TUI 联调。
+- 待机、断线、认证、退出和[共享边界专项](../test/shared-backend-report.md)已有本机回归；主题按端独立，运行中配置重读和写权由共同协调模块处理。
+- 结果与未验证项见[联调报告](../test/checkpoint5-report.md)，待决项见[议题清单](../issues.md)，补画项见 [Todo](../Todo.md#待补画布)。
+
+[PRD](../PRD.md) 的 W1–W10 定义 Web 的总体目标。本文划定首版交付范围，兼容版与仪表盘列在后续阶段；具体行为引用各规格。
 
 **MVP 只做现代版**：Chromium 111 起，Tailwind v4，直接使用 HeroUI v3（`@heroui/react` + `@heroui/styles`）。模型服务登录支持 OAuth 与 API KEY 两种方式，与 pi 一致。两种凭据在 Web 中对应同一种模型服务登录态，有效期按各自机制处理。当前现场使用后台管理员账号的 API KEY。功能验证后再接入发行包。
 

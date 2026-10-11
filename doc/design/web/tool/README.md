@@ -1,6 +1,11 @@
 # 工具卡片设计
 
-[通用骨架与内容组](cards.md)负责组件规则，[结果映射](mapping.md)定义数据读取；下表每个工具独立记录返回形态、主模板和实测边界。项目配置 `agent/home/settings.json` 的 `defaultTools` 为 `read`、`ls`，其中 `ls` 由诊断扩展覆盖。扩展包版本以项目配置为准。示例保留普通本机数据；设备序列号、唯一设备标识和账户名、主机名局部用 `x` 遮盖，凭据不入文档。行为规则见[诊断卡片](../../../web/SPEC/diagnostic-cards.md)，画布在 `src/web/design/cst-pilot-tools.pen`。
+[通用骨架与内容组](cards.md)负责组件规则，[结果映射](mapping.md)定义数据读取；下表每个工具独立记录返回形态、主模板和实测边界。项目配置 `agent/home/settings.json` 的 `defaultTools` 为 `read`、`ls`，其中 `ls` 由诊断扩展覆盖。实测使用的扩展版本如下，未登记的工具按原文回退。示例保留普通本机数据；设备序列号、唯一设备标识和账户名、主机名局部用 `x` 遮盖，凭据不入文档。行为规则见[诊断卡片](../../../web/SPEC/diagnostic-cards.md)，画布在 `src/web/design/cst-pilot-tools.pen`。
+
+| 包 | 版本 |
+|---|---|
+| `@ff-labs/pi-fff` | 0.10.6 |
+| `pi-web-access` | 0.18.0 |
 
 | 来源 | 工具文档 |
 |---|---|

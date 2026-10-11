@@ -28,8 +28,6 @@ CPU 与主板的内核级访问依赖 PawnIO。本项目不附带或安装该驱
 
 PawnIO：https://pawnio.cc
 
-## 用不到的依赖为什么也打包
+## 保留未启用依赖
 
-`sys-commands.ts` 的传感器模板只开 Cpu/Gpu/Motherboard，存储/内存/控制器关闭时
-DiskInfoToolkit、RAMSPDToolkit 等不会被加载。保留它们是防御性的：
-一旦未来开启更多硬件类型，不必重新组包。
+`sys-commands.ts` 的传感器模板只开 Cpu/Gpu/Motherboard，存储/内存/控制器关闭时 DiskInfoToolkit、RAMSPDToolkit 等不会被加载。保留它们的目的是：后续开启更多硬件类型时不必重新组包。
