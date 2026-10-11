@@ -83,6 +83,10 @@ rem ---- strip host model-provider credentials and endpoint overrides: the
 rem ---- kit's login state lives only in agent\home\auth.json. Inherited
 rem ---- *_API_KEY / token variables would otherwise make providers look
 rem ---- logged in; CSTOA_OA_HOST could redirect the OA authorization flow.
+rem ---- CST_PILOT_PWSH / CST_WEB_PORT / CST_WEB_NO_OPEN are dev-only
+rem ---- switches; on an untrusted host they could make diagnostics run
+rem ---- an arbitrary exe or repoint the web listener, so they are cleared
+rem ---- here too (extensions fall back to the bundled pwsh and port 52831).
 for %%V in (
     COPILOT_GITHUB_TOKEN
     ANTHROPIC_AUTH_TOKEN
@@ -133,6 +137,9 @@ for %%V in (
     AWS_CONTAINER_CREDENTIALS_FULL_URI
     AWS_WEB_IDENTITY_TOKEN_FILE
     CSTOA_OA_HOST
+    CST_PILOT_PWSH
+    CST_WEB_PORT
+    CST_WEB_NO_OPEN
 ) do set "%%V="
 
 if defined PI_INHERIT_HOST_PATH (

@@ -178,8 +178,13 @@ async function deliver(params: RunbookParams): Promise<Record<string, unknown>> 
 	const level = params.level as Level;
 	if (!(level in LEVELS)) throw new Error(`level 只能是 ${Object.keys(LEVELS).join(" / ")}`);
 	if (!params.items.length) throw new Error("至少需要一条命令");
-	if (params.sequence !== undefined && (!Number.isInteger(params.sequence) || params.sequence < 1)) {
-		throw new Error("sequence 必须是 >= 1 的整数");
+	if (
+		params.sequence !== undefined &&
+		(!Number.isInteger(params.sequence) || params.sequence < 1 || params.sequence > 999)
+	) {
+		// 序号与 NAME_RE（\d{2,3}）配套：超过 999 的文件名不被识别，重写不会替换旧文件，
+		// 违反 D2「沿用序号重写即修正，不新增文件」，因此拒绝。
+		throw new Error("sequence 必须是 1-999 的整数");
 	}
 	const title = cleanTitle(assertText(params.title, "title", MAX_TITLE));
 	const items = params.items.map((item) => {
@@ -253,7 +258,8 @@ export default function registerRunbook(pi: ExtensionAPI) {
 			sequence: Type.Optional(
 				Type.Integer({
 					minimum: 1,
-					description: "沿用已有序号修正某一份清单时传入返回值里的 sequence；省略则分配当天递增的新序号",
+					maximum: 999,
+					description: "沿用已有序号修正某一份清单时传入返回值里的 sequence（1-999）；省略则分配当天递增的新序号",
 				}),
 			),
 			items: Type.Array(
