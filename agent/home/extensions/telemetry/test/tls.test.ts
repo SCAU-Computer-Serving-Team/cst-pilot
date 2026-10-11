@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:https";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -14,6 +14,80 @@ const openssl =
 	process.env.CST_TELEMETRY_OPENSSL ??
 	["C:/Program Files/Git/usr/bin/openssl.exe", "C:/Program Files/Git/mingw64/bin/openssl.exe"].find(existsSync) ??
 	"openssl";
+
+// 过期证书用 `openssl ca -startdate/-enddate` 签发。
+// `openssl x509 -days -1` 在 OpenSSL 3.4 起被拒（Error: end date before start date），
+// 不能跨版本使用；startdate/enddate 在所有支持版本上行为一致。
+async function issueExpiredCert(dir: string, options: { env: NodeJS.ProcessEnv }) {
+	const toPosix = (path: string) => path.replace(/\\/g, "/");
+	const caConfig = join(dir, "ca.cnf");
+	await writeFile(
+		caConfig,
+		[
+			"[req]",
+			"distinguished_name=dn",
+			"[dn]",
+			"[ca]",
+			"default_ca=CA_default",
+			"[CA_default]",
+			`dir=${toPosix(dir)}`,
+			`database=${toPosix(join(dir, "index.txt"))}`,
+			`new_certs_dir=${toPosix(join(dir, "newcerts"))}`,
+			`serial=${toPosix(join(dir, "serial"))}`,
+			"default_md=sha256",
+			"policy=policy_any",
+			"unique_subject=no",
+			"copy_extensions=copy",
+			"[policy_any]",
+			"commonName=supplied",
+			"",
+		].join("\n"),
+	);
+	await mkdir(join(dir, "newcerts"), { recursive: true });
+	await writeFile(join(dir, "index.txt"), "");
+	await writeFile(join(dir, "serial"), "1000\n");
+	await execute(
+		openssl,
+		[
+			"req",
+			"-new",
+			"-key",
+			join(dir, "good.key"),
+			"-out",
+			join(dir, "expired.csr"),
+			"-subj",
+			"/CN=Telemetry test fixture",
+			"-addext",
+			"subjectAltName=IP:127.0.0.1",
+			"-addext",
+			"basicConstraints=critical,CA:TRUE",
+		],
+		options,
+	);
+	await execute(
+		openssl,
+		[
+			"ca",
+			"-batch",
+			"-config",
+			caConfig,
+			"-cert",
+			join(dir, "good.crt"),
+			"-keyfile",
+			join(dir, "good.key"),
+			"-in",
+			join(dir, "expired.csr"),
+			"-out",
+			join(dir, "expired.crt"),
+			"-startdate",
+			"20200101000000Z",
+			"-enddate",
+			"20200201000000Z",
+			"-notext",
+		],
+		options,
+	);
+}
 
 test("专用 CA 仅信任对应证书，错误主机名与过期证书不发送令牌", async () => {
 	const dir = await mkdtemp(join(await testRoot(), "cst-telemetry-tls-"));
@@ -50,21 +124,7 @@ test("专用 CA 仅信任对应证书，错误主机名与过期证书不发送�
 				options,
 			);
 		}
-		await execute(
-			openssl,
-			[
-				"x509",
-				"-in",
-				join(dir, "good.crt"),
-				"-signkey",
-				join(dir, "good.key"),
-				"-days",
-				"-1",
-				"-out",
-				join(dir, "expired.crt"),
-			],
-			options,
-		);
+		await issueExpiredCert(dir, options);
 		for (const name of ["good", "wrong-host", "expired"]) {
 			const cert = await readFile(join(dir, `${name}.crt`), "utf8");
 			const key = await readFile(join(dir, `${name === "expired" ? "good" : name}.key`), "utf8");
