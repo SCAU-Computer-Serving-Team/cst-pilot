@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TreeNode } from "../tree/branch-tree";
 import { apiJson } from "./api";
+import { OptimisticSessionDeletion } from "./optimistic-session-deletion";
 import { StreamPacer } from "./stream-player";
 
 export type SessionRow = { id: string; title: string; updatedAt?: string; running: boolean };
@@ -101,6 +102,12 @@ export function useSessions() {
 	const [sessions, setSessions] = useState<SessionRow[]>([]);
 	const [stage, setStage] = useState("");
 	const [error, setError] = useState("");
+	const currentRows = useRef<SessionRow[]>([]);
+	const deletions = useRef(new OptimisticSessionDeletion());
+	const updateRows = useCallback((rows: SessionRow[]) => {
+		currentRows.current = rows;
+		setSessions(rows);
+	}, []);
 	const requestSequence = useRef(0);
 	const refreshTimer = useRef<number | undefined>(undefined);
 	const refresh = useCallback(async () => {
@@ -108,14 +115,14 @@ export function useSessions() {
 		try {
 			const state = await apiJson<{ sessions: SessionRow[]; stage: string }>("/api/state");
 			if (sequence !== requestSequence.current) return;
-			setSessions(state.sessions);
+			updateRows(deletions.current.reconcile(state.sessions));
 			setStage(state.stage);
 			setError("");
 		} catch (cause) {
 			if (sequence === requestSequence.current)
 				setError(cause instanceof Error ? cause.message : "会话列表加载失败");
 		}
-	}, []);
+	}, [updateRows]);
 	useEffect(() => {
 		void refresh();
 		return () => {
@@ -143,7 +150,21 @@ export function useSessions() {
 		},
 		!!stage && stage !== "preview",
 	);
-	return { sessions, stage, error, refresh };
+	const beginDeletion = useCallback(
+		(ids: readonly string[]) => {
+			++requestSequence.current;
+			updateRows(deletions.current.begin(currentRows.current, ids));
+		},
+		[updateRows],
+	);
+	const settleDeletion = useCallback(
+		(deleted: readonly string[], failed: readonly string[]) => {
+			++requestSequence.current;
+			updateRows(deletions.current.settle(currentRows.current, deleted, failed));
+		},
+		[updateRows],
+	);
+	return { sessions, stage, error, refresh, beginDeletion, settleDeletion };
 }
 
 export function useSessionTree(id: string | undefined) {

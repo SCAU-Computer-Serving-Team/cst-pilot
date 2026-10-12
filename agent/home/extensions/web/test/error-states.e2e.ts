@@ -27,6 +27,11 @@ test("错误状态：真实401、持续断线、恢复不重发与运行任务�
 			res.end();
 			return;
 		}
+		if (raw.includes("REQUEST_FAIL")) {
+			res.writeHead(500, { "content-type": "application/json" });
+			res.end('{"error":{"message":"REQUEST_FAILED_FOR_TEST"}}');
+			return;
+		}
 		res.writeHead(401, { "content-type": "application/json" });
 		res.end('{"error":{"type":"authentication_error","message":"EXPIRED_FOR_TEST"}}');
 	});
@@ -84,17 +89,118 @@ test("错误状态：真实401、持续断线、恢复不重发与运行任务�
 	let browser: BrowserProbe | undefined;
 	try {
 		browser = await BrowserProbe.launch(root);
+		const probe = browser;
+		async function assertSurface(selector: string, label: string, finished = false) {
+			for (const width of [1600, 960]) {
+				await probe.call("Emulation.setDeviceMetricsOverride", {
+					width,
+					height: 1000,
+					deviceScaleFactor: 1,
+					mobile: false,
+				});
+				if (width <= 960 && !(await probe.evaluate("!!document.querySelector('.exit-dialog')"))) {
+					await probe.click('button[aria-label="收起侧栏"]');
+					await probe.until(
+						"document.querySelector('.sidebar').getBoundingClientRect().right<=.5",
+						"窄屏内容不受侧栏遮挡",
+					);
+				}
+				for (const theme of ["light", "dark"]) {
+					await probe.evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
+					await probe.evaluate("document.fonts.ready");
+					const surface = await probe.evaluate<{
+						background: string;
+						border: string;
+						radius: string;
+						padding: string;
+						left: number;
+						right: number;
+						overflow: boolean;
+					}>(`(() => {
+						const e=document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({block:'center'});
+						const s=getComputedStyle(e),r=e.getBoundingClientRect();
+						return {background:s.backgroundColor,border:s.borderTopColor,radius:s.borderRadius,padding:s.padding,left:r.left,right:r.right,overflow:e.scrollWidth>e.clientWidth};
+					})()`);
+					assert.equal(
+						surface.background,
+						theme === "light"
+							? finished
+								? "rgb(255, 255, 255)"
+								: "rgb(252, 252, 252)"
+							: finished
+								? "rgb(11, 18, 21)"
+								: "rgb(19, 26, 29)",
+						`${label} ${width} ${theme} canvas background`,
+					);
+					if (selector !== ".error-details") {
+						assert.equal(surface.border, theme === "light" ? "rgb(224, 224, 224)" : "rgb(45, 52, 56)");
+					}
+					assert.equal(surface.radius, selector === ".exit-dialog" ? (finished ? "12px" : "16px") : "8px");
+					assert.equal(surface.padding, selector === ".exit-dialog" ? "24px" : "16px");
+					assert.ok(surface.left >= 0 && surface.right <= width + 1, `${label} stays inside viewport`);
+					assert.equal(surface.overflow, false, `${label} no horizontal overflow`);
+					const name = `${label}-${width}-${theme}`;
+					await writeFile(join(root, `${name}.json`), JSON.stringify(surface, null, 2));
+					await probe.screenshot(join(root, `${name}.png`));
+				}
+			}
+			await probe.call("Emulation.setDeviceMetricsOverride", {
+				width: 1600,
+				height: 1000,
+				deviceScaleFactor: 1,
+				mobile: false,
+			});
+			await probe.evaluate("document.documentElement.dataset.theme='light'");
+			if (!(await probe.evaluate("!!document.querySelector('.exit-dialog')"))) {
+				await probe.click('button[aria-label="展开侧栏"]');
+				await probe.until(
+					"Math.abs(document.querySelector('.sidebar').getBoundingClientRect().x)<.5",
+					"恢复桌面侧栏",
+				);
+			}
+		}
 		await browser.navigate(`${origin}/`);
 		await browser.fill(".composer-input", "AUTH_FAIL");
 		await browser.click('[aria-label="发送消息"]');
 		await browser.until("!!document.querySelector('.error-notice[data-kind=auth]')", "401提供重新登录");
-		assert.equal(await browser.evaluate("document.querySelector('.error-notice details').open"), false);
+		assert.equal(await browser.evaluate("document.querySelector('.error-details').open"), false);
+		assert.equal(await browser.evaluate("document.querySelector('.error-notice strong').textContent"), "登录已失效");
+		assert.equal(await browser.evaluate("document.querySelector('.error-notice p')"), null);
 		assert.ok(
 			!(await browser.evaluate<string>("document.querySelector('.error-notice').innerText")).includes(
 				"EXPIRED_FOR_TEST",
 			),
 		);
-		await browser.screenshot(join(root, "auth-light.png"));
+		await assertSurface(".error-notice", "auth");
+		await browser.click(".error-details summary");
+		assert.equal(await browser.evaluate("document.querySelector('.error-details').open"), true);
+		assert.match(
+			await browser.evaluate<string>("document.querySelector('.error-details pre').textContent"),
+			/EXPIRED_FOR_TEST/,
+		);
+		await assertSurface(".error-details", "details");
+		await browser.evaluate("document.querySelector('.error-details summary').focus()");
+		for (const type of ["keyDown", "keyUp"]) {
+			await browser.call("Input.dispatchKeyEvent", {
+				type,
+				key: "Enter",
+				code: "Enter",
+				...(type === "keyDown" ? { text: "\r" } : {}),
+				windowsVirtualKeyCode: 13,
+			});
+		}
+		await browser.until("!document.querySelector('.error-details').open", "键盘收起技术详情");
+		await browser.fill(".composer-input", "REQUEST_FAIL");
+		await browser.click('[aria-label="发送消息"]');
+		await browser.until("!!document.querySelector('.error-notice[data-kind=general]')", "模型失败状态");
+		assert.equal(
+			await browser.evaluate("document.querySelector('.error-notice[data-kind=general] strong').textContent"),
+			"请求失败",
+		);
+		assert.equal(
+			await browser.evaluate("document.querySelector('.error-notice[data-kind=general] p').textContent"),
+			"消息已保存。",
+		);
 		await browser.call("Network.enable");
 		await browser.call("Network.emulateNetworkConditions", {
 			offline: true,
@@ -103,6 +209,25 @@ test("错误状态：真实401、持续断线、恢复不重发与运行任务�
 			uploadThroughput: 0,
 		});
 		await browser.until("!!document.querySelector('.connection-status')", "断线持续bar");
+		await browser.evaluate(
+			"Promise.all(document.querySelector('.connection-status').getAnimations().map(a=>a.finished))",
+		);
+		const connectionGeometry = await browser.evaluate<{ left: number; right: number; top: number; viewport: number }>(
+			"(()=>{const r=document.querySelector('.connection-status').getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,viewport:innerWidth};})()",
+		);
+		assert.ok(
+			Math.abs((connectionGeometry.left + connectionGeometry.right) / 2 - connectionGeometry.viewport / 2) < 1,
+			"断线提示水平居中",
+		);
+		assert.equal(connectionGeometry.top, 20, "断线提示位于顶部20px");
+		assert.equal(
+			await browser.evaluate("document.querySelector('.connection-status strong').textContent"),
+			"连接断开",
+		);
+		assert.equal(
+			await browser.evaluate("document.querySelector('.connection-status p').textContent"),
+			"正在重连，输入已保留。",
+		);
 		await browser.screenshot(join(root, "offline-light.png"));
 		const count = calls;
 		await browser.call("Network.emulateNetworkConditions", {
@@ -114,6 +239,16 @@ test("错误状态：真实401、持续断线、恢复不重发与运行任务�
 		await browser.until("!document.querySelector('.connection-status')", "恢复撤下提示");
 		assert.equal(calls, count, "恢复不能重发已接受消息");
 		await browser.until("!document.querySelector('[data-home-transition]')", "首轮页面过渡清理");
+		await browser.click(".sidebar-account-trigger");
+		await browser.click(".sidebar-account-item:has(svg.lucide-power)");
+		await browser.until(
+			"document.querySelector('.exit-dialog > p')?.textContent==='将关闭服务和终端。'",
+			"空闲退出确认",
+		);
+		assert.equal(await browser.evaluate("document.querySelector('.exit-description').textContent"), "会话保留。");
+		await assertSurface(".exit-dialog", "exit-idle");
+		await browser.click(".exit-actions button:not(.exit-confirm)");
+		assert.equal(exits, 0);
 		await browser.fill(".composer-input", "HOLD_EXIT");
 		await browser.click('[aria-label="发送消息"]');
 		await browser.until("!!document.querySelector('[aria-label=停止生成]')", "运行状态");
@@ -141,7 +276,15 @@ test("错误状态：真实401、持续断线、恢复不重发与运行任务�
 				Math.abs(geometry.y + geometry.height / 2 - geometry.viewportHeight / 2) < 1,
 			"退出弹窗在视口居中",
 		);
-		await browser.screenshot(join(root, "exit-running-light.png"));
+		assert.equal(
+			await browser.evaluate("document.querySelector('.exit-dialog > p').textContent"),
+			"1 个会话运行中；退出将停止任务、暂停队列。",
+		);
+		assert.equal(
+			await browser.evaluate("document.querySelector('.exit-description').textContent"),
+			"记录保留，任务不自动重放。",
+		);
+		await assertSurface(".exit-dialog", "exit-running");
 		await browser.call("Input.dispatchKeyEvent", {
 			type: "keyDown",
 			key: "Escape",
@@ -170,7 +313,11 @@ test("错误状态：真实401、持续断线、恢复不重发与运行任务�
 		await new Promise((r) => setTimeout(r, 180));
 		assert.equal(exits, 1);
 		assert.deepEqual(pool.snapshot(), []);
-		await browser.screenshot(join(root, "exited-light.png"));
+		assert.equal(
+			await browser.evaluate("document.querySelector('.exit-description').textContent"),
+			"会话已保存。重开请运行 pi.cmd。",
+		);
+		await assertSurface(".exit-dialog", "exited", true);
 	} finally {
 		release?.();
 		await browser?.close();

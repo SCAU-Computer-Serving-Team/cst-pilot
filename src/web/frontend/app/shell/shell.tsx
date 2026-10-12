@@ -1,7 +1,9 @@
 import { Button, Popover } from "@heroui/react";
 import {
+	Check,
 	CircleUserRound,
 	Download,
+	ListChecks,
 	LogIn,
 	LogOut,
 	MessageSquareWarning,
@@ -26,20 +28,14 @@ import { BlueHour } from "./blue-hour";
 import { ExitDialog } from "./exit-dialog";
 import { usePanelDismiss } from "./panel-dismiss";
 import { sampleSessions } from "./sample-sessions";
+import { dayGroup, groupSelection, sessionGroups } from "./session-groups";
+import {
+	SessionDeleteDialog,
+	SessionDeleteNotice,
+	SessionManagementToolbar,
+	useSessionManagement,
+} from "./session-management";
 import { currentTheme, nextTheme, type Theme, themeLabels } from "./theme";
-
-// 画布按日期分组会话列表。
-const sessionGroups = ["今天", "昨天", "一周内", "更早"];
-const dayGroup = (value?: string) => {
-	const target = value ? new Date(value) : undefined;
-	if (!target || Number.isNaN(target.getTime())) return "更早";
-	const today = new Date();
-	today.setHours(0, 0, 0, 0);
-	const day = new Date(target);
-	day.setHours(0, 0, 0, 0);
-	const days = Math.round((today.getTime() - day.getTime()) / 86400000);
-	return days <= 0 ? "今天" : days === 1 ? "昨天" : days <= 7 ? "一周内" : "更早";
-};
 
 export function Sidebar({
 	preview = false,
@@ -81,11 +77,59 @@ export function Sidebar({
 	const menuRef = useRef<HTMLDivElement>(null);
 	const topRef = useRef<HTMLDivElement>(null);
 	const selectionRef = useRef<HTMLSpanElement>(null);
+	const focusSession = useCallback((id: string) => {
+		requestAnimationFrame(() => {
+			const row = topRef.current?.querySelector<HTMLElement>(`[data-session-id="${CSS.escape(id)}"]`);
+			(row?.querySelector<HTMLElement>("input") ?? row)?.focus();
+		});
+	}, []);
+	const deletionRoute = useRef<{ id: string; from: string; homeKey?: string } | null>(null);
+	const management = useSessionManagement(sessions, {
+		onStart: async (targets) => {
+			state.beginDeletion(targets.map((session) => session.id));
+			const current = targets.find(
+				(session) => location.pathname === `/s/${session.id}` || location.pathname.startsWith(`/s/${session.id}/`),
+			);
+			if (!current) return;
+			const route: { id: string; from: string; homeKey?: string } = {
+				id: current.id,
+				from: location.pathname + location.search,
+			};
+			deletionRoute.current = route;
+			await navigate("/", { replace: true });
+			if (window.location.pathname === "/") route.homeKey = window.history.state?.key;
+		},
+		onComplete: (report) => {
+			state.settleDeletion(
+				report.deleted.map((session) => session.id),
+				report.failed.map((session) => session.id),
+			);
+			const route = deletionRoute.current;
+			deletionRoute.current = null;
+			if (
+				route?.homeKey &&
+				window.location.pathname === "/" &&
+				window.history.state?.key === route.homeKey &&
+				report.failed.some((session) => session.id === route.id)
+			) {
+				void navigate(route.from, { replace: true });
+			}
+			void state.refresh();
+		},
+	});
+	const finishManagement = management.finish;
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 路由与侧栏折叠变化触发取消未提交的管理，已提交的删除继续等待结果
+	useEffect(() => {
+		setMenu(null);
+		finishManagement();
+	}, [location.pathname, collapsed, finishManagement]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: 选区高亮的位置跟随路由与列表内容，二者不在 effect 体内读取
 	useLayoutEffect(() => {
 		const top = topRef.current;
 		const selection = selectionRef.current;
-		const active = top?.querySelector<HTMLElement>(".sidebar-new.selected, .sidebar-session.selected");
+		const active = management.managing
+			? null
+			: top?.querySelector<HTMLElement>(".sidebar-new.selected, .sidebar-session.selected");
 		if (!top || !selection) return;
 		if (!active) {
 			delete top.dataset.selectionReady;
@@ -126,27 +170,52 @@ export function Sidebar({
 			observer.disconnect();
 			window.removeEventListener("resize", moveOnResize);
 		};
-	}, [location.pathname, sessions]);
+	}, [location.pathname, sessions, management.managing]);
+	useLayoutEffect(() => {
+		if (!menu) return;
+		const element = menuRef.current;
+		if (!element) return;
+		const bounds = element.getBoundingClientRect();
+		element.style.left = `${Math.max(8, Math.min(menu.x, window.innerWidth - bounds.width - 8))}px`;
+		element.style.top = `${Math.max(8, Math.min(menu.y, window.innerHeight - bounds.height - 8))}px`;
+		element.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+	}, [menu]);
 	useEffect(() => {
 		if (!menu) return;
-		// 右键菜单只做一个动作，点击别处、按 Esc、滚动都关闭。
 		const close = (event: Event) => {
 			if (!menuRef.current?.contains(event.target as Node)) setMenu(null);
 		};
-		const closeOnEscape = (event: KeyboardEvent) => {
-			if (event.key === "Escape") setMenu(null);
-		};
 		const dismiss = () => setMenu(null);
-		menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
 		window.addEventListener("pointerdown", close);
-		window.addEventListener("keydown", closeOnEscape);
 		window.addEventListener("scroll", dismiss, true);
+		window.addEventListener("resize", dismiss);
 		return () => {
 			window.removeEventListener("pointerdown", close);
-			window.removeEventListener("keydown", closeOnEscape);
 			window.removeEventListener("scroll", dismiss, true);
+			window.removeEventListener("resize", dismiss);
 		};
 	}, [menu]);
+	useEffect(() => {
+		if (!menu && !management.managing) return;
+		const closeOnEscape = (event: KeyboardEvent) => {
+			if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || management.targets) return;
+			if (menu) {
+				event.preventDefault();
+				setMenu(null);
+				focusSession(menu.id);
+			} else if (!management.busy) {
+				event.preventDefault();
+				finishManagement();
+				topRef.current?.querySelector<HTMLElement>(".sidebar-new")?.focus();
+			}
+		};
+		window.addEventListener("keydown", closeOnEscape);
+		return () => window.removeEventListener("keydown", closeOnEscape);
+	}, [menu, management.managing, management.targets, management.busy, finishManagement, focusSession]);
+	function openSessionMenu(session: { id: string; title: string }, x: number, y: number) {
+		if (preview || management.busy || (management.managing && !management.count)) return;
+		setMenu({ ...session, x, y });
+	}
 	async function rename(id: string, current: string) {
 		setMenu(null);
 		const name = window.prompt("会话名称", current);
@@ -234,19 +303,18 @@ export function Sidebar({
 			setAccountWorking(false);
 		}
 	}
-	async function remove(id: string) {
+	function remove(id: string) {
 		setMenu(null);
-		if (!window.confirm("删除此会话及其图片？此操作无法撤销。")) return;
-		try {
-			await apiJson(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
-			if (location.pathname.startsWith(`/s/${id}`)) navigate("/");
-			await state.refresh();
-		} catch (cause) {
-			window.alert(cause instanceof Error ? cause.message : "删除失败");
-		}
+		management.requestDelete(sessions.filter((session) => session.id === id));
 	}
 	return (
-		<aside className="sidebar" aria-label="会话导航" inert={collapsed} aria-hidden={collapsed}>
+		<aside
+			className="sidebar"
+			aria-label="会话导航"
+			data-managing={management.managing || undefined}
+			inert={collapsed}
+			aria-hidden={collapsed}
+		>
 			<div className="sidebar-top" ref={topRef}>
 				<span className="sidebar-selection" ref={selectionRef} aria-hidden="true" />
 				<div className="sidebar-brand">
@@ -257,43 +325,107 @@ export function Sidebar({
 						<PanelLeft size={22} />
 					</Button>
 				</div>
-				<Link
-					className={`sidebar-new ${location.pathname === "/" ? "selected" : ""}`}
-					to={preview ? "/?preview=1" : "/"}
-					viewTransition
-					onClick={onNavigate}
-				>
-					<SquarePen size={18} />
-					新对话
-				</Link>
+				<div className="sidebar-new-area">
+					<Link
+						className={`sidebar-new ${!management.managing && location.pathname === "/" ? "selected" : ""}`}
+						to={preview ? "/?preview=1" : "/"}
+						viewTransition
+						onClick={onNavigate}
+					>
+						<SquarePen size={18} />
+						新对话
+					</Link>
+					<SessionManagementToolbar
+						active={management.managing}
+						allSelected={management.allSelected}
+						busy={management.busy}
+						onToggleAll={management.toggleAll}
+						onFinish={() => {
+							setMenu(null);
+							management.finish();
+							topRef.current?.querySelector<HTMLElement>(".sidebar-new")?.focus();
+						}}
+					/>
+				</div>
 				{sessions.length > 0 ? (
 					sessionGroups.map((group) => {
 						const list = sessions.filter((session) => groupOf(session) === group);
+						const ids = list.map((session) => session.id);
+						const groupState = groupSelection(ids, management.selection);
 						return list.length === 0 ? null : (
 							<section className="sidebar-group" key={group} aria-label={group}>
-								<h2>{group}</h2>
+								<h2>
+									{/* biome-ignore lint/a11y/useSemanticElements: 分组使用三态checkbox按钮，保留DOM承载进退过渡 */}
+									<button
+										type="button"
+										className="sidebar-group-select"
+										role="checkbox"
+										aria-label={`选择${group}的会话`}
+										aria-checked={groupState.mixed ? "mixed" : groupState.checked}
+										tabIndex={management.managing ? 0 : -1}
+										disabled={management.busy}
+										data-selected={groupState.checked || undefined}
+										data-mixed={groupState.mixed || undefined}
+										onClick={() => {
+											setMenu(null);
+											management.toggleGroup(ids);
+										}}
+										onContextMenu={(event) => {
+											event.preventDefault();
+											if (management.managing && list[0])
+												openSessionMenu(list[0], event.clientX, event.clientY);
+										}}
+									>
+										<span className="session-check-control" aria-hidden="true">
+											<Check size={12} />
+										</span>
+									</button>
+									<span className="sidebar-selection-text">{group}</span>
+								</h2>
 								{list.map((session) => (
 									<div className="sidebar-session-row" key={session.id}>
 										<Link
-											className={`sidebar-session ${location.pathname === `/s/${session.id}` ? "selected" : ""}`}
+											className={`sidebar-session ${management.managing ? "sidebar-session-select" : ""} ${!management.managing && location.pathname === `/s/${session.id}` ? "selected" : ""}`}
+											data-session-id={session.id}
+											data-selected={
+												(management.managing && management.selection?.has(session.id)) || undefined
+											}
+											data-disabled={(management.managing && management.busy) || undefined}
 											to={`/s/${session.id}${preview ? "?preview=1" : ""}`}
 											viewTransition
-											onClick={onNavigate}
+											role={management.managing ? "checkbox" : undefined}
+											aria-checked={
+												management.managing ? (management.selection?.has(session.id) ?? false) : undefined
+											}
+											aria-disabled={(management.managing && management.busy) || undefined}
+											onClick={(event) => {
+												if (!management.managing) {
+													onNavigate?.();
+													return;
+												}
+												event.preventDefault();
+												setMenu(null);
+												management.toggle(session.id);
+											}}
+											onKeyDown={(event) => {
+												if (management.managing && event.key === " ") {
+													event.preventDefault();
+													management.toggle(session.id);
+												}
+											}}
 											onContextMenu={
 												preview
 													? undefined
 													: (event) => {
 															event.preventDefault();
-															setMenu({
-																id: session.id,
-																title: session.title,
-																x: event.clientX,
-																y: event.clientY,
-															});
+															openSessionMenu(session, event.clientX, event.clientY);
 														}
 											}
 										>
-											<span>{session.title}</span>
+											<span className="session-check-control" aria-hidden="true">
+												<Check size={12} />
+											</span>
+											<span className="sidebar-selection-text">{session.title}</span>
 										</Link>
 									</div>
 								))}
@@ -314,42 +446,92 @@ export function Sidebar({
 					className="session-menu"
 					ref={menuRef}
 					role="menu"
-					aria-label={`会话 ${menu.title}`}
-					style={{
-						left: Math.max(8, Math.min(menu.x, window.innerWidth - 248)),
-						top: Math.max(8, Math.min(menu.y, window.innerHeight - 177)),
+					aria-label={management.managing ? "批量会话操作" : `会话 ${menu.title}`}
+					style={{ left: menu.x, top: menu.y }}
+					onKeyDown={(event) => {
+						if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+						event.preventDefault();
+						const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+						const current = items.indexOf(document.activeElement as HTMLElement);
+						const index =
+							event.key === "Home"
+								? 0
+								: event.key === "End"
+									? items.length - 1
+									: (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+						items[index]?.focus();
 					}}
 				>
-					<button
-						type="button"
-						role="menuitem"
-						className="sidebar-account-item"
-						onClick={() => void rename(menu.id, menu.title)}
-					>
-						<Pencil size={18} aria-hidden="true" />
-						重命名
-					</button>
-					<a
-						role="menuitem"
-						className="sidebar-account-item"
-						href={`/api/sessions/${encodeURIComponent(menu.id)}/export`}
-						download
-						onClick={() => setMenu(null)}
-					>
-						<Download size={18} aria-hidden="true" />
-						导出
-					</a>
-					<hr className="session-menu-divider" />
-					<button
-						type="button"
-						role="menuitem"
-						className="sidebar-account-item sidebar-menu-delete"
-						onClick={() => void remove(menu.id)}
-					>
-						<Trash2 size={18} aria-hidden="true" />
-						删除
-					</button>
+					{management.managing ? (
+						<button
+							type="button"
+							role="menuitem"
+							className="sidebar-account-item sidebar-menu-delete"
+							onClick={() => {
+								setMenu(null);
+								management.requestDelete();
+							}}
+						>
+							<Trash2 size={18} aria-hidden="true" />
+							删除
+						</button>
+					) : (
+						<>
+							<button
+								type="button"
+								role="menuitem"
+								className="sidebar-account-item"
+								onClick={() => void rename(menu.id, menu.title)}
+							>
+								<Pencil size={18} aria-hidden="true" />
+								重命名
+							</button>
+							<a
+								role="menuitem"
+								className="sidebar-account-item"
+								href={`/api/sessions/${encodeURIComponent(menu.id)}/export`}
+								download
+								onClick={() => setMenu(null)}
+							>
+								<Download size={18} aria-hidden="true" />
+								导出
+							</a>
+							<button
+								type="button"
+								role="menuitem"
+								className="sidebar-account-item"
+								onClick={() => {
+									setMenu(null);
+									management.start(menu.id);
+									focusSession(menu.id);
+								}}
+							>
+								<ListChecks size={18} aria-hidden="true" />
+								管理
+							</button>
+							<hr className="session-menu-divider" />
+							<button
+								type="button"
+								role="menuitem"
+								className="sidebar-account-item sidebar-menu-delete"
+								onClick={() => remove(menu.id)}
+							>
+								<Trash2 size={18} aria-hidden="true" />
+								删除
+							</button>
+						</>
+					)}
 				</div>
+			)}
+			{management.targets && (
+				<SessionDeleteDialog
+					count={management.targets.length}
+					onCancel={management.cancel}
+					onConfirm={() => void management.confirm()}
+				/>
+			)}
+			{management.result && !management.busy && (
+				<SessionDeleteNotice result={management.result} onClose={management.dismissResult} />
 			)}
 			<div className="sidebar-footer">
 				<div className="device-icon">

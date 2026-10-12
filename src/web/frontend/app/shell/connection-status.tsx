@@ -2,6 +2,7 @@ import { WifiOff } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiJson } from "../data/api";
 import { useGlobalEvents } from "../data/web-state";
+import { Notification } from "./notification";
 
 /** 不重发写入；健康检查补充SSE尚未报告故障的情况。 */
 export function ConnectionStatus({ enabled }: { enabled: boolean }) {
@@ -45,15 +46,15 @@ export function ConnectionStatus({ enabled }: { enabled: boolean }) {
 	}, [enabled, check]);
 	if (!enabled || !disconnected) return null;
 	return (
-		<output className="connection-status">
+		<Notification className="connection-status" label="连接状态" kind="warning">
 			<WifiOff size={18} aria-hidden="true" />
 			<div>
-				<strong>与 CST Pilot 的连接已断开</strong>
-				<p>正在重连。请确认终端仍在运行；未发送内容会保留。</p>
+				<strong>连接断开</strong>
+				<p>正在重连，输入已保留。</p>
 			</div>
 			<button type="button" className="notice-action" onClick={() => void check()}>
 				重新连接
 			</button>
-		</output>
+		</Notification>
 	);
 }

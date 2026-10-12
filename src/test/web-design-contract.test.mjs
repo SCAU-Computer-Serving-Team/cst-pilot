@@ -35,9 +35,13 @@ test("四个模型服务配置帧使用 816 设置内容列，保持页面节点
   }
 });
 
-test("画布导航覆盖九个主题，浅深配置帧成对排列", () => {
-  assert.ok(web.children.some((node) => node.name === "00 · 画布导航"));
-  assert.equal(web.children.filter((node) => node.name?.includes("分区标题")).length, 9);
+test("画布导航覆盖十个主题，浅深配置帧相邻排列", () => {
+  const navigation = web.children.find((node) => node.name === "00 · 画布导航");
+  assert.ok(navigation);
+  assert.equal(web.children.filter((node) => node.name?.includes("分区标题")).length, 10);
+  const entries = [];
+  walk(navigation, (node) => { if (node.content) entries.push(node.content); });
+  assert.ok(entries.some((content) => content.includes("会话批量管理")));
   for (const [lightId, darkId] of [["rdTGN", "n3jW1"], ["i1jzTi", "LfOD8"]]) {
     const light = web.children.find((node) => node.id === lightId);
     const dark = web.children.find((node) => node.id === darkId);
@@ -104,6 +108,89 @@ test("动效令牌与 DESIGN.md 的 25 项刻度一致", () => {
     assert.ok(rules.includes(`\`--${name}\``), name);
   }
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/u);
+});
+
+test("会话勾选无多余外框，错误与退出按组件分组", () => {
+  let checkRows = 0;
+  for (const root of web.children) walk(root, (node) => {
+    assert.notEqual(node.name, "会话勾选图标位", "16×16勾选框直接参与行布局");
+    if (node.children?.some((child) => child.type === "ref" && /会话[未已]勾选/.test(child.name ?? ""))) {
+      checkRows++;
+      const check = node.children.find((child) => child.type === "ref" && /会话[未已]勾选/.test(child.name ?? ""));
+      if (node.layout === "none") {
+        const text = node.children.find((child) => child.type === "text");
+        assert.equal(check.y + check.height / 2, text.y + text.height / 2, node.id);
+      } else assert.equal(node.alignItems, "center");
+      assert.equal(check.width, 16);
+      assert.equal(check.height, 16);
+    }
+  });
+  assert.ok(checkRows >= 10);
+  for (const id of ["q6c4dk", "xsI8b"]) {
+    const board = web.children.find((node) => node.id === id);
+    assert.equal(board.height, 1100);
+    for (const name of ["错误与恢复 · 组件分组", "技术详情 · 组件分组", "退出确认 · 组件分组", "退出完成 · 状态示例"]) assert.ok(board.children.some((node) => node.name === name));
+    assert.ok(!board.children.some((node) => node.name === "交互规范" || node.name === "空闲退出规则"));
+    const cards = [];
+    walk(board, (node) => { if (["认证失效", "写入失败", "模型失败", "断线横幅"].includes(node.name)) cards.push(node); });
+    assert.equal(cards.length, 4);
+    for (const card of cards) {
+      assert.equal(card.width, 520);
+      assert.equal(card.height, undefined);
+      assert.equal(card.padding, 16);
+      if (id === "q6c4dk") {
+        assert.equal(card.fill, "#FCFCFC");
+        assert.equal(card.stroke, "#E0E0E0");
+      }
+      const titles = [];
+      walk(card, (node) => { if (node.name === "主提示") titles.push(node.content); });
+      assert.ok(titles.every((title) => title.length <= 6), "主提示只写状态");
+    }
+    walk(board, (node) => {
+      if (node.name === "保存说明") assert.equal(node.content, "记录保留，任务不自动重放。");
+      if (id === "q6c4dk" && node.type === "frame") {
+        assert.notEqual(node.fill, "#F6F6F6", "错误与退出使用近白底色");
+        if (typeof node.fill === "string" && /^#[0-9A-F]{6}$/i.test(node.fill)) {
+          assert.equal(node.fill.slice(1, 3), node.fill.slice(3, 5), "底色无红绿偏向");
+          assert.equal(node.fill.slice(3, 5), node.fill.slice(5, 7), "底色无蓝色偏向");
+        }
+      }
+    });
+  }
+});
+
+test("弹出通知的浅深组件、顶部位置与堆叠共用规范", () => {
+  for (const id of ["Ohy8e", "c6cYjn"]) {
+    const board = web.children.find((node) => node.id === id);
+    assert.ok(board);
+    const component = board.children.find((node) => node.name?.startsWith("组件 · 弹出通知"));
+    assert.equal(component.reusable, true);
+    assert.deepEqual(component.padding, [8, 16]);
+    assert.equal(component.height, 44);
+    assert.equal(component.gap, 12);
+    assert.equal(component.cornerRadius, 8);
+    assert.equal(component.children.find((node) => node.name === "关闭通知按钮").width, 26);
+    assert.equal(board.children.filter((node) => node.type === "ref" && node.ref === component.id).length, 3);
+    const preview = board.children.find((node) => node.name.startsWith("960窗口"));
+    const region = preview.children.find((node) => node.name === "统一通知区域");
+    assert.equal(region.y, 20);
+    assert.equal(region.x + region.width / 2, preview.width / 2);
+    assert.equal(region.gap, 8);
+  }
+  for (const root of web.children) walk(root, (node) => {
+    if (node.id === "iHGJ6" || node.id === "bg3n1" || node.name === "消息弹窗") {
+      assert.equal(node.y, 20);
+      assert.deepEqual(node.padding, [8, 16]);
+      assert.equal(node.cornerRadius, 8);
+    }
+  });
+  const regionCss = /\.notification-region \{([^}]+)\}/u.exec(css)[1];
+  assert.ok(regionCss.includes("position: fixed"));
+  assert.ok(regionCss.includes("top: 20px"));
+  assert.ok(regionCss.includes("left: 50%"));
+  assert.ok(regionCss.includes("flex-direction: column"));
+  assert.ok(regionCss.includes("gap: var(--space-inline)"));
+  assert.ok(rules.includes("## 弹出通知"));
 });
 
 test("账号页只保留身份字段，CSTOA 额度只放上下文面板", () => {

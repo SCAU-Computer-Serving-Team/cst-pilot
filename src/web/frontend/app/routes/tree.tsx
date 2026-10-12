@@ -21,6 +21,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router";
 import { draftKey } from "../composer/drafts";
 import { apiJson, sessionPath } from "../data/api";
 import { useSessionTitle, useSessionTree } from "../data/web-state";
+import { Notification } from "../shell/notification";
 import { branchSummaryHref } from "../tree/branch-summary";
 import {
 	applyFold,
@@ -417,10 +418,18 @@ export default function SessionTree() {
 				</div>
 			)}
 			{toast && (
-				<output className="tree-toast">
+				<Notification className="tree-toast" label="消息提示">
 					<Info size={18} aria-hidden="true" />
 					<span>{toast}</span>
-				</output>
+					<button
+						type="button"
+						className="notification-close"
+						aria-label="关闭消息提示"
+						onClick={() => setToast("")}
+					>
+						<X size={18} aria-hidden="true" />
+					</button>
+				</Notification>
 			)}
 		</main>
 	);

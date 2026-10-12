@@ -50,6 +50,7 @@ const EXCEPTIONS = {
   "202020": "DESIGN.md 聊天页浅色例外 · 正文",
   "646464": "DESIGN.md 聊天页浅色例外 · 次要文字（卡片文字统一降一档）",
   "F6F6F6": "DESIGN.md 聊天页浅色例外 · 页面底色/原文块灰底",
+  "FCFCFC": "DESIGN.md 错误与退出 · 无色偏近白组件底色",
   "F0F0F0": "DESIGN.md 聊天页浅色例外 · 弱边框/调用语句片",
   "E5E5E5": "DESIGN.md 聊天页浅色例外 · 边框",
   "EAEAEA": "DESIGN.md 聊天页浅色例外 · 悬停/选中底色",

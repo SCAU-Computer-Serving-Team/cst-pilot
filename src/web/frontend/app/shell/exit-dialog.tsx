@@ -44,6 +44,7 @@ export function ExitDialog({ onClose }: { onClose: () => void }) {
 	return createPortal(
 		<dialog
 			className="exit-dialog"
+			data-exited={exited || undefined}
 			ref={dialog}
 			aria-labelledby="exit-title"
 			onCancel={(event) => {
@@ -53,15 +54,15 @@ export function ExitDialog({ onClose }: { onClose: () => void }) {
 		>
 			<h2 id="exit-title">{exited ? "CST Pilot 已退出" : "退出 CST Pilot？"}</h2>
 			{exited ? (
-				<p>会话已保存。需要继续时，请重新运行工具包中的 pi.cmd。</p>
+				<p className="exit-description">会话已保存。重开请运行 pi.cmd。</p>
 			) : (
 				<>
 					<p>
 						{!state
-							? "正在确认运行中的任务…"
+							? "正在检查任务…"
 							: count
-								? `还有 ${count} 个会话正在运行。退出将停止这些任务，并暂停未发送队列。`
-								: "退出将关闭本机服务和待机终端，已保存的会话会保留。"}
+								? `${count} 个会话运行中；退出将停止任务、暂停队列。`
+								: "将关闭服务和终端。"}
 					</p>
 					{count > 0 && (
 						<ul className="exit-session-list">
@@ -72,7 +73,7 @@ export function ExitDialog({ onClose }: { onClose: () => void }) {
 								))}
 						</ul>
 					)}
-					<p className="exit-description">已完成的消息会保留。再次启动后，未确认的任务不会自动重放。</p>
+					{state && <p className="exit-description">{count ? "记录保留，任务不自动重放。" : "会话保留。"}</p>}
 					{error && <ErrorNotice message={error} />}
 					<div className="exit-actions">
 						<button type="button" ref={cancel} disabled={busy} onClick={onClose}>
@@ -84,7 +85,7 @@ export function ExitDialog({ onClose }: { onClose: () => void }) {
 							disabled={busy || !state}
 							onClick={() => void confirm()}
 						>
-							{busy ? "正在停止并保存…" : count ? "停止任务并退出" : "退出程序"}
+							{busy ? "正在退出…" : count ? "停止任务并退出" : "退出程序"}
 						</button>
 					</div>
 				</>
