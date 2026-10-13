@@ -1,8 +1,6 @@
 # 遥测数据契约（会话记录）
 
-状态：会话记录的字段定义，契约版本 0.1，版本号以 [信息收集契约](../contract.md) 为准。更新：2026-10-03。
-
-本文只定义一个东西：会话记录有哪些字段、每个字段的统计口径是什么。共用字段、上传信封、身份来源、计费币种、工具字段形状、不采集清单都写在 [信息收集契约](../contract.md)，本文引用不重抄。
+本页定义会话记录的字段和统计口径，契约版本为 0.1。共用字段、上传信封、身份、币种与隐私边界见[信息收集契约](../contract.md)。
 
 ## 会话记录字段
 
@@ -11,7 +9,7 @@
 | 键 | 值示例 | 来源 | 用途描述 |
 |---|---|---|---|
 | `sessionId` | `uuid`，pi 生成 | `ctx.sessionManager` | 与本地会话文件对应，便于回查，记全量。Web 派生产生新 ID，源会话不拆分 |
-| `reason` | `startup｜reload｜new｜resume｜fork` | `session_start` | 区分启动、重载、新建、恢复、分叉。两端取值映射见 [sender](sender/SPEC.md)「TUI 与 Web 会话」 |
+| `reason` | `startup｜reload｜new｜resume｜fork` | `session_start` | 区分启动、重载、新建、恢复、分叉。两端取值映射见[发送端会话规则](sender/SPEC.md#会话与草稿) |
 | `endReason` | `quit｜reload｜new｜resume｜fork｜delete｜crash` | 定稿事件 | 区分正常退出、切换会话、重载；`delete` 为 Web 删除会话，`crash` 为强杀后恢复补记 |
 | `channel` | `tui｜web` | 加载环境 | 会话运行在哪端，报表看两端使用占比 |
 

@@ -10,7 +10,10 @@ const design = resolve(root, 'doc/design/web');
 const files = [
   ...await readdir(spec).then(names => names.filter(name => name.endsWith('.md')).map(name => resolve(spec, name))),
   ...await readdir(design).then(names => names.filter(name => name.endsWith('.md')).map(name => resolve(design, name))),
-  ...['doc/web/README.md', 'doc/web/MVP.md', 'doc/design/README.md', 'doc/design/web/tool/mapping.md', 'doc/Todo.md', 'doc/issues.md', 'doc/auth/README.md', 'doc/auth/handover.md', 'doc/test/README.md', 'doc/test/account-report.md', 'doc/test/telemetry-report.md', 'DESIGN.md', 'CONTRIBUTING.md'].map(name => resolve(root, name)),
+  ...(await Promise.all(['doc/telemetry', 'doc/telemetry/sender', 'doc/telemetry/receiver'].map(async directory =>
+    (await readdir(resolve(root, directory))).filter(name => name.endsWith('.md')).map(name => resolve(root, directory, name))
+  ))).flat(),
+  ...['README.md', 'CHANGELOG.md', 'doc/PRD.md', 'doc/Notice.md', 'doc/contract.md', 'pack/README.md', 'doc/web/README.md', 'doc/web/MVP.md', 'doc/design/README.md', 'doc/design/release.md', 'doc/design/web/tool/mapping.md', 'doc/Todo.md', 'doc/issues.md', 'doc/auth/README.md', 'doc/auth/handover.md', 'doc/test/README.md', 'doc/test/account-report.md', 'doc/test/telemetry-report.md', 'doc/test/launcher-report.md', 'doc/test/checkpoint5-report.md', 'DESIGN.md', 'CONTRIBUTING.md'].map(name => resolve(root, name)),
 ];
 const slug = text => text.toLowerCase().replace(/`/g, '').replace(/[^\p{L}\p{N}_\- ]/gu, '').replace(/ /g, '-');
 
@@ -43,5 +46,11 @@ test('SPEC 保留规则，阶段状态与实现职责分别集中管理', async 
     assert.equal(/^状态：/m.test(content), false, name);
     assert.equal(/不是[^\n]*而是/.test(content), false, name);
     assert.equal(/^## (前端处理|目录划分|流式渲染策略|取值)$/m.test(content), false, name);
+  }
+  for (const file of ['doc/telemetry/sender/SPEC.md', 'doc/telemetry/receiver/SPEC.md']) {
+    const content = await readFile(resolve(root, file), 'utf8');
+    assert.equal(/^状态：/m.test(content), false, file);
+    assert.equal(/^## (部署|技术栈|模块划分|议题)$/m.test(content), false, file);
+    assert.ok(content.includes('验证'), file);
   }
 });

@@ -25,7 +25,7 @@ flowchart LR
 
 线上传输只有批量 HTTPS POST，无长连接、拉取或命令下发。两端收到相同的 `recordId` 和会话统计，各自补充接收时间与身份；各自确认、去重和保留数据。
 
-本地记录为 JSONL，每个端点一个 `pending-<URL的SHA256>.jsonl` 文件。普通草稿按会话保存；接收端原始记录保存在 `sessions.payload`。
+本地队列为 JSONL，每个端点一个 `pending-<URL的SHA256>.jsonl` 文件。会话草稿使用 `drafts/<sessionId>.json`；接收端原始记录保存在 `sessions.payload`。
 
 ## 会话生命周期
 
@@ -38,7 +38,7 @@ flowchart LR
 
 TUI 定稿由 `session_shutdown` 触发；Web 在删除会话、关闭运行层时定稿。切换 Web 页面不会结束会话实例。正常退出等待定稿落盘，不等待网络响应。
 
-TUI 与多个 Web 会话分别累计、各写草稿。本地文件读写经进程级串行队列，各端点发送使用独立的单飞状态。一个端点超时、拒绝或停采不阻塞其他端点。
+TUI 与多个 Web 会话分别累计、各写草稿。本地文件读写经进程级串行队列，同一端点同时只运行一个发送任务。一个端点超时、拒绝或停采不阻塞其他端点。
 
 强杀时，下次启动用最后已完成轮次恢复；没有完成轮次的会话无草稿可恢复。磁盘写入失败、队列淘汰和进程强杀允许有限丢失。详细规则见[发送端](sender/SPEC.md)。
 
@@ -54,4 +54,21 @@ TUI 与多个 Web 会话分别累计、各写草稿。本地文件读写经进�
 
 数据同时落在队伍服务器与 Tim 的 `timserver_1`，不经过第三方数据接收服务。报错原文是可能包含敏感片段的例外，两端执行相同保留期。
 
-发送端位于 `agent/home/extensions/telemetry/`，随本仓库发行；服务端代码位于独立仓库 `cst-pilot-server`，以本仓库契约为共享依据。两个部署的具体入口、存储和运维边界见[接收端](receiver/SPEC.md)。
+发送端位于 `agent/home/extensions/telemetry/`，随本仓库发行；服务端代码位于独立仓库 `cst-pilot-server`，以本仓库契约为共享依据。部署入口、存储位置和运维边界见[遥测部署](deployment.md)。
+
+## 发送端模块
+
+| 模块 | 职责 |
+|---|---|
+| `index.ts` | 注册会话事件，连接采集、草稿、定稿与发送 |
+| `collect.ts`、`record.ts` | 内存统计与记录序列化；版本从工具包读取 |
+| `draft.ts` | 轮次草稿的原子替换、删除与启动恢复 |
+| `config.ts`、`credential.ts` | 读取配置、币种及有效上传凭据 |
+| `outbox.ts` | 各端点队列的追加、去重、淘汰和确认删除 |
+| `delivery.ts` | 队列迁移、批次大小限制与各端点发送 |
+| `transport.ts` | HTTPS、超时、状态分类与专用 CA 校验 |
+| `shared.ts` | 进程级文件队列、各端点发送状态、草稿恢复标记及会话定稿入口 |
+
+Pi 扩展加载时不共享模块缓存，因此跨会话状态挂在 `globalThis`。正常销毁先等待队列写入，再释放会话；网络请求独立执行。
+
+`AgentSession.dispose()` 不派发会话结束事件，Web 运行层通过公开定稿入口通知遥测。TUI 使用 `session_shutdown`，两端的统计口径相同。

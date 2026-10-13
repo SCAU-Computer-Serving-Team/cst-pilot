@@ -1,16 +1,21 @@
 # MVP 要做的内容
 
-状态：Checkpoint 4 已完成本机验收，当前进入 Checkpoint 5，整体验收尚未完成。更新：2026-10-10。
+状态：Checkpoint 4 已完成本机验收，当前处于 Checkpoint 5，整体验收尚未完成。更新：2026-10-13。
 
-- 页面、工具卡片、交互与画布已对照；Checkpoint 5 已执行隔离发行副本、实际浏览器窗口与 TUI 联调。
+- 页面、工具卡片、交互与画布已对照；当前源码的会话管理、通知、账号、额度和模型菜单已有本机浏览器回归。
+- 管理员与 WT 启动已有隔离测试；当前源码的干净发行副本和真实 UAC 链路仍待验收，见[启动器验证](../test/launcher-report.md)。
 - 待机、断线、认证、退出和[共享边界专项](../test/shared-backend-report.md)已有本机回归；主题按端独立，运行中配置重读和写权由共同协调模块处理。
 - 结果与未验证项见[联调报告](../test/checkpoint5-report.md)，待决项见[议题清单](../issues.md)，补画项见 [Todo](../Todo.md#待补画布)。
 
 [PRD](../PRD.md) 的 W1–W10 定义 Web 的总体目标。本文划定首版交付范围，兼容版与仪表盘列在后续阶段；具体行为引用各规格。
 
-**MVP 只做现代版**：Chromium 111 起，Tailwind v4，直接使用 HeroUI v3（`@heroui/react` + `@heroui/styles`）。模型服务登录支持 OAuth 与 API KEY 两种方式，与 pi 一致。两种凭据在 Web 中对应同一种模型服务登录态，有效期按各自机制处理。当前现场使用后台管理员账号的 API KEY。功能验证后再接入发行包。
+**MVP 只做现代版**：Chromium 111 起，Tailwind v4，使用 HeroUI v3（`@heroui/react` + `@heroui/styles`）。模型服务支持 OAuth 与 API KEY 登录，凭据由 Pi 管理，有效期按各自机制处理。
 
-**前端严格按设计稿实现。** 页面结构、布局、字号、图标、色值与浅深主题对照 [cst-pilot-web.pen](../../src/web/design/cst-pilot-web.pen)、[cst-pilot-tools.pen](../../src/web/design/cst-pilot-tools.pen)；取色依据 [cst-pilot-colors.pen](../../src/web/design/cst-pilot-colors.pen)，跨页面视觉规则以 [DESIGN.md](../../DESIGN.md) 为准。交互和数据行为以 SPEC 为准；画布中属于后续阶段或已被 MVP 排除的入口不显示。直接使用 HeroUI v3 承载现成控件及交互，按设计稿定制样式；诊断字段行、排行行等库中没有的结构才由项目组件组合。缺画布的 MVP 交互先补浅深设计，再实现前端。
+预构建 Web 已接入实验发行包；当前新增功能的正式发行验收仍待完成。
+
+**前端按设计稿实现。** 页面与工具卡片对照 [Web 画布](../../src/web/design/cst-pilot-web.pen)和[工具画布](../../src/web/design/cst-pilot-tools.pen)。取色依据[色阶画布](../../src/web/design/cst-pilot-colors.pen)，跨页面规则见 [DESIGN.md](../../DESIGN.md)。
+
+交互和数据行为以 SPEC 为准，后续阶段及 MVP 排除的入口不显示。现成控件使用 HeroUI v3，库中没有的诊断结构由项目组件组合。缺画布的交互先补浅深设计，再实现前端。
 
 ## 一、承载
 

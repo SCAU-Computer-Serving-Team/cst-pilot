@@ -60,7 +60,7 @@ OAuth 与 OA `POST /api/oauth/introspect` 已部署，接收端已配置真实�
 | `receivedAt` | 接收端时钟 | 时间基准，客户端时钟不可信 |
 | `ip` | 接收端从连接获取 | 来源统计。只存网段，见 [telemetry/receiver/SPEC.md](telemetry/receiver/SPEC.md)「接口」 |
 
-上传凭据是队员登录得到的 [OA 访问令牌](auth/README.md)，与模型调用共用同一个令牌。接收端不自己验签（令牌是 HMAC 签名，密钥不能外发），向 OA 内省令牌换取身份，取出 `mid` 与 `device_id` 写入记录；接口与服务鉴权见[接收端](telemetry/receiver/SPEC.md#oa-内省接口)。上传不设独立作用域：采不采由团队规定，不作为队员的可选项。
+上传凭据是队员登录得到的 [OA 访问令牌](auth/README.md)，与模型调用共用同一个令牌。接收端不自己验签（令牌是 HMAC 签名，密钥不能外发），向 OA 内省令牌换取身份，取出 `mid` 与 `device_id` 写入记录；接口与服务鉴权见[接收端](telemetry/receiver/SPEC.md#身份解析)。上传不设独立作用域：采不采由团队规定，不作为队员的可选项。
 
 这条路线有两个结果：
 
@@ -258,7 +258,7 @@ IP 是采集项，由接收端从连接获取，客户端不参与，见「身�
 
 ## 议题
 
-数据定义相关的未决项。接收端的接口与运维议题归 [telemetry/receiver/SPEC.md](telemetry/receiver/SPEC.md)。
+数据定义相关的未决项。接收端接口见[接收端规格](telemetry/receiver/SPEC.md)，运维议题集中在[待处理议题](issues.md#遥测运维)。
 
 | 组 | 编号 | 议题 | 状态与候选 |
 |---|---|---|---|
