@@ -4,8 +4,19 @@ import http from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import {smokeWeb} from './web-smoke.mjs';
 
+// 自动冒烟必须保留与调用方的输入输出连接，提前拒绝需要 UAC 重启的终端。
+export function requireSmokeAdministrator(root) {
+  const launcher = path.join(root, 'launcher.ps1').replaceAll("'", "''");
+  const command = `. '${launcher}'; if (Test-PilotAdministrator) { exit 0 }; exit 1`;
+  const result = spawnSync(path.join(root, 'pwsh/pwsh.exe'), [
+    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64'),
+  ], { encoding: 'utf8', windowsHide: true, timeout: 15_000 });
+  if (result.error || result.status !== 0) throw new Error('发行冒烟需要在已取得管理员权限的终端运行，不自动请求 UAC。' + (result.error ? ` ${result.error.message}` : ''));
+}
+
 // 在独立副本启动实际发行程序；模拟模型只检查工具注册，不执行系统诊断。
 export async function smokeRelease(source, workDir) {
+  requireSmokeAdministrator(source);
   if (fs.existsSync(workDir)) throw new Error(`冒烟目录已存在，拒绝覆盖: ${workDir}`);
   const root = path.join(workDir, 'cst-pilot');
   fs.cpSync(source, root, { recursive: true });

@@ -72,6 +72,7 @@ const CONFIG = {
   // 仓库 → 发行根
   REPO_ROOT_ITEMS: [
     { p: "pi.cmd", f: true },
+    { p: "launcher.ps1", f: true },
     { p: "LICENSE", f: true },
     { p: "README.md", f: true },
     { p: "CHANGELOG.md", f: true },

@@ -5,7 +5,23 @@
 ## 运行边界
 
 默认工具不修改系统配置，系统仍按当前进程权限允许操作。未知扩展与手动命令需单独核查其读写行为。
+
 配置与会话保存在 `agent/home`，临时状态保存在 `.state`。Windows 日志和 PowerShell 原生缓存不保证完全留在 U 盘。
+
+## 管理员启动
+
+`pi.cmd` 通过随包 `launcher.ps1` 检查当前权限。未提权时使用 Windows UAC 请求管理员授权，授权后启动一份 Pi；取消、拒绝或提权失败时退出，不以普通权限继续。
+
+| 场景 | 行为 |
+|---|---|
+| 普通权限交互启动 | 请求 UAC，优先新开管理员 Windows Terminal（`wt`）窗口 |
+| 管理员 WT 会话 | 留在原窗口，不重复打开 |
+| 管理员传统控制台 | 优先转入 WT |
+| WT 未安装或启动请求失败 | 使用系统控制台，不安装软件或修改默认终端设置 |
+| 取消或拒绝 UAC | 退出，不重复请求授权 |
+| RPC、打印或自动冒烟使用管道 | 调用方须已提权；保留原连接，不转入 WT；未提权时直接报错 |
+
+Pi 及其诊断子进程统一使用管理员权限。只读范围由工具实现和扩展白名单限制，启动器不构成系统权限隔离；不关闭 UAC、不保存管理员密码、不创建服务或计划任务。提权后重新建立工具包环境，保留原工作目录和启动参数，不使用管理员账户的个人目录定位项目配置。
 
 ## AGENTS.md 不参与发行
 
@@ -48,7 +64,7 @@ TUI 主题保存在 Pi 的 `settings.json`；Web 主题保存在 `web-settings.j
 ## pi.cmd 保持纯 ASCII
 
 cmd 按 ANSI/GBK 解析批处理文件，中文内容在部分机器上会导致解析错误。
-启动器的说明性内容放在 ASCII 注释中（见 `pi.cmd` 文件头）。
+`pi.cmd` 只保留 ASCII 入口；权限请求、便携环境与运行时选择由随包 `launcher.ps1` 处理。
 
 ## pwsh 输出解码以 GBK 兜底
 
@@ -82,4 +98,6 @@ WizTree 在 NTFS 上可直读 MFT，其他文件系统采用目录遍历。`disk
 
 ## 本项目遥测独立于 pi 自带遥测
 
-`pi.cmd` 的 `PI_OFFLINE=1` 只关 pi 自身的启动联网（版本检查、包更新、模型目录、pi 自带遥测），不拦扩展请求。项目遥测由 `agent\home\extensions\telemetry\` 扩展提供，发行包生成 `agent\home\telemetry.json`，同时向 `https://www.cstoa.top/api/telemetry` 与 `https://8.163.28.9:8445/api/telemetry` 上报，两端使用独立队列。Tim 端点的专用公开 CA 随扩展发行，只用于该端点的 TLS 验证。它与 pi 自带遥测互不影响；pi 自带遥测已由 `PI_OFFLINE=1` 与 `settings.json` 的 `enableInstallTelemetry=false` 关闭。
+`pi.cmd` 的 `PI_OFFLINE=1` 只关 pi 自身的启动联网（版本检查、包更新、模型目录、pi 自带遥测），不拦扩展请求。项目遥测由 `agent\home\extensions\telemetry\` 扩展提供，发行包生成 `agent\home\telemetry.json`，同时向 `https://www.cstoa.top/api/telemetry` 与 `https://8.163.28.9:8445/api/telemetry` 上报，两端使用独立队列。
+
+Tim 端点的专用公开 CA 随扩展发行，只用于该端点的 TLS 验证。它与 pi 自带遥测互不影响；pi 自带遥测已由 `PI_OFFLINE=1` 与 `settings.json` 的 `enableInstallTelemetry=false` 关闭。

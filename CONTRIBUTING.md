@@ -24,7 +24,8 @@ python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 | 后端测试 | `npm run test:web --prefix agent` | Web 扩展的接口、会话与事件测试 |
 | 跨端共享验收 | `npm run test:web:shared-audit --prefix agent` | 独立 Pi 进程、真实工具、写权、上下文、配置与独立主题；CI 必跑 |
 | OAuth 测试 | `npm run test:oauth --prefix agent` | 模拟 OA 与真实 Pi 认证链路 |
-| 发行脚本测试 | `node --test pack/test/*.test.mjs` | 发行树校验与模型目录 |
+| 遥测测试 | `npm run test:telemetry --prefix agent` | 双端队列、独立确认与 TLS 故障；TLS 测试需要 OpenSSL |
+| 发行脚本测试 | `node --test pack/test/*.test.mjs` | 启动器、发行树、模型目录与遥测配置 |
 | 前端格式与规则 | `npm run lint --prefix src/web/frontend` | biome 检查，规则与配置在仓库根 `biome.json` |
 | 前端类型 | `npm run typecheck --prefix src/web/frontend` | react-router 类型生成加 `tsc` |
 | 前端测试 | `npm run test --prefix src/web/frontend` | 工具卡片映射、分支树与流式渲染的纯函数测试 |
@@ -34,6 +35,8 @@ python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 | 端到端验收 | `npm run test:web:e2e --prefix agent` | 先构建；真实浏览器、HTTP、Pi、持久化与重启，链路见[验收设计](doc/test/web-e2e.md) |
 
 前端 lint 必须从 `src/web/frontend` 目录发起：biome 按运行目录识别 React 项目，换目录会漏掉 React 相关规则。`npm --prefix` 已经处理，直接照表执行即可。
+
+`pi.cmd` 交互启动请求管理员授权，优先使用已安装的 Windows Terminal。管道调用与发行冒烟需由已提权终端发起；启动器测试使用隔离副本和授权替身，不自动弹出 UAC。
 
 提交前运行与改动相关的检查。修改后端运行后端检查与测试；修改前端或画布运行前端格式、类型、测试、设计约束和构建。CI 覆盖上表，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
 

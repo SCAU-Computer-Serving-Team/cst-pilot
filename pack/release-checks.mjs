@@ -51,6 +51,8 @@ export function checkReleaseTree(root, files) {
 // Web 静态产物与随包许可证的固定清单。缺失即拒绝打包，避免发行包静默少文件。
 const WEB_STATIC = 'agent/home/extensions/web/static';
 export const REQUIRED_RELEASE_FILES = [
+  'pi.cmd',
+  'launcher.ps1',
   'agent/home/APPEND_SYSTEM.md',
   'agent/home/web-search.json',
   'agent/home/telemetry.json',

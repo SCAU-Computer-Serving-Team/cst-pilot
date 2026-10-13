@@ -42,6 +42,7 @@
 ```text
 cst-pilot/
 |-- pi.cmd                     启动入口
+|-- launcher.ps1               管理员授权与便携运行环境
 |-- assets/                    品牌资源
 |-- agent/home/
 |   |-- extensions/            诊断、Web、认证等扩展
@@ -58,6 +59,7 @@ cst-pilot/
 ```text
 cst-pilot/
 |-- pi.cmd
+|-- launcher.ps1
 |-- agent/
 |   |-- .runtime/              Pi 运行时，由 pi.cmd 调用
 |   `-- home/                  扩展、技能、配置与预构建 Web 界面
@@ -71,7 +73,7 @@ cst-pilot/
 
 ## 注意事项
 
-1. 支持 Windows 10/11 x64。部分诊断能力需要管理员权限，传感器数据能否读取取决于硬件与驱动。
+1. 支持 Windows 10/11 x64。启动统一请求 Windows 管理员授权；取消授权或没有管理员凭据时不启动。传感器数据能否读取取决于硬件与驱动。
 2. 本仓库用于代码开发，不包含完整便携运行环境。开发准备见 [贡献规范](CONTRIBUTING.md)。
 3. 发行包不提供模型服务地址与密钥。如果你是 CST 队员且需要相关资源，请联系队内委员。
 4. 项目遥测默认启用，上传需要 CSTOA 登录，会话统计同时发送到 CSTOA 服务器和 Tim 的 `timserver_1`。可在 `agent/home/telemetry.json` 中将 `enabled` 设为 `false`；收集范围见 [信息收集契约](doc/contract.md)。
@@ -81,7 +83,9 @@ cst-pilot/
 
 ## 使用方式
 
-从 [Releases](https://github.com/SCAU-Computer-Serving-Team/cst-pilot/releases/latest) 下载发行版 ZIP，完整解压到电脑或 U 盘，然后双击 `pi.cmd`。
+从 [Releases](https://github.com/SCAU-Computer-Serving-Team/cst-pilot/releases/latest) 下载发行版 ZIP，完整解压到电脑或 U 盘，然后双击 `pi.cmd`。在 Windows 用户账户控制（UAC）窗口中确认授权；普通账户需要输入管理员凭据。
+
+交互界面优先在已安装的 Windows Terminal（`wt`）中打开；未安装或启动请求失败时使用系统控制台，不安装终端软件。
 
 1. 首次运行时执行 `/login`，选择模型服务并完成授权或填写 API key。
 2. 描述机主遇到的问题，让 Agent 调用工具协助排查。
