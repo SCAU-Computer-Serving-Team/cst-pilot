@@ -132,6 +132,7 @@ test("跨端用户链路：网页保存范围和模型、原生扫码、服务�
 		await browser.until("document.querySelector('.model-label')?.textContent.includes('two')", "默认模型 two");
 		await browser.click(".composer-model");
 		await browser.until("document.querySelectorAll('.model-popover [role=option]').length===2", "网页可选范围");
+		assert.equal(await browser.evaluate("document.querySelector('.model-popover input')===null"), true);
 		assert.deepEqual(
 			await browser.evaluate(
 				"[...document.querySelectorAll('.model-popover [role=option]')].map(e=>e.textContent.trim())",
@@ -291,6 +292,7 @@ test("跨端用户链路：网页保存范围和模型、原生扫码、服务�
 		);
 		await browser.click(".composer-model");
 		await browser.until("document.querySelectorAll('.model-popover [role=option]').length===1", "新的 scoped 清单");
+		assert.equal(await browser.evaluate("document.querySelector('.model-popover input')===null"), true);
 		assert.deepEqual(
 			await browser.evaluate(
 				"[...document.querySelectorAll('.model-popover [role=option]')].map(e=>e.textContent.trim())",

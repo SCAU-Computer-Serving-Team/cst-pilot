@@ -35,6 +35,26 @@ test("四个模型服务配置帧使用 816 设置内容列，保持页面节点
   }
 });
 
+test("输入框模型面板只展示列表，浅深画布一致且设置页保留搜索", () => {
+  const composer = readFileSync(new URL("../web/frontend/app/composer/composer.tsx", import.meta.url), "utf8");
+  assert.ok(!composer.includes("modelQuery"));
+  assert.ok(!composer.includes("setModelQuery"));
+  assert.ok(!composer.includes("model-search"));
+  assert.ok(composer.includes("{scoped.map((model) => ("));
+  assert.ok(!css.includes(".model-search"));
+  assert.ok(rules.includes("模型面板只展示模型行与选中勾，不设搜索栏"));
+  for (const id of ["E7LEu", "HszUK"]) {
+    const panel = web.children.find((node) => node.id === id);
+    assert.equal(panel.width, 240);
+    assert.equal(panel.padding, 16);
+    assert.ok(panel.context.includes("不设搜索栏"));
+    assert.ok(panel.children.every((node) => node.name.startsWith("模型行 ·")));
+  }
+  let settingsSearches = 0;
+  for (const root of web.children) walk(root, (node) => { if (node.name === "模型搜索框") settingsSearches++; });
+  assert.ok(settingsSearches >= 2);
+});
+
 test("画布导航覆盖十个主题，浅深配置帧相邻排列", () => {
   const navigation = web.children.find((node) => node.name === "00 · 画布导航");
   assert.ok(navigation);

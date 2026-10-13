@@ -362,6 +362,7 @@ export function Sidebar({
 										role="checkbox"
 										aria-label={`选择${group}的会话`}
 										aria-checked={groupState.mixed ? "mixed" : groupState.checked}
+										aria-hidden={!management.managing}
 										tabIndex={management.managing ? 0 : -1}
 										disabled={management.busy}
 										data-selected={groupState.checked || undefined}

@@ -114,7 +114,6 @@ export function Composer({
 	const fileInput = useRef<HTMLInputElement>(null);
 	const [models, setModels] = useState<Model[]>([]);
 	const [enabled, setEnabled] = useState<string[] | null>(null);
-	const [modelQuery, setModelQuery] = useState("");
 	const [modelMenuOpen, setModelMenuOpen] = useState(false);
 	const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
 	usePanelDismiss(modelMenuOpen || thinkingMenuOpen, () => {
@@ -467,13 +466,9 @@ export function Composer({
 		? thinkingOptions.filter((option) => thinkingLevels.includes(option.id))
 		: thinkingOptions;
 	const scoped = scopedModels(models, enabled);
-	const modelMatches = scoped.filter((item) =>
-		`${item.provider} ${item.name} ${item.id}`.toLowerCase().includes(modelQuery.toLowerCase()),
-	);
 	async function chooseModel(key: string) {
 		if (!sessionId && key === "auto" && enabled === null) {
 			setSelected(null);
-			setModelQuery("");
 			return;
 		}
 		const choice = (home ? scoped : models).find((item) => `${item.provider}/${item.id}` === key);
@@ -486,7 +481,6 @@ export function Composer({
 			if (changed.thinkingLevel) setThinking(changed.thinkingLevel);
 			if (changed.thinkingLevels) setThinkingLevels(changed.thinkingLevels);
 			setSelected({ provider: choice.provider, id: choice.id });
-			setModelQuery("");
 			setError("");
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : "无法切换模型");
@@ -776,14 +770,6 @@ export function Composer({
 							</span>
 						</Select.Trigger>
 						<Select.Popover className="composer-popover model-popover" placement="top end">
-							<div className="model-search">
-								<input
-									aria-label="搜索模型"
-									value={modelQuery}
-									onChange={(event) => setModelQuery(event.target.value)}
-									placeholder="搜索 Provider 或模型名称"
-								/>
-							</div>
 							<ListBox>
 								{!sessionId && enabled === null && (
 									<ListBox.Item id="auto" textValue="自动选择">
@@ -791,7 +777,7 @@ export function Composer({
 										<span>自动选择</span>
 									</ListBox.Item>
 								)}
-								{modelMatches.map((model) => (
+								{scoped.map((model) => (
 									<ListBox.Item
 										key={`${model.provider}/${model.id}`}
 										id={`${model.provider}/${model.id}`}

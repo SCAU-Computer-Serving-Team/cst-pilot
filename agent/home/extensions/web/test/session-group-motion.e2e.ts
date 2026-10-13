@@ -70,6 +70,13 @@ test("管理原位进退、日期整组勾选、一个月内与减少动态", { 
 		const probe = browser;
 		await probe.navigate(`http://127.0.0.1:${port}/`);
 		await probe.until("document.querySelectorAll('.sidebar-session').length===6", "分组列表");
+		assert.equal(
+			await probe.evaluate(
+				"[...document.querySelectorAll('.sidebar-group-select')].every(e=>e.getAttribute('aria-hidden')==='true' && e.tabIndex===-1)",
+			),
+			true,
+			"普通模式不向辅助技术暴露隐藏勾选框",
+		);
 		assert.deepEqual(
 			await probe.evaluate<string[]>(
 				"[...document.querySelectorAll('.sidebar-group h2')].map(e=>e.textContent.trim())",
@@ -100,6 +107,13 @@ test("管理原位进退、日期整组勾选、一个月内与减少动态", { 
 			await probe.until("!!document.querySelector('.sidebar[data-managing]')", "管理展开");
 		}
 		await enter();
+		assert.equal(
+			await probe.evaluate(
+				"[...document.querySelectorAll('.sidebar-group-select')].every(e=>e.getAttribute('aria-hidden')==='false' && e.tabIndex===0)",
+			),
+			true,
+			"管理模式恢复日期组勾选框的可访问性",
+		);
 		await probe.until("window.__heldAnimations.length>=3", "进场CSS过渡");
 		const duration = await probe.evaluate<number>(
 			"window.__heldAnimations.find(a=>a.effect.target===window.__firstCheck && a.transitionProperty==='opacity').effect.getTiming().duration",

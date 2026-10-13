@@ -98,5 +98,11 @@ jobs:
             ${{ runner.temp }}/**/composer-caret/*.png
             ${{ runner.temp }}/**/composer-caret/*.json
             ${{ runner.temp }}/**/account-profile/*.png
+            ${{ runner.temp }}/**/session-management/*.png
+            ${{ runner.temp }}/**/session-management/report.json
+            ${{ runner.temp }}/**/session-group-motion/*.png
+            ${{ runner.temp }}/**/session-group-motion/report.json
+            ${{ runner.temp }}/**/context-meter/*.png
+            ${{ runner.temp }}/**/context-meter/chat-*.json
           if-no-files-found: ignore
           retention-days: 7

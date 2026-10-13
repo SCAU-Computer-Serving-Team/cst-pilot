@@ -518,9 +518,6 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 [role="option"][aria-selected="true"] .model-option-check { visibility: visible; }
 .thinking-option-copy { display: flex; flex: 1; flex-direction: column; gap: var(--space-micro); }
 .thinking-option-copy small { color: var(--app-muted); font-size: 12px; line-height: 1.4; }
-.model-search { display: flex; flex: 0 0 auto; flex-direction: column; gap: var(--space-tight); padding: 0; }
-.model-search input { width: 100%; height: var(--control-lg); padding: 0 var(--space-inline); border: 1px solid var(--chat-border); border-radius: 6px; background: var(--chat-bg); color: var(--chat-ink); }
-.model-search small { color: var(--chat-muted); font-size: 12px; }
 .chat-main { display: flex; flex-direction: column; }
 .chat-message-surface { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .conversation { flex: 1; height: auto; max-height: none; min-height: 60px; }

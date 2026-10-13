@@ -168,7 +168,12 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 			"[...document.querySelectorAll('.model-popover [role=option]')].map(e=>e.textContent.trim())",
 		);
 		assert.deepEqual(models, ["测试模型 two"]);
-		assert.equal(await browser.evaluate("document.querySelector('.model-search').textContent.includes('/')"), false);
+		assert.equal(await browser.evaluate("document.querySelector('.model-popover input')===null"), true);
+		for (const theme of ["light", "dark"]) {
+			await browser.evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
+			await browser.screenshot(join(root, `model-menu-${theme}.png`));
+		}
+		await browser.evaluate("document.documentElement.dataset.theme='light'");
 		await browser.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
 		await browser.evaluate(
 			"window.__transitions=[]; if(document.startViewTransition){const start=document.startViewTransition.bind(document);document.startViewTransition=(...args)=>{const t=start(...args);window.__transitions.push(t);return t;};}",
@@ -181,7 +186,7 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		await browser.until("!document.querySelector('[aria-label=发送消息]').disabled", "发送按钮可用");
 		await browser.click('[aria-label="发送消息"]');
 		await browser.until(
-			"document.querySelector('.composer-shell .error-notice[data-kind=connection]')?.textContent.includes('提交结果尚未确认') && document.querySelector('.composer-input')?.textContent==='新会话实时记录'",
+			"document.querySelector('.composer-shell .error-notice[data-kind=connection]')?.textContent.includes('提交待确认') && document.querySelector('.composer-input')?.textContent==='新会话实时记录'",
 			"响应丢失后保留草稿",
 		);
 		await browser.evaluate("window.fetch=window.__fetchBeforeFault");
