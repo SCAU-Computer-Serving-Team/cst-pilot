@@ -64,6 +64,8 @@ jobs:
       - run: npm run typecheck --prefix src/web/frontend
       - run: npm run test --prefix src/web/frontend
       - run: node --test src/test/*.test.mjs
+        env:
+          CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
       - run: npm run build --prefix src/web/frontend
       - run: npm run test:fonts --prefix src/web/frontend
       - name: 浏览器与跨端用户链路 E2E

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 import { DefaultResourceLoader } from '../../agent/node_modules/@earendil-works/pi-coding-agent/dist/index.js';
+
+import { testRoot } from '../../agent/home/extensions/web/test/support.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const diagnostics = join(root, 'agent/home/extensions/diagnostics');
@@ -13,10 +13,7 @@ const unwanted = /直接信号|用降频信号替代|IO 瓶颈|说明物理内�
 
 // Execute the registered tools; only the PowerShell data-source boundary is replaced.
 async function harness(t) {
-  const base = process.env.CST_WEB_TEST_TMPDIR || (process.platform === 'win32'
-    ? (existsSync('E:/') ? 'E:/tmp' : 'F:/tmp') : tmpdir());
-  const dated = join(base, new Date().toISOString().slice(0, 10));
-  await mkdir(dated, { recursive: true });
+  const dated = await testRoot();
   const kit = await mkdtemp(join(dated, 'diagnostic-notices-'));
   const home = join(kit, 'agent/home');
   const extension = join(home, 'extensions/diagnostics');

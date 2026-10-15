@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import childProcess, { spawn } from 'node:child_process';
@@ -11,6 +10,8 @@ import { test } from 'node:test';
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from '../../agent/node_modules/@earendil-works/pi-coding-agent/dist/index.js';
 import { createAssistantMessageEventStream } from '../../agent/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai/dist/index.js';
 import { getThemeByName, resolveThemeSetting } from '../../agent/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js';
+
+import { testRoot } from '../../agent/home/extensions/web/test/support.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const source = join(root, 'agent/home/extensions/diagnostics');
@@ -26,9 +27,7 @@ const snapshot = volumes => ({ collectedAt: '2026-10-13T00:00:00.000Z', admin: t
 const accepted = { status: 'accepted', reason: 'Windows 已接受请求', returnCode: 0, error: null };
 
 async function harness(t) {
-  const base = process.env.CST_WEB_TEST_TMPDIR || (process.platform === 'win32' ? (existsSync('E:/') ? 'E:/tmp' : 'F:/tmp') : tmpdir());
-  const dated = join(base, new Date().toISOString().slice(0, 10));
-  await mkdir(dated, { recursive: true });
+  const dated = await testRoot();
   const dir = await mkdtemp(join(dated, 'bitlocker-test-')), home = join(dir, 'agent/home');
   const extension = join(home, 'extensions/diagnostics');
   await cp(source, extension, { recursive: true });
