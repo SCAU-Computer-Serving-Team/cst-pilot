@@ -1,266 +1,175 @@
 # 信息收集契约
 
-状态：契约版本 0.1。更新：2026-10-02。
+本文定义字段、含义、示例和收集边界。会话统计口径见[会话记录](telemetry/schema.md)，传输与鉴权见[发送端](telemetry/sender/SPEC.md)和[接收端](telemetry/receiver/SPEC.md)。
 
-本文是信息收集业务的最高参考：字段定义、身份来源、计费币种、工具字段形状、隐私边界都只有这一份定义，其他文档引用不重抄；写法冲突时以本文为准。
+协议版本为 `0.1`，读取记录时允许新增字段缺失。验证范围见[遥测验证](test/telemetry-report.md)。
 
-消费方是两个：遥测系统上传会话记录，[仪表盘](web/SPEC/dashboard.md) 只看请求记录。两种记录共存，按 `type` 区分：
+## 记录类型
 
-| `type` | 粒度 | 产生时机 | 主要用途 |
-|---|---|---|---|
-| `request` | 主 Agent 每次模型调用一条 | 该次调用结束后 | 模型请求日志、逐次成本、本地仪表盘。只落本地，不上传 |
-| `session` | 一场会话一条 | `session_shutdown` | 工具使用、降级、活跃时长、上下文规模。上传遥测，字段见 [telemetry/schema.md](telemetry/schema.md) |
+| `type` | 粒度 | 保存范围 |
+|---|---|---|
+| `request` | 一次主 Agent 模型请求 | 本地请求日志与仪表盘，不上传 |
+| `session` | 一场会话实例 | 遥测上传，字段见[会话记录](telemetry/schema.md) |
 
-「值示例」里的 `uuid`、`sha256(...)`、`ISO 8601` 等是格式记号，不是字面值。具体取值见文末示例。
-
-## 上传信封
-
-只有 `session` 记录上传。同一记录同时发送到 CSTOA 服务器与 Tim 的 `timserver_1`，两端分别确认和存储。上传字段与收集边界一致，`recordId` 相同；发送状态只留在本地，不进入信封。
-
-一次 POST 带一批记录，形状如下。发送端构造，接收端按此校验。
-
-```
-POST /v1/sessions
-Authorization: Bearer <OA 访问令牌>
-{ "v": "0.1", "batchId": "<uuid>", "sentAt": "<ISO 8601>", "records": [ ... ] }
-```
-
-| 键 | 值示例 | 来源 | 用途描述 |
-|---|---|---|---|
-| `v` | `"0.1"` | 常量 | 契约版本，与记录内的 `v` 同值 |
-| `batchId` | `uuid` | 发送端生成 | 批次标识，接收端据此识别重发 |
-| `sentAt` | `ISO 8601` | 发送端时钟 | 发送时刻，仅作参考；时间基准用接收端的 `receivedAt` |
-| `records` | `[ ... ]` | 发送端 | 一批记录的数组，上限 50 条或 1 MB |
+示例中的 UUID、时间和摘要均为格式示意。计数为非负整数，耗时单位为毫秒；缺失信息不能补成真实的零值。新增可空字段使用 `null`，兼容读取时接受字段缺失。
 
 ## 记录自带
 
-两种记录都携带。
+| 字段 | 含义 | 取值举例 |
+|---|---|---|
+| `v` | 记录协议版本，字符串 | `"0.1"` |
+| `type` | 记录类型 | `"request"`、`"session"` |
+| `recordId` | 记录唯一标识，接收端去重依据 | `"31de2e2e-816e-4cdc-8f35-c8eae6e69272"` |
+| `kitVersion` | 工具包发行版本；读取失败为空字符串 | `"0.3.1"` |
 
-| 键 | 值示例 | 来源 | 用途描述 |
-|---|---|---|---|
-| `v` | `"0.1"` | 常量 | 契约版本。接收端据此选择解析规则 |
-| `type` | `request｜session` | 常量 | 记录类型，接收端据此选择解析规则 |
-| `recordId` | `uuid` | 发送端生成 | 记录唯一标识，接收端去重主键 |
-| `kitVersion` | `0.3.1` | 发行版 `VERSION` | 版本分布，决定旧版兼容与问题定位 |
+重传保留同一 `recordId`。协议版本与标识算法分别管理，不增加算法版本字段。
 
-记录不自带任何身份字段，队员归属见「身份来源」。
+## 上传信封
 
-`v` 就是本文档的契约版本，全仓只有这一个版本号，改动时文档与记录一起改。按字符串比较，不做数值运算。
+| 字段 | 含义 | 取值举例 |
+|---|---|---|
+| `v` | 上传协议版本 | `"0.1"` |
+| `batchId` | 本次上传批次标识；重新组批可改变 | UUID |
+| `sentAt` | 客户端发送时刻，仅作参考 | `"2026-10-15T09:00:00+08:00"` |
+| `records` | 会话记录数组；每批 1–50 条，完整请求体最多 1 MiB | `[{ "type": "session", "recordId": "…" }]` |
+
+同一记录发送到两个接收端，各端独立确认和去重。凭据只放鉴权头，不进入信封或记录正文；上传权限不能由匿名标识证明。
 
 ## 身份来源
 
-OAuth 与 OA `POST /api/oauth/introspect` 已部署，接收端已配置真实内省。运行与验证边界见[接收端](telemetry/receiver/SPEC.md)及[验证报告](test/telemetry-report.md)。
+### 会话自带标识
 
-身份由上传凭据决定，客户端不计算、不携带。
-
-| 键 | 来源 | 用途描述 |
+| 字段 | 含义 | 取值举例 |
 |---|---|---|
-| `mid` | 上传凭据载荷 | 队员编号。使用统计与报表的归属单位 |
-| `deviceId` | 上传凭据载荷的 `device_id` | 设备标识。限流与删除的单位 |
-| `receivedAt` | 接收端时钟 | 时间基准，客户端时钟不可信 |
-| `ip` | 接收端从连接获取 | 来源统计。只存网段，见 [telemetry/receiver/SPEC.md](telemetry/receiver/SPEC.md)「接口」 |
+| `identity.installationId` | U 盘中一份已初始化的工具包配置，作为匿名使用来源 | UUID 或 `null` |
+| `identity.environmentId` | 该工具包标识体系下的操作系统安装环境 | 64 位十六进制摘要或 `null` |
+| `identity.environmentSource` | 环境标识来源；无法取得时明确未知 | `"windows-machine-guid"`、`"unavailable"` |
 
-上传凭据是队员登录得到的 [OA 访问令牌](auth/README.md)，与模型调用共用同一个令牌。接收端不自己验签（令牌是 HMAC 签名，密钥不能外发），向 OA 内省令牌换取身份，取出 `mid` 与 `device_id` 写入记录；接口与服务鉴权见[接收端](telemetry/receiver/SPEC.md#身份解析)。上传不设独立作用域：采不采由团队规定，不作为队员的可选项。
+`installationId` 首次运行随机生成，与 32 字节随机密钥 `identityKey` 一起保存在工具包 `agent/home/telemetry/identity.json`。`identityKey` 仅供本地计算，不上传。环境标识采用 HMAC-SHA256（带密钥的摘要）：
 
-这条路线有两个结果：
+```text
+message = UTF-8(JSON.stringify(["environment", MachineGuid.trim().toLowerCase()]))
+environmentId = HMAC-SHA256(identityKey, message)，输出小写十六进制
+```
 
-1. **采集侧不碰凭据。** 不调用会触发刷新与写盘的鉴权接口，不从记录里携带任何派生自凭据的标识，不做指纹计算。身份在接收端由令牌决定，与队员用哪个 provider、换不换 API KEY 都无关。
-2. **令牌无效时记录留盘。** 未登录或令牌过期的会话，记录留在本地待发队列，等队员重新登录后补发，不丢弃。
+安装上传使用从本地密钥独立派生的签名密钥，服务端只绑定公钥；安装标识本身不授予上传权限。签名与 OA 鉴权规则见[发送端](telemetry/sender/SPEC.md#凭据与配置)。
 
-自带 API KEY、未走 OA 登录的会话没有上传凭据，记录进队列但发不出去，最终被队列上限淘汰。
+服务端将标识作为不透明字符串比较，不解析内部格式。算法调整须保留已保存标识或提供关联迁移；字段类型兼容不保证新旧计算结果相同。
+
+| U 盘使用场景 | 标识含义与限制 |
+|---|---|
+| 换电脑使用 | 安装标识保持，环境标识随系统环境改变 |
+| 同一系统切换账户或提权 | 环境标识保持；不读取账户 SID 推断操作队员 |
+| 系统重装或 PE | 环境标识可能改变；PE 中无法确认来源可靠时为 `null` |
+| 不同工具包访问同一电脑 | 密钥不同，环境标识不同，不跨工具包关联电脑 |
+| 复制已初始化目录 | 副本继承安装标识与密钥，无法自动区分原件和副本 |
+| 多人共用 U 盘 | 匿名记录只能归到工具包，实际自然人保持未知 |
+| 首次初始化无法落盘 | 标识留空，不反复生成临时安装编号；已有标识可只读复用 |
+
+发行包不携带安装标识、密钥或运行状态。不在机主电脑上写标识文件；原始 MachineGuid 不进入遥测文件或日志。标识与环境在会话开始时固定，换电脑补发保留原值。
+
+### 服务端补充字段
+
+| 字段 | 含义 | 取值举例 |
+|---|---|---|
+| `mid` | 本次上传凭据经 OA 内省确认的队员编号；匿名上传为空 | `"20230001"` 或 `null` |
+| `deviceId` | OA 凭据绑定的工具包登录标识，来自内省 `device_id` | `"dev_…"` 或 `null` |
+| `receivedAt` | 服务端接收时刻 | `"2026-10-15T01:00:00Z"` |
+| `ip` | 上传连接的来源网段 | `"203.0.113.0/24"` |
+
+客户端不能自行声明已验证的 OA 身份。`mid`、`deviceId` 只证明上传时的账号与登录标识，不证明排队期间每场会话的操作人；后续登录不能覆盖历史匿名归属。
+
+安装、环境和 OA 身份分别统计。相同 IP、系统版本、模型或硬件配置不能作为合并用户的依据；匿名标识可持续关联使用来源，但无法准确计数自然人。
+
+## 环境字段
+
+描述工具包当次运行所在系统，与安装标识、操作队员分别记录。不要求上传诊断工具返回的硬件或文件内容。
+
+| 字段 | 含义 | 取值举例 |
+|---|---|---|
+| `os.platform` | 操作系统平台 | `"win32"`、`"linux"` |
+| `os.name` | 系统名称，Windows 包含版本类别 | `"Windows 11 Pro"` 或 `null` |
+| `os.version` | 系统内核版本，来自运行时 `os.release()` | `"10.0.26100"` |
+| `os.displayVersion` | Windows 功能版本 | `"24H2"` 或 `null` |
+| `os.arch` | 系统原生架构，独立探测 | `"x64"`、`"arm64"` 或 `null` |
+| `os.isPE` | 是否 Windows PE，无法判断时未知 | `true`、`false`、`null` |
+| `runtime.version` | Node 运行时版本 | `"24.15.0"` |
+| `runtime.arch` | Node 进程架构，来自 `process.arch` | `"x64"`、`"arm64"` |
+| `admin` | 当前进程是否管理员运行；探测失败为未知 | `true`、`false`、`null` |
+
+系统名称允许采集，机主自定义的计算机名不采集。系统原生架构不能从进程架构直接推断；`runtime.arch` 缺失的记录不保证 `os.arch` 表示原生架构。环境标识缺失时仍可记录已有环境字段。
 
 ## 请求记录字段
 
 ### 关联
 
-| 键 | 值示例 | 来源 | 用途描述 |
-|---|---|---|---|
-| `sessionId` | `uuid`，pi 生成 | `ctx.sessionManager` | 关联会话记录与本地会话文件，回查用，记全量 |
-| `seq` | `17` | 发送端累计 | 会话内第几次模型调用，从 1 开始。缺口即丢失率 |
+| 字段 | 含义 | 取值举例 |
+|---|---|---|
+| `sessionId` | Pi 会话标识，关联本地会话文件 | UUID |
+| `seq` | 会话内请求序号，从 1 开始 | `17` |
 
 ### 时间
 
-| 键 | 值示例 | 来源 | 用途描述 |
-|---|---|---|---|
-| `requestedAt` | `ISO 8601 带本地时区偏移` | `before_provider_request` 时刻 | 调用开始时刻 |
-| `durationMs` | `4820` | `before_provider_request` 至 assistant `message_end` 的时刻差 | 本次请求的模型调用耗时。不能用 `turn_end`：它在工具执行完才触发，会把工具耗时算进来 |
-| `ttftMs` | `640` | `before_provider_request` 至首个非空 `text_delta` / `thinking_delta` / `toolcall_delta` 的单调时钟差 | 首个输出等待；没有请求开始事件或有效增量时留空 |
+| 字段 | 含义 | 取值举例 |
+|---|---|---|
+| `requestedAt` | 发起模型请求时刻，带本地时区偏移 | `"2026-10-15T09:00:00+08:00"` |
+| `durationMs` | 请求开始至助手消息结束，不计后续工具执行 | `4820` |
+| `ttftMs` | 请求开始至首个非空正文、思考或工具调用增量；无有效增量时缺失 | `640` |
 
 ### 模型与用量
 
-| 键 | 值示例 | 来源 | 用途描述 |
-|---|---|---|---|
-| `provider` | `cstoa` | `turn_end` 的 assistant 消息 | 本次请求的供应商 |
-| `model` | `glm-5.3-flash` | 同上 | 本次请求的模型 |
-| `thinkingLevel` | `off｜minimal｜low｜medium｜high｜xhigh｜max` | 请求发起时保存的 `ctx.thinkingLevel` | 本次请求的思考档位。缺失时留空，不用请求结束时的设置反推 |
-| `input` | `8432` | `message.usage` | 输入 token，含未命中缓存的全部输入 |
-| `output` | `1286` | 同上 | 输出 token |
-| `cacheRead` | `32768` | 同上 | 命中缓存的输入 token |
-| `cacheWrite` | `0` | 同上 | 写入缓存的 token |
-| `totalTokens` | `42486` | 同上 | 用量总量 |
-| `cost` | `0.2438` | `message.usage.cost.total` | 费用数值。计价口径与币种见「计费币种」 |
-| `currency` | `CNY｜USD` | 计费币种表 | 该 provider 价目表的币种。取值规则见「计费币种」 |
+以下字段用于请求记录，以及会话记录的 `models[]` 元素。
+
+| 字段 | 含义 | 取值举例 |
+|---|---|---|
+| `provider` | 模型供应商，与上传身份无关 | `"opencode-go"`、`"cstoa"` |
+| `model` | 实际使用的模型 ID | `"deepseek-v4.1-flash"` |
+| `thinkingLevel` | 请求发起时的思考强度；未知为空字符串 | `"off"`、`"minimal"`、`"low"`、`"medium"`、`"high"`、`"xhigh"`、`"max"` |
+| `input` | 未命中缓存的输入 token | `8432` |
+| `output` | 输出 token | `1286` |
+| `cacheRead` | 缓存读取 token | `32768` |
+| `cacheWrite` | 缓存写入 token | `0` |
+| `totalTokens` | 供应商返回的 token 总量 | `42486` |
+| `cost` | Pi 模型价目表的估算费用，使用 `usage.cost.total` | `0.2438` |
+| `currency` | 与费用数值对应的币种；未知为空字符串 | `"CNY"`、`"USD"` |
 
 ### 结果
 
-| 键 | 值示例 | 来源 | 用途描述 |
-|---|---|---|---|
-| `status` | `ok｜aborted｜error` | `stopReason`、provider 状态码 | 以最终 `stopReason` 判定：`aborted` 为取消，`error` 包含供应商、网络及运行错误；成功重试前的 HTTP 错误不改变最终状态 |
-| `errorCode` | `429` | `after_provider_response` | HTTP 状态码，仅 `status = error` 且收到响应时存在。网络层失败（无响应）没有状态码。区分网关限流、故障与模型问题 |
-| `stopReason` | `stop｜length｜toolUse｜error｜aborted｜deferred` | `turn_end` | 模型侧结束原因，取值与 pi 的 `StopReason` 一致；`pending` 为中间态不记录。与 `status` 对照解释取消与截断 |
+| 字段 | 含义 | 取值举例 |
+|---|---|---|
+| `status` | 请求最终结果；成功前的重试失败不改变最终状态 | `"ok"`、`"aborted"`、`"error"` |
+| `errorCode` | 最终失败且收到响应时的 HTTP 状态码；网络无响应时缺失 | `429` |
+| `stopReason` | Pi 模型结束原因，中间态不记录 | `"stop"`、`"length"`、`"toolUse"`、`"error"`、`"aborted"`、`"deferred"` |
 
 ## 计费币种
 
-`cost` 与 `currency` 必须同源：数值来自 provider 的价目表，币种必须是那份价目表的币种。不做汇率换算。费用由发送端按价目表算出，接收端只存。
+`cost` 与 `currency` 必须对应同一份价目表，不做汇率换算；不同币种分别汇总。供应商经过中转不改变币种，实际金额以账单为准。
 
-币种由 `currency.json` 决定，文件在发送端扩展目录下，列出 pi 全部内置 provider 加 `cstoa`：
-
-```json
-{ "cstoa": "CNY", "deepseek": "CNY", "anthropic": "USD" }
-```
-
-判定规则只有一条：**该 provider 是否既面向中国大陆提供合规服务、又支持人民币计价。两条都满足记 `CNY`，有一条不满足记 `USD`。**
-
-记 `CNY` 的九个：
-
-| provider | 面向大陆 | 人民币计价 |
-|---|---|---|
-| `cstoa` | 团队 OA 代理 | 网关按人民币计价 |
-| `deepseek` | 深度求索，`api.deepseek.com` | 官方中文定价页按 ¥/百万 token |
-| `moonshotai-cn` | 月之暗面，`api.moonshot.cn` | ¥ 定价 |
-| `zai-coding-cn` | 智谱，`open.bigmodel.cn` | GLM Coding Plan ¥20/月起 |
-| `minimax-cn` | MiniMax 稀宇，`api.minimaxi.com` | ¥1 / ¥8 每百万 token |
-| `qwen-token-plan-cn` | 阿里云百炼，北京区域 | ¥39 / 139 / 499 每月 |
-| `xiaomi-token-plan-cn` | 小米 MiMo 中国站 | 境内按 ¥ 计费 |
-| `kimi-coding` | 月之暗面 Kimi，`kimi.com` | Kimi Code ¥49/月起 |
-| `ant-ling` | 蚂蚁百灵，绑支付宝结算 | 人民币 |
-
-其余三十一个记 `USD`：同一厂商的海外站或海外区域，以及不面向大陆提供服务的海外厂商。
-
-规则：
-
-1. 新增 provider 先按上面那条判定，再改 `currency.json`，不动字段定义，不改采集代码。
-2. 映射表可用但没有该 provider 时，按缺省 `USD`。映射文件不可读或内容不合法时，`currency` 留空，该条单列为「未定价」，不计入费用合计。
-3. **判定看 provider 本身，不看链路经过哪里。** 海外厂商的服务走国内中转，币种不因此改变。
-
-`cost` 是 pi 模型价目表的估算值，[仪表盘](web/SPEC/dashboard.md)采用同一口径。按币种汇总前，须核实模型价格数值与 `currency.json` 的单位一致；不能只更换币种标签。实际金额以网关账单为准。
-
-该文件随扩展目录整个复制进发行包。
+币种映射由扩展的 `currency.json` 提供，例如 `{ "cstoa": "CNY", "anthropic": "USD" }`。映射可用但缺少供应商时取 `USD`；映射不可读或无效时留空，计入未定价，不并入任何币种费用。
 
 ## 工具采集
 
-会话记录 `tools[]` 的字段形状以本节为准，[telemetry/schema.md](telemetry/schema.md) 只讲分组规则。
+会话记录的 `tools[]` 按实际启用的工具采集。每个元素按 `name + scope` 聚合；无 scope 时仅按工具名分组。
 
-### 采集范围
-
-只采工具包启用的工具：`settings.json` 的 `defaultTools` 内置工具，加扩展与包注册的工具。当前清单：
-
-| 工具 | 来源 | scope |
+| 字段 | 含义 | 取值举例 |
 |---|---|---|
-| `read` | 内置 | 无 |
-| `ls` | 诊断（覆盖内置） | 无 |
-| `disk` | 诊断 | `info` / `space` / `usage` / `health` / `all` |
-| `sys` | 诊断 | `proc` / `gpu` / `sensor` / `io` / `overview` |
-| `startup` | 诊断 | 无（同名字段） |
-| `eventlog` | 诊断 | `recent` / `boot` / `crash` / `service` / `disk` / `security` / `query` / `detail` |
-| `driver` | 诊断 | `problem` / `core` / `external` / `find` |
-| `runbook` | 诊断 | 无 |
-| `ffgrep`、`fffind` | 包（pi-fff） | 无 |
-| `open_tui` | 包（pi-open-tui） | 无 |
-| `web_search`、`source_check` | 包（pi-web-access） | 无 |
-| `fetch_content` | 包（pi-web-access） | 无 |
-| `get_search_content` | 包（pi-web-access） | 无 |
+| `name` | 工具名 | `"disk"`、`"bitlocker"` |
+| `scope` | 子功能；省略参数时使用工具默认值，无子功能时缺失 | `"usage"`、`"status"` |
+| `calls` | 已结束的调用次数 | `2` |
+| `failures` | `isError=true` 的调用次数 | `1` |
+| `degraded` | 结构化结果明确标记降级的调用次数 | `1` |
+| `totalMs` | 配对执行开始与结束事件的耗时总和 | `41200` |
+| `maxMs` | 单次最大耗时 | `38000` |
+| `resultBytes` | 结果文本 UTF-8 字节数累计，不保存正文 | `21000` |
+| `truncated` | 结构化结果明确标记裁剪的调用次数 | `0` |
+| `entriesTotal` | runbook 交付的命令条目数累计 | `12` |
+| `providers` | web_search 使用的服务分布 | `{ "tavily": 5 }` |
+| `modes` | fetch_content 使用的方式分布 | `{ "readable": 3, "raw": 1 }` |
 
-契约外工具只采公共维度。启用新工具或装新包不需要改契约。
-
-### 元素公共维度
-
-| 键 | 值示例 | 来源 | 用途描述 |
-|---|---|---|---|
-| `name` | `disk`，工具名 | `tool_execution_end` 的 `toolName` | 哪些工具真被使用 |
-| `scope` | `usage`，随工具不同 | `tool_call` 的 `input` | 子功能分布，无 scope 的工具省略 |
-| `calls` | `2` | `tool_execution_end` 计数 | 使用强度 |
-| `failures` | `0` | `isError` 计数 | 工具质量的直接指标，仅 `isError` 计入 |
-| `degraded` | `1` | 结果里降级标记出现次数 | 现场降级率，反映免管理员与缺驱动的影响 |
-| `totalMs` | `41200` | `tool_execution_start/end` 配对 | 总耗时，定位卡顿工具 |
-| `maxMs` | `38000` | 同上 | 最慢一次，判断是否有偶发长耗时 |
-| `resultBytes` | `21000` | 结果文本字节数 | 输出体积是否合理，是否触及 50 KiB 裁剪线 |
-| `truncated` | `1` | 结果触及输出上限的次数 | 判断输出是否过大 |
-
-### 分工具扩展
-
-可选，该工具出现即携带。
-
-| 工具 | 字段 | 值示例 | 用途描述 |
-|---|---|---|---|
-| `runbook` | `entriesTotal` | `12` | 交付的命令条目数累计 |
-| `web_search` | `providers` | `{ tavily: 5 }` | 搜索渠道分布 |
-| `fetch_content` | `modes` | `{ readable: 3, raw: 1 }` | 抓取模式分布 |
-
-### 边界
-
-参数值与输出正文不采：搜索词、URL、文件路径、命令正文都不进记录。
-
-## 示例
-
-请求记录：
-
-```json
-{
-  "v": "0.1",
-  "type": "request",
-  "recordId": "9e2b71c4d8f34a65",
-  "kitVersion": "0.3.1",
-  "sessionId": "1f2e8a3b",
-  "seq": 17,
-  "requestedAt": "2026-09-19T14:32:08+08:00",
-  "provider": "cstoa",
-  "model": "glm-5.3-flash",
-  "thinkingLevel": "medium",
-  "input": 8432,
-  "output": 1286,
-  "cacheRead": 32768,
-  "cacheWrite": 0,
-  "totalTokens": 42486,
-  "cost": 0.2438,
-  "currency": "CNY",
-  "durationMs": 4820,
-  "ttftMs": 640,
-  "status": "ok",
-  "stopReason": "stop"
-}
-```
-
-请求记录约 300–500 字节。会话记录约 1–3 KB，尺寸约定见 [telemetry/schema.md](telemetry/schema.md)。
+每次调用的每项指标最多计一次。工具参数只提取 scope 等上述分类字段，搜索词、URL、路径、命令正文和恢复密码不进入统计。
 
 ## 不采集
 
-对话正文、系统提示词、模型输出、工具参数值与输出正文、文件路径原文、会话名、计算机名与用户名、模型凭据原文、硬件序列号。
+对话正文、系统提示词、模型输出、工具参数与结果正文、文件路径、会话名、计算机名、用户名、账户 SID、模型凭据、原始 MachineGuid、硬件与 U 盘序列号、MAC 地址、CPU／内存／显卡配置均不作为常规字段上传。
 
-IP 是采集项，由接收端从连接获取，客户端不参与，见「身份来源」。
-
-**唯一例外：turn 级报错原文。** 报错正文按会话记录的 `errors` 字段完整收集，不截断、不上传前脱敏，见 [telemetry/schema.md](telemetry/schema.md)「报错原文」。
-
-理由是这条正文是定位供应商与网络故障的唯一依据，摘要会丢掉关键片段。代价是它可能回显路径、账号或请求片段，风险由这一条例外显式承担，不扩及其他字段。
-
-只采集本工具自身的运行信息，不做审计、监控与远程控制，也不替代网关账单。
-
-## 能回答的问题
-
-| 问题 | 数据 |
-|---|---|
-| 谁在用，用多久 | `mid`、会话起止与时长 |
-| 用了哪些模型，花多少 | 请求记录的 model、token、费用；会话记录 `models` 聚合 |
-| 用了哪些工具，失败几次 | 会话记录 `tools` 的调用数、失败数、耗时 |
-| 单次调用卡不卡 | 请求记录的 `durationMs`、`ttftMs`、`status` |
-| 从哪里接入 | 接收端记录的来源 IP |
-| 什么环境，哪个版本 | `kitVersion`、`os`、`admin` |
-
-## 议题
-
-数据定义相关的未决项。接收端接口见[接收端规格](telemetry/receiver/SPEC.md)，运维议题集中在[待处理议题](issues.md#遥测运维)。
-
-| 组 | 编号 | 议题 | 状态与候选 |
-|---|---|---|---|
-| 效果指标 | S1 | 用什么指标衡量工具好不好用 | 会话内重复提问次数、队员取消次数、界面等待时长。MVP 不考虑，后续持续跟进 |
-| 报错原文 | S4 | 组数上限 | 单条不截断。按文本分组的组数是否保留上限（现值 10 组），超出的组丢弃算不算违背「完整收集」 |
+唯一正文例外为会话 `errors[].message`：保留选中错误组的完整模型请求报错，不截断、不上传前脱敏，可能回显路径、账号或请求片段。服务端 180 天后清除报错原文；组数上限见[会话记录](telemetry/schema.md#报错原文)。

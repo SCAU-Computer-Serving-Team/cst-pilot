@@ -1,191 +1,158 @@
-# 遥测数据契约（会话记录）
+# 会话记录字段
 
-本页定义会话记录的字段和统计口径，契约版本为 0.1。共用字段、上传信封、身份、币种与隐私边界见[信息收集契约](../contract.md)。
+会话遥测按实例聚合，`type="session"`。公共字段、身份算法、环境字段、模型用量和工具元素以[信息收集契约](../contract.md)为准，本页补充会话结构与统计口径。
 
-## 会话记录字段
+协议版本为 `0.1`。读取时允许 `identity`、扩展环境字段和 `runtime` 缺失；未知值保持未知，`admin` 支持 `null`。
 
-### 会话
+## 会话与时间
 
-| 键 | 值示例 | 来源 | 用途描述 |
-|---|---|---|---|
-| `sessionId` | `uuid`，pi 生成 | `ctx.sessionManager` | 与本地会话文件对应，便于回查，记全量。Web 派生产生新 ID，源会话不拆分 |
-| `reason` | `startup｜reload｜new｜resume｜fork` | `session_start` | 区分启动、重载、新建、恢复、分叉。两端取值映射见[发送端会话规则](sender/SPEC.md#会话与草稿) |
-| `endReason` | `quit｜reload｜new｜resume｜fork｜delete｜crash` | 定稿事件 | 区分正常退出、切换会话、重载；`delete` 为 Web 删除会话，`crash` 为强杀后恢复补记 |
-| `channel` | `tui｜web` | 加载环境 | 会话运行在哪端，报表看两端使用占比 |
+| 字段 | 含义与来源 | 取值举例 |
+|---|---|---|
+| `v`、`type`、`recordId`、`kitVersion` | [公共字段](../contract.md#记录自带)，重传保持记录 ID | `"0.1"`、`"session"`、UUID、`"0.3.1"` |
+| `sessionId` | Pi 会话 ID；同一会话的不同实例可产生不同 `recordId` | UUID |
+| `channel` | 实际运行界面 | `"tui"`、`"web"` |
+| `reason` | 实例开始原因，来自 `session_start` | `"startup"`、`"new"`、`"resume"`、`"fork"`、`"reload"` |
+| `endReason` | 实例结束原因；Web 删除用 `delete`，草稿恢复用 `crash` | `"quit"`、`"new"`、`"resume"`、`"fork"`、`"reload"`、`"delete"`、`"crash"` |
+| `startedAt` | 实例开始时刻，带本地时区偏移 | `"2026-10-15T09:00:00+08:00"` |
+| `endedAt` | 正常定稿时刻；恢复时取最后完成轮次时刻 | `"2026-10-15T09:00:10+08:00"` |
+| `durationMs` | `endedAt - startedAt`，包含等待输入的空档 | `10000` |
+| `activeMs` | 各 `turn_start` 至 `turn_end` 的时间累计，表示 Agent 运行时长 | `4800` |
 
-### 时间
+TUI 与 Web 的原因取值见[发送端会话规则](sender/SPEC.md#会话与草稿)。Web 切换页面不结束实例；活动时长不代表队员投入时间。
 
-| 键 | 值示例 | 来源 | 用途描述 |
-|---|---|---|---|
-| `startedAt` | `ISO 8601 带本地时区偏移` | `session_start` | 会话开始时刻，用于时段分析与跨天归属 |
-| `endedAt` | `ISO 8601 带本地时区偏移` | 定稿时刻；`crash` 记录取草稿的 `lastTurnEndedAt` | 会话结束时刻。`crash` 时止于最后一个完成轮次 |
-| `durationMs` | `2382000` | `endedAt` − `startedAt` | 会话持续时间，含队员离开的空档 |
-| `activeMs` | `1502000` | 发送端累计：各 `turn_start` 到 `turn_end` 的间隔求和 | Agent 运行时间：模型与工具在跑的时间，不含等待输入。衡量工具负载，不代表队员投入 |
+## 身份与环境
 
-### 用量
+| 字段或对象 | 会话中的含义 | 取值举例 |
+|---|---|---|
+| `identity.installationId` | U 盘工具包配置的匿名使用来源，不能直接计为一个人 | UUID 或 `null` |
+| `identity.environmentId` | 同一工具包下的系统安装环境，不能直接计为物理电脑 | 64 位十六进制摘要或 `null` |
+| `identity.environmentSource` | 环境标识来源；不采账户 SID | `"windows-machine-guid"`、`"unavailable"` |
+| `os` | 当次运行系统的平台、名称、内核版本、功能版本、原生架构及 PE 状态 | `{ "platform": "win32", "name": "Windows 11 Pro", "version": "10.0.26100", "displayVersion": "24H2", "arch": "x64", "isPE": false }` |
+| `runtime` | Node 版本与进程架构，独立于系统原生架构 | `{ "version": "24.15.0", "arch": "x64" }` |
+| `admin` | 实际运行进程的管理员权限，探测失败为 `null` | `true`、`false`、`null` |
 
-| 键 | 值示例 | 来源 | 用途描述 |
-|---|---|---|---|
-| `prompts` | `9` | `input` 事件（`source` 为 `interactive` 或 `rpc`）计数 | 队员提问次数，使用强度。Web 提交走 `rpc`。不用 `agent_start`：自动重试会重复触发，不等于一次提问 |
-| `turns` | `23` | `turn_end` 计数 | 模型往返次数，与请求记录条数对照 |
-| `contextEntries` | `47` | 定稿时 `buildContextEntries().length`；`crash` 记录留空 | 会话结束时的上下文条目数，含压缩摘要与自定义条目。不用 `message_start` 计数：它含 toolResult 事件。上下文规模看 `contextPeak` |
+具体定义和算法见[身份来源](../contract.md#身份来源)及[环境字段](../contract.md#环境字段)。无法获取的环境属性为 `null`，不能用空白属性或相同系统名称合并用户。
 
-### 模型
+身份与环境在会话开始时固定，草稿、定稿、恢复和补发均保留原值。U 盘从电脑 A 带到 B 后上传，不以 B 的系统或权限改写 A 的记录；权限探测尚未完成时草稿可为 `null`，定稿只能补入本实例的探测结果。
 
-`models` 是**对象数组**：一次会话用到几个「provider + model + thinkingLevel」组合，就有几个元素。请求记录中的标量字段按此键分组聚合即得。
+服务端补充的 `mid`、`deviceId` 表示上传时的 OA 账号与登录标识。匿名记录保留自身归属，后续账号不自动成为历史操作人；客户端提供的身份字段不能获得已验证状态。未登录时使用安装签名上传，不依赖 CSTOA；相同记录重复上传不更新首次保存的身份或环境。
 
-| 键 | 值示例 | 来源 | 用途描述 |
-|---|---|---|---|
-| `provider` | `cstoa` | `turn_end` 的 assistant 消息 | 供应商分布 |
-| `model` | `glm-5.3-flash` | 同上 | 模型使用分布 |
-| `thinkingLevel` | `off｜minimal｜low｜medium｜high｜xhigh｜max` | 请求发起时保存的 `ctx.thinkingLevel` | 思考档位对成本的影响 |
-| `turns` | `23` | `turn_end` 按分组键计数 | 该组合的往返次数，占比最大者即主用模型 |
-| `input` | `182000` | `message.usage` 分组累计 | 输入 token，含未命中缓存的全部输入 |
-| `output` | `9400` | 同上 | 输出 token，主要计费项之一 |
-| `cacheRead` | `61000` | 同上 | 命中缓存的输入 token，单价低于 `input` |
-| `cacheWrite` | `0` | 同上 | 写入缓存的 token，部分 provider 计费 |
-| `totalTokens` | `252400` | 同上 | 用量总量，与 `turns` 对照看单次往返规模 |
-| `cost` | `2.92` | `message.usage.cost.total` 分组累计 | 费用数值，计价口径见 [信息收集契约](../contract.md)「计费币种」 |
-| `currency` | `CNY｜USD` | 计费币种表 | 同上 |
+`runtime.arch` 缺失时，不据 `os.arch` 推断系统原生架构；缺失的新增字段保持未知。
 
-元素示例：
+## 用量与模型
 
-```json
-{
-  "provider": "cstoa",
-  "model": "glm-5.3-flash",
-  "thinkingLevel": "medium",
-  "turns": 23,
-  "input": 182000,
-  "output": 9400,
-  "cacheRead": 61000,
-  "cacheWrite": 0,
-  "totalTokens": 252400,
-  "cost": 2.92,
-  "currency": "CNY"
-}
-```
+| 字段 | 含义与来源 | 取值举例 |
+|---|---|---|
+| `prompts` | `input` 来源为 `interactive` 或 `rpc` 的次数；自动重试不重复计提问 | `9` |
+| `turns` | `turn_end` 次数 | `23` |
+| `contextEntries` | 正常定稿时上下文条目数；草稿恢复时缺失 | `47` |
+| `models` | 按 `provider + model + thinkingLevel` 聚合的数组，最多 32 项 | `[{ "provider": "opencode-go", "model": "deepseek-v4.1-flash", "thinkingLevel": "high", "turns": 1, "input": 5, "output": 3, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 8, "cost": 0, "currency": "USD" }]` |
 
-多模型会话时数组含多个元素，`turns` 最多的那个即主用模型。
+`models[].turns` 表示该组合的往返次数。其余元素字段见[模型与用量](../contract.md#模型与用量)，token 与费用取每轮助手消息的 usage 后累计；思考强度取请求发起时的值。币种分别汇总，未知币种的费用单列为未定价。
 
-### 上下文
+## 上下文
 
-| 键 | 值示例 | 来源 | 用途描述 |
-|---|---|---|---|
-| `compactions` | `0` | `session_compact` | 压缩成功次数，反映长会话占比 |
-| `compactionTokens` | `0` | `session_compact` 的 `compactionEntry.tokensBefore` 累计 | 被压缩的 token 规模，压缩本身也计费 |
-| `compactionOverflows` | `0` | `session_compact` 的 `reason = overflow` 计数 | 上下文涨到溢出才压缩的次数，工具用得过重的信号 |
-| `compactionFailures` | `0` | `session_compact_failed` 计数 | 压缩失败次数。失败后上下文不会变小，长会话可能卡住 |
-| `contextPeak` | `38100` | `ctx.getContextUsage()` 的 `tokens` 峰值。该值为 `null` 或整个对象为 `undefined` 时跳过本次采样 | 上下文峰值，判断是否贴近窗口上限 |
-| `contextWindow` | `200000` | 峰值那次的 `contextWindow` | 峰值对应的窗口大小。没有它，`contextPeak` 跨模型不可比 |
+| 字段 | 含义与来源 | 取值举例 |
+|---|---|---|
+| `compactions` | 成功压缩次数，来自 `session_compact` | `2` |
+| `compactionTokens` | 各次成功压缩前 `tokensBefore` 之和，表示压缩前规模 | `182000` |
+| `compactionOverflows` | 因 `overflow` 触发的成功压缩次数 | `1` |
+| `compactionFailures` | `session_compact_failed` 次数，不采其错误正文 | `0` |
+| `contextPeak` | 已取得的上下文 token 最大值；无有效采样时为 0 | `38100` |
+| `contextWindow` | 达到上述峰值时对应的模型窗口大小，与峰值成对保存 | `200000` |
 
-### 工具
+上下文条目数包含摘要与自定义条目。`contextPeak` 和 `contextWindow` 同时为 0 表示没有有效采样，不据此认定上下文为空。
 
-`tools` 是**对象数组**：会话中用到几个「name + scope」组合，就有几个元素。同一工具的不同 scope 各占一个元素，如 `sys(gpu)` 与 `sys(proc)`；无 scope 的工具按 name 分组。
+## 工具
 
-字段形状、采集范围与边界见 [信息收集契约](../contract.md)「工具采集」。本节只定分组规则与上限：
+| 字段 | 含义与来源 | 取值举例 |
+|---|---|---|
+| `tools` | 按工具名与 scope 聚合的数组，最多 512 项 | `[{ "name": "disk", "scope": "usage", "calls": 2, "failures": 0, "degraded": 1, "totalMs": 41200, "maxMs": 38000, "resultBytes": 21000, "truncated": 0 }]` |
+| `toolFailures` | `tool_execution_end` 中 `isError=true` 的总次数 | `1` |
 
-| 项 | 规则 |
-|---|---|
-| 分组键 | `name` + `scope`，不是调用次序 |
-| 元素数上限 | 512。上限用于控制 scope 分组数量与记录体积 |
-| 契约外工具 | 只采公共维度，按 name 分组 |
-| 元素示例 | `{ "name": "disk", "scope": "usage", "calls": 2, "failures": 0, "degraded": 1, "totalMs": 41200, "maxMs": 38000, "resultBytes": 21000, "truncated": 0 }` |
+元素字段见[工具采集](../contract.md#工具采集)。工具调用 ID 仅用于本地配对，不上传；结果只统计体积、状态和规定分类，不上传正文。
 
-多元素示例：同一 `sys` 工具按 scope 各占一个元素，见文末完整记录。
+## 失败
 
-### 失败
+| 字段 | 含义与来源 | 取值举例 |
+|---|---|---|
+| `providerErrors` | `after_provider_response` 中非 2xx 状态码的次数 | `{ "429": 1, "503": 2 }` |
+| `networkErrors` | 轮次以 error 结束且本轮没有供应商响应的次数 | `2` |
+| `aborted` | `stopReason="aborted"` 的轮次数 | `1` |
 
-| 键 | 值示例 | 来源 | 用途描述 |
-|---|---|---|---|
-| `providerErrors` | `{ "429": 1 }` | `after_provider_response` 状态码分类计数 | 区分网关限流、故障与模型问题，可由请求记录聚合 |
-| `networkErrors` | `2` | `turn_end` 的 `stopReason = error` 且本往返没有 `after_provider_response` | 网络层失败计数：断网、DNS 失败、连接超时等无响应错误 |
-| `aborted` | `0` | `stopReason = aborted` 计数 | 队员主动取消次数，模型跑偏的信号 |
-| `toolFailures` | `0` | `tool_execution_end` 的 `isError` 合计 | 工具失败总数，与 `tools[].failures` 对照 |
+`networkErrors` 按是否收到响应计数，不能单凭该值判断具体网络故障。成功重试前的供应商失败仍计入 `providerErrors`。
 
-### 报错原文
+## 报错原文
 
-`errors` 是**对象数组**：按报错文本分组，同文本累加 `count`。只收 turn 级错误（provider 错误、网络错误、运行异常），不收工具错误正文。
+| 字段 | 含义与来源 | 取值举例 |
+|---|---|---|
+| `errors[].message` | 轮次结束时的模型请求 `errorMessage` 完整文本 | `"fetch failed: ETIMEDOUT"` |
+| `errors[].count` | 完全相同文本的出现次数 | `2` |
 
-| 键 | 值示例 | 来源 | 用途描述 |
-|---|---|---|---|
-| `message` | `fetch failed: ETIMEDOUT` | `turn_end` 的 `errorMessage` | 报错原文，**完整收集、不截断、不脱敏**，见 [信息收集契约](../contract.md)「不采集」 |
-| `count` | `2` | 发送端按文本分组计数 | 同文本错误重复次数 |
+按原文分组，次数降序保留最多 10 组，每组选中的原文不截断、不脱敏。该上限不代表保留所有不同报错；超过记录体积限额时按[发送端规则](sender/SPEC.md#队列与发送)处理，不裁剪文本。
 
-元素示例：
-
-```json
-{ "message": "429 rate_limit_error: max RPM reached", "count": 2 }
-```
-
-分组是为了不重复撑大记录，不是为了削减内容：同一段报错出现几次都只有一份原文。组数上限见议题 S4。
-
-### 环境
-
-| 键 | 值示例 | 来源 | 用途描述 |
-|---|---|---|---|
-| `os.version` | `10.0.26100` | 运行时 | 兼容性决策 |
-| `os.arch` | `x64｜arm64` | 运行时 | 同上 |
-| `admin` | `true｜false` | 运行时 | 是否管理员运行，与 `degraded` 对照解释降级原因 |
+不收工具错误正文。报错文本可能回显敏感片段，收集边界见[不采集](../contract.md#不采集)；服务端 180 天后清除原文。
 
 ## 示例
+
+以下为带匿名标识的会话结构，上传者字段由接收端另行补充。
 
 ```json
 {
   "v": "0.1",
   "type": "session",
-  "recordId": "0f3a91c47bd2e5a8",
+  "recordId": "31de2e2e-816e-4cdc-8f35-c8eae6e69272",
   "kitVersion": "0.3.1",
-  "sessionId": "1f2e8a3b",
+  "sessionId": "69194984-ceb2-4abd-849c-90c85da1051b",
+  "identity": {
+    "installationId": "df79039e-3744-44c8-9754-7a9568ae5684",
+    "environmentId": "7b28539aed99a4a8b9c422d017d9838e8c9c43d7b0ab986b4988b0808f174c12",
+    "environmentSource": "windows-machine-guid"
+  },
+  "os": {
+    "platform": "win32",
+    "name": "Windows 11 Pro",
+    "version": "10.0.26100",
+    "displayVersion": "24H2",
+    "arch": "x64",
+    "isPE": false
+  },
+  "runtime": { "version": "24.15.0", "arch": "x64" },
+  "admin": true,
   "channel": "tui",
-  "reason": "startup",
+  "reason": "new",
   "endReason": "quit",
-  "startedAt": "2026-09-16T14:02:11+08:00",
-  "endedAt": "2026-09-16T14:41:53+08:00",
-  "durationMs": 2382000,
-  "activeMs": 1502000,
-  "prompts": 9,
-  "turns": 23,
-  "contextEntries": 47,
-  "models": [
-    {
-      "provider": "cstoa",
-      "model": "glm-5.3-flash",
-      "thinkingLevel": "medium",
-      "turns": 23,
-      "input": 182000,
-      "output": 9400,
-      "cacheRead": 61000,
-      "cacheWrite": 0,
-      "totalTokens": 252400,
-      "cost": 2.92,
-      "currency": "CNY"
-    }
-  ],
+  "startedAt": "2026-10-15T09:00:00+08:00",
+  "endedAt": "2026-10-15T09:00:10+08:00",
+  "durationMs": 10000,
+  "activeMs": 4800,
+  "prompts": 1,
+  "turns": 1,
+  "contextEntries": 2,
+  "models": [{
+    "provider": "opencode-go",
+    "model": "deepseek-v4.1-flash",
+    "thinkingLevel": "high",
+    "turns": 1,
+    "input": 5,
+    "output": 3,
+    "cacheRead": 0,
+    "cacheWrite": 0,
+    "totalTokens": 8,
+    "cost": 0,
+    "currency": "USD"
+  }],
   "compactions": 0,
   "compactionTokens": 0,
   "compactionOverflows": 0,
   "compactionFailures": 0,
-  "contextPeak": 38100,
-  "contextWindow": 200000,
-  "tools": [
-    { "name": "disk", "scope": "usage", "calls": 2, "failures": 0, "degraded": 1, "totalMs": 41200, "maxMs": 38000, "resultBytes": 21000 },
-    { "name": "sys",  "scope": "gpu",   "calls": 1, "failures": 0, "degraded": 0, "totalMs": 3100,  "maxMs": 3100,  "resultBytes": 4200 }
-  ],
-  "providerErrors": { "429": 1 },
-  "networkErrors": 1,
-  "errors": [
-    { "message": "429 rate_limit_error: max RPM reached", "count": 1 }
-  ],
+  "contextPeak": 5,
+  "contextWindow": 16000,
+  "tools": [],
+  "providerErrors": {},
+  "networkErrors": 0,
   "aborted": 0,
   "toolFailures": 0,
-  "os": { "version": "10.0.26100", "arch": "x64" },
-  "admin": false
+  "errors": []
 }
 ```
-
-`mid`、`deviceId`、`receivedAt`、`ip` 由接收端写入，不在上传的记录里；身份两项来自 OA 的令牌内省结果。
-
-## 尺寸
-
-会话记录约 1–3 KB。`errors` 的原文可能显著撑大记录；受影响的只是这一条记录的体积，不改变组批规则。`tools` 元素数上限 512，`models` 通常 1–3 项。

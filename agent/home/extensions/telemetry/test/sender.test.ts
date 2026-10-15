@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { promisify } from "node:util";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { testRoot } from "../../web/test/support.ts";
 import { newState, onInput, onToolCall, onToolExecutionEnd, onToolExecutionStart, onTurnEnd } from "../collect.ts";
@@ -45,22 +47,67 @@ test("未登录时追加也保持 200 条上限，淘汰最旧并保留并发追
 	assert.equal((await readAll(dir)).length, OUTBOX_MAX_RECORDS - 1);
 });
 
+test("四个独立 Pi 进程并发追加，不覆盖记录或重建安装身份", async () => {
+	const dir = await home("cross-process");
+	const script = join(dir, "writer.mts");
+	await writeFile(
+		script,
+		`
+import { appendRecord } from ${JSON.stringify(new URL("../outbox.ts", import.meta.url).href)};
+import { loadInstallation } from ${JSON.stringify(new URL("../installation.ts", import.meta.url).href)};
+const home=process.argv[2], prefix=process.argv[3];
+const installation=await loadInstallation(home);
+if (!installation) throw new Error("no installation");
+for(let i=0;i<25;i++) await appendRecord(home,{v:"0.1",type:"session",recordId:prefix+"-"+i,identity:{installationId:installation.installationId}});
+console.log(installation.installationId);
+`,
+	);
+	const run = promisify(execFile);
+	const results = await Promise.all(
+		Array.from({ length: 4 }, (_, i) => run(process.execPath, [script, dir, String(i)], { timeout: 20000 })),
+	);
+	assert.equal(new Set(results.map((result) => result.stdout.trim())).size, 1);
+	const records = await readAll(dir);
+	assert.equal(records.length, 100);
+	assert.equal(new Set(records.map((value) => value.recordId)).size, 100);
+});
+
 test("草稿恢复保持 recordId，结束时间取最后完成轮次", async () => {
 	const dir = await home("crash");
 	const value = record();
 	delete value.contextEntries;
+	value.endReason = "";
 	const lastTurn = Date.now();
 	await writeDraft(dir, value.sessionId, { record: value, lastTurnEndedAt: lastTurn });
-	const recovered = await recoverDrafts(dir);
+	const recovered = await recoverDrafts(dir, async () => undefined);
 	assert.equal(recovered.length, 1);
 	assert.equal(recovered[0].recordId, value.recordId);
 	assert.equal(recovered[0].endReason, "crash");
 	assert.equal(Date.parse(recovered[0].endedAt), Math.floor(lastTurn / 1000) * 1000);
 	assert.equal(recovered[0].contextEntries, undefined);
-	assert.deepEqual(await recoverDrafts(dir), []);
+	assert.deepEqual(await recoverDrafts(dir, async () => undefined), []);
 });
 
-test("缺少或过期凭据不会上传，也不修改 auth.json", async () => {
+test("草稿入队失败仍可重试，恢复保留原系统环境和定稿时间", async () => {
+	const dir = await home("recovery-failure");
+	const value = record();
+	value.os.name = "original-environment";
+	await writeDraft(dir, value.sessionId, { record: value, lastTurnEndedAt: Date.now() });
+	assert.deepEqual(
+		await recoverDrafts(dir, async () => {
+			throw new Error("disk unavailable");
+		}),
+		[],
+	);
+	const recovered = await recoverDrafts(dir, async () => undefined);
+	assert.equal(recovered.length, 1);
+	assert.equal(recovered[0].os.name, "original-environment");
+	assert.equal(recovered[0].endReason, "quit");
+	assert.equal(recovered[0].endedAt, value.endedAt);
+	assert.deepEqual(await recoverDrafts(dir, async () => undefined), []);
+});
+
+test("缺少或过期 OA 凭据不作为上传凭据，也不修改 auth.json", async () => {
 	const dir = await home("credentials");
 	assert.equal(await readCredential(dir, "cstoa"), undefined);
 	const text = JSON.stringify({ cstoa: { access: "test-access", expires: Date.now() - 1 } });
@@ -151,7 +198,6 @@ test("TUI shutdown 返回前完成落盘，关闭遥测不产生记录", async (
 	try {
 		for (const enabled of [true, false]) {
 			delete holder[TELEMETRY_SHARED_KEY];
-			if (enabled) shared().adminProbe = Promise.resolve(false);
 			const dir = await home(enabled ? "shutdown" : "disabled");
 			process.env.PI_CODING_AGENT_DIR = dir;
 			await writeFile(join(dir, "telemetry.json"), JSON.stringify({ enabled, endpoint: "http://127.0.0.1:1" }));
@@ -172,7 +218,8 @@ test("TUI shutdown 返回前完成落盘，关闭遥测不产生记录", async (
 			if (enabled) {
 				assert.equal(pending[0].sessionId, id);
 				assert.equal(pending[0].endReason, "quit");
-			} else assert.equal(shared().adminProbe, undefined);
+			} else assert.equal(shared().retries.size, 0);
+			for (const timer of shared().retries.values()) clearInterval(timer);
 		}
 	} finally {
 		if (previousHome === undefined) delete process.env.PI_CODING_AGENT_DIR;

@@ -12,6 +12,7 @@ import { crashRecord, type SessionRecord } from "./record.ts";
 export interface DraftFile {
 	record: SessionRecord;
 	lastTurnEndedAt: number;
+	ownerPid?: number;
 }
 
 export function draftsDir(agentDir: string): string {
@@ -27,7 +28,7 @@ export async function writeDraft(agentDir: string, sessionId: string, draft: Dra
 	const temp = `${target}.${randomUUID()}.tmp`;
 	try {
 		await mkdir(draftsDir(agentDir), { recursive: true });
-		await writeFile(temp, JSON.stringify(draft), "utf8");
+		await writeFile(temp, JSON.stringify({ ...draft, ownerPid: draft.ownerPid ?? process.pid }), "utf8");
 		await rename(temp, target);
 	} catch {
 		await rm(temp, { force: true }).catch(() => undefined);
@@ -39,10 +40,13 @@ export async function removeDraft(agentDir: string, sessionId: string): Promise<
 }
 
 /**
- * 进程启动恢复：每个残留草稿补成 endReason = crash 的记录（endedAt 取最后轮次结束时刻）。
- * 返回值供入口层写入待发队列。全空会话（无轮次数据）不产生记录，直接删草稿。
+ * 启动恢复：未定稿记录补为 crash，已定稿记录保持原值。
+ * persist 确认入队后才删除源草稿，返回成功恢复的记录；全空草稿直接删除。
  */
-export async function recoverDrafts(agentDir: string): Promise<SessionRecord[]> {
+export async function recoverDrafts(
+	agentDir: string,
+	persist: (record: SessionRecord) => Promise<void>,
+): Promise<SessionRecord[]> {
 	const dir = draftsDir(agentDir);
 	let files: string[];
 	try {
@@ -54,14 +58,23 @@ export async function recoverDrafts(agentDir: string): Promise<SessionRecord[]> 
 	for (const name of files) {
 		try {
 			const draft = JSON.parse(await readFile(join(dir, name), "utf8")) as DraftFile;
+			if (draft.ownerPid && draft.ownerPid !== process.pid) {
+				try {
+					process.kill(draft.ownerPid, 0);
+					continue;
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code !== "ESRCH") continue;
+				}
+			}
 			const record = draft.record;
 			if (record && (record.turns > 0 || record.prompts > 0)) {
-				records.push(crashRecord(record, draft.lastTurnEndedAt ?? 0));
+				const recovered = record.endReason ? record : crashRecord(record, draft.lastTurnEndedAt ?? 0);
+				await persist(recovered);
+				records.push(recovered);
 			}
+			await rm(join(dir, name), { force: true });
 		} catch {
-			// 草稿损坏则丢弃，不阻塞其余恢复。
-		} finally {
-			await rm(join(dir, name), { force: true }).catch(() => undefined);
+			// 损坏或入队失败时保留源文件，后续启动重试。
 		}
 	}
 	return records;

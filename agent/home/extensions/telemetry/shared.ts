@@ -12,8 +12,8 @@ export interface TelemetryShared {
 	deliveries: Map<string, { inflight: boolean; stopped: boolean; rerun: boolean }>;
 	/** 恢复单次：进程内首个初始化的实例执行草稿恢复。 */
 	recovered: boolean;
-	/** 管理员探测单飞：进程内只发一次，定稿时取结果。 */
-	adminProbe?: Promise<boolean>;
+	/** 每个 home 的定时补发；unref 不阻塞正常退出。 */
+	retries: Map<string, ReturnType<typeof setInterval>>;
 	/** 会话定稿入口，按 sessionId 注册；TUI 由 shutdown 事件触发，Web 由运行层触发。 */
 	finalizers: Map<string, (reason: string) => Promise<void> | void>;
 }
@@ -26,9 +26,12 @@ export function shared(): TelemetryShared {
 		fileQueue: Promise.resolve(),
 		deliveries: new Map(),
 		recovered: false,
+		retries: new Map(),
 		finalizers: new Map(),
 	};
-	return holder[TELEMETRY_SHARED_KEY]!;
+	const state = holder[TELEMETRY_SHARED_KEY]!;
+	state.retries ??= new Map();
+	return state;
 }
 
 /** 把文件操作挂进串行队列，保证多实例对 pending.jsonl 的读写互斥。 */

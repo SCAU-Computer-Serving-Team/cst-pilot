@@ -2,7 +2,7 @@ import type { TelemetryEndpoint } from "./config.ts";
 import { appendRecord, BATCH_MAX_RECORDS, readAll, removeRecords } from "./outbox.ts";
 import type { SessionRecord } from "./record.ts";
 import { shared } from "./shared.ts";
-import { sendBatch } from "./transport.ts";
+import { sendBatch, type UploadAuth } from "./transport.ts";
 
 const BATCH_MAX_BYTES = 900 * 1024;
 
@@ -24,11 +24,15 @@ export async function migratePending(agentDir: string, endpoints: TelemetryEndpo
 	await removeRecords(agentDir, new Set(pending.map((record) => record.recordId)));
 }
 
-export async function flushEndpoints(agentDir: string, access: string, endpoints: TelemetryEndpoint[]): Promise<void> {
+export async function flushEndpoints(
+	agentDir: string,
+	access: UploadAuth,
+	endpoints: TelemetryEndpoint[],
+): Promise<void> {
 	await Promise.allSettled(endpoints.map((endpoint) => flushEndpoint(agentDir, access, endpoint)));
 }
 
-async function flushEndpoint(agentDir: string, access: string, endpoint: TelemetryEndpoint): Promise<void> {
+async function flushEndpoint(agentDir: string, access: UploadAuth, endpoint: TelemetryEndpoint): Promise<void> {
 	if (endpoint.unavailable) return;
 	const deliveries = shared().deliveries;
 	const key = `${agentDir}\0${endpoint.url}`;

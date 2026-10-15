@@ -3,15 +3,12 @@
  * endedAt / endReason / contextEntries 在定稿时补齐；crash 恢复路径见 draft.ts。
  */
 
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { release } from "node:os";
 import { join, resolve } from "node:path";
-import { promisify } from "node:util";
 import type { ModelAgg, SessionState, ToolAgg } from "./collect.ts";
 
-const execFileP = promisify(execFile);
+import { type EnvironmentSnapshot, unknownEnvironment } from "./environment.ts";
 
 export const CONTRACT_VERSION = "0.1";
 export const ERRORS_MAX_GROUPS = 10;
@@ -21,7 +18,7 @@ export function packageRoot(extensionDir: string): string {
 	return resolve(extensionDir, "..", "..", "..", "..");
 }
 
-export interface SessionRecord {
+export interface SessionRecord extends EnvironmentSnapshot {
 	v: string;
 	type: "session";
 	recordId: string;
@@ -50,8 +47,6 @@ export interface SessionRecord {
 	aborted: number;
 	toolFailures: number;
 	errors: { message: string; count: number }[];
-	os: { version: string; arch: string };
-	admin: boolean;
 }
 
 /** 带本地时区偏移的 ISO 8601；toISOString() 是 UTC，不符合契约。 */
@@ -93,7 +88,8 @@ export function buildRecord(
 	state: SessionState,
 	input: FinalizeInput,
 	kitVersion: string,
-	admin: boolean,
+	admin: boolean | null,
+	environment: EnvironmentSnapshot = unknownEnvironment(),
 ): SessionRecord {
 	const errorEntries = [...state.errors.entries()]
 		.sort((a, b) => b[1] - a[1])
@@ -127,7 +123,7 @@ export function buildRecord(
 		aborted: state.aborted,
 		toolFailures: state.toolFailures,
 		errors: errorEntries,
-		os: { version: release(), arch: process.arch },
+		...environment,
 		admin,
 	};
 	if (input.contextEntries !== undefined) record.contextEntries = input.contextEntries;
@@ -163,40 +159,4 @@ export async function kitVersion(extensionDir: string, cwd: string): Promise<str
 		}
 	}
 	return "";
-}
-
-let adminCache: boolean | undefined;
-
-/** 管理员探测：Windows 一次 PowerShell 预检并缓存；失败按非管理员记录。
- * 探测耗时秒级，不得在会话关键路径 await；调用后进程内只发一次，定稿时再取结果。 */
-export function detectAdmin(): Promise<boolean> {
-	if (adminCache !== undefined) return Promise.resolve(adminCache);
-	const done = (async () => {
-		if (process.platform !== "win32") {
-			adminCache = false;
-			return adminCache;
-		}
-		try {
-			const { stdout } = await execFileP(
-				"powershell",
-				[
-					"-NoProfile",
-					"-Command",
-					"([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)",
-				],
-				{ timeout: 10_000 },
-			);
-			adminCache = stdout.trim() === "True";
-		} catch {
-			adminCache = false;
-		}
-		return adminCache;
-	})();
-	done.catch(() => undefined);
-	return done;
-}
-
-/** 探测当前值：未完成时为 false。草稿写盘用；定稿用 await detectAdmin() 拿最终值。 */
-export function cachedAdmin(): boolean {
-	return adminCache === true;
 }

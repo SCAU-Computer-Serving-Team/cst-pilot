@@ -1,66 +1,94 @@
 # 遥测验证
 
-验证日期：2026-10-08。环境：Windows 11（10.0.26200），本机隔离 Node/Python 测试、Chrome 无头浏览器、Go 接收端；CSTOA 服务器只读核查。
+验证日期：2026-10-15。环境：Windows 11 Pro（10.0.26200 / 25H2）、Node 24.15.0、本机 Go 接收端、CSTOA 与阿里云 `timserver_1`。
 
 ## 结论
 
-遥测采集与双端传输的本机回归通过，接收端已完成部署检查。真实队员双端入库、异机备份与完整恢复仍待验收。账号资料与上下文额度的验证见[账号验证](account-report.md)。
+发送端已按新契约采集安装、环境和运行时字段。未登录 CSTOA 时可用安装签名自动上传；真实 Pi 会话已通过公网写入两个生产接收端，完整 payload 与本地记录逐字段一致，两端队列均已确认清空。
 
-## 双端部署验证
+两端部署前已备份，已有记录、OA 服务凭据与 Tim CA 保留。新增生产测试记录使用 `kitVersion=telemetry-e2e-20261015`，与真实使用统计分开识别。
 
-2026-10-08 在 `timserver_1` 部署 Go 接收端，Docker Compose 项目 `cst-pilot-telemetry`，目录 `/srv/cst-pilot-server`。公网检查只使用无效测试令牌，未新增生产会话记录。
+## 自动验证
 
-| 项 | 结果 |
+| 范围 | 结果 |
 |---|---|
-| 客户端配置 | 开发与发行均同时指向 CSTOA 和 Tim；每端点独立队列、确认、补发与停发状态 |
-| Tim HTTPS | `https://8.163.28.9:8445/api/telemetry`；专用 CA 验证链、IP 和有效期 |
-| 公网健康检查 | 返回 200，`ok=true`；无专用 CA 时客户端拒绝连接 |
-| 上传鉴权 | 两个公网端点均拒绝无效测试令牌，客户端结果为 `auth` |
-| 云端规则 | 仅新增 TCP 8445 入站规则，现有端口未改动 |
-| TLS 续期 | 每日检查，90 天服务证书在剩余不足 30 天时自动续签 |
-| Tim 备份 | 每日在线一致性备份，30 天保留；首次备份与 `quick_check` 已通过 |
-| 双端故障回归 | 503 保留队列、另一端确认；重启后只补发失败端；404 只停对应端点；同一端点只允许一个发送任务，队列迁移通过 |
-| TLS 故障回归 | CA 缺失、证书过期、主机名不匹配时保留队列，不发送令牌 |
+| 发送端 | 20 项通过：安装与环境、PE／探测失败、凭据、队列、草稿、双端独立确认及 TLS |
+| 跨进程持久化 | 四个独立 Node 进程各追加 25 条，返回一致安装 ID，100 条记录全部保留且 ID 唯一 |
+| 草稿故障恢复 | 注入入队失败后源草稿保留；后续恢复保留 recordId、原系统环境与已定稿时间 |
+| Go 接收端 | 12 个顶层测试通过：签名篡改、错误密钥、服务重建后绑定保留、限流、OA、去重、CSV、保留期及数据库迁移 |
+| 数据迁移 | 按已有结构建立旧库，升级后原会话仍可导出；新增运行时未知值不伪造；两个匿名安装分开汇总 |
+| 跨仓库端到端 | 真实 Pi 自动发现扩展，模型与 OA 使用本机替身，两个真实 Go 接收端入库 |
+| 自动补发 | 停止并重启一个接收端，不再派发会话事件；30 秒定时重试清空该端队列。OA 凭据被拒后使用安装签名，上传者为空 |
+| 归属与环境 | 环境 A 的待发样例在后续实例补发仍保留原环境；匿名、OA 上传与重复记录分别核对 |
+| 工程检查 | 后端 Biome、TypeScript、Go vet、2 项备份测试及 61 项源码／发行检查通过 |
+| 相关回归 | Web 后端 95 项、OAuth 11 项通过 |
 
-双端与 TLS 回归共 14 项通过，Go 接收端联调 1 项通过，发行相关检查 11 项通过。TLS 测试在临时目录调用 OpenSSL 生成测试证书，私钥不入仓库。
-
-Tim 同机备份不覆盖整机丢失，异机备份与完整恢复演练待完成。
-
-## 遥测运行检查
-
-| 项 | 依据与结论 |
-|---|---|
-| 开关与发行 | 开发与发行均启用 CSTOA、Tim 两个端点 |
-| 采集 | 模型与工具使用、用量、耗时、异常、环境；正常字段不含对话和工具正文 |
-| 本地缓存 | 草稿与每端点独立队列；各限制 200 条，未登录也执行淘汰 |
-| 正常退出 | TUI shutdown 与 Web 删除、退出等待定稿落盘，不等待网络请求 |
-| 关闭 | 不累计、不写遥测记录、不联网上传、不探测管理员身份；配置修改需重启 |
-| 接收端 | systemd 服务 active，监听 `127.0.0.1:8787`，nginx 提供公网写入口 |
-| 真实内省 | OA 与接收端均已配置服务凭据，值一致；无凭据返回 401，携带凭据检查无效测试令牌返回 `active=false` |
-| 存储 | SQLite 只读核查：已有会话记录与每日汇总；本轮未向生产写入测试会话 |
-| 清理与汇总 | 接收端代码在启动时和每 24 小时执行；生产汇总表已有数据，长期执行与清理效果待验收 |
-| 备份 | 两端遥测 SQLite 使用独立的每日一致性备份；异机保存和恢复仍待验收，部署见[遥测部署](../telemetry/deployment.md) |
-
-正常字段的隐私边界见[契约](../contract.md)。报错原文完整保存，可能包含敏感片段；清理与备份需遵守其保留期。
-
-## 本机回归
-
-2026-10-09：发送端测试 14 项通过，OAuth 扩展测试 11 项通过，Web 后端定稿等待与凭据隔离回归通过。本轮使用隔离配置和测试令牌，未向生产接收端写入记录。
+本机端到端入口：
 
 ```powershell
-npm run check --prefix agent
-npm run test:telemetry --prefix agent
-npm run test:oauth --prefix agent
-npm run test:web --prefix agent
+$env:CST_TELEMETRY_RECEIVER = '接收端可执行文件的绝对路径'
+npm run test:telemetry:e2e --prefix agent
 ```
 
-Go 接收端联调需设置 `CST_TELEMETRY_RECEIVER` 为已构建二进制的绝对路径，然后执行 `npm run test:telemetry:e2e --prefix agent`；本轮未重复执行。
+测试位于 `agent/home/extensions/telemetry/test/receiver.e2e.ts`。未配置二进制时跳过，常规 CI 不自动执行跨仓库或生产上传。
 
-## 正式启用前的验收
+## 生产部署与入库
 
-1. 重启本项目，完成真实 CSTOA 扫码授权。
-2. 使用一次模型与诊断工具，正常结束会话。Web 切换页面不定稿，退出程序会定稿。
-3. 重新启动触发补发，核对两个接收端的同一 `recordId`、学号与设备归属，以及各端队列确认后移除。
-4. 接入 SQLite 一致性备份、异机保存、恢复验证和清理失败监控。
+两端使用同一 Linux 二进制，版本为源码快照标识 `b4b63416e305793a2b327b1adf3ed96d7f89ad45`。该值用于核对此次源码快照，与 Git 提交号分别记录；候选包保存 source.tar.gz、SOURCE-MANIFEST.json 与 BUILD-INFO.json，后者标记 sourceKind=worktree-snapshot。
 
-本机回归使用隔离配置和测试令牌，不修改生产服务。
+二进制 SHA-256：`e448b09291e43e9b45a5dee4fb5d00dac64923cc7e3b151d56d0418a34d8da7b`。构建时间为 `2026-10-15T06:47:09Z`。
+
+| 检查 | CSTOA | Tim / aliyun |
+|---|---|---|
+| 更新方式 | 在线备份、替换接收端、重启独立 systemd 服务 | 在线备份、更新独立遥测 Compose 项目 |
+| 健康与版本 | ok，版本匹配 | receiver healthy，版本匹配 |
+| 原记录保留 | 更新前 13 条全部保留 | 更新前 12 条全部保留 |
+| 本轮新增记录 | 1 条，合计 14 条 | 相同记录 1 条，合计 13 条 |
+| 重传 | 返回 accepted，同一 recordId 仍为 1 条 | 相同 |
+| 无效 OA 令牌 | 拒绝，无新增会话 | 相同 |
+| 匿名字段 | payload.mid、deviceId 均为 null | 相同 |
+| 数据完整性 | quick_check=ok | quick_check=ok |
+| 安装公钥 | 首次有效签名已绑定 | 独立绑定相同安装 |
+| 配置与 CA | 凭据哈希未变 | 凭据及客户端 CA 哈希未变 |
+
+生产测试从隔离 home 启动真实 Pi，使用本机模型替身生成一轮回复。OA 未登录，发行遥测配置直连两个公网 HTTPS 入口；第三个不可达测试端点仅用于保留同一记录作本地对照，不影响生产端确认。
+
+| 字段 | 实际入库值 |
+|---|---|
+| recordId | `8291bc2f-b014-4e48-8366-c2810cf868bb` |
+| installationId | `f5d0b9d3-ea0b-457b-a56b-acf292726267` |
+| environmentId | `6c5a666a4a02925255f015a999b1ad0e48fdbe72d605aca60581c5f7c2dda087` |
+| os.name / displayVersion | Microsoft Windows 11 Pro / 25H2 |
+| os.platform / version / arch / isPE | win32 / 10.0.26200 / x64 / false |
+| runtime.version / arch | 24.15.0 / x64 |
+| admin | false，派生列为 0 |
+| prompts / turns / channel | 1 / 1 / web |
+
+从两端只读查询该测试记录，移除服务端补充字段后与本地 JSON 完全一致；新增派生列与原始 payload 一致。未复制开发目录凭据，未向模型或服务器发送 MachineGuid 原文、私钥、账户 SID 或诊断内容。
+
+## 可靠性缺口
+
+| 范围 | 尚待验证或限制 |
+|---|---|
+| 完整发行副本 | 本轮使用隔离 home 与真实扩展，未重建完整便携包，第三方扩展包未加载 |
+| 实际 U 盘 | FAT/exFAT、写保护、跨物理电脑、拔盘与磁盘暂不可写组合仍需实机覆盖 |
+| 系统与权限 | 实测环境为 Windows 11 x64 普通权限；Windows 10、ARM64、真实 PE、跨账户 UAC 待补 |
+| 真实 OA 用户 | 本机验证使用 OA 替身；生产完成匿名上传，真实队员扫码及多队员上传仍需验收 |
+| 退出与容量 | 正常退出不等待网络；强杀只恢复已写草稿，队列最多 200 条，超限淘汰最旧记录 |
+| 运行时长 | 已验证 30 秒补发，长期网络抖动、多进程与磁盘故障组合待持续运行验证 |
+| 安装鉴权 | 初次公钥绑定仅证明密钥持有权；批量新安装滥用告警、密钥遗失处理仍需运维方案。时钟偏差超过 10 分钟不能通过签名验证 |
+| 备份与告警 | 两端同机一致性备份可用，异机备份、完整恢复和上传时效／容量／证书告警仍待验收 |
+
+CSTOA 公网 /healthz 返回前端 HTML，接收端监控使用内部 `127.0.0.1:8787/healthz` 并校验内容。Tim 使用专用 CA 验证公网健康接口。
+
+## 证据位置
+
+本机证据统一保存在 `E:/tmp/2026-10-15/`：
+
+- `new-telemetry-unit.log`、`new-telemetry-e2e-final.log`、`new-agent-check-final.log`。
+- `new-receiver-tests.log`、`new-receiver-backup-tests.log`、`new-contract-pack.log`。
+- `deploy-timserver-new.log`、`deploy-cstoa-new.log`、`receiver-snapshot/`。
+- `live-telemetry.log`、`live-telemetry-result.json`、`verify-live-tim.json`、`verify-live-cstoa.json`。
+- `live-telemetry-v5MItv/record.json` 保存同一会话的本地对照，测试安装密钥仅留在该隔离目录，不进入证据正文或仓库。
+
+两端候选目录为 `/root/cst-telemetry-20261015-b4b63416e305/`；回退目录分别为部署根下 `releases/b4b63416e305-previous/`。常规提交版本发布与回退规则见独立接收端仓库的 doc/release.md。

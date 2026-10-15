@@ -18,7 +18,9 @@ import { type CurrencyMap, loadConfig, loadCurrency, type TelemetryConfig } from
 import { readCredential } from "./credential.ts";
 import { flushEndpoints, migratePending, queueRecord } from "./delivery.ts";
 import { recoverDrafts, removeDraft, writeDraft } from "./draft.ts";
-import { buildRecord, cachedAdmin, detectAdmin, kitVersion } from "./record.ts";
+import { captureEnvironment, type EnvironmentSnapshot, unknownEnvironment } from "./environment.ts";
+import { loadInstallation } from "./installation.ts";
+import { buildRecord, kitVersion } from "./record.ts";
 import { shared } from "./shared.ts";
 
 export default function telemetry(pi: ExtensionAPI): void {
@@ -33,6 +35,8 @@ export default function telemetry(pi: ExtensionAPI): void {
 	let finalized = false;
 	let ctx: ExtensionContext | undefined;
 	let ready: Promise<void> | undefined;
+	let environment = unknownEnvironment();
+	let environmentProbe: Promise<EnvironmentSnapshot> | undefined;
 
 	/** 首个事件到达时加载一次；此后 config / currency / version 为缓存值。
 	 * 管理员探测耗时秒级，不进这里：session_start 是会话关键路径，只发探测不等待，定稿时取结果。 */
@@ -43,7 +47,6 @@ export default function telemetry(pi: ExtensionAPI): void {
 				loadCurrency(extensionDir),
 				kitVersion(extensionDir, process.cwd()),
 			]);
-			if (config?.enabled && config.endpoints.length) s.adminProbe ??= detectAdmin();
 		})();
 		return ready;
 	}
@@ -53,7 +56,7 @@ export default function telemetry(pi: ExtensionAPI): void {
 	async function recoverAndFlush(): Promise<void> {
 		try {
 			await migratePending(agentDir, config!.endpoints);
-			for (const record of await recoverDrafts(agentDir)) await queueRecord(agentDir, record, config!.endpoints);
+			await recoverDrafts(agentDir, (record) => queueRecord(agentDir, record, config!.endpoints));
 		} catch {
 			// 恢复失败不阻塞上报。
 		}
@@ -62,11 +65,13 @@ export default function telemetry(pi: ExtensionAPI): void {
 
 	async function writeCurrentDraft(): Promise<void> {
 		if (!state || finalized) return;
+		environment = (await environmentProbe) ?? environment;
 		const record = buildRecord(
 			state,
 			{ endReason: "", endedAt: Date.now(), contextEntries: undefined },
 			version,
-			cachedAdmin(),
+			environment.admin,
+			environment,
 		);
 		await writeDraft(agentDir, state.sessionId, {
 			record,
@@ -90,18 +95,23 @@ export default function telemetry(pi: ExtensionAPI): void {
 				await removeDraft(agentDir, current.sessionId);
 				return;
 			}
-			const adminNow = await Promise.resolve(s.adminProbe).catch(() => false);
+			environment = (await environmentProbe) ?? environment;
 			await draftChain;
 			const record = buildRecord(
 				current,
 				{ endReason: reason, endedAt: Date.now(), contextEntries: safeContextEntries() },
 				version,
-				adminNow === true,
+				environment.admin,
+				environment,
 			);
+			await writeDraft(agentDir, current.sessionId, {
+				record,
+				lastTurnEndedAt: current.lastTurnEndedAt ?? Date.now(),
+			});
 			await queueRecord(agentDir, record, config!.endpoints);
 			await removeDraft(agentDir, current.sessionId);
 		} catch {
-			// 定稿失败丢弃本场记录，不影响退出流程。
+			// 入队失败保留草稿，不影响退出流程。
 		}
 		void flush();
 	}
@@ -133,15 +143,33 @@ export default function telemetry(pi: ExtensionAPI): void {
 	async function flush(): Promise<void> {
 		if (!active()) return;
 		const credential = await readCredential(agentDir, config!.authProvider);
-		if (credential) await flushEndpoints(agentDir, credential.access, config!.endpoints);
+		const auth = credential?.access ?? (await loadInstallation(agentDir));
+		if (auth) await flushEndpoints(agentDir, auth, config!.endpoints);
+		// OA 无效时仍可使用安装凭据补发；两次发送使用相同 recordId。
+		if (credential) {
+			const installation = await loadInstallation(agentDir);
+			if (installation) await flushEndpoints(agentDir, installation, config!.endpoints);
+		}
 	}
 
 	pi.on("session_start", async (event, context) => {
 		await ensureReady();
 		if (!active()) return;
+		if (!s.retries.has(agentDir)) {
+			const timer = setInterval(() => {
+				void flush().catch(() => undefined);
+			}, 30_000);
+			timer.unref();
+			s.retries.set(agentDir, timer);
+		}
 		// 同一实例被顶替（上一会话未走正常销毁路径）：先把旧累计按 crash 定稿，再开新会话。
 		if (state && !finalized) await finalize("crash");
 		ctx = context;
+		environment = unknownEnvironment();
+		environmentProbe = captureEnvironment(agentDir).then((value) => {
+			environment = value;
+			return value;
+		});
 		state = collect.newState(
 			context.sessionManager.getSessionId(),
 			event.reason,

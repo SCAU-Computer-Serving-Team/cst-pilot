@@ -1,206 +1,106 @@
 # 接收端
 
-本页定义接收接口、身份校验、数据存储与保留期。契约版本为 0.1。字段见[统计口径](../schema.md)和[信息收集契约](../../contract.md)，部署见[遥测部署](../deployment.md)，验证状态见[遥测验证](../../test/telemetry-report.md)。
-
-## 结论
-
-1. 单个常驻进程加一个 SQLite 文件，只做两件事：收记录、写数据库。看板与告警后置。
-2. 一个写端点 `POST /v1/sessions`，一个 `GET /healthz`。不开对外读接口，报表走命令行导 CSV。
-3. 一场会话一条记录，原始记录整条存 `payload`，常用字段抽成列。
-4. 身份由队员的 OA 登录决定：接收端拿上传的令牌向 OA 内省，取 `mid` 与 `device_id`。
-5. 使用 Go 和纯 Go SQLite 驱动，编译为单个可执行文件。依赖仍需进行安全检查。
-6. 身份解析使用已部署的 OA 内省接口。接收端服务凭据仅保存于服务器，不进入工具包。
+接收端校验上传凭据、保存会话统计，提供命令行导出和删除。协议版本 `0.1`，字段见[信息收集契约](../../contract.md)和[会话记录](../schema.md)，部署见[部署说明](../deployment.md)。
 
 ## 接口
 
-请求体形状见 [信息收集契约](../../contract.md)「上传信封」。
+| 接口 | 行为 |
+|---|---|
+| `POST /v1/sessions` | 上传 1–50 条会话记录，完整正文最多 1 MiB |
+| `GET /healthz` | 返回 ok、会话条数、version、builtAt；数据库不可读时失败 |
 
-```
-POST /v1/sessions
-Authorization: Bearer <OA 访问令牌>
-```
+公网入口将 /api/telemetry 转发到 /v1/sessions，不提供读记录或下发指令的接口。
 
-| 响应 | 含义 | 发送端会怎么做 |
-|---|---|---|
-| 202 `{ accepted, rejected, reasons }` | 收下整批，校验不过的条目在 `reasons` 里计数 | 从队列移除该批 |
-| 401 | 令牌无效或过期 | 留住记录，等重新登录 |
-| 403 | 设备被吊销或改密 | 停止本轮发送，保留记录 |
-| 400 / 413 | 请求本身不合法 | 丢弃该批 |
-| 429 / 5xx | 限流或服务端故障 | 留住记录，下次再发 |
-
-约定：
-
-1. 从 `Authorization` 头取令牌，内省通过后把 `mid` 与 `device_id` 写进每条记录。令牌不过的请求不入库。
-2. 逐条校验，非法条目计数上报，不拒绝整批。
-3. `receivedAt` 与 `ip` 由服务端补充。`ip` 只存网段。
-4. 单批上限见契约「上传信封」，超出**整批拒绝，不截断**。截断会让发送端把没送到的记录也一起删掉。
-5. 被限流的请求不写上传日志，限制重复请求造成的磁盘写入。
-6. 响应不带任何指令字段。停采只借 404 / 410 传达。
+| 响应 | 发送端处理 |
+|---|---|
+| 202 `{ accepted, rejected, reasons }` | 整批确认，逐条拒收也不重发 |
+| 401 | 凭据或签名无效，保留记录 |
+| 403 | OA 吊销、改密，或安装已绑定其他公钥，保留记录 |
+| 400 / 413 | 正文、条数或体积不合法，丢弃该批 |
+| 429 | 限流，保留并重试；不写该请求的上传日志 |
+| 5xx | 服务或身份服务故障，保留并重试 |
 
 ## 身份解析
 
-OA 设备授权与内省接口已部署。接收端使用服务凭据调用内省，工具包只上传 Agent 访问令牌。
+### OA 凭据
 
-上传令牌的载荷里有 `mid`、`typ`、`scope`、`device_id`、`pv`、`exp`、`jti`，见 [../../auth/README.md](../../auth/README.md)「令牌与设备标识」。
+Bearer 访问令牌由接收端向 OA 内省，取 mid 和 device_id。服务凭据仅放服务器，接口不跟随重定向；OA 服务不可用返回 503，不缓存故障。
 
-接收端通过 OA 内省验证令牌。签名密钥仅保存在 OA，不分发给接收端。
+| 内省结果 | 处理 |
+|---|---|
+| active=true 且包含 mid、device_id | 写入上传者 mid、deviceId |
+| expired / invalid | 401 |
+| revoked / password-changed | 403 |
+| 非 200、解析失败或超时 | 503 |
 
-```
-POST <OA_INTROSPECT_URL>
-Authorization: Bearer <服务凭据>
-{ "token": "<访问令牌>" }
-→
-{ "active": true, "mid": "M1024", "device_id": "…", "pv": 3, "exp": 1758000000 }
-```
+正常结果按令牌 SHA-256 缓存 60 秒，仅保存在内存，不写令牌或哈希日志。不额外校验模型调用作用域。
 
-| 内省结果 | 接收端回 | 处理 |
-|---|---|---|
-| `active: true` | 继续 | 把 `mid` 与 `device_id` 补进每条记录 |
-| `reason: expired` / `invalid` | 401 | 不入库，记 `uploads` |
-| `reason: revoked` / `password-changed` | 403 | 同上 |
-| 超时或 5xx | 503 | 同上，发送端会保留重试 |
+### 安装签名
 
-**不校验作用域。** 采集范围由团队规定，不作为队员的可选项，见 [../../contract.md](../../contract.md)「身份来源」。
+未登录使用 Installation 鉴权及 Ed25519 签名，格式见[发送端](../sender/SPEC.md#凭据与配置)。首次有效签名自动绑定公钥；后续必须保持相同公钥，服务重启不解除绑定。
 
-结果按令牌原文的 SHA-256 缓存 60 秒，只存内存，不落库。
+1. 签名覆盖安装标识、时间和正文摘要，时间允许前后 10 分钟；先验签，再注册安装。
+2. 每个安装每分钟最多 60 次、每个连接来源每分钟最多 120 次；内存计数有界。通过反向代理时同一连接来源限额由该入口共享，不能把它当真实用户 IP 限流。
+3. 记录声明的非空 installationId 必须与安装鉴权一致，否则逐条拒收。无新增身份的记录允许兼容接收。
+4. 安装签名只证明持有密钥，无法阻止创建多个新安装。自然人认证、恶意批量注册告警与密钥遗失处理需独立管理。
+
+### 归属边界
+
+mid、deviceId 在数据库列和 payload 中均由本次上传凭据确定，匿名上传的 payload 为 null。客户端提供的同名字段覆盖清除；这两个字段只表示上传者，不据此确定排队会话的操作人。
+
+identity 和环境保持客户端会话快照；相同 recordId 重传保留首次记录，不能通过重传补改归属、环境或接收时间。匿名安装、系统环境和上传账号分别统计。
 
 ## 校验
 
-### 整批拒绝
+整批拒绝：鉴权失败、无效 JSON、records 非数组或为空、超过 50 条或正文超过 1 MiB。
 
-| 情况 | 状态码 |
+| 逐条检查 | 拒收原因 |
 |---|---|
-| 令牌无效或过期 | 401 |
-| 设备被吊销或改密 | 403 |
-| 内省不可用 | 503 |
-| JSON 解析失败 | 400 |
-| `records` 不是数组，或为空 | 400 |
-| `records` 条数 > 50 | 400 |
-| 请求体 > 1 MB | 413 |
+| v 属于支持集合，目前为 0.1 | unknown-version |
+| type=session | unknown-type |
+| recordId 非空字符串且最多 64 字符 | bad-record-id |
+| tools≤512、models≤32、errors≤10 | too-many-elements |
+| 安装鉴权与记录非空安装标识不匹配 | installation-mismatch |
 
-### 逐条拒收
+数字类型不符按 0，缺少数组按空数组，缺少新增环境字段保持未知。未知字段原样保存在 payload，不以业务合理性检查拒收。
 
-只有三项必备：
-
-| 检查 | 拒收原因 |
-|---|---|
-| `v` 在 `ACCEPTED_VERSIONS` 里 | `unknown-version` |
-| `type === "session"` | `unknown-type` |
-| `recordId` 是非空字符串且不长于 64 字符 | `bad-record-id` |
-
-数字字段类型不符时按 0 记，数组缺失按空数组记，`kitVersion` 缺失留空。数组元素数超限时拒收：
-
-| 检查 | reason |
-|---|---|
-| `tools` ≤ 512 | `too-many-elements` |
-| `models` ≤ 32 | `too-many-elements` |
-| `errors` ≤ 10 | `too-many-elements` |
-
-202 响应确认整批，发送端不会重发被拒条目。接收端只拒绝协议明确列出的情况。
-
-### 不检查的
-
-| 不查 | 理由 |
-|---|---|
-| 业务合理性，如 `cost` 为负、`endedAt` 早于 `startedAt` | 上报路径不做数据质量判断，口径问题在统计时处理 |
-| 未知字段 | 向前兼容的唯一手段，原样存进 `payload` |
-| 记录里自带的身份字段 | 不拒，**覆盖**成内省结果。身份永远来自内省，不信任请求体 |
+receivedAt 使用服务端时钟；ip 来自连接，IPv4 存 /24 网段。经过反向代理时记录连接来源，不能作为会话地点或用户识别依据。
 
 ## 存储
 
-### `sessions`
+使用 Go、纯 Go SQLite、单数据库文件和 WAL。原始 payload 与派生列在同一事务中保存，record_id 为去重主键；新增字段迁移只增加派生列与索引，不改已有原始记录。
 
-| 列 | 说明 |
+| 表 | 内容 |
 |---|---|
-| `record_id` | 主键，去重 |
-| `mid`、`device_id`、`received_at`、`ip_net` | 服务端写入 |
-| `v`、`kit_version`、`session_id`、`channel` | 记录自带 |
-| `reason`、`end_reason`、`started_at`、`ended_at`、`duration_ms`、`active_ms`、`prompts`、`turns`、`context_entries` | 会话 |
-| `compactions`、`compaction_tokens`、`compaction_overflows`、`compaction_failures`、`context_peak`、`context_window` | 上下文 |
-| `network_errors`、`aborted`、`tool_failures` | 失败 |
-| `os_version`、`os_arch`、`admin` | 环境 |
-| `cost_cny`、`cost_usd`、`unpriced_turns` | 费用，分币种 |
-| `payload` | 整条记录 JSON |
+| sessions | 会话正文、上传者、接收时间、网段、统计、费用及环境派生列 |
+| installations | 安装 ID、绑定公钥、首次注册时间；不保存私钥或原始 MachineGuid |
+| devices | 有 OA 登录标识的最近接入信息，匿名上传不创建空设备行 |
+| members | 编号到姓名与队伍的展示资料，独立于鉴权，不强制外键 |
+| daily_rollup | 按接收时间 +08:00 日期、上传者 mid、installation_id、environment_id 聚合 |
+| uploads | 请求结果、条数、拒收原因、插入数、状态与耗时，不含正文、令牌、签名或密钥 |
 
-`payload` 保存原始记录，其他列从中派生，同一事务完成。派生规则变化时，可从原始记录重算。
+sessions 新增派生列：installation_id、environment_id、environment_source、os_platform、os_name、os_display_version、os_is_pe、runtime_version、runtime_arch。未知值为空；已有 os_version、os_arch、admin 继续保存，payload 区分 null 和缺失。
 
-`models[]`、`tools[]`、`errors[]` 和 `providerErrors` 保存在 `payload` 中，使用 JSON 函数查询。
+索引覆盖接收时间与上传者、OA 登录标识、会话 ID、工具包版本、安装及环境。不同币种分别汇总，未定价单列；峰值与窗口成对保存。缺失标识只参与未知组统计，不计为一个已识别用户。
 
-费用必须分币种存：同一天可能既走 `cstoa`（CNY）又走 pi 内置 provider（USD），合成一列等于把两种货币相加。币种查不到的不进任何一列，计入 `unpriced_turns`。
-
-索引：`(received_at, mid)`、`(device_id, received_at)`、`(session_id)`、`(kit_version)`。
-
-### `devices`
-
-| 列 | 说明 |
-|---|---|
-| `device_id` | 主键 |
-| `first_seen_at`、`last_seen_at` | 首末上报 |
-| `os_version`、`os_arch`、`admin`、`kit_version` | 最近一次 |
-| `last_ip_net` | 最近来源网段 |
-
-每次收到上报时更新。不设吊销标志，吊销由内省决定。
-
-### `members`
-
-| 列 | 说明 |
-|---|---|
-| `mid` | 主键 |
-| `name`、`team` | 编号到姓名、队伍的翻译 |
-| `active`、`synced_at` | 在队状态与同步时间 |
-
-只做翻译，不做鉴权，不做外键强制。库里没有的 `mid` 照常入库，报表直接显示编号。
-
-成员资料的导入与同步待验收，见[遥测运维](../../issues.md#遥测运维)。
-
-### `daily_rollup`
-
-| 列 | 来源 |
-|---|---|
-| `date`、`mid` | 主键。日期按 `received_at` 归到 +08:00 |
-| `sessions`、`duration_ms`、`active_ms`、`prompts`、`turns`、`context_entries` | 各列累加 |
-| `compactions`、`compaction_overflows`、`compaction_failures` | 各列累加 |
-| `context_peak`、`context_window` | 取占比最高的那一条记录的两个值，成对写入 |
-| `tool_calls`、`tool_failures`、`degraded` | `payload.tools[]` 累加 |
-| `input_tokens`、`output_tokens`、`cache_read_tokens`、`cache_write_tokens`、`total_tokens` | `payload.models[]` 累加 |
-| `cost_cny`、`cost_usd`、`unpriced_turns` | 分币种 |
-| `aborted`、`network_errors` | 累加 |
-| `error_groups`、`error_turns` | 只记组数与出错往返数，**不存原文** |
-| `models`、`tools` | JSON，按 provider + model + thinkingLevel、按 name + scope 的分布 |
-
-聚合表只保存错误计数，不保存报错原文，确保明细的 180 天清理有效。
-
-### `uploads`
-
-每个未被限流的上传请求写入一条接收结果。
-
-| 列 | 说明 |
-|---|---|
-| `id` | 自增主键 |
-| `batch_id`、`received_at` | 请求标识与服务端接收时刻 |
-| `mid`、`device_id` | 内省结果，鉴权失败时留空 |
-| `record_count`、`accepted`、`rejected` | 条数 |
-| `inserted` | 真正新增的行数，小于 `accepted` 说明是重发 |
-| `rejected_detail` | JSON：`[{ index, recordId, reason }]` |
-| `status_code`、`error` | 回给发送端的状态码与非 2xx 时的简短原因 |
-| `body_bytes`、`duration_ms`、`ip_net` | 请求侧信息 |
-
-不记请求体原文、令牌与令牌哈希。`reason` 里不放被拒记录的内容。
+汇总不保存报错原文。结构变化时可清空派生汇总并从 sessions 重建，原始会话保留。
 
 ## 保留期
 
-| 表 | 保留 | 清理动作 |
-|---|---|---|
-| `sessions` | 永久 | 每天清 180 天前 `payload` 里的 `errors` 字段，其余字段一条不动 |
-| `daily_rollup`、`devices`、`members` | 永久 | 无 |
-| `uploads` | 90 天 | 每天删过期行 |
+| 内容 | 保留与清理 |
+|---|---|
+| 会话统计、身份、公钥与汇总 | 长期保存 |
+| sessions.payload.errors | 180 天后移除 |
+| uploads | 90 天后删除 |
 
-报错原文是整条记录里唯一可能回显路径、账号或请求片段的部分，单独设期，与 OA 审计保留期同值。
-
-删除支持按 `device_id` 或 `mid` 筛选，通过命令行执行，不提供 HTTP 删除接口。
+启动及每 24 小时清理、重算汇总。模型报错原文可能含路径或账号，备份同样遵循原文保留边界。
 
 ## 运维接口
 
-只提供写入与健康检查，不提供 HTTP 读接口。明细导出使用 `export-csv`；汇总重算使用 `rollup`；按成员或设备删除使用 `delete`。
+| 命令 | 用途 |
+|---|---|
+| export-csv | 导出会话派生列，包含新身份、系统名称和运行时字段，不导出报错正文 |
+| rollup | 重算每日汇总 |
+| delete --mid / --device / --installation | 按上传账号、OA 登录标识或匿名安装删除会话，再重算汇总 |
 
-`GET /healthz` 返回 `ok`、会话条数、提交版本 `version` 与构建时间 `builtAt`。服务配置、备份和证书续期见[遥测部署](../deployment.md)，未完成验证集中在[待处理议题](../../issues.md#遥测运维)。
+命令行操作显式指定 TELEMETRY_DB。按安装删除会话仍保留公钥绑定，避免其他密钥重新占用同一标识；安装密钥恢复需独立运维流程。部署不开放远程删除接口，验证状态见[遥测验证](../../test/telemetry-report.md)。

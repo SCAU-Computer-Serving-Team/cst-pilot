@@ -1,5 +1,8 @@
 import { request as httpsRequest } from "node:https";
+import { type Installation, installationHeaders } from "./installation.ts";
 import type { SessionRecord } from "./record.ts";
+
+export type UploadAuth = string | Installation;
 
 export const POST_TIMEOUT_MS = 5000;
 export type SendOutcome = { kind: "accepted" | "auth" | "bad" | "stop" | "retry" };
@@ -15,7 +18,7 @@ function outcome(status: number): SendOutcome {
 /** 专用 CA 仅传给本次 HTTPS 请求，仍校验证书链、有效期与主机名。 */
 export async function sendBatch(
 	endpoint: string,
-	accessToken: string,
+	accessToken: UploadAuth,
 	records: SessionRecord[],
 	ca?: string,
 ): Promise<SendOutcome> {
@@ -27,7 +30,12 @@ export async function sendBatch(
 	});
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), POST_TIMEOUT_MS);
-	const headers = { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` };
+	const headers = {
+		"Content-Type": "application/json",
+		...(typeof accessToken === "string"
+			? { Authorization: `Bearer ${accessToken}` }
+			: installationHeaders(accessToken, body)),
+	};
 	try {
 		if (ca) {
 			if (new URL(endpoint).protocol !== "https:") return { kind: "retry" };

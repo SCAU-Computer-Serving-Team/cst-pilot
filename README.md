@@ -77,7 +77,7 @@ cst-pilot/
 1. 支持 Windows 10/11 x64。启动统一请求 Windows 管理员授权；取消授权或没有管理员凭据时不启动。传感器数据能否读取取决于硬件与驱动。
 2. 本仓库用于代码开发，不包含完整便携运行环境。开发准备见 [贡献规范](CONTRIBUTING.md)。
 3. 发行包不提供模型服务地址与密钥。如果你是 CST 队员且需要相关资源，请联系队内委员。
-4. 项目遥测默认启用，上传需要 CSTOA 登录，会话统计同时发送到 CSTOA 服务器和 Tim 的 `timserver_1`。可在 `agent/home/telemetry.json` 中将 `enabled` 设为 `false`；收集范围见 [信息收集契约](doc/contract.md)。
+4. 项目遥测默认启用，未登录时使用工具包安装签名上传，会话统计同时发送到 CSTOA 服务器和 Tim 的 `timserver_1`。CSTOA 登录仅提供经验证的上传账号。可在 `agent/home/telemetry.json` 中将 `enabled` 设为 `false`；收集范围见 [信息收集契约](doc/contract.md)。
 5. WizTree 仅个人使用免费，商业使用需授权。本项目采用 [MIT 许可证](LICENSE)，第三方条款见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
 其他运行限制见 [运行注意事项](doc/Notice.md)。

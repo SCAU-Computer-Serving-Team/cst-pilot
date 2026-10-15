@@ -2,6 +2,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { withFileLock } from "./file-lock.ts";
 import type { SessionRecord } from "./record.ts";
 import { enqueue } from "./shared.ts";
 
@@ -23,22 +24,24 @@ async function lines(agentDir: string, endpoint?: string): Promise<string[]> {
 }
 
 export async function appendRecord(agentDir: string, record: SessionRecord, endpoint?: string): Promise<void> {
-	return enqueue(async () => {
-		const line = JSON.stringify(record);
-		if (Buffer.byteLength(line, "utf8") > RECORD_MAX_BYTES) return;
-		await mkdir(join(agentDir, "telemetry"), { recursive: true });
-		// 相同草稿在恢复或迁移重试中不会占用多个队列位置。
-		const previous = (await lines(agentDir, endpoint)).filter((entry) => {
-			try {
-				return (JSON.parse(entry) as SessionRecord).recordId !== record.recordId;
-			} catch {
-				return false;
-			}
-		});
-		const kept = previous.slice(-(OUTBOX_MAX_RECORDS - 1));
-		kept.push(line);
-		await rewritePending(agentDir, kept, endpoint);
-	});
+	return enqueue(() =>
+		withFileLock(pendingPath(agentDir, endpoint), async () => {
+			const line = JSON.stringify(record);
+			if (Buffer.byteLength(line, "utf8") > RECORD_MAX_BYTES) return;
+			await mkdir(join(agentDir, "telemetry"), { recursive: true });
+			// 相同草稿在恢复或迁移重试中不会占用多个队列位置。
+			const previous = (await lines(agentDir, endpoint)).filter((entry) => {
+				try {
+					return (JSON.parse(entry) as SessionRecord).recordId !== record.recordId;
+				} catch {
+					return false;
+				}
+			});
+			const kept = previous.slice(-(OUTBOX_MAX_RECORDS - 1));
+			kept.push(line);
+			await rewritePending(agentDir, kept, endpoint);
+		}),
+	);
 }
 
 export async function readAll(agentDir: string, endpoint?: string): Promise<SessionRecord[]> {
@@ -54,20 +57,22 @@ export async function readAll(agentDir: string, endpoint?: string): Promise<Sess
 }
 
 export async function removeRecords(agentDir: string, recordIds: Set<string>, endpoint?: string): Promise<void> {
-	return enqueue(async () => {
-		const previous = await lines(agentDir, endpoint);
-		if (previous.length === 0) return;
-		const kept = previous
-			.filter((line) => {
-				try {
-					return !recordIds.has((JSON.parse(line) as SessionRecord).recordId);
-				} catch {
-					return false;
-				}
-			})
-			.slice(-OUTBOX_MAX_RECORDS);
-		await rewritePending(agentDir, kept, endpoint);
-	});
+	return enqueue(() =>
+		withFileLock(pendingPath(agentDir, endpoint), async () => {
+			const previous = await lines(agentDir, endpoint);
+			if (previous.length === 0) return;
+			const kept = previous
+				.filter((line) => {
+					try {
+						return !recordIds.has((JSON.parse(line) as SessionRecord).recordId);
+					} catch {
+						return false;
+					}
+				})
+				.slice(-OUTBOX_MAX_RECORDS);
+			await rewritePending(agentDir, kept, endpoint);
+		}),
+	);
 }
 
 async function rewritePending(agentDir: string, lines: string[], endpoint?: string): Promise<void> {
