@@ -19,7 +19,7 @@ sys({ scope: "sensor" })
 | `scope` | overview（默认）、proc、gpu、io、sensor |
 | `top` | proc/gpu/io 的排行项数，默认 10，最大 50 |
 
-结果按 scope 包装，例如 `{ "proc": { ... } }`。读取数值前先看 `notice`、`error`、`collectionErrors` 和 `counterErrors`；部分数据源失败时，其余结果仍可能可用。
+结果按 scope 包装，例如 `{ "proc": { ... } }`。`notice` 只说明数据口径与采集限制，不提供诊断结论或排查建议。读取数值前先看 `error`、`collectionErrors` 和 `counterErrors`；部分数据源失败时，其余结果仍可能可用。
 
 ## overview：整机概况
 
@@ -86,14 +86,14 @@ GPU Engine 和 GPU Process Memory 分别读取，失败原因放入 counterError
 
 进程 IO 计数按进程归属，与磁盘总吞吐是两个口径，不能将 byIo 与某一磁盘吞吐直接相加对账。持续高忙碌度和排队可提示 IO 瓶颈；低吞吐不直接证明碎片或坏盘，应结合访问模式、SMART 和事件日志核查。全空闲时 byIo 为空合法。
 
-## sensor：温度、风扇与降频线索
+## sensor：温度、风扇、电压与频率
 
 | 字段 | 内容 |
 |---|---|
-| `admin` / `pawnio` | 当前权限与 PawnIO 检测结果 |
-| `hardware` / `sensorCount` / `sensors[]` | LHM 硬件与读数；每项含 hw、name、type、value |
+| `admin` / `pawnio` | 当前管理员权限与 PawnIO 服务注册项检测结果；不保证传感器可读 |
+| `hardware` / `sensorCount` / `sensors[]` | LHM 硬件与读数；每项含 hw、name、type、value；温度、风扇、电压单位分别为 °C、RPM、V |
 | `thermalZones[]` | zone、tempC、passivePct |
-| `frequency` | cores、minPctOfMax、avgPctOfMax |
+| `frequency` | cores、minPctOfMax、avgPctOfMax；后两项为各逻辑核当前频率占最大频率的百分比 |
 | `counterErrors` | 热区或频率读取失败的原因；对应空值不代表设备不存在 |
 
 LHM 随包提供，传感器查询开启 CPU、GPU、主板，关闭存储、内存和嵌入式控制器路径。过滤 NaN/Infinity，最多返回 200 个传感器。热区温度由开尔文转换为摄氏度，过滤超出 −50～150°C 的值；热区名称由 ACPI 提供，不能一律认作 CPU 核心温度。

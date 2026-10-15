@@ -56,7 +56,7 @@ async function collectProc(topN: number, signal?: AbortSignal) {
 	if (r && typeof r.error === "string") return { error: r.error };
 	return {
 		...r,
-		notice: `${collectionNotice(r)}进程 ${r.totalProcs} 个，采样间隔 ${r.intervalSec}s（${r.cores} 逻辑核）。byCpu=CPU 占用率 Top N；byMem=内存（工作集）Top N。cpuPct 为采样窗口内的平均值，瞬时突发可能低估。path=可执行文件路径（系统进程或权限不足时为 null，可用于就地验证进程身份）。`,
+		notice: `${collectionNotice(r)}进程 ${r.totalProcs} 个，采样间隔 ${r.intervalSec}s（${r.cores} 逻辑核）。byCpu=CPU 占用率 Top N；byMem=内存（工作集）Top N。cpuPct 为采样窗口内的平均值，瞬时突发可能低估。path=可执行文件路径（系统进程或权限不足时可为 null）。`,
 	};
 }
 
@@ -148,7 +148,7 @@ async function collectGpu(topN: number, signal?: AbortSignal) {
 		out.degraded = true;
 	out.notice =
 		collectionNotice(out) +
-		`GPU Engine ${r.engineSamples ?? 0} 个实例按进程聚合。byGpuPct=GPU 利用率 Top N（engtypes=所用引擎类型，如 3d/copy/videodecode）；byDedicatedMB=专用显存 Top N；adapters=显卡适配器清单（bus=PCI 为实体卡插槽设备，ROOT 多为虚拟显示适配器；真实显卡以 vendor 为硬件厂商的那条为准）；` +
+		`GPU Engine ${r.engineSamples ?? 0} 个实例按进程聚合。byGpuPct=GPU 利用率 Top N（engtypes=引擎类型）；byDedicatedMB=专用显存 Top N，单位 MB；adapters=显卡适配器清单，bus 为设备 ID 的总线前缀，包含实体与虚拟适配器；` +
 		(Array.isArray(nv)
 			? `nvidia=NVIDIA 显卡状态数组，按 uuid/pciBusId 区分每张卡。`
 			: nv?.error
@@ -176,23 +176,16 @@ async function collectIo(topN: number, signal?: AbortSignal) {
 	if (r && typeof r.error === "string") return { error: r.error };
 	return {
 		...r,
-		notice: `${collectionNotice(r)}disks=每物理盘实时 IO（busyPct=磁盘忙碌百分比，持续 >80 或 queueLen 持续 >1 = IO 瓶颈；readKBs/writeKBs=读写吞吐）；byIo=每进程读+写 IO 速率 Top N（${r.intervalSec}s 差分，仅列有活动的进程，瞬时空闲可能无条目）。与 disk 的分工：disk 管容量与硬件健康，io 管"现在谁在读写"。`,
+		notice: `${collectionNotice(r)}disks=每物理盘实时 IO（queueLen=队列长度；busyPct=磁盘忙碌百分比；readKBs/writeKBs=读写吞吐，单位 KB/s）；byIo=每进程读写 IO 速率 Top N（ioKBs 单位 KB/s；${r.intervalSec}s 差分，仅列有活动的进程）。进程 IO 与物理盘吞吐分别采集，统计口径不同。`,
 	};
 }
 
 /* ------------------------------------------------------------------ */
-/* scope=sensor · 温度 / 风扇 / 电压 / 降频（LHM 用户态 + 系统计数器）     */
+/* scope=sensor · 温度 / 风扇 / 电压 / 频率（LHM + 系统计数器）          */
 /* ------------------------------------------------------------------ */
 
-// 三路数据，全部免安装：
-// 1) LHM 0.9.6 用户态部分（GPU 走 NVAPI）：DLL 随仓库分发，Add-Type 加载。
-//    CPU/主板传感器需要 PawnIO 内核驱动（LHM 0.9.5 起不再内置 WinRing0），
-//    零宿主安装约束下不提供——用降频信号（路 3）替代过热诊断。
-// 2) 热区：Thermal Zone Information 性能计数器，免管理员（MSAcpi WMI 反而要
-//    管理员，且数据同源，弃用）。温度开尔文，% Passive Limit < 100 表示
-//    该热区正在被动降热。
-// 3) 降频：% of Maximum Frequency 各核当前频率占最大频率百分比。
-//    低值 + 高负载 = 过热/功耗降频的直接信号。
+// LHM 读取 CPU、GPU、主板的可用传感器；CPU/主板的内核级读取依赖 PawnIO 与权限。
+// 热区和频率来自性能计数器；频率值为各逻辑核当前频率占最大频率的百分比。
 
 async function collectSensor(signal?: AbortSignal) {
 	signal?.throwIfAborted();
@@ -201,10 +194,7 @@ async function collectSensor(signal?: AbortSignal) {
 	}
 	const r = asRecord(await runPwsh(SENSOR_CMD, { timeoutMs: 30000, signal }));
 	if (r && typeof r.error === "string") return { error: r.error };
-	const hwList = Array.isArray(r.hardware) ? r.hardware.join(" / ") : "";
-	const pawnioFull = r.pawnio && r.admin ? "已检测到 PawnIO + 管理员，CPU/主板传感器已包含在 sensors 中。" : "";
-	// 计数器失败不静默：透出原因。无法区分"机器本来就没有"与"偶发失败"，
-	// 重试无判据，故不自动重试，让模型知情后自行决定。
+	// 保留实际采集错误，不根据权限或驱动检测结果推断已返回哪些传感器。
 	const cErr = asRecord(r.counterErrors ?? {});
 	const out: Record<string, unknown> = {
 		degraded: r.degraded,
@@ -220,13 +210,12 @@ async function collectSensor(signal?: AbortSignal) {
 	if (cErr.thermal || cErr.frequency) out.counterErrors = cErr;
 	out.notice =
 		collectionNotice(r) +
-		`sensors=LHM 可读传感器（GPU 等，免管理员）；thermalZones=主板热区（passivePct<100 表示该热区正在被动降热）；` +
-		`frequency=各核频率占最大频率百分比（minPctOfMax 低 + 负载高 = 过热/功耗降频的直接信号）。` +
-		`CPU 核心温度需内核驱动（PawnIO），零安装约束下不可得，用降频信号替代。${pawnioFull}` +
+		`sensors=LHM 读取到的 Temperature/Fan/Voltage 传感器，value 单位分别为 °C、RPM、V；过滤非有限值，最多返回 200 项。` +
+		`thermalZones=ACPI 热区，tempC 单位 °C，passivePct 为被动限制百分比；frequency=各逻辑核当前频率占最大频率的百分比。` +
+		`admin=当前管理员权限，pawnio=PawnIO 服务注册项检测结果。CPU/主板传感器读取依赖内核驱动、权限和硬件支持；本工具不安装驱动，可读项以 sensors 为准。` +
 		(cErr.thermal || cErr.frequency
-			? `注意：计数器部分读取失败（${[cErr.thermal, cErr.frequency].filter(Boolean).join("；")}），对应字段为空是读取失败，不代表机器没有热区/降频计数器。`
-			: "") +
-		(hwList ? `（硬件：${hwList}）` : "");
+			? `计数器读取失败：${[cErr.thermal, cErr.frequency].filter(Boolean).join("；")}。失败来源见 counterErrors，对应空值为采集缺失。`
+			: "");
 	return out;
 }
 
@@ -245,7 +234,7 @@ async function collectOverview(signal?: AbortSignal) {
 	if (r && typeof r.error === "string") return { error: r.error };
 	return {
 		...r,
-		notice: `${collectionNotice(r)}整机负载快照。mem=物理内存用量（usedPct>90 提示内存吃紧，可与 proc.byMem 对照找大户）；cpuTotalPct=整机 CPU 占用率（近 1 秒差分，可与 proc.byCpu 对照）；pagefile=页面文件分配/当前/峰值用量（usedMB 持续接近 allocMB 说明物理内存不足在靠页面文件撑）；pool=内核内存池（nonpaged 不可换出，持续异常增长多为驱动泄漏——内存高但进程榜单对不上大户时看这里）；machine=机型（vendor/model/cpu/bios，现场按机型匹配已知问题：散热缺陷、OEM 预装坑）；uptime=开机时长。`,
+		notice: `${collectionNotice(r)}整机负载快照。mem=物理内存用量，容量单位 MB、usedPct 单位 %；cpuTotalPct=整机 CPU 占用百分比（近 1 秒采样）；pagefile=页面文件分配/当前/峰值用量，单位 MB；pool=不可分页/分页内核内存池，单位 MB；machine=厂商/型号/CPU/BIOS；uptime=开机时间与运行时长。`,
 	};
 }
 
@@ -256,7 +245,7 @@ export default function registerSys(pi: ExtensionAPI) {
 		name: "sys",
 		label: "System Check",
 		description:
-			"只读系统检查工具，按 scope 选择子功能（不传默认 overview）：overview=整机负载快照（内存/CPU/页面文件/内存池/机型/开机时长）；proc=进程内存与 CPU 占用 Top N（含可执行文件路径）；io=每盘队列/吞吐 + 每进程 IO 速率 Top N（磁盘瓶颈定位）；gpu=每进程 GPU 利用率与显存排行（附适配器清单；有 NVIDIA 时附显卡状态，无 NVIDIA 时附核显/其他卡传感器）；sensor=温度/风扇/电压/降频信号（过热诊断）。详细指南与诊断交叉印证链见 skill「sys」。" +
+			"只读系统检查工具，按 scope 选择子功能（不传默认 overview）：overview=整机负载快照（内存/CPU/页面文件/内存池/机型/开机时长）；proc=进程内存与 CPU 占用 Top N（含可执行文件路径）；io=每盘队列/吞吐 + 每进程 IO 速率 Top N（磁盘与进程 IO 采样）；gpu=每进程 GPU 利用率与显存排行（附适配器清单；有 NVIDIA 时附显卡状态，无 NVIDIA 时附核显/其他卡传感器）；sensor=可读温度/风扇/电压、热区与频率百分比。字段与采集范围见 skill「sys」。" +
 			" 输出 JSON 最多 50 KiB，超限标注 outputTruncated；请缩小查询范围获取省略内容。",
 		promptSnippet:
 			"Query overall system load, running processes, disk IO, GPU load, and hardware sensors (read-only)",
@@ -266,7 +255,7 @@ export default function registerSys(pi: ExtensionAPI) {
 			"Use sys scope=proc when the user asks who is using memory/CPU or whether a process is hogging resources.",
 			"Use sys scope=io when the machine feels slow but CPU and memory look idle: shows per-disk busy/queue/read-write throughput and which processes are doing disk IO.",
 			"Use sys scope=gpu when the user asks about GPU load, VRAM usage, GPU temperature, or which graphics card the machine has (adapters list shows real and virtual display adapters).",
-			"Use sys scope=sensor when the user asks about temperatures, fans, voltages, or overheating (provides GPU sensors, thermal zones, and CPU throttling percentage; CPU core temps need a kernel driver and are unavailable).",
+			"Use sys scope=sensor to read available temperatures, fan speeds, voltages, thermal zones, and per-core frequency percentages. CPU/motherboard sensor availability depends on hardware, kernel drivers, and permissions; only returned readings are available.",
 		],
 		parameters: Type.Object({
 			scope: Type.Optional(StringEnum(["overview", "proc", "gpu", "sensor", "io"] as const)),

@@ -135,10 +135,8 @@ $d = Get-CimInstance Win32_PnPEntity ${wql ? `-Filter ${psString(wql)}` : ""} |
 /* 采集与收敛                                                           */
 /* ------------------------------------------------------------------ */
 
-/** 已知盲区（设计定稿，如实告知模型）：飞行模式/射频开关 WMI 读不到；
- *  网络打印机不走 PnP 枚举。设备全正常但功能异常时先排查这两处 */
-const NOTICE_BLINDSPOT =
-	"盲区：飞行模式/射频开关状态与网络打印机不在 WMI/CIM 能力内，设备全正常但功能异常时先排查这两处";
+/** 仅说明当前数据源未覆盖的状态。 */
+const NOTICE_BLINDSPOT = "采集范围不含飞行模式、射频开关状态和网络打印机。";
 
 export async function collectProblem(signal?: AbortSignal): Promise<CoreResult> {
 	signal?.throwIfAborted();
@@ -149,7 +147,7 @@ export async function collectProblem(signal?: AbortSignal): Promise<CoreResult> 
 		count: r.count ?? 0,
 		degraded: r.degraded,
 		collectionErrors: r.collectionErrors,
-		notice: `${collectionNotice(r)}errorCode 为 ConfigManagerErrorCode 原始值（0 = 正常），不翻译；hardwareIds（VEN/DEV）供联网定位驱动。${NOTICE_BLINDSPOT}`,
+		notice: `${collectionNotice(r)}errorCode 为 ConfigManagerErrorCode 原始值；hardwareIds 为设备硬件 ID。${NOTICE_BLINDSPOT}`,
 	};
 }
 
@@ -179,7 +177,7 @@ export async function collectCore(signal?: AbortSignal): Promise<CoreResult> {
 		drivers: r.drivers ?? [],
 		degraded: r.degraded,
 		collectionErrors: r.collectionErrors,
-		notice: `${collectionNotice(r)}services = bthserv / Audiosrv 状态（缺失 = 无该服务）；connStatus 为 NetConnectionStatus 原始值；drivers 表驱动是否过旧请联网比对最新版，工具不判断。${NOTICE_BLINDSPOT}`,
+		notice: `${collectionNotice(r)}services = 查询返回的 bthserv / Audiosrv 状态；connStatus 为 NetConnectionStatus 原始值；drivers = 已安装驱动的版本、日期和提供者。${NOTICE_BLINDSPOT}`,
 	};
 }
 

@@ -109,9 +109,8 @@ async function collectStartup(signal?: AbortSignal): Promise<Record<string, unkn
 			`开机自启盘点（只读）。regItems=注册表 Run/RunOnce 自启项（source=所在键，含 Wow6432Node；` +
 			`disabled=true 表示已在任务管理器禁用、不会开机拉起，共 ${disabledCount} 项）；` +
 			`startupFolders=启动文件夹（user=当前用户，allUsers=所有用户）；` +
-			`services=自启服务 StartMode=Auto（含延迟自启，共 ${svcCount} 个，Running 排前，path 超长截断）。` +
-			`诊断"开机慢/启动后卡"：优先看 disabled=false 的第三方 regItems 与 Running 的非系统路径服务；` +
-			`regItems.command 是实际执行的命令行，可定位到具体程序。`,
+			`services=自启服务 StartMode=Auto（含延迟自启，共 ${svcCount} 个，Running 排前，path 超长截断）；` +
+			`regItems.command 为注册表中的命令行。`,
 	};
 }
 
