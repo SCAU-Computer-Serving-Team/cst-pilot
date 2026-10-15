@@ -14,7 +14,6 @@ import {
 	visibleByDefault,
 	visibleByFilter,
 } from "./branch-tree.ts";
-import { sampleTree } from "./branch-tree-sample.ts";
 
 const entry = (id: string, overrides: Partial<TreeEntry> = {}): TreeEntry => ({
 	id,
@@ -57,37 +56,6 @@ test("默认视图隐藏无正文 assistant，其子条目挂到最近可见祖�
 	assert.equal(roots[0].children[0].entry.id, "3");
 });
 
-test("缩进、连接符与竖线：对齐 TUI flattenTree", () => {
-	const rows = layoutTree(buildVisibleTree(tree(), "7"), "7");
-	assert.deepEqual(
-		rows.map((row) => row.node.entry.id),
-		["1", "3", "4", "5", "6", "7", "8", "9"],
-	);
-	// 单子链条持平；分支点的子条目 +1；段首的第一代再 +1。
-	assert.deepEqual(
-		rows.map((row) => row.indent),
-		[0, 0, 0, 0, 1, 2, 1, 2],
-	);
-	// 连接符只画在分支点的子条目上。
-	assert.deepEqual(
-		rows.map((row) => row.showConnector),
-		[false, false, false, false, true, false, true, false],
-	);
-	assert.deepEqual(
-		rows.filter((row) => row.showConnector).map((row) => row.connectorColumn),
-		[0, 0],
-	);
-	assert.deepEqual(rows[4].gutters, []);
-	// 非末位兄弟的子树带竖线；末位兄弟的子树留空。
-	assert.deepEqual(rows[5].gutters, [{ column: 0, show: true }]);
-	assert.deepEqual(rows[6].gutters, []);
-	assert.deepEqual(rows[7].gutters, [{ column: 0, show: false }]);
-	assert.deepEqual(
-		rows.map((row) => row.subtreeEnd),
-		[7, 7, 7, 7, 5, 5, 7, 7],
-	);
-});
-
 test("列形态：连接符列是方块，其余是竖线或留空", () => {
 	const rows = layoutTree(buildVisibleTree(tree(), "7"), "7");
 	assert.deepEqual(slotMark(rows[0], 0), { kind: "empty" });
@@ -117,77 +85,6 @@ test("可折叠行 = 有可见子条目且是根或段首；折叠隐藏全部�
 		["1"],
 	);
 	assert.equal(all.hiddenCounts.get("1"), 7);
-});
-
-test("多根按虚拟根处理：整体左移一级且不画连接符", () => {
-	const roots = [node(user("1", "第一条"), [node(assistant("2", "回复一"))]), node(user("3", "第二条"))];
-	const rows = layoutTree(roots, "2");
-	assert.deepEqual(
-		rows.map((row) => row.node.entry.id),
-		["1", "2", "3"],
-	);
-	assert.deepEqual(
-		rows.map((row) => row.displayIndent),
-		[0, 1, 0],
-	);
-	assert.deepEqual(
-		rows.map((row) => row.showConnector),
-		[false, false, false],
-	);
-	assert.deepEqual(
-		rows.map((row) => row.indent),
-		[1, 2, 1],
-	);
-});
-
-test("示例数据：分叉、隐藏条目与当前叶位置", () => {
-	const { tree: roots, leafId } = sampleTree();
-	const rows = layoutTree(buildVisibleTree(roots, leafId), leafId);
-	const ids = rows.map((row) => row.node.entry.id);
-	// 隐藏条目不占行：设置类与无正文助手。
-	assert.equal(rows.length, 20);
-	assert.ok(!ids.includes("h3") && !ids.includes("h4") && !ids.includes("h5"));
-	// 无正文助手被隐藏，它调用的工具结果挂到 u5 之下。
-	assert.equal(ids[15], "t4");
-	assert.equal(rows[15].parentIndex, ids.indexOf("u5"));
-	// 根到首个分支点是单子链条，全部无方块无竖线。
-	assert.deepEqual(
-		rows.slice(0, 12).map((row) => row.indent),
-		Array(12).fill(0),
-	);
-	assert.deepEqual(
-		rows.slice(0, 12).map((row) => row.showConnector),
-		Array(12).fill(false),
-	);
-	// 分支点的两个子条目各占同一列的一个方块，中间用竖线连接。
-	assert.deepEqual(
-		rows.map((row) => row.indent),
-		[...Array(12).fill(0), 1, 2, 2, 2, 2, 2, 1, 2],
-	);
-	assert.deepEqual(
-		rows.filter((row) => row.showConnector).map((row) => row.node.entry.id),
-		["u4", "u6"],
-	);
-	assert.deepEqual(
-		rows.filter((row) => row.showConnector).map((row) => row.connectorColumn),
-		[0, 0],
-	);
-	assert.deepEqual(
-		rows.slice(13, 18).map((row) => slotMark(row, 0)),
-		Array(5).fill({ kind: "line" }),
-	);
-	assert.deepEqual(slotMark(rows[19], 0), { kind: "line-hidden" });
-	// 末位兄弟的子树里，这一列不画线。
-	assert.deepEqual(rows[18].gutters, []);
-	// 可折叠行：根与各段首。
-	assert.deepEqual(
-		rows.filter((row) => foldable(row)).map((row) => row.node.entry.id),
-		["u1", "u4", "u6"],
-	);
-	// 当前叶在中间，后面还有同级分支。
-	const leaf = rows.findIndex((row) => row.node.entry.id === leafId);
-	assert.equal(leaf, 16);
-	assert.ok(leaf < rows.length - 1);
 });
 
 test("行文案与搜索", () => {

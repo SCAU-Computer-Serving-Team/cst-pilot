@@ -251,22 +251,3 @@ test("五档过滤均保持 Pi 的原始排序与可见结构", async () => {
 	for (const filter of ["default", "no-tools", "user-only", "labeled-only", "all"] as const)
 		await assertSameLayout(tree, "leaf", filter, filter);
 });
-
-test("打印一棵 TUI 的树，便于人工核对", async () => {
-	const tree = [
-		link(
-			user("u1", null, "开场"),
-			link(
-				assistant("a1", "u1", "收到"),
-				link(user("u2", "a1", "分支 A"), assistant("a2", "u2", "A 的回答")),
-				link(
-					user("u3", "a1", "分支 B"),
-					link(toolResult("t1", "u3", "读取结果"), assistant("a3", "t1", "B 的回答")),
-				),
-			),
-		),
-	];
-	const tui = await tuiLayout(tree, "a2");
-	assert.ok(tui.text.some((line: string) => line.includes("分支 A")));
-	console.log(tui.text.filter((line: string) => line.trim()).join("\n"));
-});

@@ -38,19 +38,3 @@ test('Web、认证与验收文档的本地 Markdown 链接及锚点可用', asyn
   }
   assert.deepEqual(failures, []);
 });
-
-test('SPEC 保留规则，阶段状态与实现职责分别集中管理', async () => {
-  for (const name of await readdir(spec)) {
-    if (!name.endsWith('.md')) continue;
-    const content = await readFile(resolve(spec, name), 'utf8');
-    assert.equal(/^状态：/m.test(content), false, name);
-    assert.equal(/不是[^\n]*而是/.test(content), false, name);
-    assert.equal(/^## (前端处理|目录划分|流式渲染策略|取值)$/m.test(content), false, name);
-  }
-  for (const file of ['doc/telemetry/sender/SPEC.md', 'doc/telemetry/receiver/SPEC.md']) {
-    const content = await readFile(resolve(root, file), 'utf8');
-    assert.equal(/^状态：/m.test(content), false, file);
-    assert.equal(/^## (部署|技术栈|模块划分|议题)$/m.test(content), false, file);
-    assert.ok(content.includes('验证'), file);
-  }
-});

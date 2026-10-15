@@ -29,7 +29,7 @@ python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 | 前端格式与规则 | `npm run lint --prefix src/web/frontend` | biome 检查，规则与配置在仓库根 `biome.json` |
 | 前端类型 | `npm run typecheck --prefix src/web/frontend` | react-router 类型生成加 `tsc` |
 | 前端测试 | `npm run test --prefix src/web/frontend` | 工具卡片映射、分支树与流式渲染的纯函数测试 |
-| 画布与设计约束 | `node --test src/test/*.test.mjs` | 颜色、节点 ID、配置页布局与动效令牌 |
+| 工具与文档约束 | `node --test src/test/*.test.mjs` | 诊断工具、凭据边界、画布颜色与节点完整性、本地文档链接 |
 | 前端构建 | `npm run build --prefix src/web/frontend` | 产物写入 `agent/home/extensions/web/static/` |
 | 分发字体 | `npm run test:fonts --prefix src/web/frontend` | 构建后检查覆盖、hash、回退与体积 |
 | 端到端验收 | `npm run test:web:e2e --prefix agent` | 先构建；真实浏览器、HTTP、Pi、持久化与重启，链路见[验收设计](doc/test/web-e2e.md) |

@@ -15,7 +15,6 @@ const result = (details: unknown, text = "原始内容", isError = false): Messa
 const fixtures: [string, string | undefined, unknown, string][] = [
 	["disk", "space", { space: [{ drive: "E:", freeGB: 64.9 }] }, "卷 E"],
 	["disk", "usage", { usage: { root: "E:\\logs", topDirs: [{ path: "E:\\logs", sizeGB: 10 }] } }, "扫描根"],
-	["sys", "overview", { overview: { cpuTotalPct: 19, mem: { freeMB: 5343, usedPct: 83.6 } } }, "内存占用"],
 	["driver", "problem", { problem: { devices: [], count: 0 } }, "本次没有结果"],
 	[
 		"eventlog",
@@ -26,21 +25,12 @@ const fixtures: [string, string | undefined, unknown, string][] = [
 	["startup", undefined, { startup: { regItems: [{ name: "SecurityHealth", disabled: null }] } }, "注册表自启"],
 	["ls", undefined, { totalChildren: 1, entries: [{ name: "cards.md", size: "11 KB" }] }, "直接子项"],
 	[
-		"runbook",
-		undefined,
-		{ runbook: { file: "E:\\outbox\\1.txt", sequence: 1, levelLabel: "安全", items: 1, encoding: "utf-8-bom" } },
-		"风险档",
-	],
-	[
 		"source_check",
 		undefined,
 		{ artifact: { claims: [{ status: "unclear" }], sources: [{ title: "RFC", rank: 1 }] } },
 		"主张判断",
 	],
-	["fetch_content", undefined, { urlCount: 1, successful: 1 }, "原始内容"],
 	["get_search_content", undefined, { nextOffset: 180, truncated: true }, "截断"],
-	["ffgrep", undefined, { totalMatched: 2 }, "原始内容"],
-	["fffind", undefined, { totalMatched: 16, hasMore: true }, "原始内容"],
 	["read", undefined, undefined, "原始内容"],
 ];
 

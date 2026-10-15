@@ -82,16 +82,10 @@ jobs:
             ${{ runner.temp }}/**/ui-regressions/report.json
             ${{ runner.temp }}/**/shared-configuration-e2e/*.png
             ${{ runner.temp }}/**/shared-configuration-e2e/report.json
-            ${{ runner.temp }}/**/page-motion/**/*.png
-            ${{ runner.temp }}/**/page-motion/report.json
-            ${{ runner.temp }}/**/page-sequence/**/*.png
-            ${{ runner.temp }}/**/page-sequence/**/*.json
             ${{ runner.temp }}/**/login-navigation/**/*.png
             ${{ runner.temp }}/**/login-navigation/report.json
-            ${{ runner.temp }}/**/page-motion/curve-timing.json
             ${{ runner.temp }}/**/cwd-completion/*.png
             ${{ runner.temp }}/**/error-states/*.png
-            ${{ runner.temp }}/**/page-motion/natural-direction-timing.json
             ${{ runner.temp }}/**/first-turn-status/*.png
             ${{ runner.temp }}/**/first-turn-status/report.json
             ${{ runner.temp }}/**/first-turn-status/first-observation.json
@@ -102,7 +96,5 @@ jobs:
             ${{ runner.temp }}/**/session-management/report.json
             ${{ runner.temp }}/**/session-group-motion/*.png
             ${{ runner.temp }}/**/session-group-motion/report.json
-            ${{ runner.temp }}/**/context-meter/*.png
-            ${{ runner.temp }}/**/context-meter/chat-*.json
           if-no-files-found: ignore
           retention-days: 7

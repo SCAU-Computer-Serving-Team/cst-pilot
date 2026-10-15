@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { checkReleaseContent, checkReleaseTree, REQUIRED_RELEASE_FILES } from '../release-checks.mjs';
-import { RELEASE_TELEMETRY, RELEASE_WEB_SEARCH } from '../release-settings.mjs';
+import { RELEASE_SETTINGS, RELEASE_TELEMETRY, RELEASE_WEB_SEARCH } from '../release-settings.mjs';
 
 test('Web backend tests are rejected from release trees', () => {
   assert.throws(
@@ -77,7 +77,11 @@ test('a release without its generated TUN policy is rejected',()=>{
   try{fs.rmSync(path.join(root,'agent/home/web-search.json'));assert.throws(()=>checkReleaseContent(root,filesOf(root)),/缺少必需文件.*web-search/);}finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 
-test('发行遥测配置固定双端，CA 文件缺失时拒绝发行', () => {
+test('发行默认开启项目遥测并关闭 Pi 遥测，固定双端且必需 CA', () => {
+  assert.equal(RELEASE_SETTINGS.enableInstallTelemetry, false);
+  assert.equal(RELEASE_TELEMETRY.enabled, true);
+  assert.equal(RELEASE_TELEMETRY.endpoints.length, 2);
+  assert.equal(RELEASE_TELEMETRY.authProvider, 'cstoa');
   const root=makeTree(), file='agent/home/telemetry.json';
   try {
     fs.writeFileSync(path.join(root,file), JSON.stringify(RELEASE_TELEMETRY));
