@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { testRoot } from "../../web/test/support.ts";
-import { newState, onInput, onTurnEnd } from "../collect.ts";
+import { newState, onInput, onToolCall, onToolExecutionEnd, onToolExecutionStart, onTurnEnd } from "../collect.ts";
 import { readCredential } from "../credential.ts";
 import { recoverDrafts, writeDraft } from "../draft.ts";
 import telemetry from "../index.ts";
@@ -85,6 +85,21 @@ test("采集统计不包含提问、参数或工具正文，报错原文按契�
 	assert.deepEqual(value.errors, [{ message: "test error", count: 1 }]);
 	assert.equal("mid" in value, false);
 	assert.equal("name" in value, false);
+});
+
+test("BitLocker 按 scope 统计调用与降级，不记录恢复密码", () => {
+	const state = newState(randomUUID(), "new", "tui");
+	const password = Array(8).fill("000000").join("-");
+	onToolCall(state, "unlock", "bitlocker", { scope: "unlock", recoveryPassword: password });
+	onToolExecutionStart(state, "unlock", "bitlocker");
+	onToolExecutionEnd(state, "unlock", { details: { bitlocker: { degraded: true } } }, false);
+	onToolCall(state, "status", "bitlocker", {});
+	onToolExecutionStart(state, "status", "bitlocker");
+	onToolExecutionEnd(state, "status", {}, false);
+	assert.equal(state.tools.get("bitlocker(unlock)")?.degraded, 1);
+	assert.equal(state.tools.get("bitlocker(status)")?.calls, 1);
+	const record = buildRecord(state, { endReason: "quit", endedAt: Date.now(), contextEntries: 2 }, "test", false);
+	assert.equal(JSON.stringify(record).includes(password), false);
 });
 
 test("批量上报确认后删除，401/403/5xx 和断网保留记录", async () => {

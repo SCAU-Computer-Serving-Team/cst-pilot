@@ -8,7 +8,7 @@ import { errorMessage, ROOT_DIR } from "./runtime.ts";
 /**
  * runbook - 命令交付工具（cst-pilot 定制）
  *
- * 诊断只读，修复动作只能由队员手动执行。本工具把待执行的命令写成 txt，
+ * 本工具只交付需由队员手动执行的修复命令，把待执行的命令写成 txt，
  * 落在工具包 outbox\<日期>\ 下，队员打开文件逐条复制，不必从聊天记录里翻找。
  *
  * 边界：

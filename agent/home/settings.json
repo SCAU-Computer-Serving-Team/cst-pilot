@@ -14,9 +14,8 @@
     "npm:pi-open-tui@0.2.10",
     "npm:pi-web-access@0.18.0"
   ],
-  "theme": "light",
+  "theme": "light/dark",
   "enabledModels": [
-    "opencode-go/deepseek-v4.1-flash",
-    "kimi-coding/kimi-for-coding"
+    "opencode-go/deepseek-v4.1-flash"
   ]
 }

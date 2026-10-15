@@ -110,7 +110,12 @@ export function newState(sessionId: string, reason: string, channel: "tui" | "we
 }
 
 /** 无 scope 工具省略；有 scope 的工具省略入参时按各自默认值记录。 */
-const DEFAULT_SCOPES: Record<string, string> = { sys: "overview", driver: "problem", eventlog: "recent" };
+const DEFAULT_SCOPES: Record<string, string> = {
+	sys: "overview",
+	driver: "problem",
+	eventlog: "recent",
+	bitlocker: "status",
+};
 
 function scopeOf(toolName: string, input: unknown): string | undefined {
 	if (toolName in DEFAULT_SCOPES || toolName === "disk") {
@@ -145,8 +150,8 @@ function readTruncated(result: unknown): boolean {
 function readDegraded(toolName: string, scope: string | undefined, result: unknown): boolean {
 	const details = (result as { details?: Record<string, unknown> } | undefined)?.details;
 	if (details === undefined || typeof details !== "object") return false;
-	if (toolName === "startup") {
-		return (details.startup as { degraded?: unknown } | undefined)?.degraded === true;
+	if (toolName === "startup" || toolName === "bitlocker") {
+		return (details[toolName] as { degraded?: unknown } | undefined)?.degraded === true;
 	}
 	if (toolName === "disk") {
 		if ((details as { degraded?: unknown }).degraded === true) return true;

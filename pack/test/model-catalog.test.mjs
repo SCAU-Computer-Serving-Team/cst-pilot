@@ -3,8 +3,8 @@ import { test } from "node:test";
 import { goFlash, supplementGoFlash } from "../model-catalog.mjs";
 import { RELEASE_SETTINGS } from "../release-settings.mjs";
 
-test("portable startup selects the light theme and the Go Flash default", () => {
-  assert.equal(RELEASE_SETTINGS.theme, "light");
+test("portable startup follows terminal appearance and selects the Go Flash default", () => {
+  assert.equal(RELEASE_SETTINGS.theme, "light/dark");
   assert.equal(RELEASE_SETTINGS.defaultProvider, "opencode-go");
   assert.equal(RELEASE_SETTINGS.defaultModel, "deepseek-v4.1-flash");
   assert.equal(RELEASE_SETTINGS.defaultModel, goFlash.id);

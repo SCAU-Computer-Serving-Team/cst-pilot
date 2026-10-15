@@ -1,17 +1,17 @@
 # 工具文档
 
-本目录说明七个注册工具的调用方式、返回字段和限制。设计理由见 [design](../design/tool/sys-design.md)，验证方法见 [测试指南](../test/README.md)。
+本目录说明八个注册工具的调用方式、返回字段和限制。设计理由见 [design](../design/tool/sys-design.md)，验证方法见 [测试指南](../test/README.md)。
 
 ## 分类
 
-现有 7 个注册工具，6 个查询类，1 个执行类。
+现有 8 个注册工具，6 个查询类，2 个执行类。bitlocker 含只读 status 和执行类 unlock、decrypt，工具整体归入执行类。
 
 1. 查询类：只读，不改注册表、设备状态、系统配置和用户文件。
 2. 执行类：调用会改动上述状态。
 
 分类只用于文档组织。pi 的工具注册没有分类字段，模型看到的工具仍然是一份平铺清单。新增工具按上述判据归类：会写注册表、启停服务、改动设备状态或改删文件的属于执行类。
 
-执行类目前只有 runbook：它写文件，但只写工具包自身的 `outbox\`，不碰机主系统。
+runbook 只在工具包 `outbox\` 写清单。bitlocker 的 unlock、decrypt 会改变卷状态，通过 TUI 或 Web 本地输入或确认后执行。
 
 ## 工具一览
 
@@ -22,12 +22,13 @@
 5. 崩溃、蓝屏、服务与登录历史：[eventlog](eventlog.md)，`recent`、`boot`、`crash`、`service`、`disk`、`security`、`query`、`detail`，实现 [eventlog-core.ts](../../agent/home/extensions/diagnostics/eventlog-core.ts)
 6. 设备识别与驱动状态：[driver](driver.md)，`problem`、`core`、`external`、`find`，实现 [driver-core.ts](../../agent/home/extensions/diagnostics/driver-core.ts)
 7. 让队员手动执行修复命令：[runbook](runbook.md)，必填 `title`、`level`、`items`，可选 `sequence`，实现 [runbook.ts](../../agent/home/extensions/diagnostics/runbook.ts)
-8. 维护共享目录大小缓存：[wz-index](wz-index.md)（内部模块），无子功能、不注册为工具，实现 [wz-index.ts](../../agent/home/extensions/diagnostics/wz-index.ts)
+8. BitLocker 状态、解锁与完整解密：[bitlocker](bitlocker.md)，`status`、`unlock`、`decrypt`，实现 [bitlocker.ts](../../agent/home/extensions/diagnostics/bitlocker.ts)
+9. 维护共享目录大小缓存：[wz-index](wz-index.md)（内部模块），无子功能、不注册为工具，实现 [wz-index.ts](../../agent/home/extensions/diagnostics/wz-index.ts)
 
 ## 使用约定
 
 - 支持范围为 Windows 10/11 x64；裁剪系统、PE 和特殊介质的可用性需单独验证。
-- 工具不改注册表、设备状态或系统配置。存储扫描会在 `wiztree/tmp` 写入临时 CSV，并在结束时尝试清理；目录大小缓存保存在进程内。
+- 诊断查询不改注册表、设备状态或系统配置。bitlocker 的执行 scope 例外，权限与确认见对应页面。存储扫描会在 `wiztree/tmp` 写入临时 CSV，并在结束时尝试清理；目录大小缓存保存在进程内。
 - runbook 是唯一生成交付文件的工具，只在工具包 `outbox\` 写 txt 清单；扫描临时文件按上一条处理。
 - 文档中的 `工具名({...})` 是工具调用示意，不是可直接粘贴到 PowerShell 的命令。
 - 多功能工具用 `scope` 选择子功能；`ls`、`startup` 不使用 scope。默认值和必填参数见对应页面。
@@ -51,6 +52,8 @@
 4. `counterErrors` / `smartErrors`：对应数据源的具体错误。
 5. `null` / 空数组：结合错误字段判断；不能一律解释为正常、无设备或零用量。
 
+工具固定说明只描述字段含义、数据来源、单位、采样口径，以及权限、截断和采集缺失等限制。固定说明不提供故障结论、诊断阈值或排查建议，不根据权限或驱动检测结果推断已返回的数据。
+
 整次查询无法完成时，execute 抛错，由 pi 标记 `isError`；失败原因仍写入给模型的错误文本。可用数据伴随部分数据源失败时，保留成功结果及 `degraded`、`notice` 等说明，不将正常空清单当成失败。
 
 模型 JSON 输出最多 50 KiB。超限时先裁剪列表和字符串，再序列化，保留合法 JSON；`outputTruncated`、`originalBytes` 和 `outputNotice` 说明本次裁剪。统计总数仍对应原查询，需缩小查询范围获取省略内容。完整采集结果保存在 details，仅用于渲染，不自动落盘。
@@ -72,11 +75,12 @@ Windows 原生数据通过仓库自带的 `pwsh/pwsh.exe` 采集，使用 `-NoPr
 
 ## 维护
 
-`agent/home/extensions/diagnostics/index.ts` 是唯一扩展入口，按 pi 的多文件扩展约定注册七个工具。辅助模块只导出实际使用的函数和类型。入口创建共享目录索引并传给 disk、ls，每次重新加载入口都会建立新状态，见 [wz-index](wz-index.md)。
+`agent/home/extensions/diagnostics/index.ts` 是唯一扩展入口，按 pi 的多文件扩展约定注册八个工具。辅助模块只导出实际使用的函数和类型。入口创建共享目录索引并传给 disk、ls，每次重新加载入口都会建立新状态，见 [wz-index](wz-index.md)。
 
 - `disk.ts`、`driver.ts`、`eventlog.ts`：工具注册和参数 schema；对应 core 文件负责采集与路由。
 - `sys.ts`：工具注册与采集；`sys-commands.ts`：PowerShell 查询模板。
 - `startup.ts`、`ls.ts`、`runbook.ts`：较小的独立工具模块。
+- `bitlocker.ts`：注册、提示词与脱敏渲染；core 负责逐卷路由，windows/commands 负责标准输入传参及 Windows 接口，tui/web/credentials 负责双端本地交互与凭据生命周期。
 - `runtime.ts`：便携程序路径、子进程、解码与 JSON 边界；`pwsh-data.ts`：PowerShell 数据表达式和采集包装。
 - `result.ts`：模型输出体积限制与整次失败上报；`driver-data.ts`：设备结果 schema 和运行时校验。
 

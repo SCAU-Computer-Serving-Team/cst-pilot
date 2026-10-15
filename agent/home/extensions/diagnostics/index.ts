@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import registerBitLocker from "./bitlocker.ts";
 import registerDisk from "./disk.ts";
 import registerDriver from "./driver.ts";
 import registerEventlog from "./eventlog.ts";
@@ -8,9 +9,10 @@ import registerStartup from "./startup.ts";
 import registerSys from "./sys.ts";
 import { createVolumeIndex } from "./wz-index.ts";
 
-/** One loader instance owns all seven tools and their shared in-memory index. */
+/** One loader instance owns the tools and their shared in-memory index. */
 export default function diagnostics(pi: ExtensionAPI): void {
 	const volumeIndex = createVolumeIndex();
+	registerBitLocker(pi);
 	registerDisk(pi, volumeIndex);
 	registerDriver(pi);
 	registerEventlog(pi);
