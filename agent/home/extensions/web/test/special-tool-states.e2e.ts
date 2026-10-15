@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import type { BitLockerVolume } from "../../diagnostics/bitlocker-data.ts";
 import { bitLockerWebInteractions } from "../../diagnostics/bitlocker-web.ts";
 import { createWebApi } from "../server/api.ts";
@@ -230,7 +231,7 @@ test("特殊工具全状态：宽度、字号、浅深主题、详情、复制�
 		origin = `http://127.0.0.1:${port}`,
 		api = createWebApi(pool, home, port),
 		server = createWebServer(
-			"E:/Learning/Programming/cst-pilot/agent/home/extensions/web/static",
+			fileURLToPath(new URL("../static/", import.meta.url)),
 			port,
 			() => ({ sessions: pool.snapshot(), stage: "test" }),
 			api,

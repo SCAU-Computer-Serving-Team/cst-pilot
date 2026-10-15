@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { createWebApi } from "../server/api.ts";
 import { createWebServer, listenWebServer } from "../server/http.ts";
 import { WebSessionPool } from "../server/session/sessions.ts";
@@ -93,7 +94,7 @@ test("长思考与特殊工具之后，正文逐段显示，不等待重连集�
 		port = await freePort();
 	const api = createWebApi(pool, home, port),
 		server = createWebServer(
-			"E:/Learning/Programming/cst-pilot/agent/home/extensions/web/static",
+			fileURLToPath(new URL("../static/", import.meta.url)),
 			port,
 			() => ({ sessions: pool.snapshot(), stage: "test" }),
 			api,
