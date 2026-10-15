@@ -3,27 +3,40 @@ import { appendFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
+import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import { resolveModelScopeWithDiagnostics } from "@earendil-works/pi-coding-agent";
+import {
+	BitLockerExpiredError,
+	BitLockerInputError,
+	bitLockerWebInteractions,
+} from "../../diagnostics/bitlocker-web.ts";
 import { SessionOwnerConflict } from "../../runtime/owner.ts";
 import { CstoaAccount } from "./api/account.ts";
 import { createAuthRoutes } from "./api/auth.ts";
 import { listProjectFiles } from "./api/project-files.ts";
 import { getProviderQuota } from "./api/quota.ts";
+import { openDeliveredRunbook, RunbookOpenError } from "./api/runbook.ts";
 import { type ImageRef, ImageStore } from "./session/attachments.ts";
+import { browserJson } from "./session/browser-json.ts";
 import { SessionEvents } from "./session/events.ts";
 import { type Delivery, InboxConflict, SessionInbox } from "./session/inbox.ts";
 import { MutationReceipts } from "./session/receipts.ts";
 import type { WebSessionPool } from "./session/sessions.ts";
 import { WebSettings, type WebTheme } from "./session/web-settings.ts";
 
-function send(response: ServerResponse, status: number, body: unknown): void {
+function send(
+	response: ServerResponse,
+	status: number,
+	body: unknown,
+	serialize: (value: unknown) => string = JSON.stringify,
+): void {
 	// Connection close：短响应用完即断，避免与 SSE 长连接争抢浏览器每域 6 连接限制（同 http.ts）。
 	response.writeHead(status, {
 		"Content-Type": "application/json; charset=utf-8",
 		"Cache-Control": "no-store",
 		Connection: "close",
 	});
-	response.end(JSON.stringify(body));
+	response.end(serialize(body));
 }
 function problem(response: ServerResponse, status: number, code: string, message: string): void {
 	send(response, status, { error: { code, message } });
@@ -54,7 +67,13 @@ function accessLog(line: string): void {
 }
 
 /** A deliberately narrow first API slice: unsupported operations remain 404. */
-export function createWebApi(pool: WebSessionPool, agentDir: string, port: number, shutdown?: () => void) {
+export function createWebApi(
+	pool: WebSessionPool,
+	agentDir: string,
+	port: number,
+	shutdown?: () => void,
+	options: { openRunbook?: (file: string) => Promise<void> } = {},
+) {
 	let stopping = false;
 	let exitTask: Promise<void> | undefined;
 	let shutdownScheduled = false;
@@ -127,6 +146,15 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 			const stream = new SessionEvents(slot.session);
 			streams.set(id, stream);
 			slot.ui.onChange((questions) => stream.publish("session", { type: "ui_requests", questions }));
+			const bitlocker = bitLockerWebInteractions.get(id);
+			bitlocker?.onChange(() =>
+				stream.publish("session", {
+					type: "bitlocker_requests_changed",
+					requests: bitlocker.snapshot(),
+					revision: bitlocker.revision,
+					epoch: bitlocker.epoch,
+				}),
+			);
 			slot.session.subscribe((event) => {
 				if (event.type === "agent_end" && slot.session.model?.provider === "cstoa") {
 					account.invalidate();
@@ -517,34 +545,111 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 				return true;
 			}
 			const [, id, suffix = ""] = match;
+			if (suffix === "runbook/open" && method === "POST") {
+				const input = await body(request, 4096);
+				if (
+					typeof input.entryId !== "string" ||
+					typeof input.toolCallId !== "string" ||
+					Object.keys(input).length !== 2
+				)
+					throw new Error("请求须指定清单交付记录");
+				const result = await writeOnce(request, pathname, input, async () => {
+					const slot = await pool.openSaved(id);
+					const branch = slot.session.sessionManager.getBranch();
+					const index = branch.findIndex((entry) => entry.id === input.entryId);
+					const entry = branch[index];
+					if (!entry || entry.type !== "message" || entry.message.role !== "assistant")
+						throw new Error("请求对应的清单调用不存在");
+					const call = entry.message.content.find(
+						(part) => part.type === "toolCall" && part.id === input.toolCallId && part.name === "runbook",
+					);
+					if (!call) throw new Error("请求对应的清单调用不存在");
+					let delivered: ToolResultMessage | undefined;
+					for (const candidate of branch.slice(index + 1)) {
+						if (candidate.type !== "message") continue;
+						if (candidate.message.role === "assistant" || candidate.message.role === "user") break;
+						if (
+							candidate.message.role === "toolResult" &&
+							candidate.message.toolCallId === input.toolCallId &&
+							candidate.message.toolName === "runbook"
+						) {
+							delivered = candidate.message;
+							break;
+						}
+					}
+					const early = slot.execution.resultFor(entry.message.timestamp, input.toolCallId as string);
+					if (!delivered && early?.role === "toolResult" && early.toolName === "runbook") delivered = early;
+					const details = delivered?.details as { runbook?: { file?: unknown } } | undefined;
+					const file = !delivered?.isError ? details?.runbook?.file : undefined;
+					if (typeof file !== "string") throw new Error("请求对应的清单尚未交付或已失效");
+					await (options.openRunbook ?? openDeliveredRunbook)(file);
+					return { launched: true };
+				});
+				send(response, 200, result);
+				return true;
+			}
+			if (suffix === "bitlocker" && method === "GET") {
+				await pool.openSaved(id);
+				const channel = bitLockerWebInteractions.get(id);
+				send(response, 200, {
+					requests: channel?.snapshot() ?? [],
+					revision: channel?.revision ?? 0,
+					epoch: channel?.epoch,
+				});
+				return true;
+			}
+			if (/^bitlocker\/[a-zA-Z0-9-]+$/.test(suffix) && method === "POST") {
+				await pool.openSaved(id);
+				const input = await body(request, 4096);
+				const channel = bitLockerWebInteractions.get(id);
+				if (!channel) throw new BitLockerExpiredError("请求已处理或失效");
+				// 凭据不进入持久化去重记录；requestId 在内存中只消费一次。
+				channel.respond(suffix.slice("bitlocker/".length), input);
+				send(response, 200, { answered: true });
+				return true;
+			}
 			if (suffix === "" && method === "GET") {
 				const slot = await pool.openSaved(id);
-				send(response, 200, {
-					id,
-					messages: slot.session.messages.map((message) => slot.execution.decorate(message)),
-					entries: slot.session.sessionManager
-						.getBranch()
-						// 分支总结条目的 type 是 branch_summary，得单独转成前端认识的消息，否则正文里看不到它。
-						.filter((entry) => entry.type === "message" || entry.type === "branch_summary")
-						.map((entry) =>
-							entry.type === "branch_summary"
-								? {
-										id: entry.id,
-										message: {
-											role: "branchSummary",
+				send(
+					response,
+					200,
+					{
+						id,
+						bitlocker: {
+							requests: bitLockerWebInteractions.get(id)?.snapshot() ?? [],
+							revision: bitLockerWebInteractions.get(id)?.revision ?? 0,
+							epoch: bitLockerWebInteractions.get(id)?.epoch,
+						},
+						messages: slot.session.messages.map((message) => slot.execution.decorate(message)),
+						entries: slot.session.sessionManager
+							.getBranch()
+							// 分支总结条目的 type 是 branch_summary，得单独转成前端认识的消息，否则正文里看不到它。
+							.filter((entry) => entry.type === "message" || entry.type === "branch_summary")
+							.map((entry) =>
+								entry.type === "branch_summary"
+									? {
+											id: entry.id,
+											message: {
+												role: "branchSummary",
+												parentId: entry.parentId,
+												summary: entry.summary,
+												fromId: entry.fromId,
+												timestamp: new Date(entry.timestamp).getTime(),
+											},
+										}
+									: {
+											id: entry.id,
 											parentId: entry.parentId,
-											summary: entry.summary,
-											fromId: entry.fromId,
-											timestamp: new Date(entry.timestamp).getTime(),
+											message: slot.execution.decorate(entry.message),
 										},
-									}
-								: { id: entry.id, parentId: entry.parentId, message: slot.execution.decorate(entry.message) },
-						),
-					running: slot.session.isStreaming,
-					contextUsage: slot.session.getSessionStats().contextUsage ?? null,
-					queue: await (await inbox(id)).snapshot(),
-					ui: slot.ui.snapshot(),
-				});
+							),
+						running: slot.session.isStreaming,
+						contextUsage: slot.session.getSessionStats().contextUsage ?? null,
+						queue: await (await inbox(id)).snapshot(),
+						ui: slot.ui.snapshot(),
+					},
+					browserJson,
+				);
 				return true;
 			}
 			if (suffix === "" && method === "DELETE") {
@@ -819,7 +924,11 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 			problem(response, 404, "not_found", "接口不存在");
 		} catch (error) {
 			const diskCode = (error as NodeJS.ErrnoException).code;
-			if (diskCode === "ENOSPC") problem(response, 507, "storage_full", "工具包存储空间不足，输入未被接受");
+			if (error instanceof RunbookOpenError) problem(response, error.status, error.code, error.message);
+			else if (error instanceof BitLockerInputError)
+				problem(response, 400, "invalid_bitlocker_input", error.message);
+			else if (error instanceof BitLockerExpiredError) problem(response, 409, "expired_request", error.message);
+			else if (diskCode === "ENOSPC") problem(response, 507, "storage_full", "工具包存储空间不足，输入未被接受");
 			else if (["EACCES", "EPERM", "EROFS", "ENOTDIR", "EEXIST"].includes(diskCode ?? ""))
 				problem(response, 500, "storage_unavailable", "工具包目录无法写入，输入未被接受");
 			else if (error instanceof Error && /Nothing to compact|Already compacted/.test(error.message))
@@ -834,10 +943,8 @@ export function createWebApi(pool: WebSessionPool, agentDir: string, port: numbe
 					error instanceof Error ? error.message : "该会话正由另一端使用，请先关闭持有该会话的程序。",
 				);
 			else if (error instanceof InboxConflict) problem(response, 409, "conflict", error.message);
-			else if (
-				error instanceof SyntaxError ||
-				(error instanceof Error && /^(请求|消息|队列|缺少|操作|提交|图片|回答|选项)/.test(error.message))
-			) {
+			else if (error instanceof SyntaxError) problem(response, 400, "invalid_json", "请求须为有效 JSON");
+			else if (error instanceof Error && /^(请求|消息|队列|缺少|操作|提交|图片|回答|选项)/.test(error.message)) {
 				problem(response, 400, "invalid_request", error.message);
 			} else if (error instanceof Error && /会话已删除/.test(error.message))
 				problem(response, 409, "conflict", "创建请求对应的会话已删除");

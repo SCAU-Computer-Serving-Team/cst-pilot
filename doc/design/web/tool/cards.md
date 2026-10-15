@@ -1,6 +1,6 @@
 # 工具调用卡片：数据到组件
 
-本文定义一套可推广到全部工具的卡片组织方式。行为与折叠层级以[诊断卡片](../../../web/SPEC/diagnostic-cards.md)和[聊天工作台](../../../web/SPEC/chat-workspace.md#工具调用的折叠)为准；颜色、字体与尺寸以 [DESIGN.md](../../../../DESIGN.md#工具调用卡片) 和[工具调用画布](../../../../src/web/design/cst-pilot-tools.pen)为准。这里规定数据怎样进入画布、怎样落到 HeroUI v3 组件。
+本文记录通用工具卡片的数据转换与组件组织。特殊工具的独立内嵌设计见 [DESIGN.md](../../../../DESIGN.md#特殊工具内嵌组件)。行为与折叠层级以[诊断卡片](../../../web/SPEC/diagnostic-cards.md)和[聊天工作台](../../../web/SPEC/chat-workspace.md#工具调用的折叠)为准；颜色、字体与尺寸以 [DESIGN.md](../../../../DESIGN.md#工具调用卡片) 和[工具调用画布](../../../../src/web/design/cst-pilot-tools.pen)为准。这里规定数据怎样进入画布、怎样落到 HeroUI v3 组件。
 
 ## 核心结构
 
@@ -41,7 +41,7 @@ type CardView = { status: "success" | "degraded" | "error"; blocks: Block[]; raw
 type ToolState = CardView["status"] | "running" | "interrupted";
 ```
 
-第一组决定先看的内容：**概览组、排行组、原文块三选一**。`blocks` 可以重复添加同类组，也能附加提示；`sys overview` 使用强调展示，`runbook` 增加命令组，两者沿用同一骨架。等待或中断是调用状态，不从尚未到达的结果推断内容。
+通用卡片第一组决定先看的内容：**概览组、排行组、原文块三选一**。`blocks` 可以重复添加同类组，也能附加提示。等待或中断是调用状态，不从尚未到达的结果推断内容。
 
 | 内容组 | 数据形态 | 项目组件及 HTML 语义 | 扩展办法 |
 |---|---|---|---|

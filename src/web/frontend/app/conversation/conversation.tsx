@@ -1,9 +1,10 @@
 import { Button, Disclosure } from "@heroui/react";
-import { ArrowDown, Brain, ChevronDown, Copy, Download, GitBranch, GitFork, X } from "lucide-react";
+import { ArrowDown, ChevronDown, Copy, Download, GitBranch, GitFork, X } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { matchToolResults } from "../cards/match-results";
-import { ToolGroup } from "../cards/tool-card";
+import { SpecialTool } from "../cards/special-tool";
 import { sessionPath } from "../data/api";
+import type { PendingBitLocker } from "../data/bitlocker-state";
 import type { Message } from "../data/web-state";
 import { ErrorNotice } from "../shell/error-notice";
 import {
@@ -16,13 +17,15 @@ import {
 	textOf,
 } from "./conversation-parts";
 import { LiveMarkdown, Markdown } from "./markdown";
-import { StreamWords } from "./stream-words";
+import { ProcessSegment } from "./process-segment";
+import { completedToolCalls, turnSegments } from "./turn-segments";
 
 function AssistantTurnImpl({
 	id,
 	turn,
 	live,
 	resultsByTurn,
+	requests,
 	onFork,
 	onError,
 }: {
@@ -30,17 +33,12 @@ function AssistantTurnImpl({
 	turn: Turn;
 	live: boolean;
 	resultsByTurn: Map<string, Map<string, Message>>;
+	requests: PendingBitLocker[];
 	onFork: () => void;
 	onError: (text: string) => void;
 }) {
 	const { process, finalText } = splitTurn(turn.assistants);
 	const last = turn.assistants.at(-1);
-	// 折叠状态：运行中展开、结束后自动折叠；用户手动操作过后不再跟随。
-	const [open, setOpen] = useState(live);
-	const [touched, setTouched] = useState(false);
-	useEffect(() => {
-		if (!touched) setOpen(live);
-	}, [live, touched]);
 	// 计时：运行中每秒推进，结束时冻结；历史轮次取轮内最后一个时间戳（助手消息的时间戳是消息开始时刻，为近似值）。
 	const wasLive = useRef(false);
 	const [frozenAt, setFrozenAt] = useState<number>();
@@ -68,69 +66,38 @@ function AssistantTurnImpl({
 	const elapsed = formatDuration(Math.max((live ? now : (frozenAt ?? historyEnd)) - startedAt, live ? 1000 : 0));
 	return (
 		<article className="assistant-block assistant-turn" data-live={live || undefined}>
-			{/* 工作时长属于整轮回答；完成时保留过程头，只更新状态与折叠。 */}
-			<Disclosure
-				className="turn-process"
-				isExpanded={open}
-				onExpandedChange={(value) => {
-					setTouched(true);
-					setOpen(value);
-				}}
-			>
-				<Disclosure.Heading>
-					<Disclosure.Trigger className="turn-process-head">
-						<span>{live ? `工作中 ${elapsed}` : `已工作 ${elapsed}`}</span>
-						<Disclosure.Indicator />
-					</Disclosure.Trigger>
-				</Disclosure.Heading>
-				<Disclosure.Content>
-					<div className="turn-process-body">
-						{process.map(({ entry, final, part }, partIndex) => {
-							const key = `part-${partIndex}`;
-							if (part.kind === "thinking")
-								return (
-									<Disclosure className="thinking-line" key={key} isDisabled={part.part.redacted}>
-										<Disclosure.Heading>
-											<Disclosure.Trigger className="thinking-trigger">
-												<Brain size={16} aria-hidden="true" />
-												<span>已思考{part.part.redacted ? " · 内容不可用" : ""}</span>
-												<Disclosure.Indicator />
-											</Disclosure.Trigger>
-										</Disclosure.Heading>
-										<Disclosure.Content>
-											{!part.part.redacted && (
-												<section className="tool-text">
-													<pre className="tool-raw">
-														{live && final ? (
-															<StreamWords text={part.part.thinking} />
-														) : (
-															part.part.thinking
-														)}
-													</pre>
-												</section>
-											)}
-										</Disclosure.Content>
-									</Disclosure>
-								);
-							if (part.kind === "tools")
-								return (
-									<ToolGroup
-										key={key}
-										calls={part.calls}
-										results={resultsByTurn.get(entry.id ?? `stamp:${entry.message.timestamp}`) ?? new Map()}
-										live={live && final}
-									/>
-								);
-							return <Markdown key={key} text={part.text} />;
-						})}
-						{live && process.length === 0 && !finalText && (
-							<span className="t-shimmer" data-text="......">
-								......
-							</span>
+			{turnSegments(process).map((segment, index) =>
+				segment.kind === "visible" ? (
+					<div className="turn-visible" key={segment.key}>
+						{segment.parts.map(({ entry, final, part }) =>
+							part.kind === "special" ? (
+								<SpecialTool
+									key={`${entry.id ?? entry.message.timestamp}-${part.call.id}`}
+									call={part.call}
+									sessionId={id}
+									entryId={entry.id}
+									requests={requests}
+									result={resultsByTurn.get(entry.id ?? `stamp:${entry.message.timestamp}`)?.get(part.call.id)}
+									live={live && final}
+								/>
+							) : null,
 						)}
 					</div>
-				</Disclosure.Content>
-			</Disclosure>
+				) : (
+					<ProcessSegment
+						key={segment.key}
+						parts={segment.parts}
+						live={live}
+						label={
+							index === 0
+								? `${live ? "工作中" : "已工作"} ${elapsed}`
+								: `已完成 ${completedToolCalls(segment.parts, resultsByTurn)} 次工具调用`
+						}
+						waiting={live && !process.length && !finalText}
+						results={resultsByTurn}
+					/>
+				),
+			)}
 			{finalText && (live ? <LiveMarkdown text={finalText} /> : <Markdown text={finalText} />)}
 			{last?.message.stopReason === "error" && (
 				<ErrorNotice model message={last.message.errorMessage || "模型调用失败，请检查登录状态和模型设置。"} />
@@ -171,6 +138,7 @@ const AssistantTurn = memo(
 		prev.live === next.live &&
 		prev.id === next.id &&
 		prev.resultsByTurn === next.resultsByTurn &&
+		prev.requests === next.requests &&
 		prev.onFork === next.onFork &&
 		prev.onError === next.onError &&
 		prev.turn.user === next.turn.user &&
@@ -213,6 +181,7 @@ export function Conversation({
 	id,
 	entries,
 	streaming,
+	requests,
 	running,
 	summarizing,
 	refresh,
@@ -222,6 +191,7 @@ export function Conversation({
 	id: string;
 	entries: { id?: string; message: Message }[];
 	streaming?: Message;
+	requests: PendingBitLocker[];
 	running: boolean;
 	summarizing: boolean;
 	refresh: () => Promise<void>;
@@ -313,6 +283,7 @@ export function Conversation({
 									turn={turn}
 									live={live}
 									resultsByTurn={resultsByTurn}
+									requests={requests}
 									onFork={onFork}
 									onError={setError}
 								/>

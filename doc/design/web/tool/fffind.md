@@ -11,7 +11,7 @@
 | 查找统计 · 字段组 | `details.totalMatched/totalFiles/pageIndex/hasMore` | 匹配总数、索引文件数、当前页及是否有下一页 |
 | 路径结果 · 原文块 | `content[].text` | 路径、文件标注与下一页游标；保持原有顺序 |
 
-搜索 `disk`，限定 `path:"doc/design/web/tool/**"`、`limit:2` 的实测首屏：
+列举目录时使用 `pattern:""`，限定 `path:"doc/design/web/tool/**"`、`limit:2`。以下路径与分页数字为画布示例：
 
 ```text
 doc/design/web/tool/disk.md  [untracked in git]

@@ -112,6 +112,13 @@ test("单工具执行：read独立完成并冻结计时，ls继续运行；刷�
 			"[...document.querySelectorAll('.tool-card-heading')].some(e=>e.textContent.includes('read · 已完成'))",
 			"read在ls返回前独立完成",
 		);
+		const expandedCards = () =>
+			browser!.evaluate<string[]>(
+				"[...document.querySelectorAll('.tool-group .tool-card-heading')].map(e=>e.getAttribute('aria-expanded'))",
+			);
+		assert.deepEqual(await expandedCards(), ["false", "false"], "展开运行中的工具组后，子项默认折叠");
+		await browser.click(".tool-group .tool-card-heading");
+		assert.deepEqual(await expandedCards(), ["true", "false"], "点击只展开对应子项");
 		const read = () =>
 			browser!.evaluate<string>(
 				"[...document.querySelectorAll('.tool-card-heading')].find(e=>e.textContent.includes('read'))?.querySelector('time')?.textContent??''",
@@ -120,6 +127,10 @@ test("单工具执行：read独立完成并冻结计时，ls继续运行；刷�
 		assert.match(frozen, /^\d+\.\d+s$/);
 		await new Promise((r) => setTimeout(r, 1300));
 		assert.equal(await read(), frozen, "read的时钟冻结");
+		assert.deepEqual(await expandedCards(), ["true", "false"], "状态与计时更新保留各子项的展开选择");
+		await browser.click(".tool-group-heading");
+		await browser.click(".tool-group-heading");
+		assert.deepEqual(await expandedCards(), ["true", "false"], "重新展开分组保留用户对子项的选择");
 		assert.ok(
 			await browser.evaluate(
 				"[...document.querySelectorAll('.tool-card-heading')].some(e=>e.textContent.includes('正在调用 ls'))",
@@ -135,6 +146,7 @@ test("单工具执行：read独立完成并冻结计时，ls继续运行；刷�
 			"刷新不重置read完成态",
 		);
 		assert.equal(await read(), frozen);
+		assert.deepEqual(await expandedCards(), ["false", "false"], "刷新运行态后，子项仍默认折叠");
 		await writeFile(gate, "go");
 		await browser.until("document.body.textContent.includes('TIMING_COMPLETE')", "ls结束及续答");
 		await browser.click(".turn-process-head");
@@ -142,12 +154,17 @@ test("单工具执行：read独立完成并冻结计时，ls继续运行；刷�
 			"[...document.querySelectorAll('.tool-card-heading')].some(e=>e.textContent.includes('ls · 已完成'))",
 			"两个工具完成",
 		);
+		assert.deepEqual(await expandedCards(), ["false", "false"], "结果返回后，子项保持折叠");
 		const times = await browser.evaluate<string[]>(
 			"[...document.querySelectorAll('.tool-elapsed')].map(e=>e.textContent)",
 		);
 		assert.equal(times[0], frozen);
 		assert.ok(parseFloat(times[1]!) > parseFloat(times[0]!) + 1, "两工具耗时独立");
 		await browser.screenshot(join(root, "both-finished.png"));
+		await browser.navigate(`${origin}/s/${id}`);
+		await browser.click(".turn-process-head");
+		await browser.click(".tool-group-heading");
+		assert.deepEqual(await expandedCards(), ["false", "false"], "历史工具组展开后，子项默认折叠");
 		await api.close();
 		await pool.close();
 		pool = new WebSessionPool({

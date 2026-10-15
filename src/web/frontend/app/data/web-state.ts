@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TreeNode } from "../tree/branch-tree";
 import { apiJson } from "./api";
+import { type BitLockerSnapshot, newestBitLocker } from "./bitlocker-state";
 import { OptimisticSessionDeletion } from "./optimistic-session-deletion";
+import { StreamHealth } from "./stream-health";
 import { StreamPacer } from "./stream-player";
 
 export type SessionRow = { id: string; title: string; updatedAt?: string; running: boolean };
@@ -16,7 +18,7 @@ export type ContentPart =
 			id: string;
 			name: string;
 			arguments: Record<string, unknown>;
-			execution?: { startedAt: number; endedAt?: number; result?: Message };
+			execution?: { startedAt: number; endedAt?: number; stage?: string; result?: Message };
 	  };
 export type Message = {
 	role: "user" | "assistant" | "toolResult" | "branchSummary";
@@ -28,6 +30,7 @@ export type Message = {
 	toolCallId?: string;
 	toolName?: string;
 	isError?: boolean;
+	details?: unknown;
 	stopReason?: string;
 	errorMessage?: string;
 };
@@ -51,6 +54,7 @@ export type Question = {
 };
 export type SessionDetail = {
 	id: string;
+	bitlocker?: BitLockerSnapshot;
 	messages: Message[];
 	entries: { id: string; parentId?: string | null; message: Message }[];
 	running: boolean;
@@ -266,6 +270,7 @@ export function useSessionDetail(id: string | undefined) {
 	activeId.current = id;
 	const [detail, setDetail] = useState<SessionDetail>();
 	const [streaming, setStreaming] = useState<Message>();
+	const bitlockerState = useRef<BitLockerSnapshot>({ revision: -1, requests: [] });
 	const [error, setError] = useState("");
 	const refresh = useCallback(async () => {
 		if (!id) return;
@@ -273,7 +278,8 @@ export function useSessionDetail(id: string | undefined) {
 		try {
 			const state = await apiJson<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`);
 			if (activeId.current !== id || sequence !== requestSequence.current) return;
-			setDetail(state);
+			bitlockerState.current = newestBitLocker(bitlockerState.current, state.bitlocker);
+			setDetail({ ...state, bitlocker: bitlockerState.current });
 			setError("");
 		} catch (cause) {
 			if (activeId.current !== id || sequence !== requestSequence.current) return;
@@ -283,12 +289,12 @@ export function useSessionDetail(id: string | undefined) {
 	useEffect(() => {
 		setDetail(undefined);
 		setStreaming(undefined);
+		bitlockerState.current = { revision: -1, requests: [] };
 		if (!id) return;
 		void refresh();
 		const pacer = new StreamPacer(setStreaming);
 		// 一次工具循环会连发 agent_start、message_start、message_end 等事件：尾随去抖合并成一次全量拉取。
 		let refreshTimer: number | undefined;
-		let watchdogTimer: number | undefined;
 		let events: EventSource | undefined;
 		const scheduleRefresh = () => {
 			window.clearTimeout(refreshTimer);
@@ -296,20 +302,20 @@ export function useSessionDetail(id: string | undefined) {
 				void refresh();
 			}, 80);
 		};
-		// 生成期间的看门狗：活跃轮次里 15 秒收不到任何事件（流式帧高频，不可能静默这么久）
-		// 说明连接已成僵尸（服务端已断/被排队），重建 EventSource。
-		const armWatchdog = () => {
-			window.clearTimeout(watchdogTimer);
-			watchdogTimer = window.setTimeout(() => {
-				void refresh();
-				connect();
-			}, 15_000);
-		};
-		const disarmWatchdog = () => window.clearTimeout(watchdogTimer);
+		const health = new StreamHealth(() => {
+			void refresh();
+			connect();
+		});
 		const onSession = (event: Event) => {
+			if (event.currentTarget !== events) return;
+			health.pulse();
 			try {
 				const change = JSON.parse((event as MessageEvent).data);
 				if (change.type === "message_update" && change.message?.role === "assistant") pacer.update(change.message);
+				if (change.type === "bitlocker_requests_changed") {
+					bitlockerState.current = newestBitLocker(bitlockerState.current, change);
+					setDetail((state) => (state ? { ...state, bitlocker: bitlockerState.current } : state));
+				}
 				if (change.type === "ui_requests")
 					setDetail((state) => (state ? { ...state, ui: change.questions } : state));
 				if (
@@ -321,6 +327,7 @@ export function useSessionDetail(id: string | undefined) {
 						"session_tree",
 						"tool_execution_start",
 						"tool_execution_end",
+						"tool_execution_update",
 					].includes(change.type)
 				) {
 					if (change.type === "message_end" || change.type === "agent_end") {
@@ -329,9 +336,6 @@ export function useSessionDetail(id: string | undefined) {
 					}
 					scheduleRefresh();
 				}
-				if (["agent_start", "message_start"].includes(change.type)) armWatchdog();
-				else if (change.type === "agent_end") disarmWatchdog();
-				else armWatchdog();
 			} catch {
 				scheduleRefresh();
 			}
@@ -339,12 +343,19 @@ export function useSessionDetail(id: string | undefined) {
 		const connect = () => {
 			events?.close();
 			events = new EventSource(`/api/sessions/${encodeURIComponent(id)}/events`);
-			events.onopen = () => {
+			events.onopen = (event) => {
+				if (event.currentTarget !== events) return;
+				health.pulse();
 				setError("");
 				void refresh();
 			};
+			events.addEventListener("heartbeat", (event) => {
+				if (event.currentTarget === events) health.pulse();
+			});
 			events.addEventListener("session", onSession);
 			events.addEventListener("queue", (event) => {
+				if (event.currentTarget !== events) return;
+				health.pulse();
 				try {
 					const queue: InboxSnapshot = JSON.parse((event as MessageEvent).data);
 					setDetail((state) => (state ? { ...state, queue } : state));
@@ -352,12 +363,15 @@ export function useSessionDetail(id: string | undefined) {
 					void refresh();
 				}
 			});
-			events.addEventListener("reset", () => {
+			events.addEventListener("reset", (event) => {
+				if (event.currentTarget !== events) return;
+				health.pulse();
 				pacer.reset();
 				setStreaming(undefined);
 				void refresh();
 			});
-			events.onerror = () => {
+			events.onerror = (event) => {
+				if (event.currentTarget !== events) return;
 				setError("事件流已断开。请确认 pi 仍在运行；恢复后页面会自动同步。");
 			};
 		};
@@ -365,8 +379,9 @@ export function useSessionDetail(id: string | undefined) {
 		return () => {
 			pacer.reset();
 			window.clearTimeout(refreshTimer);
-			window.clearTimeout(watchdogTimer);
+			health.stop();
 			events?.close();
+			events = undefined;
 		};
 	}, [id, refresh]);
 	return { detail, streaming, error, refresh, setDetail };

@@ -104,7 +104,7 @@ omitted:
 |---|---|
 | [cst-pilot-colors.pen](src/web/design/cst-pilot-colors.pen) | 12 步用途、中性与四组彩色色阶 |
 | [cst-pilot-web.pen](src/web/design/cst-pilot-web.pen) | 首页、聊天工作台、登录页、APIKEY 表单、仪表盘、设置页与分支树的浅深两版；另含 Provider 下拉、上下文、模型、账号、侧栏会话与消息等悬停面板，输入框补全面板、未发送图片、补全选中标记与排队组件的浅深两版，分支总结的确认、自定义提示词、生成中与完成四态，分支树、消息弹窗与派生选择（各浅深两版），以及「规范 · 全部令牌」规范总板（尺寸、排版、对齐、状态、交互、动效、页面骨架） |
-| [cst-pilot-tools.pen](src/web/design/cst-pilot-tools.pen) | 工具调用画布。以「聊天工作台 · 浅色」一帧为参照，配工具卡片的三种通用渲染模式（各浅深）、折叠层级、等待/成功/失败/降级/回退各态、多列排行行与逐工具示例（含 `sys overview`、`runbook`、`web_search` 与 `read` 图片例外）；逐工具帧只有浅色，深色按三个通用模板与色阶推导 |
+| [cst-pilot-tools.pen](src/web/design/cst-pilot-tools.pen) | 通用工具卡片、折叠与状态；「规范 · 特殊工具」展示共用规则；BitLocker、整机概览、runbook、web_search 各有一个组件与状态设计区，浅深并列；另有桌面聊天与窄幅设计 |
 | [heroui-colors.pen](src/web/design/heroui-colors.pen) | HeroUI v3 默认主题对照 |
 | [asset/pencil-heroui.pen](src/web/design/asset/pencil-heroui.pen) | HeroUI 组件参考画布 |
 
@@ -322,7 +322,7 @@ Web 使用文字标识：侧栏 `CST Pilot` 为 Inter 20px/600，首页和登录
 
 #### 工具调用卡片
 
-每个工具一次调用对应一张卡片，跟随聊天页取色，不另立色表。取值与状态见 [工具调用画布](src/web/design/cst-pilot-tools.pen)。
+通用工具一次调用对应一张卡片，跟随聊天页取色。特殊工具使用下节的独立内嵌组件。取值与状态见 [工具调用画布](src/web/design/cst-pilot-tools.pen)。
 
 | 项 | 浅色 | 深色 |
 |---|---|---|
@@ -342,15 +342,52 @@ Web 使用文字标识：侧栏 `CST Pilot` 为 Inter 20px/600，首页和登录
 | 第 3 层 · 卡片内容 | 12px | 概览组、排行组、提示条、调用语句片 |
 | 第 4 层 · 密集长文 | 11px | 原文块正文（长文本、代码、日志） |
 
-加载指示圆弧直径等于同行字号，颜色与同行文字一致。四个例外工具不进入折叠，状态行按第 1 层 16px 呈现，展开内容仍为第 3 层 12px、第 4 层 11px：
-
-- `sys overview` 与 `runbook`：骨架同普通卡片，差别见[诊断卡片](doc/web/SPEC/diagnostic-cards.md#结构与交互)。
-- `web_search`：单独占一行，展开只显示传入关键词（12px），不弹出返回内容，完成以图标标识。见 [web_search 卡片](doc/design/web/tool/web_search.md)。
-- `read` 图片形态：先展示图片，再展示绝对路径。见 [read 卡片](doc/design/web/tool/read.md)。
+加载指示圆弧直径等于同行字号，颜色与同行文字一致。`read` 图片形态先展示图片，再展示绝对路径，见 [read 卡片](doc/design/web/tool/read.md)。特殊工具的布局与字号见下节。
 
 字段行数值列按整张卡片对齐：数值列起点取卡内最长的字段名宽度加 34px（标签列内 12px 间隔、最短 10px 补位，再接 12px 间隔），所有分组的字段行共用同一列。
 
 卡片正文、字段名与字段值、分组标题用思源黑体（分组标题 500，其余 400）；调用语句片与耗时用 JetBrains Mono；卡片内不用 Inter。
+
+#### 特殊工具内嵌组件
+
+特殊工具与正文同级，主要内容常驻，不进入工具计数或整轮过程折叠。组件按工具名与参数匹配，触发条件及字段来源见[结果映射](doc/design/web/tool/mapping.md#组件触发与字段来源)。「规范 · 特殊工具」沿用主画布规范板的组织方式，只展示共用基板、排版、工具匹配与聊天排列。每个工具只保留一个组件与状态设计区，可复用组件放在该区对应状态中，浅深并列。桌面与窄幅聊天示例独立保留，规范板不重复绘制完整组件。文字规则集中在本节。
+
+| 工具 | 主要内容 |
+|---|---|
+| `bitlocker unlock` | 目标卷、密钥 ID、恢复密码输入、解锁与取消；完成后展示实际锁定状态 |
+| `bitlocker decrypt` | 固定目标清单、必要影响、确认与取消；逐卷区分请求接受、后台转换和完成 |
+| `sys overview` | CPU、内存、机型与运行时长；次级字段收进详情 |
+| `web_search` | 检索状态行；展开关键词与必要失败原因 |
+| `runbook` | 三种风险档共用清单组件；命令、执行环境和文件交付；命令保留复制，文件名链接打开清单 |
+
+`bitlocker status` 使用普通工具卡片与折叠组。查询时不使用解锁或解密的特殊卡片。
+
+| 项 | 规则 |
+|---|---|
+| 结构 | 单层容器，无普通工具缩进；正文与组件相隔 16px，连续组件相隔 12px |
+| 文字 | 标题 16px/500，主要字段 14–16px，辅助文字与按钮 12px；沿用思源黑体，命令用 JetBrains Mono |
+| 基板 | 顶部轻亮面，圆角 12px、内边距 16px、边缘 1px；内容区平整 |
+| 主题 | 浅深尺寸与结构一致；组件不携带页面背景。规范板使用浅色文档底面，深色取值通过色板对照 |
+| 详情 | 只留一个详情入口，承载次级字段、方法码与原始数据；凭据始终遮蔽 |
+| 文案 | 状态、字段和按钮已表达的信息不再解释；正文不复述卡片；技术与传输边界不作常驻提示 |
+| 风险 | 解密确认保留解除保护的影响；AI 参数路径保留必要确认；失败保留原因与恢复入口 |
+| 文件 | 文件名与打开图标组成链接；详情只显示后端返回的完整文件路径，允许折行，不显示文本格式；写入失败不展示可用打开链接 |
+| 气泡 | 用户消息沿用聊天页：右对齐、内容自适应、圆角 12px、内边距 11px/16px、文字 18px；浅底 `#F0F0F0`，深底 `#1D2428` |
+
+特殊组件的恢复密码输入独立于聊天输入。本地输入的密码不进入聊天、原始数据、遥测或浏览器持久存储；AI 参数路径保留模型传输边界确认。刷新后重新输入；确认绑定会话、调用与目标卷，已处理请求不能再次提交。BitLocker Web 交互与清单文件打开属于设计范围，接口要求见[计划中的 Web 交互](doc/design/web/tool/mapping.md#web-交互)。
+
+基板渐变自上而下取下表色值。面色位置为 0%、8%、50%、100%；边缘位置为 0%、48%、100%。
+
+| 位置 | 浅色 | 深色 |
+|---|---|---|
+| 面色 | `#FAFAFA` → `#F9F9F9` → `#F7F7F7` → `#F5F5F5` | `#1C272C` → `#192328` → `#161F24` → `#131A1D` |
+| 边缘 | `#ECECEC` → `#E0E0E0` → `#D5D5D5` | `#3B484E` → `#2D373C` → `#242D32` |
+| 顶部内高光 | 偏移 0,1；模糊 0；`#FFFFFF99` | 同尺寸；`#E0EAEE12` |
+| 底部内暗边 | 偏移 0,-1；模糊 1；`#1A202409` | 同尺寸；`#1A202433` |
+| 接触阴影 | 偏移 0,1；模糊 2；`#1A20240D` | 同尺寸；`#1A20244D` |
+| 外投影 | 偏移 0,3；模糊 6；`#1A20240A` | 同尺寸；`#1A20242E` |
+
+检索条的阴影偏移与模糊减半。主按钮仅保留 1px 顶部内高光与接触阴影。设计参考 [HeroUI Pro Mouve](https://heroui.pro/docs/react/getting-started/theming) 与 [Radix Shadows](https://www.radix-ui.com/themes/docs/theme/shadows)，使用项目配色。
 
 #### 动态背景
 
@@ -383,10 +420,44 @@ Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用�
 
 | 范围 | 值 |
 |---|---|
-| 聊天页正文与控件 | `lineHeight: 1.5` |
-| 聊天页表格单元格 | `lineHeight: 1.45` |
+| 助手 Markdown 正文 | 16px/400，`lineHeight: 1.75`（28px），`letterSpacing: 0.02em`（0.32px） |
+| 聊天页控件、用户气泡与状态行 | `lineHeight: 1.5`，不继承正文加宽字距 |
+| Markdown 表格单元格 | `lineHeight: 1.6`，内边距保持 8px/12px |
+| Markdown 代码 | `lineHeight: 1.6`，`letterSpacing: 0`；保留等宽字体 |
+| Markdown H1/H2 | 24px/600，`lineHeight: 1.4`，`letterSpacing: 0` |
+| Markdown H3–H6 | 16px/600，`lineHeight: 1.5`，`letterSpacing: 0` |
 | 工具卡片原文块 | `lineHeight: 1.6` |
 | 仪表盘 36px 指标数值 | `letterSpacing: -0.6` |
+
+### Markdown 块间距
+
+取值是相邻内容块边缘之间的净距离，浅深主题、窄幅、流式与完成态共用。正文、标题、列表分别取值；首块不留段前空白，末块不留尾部空白。字体、颜色与内容列宽度保持既有规范。
+
+| 相邻内容 | 净距离 |
+|---|---:|
+| 段落 → 段落 | 16px |
+| 段落 → 列表 | 8px |
+| 同层列表项 | 6px |
+| 嵌套列表上下 | 4px |
+| 列表 → 正文 | 16px |
+| 引用、代码块、表格 ↔ 正文 | 16px |
+| 连续标题 | 12px |
+| 分隔线上下 | 24px |
+
+| 标题 | 段前 | 段后 |
+|---|---:|---:|
+| H1 | 32px | 16px |
+| H2 | 24px | 12px |
+| H3 | 20px | 8px |
+| H4 | 16px | 8px |
+| H5 | 12px | 8px |
+| H6 | 12px | 4px |
+
+标题与正文按标题的段后取值，正文与标题按标题的段前取值；连续标题与分隔线按上表单独处理。长列表项保留正文行高，列表项内的多段正文仍相隔16px。读取区域使用专用间距，不改变全站 `--space-*` 变量，也不改变工具组件、思考原文、按钮和状态行。
+
+实现只在当前块前设置间距，不同时叠加统一 `gap` 和上下边距。流式定稿前缀与尾段处于同一内容容器，相邻规则跨分段生效。
+
+参考：[Notion 相邻块排版](https://www.notion.com/blog/updating-the-design-of-notion-pages)、[Obsidian 字体变量](https://docs.obsidian.md/Reference/CSS+variables/Foundations/Typography)、[Minimal 间距变量](https://github.com/kepano/obsidian-minimal/blob/master/src/scss/variables/root.scss)、[GitHub Markdown](https://github.com/sindresorhus/github-markdown-css/blob/main/github-markdown.css)、[Tailwind Typography](https://github.com/tailwindlabs/tailwindcss-typography/blob/main/src/styles.js)。正文1.75行高参考Tailwind的16px/28px；0.02em字距按本项目中文字体确定。
 
 ### 使用边界
 

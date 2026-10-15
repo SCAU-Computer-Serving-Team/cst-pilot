@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { browserJson } from "./browser-json.ts";
 
 /** Process-local, bounded replay of a single session's SDK events. */
 export class SessionEvents {
@@ -10,14 +11,16 @@ export class SessionEvents {
 	private readonly clients = new Set<ServerResponse>();
 	private readonly unsubscribe: () => void;
 
-	constructor(session?: AgentSession) {
+	private readonly heartbeatMs: number;
+	constructor(session?: AgentSession, heartbeatMs = 20_000) {
+		this.heartbeatMs = heartbeatMs;
 		this.unsubscribe = session?.subscribe((event) => this.publish("session", event)) ?? (() => {});
 	}
 
 	publish(name: "session" | "queue" | "state", value: unknown): void {
 		let data: string;
 		try {
-			data = JSON.stringify(value);
+			data = browserJson(value);
 		} catch {
 			return;
 		}
@@ -31,10 +34,12 @@ export class SessionEvents {
 				continue;
 			}
 			try {
-				if (!client.write(frame)) {
+				// write(false) 已接收帧，只表示缓冲超过高水位。正常大帧不能因此断流。
+				// 对长期不读取的客户端限制积压；重连仍使用现有历史回放或 reset。
+				if (client.writableLength > 8 * 1024 * 1024) {
 					this.clients.delete(client);
 					client.end();
-				}
+				} else client.write(frame);
 			} catch {
 				this.clients.delete(client);
 			}
@@ -70,12 +75,12 @@ export class SessionEvents {
 		const heartbeat = setInterval(() => {
 			if (response.writableEnded || response.destroyed) return;
 			try {
-				response.write(": keepalive\n\n");
+				response.write("event: heartbeat\ndata: {}\n\n");
 			} catch {
 				this.clients.delete(response);
 				clearInterval(heartbeat);
 			}
-		}, 20_000);
+		}, this.heartbeatMs);
 		heartbeat.unref();
 		response.on("close", () => {
 			clearInterval(heartbeat);

@@ -231,7 +231,7 @@
 }
 * { box-sizing: border-box; scrollbar-width: none; }
 *::-webkit-scrollbar { width: 0; height: 0; }
-html, body { min-width: 560px; min-height: 100%; margin: 0; }
+html, body { min-width: 320px; min-height: 100%; margin: 0; }
 body { color: var(--app-ink); }
 button, textarea { font: inherit; }
 a { color: inherit; text-decoration: none; }
@@ -438,6 +438,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .user-line { display: flex; justify-content: end; }
 .user-bubble { margin: 0; padding: var(--space-component) var(--space-section); border-radius: var(--radius-row); background: var(--chat-bubble); color: var(--chat-ink); font-size: 18px; }
 .assistant-block { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-component); }
+.turn-visible { display:flex; flex-direction:column; gap:var(--space-component); width:100%; min-width:0; }
 .conversation-status { display: flex; align-items: center; gap: var(--space-inline); min-height: 28px; color: var(--chat-muted); }
 .conversation-status small { font-size: 14px; }
 .conversation-status .success-icon { color: var(--chat-success); }
@@ -522,30 +523,49 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .chat-message-surface { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .conversation { flex: 1; height: auto; max-height: none; min-height: 60px; }
 .chat-composer-area { position: relative; left: auto; bottom: auto; transform: none; margin: auto auto 12px; flex: 0 0 auto; }
-.markdown { display: flex; flex-direction: column; gap: var(--space-component); font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; max-width: 100%; }
+/* 阅读间距仅作用于 Markdown；流式前缀和尾段共用一个容器。 */
+.markdown { --prose-line-height: 1.75; --prose-tracking: .02em; --prose-block-space: 16px; display: flow-root; width: 100%; min-width: 0; max-width: 100%; font-size: 16px; line-height: var(--prose-line-height); letter-spacing: var(--prose-tracking); overflow-wrap: anywhere; }
 .markdown > * { margin: 0; }
-.markdown p { font-size: inherit; }
+.markdown p { margin: 0; font-size: inherit; }
+.markdown > :not(:first-child), .markdown blockquote > :not(:first-child) { margin-block-start: var(--prose-block-space); }
+.markdown > p + :is(ul, ol):not(:first-child), .markdown blockquote > p + :is(ul, ol):not(:first-child) { margin-block-start: 8px; }
 .markdown a { color: var(--chat-tool); text-decoration: underline; }
-.markdown pre, .tool-raw, .tool-commands pre { max-width: 100%; overflow-x: auto; padding: 12px; border-radius: 8px; background: var(--chat-bubble); white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 "JetBrains Mono", monospace; }
+.tool-raw, .tool-commands pre { max-width: 100%; overflow-x: auto; padding: 12px; border-radius: 8px; background: var(--chat-bubble); white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 "JetBrains Mono", monospace; }
+.markdown pre { max-width: 100%; overflow-x: auto; padding: 12px; border-radius: 8px; background: var(--chat-bubble); white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.6 "JetBrains Mono", monospace; letter-spacing: 0; }
 .thinking-line .tool-text { margin-top: var(--space-inline); }
 .thinking-line .tool-raw { max-height: none; overflow: visible; }
 .tool-text .tool-raw { margin: 0; padding: var(--space-component); border-radius: 6px; color: #757d82; font-family: inherit; font-size: 11px; line-height: 1.6; }
-.markdown code { padding: 0 2px; border-radius: 4px; background: var(--chat-bubble); font: 13px/1.5 "JetBrains Mono", monospace; }
+.markdown code { padding: 0 2px; border-radius: 4px; background: var(--chat-bubble); font: 13px/1.6 "JetBrains Mono", monospace; letter-spacing: 0; }
+.markdown pre code { padding: 0; border-radius: 0; background: none; font: inherit; letter-spacing: 0; }
 .markdown-table { width: 816px; max-width: 100%; overflow-x: auto; }
 .markdown table { width: 100%; border-collapse: collapse; }
-.markdown th, .markdown td { padding: 8px 12px; border: 1px solid var(--chat-border); }
+.markdown th, .markdown td { padding: 8px 12px; border: 1px solid var(--chat-border); line-height: 1.6; }
 .markdown th { background: var(--chat-bubble); }
 .markdown ul, .markdown ol { padding-left: var(--space-group); }
 .markdown ul { list-style: square; }
 .markdown ol { list-style: decimal; }
 .markdown li::marker { color: var(--chat-muted); }
-.markdown li + li { margin-top: var(--space-tight); }
+.markdown li + li { margin-top: 6px; }
 .markdown li > p { margin: 0; }
-.markdown li > ul, .markdown li > ol { margin-top: var(--space-tight); }
-.markdown h1, .markdown h2 { font-size: 24px; font-weight: 600; }
-.markdown h3, .markdown h4, .markdown h5, .markdown h6 { font-size: 16px; font-weight: 600; }
+.markdown li > p + p { margin-block-start: var(--prose-block-space); }
+.markdown li > ul, .markdown li > ol { margin-block: 4px; }
+.markdown h1, .markdown h2 { font-size: 24px; font-weight: 600; line-height: 1.4; letter-spacing: 0; }
+.markdown h3, .markdown h4, .markdown h5, .markdown h6 { font-size: 16px; font-weight: 600; line-height: 1.5; letter-spacing: 0; }
+.markdown > h1:not(:first-child) { margin-block-start: 32px; }
+.markdown > h2:not(:first-child) { margin-block-start: 24px; }
+.markdown > h3:not(:first-child) { margin-block-start: 20px; }
+.markdown > h4:not(:first-child) { margin-block-start: 16px; }
+.markdown > :is(h5, h6):not(:first-child) { margin-block-start: 12px; }
+.markdown > h1 + :not(:first-child) { margin-block-start: 16px; }
+.markdown > h2 + :not(:first-child) { margin-block-start: 12px; }
+.markdown > :is(h3, h4, h5) + :not(:first-child) { margin-block-start: 8px; }
+.markdown > h6 + :not(:first-child) { margin-block-start: 4px; }
+.markdown > :is(h1, h2, h3, h4, h5, h6) + :is(h1, h2, h3, h4, h5, h6):not(:first-child) { margin-block-start: 12px; }
 .markdown hr { height: 1px; border: 0; background: var(--chat-border); }
+.markdown > hr:not(:first-child), .markdown > hr + :not(:first-child) { margin-block-start: 24px; }
 .markdown blockquote { margin: 0; padding-left: var(--space-component); border-left: 2px solid var(--chat-border); color: var(--chat-muted); }
+.markdown > :first-child { margin-block-start: 0; }
+.markdown > :last-child { margin-block-end: 0; }
 .message-image { display: block; max-width: 320px; max-height: 240px; object-fit: contain; margin-top: var(--space-inline); border-radius: 8px; }
 .answer-actions a { display: grid; place-items: center; width: var(--control); height: var(--control); border-radius: var(--radius-control); color: var(--chat-muted); transition: color var(--duration-quick) var(--ease-smooth-out); }
 .answer-actions a:hover { background: transparent; color: var(--chat-ink); }
@@ -1387,4 +1407,9 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation-duration: 0s !important; animation-delay: 0s !important; }
   .app-layout[data-view-transitions="false"] :is(.chat-header, .chat-composer-area, .conversation, .composer-shell--home, .home-footnote) { animation: none; }
+}
+@media(max-width:600px) {
+  .conversation > * { width:calc(100% - 32px); }
+  .chat-header { padding-inline:16px; }
+  .chat-composer-area { padding-inline:16px; }
 }

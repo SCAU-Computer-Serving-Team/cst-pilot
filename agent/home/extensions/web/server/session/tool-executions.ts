@@ -5,6 +5,7 @@ const TYPE = "cst-web-tool-execution";
 export interface ToolExecution {
 	startedAt: number;
 	endedAt?: number;
+	stage?: string;
 	result?: AgentMessage;
 }
 interface RecordEntry extends ToolExecution {
@@ -38,7 +39,7 @@ export class ToolExecutions {
 		return `${timestamp}:${id}`;
 	}
 	private persist(record: RecordEntry) {
-		const { result: _, ...data } = record;
+		const { result: _, stage: _stage, ...data } = record;
 		this.session.sessionManager.appendCustomEntry(TYPE, data);
 	}
 	private onEvent(event: AgentSessionEvent) {
@@ -60,6 +61,11 @@ export class ToolExecutions {
 			this.records.set(key, record);
 			this.active.set(event.toolCallId, key);
 			this.persist(record);
+		} else if (event.type === "tool_execution_update") {
+			const key = this.active.get(event.toolCallId);
+			const record = key ? this.records.get(key) : undefined;
+			const details = event.partialResult.details as { bitlocker?: { stage?: unknown } } | undefined;
+			if (record && typeof details?.bitlocker?.stage === "string") record.stage = details.bitlocker.stage;
 		} else if (event.type === "tool_execution_end") {
 			const key = this.active.get(event.toolCallId),
 				record = key ? this.records.get(key) : undefined;
@@ -101,10 +107,13 @@ export class ToolExecutions {
 				if (part.type !== "toolCall") return part;
 				const record = this.records.get(this.key(message.timestamp, part.id));
 				if (!record) return part;
-				const { startedAt, endedAt, result } = record;
-				return { ...part, execution: { startedAt, endedAt, result } };
+				const { startedAt, endedAt, stage, result } = record;
+				return { ...part, execution: { startedAt, endedAt, stage, result } };
 			}),
 		};
+	}
+	resultFor(timestamp: number, toolCallId: string): AgentMessage | undefined {
+		return this.records.get(this.key(timestamp, toolCallId))?.result;
 	}
 	close() {
 		this.unsubscribe();

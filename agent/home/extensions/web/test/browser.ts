@@ -178,7 +178,7 @@ export class BrowserProbe {
 		await this.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
 		point = await this.evaluate<{ x: number; y: number }>(`(async () => {
 			const element = document.querySelector(${JSON.stringify(selector)});
-			let previous, stable = 0;
+			let previous, stable = 0, obstacle = "";
 			for (let frame = 0; frame < 90; frame++) {
 				await new Promise(resolve => requestAnimationFrame(resolve));
 				const rect = element.getBoundingClientRect();
@@ -187,11 +187,14 @@ export class BrowserProbe {
 				if (stable >= 2) {
 					const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
 					const target = document.elementFromPoint(x, y);
-					if (!element.contains(target)) throw new Error("点击控件被遮挡："+${JSON.stringify(selector)}+"；遮挡元素："+target?.outerHTML.slice(0,600));
+					if (!element.contains(target)) {
+						obstacle = target?.outerHTML.slice(0,600) ?? "视口之外";
+						continue;
+					}
 					return { x, y };
 				}
 			}
-			throw new Error("点击控件未停止移动");
+			throw new Error("点击控件持续不可点击："+${JSON.stringify(selector)}+"；移动或遮挡："+obstacle);
 		})()`);
 		await this.call("Input.dispatchMouseEvent", { type: "mousePressed", button: "left", clickCount: 1, ...point });
 		await this.call("Input.dispatchMouseEvent", { type: "mouseReleased", button: "left", clickCount: 1, ...point });

@@ -8,6 +8,7 @@ import { visibleQueueItems } from "../conversation/conversation-parts";
 import { QuestionPanel } from "../conversation/question-panel";
 import { QueuePanel } from "../conversation/queue-panel";
 import { apiJson, sessionPath } from "../data/api";
+import type { PendingBitLocker } from "../data/bitlocker-state";
 import { presentError } from "../data/error-presenter";
 import { useSessionDetail, useSessionTitle } from "../data/web-state";
 import { ErrorNotice } from "../shell/error-notice";
@@ -15,6 +16,8 @@ import { usePanelDismiss } from "../shell/panel-dismiss";
 import { sampleSessions } from "../shell/sample-sessions";
 import { branchSummaryChoice, type NavigateResult, summaryBody, summaryTagText } from "../tree/branch-summary";
 import { ForkPicker, forkTargets } from "../tree/fork-picker";
+
+const EMPTY_REQUESTS: PendingBitLocker[] = [];
 
 export default function Chat() {
 	const { sessionId } = useParams();
@@ -163,6 +166,7 @@ export default function Chat() {
 					<Conversation
 						id={detail.id}
 						entries={entries}
+						requests={detail.bitlocker?.requests ?? EMPTY_REQUESTS}
 						streaming={streaming}
 						running={!!detail.running}
 						summarizing={summarizing}

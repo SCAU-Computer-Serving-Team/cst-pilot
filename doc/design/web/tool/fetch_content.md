@@ -25,6 +25,6 @@
 
 ## 特殊情况
 
-独立脚本没有当前模型，`answer` 模式实测返回 `content:"Error: Page answer failed: No current model available for page answering"` 与上述 `details.error`，主模板改为错误原文块；这不代表正常 Pi 会话的问答必然失败。
+画布中的 `answer` 失败示例省略了 `prompt`，对应 `content:"Error: mode answer requires prompt."` 与 `details.error:"mode answer requires prompt"`。提供 `prompt` 后才进入抓取与模型回答；独立脚本没有当前模型时，可返回 `Page answer failed: No current model available for page answering`。
 
 TUN 代理可将公开域名解析到 `198.18.0.0/15`；发行配置允许该段，未配置放行策略时工具会报告内网地址检查失败。单 URL 的 `details.error`、多 URL 的 `successful < urlCount` 都须保留失败原因。图片块是代码支持的形态，此次未实测图片 URL。

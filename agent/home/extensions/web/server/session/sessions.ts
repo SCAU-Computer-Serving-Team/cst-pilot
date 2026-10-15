@@ -8,6 +8,7 @@ import {
 	createAgentSessionServices,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { BitLockerWebInteraction, bitLockerWebInteractions } from "../../../diagnostics/bitlocker-web.ts";
 import { installRuntimeAdapter, registerRuntimeSession } from "../../../runtime/adapter.ts";
 import { checkSharedConfiguration } from "../../../runtime/configuration.ts";
 import { ownSession } from "../../../runtime/owner.ts";
@@ -38,6 +39,7 @@ const WEB_TOOLS = [
 	"eventlog",
 	"driver",
 	"runbook",
+	"bitlocker",
 	"web_search",
 	"source_check",
 	"fetch_content",
@@ -155,6 +157,14 @@ export class WebSessionPool {
 		});
 		registerRuntimeSession(session, this.options.agentDir, release);
 		const ui = new WebUiBridge();
+		const bitlocker = new BitLockerWebInteraction();
+		bitLockerWebInteractions.set(session.sessionId, bitlocker);
+		const dispose = session.dispose.bind(session);
+		session.dispose = () => {
+			bitlocker.close();
+			bitLockerWebInteractions.delete(session.sessionId);
+			dispose();
+		};
 		try {
 			if (extensionsResult.errors.length) throw new Error("Web 会话扩展加载失败");
 			await session.bindExtensions({ uiContext: ui.context(), mode: "rpc" });

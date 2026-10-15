@@ -27,7 +27,7 @@
 |---|---|---|
 | GET | `/api/sessions` | 会话列表：ID、标题、更新时间、占用方、运行状态 |
 | POST | `/api/sessions` | 新建会话 |
-| GET | `/api/sessions/<id>` | 会话详情：消息、执行状态、队列版本与条目、待回答的扩展提问 |
+| GET | `/api/sessions/<id>` | 会话详情：消息、执行状态、队列版本与条目、待回答的扩展提问、BitLocker 请求与版本 |
 | PATCH | `/api/sessions/<id>` | 重命名 |
 | DELETE | `/api/sessions/<id>` | 删除 |
 | POST | `/api/sessions/<id>/open` | 进入会话；复用已有 Web 实例，若仍由 TUI 持有则返回 409 |
@@ -43,6 +43,9 @@
 | GET | `/api/sessions/<id>/tree` | 读取分支树 |
 | POST | `/api/sessions/<id>/tree/navigate` | 导航到指定 `entryId`，对应 `/tree` 的选择操作 |
 | GET | `/api/sessions/<id>/export` | 导出当前会话，供浏览器下载 |
+| GET | `/api/sessions/<id>/bitlocker` | 当前待处理请求与递增版本；不含恢复密码 |
+| POST | `/api/sessions/<id>/bitlocker/<requestId>` | 提交本地密码、确认或取消；请求只消费一次 |
+| POST | `/api/sessions/<id>/runbook/open` | 按助手条目与调用 ID 打开已交付 TXT；请求去重，只返回启动受理 |
 | POST | `/api/sessions/<id>/ui/<requestId>/response` | 回答扩展的选择、确认、输入或多行编辑请求 |
 | POST | `/api/sessions/<id>/compact` | 压缩，对应 `/compact` |
 | GET | `/api/sessions/<id>/events` | 该会话的事件流 |
@@ -115,7 +118,7 @@
 
 1. 错误统一为 `{ error: { code, message } }`，HTTP 状态表达语义。会话仍由 TUI 持有或正在被其他实例写入时返回 409。
 2. 会话 ID 使用稳定会话 ID。地址与响应都不出现记录文件的绝对路径。
-3. 写操作带 `Idempotency-Key`；消息提交另以消息 ID 去重。同一消息 ID 重复提交，只有会话、正文、图片与提交方式一致时才算重试，否则返回冲突。执行中断后的重复请求不会重新执行。
+3. 写操作带 `Idempotency-Key`；消息提交另以消息 ID 去重。同一消息 ID 重复提交，只有会话、正文、图片与提交方式一致时才算重试，否则返回冲突。执行中断后的重复请求不会重新执行。BitLocker 本地凭据提交使用一次性的 `requestId`，绕过持久化去重记录；重复或失效提交返回 409，无效输入返回 400。清单已缺失返回 404，访问拒绝返回 403，记事本启动失败返回 503；确定失败后可修正并重新发起打开。
 4. 内置命令走对应接口。普通消息中的斜杠文本按原文交给模型。调用已开放的诊断技能时，消息体显式传 `skill`（范围见命令规格），后端才展开技能。逐条对照见[命令与功能对应](commands.md)。
 5. Web 服务自身无访问账号；模型服务的登录状态由后端凭据决定。**仅监听本机回环地址**，不提供局域网或远程访问。
 6. 服务端控制允许的工具集合。新建、恢复、切换会话和修改设置时，前端都不能扩大这个集合。

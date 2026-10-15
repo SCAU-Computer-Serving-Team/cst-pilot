@@ -166,7 +166,7 @@ const nameKeys = [
 	"display",
 	"label",
 ];
-const diagnostics = new Set(["disk", "sys", "driver", "eventlog", "startup", "ls"]);
+const diagnostics = new Set(["disk", "sys", "driver", "eventlog", "startup", "ls", "bitlocker"]);
 const textTools = new Set(["read", "ffgrep", "fffind", "fetch_content", "get_search_content"]);
 
 export function mapTool(call: Call, result: Message): CardView {
@@ -186,7 +186,12 @@ export function mapTool(call: Call, result: Message): CardView {
 		typeof call.arguments.scope === "string"
 			? call.arguments.scope
 			: ({ sys: "overview", driver: "problem", eventlog: "recent" } as Record<string, string>)[call.name];
-	const nested = scope && detail ? record(detail[scope]) : undefined;
+	const nested =
+		detail && call.name === "bitlocker"
+			? record(detail.bitlocker)
+			: scope && detail
+				? record(detail[scope])
+				: undefined;
 	const source = diagnostics.has(call.name) && nested ? nested : detail;
 	const hasUsefulData = source && Object.entries(source).some(([key, value]) => !noticeKeys.has(key) && value != null);
 	const hasError = !!(detail?.error || source?.error);

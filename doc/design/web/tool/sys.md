@@ -56,4 +56,4 @@
 
 `sensor` 实测 `admin:false`、`pawnio:false`，仍取得 6 条传感器读数及热区和频率数据。卡片只显示已有来源；没有 CPU/主板温度时应保留 `notice` 的采集范围，不能推断温度正常。
 
-`overview` 使用醒目例外画布：上方实测同时含 CPU、内存、页面文件、内核池、机型与开机时长，需在同次结果里突出整体负载。它复用字段组与通用状态行。`gpu` 的 `nvidia:null`、`nvidia:{error}` 和 `lhmGpu` 分支由代码确认，本机实测返回的是 `nvidia[]`。整次 `isError` 则改用原文块。
+`overview` 使用独立内嵌组件，CPU、内存与运行时长优先展示，次级系统字段收进详情。视觉规范见 [DESIGN.md](../../../../DESIGN.md#特殊工具内嵌组件)。`gpu` 的 `nvidia:null`、`nvidia:{error}` 和 `lhmGpu` 分支由代码确认，本机实测返回的是 `nvidia[]`。整次 `isError` 则改用原文块。

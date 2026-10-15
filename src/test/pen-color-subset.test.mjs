@@ -56,6 +56,18 @@ const EXCEPTIONS = {
   "EAEAEA": "DESIGN.md 聊天页浅色例外 · 悬停/选中底色",
   "D5D5D5": "登录卡片输入框描边（聊天页例外灰体系内）",
   "F5F6F8": "主页侧栏底色 light-sidebar（DESIGN.md colors）",
+  // DESIGN.md「特殊工具内嵌组件」：基板面色与边缘渐变
+  "FAFAFA": "DESIGN.md 特殊工具内嵌组件 · 浅色面色 0%",
+  "F9F9F9": "DESIGN.md 特殊工具内嵌组件 · 浅色面色 8%",
+  "F7F7F7": "DESIGN.md 特殊工具内嵌组件 · 浅色面色 50%",
+  "F5F5F5": "DESIGN.md 特殊工具内嵌组件 · 浅色面色 100%",
+  "1C272C": "DESIGN.md 特殊工具内嵌组件 · 深色面色 0%",
+  "192328": "DESIGN.md 特殊工具内嵌组件 · 深色面色 8%",
+  "161F24": "DESIGN.md 特殊工具内嵌组件 · 深色面色 50%",
+  "ECECEC": "DESIGN.md 特殊工具内嵌组件 · 浅色边缘 0%",
+  "3B484E": "DESIGN.md 特殊工具内嵌组件 · 深色边缘 0%",
+  "2D373C": "DESIGN.md 特殊工具内嵌组件 · 深色边缘 48%",
+  "242D32": "DESIGN.md 特殊工具内嵌组件 · 深色边缘 100%",
   // DESIGN.md colors 记录的产品色，色阶画布未收录
   "465A9F": "DESIGN.md light-send · 发送/登录/进度弧强调色（Blue hour 深段）",
   "161C4A": "登录深色 AIR 底色（asset/blue-hour-air-dark-palette.png 色表）",

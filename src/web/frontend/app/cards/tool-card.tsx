@@ -202,11 +202,11 @@ export const ToolCard = memo(function ToolCard({
 	const startedAt = call.execution?.startedAt;
 	const endedAt = call.execution?.endedAt;
 	const special = isStandaloneTool(call, result);
-	const [open, setOpen] = useState(special || !!live);
+	const [open, setOpen] = useState(special);
 	const [touched, setTouched] = useState(false);
 	useEffect(() => {
-		if (!touched && (live || special)) setOpen(true);
-	}, [live, special, touched]);
+		if (!touched && special) setOpen(true);
+	}, [special, touched]);
 	const [raw, setRaw] = useState(false);
 	const [now, setNow] = useState(Date.now());
 	useEffect(() => {

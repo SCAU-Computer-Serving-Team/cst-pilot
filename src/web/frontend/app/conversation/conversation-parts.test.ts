@@ -23,7 +23,7 @@ test("assistant prose stays before and after the corresponding tool calls", () =
 	]);
 	assert.deepEqual(
 		parts.map((part) => part.kind),
-		["thinking", "text", "tools", "text", "tools"],
+		["thinking", "text", "special", "text", "tools"],
 	);
 	assert.equal(parts[1].kind === "text" && parts[1].text, "下面联网搜索这两款的详细资料：");
 	assert.equal(parts[4].kind === "tools" && parts[4].calls.length, 2);
@@ -112,7 +112,7 @@ test("splitTurn keeps only the trailing text of the last assistant message outsi
 	]);
 	assert.deepEqual(
 		process.map((item) => item.part.kind),
-		["thinking", "tools", "text"],
+		["thinking", "special", "text"],
 	);
 	assert.equal(finalText, "最后正文");
 });

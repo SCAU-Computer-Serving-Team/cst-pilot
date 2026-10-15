@@ -21,6 +21,14 @@ Web 功能按[端到端验收](web-e2e.md)覆盖完整用户操作。Checkpoint 
 
 共享后端的 TUI/Web 一致性使用[专项计划](shared-backend.md)，实际 Herdr、发行副本及独立 Pi 进程结果见[专项报告](shared-backend-report.md)。可重复入口 `npm run test:web:shared-audit --prefix agent` 覆盖独立 Pi 进程、真实工具与文件边界，并纳入 CI；实际 TUI 与完整扩展副本另行联调。
 
+## BitLocker 验收
+
+自动入口：`node --test src/test/bitlocker.test.mjs`。测试通过真实注册工具和 Pi 会话覆盖 TUI / Web 输入、操作确认、逐卷结果、调用中断、同卷互斥与 JSONL 凭据脱敏。Windows 操作使用替身，PowerShell 程序仅替换 CIM 命令；连接选项和标准输入传参另行核查。
+
+实机先做只读 status，并用独立 PowerShell 对照权限与错误。unlock、decrypt 只在获准的隔离测试卷上验证；实际终端、加密卷、Windows 10/11 和 PE 的验收范围见 [Todo](../Todo.md)，不要把替身通过表述为真实磁盘执行成功。
+
+特殊组件的尺寸、字号、浅深主题、固定目标与操作恢复见 `agent/home/extensions/web/test/special-tool-states.e2e.ts`。流式回归见 `streaming-after-tool.e2e.ts`；文件打开、请求去重与凭据提交边界见 `special-tool-api.test.ts`。
+
 ## 选择范围
 
 - **局部修复**：阅读相关代码，执行小脚本、参数边界或故障注入；记录未做的实机验证。

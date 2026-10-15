@@ -1,3 +1,4 @@
+import { specialToolKind } from "../cards/special-tool-data.ts";
 import type { ContentPart, Message, QueueItem } from "../data/web-state";
 
 type Thinking = Extract<ContentPart, { type: "thinking" }>;
@@ -14,7 +15,8 @@ export const textOf = (message: Message) =>
 export type ConversationPart =
 	| { kind: "thinking"; part: Thinking }
 	| { kind: "text"; text: string }
-	| { kind: "tools"; calls: Call[] };
+	| { kind: "tools"; calls: Call[] }
+	| { kind: "special"; call: Call };
 
 /** The model can put prose before and after a tool call in the same assistant message. */
 export function orderedParts(content: ContentPart[]): ConversationPart[] {
@@ -23,7 +25,8 @@ export function orderedParts(content: ContentPart[]): ConversationPart[] {
 		const last = parts.at(-1);
 		if (part.type === "thinking") parts.push({ kind: "thinking", part });
 		else if (part.type === "toolCall") {
-			if (last?.kind === "tools") last.calls.push(part);
+			if (specialToolKind(part)) parts.push({ kind: "special", call: part });
+			else if (last?.kind === "tools") last.calls.push(part);
 			else parts.push({ kind: "tools", calls: [part] });
 		} else if (part.type === "text") {
 			if (last?.kind === "text") last.text += `\n${part.text}`;

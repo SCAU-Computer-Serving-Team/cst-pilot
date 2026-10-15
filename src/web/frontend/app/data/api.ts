@@ -40,7 +40,16 @@ export type AccountStatus = {
 /** 会话接口路径：id 统一编码，suffix 以 `/` 开头。 */
 export const sessionPath = (id: string, suffix = "") => `/api/sessions/${encodeURIComponent(id)}${suffix}`;
 
-type ApiError = { error?: { message?: string } };
+type ApiError = { error?: { message?: string; code?: string } };
+export class ApiFailure extends Error {
+	readonly status: number;
+	readonly code?: string;
+	constructor(message: string, status: number, code?: string) {
+		super(message);
+		this.status = status;
+		this.code = code;
+	}
+}
 
 export async function apiJson<T>(
 	path: string,
@@ -76,7 +85,11 @@ export async function apiJson<T>(
 	const data: unknown = await response.json().catch(() => null);
 	if (!response.ok) {
 		const message = (data as ApiError | null)?.error?.message;
-		throw new Error(typeof message === "string" ? message : `请求未完成（${response.status}），请重试。`);
+		throw new ApiFailure(
+			typeof message === "string" ? message : `请求未完成（${response.status}），请重试。`,
+			response.status,
+			(data as ApiError | null)?.error?.code,
+		);
 	}
 	return data as T;
 }
