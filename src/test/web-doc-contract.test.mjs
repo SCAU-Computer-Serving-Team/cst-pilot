@@ -13,7 +13,7 @@ const files = [
   ...(await Promise.all(['doc/telemetry', 'doc/telemetry/sender', 'doc/telemetry/receiver'].map(async directory =>
     (await readdir(resolve(root, directory))).filter(name => name.endsWith('.md')).map(name => resolve(root, directory, name))
   ))).flat(),
-  ...['README.md', 'CHANGELOG.md', 'doc/PRD.md', 'doc/Notice.md', 'doc/contract.md', 'pack/README.md', 'doc/web/README.md', 'doc/web/MVP.md', 'doc/design/README.md', 'doc/design/release.md', 'doc/design/web/tool/mapping.md', 'doc/Todo.md', 'doc/issues.md', 'doc/auth/README.md', 'doc/auth/handover.md', 'doc/test/README.md', 'doc/test/account-report.md', 'doc/test/telemetry-report.md', 'doc/test/launcher-report.md', 'doc/test/checkpoint5-report.md', 'DESIGN.md', 'CONTRIBUTING.md'].map(name => resolve(root, name)),
+  ...['README.md', 'CHANGELOG.md', 'doc/PRD.md', 'doc/Notice.md', 'doc/contract.md', 'pack/README.md', 'doc/web/README.md', 'doc/web/MVP.md', 'doc/design/README.md', 'doc/design/release.md', 'doc/design/web/tool/mapping.md', 'doc/Todo.md', 'doc/issues.md', 'doc/auth/README.md', 'doc/auth/integration.md', 'doc/test/README.md', 'doc/test/account-report.md', 'doc/test/telemetry-report.md', 'doc/test/launcher-report.md', 'doc/test/checkpoint5-report.md', 'DESIGN.md', 'CONTRIBUTING.md'].map(name => resolve(root, name)),
 ];
 const slug = text => text.toLowerCase().replace(/`/g, '').replace(/[^\p{L}\p{N}_\- ]/gu, '').replace(/ /g, '-');
 

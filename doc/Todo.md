@@ -16,7 +16,7 @@
 | 管理员与 WT 启动：真实 UAC 同意／取消、跨账户授权、未安装 WT 和系统控制台回退 | [运行边界](Notice.md#管理员启动)、[议题清单](issues.md#实机验证) |
 | 会话管理、通知与简化模型面板：补最低浏览器、实际窗口和多标签组合验收 | [端到端验收](test/web-e2e.md)、[联调报告](test/checkpoint5-report.md) |
 | 遥测真实队员双端入库验收；两端异机备份与完整恢复验证；清理和汇总监控 | [遥测验证](test/telemetry-report.md) |
-| OAuth 真机联调；验证真实登录、模型调用与遥测身份 | [认证交接](auth/handover.md) |
+| OAuth 真机联调；验证真实登录、模型调用与遥测身份 | [CSTOA 接入](auth/integration.md) |
 | CSTOA 资料与上下文额度的多队员生产验收 | [账号验证](test/account-report.md) |
 
 ## 待补画布

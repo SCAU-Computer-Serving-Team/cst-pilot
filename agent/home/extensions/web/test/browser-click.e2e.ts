@@ -23,6 +23,15 @@ test("浏览器点击等待异步定位进入视口，永久遮挡仍失败", { 
 		await browser.evaluate("setTimeout(()=>document.querySelector('#target').style.left='80px',250)");
 		await browser.click("#target");
 		assert.equal(await browser.evaluate("window.clicked"), true);
+		await browser.evaluate(`(() => {
+			const list = document.createElement('div');
+			list.style.cssText = 'position:fixed;left:400px;top:80px;width:120px;height:64px;overflow:auto';
+			list.innerHTML = '<div style="height:1200px"></div><button id="option" onclick="window.optionClicked=true">option</button>';
+			list.addEventListener('pointerenter', () => { list.scrollTop = 0; window.listReset = true; }, { once: true });
+			document.body.append(list);
+		})()`);
+		await browser.click("#option");
+		assert.equal(await browser.evaluate("window.listReset && window.optionClicked"), true);
 		const current = browser;
 		await assert.rejects(() => current.click("#blocked"), /遮挡|不可点击|未停止/);
 	} finally {

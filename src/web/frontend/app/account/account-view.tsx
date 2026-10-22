@@ -1,5 +1,5 @@
 import { Button } from "@heroui/react";
-import { LogOut, ScanQrCode } from "lucide-react";
+import { KeyRound, LogOut, ScanQrCode } from "lucide-react";
 import { Link } from "react-router";
 import { loginPath } from "../auth/providers";
 import type { AccountStatus } from "../data/api";
@@ -70,6 +70,10 @@ export function AccountView({
 				<Link className="settings-action" to={loginPath("cstoa", "oauth", "/account")}>
 					<ScanQrCode size={16} aria-hidden="true" />
 					{account?.signedIn ? "重新扫码登录" : "扫码登录"}
+				</Link>
+				<Link className="settings-action" to={loginPath("cstoa", "api_key", "/account")}>
+					<KeyRound size={16} aria-hidden="true" />
+					APIKEY 登录
 				</Link>
 				{account?.signedIn ? (
 					<Button

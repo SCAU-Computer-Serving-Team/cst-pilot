@@ -53,4 +53,4 @@
 |---|---|
 | transitions.dev 相关片段的发行授权是否已覆盖实际使用内容？ | 正式发行前核对代码来源与授权条款 |
 
-OA 身份、额度与遥测接收端的外部依赖见[认证交接](auth/handover.md)和[遥测接收规格](telemetry/receiver/SPEC.md)。
+OA 身份、额度与遥测接收端的外部依赖见[CSTOA 接入](auth/integration.md)和[遥测接收规格](telemetry/receiver/SPEC.md)。

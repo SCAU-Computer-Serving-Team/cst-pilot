@@ -1,8 +1,8 @@
 # OA 登录与模型接入
 
-状态：扩展与 Web 登录面板已实现，待真机联调。更新：2026-10-04，交接入口见 [handover.md](handover.md)。
+OAuth 与 CSTOA APIKEY 共用模型服务、成员身份和积分展示。实现入口和服务端接口见[CSTOA 接入](integration.md)。
 
-OAuth 负责队员登录认证和接入团队模型服务。登录态随 U 盘保存，按令牌有效期延续。在 Web 中，OAuth 与 API KEY 共用模型服务的登录状态展示和退出操作；本文只规定 OAuth 的有效期和刷新。Web 接口见[模型与登录](../web/SPEC/app-router.md#模型与登录)。
+队员可通过手机 OAuth 授权或 CSTOA AI Console 创建的 APIKEY 使用团队模型，两种方式均消耗成员积分。登录态随 U 盘保存，按凭据有效期延续。Web 接口见[模型与登录](../web/SPEC/app-router.md#模型与登录)。
 
 ## 范围与流程
 
@@ -12,7 +12,7 @@ OAuth 负责队员登录认证和接入团队模型服务。登录态随 U 盘�
 4. Agent 轮询令牌端点，取得访问令牌，由 pi 保存到 U 盘的 `agent/home/auth.json`。
 5. pi 携带访问令牌调用 OA 的 OpenAI 兼容代理。OA 校验权限与额度，转发到 New API 网关，记录用量。
 
-模型调用链：`pi → OA 代理 → New API 网关 → 模型`。网关长期密钥只在服务端使用。
+OAuth 调用链：`pi → OA 代理 → New API 网关 → 模型`，内部网关令牌保留在服务端。APIKEY 调用链：`pi → New API 网关 → 模型`，使用队员自行提供的密钥。
 
 | 项 | 约定 |
 |---|---|
@@ -36,6 +36,21 @@ OAuth 负责队员登录认证和接入团队模型服务。登录态随 U 盘�
 扩展把 `verification_uri_complete` 填进 `device_code` 事件的 `verificationUri`，Web 前端直接编码该链接并渲染倒计时；设备码信息经 Web server 转发（方式见 [pi-extension.md](pi-extension.md)「登录与刷新」）。Web UI 的 OAuth 登录面板已实现（登录页扫码 tab），与 API KEY 共用登录状态展示与退出。
 
 上游 issue #9774（给 pi 原生设备码对话框加二维码）**只涉及 TUI**。Web UI 的二维码由本项目前端实现，不依赖上游。
+
+## APIKEY、模型与积分
+
+| 项 | 规则 |
+|---|---|
+| 密钥来源 | CSTOA AI Console 创建并绑定成员的 APIKEY；其他服务密钥使用各自 Provider |
+| 模型地址 | OAuth 使用 `/api/agent/llm/v1`；APIKEY 使用 `/v1`；两者均位于 `https://www.cstoa.top` |
+| 模型目录 | 登录后预取；进入模型界面或发送输入时自动检查，成功清单缓存 5 分钟，失败后 30 秒再尝试 |
+| 目录隔离 | 按凭据与地址区分；换账号或登录方式不沿用其他凭据的目录；同凭据刷新失败可继续使用缓存 |
+| 模型能力 | 已知模型复用 Pi 目录元数据；未知模型使用保守参数；服务端成功返回空目录时移除旧模型 |
+| 积分 | New API quota 与额度点 1:1，推理时由网关扣除；客户端不重复计价 |
+| APIKEY 可用积分 | 取成员积分与密钥剩余额度的较小值；无限额密钥取成员积分 |
+| 本人资料 | OAuth 读取 `/api/agent/profile`；APIKEY 读取 `/api/agent/key-profile` |
+
+同一 `cstoa` Provider 保留最近登录的一种凭据。账号页、菜单、额度与退出对两种方式一致；密钥失效与网关故障分别提示。
 
 ## 登录有效期
 
@@ -118,6 +133,8 @@ TOTP 在本期实现绑定和校验，授权页强制校验（Authenticator 应�
 | DELETE | `/api/agent/devices/{id}` | OA 会话 | 移除设备 |
 | ANY | `/api/agent/llm/v1/*` | access_token | OpenAI 兼容模型代理 |
 | GET | `/api/agent/profile` | access_token | 本人学号、姓名、分组与额度点；客户端字段映射见[专属账号](../web/SPEC/app-router.md#专属账号) |
+| GET | `/api/agent/key-profile` | CSTOA APIKEY | 密钥绑定成员与可用积分 |
+| GET | `/v1/models` | CSTOA APIKEY | 密钥可用模型目录 |
 
 设备授权请求包含设备名、平台、Agent 版本和作用域。响应包含 `device_code`、`user_code`、`verification_uri`、`verification_uri_complete`、`expires_in=300`、`interval=5`。
 
@@ -150,6 +167,6 @@ TOTP 在本期实现绑定和校验，授权页强制校验（Authenticator 应�
 ## 相关规格
 
 1. [pi 扩展方案](pi-extension.md)：事件、凭据取用与发行方式。
-2. [交接文档](handover.md)：开发起点、阅读顺序与外部依赖。
+2. [CSTOA 接入](integration.md)：功能实现入口与服务端接口。
 3. [遥测系统](../telemetry/README.md)：独立的数据采集与上传规格。上传鉴权复用本文的访问令牌，接收端据此解析队员身份。
 4. [OA 侧任务拆分](https://github.com/SCAU-Computer-Serving-Team/cstoa-api-fastapi/blob/main/docs/oa-tasks.md)：后端实施清单，登录与模型接入范围以本文为准。

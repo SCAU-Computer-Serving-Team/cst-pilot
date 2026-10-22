@@ -57,7 +57,7 @@ export function Sidebar({
 	const navigate = useNavigate();
 	const [providers, setProviders] = useState<ProviderStatus[]>([]);
 	const team = accountProvider(providers);
-	const teamSignedIn = team?.type === "oauth";
+	const teamSignedIn = team?.type === "oauth" || team?.type === "api_key";
 	const [accountError, setAccountError] = useState("");
 	const [accountWorking, setAccountWorking] = useState(false);
 	const [accountMenuOpen, setAccountMenuOpen] = useState(false);

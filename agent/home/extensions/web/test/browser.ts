@@ -189,6 +189,10 @@ export class BrowserProbe {
 					const target = document.elementFromPoint(x, y);
 					if (!element.contains(target)) {
 						obstacle = target?.outerHTML.slice(0,600) ?? "视口之外";
+						if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) {
+							element.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
+							stable = 0;
+						}
 						continue;
 					}
 					return { x, y };

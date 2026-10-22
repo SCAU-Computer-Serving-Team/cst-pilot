@@ -1,95 +1,60 @@
 # OA 登录扩展
 
-状态：已实现，待真机联调。更新：2026-10-04。适配项目锁定的 pi 0.85.1，业务约定见 [OA 登录与模型接入](README.md)，交接入口见 [handover.md](handover.md)。
+扩展通过 Pi 原生 Provider 接入 `cstoa`，提供 OAuth 与 APIKEY 两种登录方式。两端共用 Pi 的凭据、模型目录和推理实现，不修改 Pi 内核。业务规则见[OA 登录与模型接入](README.md)。
 
-扩展通过 `pi.registerProvider("cstoa", { oauth })` 接入原生 `/login`，不修改 pi 内核。
+## 职责与文件
 
-## 职责
-
-| 事项 | 负责方 |
+| 文件 | 职责 |
 |---|---|
-| 登录入口、网址与数字码显示 | pi，扩展调用 `callbacks.onDeviceCode` |
-| Web UI 登录面板与二维码 | 扩展提供设备码信息，Web 前端渲染二维码与倒计时 |
-| 申请设备码、轮询、令牌交换 | 扩展 |
-| 凭据保存、刷新触发、并发刷新互斥 | pi，凭据位于 `agent/home/auth.json` |
-| 刷新请求 | 扩展实现 `refreshToken(credentials, signal)` |
-| 模型请求 | pi 的 OpenAI 兼容适配器，令牌由 `oauth.getApiKey` 提供 |
-| 设备标识 | 扩展维护 `agent/home/device.json` |
+| `agent/home/extensions/oauth/index.ts` | 注册原生 `cstoa` Provider |
+| `provider.ts` | 双方式登录、凭据对应的固定模型地址、复用 Pi Chat Completions 适配器 |
+| `oa.ts` | OAuth 设备码申请、轮询、令牌交换和刷新 |
+| `device.ts` | U 盘设备标识 |
+| `models.ts` | 动态模型目录、元数据、凭据隔离、缓存与发布 |
+| `sync.ts` | TUI/Web 自动刷新，合并同一运行实例的并发请求 |
+| `test/` | OAuth、模型目录和真实 Pi 加载测试 |
 
-## 文件
+凭据由 Pi 保存到 `agent/home/auth.json`，动态目录由 Pi 保存到 `models-store.json`。目录只包含模型元数据和凭据摘要，不包含令牌或密钥。Web 本人资料与额度由 `web/server/api/account.ts` 查询，浏览器不读取已有凭据。
 
-```text
-agent/home/extensions/oauth/
-|-- index.ts       注册 provider
-|-- oa.ts          设备授权与令牌交换
-|-- device.ts      设备标识
-|-- package.json
-`-- test/          mock 单测与内核 e2e，运行 npm run test:oauth
+## OAuth
+
+1. `login()` 申请设备码，用 `device_code` 事件交给 TUI 或 Web 展示。
+2. `verificationUri` 使用服务端返回的完整授权链接，手机打开后预填数字码。
+3. 手机完成 OA 登录、TOTP 校验与批准。扩展按服务端间隔轮询，并响应取消、拒绝、过期和减速。
+4. 成功返回访问令牌、可选刷新令牌和毫秒到期时间。预取模型后由 Pi 保存凭据与目录。
+5. Pi 在访问令牌进入刷新窗口后调用扩展刷新。刷新请求使用 Pi 提供的取消信号，凭据轮换和跨进程互斥由 Pi 管理。
+
+默认不下发刷新令牌；记住模式的七天从首次授权起算。其他有效期和吊销规则见[登录有效期](README.md#登录有效期)。
+
+## APIKEY
+
+1. 使用 Pi 原生秘密输入步骤获取队员提供的 CSTOA APIKEY。
+2. 调用固定的 `/api/agent/key-profile` 校验成员归属和凭据状态。积分为零不阻止登录。
+3. 预取 `/v1/models`，由 Pi 保存 `type=api_key` 凭据。
+4. 模型请求直接使用 OA 域名下的 `/v1`。OAuth 请求使用 `/api/agent/llm/v1`，两种凭据不混用请求地址。
+
+CSTOA 禁用自定义服务地址。其他服务的 APIKEY、自定义地址和 OAuth 行为保持独立。
+
+## 动态模型
+
+Provider 的 `refreshModels(context)` 通过 `context.publish()` 发布清单与缓存。成功清单允许为空，空清单移除旧模型；格式、网络和 HTTP 错误保留同一凭据的有效缓存。
+
+- 登录后预取，进入模型界面或发送输入时自动检查。成功缓存五分钟，失败后等待三十秒再尝试。
+- 换凭据或服务地址时清除不匹配的目录，缓存不能使其他账号的模型可用。
+- 模型 ID 来自网关；能力与上下文参数复用 Pi 的已知目录，未知模型使用保守参数。上游返回的 URL 和请求头不作为连接配置。
+- 推理使用 Pi 内置 Chat Completions 实现，保留工具调用、流式输出和取消行为。模型本地费用为零，真实积分由 New API 扣除。
+
+`PI_OFFLINE=1` 继续关闭 Pi 全局启动联网。项目只主动更新 CSTOA，不开启其他 Provider 的启动联网。
+
+## 验证与发行
+
+```powershell
+npm run check --prefix agent
+npm run test:oauth --prefix agent
+node --test agent/home/extensions/web/test/cstoa-credentials.test.ts
+node --test agent/home/extensions/web/test/cstoa-login.e2e.ts agent/home/extensions/web/test/account.e2e.ts
 ```
 
-只使用 Node 内置模块与全局 `fetch`。
+浏览器测试先构建 Web。隔离测试覆盖双方式登录、实际 Pi 推理路径、积分刷新、目录持久化与凭据隔离，入口见[账号验证](../test/account-report.md)。真实手机授权和实际积分扣减需使用获准的测试账号单独验证。
 
-## 登录与刷新
-
-1. `login(callbacks)` 请求设备码，用 `onDeviceCode({ userCode, verificationUri, intervalSeconds, expiresInSeconds })` 显示授权信息。
-2. 扩展按 OA 给定的 interval 轮询，处理待确认、减速、拒绝、过期与用户取消。pi 内部轮询工具没有公开导出。
-3. 成功后返回 `{ access, refresh, expires }`，`expires` 是毫秒时间戳，由 pi 保存凭据。
-4. 默认模式没有刷新令牌时返回 `refresh: ""`；进入刷新窗口后提示重新授权。
-5. pi 在取凭据时发现剩余有效期不足五分钟，调用 `refreshToken`。扩展发出刷新请求并返回轮换后的凭据，网络请求使用传入的 `signal`；该信号包含十五秒超时。
-6. 网络或超时错误提示检查网络；凭据失效时要求重新 `/login`。
-
-登录轮询响应 `callbacks.signal`，刷新请求响应 `signal`。扩展不另建后台刷新循环。
-
-TUI 与 Web UI 共用同一个 `login()`，设备码展示由各 UI 形态负责（TUI 用内核原生对话框；Web 登录页扫码 tab 已实现）。约定：扩展把 `verification_uri_complete`（带数字码的完整链接）填进 `onDeviceCode` 的 `verificationUri` 字段，与内核内置 Kimi provider 一致；TUI 点击打开即预填数字码，Web 前端直接编码该链接渲染二维码，扩展侧只放行 http(s) 链接。
-
-Web 端接入已实现：Web server 直接调用 `modelRuntime.login("cstoa", "oauth", interaction)`（与现有 API KEY 登录同一路径），消费 `interaction.notify` 的 `device_code` 事件，经 `/api/events` SSE 推给登录页。不新增跨扩展通道，也不需要 pi 内核新增会话事件。
-
-## 模型与凭据取用
-
-| provider 字段 | 值 |
-|---|---|
-| `baseUrl` | `https://www.cstoa.top/api/agent/llm/v1` |
-| `api` | `openai-completions` |
-| `models` | OA 网关提供的可用模型清单 |
-| `oauth.getApiKey` | `(credentials) => credentials.access` |
-
-其他 OA 业务需要当前访问令牌时，使用 `ctx.modelRegistry.getProviderAuth("cstoa")`，从结果的 `auth.apiKey` 取值。该调用按需触发 pi 的刷新流程；调用方处理失败，不保存令牌副本。
-
-## 错误提示
-
-| 场景 | 行为 |
-|---|---|
-| 授权拒绝或设备码过期 | 提示重新开始授权 |
-| 网络失败或超时 | 提示检查网络 |
-| 401，凭据失效 | 清理本地凭据并提示重新授权 |
-| 403，权限不足 | 提示权限不足 |
-| 设备吊销或改密 | 提示重新授权或联系管理员 |
-| 额度不足 | 提示额度不足，不自动重试 |
-| 凭据写入失败 | 提示存储问题，不声称已成功保存登录态 |
-
-## 测试用例
-
-| 用例 | 说明 |
-|---|---|
-| 首次授权 | 全新 U 盘：`/login` → 手机输入数字码并确认 → 模型可用 |
-| Web UI 二维码 | Web UI 弹出二维码，手机扫码直达授权页并预填数字码 |
-| 无任务调用 | 未选任务、未创建修机会话时，权限与额度满足即可调用模型 |
-| 跳电脑 | 同一 U 盘换电脑、盘符变化：登录态按有效期延续，不要求重新授权 |
-| 记住到期 | 记住模式 7 天（自首次授权）到期后要求重新授权 |
-| 并发刷新 | 多路并发请求只触发一次刷新（pi 文件锁） |
-| 本地退出 | `/logout` 只清本地凭据；服务端吊销后独立副本也失效 |
-| 拔盘、写盘失败 | 明确提示，不误报为令牌盗用 |
-| 拒绝 | 授权页拒绝后收到 `access_denied` |
-| 超时 | 5 分钟未确认，提示重新开始 |
-| 刷新 | 记住模式下 pi 自动刷新 |
-| 吊销 | 个人中心吊销后请求被拒并提示重新登录 |
-| 改密 | 改密后旧令牌立即失效 |
-| 额度不足 | 代理端点返回额度错误，界面提示 |
-| 断网 | 明确的网络错误提示 |
-
-## 便携运行与发行
-
-1. 通过 `pi.cmd` 启动，`PI_CODING_AGENT_DIR` 指向工具包的 `agent/home`。设备标识与凭据均保存在此目录。
-2. `PI_OFFLINE=1` 只关闭 pi 的启动联网，不阻止授权、刷新和模型请求。
-3. `pack/pack.mjs` 复制扩展目录。发行包不含个人凭据与设备标识，首次运行后生成。
-4. 验收范围见 [OA 登录与模型接入](README.md#本期验收)。
+发行包复制扩展源码，排除个人凭据和设备标识。首次使用后在工具包目录生成运行态文件。

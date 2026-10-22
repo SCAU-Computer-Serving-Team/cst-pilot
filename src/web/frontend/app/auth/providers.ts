@@ -55,7 +55,7 @@ export function loginPath(providerId: string, method: LoginMethod, destination =
 }
 /** 登录成功依据实际完成的服务/方式，取消仍使用原returnTo。 */
 export function loginSuccessPath(providerId: string, method: LoginMethod, destination: string): string {
-	if (providerId === CSTOA_PROVIDER && method === "oauth") return "/account";
+	if (providerId === CSTOA_PROVIDER && (method === "oauth" || method === "api_key")) return "/account";
 	const path = returnPath(destination);
 	return path === "/account" ? "/settings#accounts" : path;
 }

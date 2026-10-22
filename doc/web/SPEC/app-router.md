@@ -79,7 +79,7 @@
 | `GET /api/account` | `providerId`、`signedIn`、`requiresLogin`、`profile` | 未登录或凭据失效时资料为空；`profile.reason` 说明资料查询失败原因 |
 | `GET /api/quota?provider=cstoa` | `provider`、`supported`、`balance`、`unit`、`requiresLogin`、`reason`、`fetchedAt` | 成功时 `supported=true`、`unit=credit`；0 是有效额度，失败时不返回虚构余额 |
 
-本机后端使用 Pi 管理的令牌查询 OA `GET /api/agent/profile`。字段映射如下，10,000 额度点对应 ¥1。
+本机后端使用 Pi 管理的凭据查询 OA：OAuth 读取 `GET /api/agent/profile`，APIKEY 读取 `GET /api/agent/key-profile`。两者共用下表映射，10,000 额度点对应 ¥1。APIKEY 的 `balance` 已包含成员余额和密钥额度上限。
 
 | OA 字段 | 本机字段 | 有效条件 |
 |---|---|---|

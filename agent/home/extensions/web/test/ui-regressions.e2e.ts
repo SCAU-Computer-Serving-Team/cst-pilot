@@ -186,7 +186,7 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		await browser.until("!document.querySelector('[aria-label=发送消息]').disabled", "发送按钮可用");
 		await browser.click('[aria-label="发送消息"]');
 		await browser.until(
-			"document.querySelector('.composer-shell .error-notice[data-kind=connection]')?.textContent.includes('提交待确认') && document.querySelector('.composer-input')?.textContent==='新会话实时记录'",
+			"document.querySelector('.error-notification .notification-message')?.textContent.includes('提交待确认') && document.querySelector('.composer-input')?.textContent==='新会话实时记录'",
 			"响应丢失后保留草稿",
 		);
 		await browser.evaluate("window.fetch=window.__fetchBeforeFault");

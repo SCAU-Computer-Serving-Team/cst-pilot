@@ -9,6 +9,7 @@ import {
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { BitLockerWebInteraction, bitLockerWebInteractions } from "../../../diagnostics/bitlocker-web.ts";
+import { refreshCstoaModels } from "../../../oauth/sync.ts";
 import { installRuntimeAdapter, registerRuntimeSession } from "../../../runtime/adapter.ts";
 import { checkSharedConfiguration } from "../../../runtime/configuration.ts";
 import { ownSession } from "../../../runtime/owner.ts";
@@ -104,6 +105,7 @@ export class WebSessionPool {
 		const task = this.getServices().then(async (services) => {
 			await services.settingsManager.reload();
 			await services.modelRuntime.refresh({ allowNetwork: false });
+			await refreshCstoaModels(services.modelRuntime);
 			checkSharedConfiguration(services.settingsManager, services.modelRuntime);
 			return services;
 		});
