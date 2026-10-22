@@ -54,6 +54,15 @@ const post = (path: string, value: unknown, headers: Record<string, string> = {}
 		body: JSON.stringify(value),
 	});
 
+test("计划中的导出与分享不提供可执行接口", async () => {
+	for (const suffix of ["export", "share"]) {
+		const response = await fetch(`${origin}/api/sessions/${slot.id}/${suffix}`);
+		assert.equal(response.status, 404);
+		assert.equal((await response.json()).error.code, "not_found");
+		assert.equal(response.headers.get("content-disposition"), null);
+	}
+});
+
 test("creating a session with the same request key returns the same session", async () => {
 	const key = "new-session-once";
 	const first = await post("/api/sessions", {}, { "Idempotency-Key": key });

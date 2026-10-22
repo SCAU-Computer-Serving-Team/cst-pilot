@@ -18,6 +18,7 @@ import { getProviderQuota } from "./api/quota.ts";
 import { openDeliveredRunbook, RunbookOpenError } from "./api/runbook.ts";
 import { type ImageRef, ImageStore } from "./session/attachments.ts";
 import { browserJson } from "./session/browser-json.ts";
+import { compactSession } from "./session/compaction.ts";
 import { SessionEvents } from "./session/events.ts";
 import { type Delivery, InboxConflict, SessionInbox } from "./session/inbox.ts";
 import { MutationReceipts } from "./session/receipts.ts";
@@ -753,31 +754,6 @@ export function createWebApi(
 				send(response, 200, { aborted: true });
 				return true;
 			}
-			if (suffix === "export" && method === "GET") {
-				const slot = await pool.openSaved(id);
-				const content = slot.session.messages
-					.map((message) => {
-						const body = "content" in message ? message.content : undefined;
-						const text =
-							typeof body === "string"
-								? body
-								: Array.isArray(body)
-									? body
-											.filter((part) => part.type === "text")
-											.map((part) => part.text)
-											.join("\n")
-									: "";
-						return `## ${message.role}\n\n${text}`;
-					})
-					.join("\n\n");
-				response.writeHead(200, {
-					"Content-Type": "text/markdown; charset=utf-8",
-					"Cache-Control": "no-store",
-					"Content-Disposition": `attachment; filename="session-${id}.md"`,
-				});
-				response.end(content);
-				return true;
-			}
 			if (suffix === "compact" && method === "POST") {
 				const input = await body(request);
 				if (
@@ -787,8 +763,8 @@ export function createWebApi(
 					throw new Error("请求的压缩提示无效");
 				const result = await writeOnce(request, pathname, input, async () => {
 					const slot = await pool.openSaved(id);
-					if (slot.session.isStreaming) throw new InboxConflict("会话正在执行");
-					await slot.session.compact(input.instructions as string | undefined);
+					if (!slot.session.isIdle) throw new InboxConflict("会话正在执行，请等待完成后再压缩");
+					await compactSession(slot.session, input.instructions as string | undefined);
 					return { id, compacted: true };
 				});
 				send(response, 200, result);
@@ -931,8 +907,10 @@ export function createWebApi(
 			else if (diskCode === "ENOSPC") problem(response, 507, "storage_full", "工具包存储空间不足，输入未被接受");
 			else if (["EACCES", "EPERM", "EROFS", "ENOTDIR", "EEXIST"].includes(diskCode ?? ""))
 				problem(response, 500, "storage_unavailable", "工具包目录无法写入，输入未被接受");
-			else if (error instanceof Error && /Nothing to compact|Already compacted/.test(error.message))
-				problem(response, 409, "nothing_to_compact", "当前会话无需压缩");
+			else if (error instanceof Error && error.message === "Already compacted")
+				problem(response, 409, "already_compacted", "会话已压缩，继续对话后可再次压缩");
+			else if (error instanceof Error && error.message === "Nothing to compact (session too small)")
+				problem(response, 409, "nothing_to_compact", "当前没有可压缩的较早内容");
 			else if (diskCode === "CST_CONFIGURATION_UNAVAILABLE" && error instanceof Error)
 				problem(response, 503, "configuration_unavailable", error.message);
 			else if (error instanceof SessionOwnerConflict || diskCode === "CST_SESSION_OWNED")

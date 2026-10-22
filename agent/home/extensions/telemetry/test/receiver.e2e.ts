@@ -6,17 +6,17 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { RELEASE_SETTINGS, RELEASE_TELEMETRY } from "../../../../../pack/release-settings.mjs";
 import { WebSessionPool } from "../../web/server/session/sessions.ts";
 import { freePort } from "../../web/test/browser.ts";
 import { testRoot } from "../../web/test/support.ts";
+import { newState } from "../collect.ts";
 import { flushEndpoints } from "../delivery.ts";
 import { loadInstallation } from "../installation.ts";
 import { appendRecord, readAll } from "../outbox.ts";
+import { buildRecord } from "../record.ts";
 import { sendBatch } from "../transport.ts";
 
-const { RELEASE_SETTINGS, RELEASE_TELEMETRY } = await import(
-	new URL("../../../../../pack/release-settings.mjs", import.meta.url).href
-);
 const binary = process.env.CST_TELEMETRY_RECEIVER;
 
 test(
@@ -186,8 +186,6 @@ test(
 			assert.ok(firstCsv.includes(installation.installationId));
 			assert.ok(firstCsv.includes(process.versions.node));
 			assert.ok(!firstCsv.includes("test-member"));
-			const { buildRecord } = await import("../record.ts");
-			const { newState } = await import("../collect.ts");
 			const offline = buildRecord(
 				newState(crypto.randomUUID(), "new", "web"),
 				{ endReason: "quit", endedAt: Date.now(), contextEntries: 2 },

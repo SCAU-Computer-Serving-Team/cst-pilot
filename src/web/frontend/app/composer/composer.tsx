@@ -56,6 +56,7 @@ const commandLabels: Record<string, string> = {
 	"/compact": "压缩上下文",
 	"/fork": "派生当前会话",
 	"/tree": "打开分支树",
+	"/skill:bitlocker": "BitLocker 状态、解锁与解密",
 	"/skill:disk": "磁盘容量、型号与健康",
 	"/skill:driver": "设备识别与驱动状态",
 	"/skill:eventlog": "崩溃、蓝屏与服务历史",
@@ -723,7 +724,7 @@ export function Composer({
 						</div>
 					</fieldset>
 				)}
-				{error && <ErrorNotice input message={error} />}
+				{error && <ErrorNotice key={error} input message={error} onDismiss={() => setError("")} />}
 				<div className="composer-actions">
 					<input
 						ref={fileInput}

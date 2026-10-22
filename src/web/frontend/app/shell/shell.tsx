@@ -2,7 +2,6 @@ import { Button, Popover } from "@heroui/react";
 import {
 	Check,
 	CircleUserRound,
-	Download,
 	ListChecks,
 	LogIn,
 	LogOut,
@@ -487,16 +486,6 @@ export function Sidebar({
 								<Pencil size={18} aria-hidden="true" />
 								重命名
 							</button>
-							<a
-								role="menuitem"
-								className="sidebar-account-item"
-								href={`/api/sessions/${encodeURIComponent(menu.id)}/export`}
-								download
-								onClick={() => setMenu(null)}
-							>
-								<Download size={18} aria-hidden="true" />
-								导出
-							</a>
 							<button
 								type="button"
 								role="menuitem"

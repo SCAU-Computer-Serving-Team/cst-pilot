@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -15,6 +15,9 @@ test("TAG 光标：选择命令、继续输入、草稿恢复、移除和文件�
 	await mkdir(root, { recursive: true });
 	const home = await mkdtemp(join(root, "home-"));
 	await writeFile(join(home, "package-caret.txt"), "FILE_REFERENCE_FIXTURE");
+	await cp(fileURLToPath(new URL("../../../skills/bitlocker/", import.meta.url)), join(home, "skills", "bitlocker"), {
+		recursive: true,
+	});
 	await writeFile(join(home, "web-settings.json"), JSON.stringify({ theme: "dark" }));
 	const received: string[] = [];
 	const model = createServer(async (request, response) => {
@@ -143,6 +146,30 @@ test("TAG 光标：选择命令、继续输入、草稿恢复、移除和文件�
 		assert.ok(
 			received.some((text) => text === `${token} 查看`),
 			`模型收到规范文件引用和正文，视觉间距不进入请求：${JSON.stringify({ token, received })}`,
+		);
+		await browser.fill(".composer-input", "/skill:bit");
+		await browser.until("!!document.querySelector('.command-suggestions .command-active')", "BitLocker 技能补全");
+		await key("Enter");
+		await browser.until(
+			"!!document.querySelector('.composer-chip[data-token=\"/skill:bitlocker\"]')",
+			"BitLocker 技能 TAG",
+		);
+		await browser.call("Input.insertText", { text: "查询状态" });
+		await browser.click('[aria-label="发送消息"]');
+		await browser.until(
+			"document.querySelector('.conversation')?.textContent.includes('查询状态')",
+			"BitLocker 技能发送",
+		);
+		for (
+			let attempt = 0;
+			attempt < 100 && !received.some((text) => text.includes('<skill name="bitlocker"'));
+			attempt++
+		) {
+			await new Promise((resolve) => setTimeout(resolve, 30));
+		}
+		assert.ok(
+			received.some((text) => text.includes('<skill name="bitlocker"') && text.includes("查询状态")),
+			"显式技能由 Pi 展开后发给本机模型替身",
 		);
 		await writeFile(
 			join(root, "report.json"),

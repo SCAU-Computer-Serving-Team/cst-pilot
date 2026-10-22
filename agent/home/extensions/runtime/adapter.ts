@@ -69,7 +69,7 @@ export function currentRuntime(id: string): AgentSession | undefined {
 }
 
 /** Pi0.85.1没有扩展获取当前AgentSession的入口。集中适配公开bindExtensions。
- * 只包装本实例公开方法，不访问私有字段、不修改SDK文件；重载复用进程内登记。
+ * 在进程内包装原型bindExtensions，再包装已登记实例的公开方法；不访问私有字段或修改SDK文件。
  */
 export function installRuntimeAdapter(): void {
 	const target = AgentSession.prototype;

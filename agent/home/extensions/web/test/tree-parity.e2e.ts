@@ -13,15 +13,12 @@ import { type AddressInfo, createServer as createNetServer } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { initTheme, TreeSelectorComponent } from "@earendil-works/pi-coding-agent";
 import { createWebApi } from "../server/api.ts";
 import { createWebServer, listenWebServer } from "../server/http.ts";
 import { WebSessionPool } from "../server/session/sessions.ts";
 import { testRoot } from "./support.ts";
 
-const PI_DIST = new URL(
-	"../../../../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/",
-	import.meta.url,
-);
 const STATIC_DIR = fileURLToPath(new URL("../static/", import.meta.url));
 const rootDir = await testRoot();
 
@@ -46,8 +43,6 @@ async function freePort(): Promise<number> {
 
 /** 读 pi TUI 自己算出的排版。TUI 是唯一真源。 */
 async function tuiRows(tree: TreeNodeShape[], leafId: string | null) {
-	const { TreeSelectorComponent } = await import(new URL("components/tree-selector.js", PI_DIST).href);
-	const { initTheme } = await import(new URL("theme/theme.js", PI_DIST).href);
 	initTheme("dark");
 	const component = new TreeSelectorComponent(
 		tree as never,
@@ -58,8 +53,18 @@ async function tuiRows(tree: TreeNodeShape[], leafId: string | null) {
 		async () => {},
 	);
 	const list = (
-		component as {
-			treeList: { multipleRoots: boolean; filteredNodes: any[]; isFoldable: (entryId: string) => boolean };
+		component as unknown as {
+			treeList: {
+				multipleRoots: boolean;
+				filteredNodes: {
+					node: { entry: { id: string } };
+					indent: number;
+					showConnector: boolean;
+					isVirtualRootChild: boolean;
+					gutters: { position: number; show: boolean }[];
+				}[];
+				isFoldable: (entryId: string) => boolean;
+			};
 		}
 	).treeList;
 	const rows: RowShape[] = list.filteredNodes.map((flat) => {
@@ -86,7 +91,7 @@ async function tuiRows(tree: TreeNodeShape[], leafId: string | null) {
 class Cdp {
 	private seq = 0;
 	private socket: WebSocket;
-	private pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
+	private pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
 	constructor(socket: WebSocket) {
 		this.socket = socket;
 		socket.addEventListener("message", (event) => {
@@ -103,13 +108,14 @@ class Cdp {
 			else waiter.resolve(message.result);
 		});
 	}
-	send(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<any> {
+	async send<T = unknown>(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<T> {
 		const id = ++this.seq;
 		const payload = JSON.stringify(sessionId ? { id, method, params, sessionId } : { id, method, params });
-		return new Promise((resolve, reject) => {
+		const result = await new Promise<unknown>((resolve, reject) => {
 			this.pending.set(id, { resolve, reject });
 			this.socket.send(payload);
 		});
+		return result as T;
 	}
 }
 
@@ -204,15 +210,18 @@ async function readPage(pageUrl: string, probe: string, shotPath?: string) {
 			socket.addEventListener("error", () => reject(new Error("无法连接 Chrome")));
 		});
 		const cdp = new Cdp(socket);
-		const page = await cdp.send("Target.createTarget", { url: "about:blank" });
-		const attached = await cdp.send("Target.attachToTarget", { targetId: page.targetId, flatten: true });
+		const page = await cdp.send<{ targetId: string }>("Target.createTarget", { url: "about:blank" });
+		const attached = await cdp.send<{ sessionId: string }>("Target.attachToTarget", {
+			targetId: page.targetId,
+			flatten: true,
+		});
 		const session = attached.sessionId as string;
 		await cdp.send("Page.enable", {}, session);
 		await cdp.send("Page.navigate", { url: pageUrl }, session);
 		let ready = false;
 		for (let attempt = 0; attempt < 150 && !ready; attempt++) {
 			try {
-				const state = await cdp.send(
+				const state = await cdp.send<{ result?: { value?: unknown } }>(
 					"Runtime.evaluate",
 					{
 						expression: `location.href === ${JSON.stringify(pageUrl)} && document.readyState === "complete"`,
@@ -234,7 +243,7 @@ async function readPage(pageUrl: string, probe: string, shotPath?: string) {
 			session,
 		);
 		if (shotPath) {
-			const shot = await cdp.send("Page.captureScreenshot", { format: "png" }, session);
+			const shot = await cdp.send<{ data: string }>("Page.captureScreenshot", { format: "png" }, session);
 			await writeFile(shotPath, Buffer.from(shot.data as string, "base64"));
 		}
 		return (evaluated as { result: { value: string } }).result.value;

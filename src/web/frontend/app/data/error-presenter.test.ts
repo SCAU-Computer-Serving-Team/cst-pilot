@@ -48,6 +48,34 @@ test("Context-aware copy follows the canvas without claiming unconfirmed writes"
 	assert.ok(!pending.description.includes("已保存"));
 });
 
+test("压缩状态保留具体原因，与失败和执行中状态分开", () => {
+	const empty = presentError("当前没有可压缩的较早内容");
+	assert.equal(empty.kind, "compaction");
+	assert.equal(empty.title, "暂无可压缩内容");
+	const done = presentError("会话已压缩，继续对话后可再次压缩");
+	assert.equal(done.kind, "compaction");
+	assert.equal(done.title, "会话已压缩");
+	assert.equal(presentError("会话正在执行，请等待完成后再压缩").kind, "busy");
+	assert.equal(presentError("操作未完成，请稍后重试").kind, "general");
+});
+
+test("压缩通知的悬停说明包含原因，兼容无需压缩的返回文案", () => {
+	const done = presentError("会话已压缩，继续对话后可再次压缩");
+	assert.match(done.description, /上次压缩后没有新增对话/);
+	const empty = presentError("当前没有可压缩的较早内容");
+	assert.match(empty.description, /保留近期原文/);
+	assert.match(empty.description, /不足以分出/);
+	const legacy = presentError("当前会话无需压缩");
+	assert.equal(legacy.kind, "compaction");
+	assert.equal(legacy.title, "暂时无法压缩");
+	assert.match(legacy.description, /内容较少/);
+	assert.match(legacy.description, /没有新增对话/);
+	for (const error of [done, empty, legacy]) {
+		assert.ok(!error.description.includes("检查设置"));
+		assert.match(error.description, /继续对话/);
+	}
+});
+
 test("详情遮蔽密钥，不将技术文本放主提示", () => {
 	const e = presentError("500 apiKey=private-placeholder-token Authorization: Bearer example-secret");
 	assert.ok(!e.title.includes("500"));

@@ -117,7 +117,7 @@ export function checkReleaseContent(root, files) {
 
 export function verifyManifest(root, files) {
   const expected = new Map(fs.readFileSync(path.join(root, 'SHA256SUMS'), 'utf8').trim().split(/\r?\n/).map((line) => {
-    const match = line.match(/^([a-f0-9]{64})  (.+)$/);
+    const match = line.match(/^([a-f0-9]{64}) {2}(.+)$/);
     if (!match) throw new Error('校验清单格式错误');
     return [match[2], match[1]];
   }));

@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "check": "biome check home/extensions && tsc --noEmit -p tsconfig.json",
+    "check:engineering": "node ../src/check/engineering.mjs",
     "test:oauth": "node --test home/extensions/oauth/test/*.test.ts",
     "test:telemetry": "node --test home/extensions/telemetry/test/*.test.ts",
     "test:telemetry:e2e": "node --test home/extensions/telemetry/test/*.e2e.ts",
@@ -18,6 +19,9 @@
   "author": "",
   "license": "MIT",
   "type": "commonjs",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.85.1"
   },

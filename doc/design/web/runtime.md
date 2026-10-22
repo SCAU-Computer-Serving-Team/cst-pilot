@@ -17,7 +17,7 @@
 
 ## 运行协调
 
-`agent/home/extensions/runtime/` 负责 TUI 与 Web 的写权和重读。Pi 0.85.1 没有让扩展获取当前 AgentSession 的入口，因此适配公开 `bindExtensions`，登记当前实例，再包装本实例的 `prompt`、`cycleModel` 和 `dispose`。不访问 SDK 私有字段，不修改 SDK 或官方可执行文件；重载复用进程级登记。
+`agent/home/extensions/runtime/` 负责 TUI 与 Web 的写权和重读。Pi 0.85.1 没有让扩展获取当前 AgentSession 的入口，因此在进程内包装 `AgentSession.prototype.bindExtensions`，登记绑定的实例，再包装该实例的 `prompt`、`cycleModel` 和 `dispose`。不访问 SDK 私有字段，不修改 SDK 或官方可执行文件；重载复用进程级登记。
 
 | 阶段 | 处理 |
 |---|---|
@@ -43,6 +43,12 @@ Web 进程只创建一份共享 `settingsManager` 和 `modelRuntime`，每个会
 `/web` 等待 TUI 空闲，再切到独立待机会话并销毁旧实例，之后打开原记录。未落盘对话拒绝接管，空会话由 Web 创建。分支在独立 SessionManager 上创建，源会话 ID、目录与写权保持不变；保留 SDK 的延迟落盘规则。
 
 Web 会话池按 ID 复用同一实例。离开页面只取消订阅，服务退出前仍持有写权；持有者退出后，另一端重新打开并读取磁盘最新内容。
+
+## 手动压缩
+
+Web 优先采用 Pi 配置的近期保留量。该范围覆盖全部可压缩内容时，从当前有效消息估算量的一半开始缩小，直到 Pi 的安全切分点前存在可总结内容；总结、工具结果边界与落盘仍由 SDK 处理。
+
+`session/compaction.ts` 使用异步调用上下文隔离本次设置读取，只覆盖 SDK 准备压缩时的一次读取。其他会话、自动压缩、事件监听器与共享设置文件保持原值；接口沿用会话写入串行化和幂等回执。
 
 ## 输入与退出
 

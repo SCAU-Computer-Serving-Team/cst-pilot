@@ -1,9 +1,8 @@
 import { Button, Disclosure } from "@heroui/react";
-import { ArrowDown, ChevronDown, Copy, Download, GitBranch, GitFork, X } from "lucide-react";
+import { ArrowDown, ChevronDown, Copy, GitBranch, GitFork, X } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { matchToolResults } from "../cards/match-results";
 import { SpecialTool } from "../cards/special-tool";
-import { sessionPath } from "../data/api";
 import type { PendingBitLocker } from "../data/bitlocker-state";
 import type { Message } from "../data/web-state";
 import { ErrorNotice } from "../shell/error-notice";
@@ -120,9 +119,6 @@ function AssistantTurnImpl({
 					<Button variant="ghost" isIconOnly aria-label="派生会话" onPress={() => onFork()}>
 						<GitFork size={16} />
 					</Button>
-					<a href={sessionPath(id, "/export")} download={`session-${id}.md`} aria-label="导出会话">
-						<Download size={16} />
-					</a>
 					<span>
 						{new Date(last.message.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}
 					</span>

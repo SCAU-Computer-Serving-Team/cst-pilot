@@ -19,7 +19,7 @@
 
 ## 接口
 
-前缀 `/api`，同源。常规响应为 JSON，事件流用 SSE，会话导出返回下载内容。
+前缀 `/api`，同源。常规响应为 JSON，事件流用 SSE。会话导出和分享属于计划中功能，不提供接口。
 
 ### 会话
 
@@ -42,7 +42,6 @@
 | POST | `/api/sessions/<id>/fork` | 从指定 `entryId` 派生会话，返回新会话 ID |
 | GET | `/api/sessions/<id>/tree` | 读取分支树 |
 | POST | `/api/sessions/<id>/tree/navigate` | 导航到指定 `entryId`，对应 `/tree` 的选择操作 |
-| GET | `/api/sessions/<id>/export` | 导出当前会话，供浏览器下载 |
 | GET | `/api/sessions/<id>/bitlocker` | 当前待处理请求与递增版本；不含恢复密码 |
 | POST | `/api/sessions/<id>/bitlocker/<requestId>` | 提交本地密码、确认或取消；请求只消费一次 |
 | POST | `/api/sessions/<id>/runbook/open` | 按助手条目与调用 ID 打开已交付 TXT；请求去重，只返回启动受理 |

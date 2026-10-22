@@ -108,7 +108,10 @@ export class SessionInbox {
 		images: ImageRef[] = [],
 		skill?: string,
 	): Promise<InboxItem> {
-		if (skill !== undefined && !["disk", "driver", "eventlog", "ls", "runbook", "startup", "sys"].includes(skill))
+		if (
+			skill !== undefined &&
+			!["bitlocker", "disk", "driver", "eventlog", "ls", "runbook", "startup", "sys"].includes(skill)
+		)
 			throw new Error("技能名称无效");
 		if (
 			!/^[a-zA-Z0-9_-]{1,128}$/.test(id) ||

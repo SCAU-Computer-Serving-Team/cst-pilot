@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -239,7 +239,7 @@ test('TUI 隐藏输入支持粘贴、窄宽、显示切换、无效格式与中�
   const h = await harness(t);
   const abort = new AbortController();
   let value = 'pending';
-  const component = new h.state.api.RecoveryPasswordInput(volume(), theme, () => {}, input => value = input, abort.signal);
+  const component = new h.state.api.RecoveryPasswordInput(volume(), theme, () => {}, input => { value = input; }, abort.signal);
   component.handleInput('\x1b[200~wrong\x1b[201~');
   component.handleInput('\r');
   assert.equal(value, 'pending');
@@ -264,7 +264,7 @@ test('同卷并发操作被拒绝，提交后中断保留结果并取消剩余�
   const h = await harness(t);
   const other = await harness(t);
   let entered;
-  const waiting = new Promise(resolve => entered = resolve);
+  const waiting = new Promise(resolve => { entered = resolve; });
   let release;
   h.ctx.ui.custom = () => new Promise(resolve => { release = resolve; entered(); });
   const first = h.run({ scope: 'unlock', drive: 'D:' });
@@ -349,8 +349,8 @@ async function pwsh(program, request) {
   return new Promise((resolve, reject) => {
     const child = spawn(join(root, 'pwsh/pwsh.exe'), ['-NoProfile', '-NonInteractive', '-Command', program], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let out = '', err = '';
-    child.stdout.on('data', chunk => out += chunk);
-    child.stderr.on('data', chunk => err += chunk);
+    child.stdout.on('data', chunk => { out += chunk; });
+    child.stderr.on('data', chunk => { err += chunk; });
     child.on('error', reject);
     child.on('close', code => code === 0 ? resolve(JSON.parse(out)) : reject(new Error(err)));
     child.stdin.end(JSON.stringify(request));
@@ -359,7 +359,7 @@ async function pwsh(program, request) {
 
 test('生产 DCOM 选项可创建且启用 PacketPrivacy，无需管理员或真实卷', { skip: process.platform !== 'win32' || !existsSync(join(root, 'pwsh/pwsh.exe')) }, async t => {
   const h = await harness(t);
-  const line = h.state.api.BITLOCKER_COMMAND.match(/^  \$option = .+$/m)[0];
+  const line = h.state.api.BITLOCKER_COMMAND.match(/^ {2}\$option = .+$/m)[0];
   const value = await pwsh(`$ErrorActionPreference='Stop'; ${line}; @{packetPrivacy=$option.PacketPrivacy}|ConvertTo-Json`, {});
   assert.equal(value.packetPrivacy, true);
 });

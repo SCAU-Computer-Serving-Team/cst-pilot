@@ -1,4 +1,6 @@
-import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -92,14 +94,18 @@ async function readEntries(dir: string): Promise<{ name: string; mtimeMs: number
 	let names: string[];
 	try {
 		names = await readdir(dir);
-	} catch {
-		return [];
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+		throw error;
 	}
 	const entries: { name: string; mtimeMs: number }[] = [];
 	for (const name of names) {
 		if (!NAME_RE.test(name)) continue;
-		const info = await stat(join(dir, name)).catch(() => null);
-		if (info) entries.push({ name, mtimeMs: info.mtimeMs });
+		const info = await stat(join(dir, name)).catch((error: NodeJS.ErrnoException) => {
+			if (error.code === "ENOENT") return undefined;
+			throw error;
+		});
+		if (info?.isFile()) entries.push({ name, mtimeMs: info.mtimeMs });
 	}
 	return entries;
 }
@@ -125,18 +131,58 @@ async function writeSlot(
 	level: Level,
 	title: string,
 	body: string,
+	replacing: boolean,
 ): Promise<{ file: string; name: string }> {
-	const label = LEVELS[level];
-	for (const entry of await readEntries(dir)) {
-		const matched = NAME_RE.exec(entry.name);
-		if (matched && Number(matched[1]) === sequence) {
-			await rm(join(dir, entry.name), { force: true });
-		}
-	}
-	const name = `${pad(sequence)}-${label}-${title}.txt`;
+	const previous = (await readEntries(dir)).filter((entry) => Number(NAME_RE.exec(entry.name)?.[1]) === sequence);
+	if (replacing && previous.length === 0) throw new Error(`序号 ${sequence} 不存在，无法修正`);
+	if (previous.length > 1 || (!replacing && previous.length))
+		throw new Error(`序号 ${sequence} 已重复，请检查清单目录`);
+	const name = `${pad(sequence)}-${LEVELS[level]}-${title}.txt`;
 	const file = join(dir, name);
-	await writeFile(file, body, { encoding: "utf8" });
-	return { file, name };
+	const temporary = join(dir, `.${randomUUID()}.txt`);
+	try {
+		await writeFile(temporary, body, { encoding: "utf8", flag: "wx" });
+		await rename(temporary, file);
+		const old = previous[0]?.name;
+		const sameName = old && (process.platform === "win32" ? old.toLowerCase() === name.toLowerCase() : old === name);
+		if (old && !sameName) {
+			try {
+				await rm(join(dir, old));
+			} catch (error) {
+				await rm(file);
+				throw error;
+			}
+		}
+		return { file, name };
+	} finally {
+		await rm(temporary, { force: true });
+	}
+}
+
+/** 协调同一清单目录的独立进程；进程退出后由内核释放，不落锁文件。 */
+async function withDirectoryLock<T>(dir: string, task: () => Promise<T>): Promise<T> {
+	const canonical = await realpath(dir);
+	const key = createHash("sha256")
+		.update(process.platform === "win32" ? canonical.toLowerCase() : canonical)
+		.digest();
+	const lock = createServer((socket) => socket.destroy());
+	const address = process.platform === "win32" ? `\\\\.\\pipe\\cst-pilot-runbook-${key.toString("hex")}` : undefined;
+	await new Promise<void>((resolve, reject) => {
+		lock.once("error", (error: NodeJS.ErrnoException) => {
+			const occupied =
+				error.code === "EADDRINUSE" ||
+				(!!address && error.code === "ERR_INVALID_ARG_TYPE" && error.message === `Failed to listen at ${address}`);
+			reject(occupied ? new Error("清单目录正由另一进程写入，请稍后重试") : error);
+		});
+		if (address) lock.listen(address, resolve);
+		else lock.listen({ host: "127.0.0.1", port: 32000 + (key.readUInt32BE(0) % 20000), exclusive: true }, resolve);
+	});
+	lock.unref();
+	try {
+		return await task();
+	} finally {
+		await new Promise<void>((resolve, reject) => lock.close((error) => (error ? reject(error) : resolve())));
+	}
 }
 
 /**
@@ -202,9 +248,12 @@ async function deliver(params: RunbookParams): Promise<Record<string, unknown>> 
 	try {
 		const written = await serialize(async () => {
 			await mkdir(dir, { recursive: true });
-			const sequence = params.sequence ?? (await nextSequence(dir));
-			const { file, name } = await writeSlot(dir, sequence, level, title, body);
-			return { sequence, file, name };
+			return withDirectoryLock(dir, async () => {
+				const sequence = params.sequence ?? (await nextSequence(dir));
+				if (sequence > 999) throw new Error("当天序号已达到 999，请在次日生成新清单");
+				const { file, name } = await writeSlot(dir, sequence, level, title, body, params.sequence !== undefined);
+				return { sequence, file, name };
+			});
 		});
 		return {
 			runbook: {

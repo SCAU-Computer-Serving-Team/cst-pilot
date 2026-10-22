@@ -477,7 +477,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .command-suggestions button small { margin-left: auto; color: var(--chat-muted); font-size: 12px; }
 .command-suggestions .command-active { background: var(--app-selected); }
 /* 图片卡片圆角 12、内边距 12、间距 8；缩略图 80×64。 */
-.composer-attachments { display: flex; gap: var(--space-inline); margin: 0; padding: var(--space-component); list-style: none; width: fit-content; max-width: 100%; padding: var(--space-component); border: 1px solid var(--app-sidebar-border); border-radius: var(--radius-menu); background: var(--chat-row); box-shadow: var(--shadow-menu); overflow-x: auto; }
+.composer-attachments { display: flex; gap: var(--space-inline); margin: 0; padding: var(--space-component); list-style: none; width: fit-content; max-width: 100%; border: 1px solid var(--app-sidebar-border); border-radius: var(--radius-menu); background: var(--chat-row); box-shadow: var(--shadow-menu); overflow-x: auto; }
 :root[data-theme="dark"] .composer-attachments { box-shadow: var(--shadow-menu); }
 @media (prefers-color-scheme: dark) { :root[data-theme="system"] .composer-attachments { box-shadow: var(--shadow-menu); } }
 .draft-image { position: relative; flex: 0 0 80px; height: 64px; }
@@ -1293,6 +1293,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .tree-fold-count { color: var(--chat-muted); font-size: 12px; }
 .tree-current { flex: 0 0 auto; margin-left: var(--space-component); color: var(--chat-tool); font-size: 12px; }
 .chat-menu-trigger { margin-left: auto; color: var(--chat-muted); }
+.sidebar-account-item:disabled { opacity: .45; cursor: not-allowed; color: var(--chat-muted); background: transparent; }
 
 @media (max-width: 960px) {
   .tree-toolbar { flex-wrap: nowrap; flex-basis: 56px; min-height: 56px; padding: 0 24px; gap: var(--space-inline); }
@@ -1305,16 +1306,39 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 }
 
 .notification-region { position: fixed; z-index: 60; top: 20px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: var(--space-inline); width: min(520px, calc(100vw - 48px)); pointer-events: none; }
-.notification { display: flex; align-items: flex-start; flex: none; gap: var(--space-component); width: max-content; max-width: 100%; min-height: 44px; padding: var(--space-inline) var(--space-section); border: 1px solid var(--chat-border); border-radius: var(--radius-row); background: var(--chat-row); color: var(--chat-ink); font-size: var(--font-body); line-height: 1.5; pointer-events: auto; box-shadow: var(--shadow-menu); font-weight: 400; animation: notification-in var(--duration-fast) var(--ease-smooth-out) backwards; }
-.notification > svg { flex: 0 0 var(--icon-menu); margin-top: var(--space-tight); color: var(--chat-muted); }
-.notification[data-kind="success"] > svg { color: var(--chat-success); }
-.notification[data-kind="warning"] > svg { color: var(--notice-warning); }
-.notification[data-kind="danger"] > svg { color: var(--notice-danger); }
+.notification { position: relative; display: flex; align-items: center; flex: none; gap: var(--space-component); width: max-content; max-width: 100%; min-height: 44px; padding: var(--space-inline) var(--space-section); border: 1px solid var(--chat-border); border-radius: var(--radius-row); background: var(--chat-row); color: var(--chat-ink); font-size: var(--font-body); line-height: 1.5; pointer-events: auto; box-shadow: var(--shadow-menu); font-weight: 400; opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+.notification:has(.notification-detail[data-open="true"]) { z-index: 1; }
+.notification[data-state="entering"] { animation: notification-in var(--duration-fast) var(--ease-smooth-out) both; will-change: transform, opacity, filter; }
+.notification[data-state="closing"] { animation: notification-out var(--duration-medium) var(--ease-smooth-out) both; pointer-events: none; will-change: transform, opacity, filter; }
+.notification[data-state="closing"] .notification-detail { visibility: hidden; pointer-events: none; }
+.notification > svg { flex: 0 0 var(--icon-menu); color: var(--chat-muted); }
+.notification[data-kind="success"] > svg, .notification[data-kind="success"] .notification-detail-trigger { color: var(--chat-success); }
+.notification[data-kind="warning"] > svg, .notification[data-kind="warning"] .notification-detail-trigger { color: var(--notice-warning); }
+.notification[data-kind="danger"] > svg, .notification[data-kind="danger"] .notification-detail-trigger { color: var(--notice-danger); }
+.notification-message { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.notification-disclosure { padding: 0; margin: 0; border: 0; min-width: 0; display: inline-flex; flex: 0 0 var(--icon-menu); align-self: stretch; align-items: center; }
+.notification-detail-trigger { display: inline-flex; align-items: center; justify-content: center; width: var(--icon-menu); height: var(--control); padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--chat-muted); cursor: help; }
+.notification-detail-trigger > svg { flex: none; width: var(--icon-menu); height: var(--icon-menu); }
+.notification-detail-trigger:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
+.notification-detail { position: absolute; z-index: 1; top: 100%; left: 50%; transform: translateX(-50%) scale(var(--scale-small)); transform-origin: 50% 0; width: max-content; max-width: min(520px, calc(100vw - 48px)); padding-top: var(--space-inline); visibility: hidden; opacity: 0; pointer-events: none; transition: opacity var(--duration-quick) var(--ease-out), transform var(--duration-quick) var(--ease-out), visibility var(--duration-quick); }
+.notification-detail::before { content: ""; position: absolute; z-index: -1; inset: var(--space-inline) 0 0; border: 1px solid var(--chat-border); border-radius: var(--radius-row); background: var(--chat-row); box-shadow: var(--shadow-menu); }
+.notification-detail[data-open="true"] { visibility: visible; opacity: 1; transform: translateX(-50%) scale(1); pointer-events: auto; transition-delay: var(--duration-micro); }
+.notification-detail > * { display: block; margin: 0 var(--space-section); }
+.notification-detail > :first-child { padding-top: var(--space-component); }
+.notification-detail > :last-child { padding-bottom: var(--space-component); }
+.notification-detail-description { color: var(--chat-ink); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.notification-detail-label { padding-top: var(--space-inline); color: var(--chat-muted); font-size: 12px; }
+.notification-detail code { color: var(--chat-muted); font: 12px/1.6 "JetBrains Mono", monospace; white-space: pre-wrap; overflow-wrap: anywhere; max-height: min(320px, 50vh); overflow: auto; }
+@media (prefers-reduced-motion: reduce) { .notification-detail { transition: none; } }
 .notification strong { font-weight: 400; }
 .notification .notice-action { min-height: var(--control); padding: 0 var(--space-inline); color: var(--chat-ink); font-size: 14px; }
 .notification p { overflow-wrap: anywhere; }
-@keyframes notification-in { from { opacity: 0; transform: translateY(calc(-1 * var(--distance-base))); } }
-@media (prefers-reduced-motion: reduce) { .notification { animation: none; } }
+@keyframes notification-in { from { opacity: 0; transform: translateY(calc(-1 * var(--distance-base))) scale(var(--scale-medium)); filter: blur(var(--blur-small)); } }
+@keyframes notification-out {
+  from { opacity: var(--notification-exit-opacity, 1); transform: var(--notification-exit-transform, translateY(0) scale(1)); filter: var(--notification-exit-filter, blur(0)); }
+  to { opacity: 0; transform: translateY(calc(-1 * var(--distance-micro))) scale(var(--scale-tiny)); filter: blur(var(--blur-small)); }
+}
+@media (prefers-reduced-motion: reduce) { .notification[data-state] { animation: none; will-change: auto; } }
 .error-notice { display:flex; align-items:flex-start; gap:var(--space-component); padding:var(--space-section); border:1px solid var(--chat-border); border-radius:var(--radius-row); background:var(--notice-bg); color:var(--chat-ink); font-size:14px; line-height:1.5; }
 :root[data-theme="dark"] { --notice-bg:#131a1d; --notice-danger:#ff8a80; --notice-warning:#e4a247; }
 @media (prefers-color-scheme:dark) { :root:not([data-theme="light"]) { --notice-bg:#131a1d; --notice-danger:#ff8a80; --notice-warning:#e4a247; } }
@@ -1357,7 +1381,9 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .app-layout[data-home-transition] .chat-composer-area { view-transition-name: workspace-composer; }
 .app-layout[data-home-transition] .chat-header { view-transition-name: workspace-header; }
 .app-layout[data-home-transition] .chat-message-surface { view-transition-name: workspace-messages; }
-:root:has([data-home-transition])::view-transition-old(root),
+/* biome-ignore lint/correctness/noUnknownTypeSelector: root 是浏览器视图过渡的快照名。 */
+:root:has([data-home-transition])::view-transition-old(root) { animation: none; mix-blend-mode: normal; }
+/* biome-ignore lint/correctness/noUnknownTypeSelector: root 是浏览器视图过渡的快照名。 */
 :root:has([data-home-transition])::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
 /* 固定快照几何；返回时蓝白覆盖旧工作区，主页内容保留在背景上方。 */
 ::view-transition-group(home-background) { z-index: 1; animation: none; }

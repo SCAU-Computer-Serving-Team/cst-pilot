@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getKeybindings } from "@earendil-works/pi-tui";
 import { getWebContainer } from "../web/server/container.ts";
 import { currentRuntime, installRuntimeAdapter, refreshRuntime } from "./adapter.ts";
 import { ownSession } from "./owner.ts";
@@ -15,8 +16,15 @@ export default function runtime(pi: ExtensionAPI): void {
 		off = ctx.ui.onTerminalInput((data) => {
 			if (getWebContainer().parked || replay || !ctx.isIdle()) return;
 			const command = ctx.ui.getEditorText().trim();
-			const menuEnter = (data === "\r" || data === "\n") && /^\/(?:model|scoped-models)(?:\s|$)/.test(command);
-			if (!menuEnter && !["\x10", "\x0c", "\x1bp"].includes(data)) return;
+			const keys = getKeybindings();
+			const menuEnter = keys.matches(data, "tui.input.submit") && /^\/(?:model|scoped-models)(?:\s|$)/.test(command);
+			if (
+				!menuEnter &&
+				!keys.matches(data, "app.model.select") &&
+				!keys.matches(data, "app.model.cycleForward") &&
+				!keys.matches(data, "app.model.cycleBackward")
+			)
+				return;
 			const session = currentRuntime(ctx.sessionManager.getSessionId());
 			if (!session) return;
 			void refreshRuntime(session)

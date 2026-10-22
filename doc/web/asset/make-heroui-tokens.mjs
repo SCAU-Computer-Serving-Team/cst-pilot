@@ -148,7 +148,7 @@ for (const block of blocks) {
 	const s = block.selector;
 	let group;
 	if (/data-vibrant-palette/.test(s)) group = "vibrant";
-	else if (/:host|\:root|\.dark|\.light|\.default|data-theme/.test(s)) {
+	else if (/:host|:root|\.dark|\.light|\.default|data-theme/.test(s)) {
 		if (/\.dark|data-theme="dark"/.test(s)) group = "dark";
 		else if (/\.light|\.default|data-theme="light"|data-theme="default"/.test(s)) group = "light";
 		else group = "common";

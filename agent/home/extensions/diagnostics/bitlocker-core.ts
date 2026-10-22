@@ -7,6 +7,7 @@ import {
 	normalizeDrive,
 	validateRecoveryPassword,
 } from "./bitlocker-data.ts";
+import { BitLockerVolumeBusy, ownBitLockerVolume } from "./bitlocker-lock.ts";
 
 export type BitLockerParams = { scope?: BitLockerScope; drive?: string; recoveryPassword?: string };
 export type BitLockerInteraction = {
@@ -21,12 +22,6 @@ const NOTICE =
 	"encryptionPercentage 单位为 %，取整后的 0 不保证完全解密；完成以 conversionStatus=0 为准。" +
 	"autoUnlockEnabled 仅适用于数据卷，autoUnlockKeysStored 仅适用于当前运行的系统卷。" +
 	"字段 null 须结合 collectionErrors 判断；请求结果与当前卷状态分别记录。";
-const lockKey = Symbol.for("cst-pilot.bitlocker.volume-locks");
-function locks(): Set<string> {
-	const globals = globalThis as typeof globalThis & { [lockKey]?: Set<string> };
-	globals[lockKey] ??= new Set();
-	return globals[lockKey];
-}
 function operation(status: BitLockerOperation["status"], reason: string): BitLockerOperation {
 	return { status, reason, returnCode: null, error: null };
 }
@@ -119,12 +114,16 @@ export async function executeBitLocker(
 		if (target.operation) continue;
 		signal?.throwIfAborted();
 		const key = target.volumeId.toUpperCase();
-		if (locks().has(key)) {
-			target.operation = operation("rejected", "目标卷已有操作进行中");
+		let release: () => void;
+		try {
+			release = await ownBitLockerVolume(key);
+		} catch (error) {
+			if (!(error instanceof BitLockerVolumeBusy)) throw error;
+			target.operation = operation("rejected", error.message);
 			continue;
 		}
-		locks().add(key);
 		try {
+			signal?.throwIfAborted();
 			let password = provided;
 			if (scope === "unlock") {
 				if (target.lockStatus === 0) {
@@ -189,7 +188,7 @@ export async function executeBitLocker(
 				break;
 			}
 		} finally {
-			locks().delete(key);
+			release();
 		}
 	}
 	return finish();

@@ -20,6 +20,13 @@ jobs:
           cache-dependency-path: agent/package-lock.json
       - run: npm ci --prefix agent --ignore-scripts
       - run: npm run check --prefix agent
+      - name: 准备固定版本 PowerShell 静态检查
+        shell: pwsh
+        run: |
+          $modules = Join-Path $env:RUNNER_TEMP "cst-check-modules"
+          Save-Module -Name PSScriptAnalyzer -RequiredVersion 1.24.0 -Repository PSGallery -Path $modules -Force
+          "CST_PSSCRIPTANALYZER_MODULE=$modules/PSScriptAnalyzer/1.24.0/PSScriptAnalyzer.psd1" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - run: npm run check:engineering --prefix agent
       - run: npm run test:oauth --prefix agent
       - run: npm run test:telemetry --prefix agent
         env:

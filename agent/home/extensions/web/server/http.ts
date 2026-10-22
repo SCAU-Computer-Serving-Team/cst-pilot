@@ -2,6 +2,7 @@ import { appendFileSync } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, isAbsolute, relative, resolve, sep } from "node:path";
+import { readKitVersion } from "../../branding/version.ts";
 
 let accessLogPath: string | null = null;
 export function setHttpAccessLog(path: string): void {
@@ -74,7 +75,7 @@ export function createWebServer(
 	const root = resolve(staticDirectory);
 	return createServer(async (request: IncomingMessage, response: ServerResponse) => {
 		const startedAt = Date.now();
-		const label = `${request.method ?? "GET"} ${decodeURIComponent((request.url ?? "/").split("?")[0])}`;
+		const label = `${request.method ?? "GET"} ${(request.url ?? "/").split("?")[0]}`;
 		const logDone = (how: string) =>
 			accessLog(`${label} -> ${how} ${response.statusCode} ${Date.now() - startedAt}ms`);
 		response.on("close", () => logDone("close"));
@@ -95,13 +96,14 @@ export function createWebServer(
 		if (pathname === "/api/state" && (request.method === "GET" || request.method === "HEAD")) {
 			try {
 				json(response, 200, {
-					version: "0.0.0",
+					version: readKitVersion(),
 					...(await state()),
 					connected: true,
 					commands: [
 						"/compact",
 						"/fork",
 						"/tree",
+						"/skill:bitlocker",
 						"/skill:disk",
 						"/skill:driver",
 						"/skill:eventlog",

@@ -22,8 +22,7 @@ const colorsPenPath = path.join(root, "src/web/design/cst-pilot-colors.pen");
 function extractColors(text) {
   const found = [];
   const re = /#([0-9a-fA-F]{6,8})\b/g;
-  let m;
-  while ((m = re.exec(text)) !== null) {
+  for (const m of text.matchAll(re)) {
     const hex = m[1].toUpperCase();
     if (hex.length === 8) {
       if (hex.slice(6) === "00") continue; // 全透明，不产生视觉颜色

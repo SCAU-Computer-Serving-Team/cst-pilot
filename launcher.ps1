@@ -21,6 +21,7 @@ function Get-PilotWindowsTerminal {
 }
 
 function Start-PilotWindowProcess {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal launcher operation; Windows UAC owns confirmation.')]
     param([string]$FilePath, [string[]]$ArgumentList, [string]$WorkingDirectory, [string]$Verb = 'runas')
     $start = [Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $FilePath
@@ -40,6 +41,7 @@ function Get-PilotRootException {
 }
 
 function New-PilotElevationCommand {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds a command string without changing system state.')]
     param([string]$Root, [string]$WorkingDirectory, [string[]]$Arguments)
     $Root = [IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($Root))
     $request = @{ root = $Root; launcher = (Join-Path $Root 'launcher.ps1'); cwd = $WorkingDirectory; arguments = @($Arguments); consoleReady = $true }
@@ -57,6 +59,7 @@ exit `$script:PilotExitCode
 }
 
 function Start-PilotElevated {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Internal elevation flow; Windows UAC owns confirmation.')]
     param([string]$Root, [string[]]$Arguments)
     $cwd = (Get-Location).ProviderPath
     $command = New-PilotElevationCommand -Root $Root -WorkingDirectory $cwd -Arguments $Arguments
@@ -179,7 +182,7 @@ function Get-PilotRuntime {
     $binary = Join-Path $Root 'agent/.runtime/prx.bin'
     if (Test-Path -LiteralPath $binary -PathType Leaf) {
         $directory = Get-Item -LiteralPath (Join-Path $Root 'agent/.runtime') -Force
-        try { $directory.Attributes = $directory.Attributes -bor [IO.FileAttributes]::Hidden } catch { }
+        try { $directory.Attributes = $directory.Attributes -bor [IO.FileAttributes]::Hidden } catch { Write-Verbose 'Runtime directory attributes could not be changed; continuing.' }
         return @{ file = $binary; arguments = $arguments }
     }
     return @{

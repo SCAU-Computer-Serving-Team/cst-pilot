@@ -7,6 +7,7 @@
 		"noEmit": true,
 		"erasableSyntaxOnly": true,
 		"allowImportingTsExtensions": true,
+		"allowJs": true,
 		"skipLibCheck": true,
 		"types": [
 			"node"
@@ -33,10 +34,6 @@
 		"noUnusedParameters": true
 	},
 	"include": [
-		"home/extensions/runtime/**/*.ts",
-		"home/extensions/diagnostics/**/*.ts",
-		"home/extensions/oauth/**/*.ts",
-		"home/extensions/telemetry/**/*.ts",
-		"home/extensions/web/**/*.ts"
+		"home/extensions/**/*.ts"
 	]
 }

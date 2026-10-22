@@ -1,5 +1,5 @@
 import { Button, Popover } from "@heroui/react";
-import { EllipsisVertical, HardDrive, ListTree, X } from "lucide-react";
+import { Download, EllipsisVertical, HardDrive, ListTree, Share2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { Composer } from "../composer/composer";
@@ -140,6 +140,14 @@ export default function Chat() {
 									<ListTree size={18} aria-hidden="true" />
 									分支树
 								</Link>
+								<button type="button" className="sidebar-account-item" disabled title="计划中">
+									<Download size={18} aria-hidden="true" />
+									导出会话
+								</button>
+								<button type="button" className="sidebar-account-item" disabled title="计划中">
+									<Share2 size={18} aria-hidden="true" />
+									分享
+								</button>
 							</Popover.Dialog>
 						</Popover.Content>
 					</Popover>

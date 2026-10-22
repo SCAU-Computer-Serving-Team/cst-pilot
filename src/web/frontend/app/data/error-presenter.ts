@@ -6,6 +6,33 @@ export function presentError(
 		.replace(/(Bearer\s+)[^\s"',}]+/gi, "$1[已隐藏]")
 		.replace(/((?:api[_-]?key|token|secret|password)["']?\s*[:=]\s*["']?)[^\s"',}]+/gi, "$1[已隐藏]")
 		.slice(0, 4000);
+	if (/already_compacted|会话已压缩/.test(message))
+		return {
+			kind: "compaction",
+			title: "会话已压缩",
+			description: "上次压缩后没有新增对话，本次无需重复生成摘要。继续对话后可再次压缩。",
+			action: "",
+			detail,
+		};
+	if (/nothing_to_compact|当前没有可压缩的较早内容/.test(message))
+		return {
+			kind: "compaction",
+			title: "暂无可压缩内容",
+			description:
+				"压缩会把较早的对话整理成摘要，并保留近期原文。当前内容不足以分出可总结的历史部分，请继续对话后再试。",
+			action: "",
+			detail,
+		};
+	if (/当前会话无需压缩/.test(message))
+		return {
+			kind: "compaction",
+			title: "暂时无法压缩",
+			description: "本次未找到可压缩的历史内容。可能是内容较少，或已压缩后没有新增对话；继续对话后可再次尝试。",
+			action: "",
+			detail,
+		};
+	if (/会话正在执行/.test(message))
+		return { kind: "busy", title: "会话正在执行", description: "请等待当前操作完成后重试。", action: "", detail };
 	if (/session_owned|该会话正由另一端使用/.test(message))
 		return {
 			kind: "owner",

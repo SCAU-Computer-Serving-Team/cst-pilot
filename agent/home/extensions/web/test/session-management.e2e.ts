@@ -117,7 +117,20 @@ test("会话管理：多选、取消、真实删除、运行冲突、断线与�
 		const row = (id: string) => `.sidebar-session[data-session-id="${id}"]`;
 		async function rightClick(id: string) {
 			const point = await probe.evaluate<{ x: number; y: number }>(
-				`(() => { const e = document.querySelector(${JSON.stringify(row(id))}); e.scrollIntoView({block:'center'}); const r = e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`,
+				`(async () => {
+					const e = document.querySelector(${JSON.stringify(row(id))});
+					e.scrollIntoView({block:'center'});
+					let previous, stable = 0;
+					for (let frame = 0; frame < 90; frame++) {
+						await new Promise(resolve => requestAnimationFrame(resolve));
+						const r = e.getBoundingClientRect();
+						stable = previous && Math.abs(r.x-previous.x)<.25 && Math.abs(r.y-previous.y)<.25 && Math.abs(r.width-previous.width)<.25 ? stable+1 : 0;
+						previous = r;
+						const x = r.x+r.width/2, y = r.y+r.height/2;
+						if (stable >= 3 && e.contains(document.elementFromPoint(x,y))) return {x,y};
+					}
+					throw new Error('右键目标仍在移动或被遮挡');
+				})()`,
 			);
 			await probe.call("Input.dispatchMouseEvent", {
 				type: "mousePressed",
@@ -154,6 +167,10 @@ test("会话管理：多选、取消、真实删除、运行冲突、断线与�
 			await rightClick(id);
 			await probe.click(".session-menu button:has(svg.lucide-list-checks)");
 			await probe.until("!!document.querySelector('.sidebar[data-managing]')", "管理模式");
+			await probe.until(
+				"!document.querySelector('.session-delete-notice[data-state=closing]')",
+				"上一条删除结果退场完成",
+			);
 		}
 		async function confirmDelete(id: string) {
 			await rightClick(id);
@@ -464,7 +481,7 @@ test("会话管理：多选、取消、真实删除、运行冲突、断线与�
 			await probe.evaluate<string[]>(
 				"[...document.querySelectorAll('.session-menu [role=menuitem]')].map(e=>e.textContent.trim())",
 			),
-			["重命名", "导出", "管理", "删除"],
+			["重命名", "管理", "删除"],
 		);
 		await probe.call("Input.dispatchKeyEvent", { type: "keyDown", key: "End", code: "End" });
 		assert.equal(await probe.evaluate("document.activeElement.textContent.trim()"), "删除", "菜单End聚焦删除");

@@ -259,12 +259,10 @@ test("HTTP 端到端冒烟：并发会话与队列、幂等重放、模型范围
 		const branch = await forked.json();
 		assert.notEqual(branch.id, one.id);
 		assert.equal((await fetch(`${origin}/api/sessions/${branch.id}`)).status, 200);
-		const exported = await fetch(`${origin}${sessionPath}/export`);
-		assert.equal(exported.status, 200);
-		assert.ok((await exported.text()).includes("OK"));
 		const compacted = await send(`${sessionPath}/compact`, { instructions: "简短概括" });
-		assert.equal(compacted.status, 409);
-		assert.equal((await compacted.json()).error.code, "nothing_to_compact");
+		assert.equal(compacted.status, 200);
+		assert.equal((await compacted.json()).compacted, true);
+		const afterCompact = modelCalls;
 		const again = await send(`/api/sessions/${one.id}/messages`, {
 			id: "a",
 			text: "first",
@@ -273,7 +271,7 @@ test("HTTP 端到端冒烟：并发会话与队列、幂等重放、模型范围
 		});
 		assert.equal(again.status, 202);
 		await new Promise((resolve) => setTimeout(resolve, 150));
-		assert.equal(modelCalls, 2);
+		assert.equal(modelCalls, afterCompact);
 		const interrupted = await send(`${sessionPath}/messages`, {
 			id: "interrupt-me",
 			text: "long task",

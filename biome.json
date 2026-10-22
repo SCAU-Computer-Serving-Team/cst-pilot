@@ -10,7 +10,7 @@
 				"useNodejsImportProtocol": "off"
 			},
 			"suspicious": {
-				"noExplicitAny": "off",
+				"noExplicitAny": "error",
 				"noControlCharactersInRegex": "off",
 				"noEmptyInterface": "off"
 			}
@@ -24,6 +24,15 @@
 		"lineWidth": 120
 	},
 	"files": {
-		"includes": ["agent/home/extensions/**/*.ts", "src/web/frontend/**/*.{ts,tsx}", "!!**/node_modules", "!!src/web/frontend/build", "!!src/web/frontend/.react-router"]
-	}
+		"includes": ["agent/home/extensions/**/*.ts", "src/web/frontend/**/*.{ts,tsx}", "**/*.mjs", "**/*.json", "**/*.css", "!!**/node_modules", "!!src/web/frontend/build", "!!src/web/frontend/.react-router", "!!agent/home/extensions/web/static", "!!src/web/frontend/public", "!!agent/home/sessions", "!!agent/home/npm", "!!agent/home/web-inbox", "!!agent/home/telemetry", "!!agent/home/auth.json", "!!agent/home/settings.json", "!!agent/home/models.json", "!!agent/home/models-store.json", "!!agent/home/telemetry.json", "!!agent/home/web-settings.json", "!!pack/work", "!!.state", "!!dist" ]
+	},
+	"css": { "parser": { "tailwindDirectives": true } },
+	"overrides": [{
+		"includes": ["**/*.mjs", "**/*.json", "**/*.css"],
+		"formatter": { "enabled": false },
+		"assist": { "enabled": false }
+	}, {
+		"includes": ["**/*.css"],
+		"linter": { "rules": { "complexity": { "noImportantStyles": "off" }, "style": { "noDescendingSpecificity": "off" } } }
+	}]
 }

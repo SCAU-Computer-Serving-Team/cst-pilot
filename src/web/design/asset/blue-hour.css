@@ -8,8 +8,13 @@
 .gradient-blue-hour {
   position: relative;
   background: linear-gradient(180deg, #22265E 10.0%, #3B4EA8 30.0%, #7785DE 50.0%, #BCC4F1 70.0%, #E4E9FA 90.0%); /* fallback: engines without oklab interpolation */
-  background: linear-gradient(180deg in oklab, #22265E 10.0%, #3B4EA8 30.0%, #7785DE 50.0%, #BCC4F1 70.0%, #E4E9FA 90.0%);
   /* soft fallback: CSS cannot draw the strips. Export SVG or PNG for the real thing. */
+}
+
+@supports (background: linear-gradient(180deg in oklab, #22265E, #E4E9FA)) {
+  .gradient-blue-hour {
+    background: linear-gradient(180deg in oklab, #22265E 10.0%, #3B4EA8 30.0%, #7785DE 50.0%, #BCC4F1 70.0%, #E4E9FA 90.0%);
+  }
 }
 
 .gradient-blue-hour::after {

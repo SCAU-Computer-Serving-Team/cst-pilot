@@ -100,11 +100,6 @@ export default function SessionTree() {
 		[preview, leafId],
 	);
 	useEffect(() => {
-		if (!toast) return;
-		const timer = window.setTimeout(() => setToast(""), 2600);
-		return () => window.clearTimeout(timer);
-	}, [toast]);
-	useEffect(() => {
 		if (choice) setChoiceIndex(0);
 	}, [choice]);
 	// 选择对话框的键盘操作：方向键移动光标，Enter 确认，Esc 关闭。
@@ -418,7 +413,13 @@ export default function SessionTree() {
 				</div>
 			)}
 			{toast && (
-				<Notification className="tree-toast" label="消息提示">
+				<Notification
+					key={toast}
+					className="tree-toast"
+					label="消息提示"
+					duration={2600}
+					onDismiss={() => setToast("")}
+				>
 					<Info size={18} aria-hidden="true" />
 					<span>{toast}</span>
 					<button

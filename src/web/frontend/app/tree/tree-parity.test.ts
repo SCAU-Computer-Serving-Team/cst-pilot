@@ -1,31 +1,28 @@
 // 与 pi TUI 的排版对照。同一棵树分别交给 TUI 的 TreeList 与本文件的 layoutTree，比较可见行、
 // 缩进、连接符列与竖线列。TUI 是唯一真源，这里失败就说明移植走样。
-// 依赖 pi 发行包里未导出的内部组件，路径按 @earendil-works/pi-coding-agent 版本固定。
+// 使用项目锁定的 Pi 公共导出；内部排版字段仅用于测试对照。
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import {
+	initTheme,
+	TreeSelectorComponent,
+} from "../../../../../agent/node_modules/@earendil-works/pi-coding-agent/dist/index.js";
 import { buildVisibleTree, layoutTree, type TreeEntry, type TreeNode, type ViewFilter } from "./branch-tree.ts";
-
-const DIST = new URL(
-	"../../../../../agent/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/",
-	import.meta.url,
-);
 
 type Layout = { id: string; indent: number; square: number | null; lines: number[]; blanks: number[] };
 
 /** 交给 TUI 渲染，读回它算出的排版字段。 */
 async function tuiLayout(tree: TreeNode[], leafId: string | null, filter: ViewFilter = "default") {
-	const { TreeSelectorComponent } = await import(new URL("components/tree-selector.js", DIST).href);
-	const { initTheme } = await import(new URL("theme/theme.js", DIST).href);
 	initTheme("dark");
 	const component = new TreeSelectorComponent(
-		tree,
+		tree as unknown as ConstructorParameters<typeof TreeSelectorComponent>[0],
 		leafId,
 		80,
 		() => {},
 		() => {},
 		async () => {},
 	);
-	const list = component.treeList as {
+	const list = (component as unknown as { treeList: unknown }).treeList as {
 		filterMode: ViewFilter;
 		applyFilter(): void;
 		multipleRoots: boolean;

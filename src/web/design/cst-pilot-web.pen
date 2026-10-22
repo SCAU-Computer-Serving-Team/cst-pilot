@@ -1,5 +1,5 @@
 {
-  "version": "2.20",
+  "version": "2.21",
   "children": [
     {
       "type": "frame",
@@ -807,9 +807,9 @@
                       "id": "RcnMJ",
                       "name": "文字",
                       "fill": "#7F888C",
-                      "content": "首页默认；控件与气泡 1.5；正文 16px/28px/0.02em，代码与标题字距 0。\n段落 16；段落到列表 8；列表项 6；嵌套列表上下 4；引用、代码、表格与正文 16；分隔线上下 24。\n标题段前/段后：H1 32/16、H2 24/12、H3 20/8、H4 16/8、H5 12/8、H6 12/4；连续标题 12。首尾不留空。\n浅深、窄幅与流式共用；工具组件、思考原文和状态行独立。",
                       "textGrowth": "fixed-width",
                       "width": "fill_container",
+                      "content": "首页默认；控件与气泡 1.5；正文 16px/28px/0.02em，代码与标题字距 0。\n段落 16；段落到列表 8；列表项 6；嵌套列表上下 4；引用、代码、表格与正文 16；分隔线上下 24。\n标题段前/段后：H1 32/16、H2 24/12、H3 20/8、H4 16/8、H5 12/8、H6 12/4；连续标题 12。首尾不留空。\n浅深、窄幅与流式共用；工具组件、思考原文和状态行独立。",
                       "lineHeight": 1.5,
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": 11,
@@ -859,10 +859,10 @@
                           "fill": "#1A2024",
                           "content": "磁盘剩余空间与启动项检查",
                           "lineHeight": 1.75,
-                          "letterSpacing": 0.32,
                           "fontFamily": "Source Han Sans CN",
                           "fontSize": 16,
-                          "fontWeight": "normal"
+                          "fontWeight": "normal",
+                          "letterSpacing": 0.32
                         }
                       ]
                     },
@@ -5358,43 +5358,6 @@
                     },
                     {
                       "type": "frame",
-                      "id": "gRt9A",
-                      "name": "菜单项 · 导出",
-                      "width": "fill_container",
-                      "height": 42,
-                      "cornerRadius": 8,
-                      "gap": 12,
-                      "padding": [
-                        0,
-                        12
-                      ],
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "icon",
-                          "id": "GpLtY",
-                          "name": "图标",
-                          "width": 18,
-                          "height": 18,
-                          "icon": "download",
-                          "library": "lucide",
-                          "fill": "#5F676C"
-                        },
-                        {
-                          "type": "text",
-                          "id": "PHzDt",
-                          "name": "菜单文字",
-                          "fill": "#1A2024",
-                          "content": "导出",
-                          "lineHeight": 1.5,
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
                       "id": "UMKon",
                       "name": "分隔线包裹",
                       "width": "fill_container",
@@ -9028,7 +8991,7 @@
               "fill": "#5F676C",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "浅色白底、深色中性3；正文16、说明14，只有图标用语义色。通用通知在所有页面共用一处；不抢焦点，不推动内容；成功、提示、警告、失败状态见09区组件。",
+              "content": "浅色白底、深色中性3；常态正文16，图标18，只有图标用语义色。操作提示单行呈现，说明与脱敏技术详情收进状态图标的悬停浮层；悬停、键盘聚焦或页面隐藏暂停2.6秒展示计时，结束后继续剩余时间。不抢焦点，不推动内容。 入场250ms smooth-out：上方8px、缩放0.97、模糊2px到清晰原位；退场350ms，从当前呈现值向上4px、缩放0.99、模糊2px淡出后移除。详情150ms ease-out、缩放0.98，悬停延迟80ms，关闭无延迟。减少动态直接切换。",
               "lineHeight": 1.5,
               "fontFamily": "Source Han Sans CN",
               "fontSize": 16,
@@ -11911,28 +11874,6 @@
                         },
                         {
                           "type": "frame",
-                          "id": "kmWJu",
-                          "name": "HeroUI Ghost Button · 导出",
-                          "width": 32,
-                          "height": 32,
-                          "cornerRadius": 14,
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "cT3tz",
-                              "name": "导出",
-                              "width": 15,
-                              "height": 15,
-                              "icon": "download",
-                              "library": "lucide",
-                              "fill": "#646464"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
                           "id": "ZJ4i1",
                           "name": "操作栏弹性间距",
                           "width": "fill_container",
@@ -13753,28 +13694,6 @@
                               "width": 15,
                               "height": 15,
                               "icon": "git-fork",
-                              "library": "lucide",
-                              "fill": "#AAB3B7"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "kdQfx",
-                          "name": "HeroUI Ghost Button · 导出",
-                          "width": 32,
-                          "height": 32,
-                          "cornerRadius": 14,
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "sCDIB",
-                              "name": "导出",
-                              "width": 15,
-                              "height": 15,
-                              "icon": "download",
                               "library": "lucide",
                               "fill": "#AAB3B7"
                             }
@@ -46141,28 +46060,6 @@
                         },
                         {
                           "type": "frame",
-                          "id": "r0iEt8",
-                          "name": "HeroUI Ghost Button · 导出",
-                          "width": 32,
-                          "height": 32,
-                          "cornerRadius": 14,
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "NvMAD",
-                              "name": "导出",
-                              "width": 15,
-                              "height": 15,
-                              "icon": "download",
-                              "library": "lucide",
-                              "fill": "#646464"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
                           "id": "cXJpf",
                           "name": "操作栏弹性间距",
                           "width": "fill_container",
@@ -47924,28 +47821,6 @@
                         },
                         {
                           "type": "frame",
-                          "id": "thkIP",
-                          "name": "HeroUI Ghost Button · 导出",
-                          "width": 32,
-                          "height": 32,
-                          "cornerRadius": 14,
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "h3rg1",
-                              "name": "导出",
-                              "width": 15,
-                              "height": 15,
-                              "icon": "download",
-                              "library": "lucide",
-                              "fill": "#AAB3B7"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
                           "id": "lRCpQ",
                           "name": "操作栏弹性间距",
                           "width": "fill_container",
@@ -49700,28 +49575,6 @@
                               "width": 15,
                               "height": 15,
                               "icon": "git-fork",
-                              "library": "lucide",
-                              "fill": "#646464"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "kLZD8",
-                          "name": "HeroUI Ghost Button · 导出",
-                          "width": 32,
-                          "height": 32,
-                          "cornerRadius": 14,
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "HWyWi",
-                              "name": "导出",
-                              "width": 15,
-                              "height": 15,
-                              "icon": "download",
                               "library": "lucide",
                               "fill": "#646464"
                             }
@@ -51503,28 +51356,6 @@
                         },
                         {
                           "type": "frame",
-                          "id": "z11Yu",
-                          "name": "HeroUI Ghost Button · 导出",
-                          "width": 32,
-                          "height": 32,
-                          "cornerRadius": 14,
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "TDR2A",
-                              "name": "导出",
-                              "width": 15,
-                              "height": 15,
-                              "icon": "download",
-                              "library": "lucide",
-                              "fill": "#AAB3B7"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
                           "id": "A29XIl",
                           "name": "操作栏弹性间距",
                           "width": "fill_container",
@@ -53292,28 +53123,6 @@
                               "width": 15,
                               "height": 15,
                               "icon": "git-fork",
-                              "library": "lucide",
-                              "fill": "#646464"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "V9wttZ",
-                          "name": "HeroUI Ghost Button · 导出",
-                          "width": 32,
-                          "height": 32,
-                          "cornerRadius": 14,
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "qWzmy",
-                              "name": "导出",
-                              "width": 15,
-                              "height": 15,
-                              "icon": "download",
                               "library": "lucide",
                               "fill": "#646464"
                             }
@@ -55121,28 +54930,6 @@
                               "width": 15,
                               "height": 15,
                               "icon": "git-fork",
-                              "library": "lucide",
-                              "fill": "#AAB3B7"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "SRu5i",
-                          "name": "HeroUI Ghost Button · 导出",
-                          "width": 32,
-                          "height": 32,
-                          "cornerRadius": 14,
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "s4hKvY",
-                              "name": "导出",
-                              "width": 15,
-                              "height": 15,
-                              "icon": "download",
                               "library": "lucide",
                               "fill": "#AAB3B7"
                             }
@@ -63468,56 +63255,6 @@
         },
         {
           "type": "frame",
-          "id": "fdUe4",
-          "name": "菜单项 · 导出",
-          "width": "fill_container",
-          "height": 42,
-          "fill": "#00000000",
-          "cornerRadius": 8,
-          "gap": 12,
-          "padding": [
-            0,
-            12
-          ],
-          "alignItems": "center",
-          "children": [
-            {
-              "type": "frame",
-              "id": "uIDNL",
-              "name": "图标位",
-              "padding": [
-                5,
-                0,
-                0,
-                0
-              ],
-              "children": [
-                {
-                  "type": "icon",
-                  "id": "KxLWd",
-                  "name": "导出图标",
-                  "width": 18,
-                  "height": 18,
-                  "icon": "download",
-                  "library": "lucide",
-                  "fill": "#5F676C"
-                }
-              ]
-            },
-            {
-              "type": "text",
-              "id": "aHlbZ",
-              "name": "导出",
-              "fill": "#1A2024",
-              "content": "导出",
-              "fontFamily": "Source Han Sans CN",
-              "fontSize": 16,
-              "fontWeight": "normal"
-            }
-          ]
-        },
-        {
-          "type": "frame",
           "id": "r4uSF",
           "name": "菜单项 · 管理",
           "width": "fill_container",
@@ -63716,56 +63453,6 @@
         },
         {
           "type": "frame",
-          "id": "kCJ1i",
-          "name": "菜单项 · 导出",
-          "width": "fill_container",
-          "height": 42,
-          "fill": "#00000000",
-          "cornerRadius": 8,
-          "gap": 12,
-          "padding": [
-            0,
-            12
-          ],
-          "alignItems": "center",
-          "children": [
-            {
-              "type": "frame",
-              "id": "NAFal",
-              "name": "图标位",
-              "padding": [
-                5,
-                0,
-                0,
-                0
-              ],
-              "children": [
-                {
-                  "type": "icon",
-                  "id": "NfYBo",
-                  "name": "导出图标",
-                  "width": 18,
-                  "height": 18,
-                  "icon": "download",
-                  "library": "lucide",
-                  "fill": "#AAB3B7"
-                }
-              ]
-            },
-            {
-              "type": "text",
-              "id": "X86J2",
-              "name": "导出",
-              "fill": "#FFFFFF",
-              "content": "导出",
-              "fontFamily": "Source Han Sans CN",
-              "fontSize": 16,
-              "fontWeight": "normal"
-            }
-          ]
-        },
-        {
-          "type": "frame",
           "id": "PEpIO",
           "name": "菜单项 · 管理",
           "width": "fill_container",
@@ -63892,7 +63579,7 @@
       "x": 22280,
       "y": 5591,
       "name": "消息菜单 · 点击",
-      "context": "点击聊天标题栏右上角三个点弹出。「分支树」跳转到当前会话的分支树视图；「分享」暂不进入 MVP，前端不显示。宽240、圆角16、内边距12、描边 #D5DEE3；与其余悬停面板同一套卡片样式，区别是不加投影。 · 画布分区：06 · 悬停与菜单",
+      "context": "点击消息菜单打开。分支树可用；导出会话与分享属于计划中功能，常驻置灰、不可点击，不发起请求。菜单宽240、内边距12、行高42、行间距2、禁用不透明度45%。",
       "width": 240,
       "fill": "#FFFFFF",
       "cornerRadius": "$radius-menu",
@@ -63907,18 +63594,23 @@
           "id": "n13VX",
           "name": "菜单项 · 分支树",
           "width": "fill_container",
+          "height": 42,
           "cornerRadius": 8,
           "gap": 12,
-          "padding": 12,
+          "padding": [
+            0,
+            12
+          ],
+          "alignItems": "center",
           "children": [
             {
               "type": "icon",
               "id": "cYUVF",
-              "name": "分享图标",
+              "name": "分支树图标",
               "width": 18,
               "height": 18,
-              "icon": "account_tree",
-              "library": "Material Symbols Rounded",
+              "icon": "list-tree",
+              "library": "lucide",
               "fill": "#5F676C"
             },
             {
@@ -63935,12 +63627,57 @@
         },
         {
           "type": "frame",
-          "id": "Hrsix",
-          "name": "菜单项 · 分享",
+          "id": "Nzk4D",
+          "name": "菜单项 · 导出会话 · 计划中",
+          "context": "计划中，禁用，不提供下载接口",
+          "opacity": 0.45,
           "width": "fill_container",
+          "height": 42,
           "cornerRadius": 8,
           "gap": 12,
-          "padding": 12,
+          "padding": [
+            0,
+            12
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "LKPlf",
+              "name": "导出图标",
+              "width": 18,
+              "height": 18,
+              "icon": "download",
+              "library": "lucide",
+              "fill": "#5F676C"
+            },
+            {
+              "type": "text",
+              "id": "MrgLC",
+              "name": "导出会话",
+              "fill": "#1A2024",
+              "content": "导出会话",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Hrsix",
+          "name": "菜单项 · 分享",
+          "context": "计划中，禁用，不发起分享请求",
+          "opacity": 0.45,
+          "width": "fill_container",
+          "height": 42,
+          "cornerRadius": 8,
+          "gap": 12,
+          "padding": [
+            0,
+            12
+          ],
+          "alignItems": "center",
           "children": [
             {
               "type": "icon",
@@ -63948,8 +63685,8 @@
               "name": "分享图标",
               "width": 18,
               "height": 18,
-              "icon": "share",
-              "library": "Material Symbols Rounded",
+              "icon": "share-2",
+              "library": "lucide",
               "fill": "#5F676C"
             },
             {
@@ -63972,7 +63709,7 @@
       "x": 22600,
       "y": 5591,
       "name": "消息菜单 · 点击 · 深色",
-      "context": "深色版。点击聊天标题栏右上角三个点弹出。「分支树」跳转到当前会话的分支树视图；「分享」暂不进入 MVP，前端不显示。结构与浅色版一致。 · 画布分区：06 · 悬停与菜单",
+      "context": "点击消息菜单打开。分支树可用；导出会话与分享属于计划中功能，常驻置灰、不可点击，不发起请求。菜单宽240、内边距12、行高42、行间距2、禁用不透明度45%。",
       "width": 240,
       "fill": "#131A1D",
       "cornerRadius": "$radius-menu",
@@ -63987,18 +63724,23 @@
           "id": "o0EbvT",
           "name": "菜单项 · 分支树",
           "width": "fill_container",
+          "height": 42,
           "cornerRadius": 8,
           "gap": 12,
-          "padding": 12,
+          "padding": [
+            0,
+            12
+          ],
+          "alignItems": "center",
           "children": [
             {
               "type": "icon",
               "id": "ApbVu",
-              "name": "分享图标",
+              "name": "分支树图标",
               "width": 18,
               "height": 18,
-              "icon": "account_tree",
-              "library": "Material Symbols Rounded",
+              "icon": "list-tree",
+              "library": "lucide",
               "fill": "#AAB3B7"
             },
             {
@@ -64015,12 +63757,57 @@
         },
         {
           "type": "frame",
-          "id": "n3V5d",
-          "name": "菜单项 · 分享",
+          "id": "JyYYh",
+          "name": "菜单项 · 导出会话 · 计划中",
+          "context": "计划中，禁用，不提供下载接口",
+          "opacity": 0.45,
           "width": "fill_container",
+          "height": 42,
           "cornerRadius": 8,
           "gap": 12,
-          "padding": 12,
+          "padding": [
+            0,
+            12
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "XWcBs",
+              "name": "导出图标",
+              "width": 18,
+              "height": 18,
+              "icon": "download",
+              "library": "lucide",
+              "fill": "#AAB3B7"
+            },
+            {
+              "type": "text",
+              "id": "l4F1cl",
+              "name": "导出会话",
+              "fill": "#E0EAEE",
+              "content": "导出会话",
+              "fontFamily": "Source Han Sans CN",
+              "fontSize": 16,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "n3V5d",
+          "name": "菜单项 · 分享",
+          "context": "计划中，禁用，不发起分享请求",
+          "opacity": 0.45,
+          "width": "fill_container",
+          "height": 42,
+          "cornerRadius": 8,
+          "gap": 12,
+          "padding": [
+            0,
+            12
+          ],
+          "alignItems": "center",
           "children": [
             {
               "type": "icon",
@@ -64028,8 +63815,8 @@
               "name": "分享图标",
               "width": 18,
               "height": 18,
-              "icon": "share",
-              "library": "Material Symbols Rounded",
+              "icon": "share-2",
+              "library": "lucide",
               "fill": "#AAB3B7"
             },
             {
@@ -94951,28 +94738,6 @@
                         },
                         {
                           "type": "frame",
-                          "id": "qjWoi",
-                          "name": "HeroUI Ghost Button · 导出",
-                          "width": 32,
-                          "height": 32,
-                          "cornerRadius": 14,
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "aZ8lf",
-                              "name": "导出",
-                              "width": 15,
-                              "height": 15,
-                              "icon": "download",
-                              "library": "lucide",
-                              "fill": "#646464"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
                           "id": "bKH06",
                           "name": "操作栏弹性间距",
                           "width": "fill_container",
@@ -96679,28 +96444,6 @@
                               "width": 15,
                               "height": 15,
                               "icon": "git-fork",
-                              "library": "lucide",
-                              "fill": "#646464"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "KdnFb",
-                          "name": "HeroUI Ghost Button · 导出",
-                          "width": 32,
-                          "height": 32,
-                          "cornerRadius": 14,
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "Pq0AI",
-                              "name": "导出",
-                              "width": 15,
-                              "height": 15,
-                              "icon": "download",
                               "library": "lucide",
                               "fill": "#646464"
                             }
@@ -98853,28 +98596,6 @@
                         },
                         {
                           "type": "frame",
-                          "id": "pPhOs",
-                          "name": "HeroUI Ghost Button · 导出",
-                          "width": 32,
-                          "height": 32,
-                          "cornerRadius": 14,
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "ORLVH",
-                              "name": "导出",
-                              "width": 15,
-                              "height": 15,
-                              "icon": "download",
-                              "library": "lucide",
-                              "fill": "#AAB3B7"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
                           "id": "Af98A",
                           "name": "操作栏弹性间距",
                           "width": "fill_container",
@@ -100581,28 +100302,6 @@
                               "width": 15,
                               "height": 15,
                               "icon": "git-fork",
-                              "library": "lucide",
-                              "fill": "#AAB3B7"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "MyHeF",
-                          "name": "HeroUI Ghost Button · 导出",
-                          "width": 32,
-                          "height": 32,
-                          "cornerRadius": 14,
-                          "justifyContent": "center",
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "gD9CN",
-                              "name": "导出",
-                              "width": 15,
-                              "height": 15,
-                              "icon": "download",
                               "library": "lucide",
                               "fill": "#AAB3B7"
                             }
@@ -107113,7 +106812,7 @@
           "type": "frame",
           "id": "lCG2P",
           "name": "组件 · 弹出通知 · 浅色",
-          "context": "固定在视口顶部20，水平居中；宽度由文字决定，最大520；窄窗口两侧至少24。单行高44，内边距8/16，列间距12，图标18，文字16，关闭按钮26。多条沿同一中轴按8px间隔向下排列。",
+          "context": "固定视口顶部20并居中；单行高44，内边距8/16，间距12，状态图标18，正文16/400，关闭按钮26。操作说明与技术详情悬停状态图标查看，键盘聚焦同样可用；悬停通知或详情、通知内聚焦、页面隐藏暂停有效展示计时，离开后继续剩余时间。 入场250ms smooth-out：上方8px、缩放0.97、模糊2px到清晰原位；退场350ms，从当前呈现值向上4px、缩放0.99、模糊2px淡出后移除。详情150ms ease-out、缩放0.98，悬停延迟80ms，关闭无延迟。减少动态直接切换。",
           "reusable": true,
           "height": 44,
           "fill": "#FFFFFF",
@@ -107453,7 +107152,7 @@
           "fill": "#646464",
           "textGrowth": "fixed-width",
           "width": "fill_container",
-          "content": "消息提示按原有时限消失；删除结果可关闭；断线提示持续到连接恢复。通知不抢焦点，关闭按钮支持键盘。表单校验和历史错误留在原内容内。",
+          "content": "操作与消息提示按2.6秒有效展示时间关闭；鼠标悬停通知或详情、键盘焦点留在通知内、页面隐藏时暂停，结束后继续剩余时间。常态只显示状态图标、一句提示与关闭；说明和技术详情悬停状态图标后查看，键盘聚焦同样可用，Esc关闭详情。删除结果保留到关闭，断线提示保留到恢复。 入场250ms smooth-out：上方8px、缩放0.97、模糊2px到清晰原位；退场350ms，从当前呈现值向上4px、缩放0.99、模糊2px淡出后移除。详情150ms ease-out、缩放0.98，悬停延迟80ms，关闭无延迟。减少动态直接切换。",
           "lineHeight": 1.5,
           "fontFamily": "Source Han Sans CN",
           "fontSize": 14,
@@ -107500,7 +107199,7 @@
           "type": "frame",
           "id": "Ob1J1",
           "name": "组件 · 弹出通知 · 深色",
-          "context": "固定在视口顶部20，水平居中；宽度由文字决定，最大520；窄窗口两侧至少24。单行高44，内边距8/16，列间距12，图标18，文字16，关闭按钮26。多条沿同一中轴按8px间隔向下排列。",
+          "context": "固定视口顶部20并居中；单行高44，内边距8/16，间距12，状态图标18，正文16/400，关闭按钮26。操作说明与技术详情悬停状态图标查看，键盘聚焦同样可用；悬停通知或详情、通知内聚焦、页面隐藏暂停有效展示计时，离开后继续剩余时间。 入场250ms smooth-out：上方8px、缩放0.97、模糊2px到清晰原位；退场350ms，从当前呈现值向上4px、缩放0.99、模糊2px淡出后移除。详情150ms ease-out、缩放0.98，悬停延迟80ms，关闭无延迟。减少动态直接切换。",
           "reusable": true,
           "height": 44,
           "fill": "#131A1D",
@@ -107840,7 +107539,7 @@
           "fill": "#AAB3B7",
           "textGrowth": "fixed-width",
           "width": "fill_container",
-          "content": "消息提示按原有时限消失；删除结果可关闭；断线提示持续到连接恢复。通知不抢焦点，关闭按钮支持键盘。表单校验和历史错误留在原内容内。",
+          "content": "操作与消息提示按2.6秒有效展示时间关闭；鼠标悬停通知或详情、键盘焦点留在通知内、页面隐藏时暂停，结束后继续剩余时间。常态只显示状态图标、一句提示与关闭；说明和技术详情悬停状态图标后查看，键盘聚焦同样可用，Esc关闭详情。删除结果保留到关闭，断线提示保留到恢复。 入场250ms smooth-out：上方8px、缩放0.97、模糊2px到清晰原位；退场350ms，从当前呈现值向上4px、缩放0.99、模糊2px淡出后移除。详情150ms ease-out、缩放0.98，悬停延迟80ms，关闭无延迟。减少动态直接切换。",
           "lineHeight": 1.5,
           "fontFamily": "Source Han Sans CN",
           "fontSize": 14,

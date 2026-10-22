@@ -4,13 +4,13 @@
 
 ## 环境
 
-Windows 上开发，命令用 PowerShell 执行。需要 Node 22 以上，仓库自带 `node/`（不入库）时可以改用它。
+Windows 上开发，命令用 PowerShell 执行。需要 Node 22.19.0 以上，仓库自带 `node/`（不入库）时可以改用它。字体生成使用 Python 3.11，与 CI 保持一致。
 
 首次准备依赖：
 
 ```powershell
-npm ci --prefix agent
-npm ci --prefix src/web/frontend
+npm ci --prefix agent --ignore-scripts
+npm ci --prefix src/web/frontend --ignore-scripts
 python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 ```
 
@@ -20,6 +20,7 @@ python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 
 | 范围 | 命令 | 说明 |
 |---|---|---|
+| 脚本、配置与 CSS | `npm run check:engineering --prefix agent` | Biome 静态规则与 PowerShell 语法 / PSScriptAnalyzer 1.24.0；覆盖已跟踪和新增文件 |
 | 后端格式与类型 | `npm run check --prefix agent` | biome 检查加 `tsc` |
 | 后端测试 | `npm run test:web --prefix agent` | Web 扩展的接口、会话与事件测试 |
 | 跨端共享验收 | `npm run test:web:shared-audit --prefix agent` | 独立 Pi 进程、真实工具、写权、上下文、配置与独立主题；CI 必跑 |
@@ -35,6 +36,8 @@ python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 | 端到端验收 | `npm run test:web:e2e --prefix agent` | 先构建；真实浏览器、HTTP、Pi、持久化与重启，链路见[验收设计](doc/test/web-e2e.md) |
 
 前端 lint 必须从 `src/web/frontend` 目录发起：biome 按运行目录识别 React 项目，换目录会漏掉 React 相关规则。`npm --prefix` 已经处理，直接照表执行即可。
+
+工程检查使用已安装的 PSScriptAnalyzer 1.24.0，也可用 `CST_PSSCRIPTANALYZER_MODULE` 指向该版本的模块清单；CI 安装固定版本。MJS、JSON、CSS 启用静态规则，不批量格式化已有文件；CSS 的层叠优先级和 `!important` 由界面回归验证，重复属性、非法语法等仍检查。
 
 `pi.cmd` 交互启动请求管理员授权，优先使用已安装的 Windows Terminal。管道调用与发行冒烟需由已提权终端发起；启动器测试使用隔离副本和授权替身，不自动弹出 UAC。
 

@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import { type AddressInfo, createServer as createNetServer } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -33,7 +33,7 @@ async function freePort(): Promise<number> {
 class Cdp {
 	private seq = 0;
 	private socket: WebSocket;
-	private pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
+	private pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
 	constructor(socket: WebSocket) {
 		this.socket = socket;
 		socket.addEventListener("message", (event) => {
@@ -50,13 +50,14 @@ class Cdp {
 			else waiter.resolve(message.result);
 		});
 	}
-	send(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<any> {
+	async send<T = unknown>(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<T> {
 		const id = ++this.seq;
 		const payload = JSON.stringify(sessionId ? { id, method, params, sessionId } : { id, method, params });
-		return new Promise((resolve, reject) => {
+		const result = await new Promise<unknown>((resolve, reject) => {
 			this.pending.set(id, { resolve, reject });
 			this.socket.send(payload);
 		});
+		return result as T;
 	}
 }
 
@@ -105,15 +106,18 @@ async function readPage(pageUrl: string, probe: string, shotPath?: string) {
 			socket.addEventListener("error", () => reject(new Error("无法连接 Chrome")));
 		});
 		const cdp = new Cdp(socket);
-		const page = await cdp.send("Target.createTarget", { url: "about:blank" });
-		const attached = await cdp.send("Target.attachToTarget", { targetId: page.targetId, flatten: true });
+		const page = await cdp.send<{ targetId: string }>("Target.createTarget", { url: "about:blank" });
+		const attached = await cdp.send<{ sessionId: string }>("Target.attachToTarget", {
+			targetId: page.targetId,
+			flatten: true,
+		});
 		const session = attached.sessionId as string;
 		await cdp.send("Page.enable", {}, session);
 		await cdp.send("Page.navigate", { url: pageUrl }, session);
 		let ready = false;
 		for (let attempt = 0; attempt < 150 && !ready; attempt++) {
 			try {
-				const result = await cdp.send(
+				const result = await cdp.send<{ result?: { value?: unknown } }>(
 					"Runtime.evaluate",
 					{
 						expression: `location.href === ${JSON.stringify(pageUrl)} && document.readyState === "complete"`,
@@ -134,7 +138,7 @@ async function readPage(pageUrl: string, probe: string, shotPath?: string) {
 			session,
 		);
 		if (shotPath) {
-			const shot = await cdp.send("Page.captureScreenshot", { format: "png" }, session);
+			const shot = await cdp.send<{ data: string }>("Page.captureScreenshot", { format: "png" }, session);
 			await writeFile(shotPath, Buffer.from(shot.data as string, "base64"));
 		}
 		const value = (evaluated as { result?: { value?: unknown }; exceptionDetails?: unknown }).result?.value;
@@ -537,7 +541,7 @@ test("分支总结：总结、自定义提示词与取消", async () => {
 
 test("生成中提交树导航：先停生成再导航，不再 409", async () => {
 	const home = await mkdtemp(join(rootDir, "cst-web-tree-abort-"));
-	const held = new Set<import("node:http").ServerResponse>();
+	const held = new Set<ServerResponse>();
 	const model = createServer(async (request, response) => {
 		let raw = "";
 		for await (const chunk of request) raw += String(chunk);

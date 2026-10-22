@@ -226,6 +226,25 @@ test("failed persistence never calls the model", async () => {
 	assert.equal(calls, 0);
 });
 
+test("BitLocker skill is accepted explicitly while unknown skills are rejected", async () => {
+	const received: { text: string; skill?: string }[] = [];
+	const inbox = new SessionInbox(root, "bitlocker-skill", {
+		isBusy: () => false,
+		prompt: async (text, _images, skill) => {
+			received.push({ text, skill });
+		},
+		steer: async () => {},
+	});
+	try {
+		await assert.rejects(inbox.accept("unknown", "", "queue", [], "untrusted"), /技能名称无效/);
+		await inbox.accept("status", "查询状态", "queue", [], "bitlocker");
+		await waitFor(async () => (await inbox.snapshot()).items[0]?.status === "delivered");
+		assert.deepEqual(received, [{ text: "查询状态", skill: "bitlocker" }]);
+	} finally {
+		await inbox.close();
+	}
+});
+
 test("rejects path traversal in session ID", () => {
 	assert.throws(
 		() => new SessionInbox(root, "../auth", { isBusy: () => false, prompt: async () => {}, steer: async () => {} }),
