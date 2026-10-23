@@ -218,7 +218,7 @@ export function ProviderLoginForm({ standalone = false }: { standalone?: boolean
 							{standalone ? <span className="provider-field-label">自定义地址</span> : null}
 							<Checkbox
 								isSelected={customProvider}
-								isDisabled={loading}
+								isDisabled={loading || selected?.id === CSTOA_PROVIDER}
 								onChange={(selected) => {
 									setCustomProvider(selected);
 									setError("");

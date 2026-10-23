@@ -1,6 +1,6 @@
 # 待处理议题
 
-更新：2026-10-15。本页只记录未决产品选择与未完成验证。实施范围见 [MVP](web/MVP.md)，待办见 [Todo](Todo.md)。
+更新：2026-10-23。本页只记录未决产品选择与未完成验证。实施范围见 [MVP](web/MVP.md)，待办见 [Todo](Todo.md)。
 
 ## 工程边界
 
@@ -26,6 +26,12 @@
 | 并发与强制退出 | 全部多标签队列与附件组合，宿主强制终止后的提示与恢复 | 完整用户链路与存储证据 |
 
 本机覆盖与边界见[Checkpoint 5 报告](test/checkpoint5-report.md)和[共享专项报告](test/shared-backend-report.md)。
+
+## CSTOA 模型
+
+| 待完成 | 当前核对结果 |
+|---|---|
+| 确认并配置 `deepseek-v4-pro` 计费 | 2026-10-23 生产只读核对：网关已启用该模型，计费快照未配置价格。New API 在关闭自用模式时会从 `/v1/models` 中过滤未配置计费的模型。OA 模型广场仍列出该项；需确定实际计费价格后再验证目录与调用。 |
 
 ## 遥测运维
 
@@ -53,4 +59,4 @@
 |---|---|
 | transitions.dev 相关片段的发行授权是否已覆盖实际使用内容？ | 正式发行前核对代码来源与授权条款 |
 
-OA 身份、额度与遥测接收端的外部依赖见[认证交接](auth/handover.md)和[遥测接收规格](telemetry/receiver/SPEC.md)。
+OA 身份、额度与遥测接收端的外部依赖见[CSTOA 接入](auth/integration.md)和[遥测接收规格](telemetry/receiver/SPEC.md)。

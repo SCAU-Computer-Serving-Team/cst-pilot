@@ -66,7 +66,7 @@ export class CstoaAccount {
 
 	private async readAccess(runtime: AccountRuntime, invalidAuth: boolean): Promise<string | Snapshot> {
 		const credentials = await runtime.listCredentials();
-		const signedIn = credentials.some((entry) => entry.providerId === "cstoa" && entry.type === "oauth");
+		const signedIn = credentials.some((entry) => entry.providerId === "cstoa");
 		if (!signedIn || invalidAuth) return empty(signedIn, signedIn && invalidAuth);
 		try {
 			return (await runtime.getAuth("cstoa"))?.auth?.apiKey || empty(true, true);
@@ -94,7 +94,8 @@ export class CstoaAccount {
 					!(origin.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(origin.hostname)))
 			)
 				return empty(true, false, "账号服务地址无效，请检查配置。");
-			endpoint = new URL("/api/agent/profile", origin);
+			const credential = (await runtime.listCredentials()).find((entry) => entry.providerId === "cstoa");
+			endpoint = new URL(credential?.type === "api_key" ? "/api/agent/key-profile" : "/api/agent/profile", origin);
 		} catch {
 			return empty(true, false, "账号服务地址无效，请检查配置。");
 		}

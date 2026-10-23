@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { AgentSession, resolveModelScopeWithDiagnostics } from "@earendil-works/pi-coding-agent";
+import { refreshCstoaModels } from "../oauth/sync.ts";
 import { checkSharedConfiguration } from "./configuration.ts";
 import { ownSession } from "./owner.ts";
 
@@ -42,6 +43,7 @@ export async function refreshRuntime(session: AgentSession): Promise<void> {
 	const task = (async () => {
 		await session.settingsManager.reload();
 		await session.modelRuntime.refresh({ allowNetwork: false });
+		await refreshCstoaModels(session.modelRuntime);
 		checkSharedConfiguration(session.settingsManager, session.modelRuntime);
 		if (!process.argv.some((arg) => arg === "--models" || arg.startsWith("--models="))) {
 			const scope = await resolveModelScopeWithDiagnostics(
@@ -108,6 +110,8 @@ export function installRuntimeAdapter(): void {
 			};
 			this.prompt = async (...args) => {
 				await refreshRuntime(this);
+				if (this.isIdle && this.model?.provider === "cstoa" && !this.modelRuntime.getModel("cstoa", this.model.id))
+					throw new Error("当前 CSTOA 模型已不可用，请重新选择模型。");
 				return prompt(...args);
 			};
 		}

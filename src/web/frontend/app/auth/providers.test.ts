@@ -109,7 +109,7 @@ test("登录成功按实际服务和方式返回：CSTOA OAuth到账号，其他
 	assert.equal(loginSuccessPath("cstoa", "oauth", "/settings#accounts"), "/account");
 	assert.equal(loginSuccessPath("kimi-coding", "oauth", "/account"), "/settings#accounts");
 	assert.equal(loginSuccessPath("openai", "api_key", "/account"), "/settings#accounts");
-	assert.equal(loginSuccessPath("cstoa", "api_key", "/account"), "/settings#accounts");
+	assert.equal(loginSuccessPath("cstoa", "api_key", "/account"), "/account");
 	assert.equal(loginSuccessPath("openai", "api_key", "/settings#accounts"), "/settings#accounts");
 	assert.equal(loginSuccessPath("openai", "api_key", "/"), "/");
 	assert.equal(loginSuccessPath("openai", "api_key", "https://example.com"), "/");

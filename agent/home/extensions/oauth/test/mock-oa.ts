@@ -13,6 +13,9 @@ export interface MockOptions {
 	outcome?: "approve" | "deny" | "expire";
 	/** 账号接口状态，可在浏览器测试中切换以覆盖重试。 */
 	profileStatus?: number;
+	models?: string[];
+	keyModels?: string[];
+	modelsStatus?: number;
 	profile?: {
 		memberId?: string;
 		name?: string;
@@ -98,20 +101,38 @@ export async function startMockOa(options: MockOptions = {}): Promise<MockOa> {
 			);
 			return;
 		}
-		if (request.url === "/api/agent/llm/v1/chat/completions") {
+		if (request.url === "/api/agent/llm/v1/models" || request.url === "/v1/models") {
+			response.statusCode = options.modelsStatus ?? 200;
+			const keyMode = request.url === "/v1/models";
+			const expected = keyMode ? ["Bearer sk-test-key"] : ["Bearer access-1", "Bearer access-2"];
+			if (!expected.includes(request.headers.authorization ?? "")) response.statusCode = 401;
+			response.end(
+				JSON.stringify({
+					object: "list",
+					data: (keyMode
+						? (options.keyModels ?? ["key-model"])
+						: (options.models ?? ["deepseek-v4.1-flash", "glm-5.3-flash", "omen-alpha", "space-bunny-free"])
+					).map((id) => ({ id, object: "model" })),
+				}),
+			);
+			return;
+		}
+		if (["/api/agent/llm/v1/chat/completions", "/v1/chat/completions"].includes(request.url ?? "")) {
 			response.setHeader("Content-Type", "text/event-stream");
 			response.end(
 				`data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", choices: [{ index: 0, delta: { role: "assistant", content: "测试完成" }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
 			);
 			return;
 		}
-		if (request.url === "/api/agent/profile") {
+		if (request.url === "/api/agent/profile" || request.url === "/api/agent/key-profile") {
 			if (options.profileStatus && options.profileStatus !== 200) {
 				response.statusCode = options.profileStatus;
 				response.end("{}");
 				return;
 			}
-			if (!["Bearer access-1", "Bearer access-2"].includes(request.headers.authorization ?? "")) {
+			const valid =
+				request.url === "/api/agent/key-profile" ? ["Bearer sk-test-key"] : ["Bearer access-1", "Bearer access-2"];
+			if (!valid.includes(request.headers.authorization ?? "")) {
 				response.statusCode = 401;
 				response.end("{}");
 				return;

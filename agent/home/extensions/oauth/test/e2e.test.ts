@@ -41,16 +41,7 @@ test("e2e：内核加载扩展完成设备流，凭据写入 auth.json 且模型
 		const services = await createAgentSessionServices({ cwd: process.cwd(), agentDir });
 		const provider = services.modelRuntime.getProvider("cstoa");
 		assert.ok(provider, "cstoa provider 应已注册");
-		const models = provider.getModels();
-		assert.equal(models.length, 4);
-		// 参数预置：与 pi-ai 目录中的同族/同名模型对齐。
-		const deepseek = models.find((model) => model.id === "deepseek-v4.1-flash");
-		assert.equal(deepseek?.contextWindow, 1_000_000);
-		assert.equal(deepseek?.reasoning, true);
-		const glm = models.find((model) => model.id === "glm-5.3-flash");
-		assert.equal(glm?.contextWindow, 1_000_000);
-		assert.equal(glm?.reasoning, true);
-		assert.deepEqual(glm?.input, ["text", "image"]);
+		assert.equal(provider.getModels().length, 0, "未登录不提供其他凭据的模型");
 
 		const events: unknown[] = [];
 		const credential = await services.modelRuntime.login("cstoa", "oauth", {
@@ -83,7 +74,13 @@ test("e2e：内核加载扩展完成设备流，凭据写入 auth.json 且模型
 		const device = JSON.parse(await readFile(join(agentDir, "device.json"), "utf8")) as { device_id?: string };
 		assert.match(device.device_id ?? "", /^dev_[0-9a-f]{32}$/);
 
-		const requestAuth = await provider.auth.oauth?.toAuth(credential);
+		const activeProvider = services.modelRuntime.getProvider("cstoa");
+		const models = activeProvider?.getModels() ?? [];
+		assert.equal(models.length, 4);
+		assert.equal(models.find((model) => model.id === "deepseek-v4.1-flash")?.contextWindow, 1_000_000);
+		assert.deepEqual(models.find((model) => model.id === "glm-5.3-flash")?.input, ["text", "image"]);
+		assert.ok(mock.requests.some((request) => request.path === "/api/agent/llm/v1/models"));
+		const requestAuth = await activeProvider?.auth.oauth?.toAuth(credential);
 		assert.equal(requestAuth?.apiKey, "access-1");
 	} finally {
 		await mock.close();

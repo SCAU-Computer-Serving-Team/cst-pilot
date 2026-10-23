@@ -1,6 +1,6 @@
 # OAuth 实现
 
-本页定义 Web 对 Pi 登录交互的接线。行为见[登录规格](../../web/SPEC/auth.md)，OA 设备码协议见[认证交接](../../auth/handover.md)。
+本页定义 Web 对 Pi 登录交互的接线。行为见[登录规格](../../web/SPEC/auth.md)，OA 设备码协议见[账号与模型规格](../../auth/README.md)。
 
 ## Pi 的职责
 

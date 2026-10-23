@@ -42,6 +42,7 @@ export async function withProviderEndpoint<T>(
 	modelRuntime: ModelRuntime,
 	login: () => Promise<T>,
 ): Promise<T> {
+	if (providerId === "cstoa") throw new Error("CSTOA 使用固定服务地址，无需自定义 Provider。");
 	const endpoint = normalizeBaseUrl(baseUrl);
 	const models = modelRuntime.getModels(providerId);
 	if (!models.length) throw new Error("请求的 Provider 没有可用模型，请先在 Pi 中配置模型");
