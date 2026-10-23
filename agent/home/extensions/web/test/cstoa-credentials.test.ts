@@ -148,6 +148,13 @@ test("CSTOA APIKEY与扫码共用身份、积分和模型选择；自动目录�
 		);
 		assert.deepEqual(oauthModels.map((m: { id: string }) => m.id).sort(), [...options.models].sort());
 		assert.ok(oauthModels.every((m: { id: string; name: string }) => m.name === m.id));
+		const requestsBeforeSwitch = mock.requests.filter((r) => r.path.endsWith("/chat/completions")).length;
+		await assert.rejects(slot.session.prompt("模型已不属于当前凭据", { source: "rpc" }), /模型.*不可用.*重新选择/);
+		assert.equal(
+			mock.requests.filter((r) => r.path.endsWith("/chat/completions")).length,
+			requestsBeforeSwitch,
+			"目录已移除的模型不得用新凭据继续请求",
+		);
 		const oauthModel = modelRuntime.getModel("cstoa", "deepseek-flash");
 		assert.ok(oauthModel);
 		const answer = await modelRuntime.completeSimple(oauthModel, {
@@ -160,6 +167,24 @@ test("CSTOA APIKEY与扫码共用身份、积分和模型选择；自动目录�
 			),
 		);
 		assert.equal((await get("/api/account")).profile.studentId, "20230001");
+		const selection = await post("/api/models/select", {
+			sessionId: slot.id,
+			provider: "cstoa",
+			modelId: oauthModel.id,
+		});
+		assert.equal(selection.status, 200, "旧模型不可用时仍能通过 Web 切换模型");
+		await slot.session.prompt("切换到当前凭据可用模型后继续", { source: "rpc" });
+		assert.equal(slot.session.messages.at(-1)?.role, "assistant");
+		options.models = [];
+		await modelRuntime.refresh({ providers: ["cstoa"], allowNetwork: true, force: true });
+		assert.equal(modelRuntime.getModels("cstoa").length, 0);
+		const requestsBeforeEmpty = mock.requests.filter((r) => r.path.endsWith("/chat/completions")).length;
+		await assert.rejects(slot.session.prompt("目录已清空", { source: "rpc" }), /模型.*不可用.*重新选择/);
+		assert.equal(
+			mock.requests.filter((r) => r.path.endsWith("/chat/completions")).length,
+			requestsBeforeEmpty,
+			"成功空目录后不再调用会话保留的模型",
+		);
 		await post("/api/auth/cstoa/logout", {});
 		assert.equal((await get("/api/account")).signedIn, false);
 		assert.equal(

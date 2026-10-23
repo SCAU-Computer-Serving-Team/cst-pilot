@@ -110,6 +110,8 @@ export function installRuntimeAdapter(): void {
 			};
 			this.prompt = async (...args) => {
 				await refreshRuntime(this);
+				if (this.isIdle && this.model?.provider === "cstoa" && !this.modelRuntime.getModel("cstoa", this.model.id))
+					throw new Error("当前 CSTOA 模型已不可用，请重新选择模型。");
 				return prompt(...args);
 			};
 		}
