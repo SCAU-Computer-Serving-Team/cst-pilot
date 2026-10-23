@@ -2,7 +2,7 @@
 
 ## 结论
 
-OAuth 与 APIKEY 的本人资料、积分、自动模型和退出通过本机隔离验收。服务端 APIKEY 资料接口已在 [OA PR #131](https://github.com/SCAU-Computer-Serving-Team/cstoa-api-fastapi/pull/131) 合并并部署；健康、就绪、新接口和既有 OAuth 接口的无凭据拒绝检查通过。
+OAuth 与 APIKEY 的本人资料、积分、自动模型和退出通过本机隔离验收。服务端 APIKEY 资料接口及错误响应禁缓存分别在 [OA PR #131](https://github.com/SCAU-Computer-Serving-Team/cstoa-api-fastapi/pull/131) 与 [#132](https://github.com/SCAU-Computer-Serving-Team/cstoa-api-fastapi/pull/132) 合并并部署；健康、就绪、新接口和既有 OAuth 接口的无凭据拒绝检查通过。
 
 真实手机 2FA、生产多队员资料和实际积分扣减仍需使用获准的测试账号验证。
 
@@ -14,7 +14,7 @@ OAuth 与 APIKEY 的本人资料、积分、自动模型和退出通过本机隔
 |---|---|
 | 扩展 Biome 与 TypeScript | 通过 |
 | 前端 lint、类型与构建 | 通过 |
-| OAuth 与动态目录 | 13 项通过 |
+| OAuth 与动态目录 | 14 项通过，2026-10-23 补充原始模型 ID 与缓存名称回归 |
 | Web 后端 | 105 项通过，含账号、授权、模型与独立 Pi 进程恢复 |
 | 共享配置专项 | 7 项通过 |
 | 遥测 | 20 项通过 |
@@ -36,6 +36,17 @@ OAuth 与 APIKEY 的本人资料、积分、自动模型和退出通过本机隔
 | 积分更新 | 请求结束后刷新缓存；0 是有效值；资料和积分故障分别处理 |
 | 安全 | 目录不含凭据；浏览器存储不含 APIKEY；上游模型地址和请求头不能改变连接配置 |
 | 布局 | 两种窗口与主题、长姓名、面板边界、键盘打开及 Esc 关闭通过 |
+
+## 模型目录核对
+
+2026-10-23，生产只读核对网关启用目录、计费快照及 `v1.0.0-rc.37` 的模型过滤条件，未调用生产推理或修改网关配置。
+
+| 范围 | 结果 |
+|---|---|
+| Pilot 显示与请求 | 保留网关原始 ID；元数据别名只复用能力参数；已存目录恢复时采用同一显示规则 |
+| 隔离回归 | OAuth、Web 后端与桌面浅色／窄屏深色浏览器通过；模拟清单的三个模型完整保留，推理请求使用 `deepseek-flash` |
+| 生产目录 | 已启用 `MiniMax-M3.1-Flash`、`deepseek-flash`、`deepseek-v4-pro`；前两项存在计费配置，Pro 未配置计费 |
+| 网关过滤 | 关闭自用模式时，New API 从 `/v1/models` 过滤未配置计费的模型；Pro 计费确认与调用验收见[待处理议题](../issues.md#cstoa-模型) |
 
 ## 可重复入口
 
@@ -63,10 +74,10 @@ npm run test:web:e2e --prefix agent
 |---|---|
 | 后端自检 | 相关测试 124 项及 12 项子测试通过，Ruff 通过 |
 | CI | 6 个任务全部通过，包含完整 SQLite、MySQL 集成、锁文件、安全检查和容器构建 |
-| 部署范围 | 当前生产基线 `df075086a137` 加本次 4 个 Python 文件；不改数据库、New API、nginx 或环境配置 |
-| 发布后复核 | 服务为 active，4 个 Python 文件摘要与增量清单一致；健康、就绪及两类接口的无凭据拒绝通过，合成无效 APIKEY 被拒绝 |
-| 发布目录 | `/opt/cstoa-api-fastapi-dual/releases/df075086a137-pr131-9761216bfd3e` |
-| 回退目录 | `/opt/cstoa-api-fastapi-dual/releases/df075086a137`；切回 `current` 后重启 `cstoa.service` |
+| 部署范围 | 生产基线 `df075086a137` 加 PR #131 的 4 个 Python 文件及 PR #132 的 `server/main.py`；不改数据库、New API、nginx 或环境配置 |
+| 发布后复核 | 服务为 active，代码摘要与增量清单一致；健康、就绪及两类接口的无凭据拒绝通过，合成无效 APIKEY 被拒绝且响应带 `Cache-Control: no-store` |
+| 发布目录 | `/opt/cstoa-api-fastapi-dual/releases/df075086a137-pr132-a5327fdeb193` |
+| 回退目录 | `/opt/cstoa-api-fastapi-dual/releases/df075086a137-pr131-9761216bfd3e`；将 `/opt/cstoa-api-fastapi-dual/current` 和 `/opt/cstoa-api-fastapi/current` 均切回后重启 `cstoa.service` |
 
 ## 未验证边界
 

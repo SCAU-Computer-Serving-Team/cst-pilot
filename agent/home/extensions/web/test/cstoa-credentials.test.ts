@@ -14,7 +14,11 @@ test("CSTOA APIKEY与扫码共用身份、积分和模型选择；自动目录�
 	const home = await mkdtemp(join(await testRoot(), "cstoa-credentials-"));
 	const previousHome = process.env.PI_CODING_AGENT_DIR;
 	const previousHost = process.env.CSTOA_OA_HOST;
-	const options = { profile: { balance: 12000 }, keyModels: ["key-model"] };
+	const options = {
+		profile: { balance: 12000 },
+		keyModels: ["key-model"],
+		models: ["deepseek-flash", "deepseek-v4-pro", "MiniMax-M3.1-Flash"],
+	};
 	const mock = await startMockOa(options);
 	process.env.PI_CODING_AGENT_DIR = home;
 	process.env.CSTOA_OA_HOST = mock.host;
@@ -142,13 +146,19 @@ test("CSTOA APIKEY与扫码共用身份、积分和模型选择；自动目录�
 			oauthModels.some((m: { id: string }) => m.id === "key-model"),
 			false,
 		);
-		const oauthModel = modelRuntime.getModel("cstoa", "deepseek-v4.1-flash");
+		assert.deepEqual(oauthModels.map((m: { id: string }) => m.id).sort(), [...options.models].sort());
+		assert.ok(oauthModels.every((m: { id: string; name: string }) => m.name === m.id));
+		const oauthModel = modelRuntime.getModel("cstoa", "deepseek-flash");
 		assert.ok(oauthModel);
 		const answer = await modelRuntime.completeSimple(oauthModel, {
 			messages: [{ role: "user", content: "测试扫码模型", timestamp: Date.now() }],
 		});
 		assert.equal(answer.stopReason, "stop");
-		assert.ok(mock.requests.some((r) => r.path === "/api/agent/llm/v1/chat/completions"));
+		assert.ok(
+			mock.requests.some(
+				(r) => r.path === "/api/agent/llm/v1/chat/completions" && r.body.model === "deepseek-flash",
+			),
+		);
 		assert.equal((await get("/api/account")).profile.studentId, "20230001");
 		await post("/api/auth/cstoa/logout", {});
 		assert.equal((await get("/api/account")).signedIn, false);

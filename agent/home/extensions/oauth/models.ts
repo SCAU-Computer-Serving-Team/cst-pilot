@@ -93,7 +93,7 @@ export class CstoaModels {
 			const known = this.metadata.find((model) => model.id === metadataId && model.api === "openai-completions");
 			return {
 				id,
-				name: known?.name ?? id,
+				name: id,
 				api: "openai-completions",
 				provider: PROVIDER_ID,
 				baseUrl,
@@ -147,7 +147,11 @@ export class CstoaModels {
 			}
 		}
 		if (entry) {
-			const next = entry;
+			// 已保存目录同样展示网关 ID；只修正内存名称，不触发共享文件写入。
+			const next = {
+				...entry,
+				models: entry.models.map((model) => ({ ...model, name: model.id })),
+			};
 			const changed = fetched || next.etag !== stored?.etag || next.checkedAt !== stored?.checkedAt;
 			await context.publish({
 				...(changed ? { persist: next } : {}),

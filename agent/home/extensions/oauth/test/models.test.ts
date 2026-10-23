@@ -92,6 +92,58 @@ test("模型目录随凭据隔离，自动刷新增删、允许空目录，失�
 	assert.equal(catalog.getModels().length, 0);
 });
 
+test("CSTOA 展示与请求均保留网关原始 ID，元数据别名不改名、不丢模型，缓存恢复同口径", async () => {
+	const ids = ["deepseek-flash", "deepseek-v4-pro", "MiniMax-M3.1-Flash"];
+	const credential: Credential = { type: "api_key", key: "test-key" };
+	const catalog = new CstoaModels(
+		[
+			{
+				id: "deepseek-v4-flash",
+				name: "DeepSeek V4 Flash",
+				api: "openai-completions",
+				provider: "deepseek",
+				baseUrl: "https://api.deepseek.com",
+				input: ["text"],
+				reasoning: true,
+				contextWindow: 1_000_000,
+				maxTokens: 384_000,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			},
+		],
+		async () => Response.json({ data: ids.map((id) => ({ id })) }),
+	);
+	const stored = await catalog.fetch(credential, new AbortController().signal);
+	assert.deepEqual(
+		stored.models.map((model) => model.id),
+		ids,
+	);
+	assert.deepEqual(
+		stored.models.map((model) => model.name),
+		ids,
+	);
+	assert.equal(stored.models[0]?.contextWindow, 1_000_000, "能力参数仍可复用 Pi 目录");
+	const legacy = {
+		...stored,
+		models: stored.models.map((model, index) => (index === 0 ? { ...model, name: "DeepSeek V4 Flash" } : model)),
+	};
+	const restarted = new CstoaModels([]);
+	await restarted.refresh({
+		credential,
+		stored: legacy,
+		allowNetwork: false,
+		signal: new AbortController().signal,
+		publish: async ({ persist, update }) => {
+			assert.equal(persist, undefined, "恢复缓存不重写共享目录");
+			update?.();
+			return true;
+		},
+	});
+	assert.deepEqual(
+		restarted.getModels().map((model) => model.name),
+		ids,
+	);
+});
+
 test("模型清单只接收 ID，不接受上游提供的请求地址或密钥", async () => {
 	const catalog = new CstoaModels([], async () =>
 		Response.json({

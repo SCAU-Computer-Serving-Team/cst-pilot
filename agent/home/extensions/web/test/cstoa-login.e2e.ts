@@ -21,7 +21,8 @@ test(
 		await cp(fileURLToPath(new URL("../../oauth", import.meta.url)), join(home, "extensions", "oauth"), {
 			recursive: true,
 		});
-		const oa = await startMockOa();
+		const modelIds = ["deepseek-flash", "MiniMax-M3.1-Flash"];
+		const oa = await startMockOa({ keyModels: modelIds });
 		const previousHost = process.env.CSTOA_OA_HOST,
 			previousHome = process.env.PI_CODING_AGENT_DIR;
 		process.env.CSTOA_OA_HOST = oa.host;
@@ -84,11 +85,25 @@ test(
 				);
 				await browser.screenshot(join(root, `key-account-${theme}.png`));
 				const models = await (await fetch(`${origin}/api/models`)).json();
-				assert.ok(
-					models.models.some(
-						(model: { provider: string; id: string }) => model.provider === "cstoa" && model.id === "key-model",
-					),
+				assert.deepEqual(
+					models.models
+						.filter((model: { provider: string }) => model.provider === "cstoa")
+						.map((model: { id: string; name: string }) => ({ id: model.id, name: model.name })),
+					modelIds.map((id) => ({ id, name: id })),
 				);
+				await browser.navigate(`${origin}/settings`);
+				await browser.until("!!document.querySelector('.settings-search input')", "模型设置");
+				await browser.fill(".settings-search input", "cstoa");
+				await browser.until("document.querySelectorAll('.settings-model').length===2", "CSTOA 两个可用模型");
+				assert.deepEqual(
+					await browser.evaluate(
+						"[...document.querySelectorAll('.settings-model-name')].map(element=>element.textContent).sort()",
+					),
+					[...modelIds].sort(),
+				);
+				await browser.screenshot(join(root, `key-models-${theme}.png`));
+				await browser.navigate(`${origin}/account`);
+				await browser.until("!!document.querySelector('.account-fields')", "返回账号页");
 				if (await browser.evaluate("document.querySelector('.sidebar')?.getAttribute('aria-hidden')==='true'"))
 					await browser.click('button[aria-label="展开侧栏"]');
 				await browser.click('button[aria-label="账号菜单"]');
