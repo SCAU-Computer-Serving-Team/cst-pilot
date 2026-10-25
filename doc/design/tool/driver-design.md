@@ -53,4 +53,4 @@ core 网卡仅取 NetConnectionID 非空的条目，保留虚拟网卡。Physica
 
 ## 验证
 
-按[测试指南](../../test/README.md)执行 driver 公共组与硬件差异项；验证记录放在 `doc/test/testlog/`。
+按[测试指南](../../test/README.md)执行 driver 公共组与硬件差异项；验证记录放在仓库外当天临时目录。

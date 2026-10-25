@@ -64,4 +64,4 @@ detail 的 XML 元素是 EventRecordID，PowerShell 属性是 RecordId。事件 
 
 ## 验证
 
-按[测试指南](../../test/README.md)执行 eventlog 公共组，重点覆盖权限、过滤、计数与截断。核对 SCM 元数据时需解码事件 ID 的高位编码；具体环境结果放在 `doc/test/testlog/`。
+按[测试指南](../../test/README.md)执行 eventlog 公共组，重点覆盖权限、过滤、计数与截断。核对 SCM 元数据时需解码事件 ID 的高位编码；具体环境结果放在仓库外当天临时目录。

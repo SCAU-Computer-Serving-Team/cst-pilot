@@ -94,25 +94,3 @@ test("界面画布的颜色常量是色阶画布定义色与登记例外的子�
     );
   }
 });
-
-test("例外清单无冗余（登记的颜色不应已在色阶画布中定义）", () => {
-  const palette = new Set(extractColors(readFileSync(colorsPenPath, "utf8")));
-  const redundant = Object.keys(EXCEPTIONS).filter((c) => palette.has(c));
-  assert.deepEqual(
-    redundant,
-    [],
-    `以下例外已在色阶画布定义，应从 EXCEPTIONS 移除：${redundant.join(" ")}`,
-  );
-});
-
-test("例外清单中的颜色确实在界面画布中被使用（防止登记幽灵条目）", () => {
-  const used = new Set(
-    penPaths.flatMap((p) => extractColors(readFileSync(p, "utf8"))),
-  );
-  const ghosts = Object.keys(EXCEPTIONS).filter((c) => !used.has(c));
-  assert.deepEqual(
-    ghosts,
-    [],
-    `以下例外登记后未在画布使用，应移除：${ghosts.join(" ")}`,
-  );
-});

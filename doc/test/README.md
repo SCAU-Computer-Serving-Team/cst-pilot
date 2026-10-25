@@ -1,25 +1,36 @@
 # 测试指南
 
-本目录分开维护测试方法、环境覆盖和执行记录。**清单中的预期不是已验证结论**；只有带日期、环境和证据的记录才能说明某次验证结果。
+本目录说明测试分工、执行入口、隔离要求和判定规则。测试结果、日期日志和运行产物放仓库外当天临时目录，不在本目录维护通过数量或验收进度。
 
-1. [Testlist](Testlist.md)：环境覆盖状态
-2. [设备形态](env-desktop.md)：组装机、品牌机、笔记本、一体机、旧机器
-3. [操作系统](env-os.md)：Windows 10/11、裁剪镜像、本地化
-4. [移动介质](env-media.md)：U 盘、移动硬盘、SD 卡及文件系统差异
-5. [PE](env-pe.md)：运行时、系统服务和只读介质的降级
-6. `testlog/`：已执行的环境、结果、缺陷与未决项；按日期分文件，本机记录，不入库
+## 测试分工与入口
 
-## 启动器验收
+以下命令从仓库根目录执行。
 
-管理员授权、WT 承载、参数传递和管道调用的结果见[启动器验证](launcher-report.md)。自动测试使用授权替身；真实 UAC、跨账户授权和完整发行副本单独验收。
+| 模块 | 入口 | 职责 |
+|---|---|---|
+| 工具与工程约束 | `node --test src/test/*.test.mjs` | 工具行为、工程配置、画布结构和文档链接 |
+| 发行 | `node --test pack/test/*.test.mjs` | 启动器、环境隔离、白名单、配置与资源完整性 |
+| OAuth | `npm run test:oauth --prefix agent` | 登录、续期、模型目录与凭据隔离 |
+| Web 后端 | `npm run test:web --prefix agent` | API、会话、存储、鉴权、队列和故障恢复 |
+| Web 用户链路 | `npm run test:web:e2e --prefix agent` | 隔离浏览器中的完整操作流程 |
+| 跨端共享 | `npm run test:web:shared-audit --prefix agent` | 独立 Pi 进程、共享配置、历史目录与单写权 |
+| 前端 | `npm test --prefix src/web/frontend` | 状态、数据转换与交互逻辑 |
+| 字体与静态资源 | `npm run test:fonts --prefix src/web/frontend` | 字体覆盖、许可、校验和及资源更新 |
+| 遥测 | `npm run test:telemetry --prefix agent` | 采集、草稿、扣点、队列、重试与 TLS |
+| 遥测跨仓库 | `npm run test:telemetry:e2e --prefix agent` | 真实 Pi 到两个 Go 接收端，需配置接收端可执行文件 |
 
-## Web 验收
+格式、类型与静态检查独立执行：`npm run check --prefix agent`、`npm run check:engineering --prefix agent`、前端 `lint` 与 `typecheck`。这些检查不代替功能验收。
 
-CSTOA 学号、姓名和上下文额度的隔离验收见[账号验证](account-report.md)。
+## 专项说明
 
-Web 功能按[端到端验收](web-e2e.md)覆盖完整用户操作。Checkpoint 5 使用[联调计划](checkpoint5.md)，本轮结果见[联调报告](checkpoint5-report.md)；已获授权的修复按原链路重新验收，未验证项保持明确。类型、纯函数与画布检查作辅助，验收报告按链路给出结果和未验证边界。
-
-共享后端的 TUI/Web 一致性使用[专项计划](shared-backend.md)，实际 Herdr、发行副本及独立 Pi 进程结果见[专项报告](shared-backend-report.md)。可重复入口 `npm run test:web:shared-audit --prefix agent` 覆盖独立 Pi 进程、真实工具与文件边界，并纳入 CI；实际 TUI 与完整扩展副本另行联调。
+| 文档 | 内容 |
+|---|---|
+| [启动器](launcher.md) | 管理员授权、WT、参数、管道和发行验证 |
+| [账号](account.md) | OAuth／APIKEY、本人资料、额度、模型与真实服务边界 |
+| [Web 用户链路](web-e2e.md) | 浏览器测试、故障注入、实机交互与产物 |
+| [共享后端](shared-backend.md) | TUI/Web 配置、会话写权与进程边界 |
+| [遥测](telemetry.md) | 发送端、OA、接收端、账单与双端集成 |
+| [环境覆盖](Testlist.md) | 设备、系统、介质与 PE 的选样要求 |
 
 ## BitLocker 验收
 
@@ -27,13 +38,14 @@ Web 功能按[端到端验收](web-e2e.md)覆盖完整用户操作。Checkpoint 
 
 实机先做只读 status，并用独立 PowerShell 对照权限与错误。unlock、decrypt 只在获准的隔离测试卷上验证；实际终端、加密卷、Windows 10/11 和 PE 的验收范围见 [Todo](../Todo.md)，不要把替身通过表述为真实磁盘执行成功。
 
-特殊组件的尺寸、字号、浅深主题、固定目标与操作恢复见 `agent/home/extensions/web/test/special-tool-states.e2e.ts`。流式回归见 `streaming-after-tool.e2e.ts`；文件打开、请求去重与凭据提交边界见 `special-tool-api.test.ts`。
+特殊组件的状态、详情展开、复制、窄屏可用性、固定目标与操作恢复见 `agent/home/extensions/web/test/special-tool-states.e2e.ts`。流式回归见 `streaming-after-tool.e2e.ts`；文件打开、请求去重与凭据提交边界见 `special-tool-api.test.ts`。
 
 ## 自动测试取舍
 
 - 保留公开行为、故障恢复、持久化、鉴权与凭据边界；跨端一致性直接对照 Pi。
 - 画布只检查颜色登记、节点完整性，文档只检查本地链接。不锁定节点 ID、演示内容、CSS 原文、文档标题或句式。
-- 相同行为已有完整链路覆盖时，不再增加单独的视觉用例；动效逐帧曲线与固定像素按设计变更人工验收。
+- 相同行为已有完整链路覆盖时，不再增加重复用例。字号、间距、颜色、动画时长和曲线按设计变更人工验收；自动测试只判断内容可见、可操作、不重叠和不溢出。
+- 不用源码字符串、内部文件数量或 DOM 节点身份证明功能正确。安全发行边界、数据格式、资源完整性与明确工程规则仍独立校验。
 
 ## 选择范围
 
@@ -49,7 +61,7 @@ Web 功能按[端到端验收](web-e2e.md)覆盖完整用户操作。Checkpoint 
 2. Agent 仅通过项目工具采集；核查者通过独立 PowerShell、系统界面或计时取得对照证据。
 3. 对照同一对象、相近时间和相同单位。实时采样不能要求逐值相等；冲突先排除权限、口径、采样窗口和对象不同，再记录缺陷。
 4. 每项记录调用、关键返回、对照方法、结论和耗时。只读核查，不修改机主数据；需要拔插、准备大文件或调整环境的项目单独安排。
-5. 将结果按日期追加到 `testlog/<日期>.md`；区分通过、预期降级、失败、未执行和不适用。
+5. 将结果、日志和截图放仓库外当天临时目录；区分通过、预期降级、失败、未执行和不适用。
 
 明确且符合设计的降级可以通过。崩溃、挂起、静默丢失错误、把未知数据当作正常值应判失败。硬件不存在本身不算失败，但必须与采集失败区分。
 
@@ -115,7 +127,7 @@ Web 功能按[端到端验收](web-e2e.md)覆盖完整用户操作。Checkpoint 
 
 ## 记录模板
 
-写入 `testlog/<YYYY-MM-DD>.md`，一天一个文件；同一天多次测试追加到同一文件，各自一个一级标题。
+在仓库外当天临时目录创建记录，注明测试范围并关联原始日志。Windows 使用 `F:/tmp/<日期>/` 或 `E:/tmp/<日期>/`，不提交隔离 home、凭据或浏览器配置。
 
 ```markdown
 # YYYY-MM-DD · 环境名称
