@@ -119,14 +119,13 @@ test("跨端用户链路：网页保存范围和模型、原生扫码、服务�
 	try {
 		await startWeb();
 		browser = await BrowserProbe.launch(root);
-		await browser.navigate(`${origin}/settings`);
+		await browser.navigate(`${origin}/settings/models`);
 		await browser.until("!!document.querySelector('[aria-label=\"启用 测试模型 one\"]')", "模型范围设置加载");
 		await browser.fill(".settings-search input", "测试模型");
 		await browser.click('.settings-model:has([aria-label="启用 测试模型 one"]) .settings-check-box');
-		await browser.click(".settings-save");
 		await browser.until(
-			"document.querySelector('.settings-save')?.textContent.includes('已保存')",
-			"网页保存模型范围",
+			"document.querySelector('.settings-notification')?.textContent.includes('已自动保存')",
+			"网页自动保存模型范围",
 		);
 		await browser.navigate(`${origin}/`);
 		await browser.until("document.querySelector('.model-label')?.textContent.includes('two')", "默认模型 two");
@@ -177,15 +176,18 @@ test("跨端用户链路：网页保存范围和模型、原生扫码、服务�
 
 		await browser.navigate(`${origin}/settings/provider?provider=probe&method=api_key`);
 		await browser.until(
-			"!!document.querySelector('.login-api-form') && !!document.querySelector('.login-custom-checkbox')",
+			"!!document.querySelector('.settings-key-input input') && !!document.querySelector('.settings-advanced-trigger')",
 			"服务配置表单",
 		);
-		await browser.click(".login-custom-checkbox");
+		await browser.click(".settings-advanced-trigger");
 		const endpoint = `http://127.0.0.1:${modelPort}/custom/v1`;
 		await browser.fill('input[type="url"]', endpoint);
-		await browser.fill(".login-key-field input", "shared-e2e-key");
-		await browser.click(".login-api-form .login-submit");
-		await browser.until("location.pathname==='/settings'", "保存服务返回设置");
+		await browser.fill(".settings-key-input input", "shared-e2e-key");
+		await browser.click(".settings-page-heading");
+		await browser.until(
+			"!!document.querySelector('.settings-notification') && !!document.querySelector('.settings-key-input input')",
+			"服务配置自动保存",
+		);
 		await stopWeb();
 		await startWeb();
 		await browser.navigate(`${origin}/account`);

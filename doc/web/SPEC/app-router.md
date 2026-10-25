@@ -9,10 +9,14 @@
 | `/` | 主页 | 入口，含会话列表 |
 | `/s/<sessionId>` | 聊天工作台 | 会话 ID 在地址里 |
 | `/s/<sessionId>/tree` | 分支树 | 对应 TUI 的 `/tree`，呈现与行布局规则见[分支树](branch-tree.md) |
-| `/dashboard` | 仪表盘 | MVP 后实现，字段口径见[仪表盘](dashboard.md) |
+| `/dashboard` | 仪表盘 | 后续迭代，字段口径见[仪表盘](dashboard.md) |
 | `/login` | 登录页 | 居中面板 |
-| `/settings` | 设置 | 入口在账号菜单 |
-| `/settings/provider` | 模型服务配置 | 接收 `provider`、`method`；使用设置行布局承载凭据表单 |
+| `/settings` | 模型服务 | 设置默认页；兼容 `/settings#accounts` |
+| `/settings/general` | 常规设置 | Web 主题 |
+| `/settings/models` | 模型偏好 | 启用范围、搜索、服务筛选与排序 |
+| `/settings/shortcuts` | 快捷键 | 展示聊天快捷键 |
+| `/settings/add` | 添加服务 | 搜索未配置的服务并连接 |
+| `/settings/provider` | 模型服务配置 | 接收 `provider`、`method`；承载凭据、授权、高级设置与移除确认 |
 | `/account` | CSTOA 账号信息 | 学号、姓名与专属账号登录、退出 |
 
 导航行为：真实链接、可复制地址、可在新标签页打开、支持刷新与前进后退。地址只在本机服务运行时有效，不是公开分享链接。
@@ -134,6 +138,6 @@
 
 ## 双版本
 
-**MVP 只有现代版。** `/web` 直接打开，没有档位参数；服务端只选一个产物目录，地址共用一套、不加前缀，端口只有一个。
+**当前提供现代版。** `/web` 直接打开，没有档位参数；服务端只选一个产物目录，地址共用一套、不加前缀，端口只有一个。
 
 兼容版（Tailwind 3.4、Chromium 86）在功能完善后增加，入口命令与切换方式届时确定，基线见[浏览器基线](frontend.md#浏览器基线)。

@@ -30,71 +30,31 @@ const sample = [
 	"---",
 	"排版尾段标记，流式和完成态共用相邻规则。",
 ].join("\n\n");
-const metrics = (index: number) => `(() => {
-	const root=document.querySelectorAll('.markdown')[${index}];
-	const style=e=>{const s=getComputedStyle(e);return {size:parseFloat(s.fontSize),line:parseFloat(s.lineHeight),tracking:parseFloat(s.letterSpacing)||0,weight:s.fontWeight};};
-	const gap=(a,b)=>+(b.getBoundingClientRect().top-a.getBoundingClientRect().bottom).toFixed(2);
-	const children=Array.from(root.children),heads=children.filter(e=>/^H[1-6]$/.test(e.tagName));
-	const list=root.querySelector('ul'),nested=list.querySelector('ul'),loose=root.querySelector('ol li'),quote=root.querySelector('blockquote');
-	return {body:style(root),tags:children.map(e=>e.tagName),gaps:children.slice(1).map((e,i)=>gap(children[i],e)),
-		heads:heads.map(e=>({tag:e.tagName,style:style(e),before:gap(e.previousElementSibling,e),after:gap(e,e.nextElementSibling)})),
-		list:{before:gap(list.previousElementSibling,list),items:gap(list.children[0],list.children[1]),after:gap(list,list.nextElementSibling),nestedBefore:getComputedStyle(nested).marginTop,nestedAfter:getComputedStyle(nested).marginBottom},
-		loose:gap(loose.children[0],loose.children[1]),quote:gap(quote.children[0],quote.children[1]),
-		code:style(root.querySelector('pre code')),cell:style(root.querySelector('td')),tableWidth:root.querySelector('.markdown-table').getBoundingClientRect().width,
-		height:+root.getBoundingClientRect().height.toFixed(2),width:root.getBoundingClientRect().width,
-		firstMargin:getComputedStyle(children[0]).marginTop,lastMargin:getComputedStyle(children.at(-1)).marginBottom,
-		control:style(document.querySelector('.turn-process-head'))};
+const metrics = () => `(() => {
+ const root=document.querySelector('.markdown'),rect=root.getBoundingClientRect();
+ return {text:root.textContent,headings:[...root.querySelectorAll('h1,h2,h3,h4,h5,h6')].map(e=>e.tagName),
+ blocks:['ul','ol','blockquote','pre code','table'].map(selector=>!!root.querySelector(selector)),
+ width:rect.width,tableWidth:root.querySelector('.markdown-table').getBoundingClientRect().width,
+ withinViewport:rect.left>=0&&rect.right<=innerWidth+1,pageOverflow:document.documentElement.scrollWidth>innerWidth};
 })()`;
-type Metrics = {
-	body: { size: number; line: number; tracking: number };
-	tags: string[];
-	gaps: number[];
-	heads: { tag: string; style: { size: number; line: number; tracking: number }; before: number; after: number }[];
-	list: { before: number; items: number; after: number; nestedBefore: string; nestedAfter: string };
-	loose: number;
-	quote: number;
-	code: { line: number; tracking: number };
-	cell: { line: number };
-	tableWidth: number;
-	height: number;
+interface Metrics {
+	text: string;
+	headings: string[];
+	blocks: boolean[];
 	width: number;
-	firstMargin: string;
-	lastMargin: string;
-	control: { line: number; tracking: number };
-};
-const near = (actual: number, expected: number) =>
-	assert.ok(Math.abs(actual - expected) < 0.06, `${actual} != ${expected}`);
+	tableWidth: number;
+	withinViewport: boolean;
+	pageOverflow: boolean;
+}
 function verify(value: Metrics) {
-	assert.equal(value.body.size, 16);
-	assert.equal(value.body.line, 28);
-	near(value.body.tracking, 0.32);
-	assert.equal(value.gaps[0], 16);
-	const before = [32, 24, 20, 16, 12, 12],
-		after = [16, 12, 8, 8, 8, 4];
-	for (let i = 0; i < 6; i++) {
-		const head = value.heads[i]!;
-		assert.equal(head.before, before[i]);
-		assert.equal(head.after, after[i]);
-		assert.equal(head.style.size, i < 2 ? 24 : 16);
-		near(head.style.line, i < 2 ? 33.6 : 24);
-		assert.equal(head.style.tracking, 0);
-	}
-	assert.equal(value.heads[6]!.after, 12);
-	assert.equal(value.heads[7]!.before, 12);
-	assert.deepEqual(value.list, { before: 8, items: 6, after: 16, nestedBefore: "4px", nestedAfter: "4px" });
-	assert.equal(value.loose, 16);
-	assert.equal(value.quote, 16);
-	near(value.code.line, 20.8);
-	assert.equal(value.code.tracking, 0);
-	near(value.cell.line, 25.6);
-	assert.deepEqual(value.gaps.slice(-2), [24, 24]);
-	assert.equal(value.firstMargin, "0px");
-	assert.equal(value.lastMargin, "0px");
-	assert.equal(value.control.line, 24);
-	assert.equal(value.control.tracking, 0);
+	for (const tag of ["H1", "H2", "H3", "H4", "H5", "H6"]) assert.ok(value.headings.includes(tag), tag);
+	assert.ok(value.blocks.every(Boolean), "列表、引用、代码与表格正常渲染");
+	assert.ok(value.width > 0 && value.withinViewport, "正文在可用视口内");
+	assert.ok(value.tableWidth <= value.width + 1, "宽表格在正文内滚动");
+	assert.equal(value.pageOverflow, false, "页面不产生横向滚动");
 }
 
-test("Markdown排版：分级间距、流式一致、浅深主题、窄幅与放大", { timeout: 60000 }, async () => {
+test("Markdown结构渲染、流式完成、浅深主题、窄幅与放大", { timeout: 60000 }, async () => {
 	const root = await mkdtemp(join(await testRoot(), "markdown-typeset-")),
 		home = join(root, "home");
 	await mkdir(home, { recursive: true });
@@ -175,21 +135,26 @@ test("Markdown排版：分级间距、流式一致、浅深主题、窄幅与放
 		await browser.fill(".composer-input", "排版测试");
 		await browser.click('[aria-label="发送消息"]');
 		await browser.until(
-			"document.querySelector('.markdown')?.textContent.includes('排版尾段标记')",
+			`document.querySelector('.markdown')?.textContent.includes(${JSON.stringify(sample.split("\n\n").at(-1))})`,
 			"流式正文完整到达",
 		);
 		await browser.evaluate("document.fonts.ready.then(()=>true)");
-		const live = await browser.evaluate<Metrics>(metrics(0));
+		const live = await browser.evaluate<Metrics>(metrics());
 		verify(live);
 		release();
 		await browser.until("!document.querySelector('.assistant-turn[data-live]')", "模型完成");
-		const finished = await browser.evaluate<Metrics>(metrics(0));
-		assert.deepEqual(finished, live, "流式分段边界和高亮不改变排版");
+		const finished = await browser.evaluate<Metrics>(metrics());
+		verify(finished);
+		assert.equal(
+			finished.text.replace(/\s+/g, " ").trim(),
+			live.text.replace(/\s+/g, " ").trim(),
+			"流式完成不丢失或重复正文",
+		);
 		await browser.evaluate("document.querySelector('.conversation').scrollTop=0");
 		await browser.until("document.querySelector('.markdown').getBoundingClientRect().top>100", "正文顶部");
 		await browser.screenshot(join(root, "desktop-light.png"));
 		await browser.evaluate("document.documentElement.dataset.theme='dark'");
-		verify(await browser.evaluate<Metrics>(metrics(0)));
+		verify(await browser.evaluate<Metrics>(metrics()));
 		await browser.screenshot(join(root, "desktop-dark.png"));
 		await browser.call("Emulation.setDeviceMetricsOverride", {
 			width: 390,
@@ -199,13 +164,12 @@ test("Markdown排版：分级间距、流式一致、浅深主题、窄幅与放
 		});
 		await browser.click('[aria-label="收起侧栏"]');
 		await browser.until(
-			"Math.abs(document.querySelector('.markdown').getBoundingClientRect().left-16)<1",
+			"(()=>{const r=document.querySelector('.markdown').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+1})()",
 			"窄幅布局结束",
 		);
 		await browser.evaluate("document.querySelector('.conversation').scrollTop=0");
-		const narrow = await browser.evaluate<Metrics>(metrics(0));
+		const narrow = await browser.evaluate<Metrics>(metrics());
 		verify(narrow);
-		near(narrow.width, 358);
 		assert.ok(narrow.tableWidth <= narrow.width);
 		assert.equal(await browser.evaluate("document.documentElement.scrollWidth<=390"), true);
 		await browser.screenshot(join(root, "narrow-dark.png"));

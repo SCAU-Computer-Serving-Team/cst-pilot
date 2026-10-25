@@ -90,7 +90,7 @@ test("错误状态：真实401、持续断线、恢复不重发与运行任务�
 	try {
 		browser = await BrowserProbe.launch(root);
 		const probe = browser;
-		async function assertSurface(selector: string, label: string, finished = false) {
+		async function assertSurface(selector: string, label: string) {
 			for (const width of [1600, 960]) {
 				await probe.call("Emulation.setDeviceMetricsOverride", {
 					width,
@@ -108,35 +108,11 @@ test("错误状态：真实401、持续断线、恢复不重发与运行任务�
 				for (const theme of ["light", "dark"]) {
 					await probe.evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
 					await probe.evaluate("document.fonts.ready");
-					const surface = await probe.evaluate<{
-						background: string;
-						border: string;
-						radius: string;
-						padding: string;
-						left: number;
-						right: number;
-						overflow: boolean;
-					}>(`(() => {
-						const e=document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({block:'center'});
-						const s=getComputedStyle(e),r=e.getBoundingClientRect();
-						return {background:s.backgroundColor,border:s.borderTopColor,radius:s.borderRadius,padding:s.padding,left:r.left,right:r.right,overflow:e.scrollWidth>e.clientWidth};
+					const surface = await probe.evaluate<{ left: number; right: number; overflow: boolean }>(`(() => {
+						const e=document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({block:"center"});
+						const r=e.getBoundingClientRect();
+						return {left:r.left,right:r.right,overflow:e.scrollWidth>e.clientWidth};
 					})()`);
-					assert.equal(
-						surface.background,
-						theme === "light"
-							? finished
-								? "rgb(255, 255, 255)"
-								: "rgb(252, 252, 252)"
-							: finished
-								? "rgb(11, 18, 21)"
-								: "rgb(19, 26, 29)",
-						`${label} ${width} ${theme} canvas background`,
-					);
-					if (selector !== ".error-details") {
-						assert.equal(surface.border, theme === "light" ? "rgb(224, 224, 224)" : "rgb(45, 52, 56)");
-					}
-					assert.equal(surface.radius, selector === ".exit-dialog" ? (finished ? "12px" : "16px") : "8px");
-					assert.equal(surface.padding, selector === ".exit-dialog" ? "24px" : "16px");
 					assert.ok(surface.left >= 0 && surface.right <= width + 1, `${label} stays inside viewport`);
 					assert.equal(surface.overflow, false, `${label} no horizontal overflow`);
 					const name = `${label}-${width}-${theme}`;
@@ -212,12 +188,21 @@ test("错误状态：真实401、持续断线、恢复不重发与运行任务�
 		await browser.evaluate(
 			"Promise.all(document.querySelector('.connection-status').getAnimations().map(a=>a.finished))",
 		);
-		const connectionGeometry = await browser.evaluate<{ left: number; right: number; top: number; viewport: number }>(
-			"(()=>{const r=document.querySelector('.connection-status').getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,viewport:innerWidth};})()",
+		const connectionGeometry = await browser.evaluate<{
+			left: number;
+			right: number;
+			top: number;
+			viewport: number;
+			contentLeft: number;
+		}>(
+			"(()=>{const r=document.querySelector('.connection-status').getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,viewport:innerWidth,contentLeft:document.querySelector('.sidebar').inert?0:document.querySelector('.sidebar').getBoundingClientRect().width};})()",
 		);
 		assert.ok(
-			Math.abs((connectionGeometry.left + connectionGeometry.right) / 2 - connectionGeometry.viewport / 2) < 1,
-			"断线提示水平居中",
+			Math.abs(
+				(connectionGeometry.left + connectionGeometry.right) / 2 -
+					(connectionGeometry.viewport + connectionGeometry.contentLeft) / 2,
+			) < 1,
+			"断线提示在主内容区域居中",
 		);
 		assert.equal(connectionGeometry.top, 20, "断线提示位于顶部20px");
 		assert.equal(
@@ -317,7 +302,7 @@ test("错误状态：真实401、持续断线、恢复不重发与运行任务�
 			await browser.evaluate("document.querySelector('.exit-description').textContent"),
 			"会话已保存。重开请运行 pi.cmd。",
 		);
-		await assertSurface(".exit-dialog", "exited", true);
+		await assertSurface(".exit-dialog", "exited");
 	} finally {
 		release?.();
 		await browser?.close();

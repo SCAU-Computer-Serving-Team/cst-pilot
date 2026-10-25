@@ -24,6 +24,7 @@ export type Message = {
 	role: "user" | "assistant" | "toolResult" | "branchSummary";
 	content: string | ContentPart[];
 	timestamp: number;
+	work?: { startedAt: number; endedAt: number };
 	/** 分支总结消息的正文（role 为 branchSummary 时，pi 只给 summary）。 */
 	summary?: string;
 	fromId?: string;

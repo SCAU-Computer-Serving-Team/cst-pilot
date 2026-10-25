@@ -1,4 +1,5 @@
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import { WorkDurations } from "./work-durations.ts";
 
 type AgentMessage = AgentSession["messages"][number];
 const TYPE = "cst-web-tool-execution";
@@ -19,7 +20,9 @@ export class ToolExecutions {
 	private readonly unsubscribe: () => void;
 	private readonly session: AgentSession;
 	private readonly clock: () => number;
+	private readonly work: WorkDurations;
 	constructor(session: AgentSession, clock = Date.now) {
+		this.work = new WorkDurations(session, clock);
 		this.session = session;
 		this.clock = clock;
 		for (const entry of session.sessionManager.getEntries())
@@ -102,7 +105,7 @@ export class ToolExecutions {
 	decorate(message: AgentMessage): AgentMessage {
 		if (message.role !== "assistant") return message;
 		return {
-			...message,
+			...this.work.decorate(message),
 			content: message.content.map((part) => {
 				if (part.type !== "toolCall") return part;
 				const record = this.records.get(this.key(message.timestamp, part.id));
@@ -116,6 +119,7 @@ export class ToolExecutions {
 		return this.records.get(this.key(timestamp, toolCallId))?.result;
 	}
 	close() {
+		this.work.close();
 		this.unsubscribe();
 	}
 }

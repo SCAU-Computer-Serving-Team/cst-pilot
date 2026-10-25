@@ -157,6 +157,7 @@ export function createWebApi(
 				}),
 			);
 			slot.session.subscribe((event) => {
+				if (event.type === "agent_end") globalEvents.publish("state", { type: "usage_changed", sessionId: id });
 				if (event.type === "agent_end" && slot.session.model?.provider === "cstoa") {
 					account.invalidate();
 					globalEvents.publish("state", { type: "quota_changed", providerId: "cstoa" });

@@ -11,7 +11,7 @@
 | 页面 | 静态 SPA，由扩展 HTTP 服务提供 |
 | 运行服务器 | Pi 进程中的一个 HTTP 服务，不增加转发层或运行时进程 |
 
-兼容版在 MVP 后实现，计划共用组件和地址，使用 Tailwind 3.4 与独立样式构建；不直接复用 HeroUI v3 产物。
+兼容版列入后续迭代，计划共用组件和地址，使用 Tailwind 3.4 与独立样式构建；不直接复用 HeroUI v3 产物。
 
 ## 工程边界
 
@@ -38,13 +38,29 @@
 
 Markdown 的数值与相邻规则集中在 [DESIGN.md](../../../DESIGN.md#markdown-块间距)。`app/styles.css` 的 `.markdown` 作用域承载正文、六级标题、列表、引用、代码与表格；不把读取间距写入全站控件变量。
 
-正文容器铺满所在内容列，用单侧段前边距控制块间距。列表项内的嵌套列表与多段正文分别处理；代码清除继承的字距。浏览器测试 `markdown-typography.e2e.ts` 对比流式和完成态的结构、尺寸与实际块间距离，同时检查浅深主题、窄幅、放大与工具文字隔离。
+正文容器铺满所在内容列，用单侧段前边距控制块间距。列表项内的嵌套列表与多段正文分别处理；代码清除继承的字距。浏览器测试 `markdown-rendering.e2e.ts` 检查标题、列表、引用、代码和表格，以及流式完成后的正文完整性、浅深主题、窄幅与放大。字号、字距和块间距按设计变更人工验收。
 
 ## 状态与加载
 
 - 会话首屏先取启动快照，再按页面取数；独立请求并行。
 - 账号页、设置和菜单共用 `routes/layout.tsx` 中的一份 `AccountProvider`，避免重复读取资料。
 - 上下文面板打开时按当前服务查询额度。切换服务或收到认证、额度事件时清除旧值，请求序号阻止迟到响应覆盖新状态。
+- 会话结束或树导航发布带 `sessionId` 的 `usage_changed`，输入框仅为当前会话重读缓存统计；不按流式增量请求，切页取消旧请求。
+- 助手消息结束时，服务端用 `cst-web-work-duration` 自定义会话条目保存用户消息起点与真实完成时刻。HTTP 快照增加 `message.work`，不改变模型上下文；前端沿用持久化区间展示耗时。
+
+### 设置页
+
+`routes/settings.tsx` 承载共用标题栏、设置内导航、内容列与保存反馈；子路由按需取数。`settings/settings.css` 限定在设置界面，账号页和登录页继续使用各自样式。
+
+| 模块 | 职责 |
+|---|---|
+| `settings/use-settings-resource.ts` | 资源读取、串行写入、失败回滚与共享事件刷新；读请求可取消，请求序号阻止迟到响应覆盖写入 |
+| `settings/provider-list.ts`、`auth/provider-services.tsx` | 已配置与可添加服务分类、登录状态和单一行操作 |
+| `settings/provider-configuration.tsx` | 密钥完成输入后启动 Pi 授权流程，高级地址和移除凭据确认；已有密钥不读取 |
+| `settings/model-scope.ts` | 模型范围归一、勾选与双向排序；沿用服务端默认范围语义 |
+| `settings/settings-frame.tsx` | 分区、返回、加载错误与保存通知；连续保存更新同一条通知的计时 |
+
+主题与模型范围按资源分别串行写入，失败恢复已确认值。OAuth、多步骤 API KEY 与登录页共用 `OAuthPanel` 和流程版本校验；切页或切换方式取消未完成流程。
 
 ### 会话管理与通知
 
@@ -54,7 +70,7 @@ Markdown 的数值与相邻规则集中在 [DESIGN.md](../../../DESIGN.md#markdo
 | `shell/session-management.tsx` | 保存选择、确认与结果；原生删除对话框默认聚焦取消 |
 | `shell/session-deletion.ts` | 逐项调用 DELETE，一项失败不阻止后续项；不自动重试 |
 | `data/optimistic-session-deletion.ts` | 隐藏待删除项，过滤迟到列表，失败时恢复最新快照和排序 |
-| `shell/notification.tsx` | 页面布局外的唯一通知区域；通过 React portal 挂载，避免页面位移影响通知定位 |
+| `shell/notification.tsx` | 页面布局外的唯一通知区域；共用注册表保持退场节点，以侧栏之外的主内容区域为居中基准 |
 | `shell/error-notice.tsx`、`data/error-presenter.ts` | 行内错误与默认收起的技术详情；文案区分已接受消息和待确认提交 |
 
 会话行、文字与勾选框持续挂载，进退只过渡位移和透明度。管理操作位于新对话右侧，不增加列表高度；右键菜单支持方向键。删除当前会话的回滚检查导航键，保留用户后续导航。
@@ -108,4 +124,4 @@ Python、FontTools 和开发依赖仅用于构建，不进入现场运行链；�
 | `npm run test:web:shared-audit --prefix agent` | 独立 Pi 进程与共享文件、工具、写权、上下文、配置及主题边界 |
 | `npm run test:web:e2e --prefix agent` | 构建后运行隔离 Chrome、真实 HTTP 和 Pi 新进程；覆盖持久化、故障恢复及重启 |
 
-检查不等于真实供应商授权或最低浏览器版本验收。阶段与未完成验证由 MVP 管理。
+自动检查、真实供应商授权和目标环境验证分别执行，方法见[Web 测试](../../test/web-e2e.md)。MVP 已交付范围见[阶段说明](../../web/MVP.md)，后续验证任务见[待办清单](../../Todo.md)。

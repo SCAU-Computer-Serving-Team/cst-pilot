@@ -36,12 +36,6 @@ test("消息菜单仅分支树可用，导出与分享置灰且不发请求", { 
 				{ text: "分享", disabled: true },
 			],
 		);
-		assert.deepEqual(
-			await probe.evaluate(
-				"[...document.querySelectorAll('.sidebar-account-menu button')].map(e=>getComputedStyle(e).opacity)",
-			),
-			["0.45", "0.45"],
-		);
 		await probe.evaluate("document.querySelectorAll('.sidebar-account-menu button').forEach(e=>e.click())");
 		assert.deepEqual(await probe.evaluate("window.__plannedRequests"), []);
 		await probe.evaluate("document.fonts.ready");

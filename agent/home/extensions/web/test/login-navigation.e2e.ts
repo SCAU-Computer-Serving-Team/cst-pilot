@@ -125,7 +125,7 @@ test("登录返回：CSTOA入口切换APIKEY/其他OAuth回模型服务，CSTOA�
 		assert.ok(completed.includes("a-external"));
 		await browser.navigate(`${origin}/settings/provider?provider=cstoa&method=oauth&returnTo=%2Fsettings%23accounts`);
 		await browser.until(
-			"document.querySelector('.provider-config-form')?.dataset.method==='cstoa'&&!!document.querySelector('.oauth-auth-link')",
+			"!!document.querySelector('.settings-provider-config .oauth-auth-link')",
 			"设置中的CSTOA授权",
 		);
 		await browser.click(".oauth-auth-link");

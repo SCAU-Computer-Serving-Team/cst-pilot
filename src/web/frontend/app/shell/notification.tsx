@@ -19,6 +19,8 @@ type NotificationProps = {
 	kind?: "info" | "success" | "warning" | "danger";
 	/** Zero keeps recovery and deletion notices persistent. */
 	duration?: number;
+	/** Refresh one notification in place without stacking another surface. */
+	lifetimeKey?: number;
 	onDismiss?: () => void;
 };
 type ExitStyle = CSSProperties & {
@@ -35,7 +37,7 @@ type Registry = {
 const NotificationRegistry = createContext<Registry | null>(null);
 
 /** Keep the surface mounted through its exit, including route-owned and recovery notifications. */
-export function NotificationRegion({ children }: { children: ReactNode }) {
+export function NotificationRegion({ children, contentInset = 0 }: { children: ReactNode; contentInset?: number }) {
 	const [notices, setNotices] = useState<Notice[]>([]);
 	const registry = useMemo<Registry>(
 		() => ({
@@ -71,7 +73,7 @@ export function NotificationRegion({ children }: { children: ReactNode }) {
 	return (
 		<NotificationRegistry value={registry}>
 			{children}
-			<div className="notification-region">
+			<div className="notification-region" style={{ "--notification-inset": `${contentInset}px` } as CSSProperties}>
 				{notices.map((notice) => (
 					<NotificationSurface key={notice.id} notice={notice} registry={registry} />
 				))}
@@ -86,20 +88,21 @@ export function Notification({
 	label,
 	kind = "info",
 	duration = 0,
+	lifetimeKey = 0,
 	onDismiss,
 }: NotificationProps) {
 	const registry = useContext(NotificationRegistry);
 	const id = useId();
 	useLayoutEffect(() => {
-		registry?.update(id, { children, className, label, kind, duration, onDismiss });
-	}, [registry, id, children, className, label, kind, duration, onDismiss]);
+		registry?.update(id, { children, className, label, kind, duration, lifetimeKey, onDismiss });
+	}, [registry, id, children, className, label, kind, duration, lifetimeKey, onDismiss]);
 	useLayoutEffect(() => () => registry?.remove(id), [registry, id]);
 	return null;
 }
 
 function NotificationSurface({ notice, registry }: { notice: Notice; registry: Registry }) {
 	const { id, props, exiting } = notice;
-	const { children, className, label, kind, duration = 0, onDismiss } = props;
+	const { children, className, label, kind, duration = 0, lifetimeKey = 0, onDismiss } = props;
 	const element = useRef<HTMLOutputElement>(null);
 	const [entered, setEntered] = useState(false);
 	const lifetime = useRef<NotificationLifetime | null>(null);
@@ -127,6 +130,7 @@ function NotificationSurface({ notice, registry }: { notice: Notice; registry: R
 			media.removeEventListener("change", changed);
 		};
 	}, [exiting, registry, id]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 每次保存成功重置当前通知的展示时间。
 	useEffect(() => {
 		if (!entered || exiting || duration <= 0) return;
 		const timer = new NotificationLifetime(duration, () => dismiss.current?.());
@@ -142,7 +146,7 @@ function NotificationSurface({ notice, registry }: { notice: Notice; registry: R
 			lifetime.current = null;
 			document.removeEventListener("visibilitychange", visibility);
 		};
-	}, [duration, entered, exiting]);
+	}, [duration, entered, exiting, lifetimeKey]);
 	return (
 		<output
 			id={id}
