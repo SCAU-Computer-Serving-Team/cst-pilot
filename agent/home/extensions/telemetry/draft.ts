@@ -7,12 +7,14 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { BillingRequest } from "./billing.ts";
 import { crashRecord, type SessionRecord } from "./record.ts";
 
 export interface DraftFile {
 	record: SessionRecord;
 	lastTurnEndedAt: number;
 	ownerPid?: number;
+	cstoaRequests?: BillingRequest[];
 }
 
 export function draftsDir(agentDir: string): string {
@@ -46,6 +48,7 @@ export async function removeDraft(agentDir: string, sessionId: string): Promise<
 export async function recoverDrafts(
 	agentDir: string,
 	persist: (record: SessionRecord) => Promise<void>,
+	prepare?: (record: SessionRecord, draft: DraftFile) => Promise<SessionRecord>,
 ): Promise<SessionRecord[]> {
 	const dir = draftsDir(agentDir);
 	let files: string[];
@@ -68,7 +71,8 @@ export async function recoverDrafts(
 			}
 			const record = draft.record;
 			if (record && (record.turns > 0 || record.prompts > 0)) {
-				const recovered = record.endReason ? record : crashRecord(record, draft.lastTurnEndedAt ?? 0);
+				let recovered = record.endReason ? record : crashRecord(record, draft.lastTurnEndedAt ?? 0);
+				if (!record.endReason && prepare) recovered = await prepare(recovered, draft);
 				await persist(recovered);
 				records.push(recovered);
 			}

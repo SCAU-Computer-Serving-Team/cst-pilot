@@ -2,7 +2,7 @@
 
 本文定义字段、含义、示例和收集边界。会话统计口径见[会话记录](telemetry/schema.md)，传输与鉴权见[发送端](telemetry/sender/SPEC.md)和[接收端](telemetry/receiver/SPEC.md)。
 
-协议版本为 `0.1`，读取记录时允许新增字段缺失。验证范围见[遥测验证](test/telemetry-report.md)。
+协议版本为 `0.1`，读取记录时允许新增字段缺失。验证方法见[遥测测试](test/telemetry.md)。
 
 ## 记录类型
 
@@ -130,8 +130,10 @@ environmentId = HMAC-SHA256(identityKey, message)，输出小写十六进制
 | `cacheRead` | 缓存读取 token | `32768` |
 | `cacheWrite` | 缓存写入 token | `0` |
 | `totalTokens` | 供应商返回的 token 总量 | `42486` |
-| `cost` | Pi 模型价目表的估算费用，使用 `usage.cost.total` | `0.2438` |
+| `cost` | Pi 模型价目表的估算费用，使用 `usage.cost.total`；会话中 CSTOA 为 `null`，计入未定价 | `0.2438`、`null` |
 | `currency` | 与费用数值对应的币种；未知为空字符串 | `"CNY"`、`"USD"` |
+
+会话 `models[]` 另含 `incompleteUsageTurns`，标记未取得完整 usage 的轮次；CSTOA 实际扣点单独保存在 `cstoaBilling`。定义见[会话用量](telemetry/schema.md#用量与模型)和[CSTOA 扣点](telemetry/schema.md#cstoa-扣点)。本地请求日志继续保存 SDK 费用值。
 
 ### 结果
 
@@ -143,7 +145,7 @@ environmentId = HMAC-SHA256(identityKey, message)，输出小写十六进制
 
 ## 计费币种
 
-`cost` 与 `currency` 必须对应同一份价目表，不做汇率换算；不同币种分别汇总。供应商经过中转不改变币种，实际金额以账单为准。
+`cost` 与 `currency` 必须对应同一份价目表，不做汇率换算；不同币种分别汇总。供应商经过中转不改变币种，实际金额以账单为准。CSTOA 扣点单位为额度点，与估算费用分别统计，不换算人民币；币种映射存在也不能将未知价格补成零费用。
 
 币种映射由扩展的 `currency.json` 提供，例如 `{ "cstoa": "CNY", "anthropic": "USD" }`。映射可用但缺少供应商时取 `USD`；映射不可读或无效时留空，计入未定价，不并入任何币种费用。
 

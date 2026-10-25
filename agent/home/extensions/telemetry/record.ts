@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import type { BillingSummary } from "./billing.ts";
 import type { ModelAgg, SessionState, ToolAgg } from "./collect.ts";
 
 import { type EnvironmentSnapshot, unknownEnvironment } from "./environment.ts";
@@ -35,6 +36,7 @@ export interface SessionRecord extends EnvironmentSnapshot {
 	turns: number;
 	contextEntries?: number;
 	models: ReturnType<typeof modelEntries>;
+	cstoaBilling?: BillingSummary;
 	compactions: number;
 	compactionTokens: number;
 	compactionOverflows: number;
@@ -64,7 +66,7 @@ export function localIso(epoch: number): string {
 }
 
 function modelEntries(models: Map<string, ModelAgg>): Omit<ModelAgg, never>[] {
-	return [...models.values()];
+	return [...models.values()].map((model) => ({ ...model }));
 }
 
 function toolEntries(tools: Map<string, ToolAgg>): object[] {
@@ -126,6 +128,7 @@ export function buildRecord(
 		...environment,
 		admin,
 	};
+	if (state.cstoaBilling?.summary()) record.cstoaBilling = state.cstoaBilling.summary();
 	if (input.contextEntries !== undefined) record.contextEntries = input.contextEntries;
 	return record;
 }

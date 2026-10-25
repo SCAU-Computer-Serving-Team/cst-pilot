@@ -62,7 +62,7 @@ identity 和环境保持客户端会话快照；相同 recordId 重传保留首�
 | tools≤512、models≤32、errors≤10 | too-many-elements |
 | 安装鉴权与记录非空安装标识不匹配 | installation-mismatch |
 
-数字类型不符按 0，缺少数组按空数组，缺少新增环境字段保持未知。未知字段原样保存在 payload，不以业务合理性检查拒收。
+基础计数字段类型不符按 0，缺少数组按空数组；新增环境、CSTOA 扣点和 usage 完整性字段缺失时保持未知。扣点汇总类型、范围或计数关系非法时，派生扣点列整体置 NULL；原始字段保留在 payload，不以业务合理性检查拒收。
 
 receivedAt 使用服务端时钟；ip 来自连接，IPv4 存 /24 网段。经过反向代理时记录连接来源，不能作为会话地点或用户识别依据。
 
@@ -80,6 +80,17 @@ receivedAt 使用服务端时钟；ip 来自连接，IPv4 存 /24 网段。经�
 | uploads | 请求结果、条数、拒收原因、插入数、状态与耗时，不含正文、令牌、签名或密钥 |
 
 sessions 新增派生列：installation_id、environment_id、environment_source、os_platform、os_name、os_display_version、os_is_pe、runtime_version、runtime_arch。未知值为空；已有 os_version、os_arch、admin 继续保存，payload 区分 null 和缺失。
+
+sessions 与 daily_rollup 增加可空派生列：
+
+| 列 | 来源与口径 |
+|---|---|
+| cstoa_requests | cstoaBilling.requests |
+| cstoa_settled_requests | cstoaBilling.settledRequests |
+| cstoa_quota_points | 已确认额度点之和；无确认账单为 NULL |
+| incomplete_usage_turns | models[].incompleteUsageTurns 已知部分之和；完全缺失时为 NULL |
+
+首次迁移从原始 payload 重算新列及费用派生列，CSTOA 统一计入 unpriced_turns，原始 payload 保持不变。每日汇总只累加已知部分，全部未知仍为 NULL；额度点须与请求覆盖数量一起读取。CSV 导出包含上述四列。
 
 索引覆盖接收时间与上传者、OA 登录标识、会话 ID、工具包版本、安装及环境。不同币种分别汇总，未定价单列；峰值与窗口成对保存。缺失标识只参与未知组统计，不计为一个已识别用户。
 
@@ -103,4 +114,4 @@ sessions 新增派生列：installation_id、environment_id、environment_source
 | rollup | 重算每日汇总 |
 | delete --mid / --device / --installation | 按上传账号、OA 登录标识或匿名安装删除会话，再重算汇总 |
 
-命令行操作显式指定 TELEMETRY_DB。按安装删除会话仍保留公钥绑定，避免其他密钥重新占用同一标识；安装密钥恢复需独立运维流程。部署不开放远程删除接口，验证状态见[遥测验证](../../test/telemetry-report.md)。
+命令行操作显式指定 TELEMETRY_DB。按安装删除会话仍保留公钥绑定，避免其他密钥重新占用同一标识；安装密钥恢复需独立运维流程。部署不开放远程删除接口，验证方法见[遥测测试](../../test/telemetry.md)。

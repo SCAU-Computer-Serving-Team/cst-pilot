@@ -6,13 +6,15 @@
  * - shutdown：定稿。TUI 走 pi 的 session_shutdown 事件；Web 由运行层销毁实例时经
  *   globalThis 入口调用（见 WebSessionPool 的 deleteSaved 与 close）。
  * - 进程启动：首个实例执行草稿恢复，补 endReason = crash 的记录。
- * 正常退出等待各端点队列落盘；网络异步，不抛错、不向队员输出。
+ * 正常退出有限补查账单并等待各端点队列落盘；上传异步，不向队员输出采集故障。
  */
 
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { observeRequests } from "../oauth/request-observer.ts";
+import { billingLookup, CstoaBilling } from "./billing.ts";
 import * as collect from "./collect.ts";
 import { type CurrencyMap, loadConfig, loadCurrency, type TelemetryConfig } from "./config.ts";
 import { readCredential } from "./credential.ts";
@@ -37,6 +39,7 @@ export default function telemetry(pi: ExtensionAPI): void {
 	let ready: Promise<void> | undefined;
 	let environment = unknownEnvironment();
 	let environmentProbe: Promise<EnvironmentSnapshot> | undefined;
+	let stopObserving: (() => void) | undefined;
 
 	/** 首个事件到达时加载一次；此后 config / currency / version 为缓存值。
 	 * 管理员探测耗时秒级，不进这里：session_start 是会话关键路径，只发探测不等待，定稿时取结果。 */
@@ -56,7 +59,16 @@ export default function telemetry(pi: ExtensionAPI): void {
 	async function recoverAndFlush(): Promise<void> {
 		try {
 			await migratePending(agentDir, config!.endpoints);
-			await recoverDrafts(agentDir, (record) => queueRecord(agentDir, record, config!.endpoints));
+			await recoverDrafts(
+				agentDir,
+				(record) => queueRecord(agentDir, record, config!.endpoints),
+				async (record, draft) => {
+					if (!draft.cstoaRequests?.length) return record;
+					const billing = new CstoaBilling(draft.cstoaRequests);
+					await billing.settle(billingLookup(agentDir, fetch, AbortSignal.timeout(4_500)));
+					return { ...record, cstoaBilling: billing.summary() };
+				},
+			);
 		} catch {
 			// 恢复失败不阻塞上报。
 		}
@@ -76,19 +88,29 @@ export default function telemetry(pi: ExtensionAPI): void {
 		await writeDraft(agentDir, state.sessionId, {
 			record,
 			lastTurnEndedAt: state.lastTurnEndedAt ?? Date.now(),
+			cstoaRequests: state.cstoaBilling?.snapshot(),
 		});
 	}
 
 	/** 同一会话的草稿写串行化：连续 turn_end 的重写并发会让临时文件 rename 乱序，旧内容覆盖新内容。 */
 	let draftChain: Promise<void> = Promise.resolve();
-	function queueDraft(): void {
-		draftChain = draftChain.then(() => writeCurrentDraft()).catch(() => undefined);
+	function queueDraft(settle = false): void {
+		const current = state;
+		draftChain = draftChain
+			.then(async () => {
+				if (settle) await current?.cstoaBilling?.settle(billingLookup(agentDir));
+				await writeCurrentDraft();
+			})
+			.catch(() => undefined);
 	}
 
 	async function finalize(reason: string): Promise<void> {
 		const current = state;
 		if (!current || finalized) return;
+		const endedAt = Date.now();
 		finalized = true;
+		stopObserving?.();
+		stopObserving = undefined;
 		s.finalizers.delete(current.sessionId);
 		try {
 			if (current.turns === 0 && current.prompts === 0) {
@@ -97,9 +119,20 @@ export default function telemetry(pi: ExtensionAPI): void {
 			}
 			environment = (await environmentProbe) ?? environment;
 			await draftChain;
+			if (current.cstoaBilling) {
+				const signal = AbortSignal.timeout(4_500);
+				await current.cstoaBilling.settle(billingLookup(agentDir, fetch, signal));
+				if (
+					!signal.aborted &&
+					current.cstoaBilling.summary()?.requests !== current.cstoaBilling.summary()?.settledRequests
+				) {
+					await new Promise((resolve) => setTimeout(resolve, 300));
+					await current.cstoaBilling.settle(billingLookup(agentDir, fetch, signal));
+				}
+			}
 			const record = buildRecord(
 				current,
-				{ endReason: reason, endedAt: Date.now(), contextEntries: safeContextEntries() },
+				{ endReason: reason, endedAt, contextEntries: safeContextEntries() },
 				version,
 				environment.admin,
 				environment,
@@ -176,6 +209,16 @@ export default function telemetry(pi: ExtensionAPI): void {
 			context.mode === "tui" ? "tui" : "web",
 		);
 		finalized = false;
+		const current = state;
+		current.cstoaBilling = new CstoaBilling();
+		stopObserving = observeRequests(current.sessionId, () => {
+			const finish = current.cstoaBilling!.start();
+			queueDraft();
+			return (id) => {
+				finish(id);
+				queueDraft();
+			};
+		});
 		s.finalizers.set(state.sessionId, (reason: string) => finalize(reason));
 		if (!s.recovered) {
 			s.recovered = true;
@@ -204,7 +247,7 @@ export default function telemetry(pi: ExtensionAPI): void {
 	pi.on("turn_end", (event) => {
 		if (!state) return;
 		collect.onTurnEnd(state, event.message, safeContextUsage(), currency);
-		queueDraft();
+		queueDraft(true);
 	});
 
 	pi.on("after_provider_response", (event) => {

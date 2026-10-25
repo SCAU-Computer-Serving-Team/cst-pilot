@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { promisify } from "node:util";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { requestFetch } from "../../oauth/request-observer.ts";
 import { testRoot } from "../../web/test/support.ts";
 import { newState, onInput, onToolCall, onToolExecutionEnd, onToolExecutionStart, onTurnEnd } from "../collect.ts";
 import { readCredential } from "../credential.ts";
@@ -211,13 +212,42 @@ test("TUI shutdown 返回前完成落盘，关闭遥测不产生记录", async (
 				{ reason: "new" },
 				{ mode: "tui", sessionManager: { getSessionId: () => id, buildContextEntries: () => [] } },
 			);
-			await handlers.get("input")!({ source: "interactive" });
-			await handlers.get("session_shutdown")!({ reason: "quit" });
+			await writeFile(
+				join(dir, "auth.json"),
+				JSON.stringify({ cstoa: { type: "oauth", access: "fixture-only", expires: Date.now() + 60_000 } }),
+			);
+			const previousFetch = globalThis.fetch;
+			let billingQueries = 0;
+			globalThis.fetch = async (input, init) => {
+				if (String(input).endsWith("/api/agent/llm/billing")) {
+					billingQueries++;
+					assert.equal(enabled, true, "禁用遥测不查询账单");
+					assert.equal(new Headers(init?.headers).get("authorization"), "Bearer fixture-only");
+					return Response.json({
+						result: true,
+						data: { unit: "quota_point", requests: [{ requestId: "fixture-request", quotaPoints: 198 }] },
+					});
+				}
+				throw new Error("offline fixture");
+			};
+			try {
+				await handlers.get("input")!({ source: "interactive" });
+				await requestFetch(
+					id,
+					async () => new Response("", { headers: { "x-oneapi-request-id": "fixture-request" } }),
+				)("https://www.cstoa.top/v1/chat/completions");
+				await handlers.get("session_shutdown")!({ reason: "quit" });
+			} finally {
+				globalThis.fetch = previousFetch;
+			}
+			assert.equal(billingQueries, enabled ? 1 : 0);
 			const pending = await readAll(dir, "http://127.0.0.1:1/");
 			assert.equal(pending.length, enabled ? 1 : 0);
 			if (enabled) {
 				assert.equal(pending[0].sessionId, id);
 				assert.equal(pending[0].endReason, "quit");
+				assert.deepEqual(pending[0].cstoaBilling, { requests: 1, settledRequests: 1, quotaPoints: 198 });
+				assert.equal(JSON.stringify(pending).includes("fixture-request"), false);
 			} else assert.equal(shared().retries.size, 0);
 			for (const timer of shared().retries.values()) clearInterval(timer);
 		}

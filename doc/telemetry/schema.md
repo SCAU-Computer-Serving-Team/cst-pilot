@@ -2,7 +2,7 @@
 
 会话遥测按实例聚合，`type="session"`。公共字段、身份算法、环境字段、模型用量和工具元素以[信息收集契约](../contract.md)为准，本页补充会话结构与统计口径。
 
-协议版本为 `0.1`。读取时允许 `identity`、扩展环境字段和 `runtime` 缺失；未知值保持未知，`admin` 支持 `null`。
+协议版本为 `0.1`。读取时允许 `identity`、扩展环境字段、`runtime` 及新增扣点字段缺失；未知值保持未知，`admin` 支持 `null`。
 
 ## 会话与时间
 
@@ -14,7 +14,7 @@
 | `reason` | 实例开始原因，来自 `session_start` | `"startup"`、`"new"`、`"resume"`、`"fork"`、`"reload"` |
 | `endReason` | 实例结束原因；Web 删除用 `delete`，草稿恢复用 `crash` | `"quit"`、`"new"`、`"resume"`、`"fork"`、`"reload"`、`"delete"`、`"crash"` |
 | `startedAt` | 实例开始时刻，带本地时区偏移 | `"2026-10-15T09:00:00+08:00"` |
-| `endedAt` | 正常定稿时刻；恢复时取最后完成轮次时刻 | `"2026-10-15T09:00:10+08:00"` |
+| `endedAt` | 实例结束时刻，不包含定稿查账等待；恢复时取草稿保存的最后轮次时刻 | `"2026-10-15T09:00:10+08:00"` |
 | `durationMs` | `endedAt - startedAt`，包含等待输入的空档 | `10000` |
 | `activeMs` | 各 `turn_start` 至 `turn_end` 的时间累计，表示 Agent 运行时长 | `4800` |
 
@@ -48,7 +48,29 @@ TUI 与 Web 的原因取值见[发送端会话规则](sender/SPEC.md#会话与�
 | `contextEntries` | 正常定稿时上下文条目数；草稿恢复时缺失 | `47` |
 | `models` | 按 `provider + model + thinkingLevel` 聚合的数组，最多 32 项 | `[{ "provider": "opencode-go", "model": "deepseek-v4.1-flash", "thinkingLevel": "high", "turns": 1, "input": 5, "output": 3, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 8, "cost": 0, "currency": "USD" }]` |
 
-`models[].turns` 表示该组合的往返次数。其余元素字段见[模型与用量](../contract.md#模型与用量)，token 与费用取每轮助手消息的 usage 后累计；思考强度取请求发起时的值。币种分别汇总，未知币种的费用单列为未定价。
+`models[].turns` 表示该组合的往返次数。其余元素字段见[模型与用量](../contract.md#模型与用量)，token 与估算费用取每轮助手消息的 usage 后累计；思考强度取请求发起时的值。CSTOA 的 `cost=null`；其他模型缺少有效费用或币种时也计入未定价。
+
+| 会话模型字段 | 含义 | 示例 |
+|---|---|---|
+| `models[].incompleteUsageTurns` | 缺少 usage、totalTokens 为零，或以 error／aborted 结束的轮次数；缺失字段表示未知 | `1` |
+
+该标记采用保守口径，保留已见 token。未标记轮次也不保证网关最终计费与 SDK usage 完全一致。
+
+## CSTOA 扣点
+
+`cstoaBilling` 只统计当前实例中观察到的 CSTOA 推理 HTTP 尝试，按网关请求 ID 查询已归属本人的消费账单。无观测请求时省略整个对象；计数与额度点均为非负安全整数。
+
+| 字段 | 含义 | 示例 |
+|---|---|---|
+| `cstoaBilling.requests` | 观察到的请求数；相同有效请求 ID 只计一次，无 ID 的尝试分别计数 | `3` |
+| `cstoaBilling.settledRequests` | 已取得有效账单扣点的请求数，不能超过 requests | `2` |
+| `cstoaBilling.quotaPoints` | 已确认请求的额度点之和；没有已确认账单时为 null | `198`、`0`、`null` |
+
+`2/3` 表示只确认了部分请求。此时 198 点是已确认部分，不能作为完整会话消耗；真实零扣点需有已确认账单。缺少请求 ID、账单延迟、网络失败、中断或无有效查询凭据均保留未知。
+
+每次 HTTP 重试单独观测。请求 ID 仅保存在本地未定稿草稿，不上传；定稿后保持记录内容不变，迟到账单不回填已入队记录。查询不使用账号余额差，不受其他会话消费或充值差额归因影响；未观测到的请求不在覆盖范围内。
+
+额度点独立于 `models[].cost` 与币种，不换算人民币。查询接口及有界等待见[发送端](sender/SPEC.md#cstoa-账单查询)。
 
 ## 上下文
 
@@ -80,7 +102,7 @@ TUI 与 Web 的原因取值见[发送端会话规则](sender/SPEC.md#会话与�
 | `networkErrors` | 轮次以 error 结束且本轮没有供应商响应的次数 | `2` |
 | `aborted` | `stopReason="aborted"` 的轮次数 | `1` |
 
-`networkErrors` 按是否收到响应计数，不能单凭该值判断具体网络故障。成功重试前的供应商失败仍计入 `providerErrors`。
+`networkErrors` 按是否收到响应计数，不能单凭该值判断具体网络故障。`providerErrors` 只统计 SDK 事件可见的响应；内部 HTTP 重试由 `cstoaBilling.requests` 单独观察，不保证全部反映在错误计数中。
 
 ## 报错原文
 
@@ -140,7 +162,8 @@ TUI 与 Web 的原因取值见[发送端会话规则](sender/SPEC.md#会话与�
     "cacheWrite": 0,
     "totalTokens": 8,
     "cost": 0,
-    "currency": "USD"
+    "currency": "USD",
+    "incompleteUsageTurns": 0
   }],
   "compactions": 0,
   "compactionTokens": 0,

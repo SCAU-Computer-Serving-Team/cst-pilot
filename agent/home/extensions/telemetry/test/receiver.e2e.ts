@@ -34,6 +34,10 @@ test(
 			recursive: true,
 			filter: (file) => !file.replaceAll("\\", "/").includes("/test"),
 		});
+		await cp(fileURLToPath(new URL("../../oauth/", import.meta.url)), join(home, "extensions", "oauth"), {
+			recursive: true,
+			filter: (file) => !file.replaceAll("\\", "/").includes("/test"),
+		});
 		const ports = await Promise.all([freePort(), freePort(), freePort(), freePort()]);
 		const endpoints = ports.slice(0, 2).map((port) => ({ url: `http://127.0.0.1:${port}/v1/sessions` }));
 		await writeFile(join(home, "telemetry.json"), JSON.stringify({ ...RELEASE_TELEMETRY, endpoints }));
@@ -87,11 +91,35 @@ test(
 				),
 			);
 		});
+		let billingQueries = 0;
 		const model = createServer(async (request, response) => {
+			if (request.url?.endsWith("/models")) {
+				response.setHeader("Content-Type", "application/json");
+				response.end(JSON.stringify({ data: [{ id: "one" }] }));
+				return;
+			}
+			if (request.url === "/api/agent/llm/billing") {
+				assert.equal(request.headers.authorization, "Bearer test-agent-token");
+				let body = "";
+				for await (const chunk of request) body += chunk;
+				assert.deepEqual(JSON.parse(body).requestIds, ["cstoa-request"]);
+				billingQueries++;
+				response.setHeader("Content-Type", "application/json");
+				response.end(
+					JSON.stringify({
+						result: true,
+						data: {
+							unit: "quota_point",
+							requests: [{ requestId: "cstoa-request", quotaPoints: billingQueries === 1 ? null : 198 }],
+						},
+					}),
+				);
+				return;
+			}
 			for await (const _ of request) {
 				/* consume request */
 			}
-			response.writeHead(200, { "Content-Type": "text/event-stream" });
+			response.writeHead(200, { "Content-Type": "text/event-stream", "x-oneapi-request-id": "cstoa-request" });
 			const frames = [
 				{
 					id: "fixture",
@@ -112,6 +140,7 @@ test(
 		const children: ReturnType<typeof spawn>[] = [];
 		const previousHome = process.env.PI_CODING_AGENT_DIR;
 		const previousOffline = process.env.PI_OFFLINE;
+		const previousOaHost = process.env.CSTOA_OA_HOST;
 		let pool: WebSessionPool | undefined;
 		const health = async (index: number): Promise<{ ok: boolean; sessions: number }> =>
 			(await fetch(`http://127.0.0.1:${ports[index]}/healthz`)).json();
@@ -154,6 +183,7 @@ test(
 			for (let index = 0; index < 2; index++) await startReceiver(index);
 			process.env.PI_CODING_AGENT_DIR = home;
 			process.env.PI_OFFLINE = "1";
+			process.env.CSTOA_OA_HOST = `http://127.0.0.1:${ports[3]}`;
 			const options = {
 				cwd: home,
 				agentDir: home,
@@ -213,17 +243,37 @@ test(
 						type: "oauth",
 						access: "test-agent-token",
 						refresh: "test-refresh",
-						expires: Date.now() + 60_000,
+						expires: Date.now() + 3_600_000,
 					},
 				}),
 			);
+			const settings = JSON.parse(await readFile(join(home, "settings.json"), "utf8"));
+			await writeFile(
+				join(home, "settings.json"),
+				JSON.stringify({ ...settings, defaultProvider: "cstoa", defaultModel: "one" }),
+			);
 			pool = new WebSessionPool(options);
+			await (await pool.getServices()).modelRuntime.refresh({
+				allowNetwork: true,
+				force: true,
+				providers: ["cstoa"],
+			});
 			slot = await pool.create();
+			const runtime = (await pool.getServices()).modelRuntime;
+			const refreshed = await runtime.refresh({ providers: ["cstoa"], allowNetwork: true, force: true });
+			assert.equal(refreshed.errors.size, 0, [...refreshed.errors.values()].map((error) => error.message).join(","));
+			const cstoaModel = runtime.getModel("cstoa", "one");
+			assert.ok(cstoaModel);
+			await slot.session.setModel(cstoaModel);
+			assert.equal(slot.session.model?.provider, "cstoa");
 			await until(
 				async () => (await health(0)).sessions === 1 && (await health(1)).sessions === 2,
 				"新会话启动未独立补发缓存",
 			);
 			await slot.session.prompt("已登录遥测测试");
+			const reply = slot.session.messages.filter((message) => message.role === "assistant").at(-1);
+			assert.ok(reply && reply.role === "assistant");
+			assert.notEqual(reply.stopReason, "error", reply.errorMessage);
 			await pool.close();
 			pool = undefined;
 			await until(
@@ -237,6 +287,7 @@ test(
 					),
 				"两端未独立确认清空队列",
 			);
+			assert.ok(billingQueries >= 2, "账单延迟应在定稿时补查");
 			for (const [index, endpoint] of endpoints.entries()) {
 				const csvFile = join(root, `receiver-${index}.csv`);
 				execFileSync(binary, ["export-csv", csvFile], {
@@ -246,6 +297,15 @@ test(
 				const csv = await readFile(csvFile, "utf8");
 				assert.equal(csv.trim().split("\n").length, index === 0 ? 3 : 4);
 				assert.ok(csv.includes(",test-member,test-device,"), "上传账号来自 OA 内省");
+				const lines = csv.trim().split("\n");
+				const columns = lines[0].split(",");
+				const logged = lines
+					.find((line) => line.includes(",test-member,test-device,") && !line.startsWith(`${offline.recordId},`))!
+					.split(",");
+				assert.equal(logged[columns.indexOf("cstoa_quota_points")], "198");
+				assert.equal(logged[columns.indexOf("cstoa_requests")], "1");
+				assert.equal(logged[columns.indexOf("cstoa_settled_requests")], "1");
+				assert.equal(logged[columns.indexOf("unpriced_turns")], "1");
 				if (index === 1) {
 					assert.ok(csv.includes("environment-on-computer-a"));
 					assert.ok(csv.includes("Offline Windows fixture"));
@@ -304,7 +364,9 @@ test(
 			else process.env.PI_CODING_AGENT_DIR = previousHome;
 			if (previousOffline === undefined) delete process.env.PI_OFFLINE;
 			else process.env.PI_OFFLINE = previousOffline;
-			await rm(root, { recursive: true, force: true });
+			if (previousOaHost === undefined) delete process.env.CSTOA_OA_HOST;
+			else process.env.CSTOA_OA_HOST = previousOaHost;
+			await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 		}
 	},
 );
