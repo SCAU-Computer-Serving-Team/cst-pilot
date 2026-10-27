@@ -1,6 +1,6 @@
 # 诊断与执行工具规格
 
-`diagnostics` 模块注册 8 个面向维修现场的工具（6 个只读查询工具，2 个交付／执行工具）。内部结构与共享缓存见 [ARCHITECTURE.md](ARCHITECTURE.md)，调用参数与返回字段见 [API.md](API.md)。
+`diagnostics` 模块注册 10 个面向维修现场的工具（6 个只读查询工具、3 个命令方案／交付工具与 1 个卷状态执行工具）。内部结构与共享缓存见 [ARCHITECTURE.md](ARCHITECTURE.md)，调用参数与返回字段见 [API.md](API.md)。
 
 ## 工具总览与通用规则
 
@@ -12,12 +12,14 @@
 | `startup` | 查询 | 无 `scope` | 注册表自启、启动文件夹与自动启动服务盘点，含禁用三态 |
 | `eventlog` | 查询 | `recent`、`boot`、`crash`、`service`、`disk`、`security`、`query`、`detail` | Windows 事件日志场景化查询、按提供程序／ID 聚合计数与单条原文读取 |
 | `driver` | 查询 | `problem`、`core`、`external`、`find` | 异常设备、网络／蓝牙／音频／显示核心硬件与驱动版本、外设与按条件查找 |
+| `command_plan` | 方案 | 无 `scope` | 保存完整命令方案，以稳定 ID 和版本管理多轮修订 |
+| `runbook_deliver` | 交付 | 无 `scope` | 将已核对的方案版本导出为手动执行的 TXT 清单 |
 | `runbook` | 交付 | 无 `scope` | 在工具包 `outbox/<日期>/` 生成供队员手动复制执行的纯文本修复命令清单 |
 | `bitlocker` | 执行 | `status`、`unlock`、`decrypt` | 实时查询卷加密状态、48 位恢复密码解锁、经本地确认发起后台完整解密 |
 
 通用行为约束：
 
-1. **只读与写入例外**：查询工具不修改注册表、系统配置、服务状态或机主文件；`disk usage` 与 `ls` 仅在 `wiztree/tmp` 写入临时 CSV 并在结束时清理；`runbook` 仅写 `outbox/`；只有 `bitlocker` 的 `unlock` 与 `decrypt` 经本地输入或确认后改动卷状态。
+1. **只读与写入例外**：查询工具不修改注册表、系统配置、服务状态或机主文件；`disk usage` 与 `ls` 仅在 `wiztree/tmp` 写入临时 CSV 并在结束时清理；`command_plan`、`runbook_deliver` 与 `runbook` 仅写 `outbox/`；只有 `bitlocker` 的 `unlock` 与 `decrypt` 经本地输入或确认后改动卷状态。
 2. **口径与错误诚实**：工具固定说明（`notice`）仅陈述数据来源、单位、采样窗口与采集限制，不输出故障定性或修复建议。部分数据源失败时保留成功数据并标记 `degraded: true`；整次查询失败时抛错并由 Pi 标记 `isError`。空数组或 `null` 必须结合错误字段判读，禁止直接当作健康或零值。
 
 ## 查询工具规则
@@ -40,7 +42,13 @@
 - **eventlog 场景与权限**：内置场景事件范围见 [API.md](API.md#eventlog-内置事件范围)。`boot` 合并系统启停与 WHEA 并按 `logName + recordId` 去重后再截断 `top`；`crash` 保留 Information 级 WER（1001）与 Hang（1002），`app` 子串过滤作用于全部分组；`7045` 归入 `boot` 新装服务而非 `service` 故障。`security` 执行前显式检查管理员身份，非管理员直接返回 `admin: false, degraded: true`，禁止将无权限伪装成零命中。
 - **driver 枚举与查找**：`problem` 筛选 `Status=Error/Unknown`；`core` 网卡仅保留 `NetConnectionID` 非空项（含虚拟网卡），签名驱动版本仅按 `Net`、`Bluetooth`、`MEDIA`、`Display` 四类查询；`external` 覆盖 `USB*`、`BTHENUM*`、`DISPLAY*` 与可移动磁盘（可能含内置 USB 摄像头或内置屏）；`find` 要求至少传入一个条件，多个条件按 AND 组合，`id` 在 Node 侧匹配 `DeviceID` 与 `HardwareID` 数组。
 
-## runbook：命令清单交付
+## 命令方案与交付
+
+1. **多轮方案**：每批新增或修改的修复命令都调用 `command_plan`。创建时返回稳定 ID 与版本 1；修订携带 ID、当前 `baseVersion` 与完整命令，成功后版本递增。并发提交基于同一版本时仅一个成功。
+2. **文件交付**：队员核对方案后调用 `runbook_deliver`，只传 ID 和版本。生成 `outbox/<日期>/<ID>/v<版本>-<风险档>-<标题>.txt`，同版本重试返回同一文件；修订不改写已交付的旧版本，过期版本不再允许导出。现场修改过的文本保留原样，要求先修订方案。
+3. **完整结果**：方案与交付结果均包含规范化命令列表；前端无需依赖调用参数即可恢复预览。文件为纯文本，只供队员复制，不执行任何命令。
+
+### 单步 runbook
 
 1. **文件组织与序号**：写入 `outbox/<YYYY-MM-DD>/<序号>-<风险档中文>-<标题>.txt`，序号范围 `01`–`999`，当天唯一递增、跨天从 `01` 重置。传入已有 `sequence` 时原地替换该序号文件（文件名随新标题更新并清理旧文件名，文件总数不增）。
 2. **格式与安全限制**：UTF-8 BOM + CRLF，文件头一行，每条命令四行（环境、说明、`命令：`、单行命令正文），条目间空行分隔，无 Markdown。命令含换行、标题或说明为空、超长或序号不存在时整次调用失败且不留半成品文件。跨进程通过日期目录命名管道锁互斥写入。

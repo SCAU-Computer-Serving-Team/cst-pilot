@@ -11,7 +11,7 @@ import { BrowserProbe, freePort } from "./browser.ts";
 import { testRoot } from "./support.ts";
 
 test(
-	"浏览器 CSTOA APIKEY 登录：账号页、侧栏退出、固定地址与自动模型，桌面浅色和窄屏深色",
+	"浏览器 CSTOA APIKEY 登录：账号页退出、侧栏菜单、固定地址与自动模型，桌面浅色和窄屏深色",
 	{ timeout: 90_000 },
 	async () => {
 		const root = join(await testRoot(), "cstoa-key-login");
@@ -107,11 +107,21 @@ test(
 				if (await browser.evaluate("document.querySelector('.sidebar')?.getAttribute('aria-hidden')==='true'"))
 					await browser.click('button[aria-label="展开侧栏"]');
 				await browser.click('button[aria-label="账号菜单"]');
-				await browser.until(
-					"document.querySelector('.sidebar-account-menu')?.textContent.includes('退出 CSTOA')",
-					"密钥账号可从侧栏退出",
+				await browser.until("!!document.querySelector('.sidebar-account-menu')", "账号菜单");
+				assert.equal(
+					await browser.evaluate(
+						"document.querySelector('.sidebar-account-menu').textContent.includes('退出 CSTOA')",
+					),
+					false,
 				);
-				await browser.click(".sidebar-account-menu button:has(.lucide-log-out)");
+				assert.equal(
+					await browser.evaluate(
+						"document.querySelector('.sidebar-account-menu').textContent.includes('退出 CST Pilot')",
+					),
+					true,
+				);
+				await browser.click('.sidebar-account-menu a[href="/account"]');
+				await browser.click(".account-actions button:has(.lucide-log-out)");
 				await browser.until(
 					"document.querySelector('.account-fields')?.textContent.includes('登录后查看')",
 					"退出清空身份",

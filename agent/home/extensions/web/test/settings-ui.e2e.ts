@@ -354,10 +354,10 @@ test("设置用户链路：分类导航、自动保存、失败回滚、凭据�
 		await browser.until("!!document.querySelector('[aria-label=深色]')", "主题图标选择器");
 		assert.equal(
 			await browser.evaluate(
-				"document.documentElement.dataset.settingsDirection==='back' && getComputedStyle(document.querySelector('.settings-route')).viewTransitionName==='settings-page'",
+				"getComputedStyle(document.querySelector('.settings-route')).viewTransitionName==='settings-page'",
 			),
 			true,
-			"设置分类以向左返回的页面快照衔接",
+			"设置分类使用内容快照衔接",
 		);
 		await browser.click('[aria-label="深色"]');
 		await browser.until(

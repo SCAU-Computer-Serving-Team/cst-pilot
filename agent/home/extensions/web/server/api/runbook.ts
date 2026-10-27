@@ -2,6 +2,26 @@ import { execFile } from "node:child_process";
 import { realpath, stat } from "node:fs/promises";
 import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ToolResultMessage } from "@earendil-works/pi-ai";
+
+export function deliveredRunbookFile(message?: ToolResultMessage): string | undefined {
+	if (!message || message.isError) return undefined;
+	let details = message.details;
+	if (!details) {
+		try {
+			details = JSON.parse(
+				message.content
+					.filter((part) => part.type === "text")
+					.map((part) => part.text)
+					.join("\n"),
+			);
+		} catch {
+			return undefined;
+		}
+	}
+	const source = details as { runbook?: { file?: unknown } };
+	return typeof source?.runbook?.file === "string" ? source.runbook.file : undefined;
+}
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../..");
 export class RunbookOpenError extends Error {

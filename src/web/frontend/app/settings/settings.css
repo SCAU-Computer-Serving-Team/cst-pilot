@@ -99,15 +99,9 @@
 .settings-model[data-dragging="true"] { opacity: .45; }
 .settings-route { display: flex; flex-direction: column; gap: 24px; view-transition-name: settings-page; }
 /* 两张透明快照交叉淡化时保持亮度，避免叠在页面底色上闪白。 */
-::view-transition-old(settings-page), ::view-transition-new(settings-page) { animation-duration: var(--duration-fast); animation-timing-function: var(--ease-smooth-out); mix-blend-mode: plus-lighter; }
-::view-transition-old(settings-page) { animation-name: settings-slide-out; }
-::view-transition-new(settings-page) { animation-name: settings-slide-in; }
-@keyframes settings-slide-out { to { opacity: 0; transform: translateX(calc(var(--distance-base) * -1)); filter: blur(var(--blur-medium)); } }
-@keyframes settings-slide-in { from { opacity: 0; transform: translateX(var(--distance-base)); filter: blur(var(--blur-medium)); } }
-:root[data-settings-direction="back"] ::view-transition-old(settings-page) { animation-name: settings-slide-out-back; }
-:root[data-settings-direction="back"] ::view-transition-new(settings-page) { animation-name: settings-slide-in-back; }
-@keyframes settings-slide-out-back { to { opacity: 0; transform: translateX(var(--distance-base)); filter: blur(var(--blur-medium)); } }
-@keyframes settings-slide-in-back { from { opacity: 0; transform: translateX(calc(var(--distance-base) * -1)); filter: blur(var(--blur-medium)); } }
+::view-transition-old(settings-page), ::view-transition-new(settings-page) { animation-timing-function: var(--ease-in-out); mix-blend-mode: plus-lighter; }
+::view-transition-old(settings-page) { animation-name: text-surface-out; animation-duration: var(--duration-micro); }
+::view-transition-new(settings-page) { animation-name: text-surface-in; animation-duration: var(--duration-quick); }
 .settings-shortcuts .settings-flat-row { min-height: 56px; font-size: 16px; }
 .settings-shortcuts kbd { height: 26px; min-width: max-content; padding: 0 8px; border-radius: var(--radius-control); background: var(--chat-bubble); color: var(--chat-ink); font-family: inherit; font-size: 14px; box-shadow: none; }
 .settings-credential-form { margin: 0; }

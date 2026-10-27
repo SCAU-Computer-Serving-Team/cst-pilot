@@ -7518,7 +7518,7 @@
                       "id": "kMmiB",
                       "name": "文字",
                       "fill": "#7F888C",
-                      "content": "以 1920×1080 为基准，按 1∶1 绘制。侧栏 264 固定，内容列 1120 在主区居中。",
+                      "content": "以 1920×1080 为基准，按 1∶1 绘制。侧栏 264 固定，对话内容占满主区，两侧各留 36。",
                       "lineHeight": 1.5,
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": 11,
@@ -7685,7 +7685,7 @@
                           "y": 126,
                           "name": "文字",
                           "fill": "#1A2024",
-                          "content": "对话流 1120 居中",
+                          "content": "对话流 · 主区宽度减 72",
                           "lineHeight": 1.5,
                           "fontFamily": "Source Han Sans CN",
                           "fontSize": 12,
@@ -7698,7 +7698,7 @@
                           "y": 196,
                           "name": "文字",
                           "fill": "#5F676C",
-                          "content": "工具卡 1120 · 与正文同级",
+                          "content": "工具卡 · 与正文同宽",
                           "lineHeight": 1.5,
                           "fontFamily": "Source Han Sans CN",
                           "fontSize": 11,
@@ -7758,7 +7758,7 @@
                       "id": "wpJts",
                       "name": "文字",
                       "fill": "#5F676C",
-                      "content": "对话流与工具区 1120 同宽、同左缘；区域内部展开工具行与卡片内容各缩进 24；正文表格 816。",
+                      "content": "对话流、工具区与表格同宽、同左缘；主区两侧各留36，窄窗口各留16；工具内部缩进沿用24。",
                       "lineHeight": 1.5,
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": 11,
@@ -11135,7 +11135,7 @@
           "type": "frame",
           "id": "qQZXh",
           "name": "聊天主区 · 纯白背景",
-          "context": "聊天主区采用纯白#FFFFFF，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "正文、工具卡和表格占满侧栏以外的主区，两侧各留36px；窄窗口两侧各留16px。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -11216,12 +11216,12 @@
               "type": "frame",
               "id": "c2RVl",
               "layoutPosition": "absolute",
-              "x": 268,
+              "x": 36,
               "y": 106,
               "name": "对话流 · 当前可见内容",
-              "context": "滚动视口：固定高度 + 裁剪；第二轮在视口外，应用中滚动可见。",
+              "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
               "clip": true,
-              "width": 1120,
+              "width": 1584,
               "height": 870,
               "layout": "vertical",
               "gap": 24,
@@ -12429,15 +12429,14 @@
               "type": "frame",
               "id": "wCUZw",
               "layoutPosition": "absolute",
-              "x": 783,
-              "y": 858,
+              "x": 776,
+              "y": 909,
               "name": "回到底部",
-              "context": "浮在对话流上的次级导航按钮，只在未跟随最新消息时出现。盒高 32、圆角 6、内边距 0 12、图标 14 与文字相隔 4；底 #FFFFFF、1px #D5D5D5 描边、投影取中性 12 的 8%（0,8 blur 24）。文字与图标静置取中性 11 #646464，悬停提到正文色 #202020，按下底色中性 5 #DBE4E9，焦点 2px 中性 8 环偏移 2。水平居中于主区，底边距主区底 190。",
-              "height": 32,
-              "fill": "#FFFFFF",
-              "cornerRadius": 6,
+              "context": "对话向上滚动时显示。高 42，圆角 8，横向内边距 16；图标 16，文字 14，间隔 8。浅深主题使用反色，位于输入框上方 12px。",
+              "height": 42,
+              "fill": "#202020",
+              "cornerRadius": 8,
               "stroke": "#D5D5D5",
-              "strokeWidth": 1,
               "effect": {
                 "type": "shadow",
                 "shadowType": "outer",
@@ -12448,10 +12447,10 @@
                 },
                 "blur": 24
               },
-              "gap": 4,
+              "gap": 8,
               "padding": [
                 0,
-                12
+                16
               ],
               "alignItems": "center",
               "children": [
@@ -12459,20 +12458,20 @@
                   "type": "icon",
                   "id": "ztSNU",
                   "name": "向下图标",
-                  "width": 14,
-                  "height": 14,
+                  "width": 16,
+                  "height": 16,
                   "icon": "arrow-down",
                   "library": "lucide",
-                  "fill": "#646464"
+                  "fill": "#FFFFFF"
                 },
                 {
                   "type": "text",
                   "id": "wXcJu",
                   "name": "文字",
-                  "fill": "#646464",
+                  "fill": "#FFFFFF",
                   "content": "回到底部",
                   "fontFamily": "Source Han Sans CN",
-                  "fontSize": 12,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 }
               ]
@@ -12964,7 +12963,7 @@
           "type": "frame",
           "id": "KXKcU",
           "name": "聊天主区 · 深色背景",
-          "context": "聊天主区采用中性2 #0B1215，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "正文、工具卡和表格占满侧栏以外的主区，两侧各留36px；窄窗口两侧各留16px。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -13045,12 +13044,12 @@
               "type": "frame",
               "id": "Cp3J8",
               "layoutPosition": "absolute",
-              "x": 268,
+              "x": 36,
               "y": 106,
               "name": "对话流 · 当前可见内容",
-              "context": "滚动视口：固定高度 + 裁剪；第二轮在视口外，应用中滚动可见。",
+              "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
               "clip": true,
-              "width": 1120,
+              "width": 1584,
               "height": 870,
               "layout": "vertical",
               "gap": 24,
@@ -14258,15 +14257,14 @@
               "type": "frame",
               "id": "mkTYH",
               "layoutPosition": "absolute",
-              "x": 783,
-              "y": 858,
+              "x": 776,
+              "y": 909,
               "name": "回到底部",
-              "context": "深色版。底中性 3 #131A1D、1px 中性 7 #3C4448 描边、投影中性 1 #060B0E 的 20%；文字与图标静置取中性 11 #AAB3B7，悬停提到正文色 #E0EAEE，按下底色中性 5 #242C2F。几何与浅色一致。",
-              "height": 32,
-              "fill": "#131A1D",
-              "cornerRadius": 6,
+              "context": "对话向上滚动时显示。高 42，圆角 8，横向内边距 16；图标 16，文字 14，间隔 8。浅深主题使用反色，位于输入框上方 12px。",
+              "height": 42,
+              "fill": "#E0EAEE",
+              "cornerRadius": 8,
               "stroke": "#3C4448",
-              "strokeWidth": 1,
               "effect": {
                 "type": "shadow",
                 "shadowType": "outer",
@@ -14277,10 +14275,10 @@
                 },
                 "blur": 24
               },
-              "gap": 4,
+              "gap": 8,
               "padding": [
                 0,
-                12
+                16
               ],
               "alignItems": "center",
               "children": [
@@ -14288,20 +14286,20 @@
                   "type": "icon",
                   "id": "Xflcn",
                   "name": "向下图标",
-                  "width": 14,
-                  "height": 14,
+                  "width": 16,
+                  "height": 16,
                   "icon": "arrow-down",
                   "library": "lucide",
-                  "fill": "#AAB3B7"
+                  "fill": "#0B1215"
                 },
                 {
                   "type": "text",
                   "id": "WHqGp",
                   "name": "文字",
-                  "fill": "#AAB3B7",
+                  "fill": "#0B1215",
                   "content": "回到底部",
                   "fontFamily": "Source Han Sans CN",
-                  "fontSize": 12,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 }
               ]
@@ -16936,7 +16934,6 @@
                     10
                   ],
                   "alignItems": "center",
-                  "layoutIncludeStroke": true,
                   "children": [
                     {
                       "type": "icon",
@@ -18374,7 +18371,6 @@
                     10
                   ],
                   "alignItems": "center",
-                  "layoutIncludeStroke": true,
                   "children": [
                     {
                       "type": "icon",
@@ -20045,7 +20041,6 @@
                                 10
                               ],
                               "alignItems": "center",
-                              "layoutIncludeStroke": true,
                               "children": [
                                 {
                                   "type": "text",
@@ -21091,7 +21086,6 @@
                                 10
                               ],
                               "alignItems": "center",
-                              "layoutIncludeStroke": true,
                               "children": [
                                 {
                                   "type": "text",
@@ -21892,7 +21886,6 @@
                         10
                       ],
                       "alignItems": "center",
-                      "layoutIncludeStroke": true,
                       "children": [
                         {
                           "type": "icon",
@@ -22898,7 +22891,6 @@
                         10
                       ],
                       "alignItems": "center",
-                      "layoutIncludeStroke": true,
                       "children": [
                         {
                           "type": "icon",
@@ -26862,7 +26854,7 @@
       "x": 16328,
       "y": 176,
       "name": "账号信息 · 浅色",
-      "context": "CSTOA 专属账号详情。只管理 cstoa OAuth；姓名与学号待 Agent 资料接口接入，额度占位。沿用设置页 816px 内容列与浅深规范。 · 画布分区：03 · 账号信息",
+      "context": "CSTOA 账号资料与额度，支持扫码和 APIKEY 登录。",
       "clip": true,
       "width": 1920,
       "height": 1080,
@@ -27336,7 +27328,7 @@
           "type": "frame",
           "id": "nd83t",
           "name": "设置主区 · 浅色",
-          "context": "聊天主区采用纯白#FFFFFF，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "正文、工具卡和表格占满侧栏以外的主区，两侧各留36px；窄窗口两侧各留16px。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -27486,6 +27478,10 @@
                       "name": "账号字段 · 姓名",
                       "width": "fill_container",
                       "height": 56,
+                      "stroke": "#E0E0E0",
+                      "strokeWidth": {
+                        "bottom": 1
+                      },
                       "gap": 16,
                       "padding": [
                         0,
@@ -27511,6 +27507,46 @@
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
                           "content": "测试队员",
+                          "lineHeight": 1.5,
+                          "textAlign": "right",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Z5bOTr",
+                      "name": "账号字段 · 剩余额度",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#E0E0E0",
+                      "gap": 16,
+                      "padding": [
+                        0,
+                        16
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "xs4FN",
+                          "name": "额度标签",
+                          "fill": "#202020",
+                          "content": "剩余额度",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "QtQsZ",
+                          "name": "额度值",
+                          "fill": "#646464",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "12,345 额度点",
                           "lineHeight": 1.5,
                           "textAlign": "right",
                           "fontFamily": "Source Han Sans CN",
@@ -27559,6 +27595,43 @@
                           "name": "重新扫码登录文字",
                           "fill": "#202020",
                           "content": "重新扫码登录",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "nxwTP",
+                      "name": "按钮 · APIKEY 登录",
+                      "height": 32,
+                      "cornerRadius": 6,
+                      "stroke": "#D5D5D5",
+                      "strokeWidth": 1,
+                      "gap": 8,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "FYBml",
+                          "name": "APIKEY 登录图标",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "key-round",
+                          "library": "lucide",
+                          "fill": "#202020"
+                        },
+                        {
+                          "type": "text",
+                          "id": "b19hxR",
+                          "name": "APIKEY 登录文字",
+                          "fill": "#202020",
+                          "content": "APIKEY 登录",
                           "fontFamily": "Source Han Sans CN",
                           "fontSize": 13,
                           "fontWeight": "normal"
@@ -27616,7 +27689,7 @@
       "x": 18528,
       "y": 176,
       "name": "账号信息 · 深色",
-      "context": "CSTOA 专属账号详情。只管理 cstoa OAuth；姓名与学号待 Agent 资料接口接入，额度占位。沿用设置页 816px 内容列与浅深规范。 · 画布分区：03 · 账号信息",
+      "context": "CSTOA 账号资料与额度，支持扫码和 APIKEY 登录。",
       "clip": true,
       "width": 1920,
       "height": 1080,
@@ -28090,7 +28163,7 @@
           "type": "frame",
           "id": "b886Xg",
           "name": "设置主区 · 深色",
-          "context": "聊天主区采用中性2 #0B1215，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "正文、工具卡和表格占满侧栏以外的主区，两侧各留36px；窄窗口两侧各留16px。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -28240,6 +28313,10 @@
                       "name": "账号字段 · 姓名",
                       "width": "fill_container",
                       "height": 56,
+                      "stroke": "#2D3438",
+                      "strokeWidth": {
+                        "bottom": 1
+                      },
                       "gap": 16,
                       "padding": [
                         0,
@@ -28265,6 +28342,46 @@
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
                           "content": "测试队员",
+                          "lineHeight": 1.5,
+                          "textAlign": "right",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Z6k2fC",
+                      "name": "账号字段 · 剩余额度",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#2D3438",
+                      "gap": 16,
+                      "padding": [
+                        0,
+                        16
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "g0UxA",
+                          "name": "额度标签",
+                          "fill": "#E0EAEE",
+                          "content": "剩余额度",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "tCNep",
+                          "name": "额度值",
+                          "fill": "#AAB3B7",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "12,345 额度点",
                           "lineHeight": 1.5,
                           "textAlign": "right",
                           "fontFamily": "Source Han Sans CN",
@@ -28313,6 +28430,43 @@
                           "name": "重新扫码登录文字",
                           "fill": "#E0EAEE",
                           "content": "重新扫码登录",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "IadDO",
+                      "name": "按钮 · APIKEY 登录",
+                      "height": 32,
+                      "cornerRadius": 6,
+                      "stroke": "#3C4448",
+                      "strokeWidth": 1,
+                      "gap": 8,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "eZoct",
+                          "name": "APIKEY 登录图标",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "key-round",
+                          "library": "lucide",
+                          "fill": "#E0EAEE"
+                        },
+                        {
+                          "type": "text",
+                          "id": "u7AJYp",
+                          "name": "APIKEY 登录文字",
+                          "fill": "#E0EAEE",
+                          "content": "APIKEY 登录",
                           "fontFamily": "Source Han Sans CN",
                           "fontSize": 13,
                           "fontWeight": "normal"
@@ -28370,7 +28524,7 @@
       "x": 20968,
       "y": 176,
       "name": "账号信息 · 未登录 · 浅色",
-      "context": "CSTOA 专属账号详情。只管理 cstoa OAuth；姓名与学号待 Agent 资料接口接入，额度占位。沿用设置页 816px 内容列与浅深规范。 · 画布分区：03 · 账号信息",
+      "context": "CSTOA 账号资料与额度，支持扫码和 APIKEY 登录。",
       "clip": true,
       "width": 1920,
       "height": 1080,
@@ -28844,7 +28998,7 @@
           "type": "frame",
           "id": "C41IM1",
           "name": "设置主区 · 浅色",
-          "context": "聊天主区采用纯白#FFFFFF，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "正文、工具卡和表格占满侧栏以外的主区，两侧各留36px；窄窗口两侧各留16px。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -28994,6 +29148,10 @@
                       "name": "账号字段 · 姓名",
                       "width": "fill_container",
                       "height": 56,
+                      "stroke": "#E0E0E0",
+                      "strokeWidth": {
+                        "bottom": 1
+                      },
                       "gap": 16,
                       "padding": [
                         0,
@@ -29015,6 +29173,46 @@
                           "type": "text",
                           "id": "Ga8ub",
                           "name": "姓名值",
+                          "fill": "#646464",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "登录后查看",
+                          "lineHeight": 1.5,
+                          "textAlign": "right",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "IY0wk",
+                      "name": "账号字段 · 剩余额度",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#E0E0E0",
+                      "gap": 16,
+                      "padding": [
+                        0,
+                        16
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "SdywX",
+                          "name": "额度标签",
+                          "fill": "#202020",
+                          "content": "剩余额度",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "L303E",
+                          "name": "额度值",
                           "fill": "#646464",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
@@ -29072,6 +29270,43 @@
                           "fontWeight": "normal"
                         }
                       ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Ypabk",
+                      "name": "按钮 · APIKEY 登录",
+                      "height": 32,
+                      "cornerRadius": 6,
+                      "stroke": "#D5D5D5",
+                      "strokeWidth": 1,
+                      "gap": 8,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "jEyne",
+                          "name": "APIKEY 登录图标",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "key-round",
+                          "library": "lucide",
+                          "fill": "#202020"
+                        },
+                        {
+                          "type": "text",
+                          "id": "LFNFe",
+                          "name": "APIKEY 登录文字",
+                          "fill": "#202020",
+                          "content": "APIKEY 登录",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
                     }
                   ]
                 }
@@ -29087,7 +29322,7 @@
       "x": 23168,
       "y": 176,
       "name": "账号信息 · 未登录 · 深色",
-      "context": "CSTOA 专属账号详情。只管理 cstoa OAuth；姓名与学号待 Agent 资料接口接入，额度占位。沿用设置页 816px 内容列与浅深规范。 · 画布分区：03 · 账号信息",
+      "context": "CSTOA 账号资料与额度，支持扫码和 APIKEY 登录。",
       "clip": true,
       "width": 1920,
       "height": 1080,
@@ -29561,7 +29796,7 @@
           "type": "frame",
           "id": "ao3zs",
           "name": "设置主区 · 深色",
-          "context": "聊天主区采用中性2 #0B1215，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "正文、工具卡和表格占满侧栏以外的主区，两侧各留36px；窄窗口两侧各留16px。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -29711,6 +29946,10 @@
                       "name": "账号字段 · 姓名",
                       "width": "fill_container",
                       "height": 56,
+                      "stroke": "#2D3438",
+                      "strokeWidth": {
+                        "bottom": 1
+                      },
                       "gap": 16,
                       "padding": [
                         0,
@@ -29732,6 +29971,46 @@
                           "type": "text",
                           "id": "vrme2",
                           "name": "姓名值",
+                          "fill": "#AAB3B7",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "登录后查看",
+                          "lineHeight": 1.5,
+                          "textAlign": "right",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "tNQkf",
+                      "name": "账号字段 · 剩余额度",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#2D3438",
+                      "gap": 16,
+                      "padding": [
+                        0,
+                        16
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "MdMQG",
+                          "name": "额度标签",
+                          "fill": "#E0EAEE",
+                          "content": "剩余额度",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "J73IGt",
+                          "name": "额度值",
                           "fill": "#AAB3B7",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
@@ -29784,6 +30063,43 @@
                           "name": "重新扫码登录文字",
                           "fill": "#E0EAEE",
                           "content": "扫码登录",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "W5HIbH",
+                      "name": "按钮 · APIKEY 登录",
+                      "height": 32,
+                      "cornerRadius": 6,
+                      "stroke": "#3C4448",
+                      "strokeWidth": 1,
+                      "gap": 8,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "SJj1z",
+                          "name": "APIKEY 登录图标",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "key-round",
+                          "library": "lucide",
+                          "fill": "#E0EAEE"
+                        },
+                        {
+                          "type": "text",
+                          "id": "Sceau",
+                          "name": "APIKEY 登录文字",
+                          "fill": "#E0EAEE",
+                          "content": "APIKEY 登录",
                           "fontFamily": "Source Han Sans CN",
                           "fontSize": 13,
                           "fontWeight": "normal"
@@ -35389,7 +35705,7 @@
           "type": "frame",
           "id": "O2x4RY",
           "name": "聊天主区 · 纯白背景",
-          "context": "聊天主区采用纯白#FFFFFF，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "正文、工具卡和表格占满侧栏以外的主区，两侧各留36px；窄窗口两侧各留16px。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -35470,11 +35786,11 @@
               "type": "frame",
               "id": "mbRDN",
               "layoutPosition": "absolute",
-              "x": 268,
+              "x": 36,
               "y": 106,
               "name": "对话流 · 当前可见内容",
-              "context": "按Zcode参考图比例：正文宽占1656px主区的67.6%，左右各268px；不修改1920×1080画布与264px侧栏。",
-              "width": 1120,
+              "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
+              "width": 1584,
               "layout": "vertical",
               "gap": 24,
               "children": [
@@ -35615,7 +35931,7 @@
                       "name": "Markdown 表格 · 设备与空间",
                       "context": "HeroUI Table Header / Table Row / Table Cell。正文16px，表头14px，浅色中性背景。",
                       "clip": true,
-                      "width": 816,
+                      "width": "fill_container",
                       "cornerRadius": 8,
                       "stroke": "#E0E0E0",
                       "strokeWidth": 1,
@@ -37152,7 +37468,7 @@
           "type": "frame",
           "id": "O1c6T",
           "name": "聊天主区 · 深色背景",
-          "context": "聊天主区采用中性2 #0B1215，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "正文、工具卡和表格占满侧栏以外的主区，两侧各留36px；窄窗口两侧各留16px。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -37233,11 +37549,11 @@
               "type": "frame",
               "id": "owBTq",
               "layoutPosition": "absolute",
-              "x": 268,
+              "x": 36,
               "y": 106,
               "name": "对话流 · 当前可见内容",
-              "context": "按Zcode参考图比例：正文宽占1656px主区的67.6%，左右各268px；不修改1920×1080画布与264px侧栏。",
-              "width": 1120,
+              "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
+              "width": 1584,
               "layout": "vertical",
               "gap": 24,
               "children": [
@@ -37378,7 +37694,7 @@
                       "name": "Markdown 表格 · 设备与空间",
                       "context": "HeroUI Table Header / Table Row / Table Cell。正文16px，表头14px，取通用色阶：表头中性4 #1D2428，正文中性10。",
                       "clip": true,
-                      "width": 816,
+                      "width": "fill_container",
                       "cornerRadius": 8,
                       "stroke": "#2D3438",
                       "strokeWidth": 1,
@@ -38915,7 +39231,7 @@
           "type": "frame",
           "id": "ICVdr",
           "name": "聊天主区 · 纯白背景",
-          "context": "聊天主区采用纯白#FFFFFF，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "正文、工具卡和表格占满侧栏以外的主区，两侧各留36px；窄窗口两侧各留16px。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -38996,11 +39312,11 @@
               "type": "frame",
               "id": "EVQPV",
               "layoutPosition": "absolute",
-              "x": 268,
+              "x": 36,
               "y": 106,
               "name": "对话流 · 当前可见内容",
-              "context": "按Zcode参考图比例：正文宽占1656px主区的67.6%，左右各268px；不修改1920×1080画布与264px侧栏。",
-              "width": 1120,
+              "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
+              "width": 1584,
               "layout": "vertical",
               "gap": 24,
               "children": [
@@ -39141,7 +39457,7 @@
                       "name": "Markdown 表格 · 设备与空间",
                       "context": "HeroUI Table Header / Table Row / Table Cell。正文16px，表头14px，浅色中性背景。",
                       "clip": true,
-                      "width": 816,
+                      "width": "fill_container",
                       "cornerRadius": 8,
                       "stroke": "#E0E0E0",
                       "strokeWidth": 1,
@@ -40691,7 +41007,7 @@
           "type": "frame",
           "id": "eKILV",
           "name": "聊天主区 · 深色背景",
-          "context": "聊天主区采用中性2 #0B1215，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "正文、工具卡和表格占满侧栏以外的主区，两侧各留36px；窄窗口两侧各留16px。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -40772,11 +41088,11 @@
               "type": "frame",
               "id": "oT12V",
               "layoutPosition": "absolute",
-              "x": 268,
+              "x": 36,
               "y": 106,
               "name": "对话流 · 当前可见内容",
-              "context": "按Zcode参考图比例：正文宽占1656px主区的67.6%，左右各268px；不修改1920×1080画布与264px侧栏。",
-              "width": 1120,
+              "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
+              "width": 1584,
               "layout": "vertical",
               "gap": 24,
               "children": [
@@ -40917,7 +41233,7 @@
                       "name": "Markdown 表格 · 设备与空间",
                       "context": "HeroUI Table Header / Table Row / Table Cell。正文16px，表头14px，取通用色阶：表头中性4 #1D2428，正文中性10。",
                       "clip": true,
-                      "width": 816,
+                      "width": "fill_container",
                       "cornerRadius": 8,
                       "stroke": "#2D3438",
                       "strokeWidth": 1,
@@ -42467,7 +42783,7 @@
           "type": "frame",
           "id": "kAEWW",
           "name": "聊天主区 · 纯白背景",
-          "context": "聊天主区采用纯白#FFFFFF，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "正文、工具卡和表格占满侧栏以外的主区，两侧各留36px；窄窗口两侧各留16px。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -42548,11 +42864,11 @@
               "type": "frame",
               "id": "Fq4Ao",
               "layoutPosition": "absolute",
-              "x": 268,
+              "x": 36,
               "y": 106,
               "name": "对话流 · 当前可见内容",
-              "context": "按Zcode参考图比例：正文宽占1656px主区的67.6%，左右各268px；不修改1920×1080画布与264px侧栏。",
-              "width": 1120,
+              "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
+              "width": 1584,
               "layout": "vertical",
               "gap": 24,
               "children": [
@@ -42693,7 +43009,7 @@
                       "name": "Markdown 表格 · 设备与空间",
                       "context": "HeroUI Table Header / Table Row / Table Cell。正文16px，表头14px，浅色中性背景。",
                       "clip": true,
-                      "width": 816,
+                      "width": "fill_container",
                       "cornerRadius": 8,
                       "stroke": "#E0E0E0",
                       "strokeWidth": 1,
@@ -44276,7 +44592,7 @@
           "type": "frame",
           "id": "dhujl",
           "name": "聊天主区 · 深色背景",
-          "context": "聊天主区采用中性2 #0B1215，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "正文、工具卡和表格占满侧栏以外的主区，两侧各留36px；窄窗口两侧各留16px。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -44357,11 +44673,11 @@
               "type": "frame",
               "id": "N1ZN1E",
               "layoutPosition": "absolute",
-              "x": 268,
+              "x": 36,
               "y": 106,
               "name": "对话流 · 当前可见内容",
-              "context": "按Zcode参考图比例：正文宽占1656px主区的67.6%，左右各268px；不修改1920×1080画布与264px侧栏。",
-              "width": 1120,
+              "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
+              "width": 1584,
               "layout": "vertical",
               "gap": 24,
               "children": [
@@ -44502,7 +44818,7 @@
                       "name": "Markdown 表格 · 设备与空间",
                       "context": "HeroUI Table Header / Table Row / Table Cell。正文16px，表头14px，取通用色阶：表头中性4 #1D2428，正文中性10。",
                       "clip": true,
-                      "width": 816,
+                      "width": "fill_container",
                       "cornerRadius": 8,
                       "stroke": "#2D3438",
                       "strokeWidth": 1,
@@ -53216,7 +53532,7 @@
         {
           "type": "frame",
           "id": "dHBqP",
-          "name": "菜单项 · 登出",
+          "name": "菜单项 · 退出 CST Pilot",
           "width": "fill_container",
           "cornerRadius": 8,
           "gap": 12,
@@ -53226,19 +53542,19 @@
             {
               "type": "icon",
               "id": "vqikw",
-              "name": "登出图标",
+              "name": "退出程序图标",
               "width": 18,
               "height": 18,
-              "icon": "log-out",
+              "icon": "power",
               "library": "lucide",
               "fill": "#5F676C"
             },
             {
               "type": "text",
               "id": "RCUkW",
-              "name": "登出",
+              "name": "退出程序",
               "fill": "#1A2024",
-              "content": "退出 CSTOA",
+              "content": "退出 CST Pilot",
               "fontFamily": "Source Han Sans CN",
               "fontSize": 16,
               "fontWeight": "normal"
@@ -53486,7 +53802,7 @@
         {
           "type": "frame",
           "id": "WBOI3",
-          "name": "菜单项 · 登出",
+          "name": "菜单项 · 退出 CST Pilot",
           "width": "fill_container",
           "cornerRadius": 8,
           "gap": 12,
@@ -53496,19 +53812,19 @@
             {
               "type": "icon",
               "id": "Qlxg1",
-              "name": "登出图标",
+              "name": "退出程序图标",
               "width": 18,
               "height": 18,
-              "icon": "log-out",
+              "icon": "power",
               "library": "lucide",
               "fill": "#AAB3B7"
             },
             {
               "type": "text",
               "id": "FL2yn",
-              "name": "登出",
+              "name": "退出程序",
               "fill": "#FFFFFF",
-              "content": "退出 CSTOA",
+              "content": "退出 CST Pilot",
               "fontFamily": "Source Han Sans CN",
               "fontSize": 16,
               "fontWeight": "normal"
@@ -84789,7 +85105,7 @@
           "type": "frame",
           "id": "EIU55",
           "name": "聊天主区 · 纯白背景",
-          "context": "聊天主区采用纯白#FFFFFF，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "正文、工具卡和表格占满侧栏以外的主区，两侧各留36px；窄窗口两侧各留16px。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -84870,12 +85186,12 @@
               "type": "frame",
               "id": "pPx1u",
               "layoutPosition": "absolute",
-              "x": 268,
+              "x": 36,
               "y": 106,
               "name": "对话流 · 当前可见内容",
-              "context": "滚动视口：固定高度 + 裁剪；第二轮在视口外，应用中滚动可见。",
+              "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
               "clip": true,
-              "width": 1120,
+              "width": 1584,
               "height": 870,
               "layout": "vertical",
               "gap": 24,
@@ -86083,15 +86399,14 @@
               "type": "frame",
               "id": "y5uHCd",
               "layoutPosition": "absolute",
-              "x": 783,
-              "y": 858,
+              "x": 776,
+              "y": 909,
               "name": "回到底部",
-              "context": "浮在对话流上的次级导航按钮，只在未跟随最新消息时出现。盒高 32、圆角 6、内边距 0 12、图标 14 与文字相隔 4；底 #FFFFFF、1px #D5D5D5 描边、投影取中性 12 的 8%（0,8 blur 24）。文字与图标静置取中性 11 #646464，悬停提到正文色 #202020，按下底色中性 5 #DBE4E9，焦点 2px 中性 8 环偏移 2。水平居中于主区，底边距主区底 190。",
-              "height": 32,
-              "fill": "#FFFFFF",
-              "cornerRadius": 6,
+              "context": "对话向上滚动时显示。高 42，圆角 8，横向内边距 16；图标 16，文字 14，间隔 8。浅深主题使用反色，位于输入框上方 12px。",
+              "height": 42,
+              "fill": "#202020",
+              "cornerRadius": 8,
               "stroke": "#D5D5D5",
-              "strokeWidth": 1,
               "effect": {
                 "type": "shadow",
                 "shadowType": "outer",
@@ -86102,10 +86417,10 @@
                 },
                 "blur": 24
               },
-              "gap": 4,
+              "gap": 8,
               "padding": [
                 0,
-                12
+                16
               ],
               "alignItems": "center",
               "children": [
@@ -86113,20 +86428,20 @@
                   "type": "icon",
                   "id": "KA96b",
                   "name": "向下图标",
-                  "width": 14,
-                  "height": 14,
+                  "width": 16,
+                  "height": 16,
                   "icon": "arrow-down",
                   "library": "lucide",
-                  "fill": "#646464"
+                  "fill": "#FFFFFF"
                 },
                 {
                   "type": "text",
                   "id": "l5geJ",
                   "name": "文字",
-                  "fill": "#646464",
+                  "fill": "#FFFFFF",
                   "content": "回到底部",
                   "fontFamily": "Source Han Sans CN",
-                  "fontSize": 12,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 }
               ]
@@ -86504,7 +86819,7 @@
           "type": "frame",
           "id": "UEkuj",
           "name": "聊天主区 · 纯白背景",
-          "context": "聊天主区采用纯白#FFFFFF，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "正文、工具卡和表格占满侧栏以外的主区，两侧各留36px；窄窗口两侧各留16px。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -86585,12 +86900,12 @@
               "type": "frame",
               "id": "LVXyi",
               "layoutPosition": "absolute",
-              "x": 268,
+              "x": 36,
               "y": 106,
               "name": "对话流 · 当前可见内容",
-              "context": "滚动视口：固定高度 + 裁剪；第二轮在视口外，应用中滚动可见。",
+              "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
               "clip": true,
-              "width": 1120,
+              "width": 1584,
               "height": 870,
               "layout": "vertical",
               "gap": 24,
@@ -87798,15 +88113,14 @@
               "type": "frame",
               "id": "HuxmI",
               "layoutPosition": "absolute",
-              "x": 783,
-              "y": 858,
+              "x": 776,
+              "y": 909,
               "name": "回到底部",
-              "context": "浮在对话流上的次级导航按钮，只在未跟随最新消息时出现。盒高 32、圆角 6、内边距 0 12、图标 14 与文字相隔 4；底 #FFFFFF、1px #D5D5D5 描边、投影取中性 12 的 8%（0,8 blur 24）。文字与图标静置取中性 11 #646464，悬停提到正文色 #202020，按下底色中性 5 #DBE4E9，焦点 2px 中性 8 环偏移 2。水平居中于主区，底边距主区底 190。",
-              "height": 32,
-              "fill": "#FFFFFF",
-              "cornerRadius": 6,
+              "context": "对话向上滚动时显示。高 42，圆角 8，横向内边距 16；图标 16，文字 14，间隔 8。浅深主题使用反色，位于输入框上方 12px。",
+              "height": 42,
+              "fill": "#202020",
+              "cornerRadius": 8,
               "stroke": "#D5D5D5",
-              "strokeWidth": 1,
               "effect": {
                 "type": "shadow",
                 "shadowType": "outer",
@@ -87817,10 +88131,10 @@
                 },
                 "blur": 24
               },
-              "gap": 4,
+              "gap": 8,
               "padding": [
                 0,
-                12
+                16
               ],
               "alignItems": "center",
               "children": [
@@ -87828,20 +88142,20 @@
                   "type": "icon",
                   "id": "FJnAv",
                   "name": "向下图标",
-                  "width": 14,
-                  "height": 14,
+                  "width": 16,
+                  "height": 16,
                   "icon": "arrow-down",
                   "library": "lucide",
-                  "fill": "#646464"
+                  "fill": "#FFFFFF"
                 },
                 {
                   "type": "text",
                   "id": "oFaO6",
                   "name": "文字",
-                  "fill": "#646464",
+                  "fill": "#FFFFFF",
                   "content": "回到底部",
                   "fontFamily": "Source Han Sans CN",
-                  "fontSize": 12,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 }
               ]
@@ -88651,7 +88965,7 @@
           "type": "frame",
           "id": "BWI1m",
           "name": "聊天主区 · 深色背景",
-          "context": "聊天主区采用中性2 #0B1215，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "正文、工具卡和表格占满侧栏以外的主区，两侧各留36px；窄窗口两侧各留16px。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -88732,12 +89046,12 @@
               "type": "frame",
               "id": "FqhJ9",
               "layoutPosition": "absolute",
-              "x": 268,
+              "x": 36,
               "y": 106,
               "name": "对话流 · 当前可见内容",
-              "context": "滚动视口：固定高度 + 裁剪；第二轮在视口外，应用中滚动可见。",
+              "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
               "clip": true,
-              "width": 1120,
+              "width": 1584,
               "height": 870,
               "layout": "vertical",
               "gap": 24,
@@ -89945,15 +90259,14 @@
               "type": "frame",
               "id": "VCYXY",
               "layoutPosition": "absolute",
-              "x": 783,
-              "y": 858,
+              "x": 776,
+              "y": 909,
               "name": "回到底部",
-              "context": "深色版。底中性 3 #131A1D、1px 中性 7 #3C4448 描边、投影中性 1 #060B0E 的 20%；文字与图标静置取中性 11 #AAB3B7，悬停提到正文色 #E0EAEE，按下底色中性 5 #242C2F。几何与浅色一致。",
-              "height": 32,
-              "fill": "#131A1D",
-              "cornerRadius": 6,
+              "context": "对话向上滚动时显示。高 42，圆角 8，横向内边距 16；图标 16，文字 14，间隔 8。浅深主题使用反色，位于输入框上方 12px。",
+              "height": 42,
+              "fill": "#E0EAEE",
+              "cornerRadius": 8,
               "stroke": "#3C4448",
-              "strokeWidth": 1,
               "effect": {
                 "type": "shadow",
                 "shadowType": "outer",
@@ -89964,10 +90277,10 @@
                 },
                 "blur": 24
               },
-              "gap": 4,
+              "gap": 8,
               "padding": [
                 0,
-                12
+                16
               ],
               "alignItems": "center",
               "children": [
@@ -89975,20 +90288,20 @@
                   "type": "icon",
                   "id": "FVWBr",
                   "name": "向下图标",
-                  "width": 14,
-                  "height": 14,
+                  "width": 16,
+                  "height": 16,
                   "icon": "arrow-down",
                   "library": "lucide",
-                  "fill": "#AAB3B7"
+                  "fill": "#0B1215"
                 },
                 {
                   "type": "text",
                   "id": "Wtzx0",
                   "name": "文字",
-                  "fill": "#AAB3B7",
+                  "fill": "#0B1215",
                   "content": "回到底部",
                   "fontFamily": "Source Han Sans CN",
-                  "fontSize": 12,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 }
               ]
@@ -90366,7 +90679,7 @@
           "type": "frame",
           "id": "ySv0z",
           "name": "聊天主区 · 深色背景",
-          "context": "聊天主区采用中性2 #0B1215，无背景图案、渐变、纹理或Shader；正文列宽 1120px，诊断表格单独收窄至 816px。",
+          "context": "正文、工具卡和表格占满侧栏以外的主区，两侧各留36px；窄窗口两侧各留16px。",
           "clip": true,
           "width": "fill_container",
           "height": "fill_container",
@@ -90447,12 +90760,12 @@
               "type": "frame",
               "id": "zgE4m",
               "layoutPosition": "absolute",
-              "x": 268,
+              "x": 36,
               "y": 106,
               "name": "对话流 · 当前可见内容",
-              "context": "滚动视口：固定高度 + 裁剪；第二轮在视口外，应用中滚动可见。",
+              "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
               "clip": true,
-              "width": 1120,
+              "width": 1584,
               "height": 870,
               "layout": "vertical",
               "gap": 24,
@@ -91660,15 +91973,14 @@
               "type": "frame",
               "id": "LIh6G",
               "layoutPosition": "absolute",
-              "x": 783,
-              "y": 858,
+              "x": 776,
+              "y": 909,
               "name": "回到底部",
-              "context": "深色版。底中性 3 #131A1D、1px 中性 7 #3C4448 描边、投影中性 1 #060B0E 的 20%；文字与图标静置取中性 11 #AAB3B7，悬停提到正文色 #E0EAEE，按下底色中性 5 #242C2F。几何与浅色一致。",
-              "height": 32,
-              "fill": "#131A1D",
-              "cornerRadius": 6,
+              "context": "对话向上滚动时显示。高 42，圆角 8，横向内边距 16；图标 16，文字 14，间隔 8。浅深主题使用反色，位于输入框上方 12px。",
+              "height": 42,
+              "fill": "#E0EAEE",
+              "cornerRadius": 8,
               "stroke": "#3C4448",
-              "strokeWidth": 1,
               "effect": {
                 "type": "shadow",
                 "shadowType": "outer",
@@ -91679,10 +91991,10 @@
                 },
                 "blur": 24
               },
-              "gap": 4,
+              "gap": 8,
               "padding": [
                 0,
-                12
+                16
               ],
               "alignItems": "center",
               "children": [
@@ -91690,20 +92002,20 @@
                   "type": "icon",
                   "id": "uzpCM",
                   "name": "向下图标",
-                  "width": 14,
-                  "height": 14,
+                  "width": 16,
+                  "height": 16,
                   "icon": "arrow-down",
                   "library": "lucide",
-                  "fill": "#AAB3B7"
+                  "fill": "#0B1215"
                 },
                 {
                   "type": "text",
                   "id": "LC5Rj",
                   "name": "文字",
-                  "fill": "#AAB3B7",
+                  "fill": "#0B1215",
                   "content": "回到底部",
                   "fontFamily": "Source Han Sans CN",
-                  "fontSize": 12,
+                  "fontSize": 14,
                   "fontWeight": "normal"
                 }
               ]
@@ -98410,7 +98722,6 @@
             12
           ],
           "justifyContent": "space_between",
-          "layoutIncludeStroke": true,
           "children": [
             {
               "type": "frame",
@@ -98762,7 +99073,6 @@
                 36
               ],
               "alignItems": "center",
-              "layoutIncludeStroke": true,
               "children": [
                 {
                   "type": "icon",
@@ -98812,7 +99122,6 @@
                     "bottom": 1
                   },
                   "gap": 24,
-                  "layoutIncludeStroke": true,
                   "children": [
                     {
                       "type": "frame",
@@ -98823,7 +99132,6 @@
                       "layout": "vertical",
                       "justifyContent": "center",
                       "alignItems": "center",
-                      "layoutIncludeStroke": true,
                       "children": [
                         {
                           "type": "text",
@@ -98850,7 +99158,6 @@
                       "layout": "vertical",
                       "justifyContent": "center",
                       "alignItems": "center",
-                      "layoutIncludeStroke": true,
                       "children": [
                         {
                           "type": "text",
@@ -98874,7 +99181,6 @@
                       "layout": "vertical",
                       "justifyContent": "center",
                       "alignItems": "center",
-                      "layoutIncludeStroke": true,
                       "children": [
                         {
                           "type": "text",
@@ -98898,7 +99204,6 @@
                       "layout": "vertical",
                       "justifyContent": "center",
                       "alignItems": "center",
-                      "layoutIncludeStroke": true,
                       "children": [
                         {
                           "type": "text",
@@ -99019,7 +99324,6 @@
                       "layout": "vertical",
                       "gap": 16,
                       "padding": 24,
-                      "layoutIncludeStroke": true,
                       "children": [
                         {
                           "type": "frame",
@@ -99063,7 +99367,6 @@
                                   ],
                                   "justifyContent": "space_between",
                                   "alignItems": "center",
-                                  "layoutIncludeStroke": true,
                                   "children": [
                                     {
                                       "type": "text",
@@ -99115,7 +99418,6 @@
                                   ],
                                   "justifyContent": "space_between",
                                   "alignItems": "center",
-                                  "layoutIncludeStroke": true,
                                   "children": [
                                     {
                                       "type": "text",
@@ -99180,7 +99482,6 @@
                               ],
                               "justifyContent": "space_between",
                               "alignItems": "center",
-                              "layoutIncludeStroke": true,
                               "children": [
                                 {
                                   "type": "text",
@@ -99242,7 +99543,6 @@
                               ],
                               "justifyContent": "space_between",
                               "alignItems": "center",
-                              "layoutIncludeStroke": true,
                               "children": [
                                 {
                                   "type": "text",
@@ -99305,7 +99605,6 @@
                               ],
                               "justifyContent": "space_between",
                               "alignItems": "center",
-                              "layoutIncludeStroke": true,
                               "children": [
                                 {
                                   "type": "text",
@@ -99399,7 +99698,6 @@
                       "layout": "vertical",
                       "gap": 16,
                       "padding": 24,
-                      "layoutIncludeStroke": true,
                       "children": [
                         {
                           "type": "text",
@@ -99454,7 +99752,6 @@
                                   ],
                                   "justifyContent": "space_between",
                                   "alignItems": "center",
-                                  "layoutIncludeStroke": true,
                                   "children": [
                                     {
                                       "type": "text",
@@ -99506,7 +99803,6 @@
                                   ],
                                   "justifyContent": "space_between",
                                   "alignItems": "center",
-                                  "layoutIncludeStroke": true,
                                   "children": [
                                     {
                                       "type": "text",
@@ -99567,7 +99863,6 @@
                                   ],
                                   "justifyContent": "space_between",
                                   "alignItems": "center",
-                                  "layoutIncludeStroke": true,
                                   "children": [
                                     {
                                       "type": "text",
@@ -99619,7 +99914,6 @@
                                   ],
                                   "justifyContent": "space_between",
                                   "alignItems": "center",
-                                  "layoutIncludeStroke": true,
                                   "children": [
                                     {
                                       "type": "text",
@@ -99679,7 +99973,6 @@
                                   "strokeWidth": 1,
                                   "justifyContent": "center",
                                   "alignItems": "center",
-                                  "layoutIncludeStroke": true,
                                   "children": [
                                     {
                                       "type": "text",
@@ -99729,7 +100022,6 @@
                                   "strokeWidth": 1,
                                   "justifyContent": "center",
                                   "alignItems": "center",
-                                  "layoutIncludeStroke": true,
                                   "children": [
                                     {
                                       "type": "text",
@@ -99762,7 +100054,6 @@
                             12
                           ],
                           "alignItems": "center",
-                          "layoutIncludeStroke": true,
                           "children": [
                             {
                               "type": "icon",
@@ -99868,7 +100159,6 @@
             12
           ],
           "justifyContent": "space_between",
-          "layoutIncludeStroke": true,
           "children": [
             {
               "type": "frame",
@@ -100220,7 +100510,6 @@
                 36
               ],
               "alignItems": "center",
-              "layoutIncludeStroke": true,
               "children": [
                 {
                   "type": "icon",
@@ -100270,7 +100559,6 @@
                     "bottom": 1
                   },
                   "gap": 24,
-                  "layoutIncludeStroke": true,
                   "children": [
                     {
                       "type": "frame",
@@ -100281,7 +100569,6 @@
                       "layout": "vertical",
                       "justifyContent": "center",
                       "alignItems": "center",
-                      "layoutIncludeStroke": true,
                       "children": [
                         {
                           "type": "text",
@@ -100308,7 +100595,6 @@
                       "layout": "vertical",
                       "justifyContent": "center",
                       "alignItems": "center",
-                      "layoutIncludeStroke": true,
                       "children": [
                         {
                           "type": "text",
@@ -100332,7 +100618,6 @@
                       "layout": "vertical",
                       "justifyContent": "center",
                       "alignItems": "center",
-                      "layoutIncludeStroke": true,
                       "children": [
                         {
                           "type": "text",
@@ -100356,7 +100641,6 @@
                       "layout": "vertical",
                       "justifyContent": "center",
                       "alignItems": "center",
-                      "layoutIncludeStroke": true,
                       "children": [
                         {
                           "type": "text",
@@ -100477,7 +100761,6 @@
                       "layout": "vertical",
                       "gap": 16,
                       "padding": 24,
-                      "layoutIncludeStroke": true,
                       "children": [
                         {
                           "type": "frame",
@@ -100521,7 +100804,6 @@
                                   ],
                                   "justifyContent": "space_between",
                                   "alignItems": "center",
-                                  "layoutIncludeStroke": true,
                                   "children": [
                                     {
                                       "type": "text",
@@ -100573,7 +100855,6 @@
                                   ],
                                   "justifyContent": "space_between",
                                   "alignItems": "center",
-                                  "layoutIncludeStroke": true,
                                   "children": [
                                     {
                                       "type": "text",
@@ -100638,7 +100919,6 @@
                               ],
                               "justifyContent": "space_between",
                               "alignItems": "center",
-                              "layoutIncludeStroke": true,
                               "children": [
                                 {
                                   "type": "text",
@@ -100700,7 +100980,6 @@
                               ],
                               "justifyContent": "space_between",
                               "alignItems": "center",
-                              "layoutIncludeStroke": true,
                               "children": [
                                 {
                                   "type": "text",
@@ -100763,7 +101042,6 @@
                               ],
                               "justifyContent": "space_between",
                               "alignItems": "center",
-                              "layoutIncludeStroke": true,
                               "children": [
                                 {
                                   "type": "text",
@@ -100857,7 +101135,6 @@
                       "layout": "vertical",
                       "gap": 16,
                       "padding": 24,
-                      "layoutIncludeStroke": true,
                       "children": [
                         {
                           "type": "text",
@@ -100912,7 +101189,6 @@
                                   ],
                                   "justifyContent": "space_between",
                                   "alignItems": "center",
-                                  "layoutIncludeStroke": true,
                                   "children": [
                                     {
                                       "type": "text",
@@ -100964,7 +101240,6 @@
                                   ],
                                   "justifyContent": "space_between",
                                   "alignItems": "center",
-                                  "layoutIncludeStroke": true,
                                   "children": [
                                     {
                                       "type": "text",
@@ -101025,7 +101300,6 @@
                                   ],
                                   "justifyContent": "space_between",
                                   "alignItems": "center",
-                                  "layoutIncludeStroke": true,
                                   "children": [
                                     {
                                       "type": "text",
@@ -101077,7 +101351,6 @@
                                   ],
                                   "justifyContent": "space_between",
                                   "alignItems": "center",
-                                  "layoutIncludeStroke": true,
                                   "children": [
                                     {
                                       "type": "text",
@@ -101137,7 +101410,6 @@
                                   "strokeWidth": 1,
                                   "justifyContent": "center",
                                   "alignItems": "center",
-                                  "layoutIncludeStroke": true,
                                   "children": [
                                     {
                                       "type": "text",
@@ -101187,7 +101459,6 @@
                                   "strokeWidth": 1,
                                   "justifyContent": "center",
                                   "alignItems": "center",
-                                  "layoutIncludeStroke": true,
                                   "children": [
                                     {
                                       "type": "text",
@@ -101220,7 +101491,6 @@
                             12
                           ],
                           "alignItems": "center",
-                          "layoutIncludeStroke": true,
                           "children": [
                             {
                               "type": "icon",
@@ -101333,7 +101603,6 @@
               "strokeWidth": 1,
               "layout": "vertical",
               "padding": 8,
-              "layoutIncludeStroke": true,
               "children": [
                 {
                   "type": "frame",
@@ -101469,7 +101738,6 @@
               "strokeWidth": 1,
               "layout": "vertical",
               "padding": 8,
-              "layoutIncludeStroke": true,
               "children": [
                 {
                   "type": "frame",

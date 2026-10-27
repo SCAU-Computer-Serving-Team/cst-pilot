@@ -94,16 +94,16 @@ test("设置控件、紧凑协议菜单及外部入场动效", { timeout: 60_000
 				"window.__motion=[];document.addEventListener('animationstart',e=>window.__motion.push({name:e.animationName,target:e.target.className}));",
 		});
 		await browser.navigate(`${origin}/`);
+		await browser.evaluate(
+			`(() => {const start=document.startViewTransition.bind(document);document.startViewTransition=(...args)=>{const t=start(...args);t.ready.then(()=>{window.__entrySnapshots=document.getAnimations().map(a=>a.effect?.pseudoElement)});return t}})()`,
+		);
 		await browser.click(".sidebar-account-trigger");
 		await browser.click('.sidebar-account-item[href="/settings"]');
 		await browser.until(
-			"location.pathname==='/settings'&&window.__motion.some(e=>e.name==='route-part-in')",
-			"外部进入设置组件有入场",
+			"location.pathname==='/settings'&&window.__entrySnapshots?.includes('::view-transition-new(settings-surface)')",
+			"外部进入设置使用页面快照",
 		);
-		await browser.until(
-			"!document.getAnimations().some(a=>a.playState==='running'&&a.animationName==='route-part-in')",
-			"设置入场结束",
-		);
+		await browser.until("!document.getAnimations().some(a=>a.playState==='running')", "设置入场结束");
 		await browser.evaluate("window.__motion=[]");
 		await browser.click('a[href="/settings/general"]');
 		await browser.until(

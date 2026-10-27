@@ -308,11 +308,14 @@ export function onToolExecutionEnd(state: SessionState, toolCallId: string, resu
 	if (readDegraded(name, scope, result)) agg.degraded++;
 
 	const details = (result as { details?: Record<string, unknown> } | undefined)?.details;
-	if (name === "runbook") {
-		const items = (details?.items ?? (details?.runbook as { items?: unknown[] } | undefined)?.items) as
-			| unknown[]
-			| undefined;
-		if (Array.isArray(items)) agg.entriesTotal = (agg.entriesTotal ?? 0) + items.length;
+	if (!isError && (name === "runbook" || name === "runbook_deliver")) {
+		const items = details?.items ?? (details?.runbook as { items?: unknown } | undefined)?.items;
+		const count = Array.isArray(items)
+			? items.length
+			: typeof items === "number" && Number.isSafeInteger(items) && items >= 0
+				? items
+				: 0;
+		agg.entriesTotal = (agg.entriesTotal ?? 0) + count;
 	}
 	if (name === "web_search") {
 		const provider = details?.provider;

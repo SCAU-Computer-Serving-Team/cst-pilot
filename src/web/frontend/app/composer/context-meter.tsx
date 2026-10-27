@@ -122,7 +122,7 @@ export function ContextMeter({
 								<Info size={14} aria-hidden="true" />
 							</span>
 							{provider === "cstoa" ? (
-								<Link className="context-more" to="/account">
+								<Link className="context-more" to="/account" viewTransition>
 									账号信息
 									<ChevronRight size={14} aria-hidden="true" />
 								</Link>

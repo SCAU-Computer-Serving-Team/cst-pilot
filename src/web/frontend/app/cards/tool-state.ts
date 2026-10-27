@@ -31,7 +31,7 @@ export function splitToolCalls(
 export function isStandaloneTool(call: Call, result?: Message): boolean {
 	return (
 		call.name === "web_search" ||
-		call.name === "runbook" ||
+		["runbook", "command_plan", "runbook_deliver"].includes(call.name) ||
 		(call.name === "sys" && (call.arguments.scope ?? "overview") === "overview") ||
 		(call.name === "read" && Array.isArray(result?.content) && result.content.some((part) => part.type === "image"))
 	);

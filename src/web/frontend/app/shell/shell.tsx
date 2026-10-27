@@ -4,7 +4,6 @@ import {
 	CircleUserRound,
 	ListChecks,
 	LogIn,
-	LogOut,
 	MessageSquareWarning,
 	Monitor,
 	PanelLeft,
@@ -294,18 +293,6 @@ export function Sidebar({
 			setAccountWorking(false);
 		}
 	}
-	async function logout() {
-		if (!teamSignedIn || accountWorking) return;
-		setAccountWorking(true);
-		try {
-			await apiJson("/api/auth/cstoa/logout", { method: "POST" });
-			await refreshAccount();
-		} catch (cause) {
-			setAccountError(cause instanceof Error ? cause.message : "退出账号失败，请重试");
-		} finally {
-			setAccountWorking(false);
-		}
-	}
 	function remove(id: string) {
 		setMenu(null);
 		management.requestDelete(sessions.filter((session) => session.id === id));
@@ -565,7 +552,7 @@ export function Sidebar({
 									<hr className="session-menu-divider" />
 								</>
 							)}
-							<Link className="sidebar-account-item" to="/account" onClick={closeAccountMenu}>
+							<Link className="sidebar-account-item" to="/account" viewTransition onClick={closeAccountMenu}>
 								<CircleUserRound size={18} aria-hidden="true" />
 								账号信息
 							</Link>
@@ -579,7 +566,7 @@ export function Sidebar({
 									{teamRequiresLogin ? "重新登录 CSTOA" : "登录 CSTOA"}
 								</Link>
 							)}
-							<Link className="sidebar-account-item" to="/settings" onClick={closeAccountMenu}>
+							<Link className="sidebar-account-item" to="/settings" viewTransition onClick={closeAccountMenu}>
 								<Settings size={18} aria-hidden="true" />
 								设置
 							</Link>
@@ -604,23 +591,6 @@ export function Sidebar({
 								<MessageSquareWarning size={18} aria-hidden="true" />
 								反馈问题
 							</a>
-							{teamSignedIn && (
-								<>
-									<hr className="session-menu-divider" />
-									<Button
-										variant="ghost"
-										className="sidebar-account-item"
-										isDisabled={accountWorking}
-										onPress={() => {
-											closeAccountMenu();
-											void logout();
-										}}
-									>
-										<LogOut size={18} aria-hidden="true" />
-										退出 CSTOA
-									</Button>
-								</>
-							)}
 							<hr className="session-menu-divider" />
 							<Button
 								variant="ghost"

@@ -88,10 +88,7 @@ test("CSTOA：身份展示、上下文额度、零值、重试、模型隔离与
 				"document.querySelector('.account-fields')?.innerText.includes('20230001')&&document.querySelector('.account-fields')?.innerText.includes('测试队员')",
 				"学号姓名显示",
 			);
-			assert.equal(
-				await browser.evaluate("document.querySelector('.account-fields').innerText.includes('额度')"),
-				false,
-			);
+			await browser.until("document.querySelector('.account-quota')?.innerText==='12,345 额度点'", "账号页额度");
 			assert.equal(
 				await browser.evaluate("document.querySelector('.account-fields').innerText.includes('access-1')"),
 				false,
@@ -157,6 +154,8 @@ test("CSTOA：身份展示、上下文额度、零值、重试、模型隔离与
 		await browser.screenshot(join(root, "menu-dark.png"));
 		options.profile = { balance: 0 };
 		await fetch(`${origin}/api/quota?provider=cstoa&refresh=1`);
+		await browser.navigate(`${origin}/account`);
+		await browser.until("document.querySelector('.account-quota')?.innerText==='0 额度点'", "账号页零额度");
 		await browser.navigate(`${origin}/s/${slot.id}`);
 		await openContext();
 		await browser.until("document.querySelector('.context-balance')?.innerText==='0 额度点'", "零额度");
@@ -174,9 +173,17 @@ test("CSTOA：身份展示、上下文额度、零值、重试、模型隔离与
 			"document.querySelector('.context-quota-notice')?.innerText.includes('额度暂不可用')",
 			"额度故障",
 		);
+		await browser.navigate(`${origin}/account`);
+		await browser.until(
+			"document.querySelector('.account-quota')?.innerText.includes('额度暂不可用')",
+			"账号页额度故障",
+		);
 		options.profile = { balance: 100 };
-		await browser.click(".context-quota-notice button");
-		await browser.until("document.querySelector('.context-balance')?.innerText==='100 额度点'", "额度重试");
+		await browser.click(".account-quota button");
+		await browser.until("document.querySelector('.account-quota')?.innerText==='100 额度点'", "账号页额度重试");
+		await browser.navigate(`${origin}/s/${slot.id}`);
+		await openContext();
+		await browser.until("document.querySelector('.context-balance')?.innerText==='100 额度点'", "上下文额度恢复");
 		options.profileStatus = 404;
 		await fetch(`${origin}/api/account?refresh=1`);
 		await browser.navigate(`${origin}/account`);
@@ -201,6 +208,7 @@ test("CSTOA：身份展示、上下文额度、零值、重试、模型隔离与
 			await browser.evaluate("document.querySelector('.account-fields').innerText.includes('测试队员')"),
 			false,
 		);
+		assert.equal(await browser.evaluate("document.querySelector('.account-quota').innerText"), "登录后查看");
 		assert.ok((await modelRuntime.listCredentials()).some((item) => item.providerId === "openai"));
 		await observer.until(
 			"document.querySelector('.context-quota-notice')?.innerText.includes('登录后查看')",

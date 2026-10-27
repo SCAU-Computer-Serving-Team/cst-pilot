@@ -1,6 +1,6 @@
 # Web 前后端架构
 
-本页说明 Web 前后端目录组织、流式渲染与状态同步、草稿图片存储回收、分支树几何算法及 15 个工具卡片的数据转换管线。行为要求见 [SPEC.md](SPEC.md)，接口定义见 [API.md](API.md)。
+本页说明 Web 前后端目录组织、流式渲染与状态同步、草稿图片存储回收、分支树几何算法及工具卡片的数据转换管线。行为要求见 [SPEC.md](SPEC.md)，接口定义见 [API.md](API.md)。
 
 ## 工程边界与静态服务
 
@@ -9,7 +9,7 @@
 ```text
 src/web/frontend/app/
 ├── routes/         路由页面装配（主页、工作台、树、设置、登录、账号）
-├── cards/          15 个工具的结果转换（map-tool.ts / special-tool-data.ts）与渲染组件
+├── cards/          开放工具的结果转换（map-tool.ts / special-tool-data.ts）与渲染组件
 ├── conversation/   对话流、过程分段、Markdown 安全切分、排队面板与扩展提问
 ├── composer/       输入框行内标记编辑器、补全面板、草稿与 IndexedDB 图片引用、上下文额度
 ├── tree/           分支树可见重挂、几何列计算（branch-tree.ts）与分支总结参数编解码
@@ -66,7 +66,7 @@ type Block =
   | { kind: "commands"; id: string; items: { shell: string; summary: string; command: string; admin: boolean }[] };
 ```
 
-### 15 个工具的主模板与字段来源
+### 工具主模板与字段来源
 
 整次 `isError: true` 统一使用错误**原文块**；正常或降级返回按下表映射：
 
@@ -78,7 +78,7 @@ type Block =
 | `startup` | 概览组 | 依次生成自启概况、`regItems[]`（`disabled` 映射为已禁用／未禁用／状态未知）、`startupFolders[]`、`services[]` 字段组 |
 | `eventlog` | 概览组（列表类）<br>原文块（`detail`） | 列表类将 `events[]` 生成事件字段组，`counts[]` 生成来源排行组，附范围统计与 `security` 权限降级提示；`detail` 生成事件头字段组 + `msg` 原文块 |
 | `driver` | 概览组 | `problem/find` 生成匹配设备与汇总字段组；`core` 按网卡、蓝牙、音频、显示、服务、驱动分组；`external` 按外设与可移动存储分组 |
-| `runbook` | 特殊组件 | 标题与命令条目取自调用参数 `items[]`，文件路径、序号与风险档取自 `details.runbook` |
+| `command_plan` / `runbook_deliver` / `runbook` | 特殊组件 | 标题、命令、风险档与版本优先取 `details.runbook`；缺失 `details` 时读取结果 JSON；缺少结构化命令时回退调用参数。方案与导出共用卡片，只有交付成功显示文件链接 |
 | `bitlocker` | 概览组（`status`）<br>特殊组件（`unlock/decrypt`） | `status` 按卷生成状态字段组；`unlock/decrypt` 走特殊组件，合并 `details.bitlocker.volumes[]`、每卷 `operation` 与会话待处理交互请求 |
 | `web_search` | 特殊组件 | 行内展示检索状态，展开调用参数 `queries / query`，状态比对 `successfulQueries` 与 `queryCount` |
 | `source_check` | 概览组 | 依次展示主张判断（`claims[]`）、来源排行（`sources[]`）、引文原文块（`passages[]`）与续读标识 |
@@ -90,4 +90,4 @@ type Block =
 ### 特殊工具交互
 
 - **BitLocker 本地输入与确认**：Web 后端在内存中维护绑定 `sessionId + entryId + toolCallId + requestId` 的待处理请求（3 分钟有效期，带递增版本），随会话快照与 SSE 下发。前端 `bitlocker-input.tsx` 通过 `POST /api/sessions/:id/bitlocker/:requestId` 一次性提交恢复密码或确认解密，绕过持久化幂等日志，确保恢复密码永不落盘。
-- **Runbook 文件打开**：点击卡片文件名调用 `POST /api/sessions/:id/runbook/open`，后端校验该会话历史条目对应的 `outbox/` 文件存在后启动系统记事本，并对重复点击做去重保护。
+- **Runbook 文件打开**：点击卡片文件名调用 `POST /api/sessions/:id/runbook/open`，后端按助手条目和调用 ID 匹配 `runbook` 或 `runbook_deliver` 的结果，从结果读取路径，校验文件属于 `outbox/` 后启动系统记事本，并对重复点击做去重保护。

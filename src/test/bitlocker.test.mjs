@@ -102,9 +102,9 @@ export default function(){globalThis[Symbol.for(${JSON.stringify(key)})].api={Bi
   return { state, loader, tool, tools, dir, home, run, ctx, emit };
 }
 
-test('Pi 发现八个工具与 bitlocker skill，参数和提示词可用', async t => {
+test('Pi 发现诊断与命令方案工具及 bitlocker skill，参数和提示词可用', async t => {
   const h = await harness(t);
-  assert.equal(h.tools.length, 8);
+  assert.deepEqual(h.tools.map(tool => tool.name).sort(), ['bitlocker', 'command_plan', 'disk', 'driver', 'eventlog', 'ls', 'runbook', 'runbook_deliver', 'startup', 'sys']);
   assert.ok(h.tool.promptSnippet);
   assert.equal(h.tool.executionMode, 'sequential');
   assert.ok(h.loader.getSkills().skills.some(skill => skill.name === 'bitlocker'));

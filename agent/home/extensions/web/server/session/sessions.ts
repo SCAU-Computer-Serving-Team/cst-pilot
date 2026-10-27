@@ -28,6 +28,8 @@ const WEB_TOOLS = [
 	"eventlog",
 	"driver",
 	"runbook",
+	"command_plan",
+	"runbook_deliver",
 	"bitlocker",
 	"web_search",
 	"source_check",

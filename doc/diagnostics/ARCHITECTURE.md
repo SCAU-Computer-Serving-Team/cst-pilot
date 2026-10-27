@@ -4,12 +4,14 @@
 
 ## 扩展结构
 
-`agent/home/extensions/diagnostics/index.ts` 是唯一扩展入口，每次加载时创建一份共享目录大小索引 `createVolumeIndex()` 并注入 `disk` 与 `ls`，统一注册 8 个工具。
+`agent/home/extensions/diagnostics/index.ts` 是唯一扩展入口，每次加载时创建一份共享目录大小索引 `createVolumeIndex()` 并注入 `disk` 与 `ls`，统一注册 10 个工具。
 
 | 模块文件 | 职责 |
 |---|---|
-| `index.ts` | 扩展入口，创建 `wz-index` 实例并注册 8 个工具 |
-| `ls.ts`、`startup.ts`、`runbook.ts` | 独立工具的参数校验、执行与返回封装 |
+| `index.ts` | 扩展入口，创建 `wz-index` 实例并注册 10 个工具 |
+| `ls.ts`、`startup.ts` | 独立查询工具的参数校验、执行与返回封装 |
+| `runbook.ts` / `runbook-files.ts` | 命令工具注册、共用参数校验、文本格式、单步写入及文件锁 |
+| `command-plan.ts` / `command-plan-store.ts` | 方案／交付工具注册与版本存储；`outbox/.plans/<ID>/v<版本>.json` 为方案事实来源，导出文本保持版本内容 |
 | `disk.ts` / `disk-core.ts` | 存储工具注册与空间、物理盘、SMART、WizTree／Node 扫描实现 |
 | `sys.ts` / `sys-commands.ts` | 实时负载与传感器注册、采集编排及 PowerShell 采样脚本模板 |
 | `driver.ts` / `driver-core.ts` / `driver-data.ts` | 设备与驱动工具注册、WMI 查询、Node 侧过滤与结果 Schema 校验 |
@@ -54,6 +56,8 @@ flowchart LR
 3. **只收精确快照**：仅接收 WizTree 导出数据，不缓存 Node 递归统计结果，防止权限拒绝或预算截断产生的下界污染后续查询。当前卷 WizTree 失败后标记 `failed`，避免后续每次 `ls` 重复等待超时。
 
 ## 跨进程互斥锁
+
+- **方案版本锁**：`command_plan` 与 `runbook_deliver` 共用 `outbox/.plans` 目录锁。读取当前版本、核对版本和原子发布均在锁内完成；JSON 与 TXT 经临时文件重命名发布，失败后清理临时文件。
 
 - **runbook 日期目录锁**：同一进程内通过串行队列排队；跨进程按 `outbox/<YYYY-MM-DD>` 路径哈希建立 Windows 命名管道锁，冲突时直接拒绝写入，防止多进程分配重复序号或覆盖修正文件。
 - **bitlocker 同卷锁**：按规范化 `volumeId`（统一大写与尾部反斜线，不含盘符或会话 ID）建立本机命名管道锁 `bitlocker-lock.ts`。取得锁后重新调用 Windows 接口核实卷身份与当前状态，覆盖本地确认、提交与状态复查，进程退出时由操作系统自动释放。

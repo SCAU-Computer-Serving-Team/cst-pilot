@@ -330,7 +330,10 @@ export const ToolCard = memo(function ToolCard({
 				>
 					<Card.Header>
 						<Disclosure.Heading>
-							<Disclosure.Trigger className="tool-card-heading">{heading}</Disclosure.Trigger>
+							<Disclosure.Trigger className="tool-card-heading">
+								{heading}
+								<Disclosure.Indicator />
+							</Disclosure.Trigger>
 						</Disclosure.Heading>
 					</Card.Header>
 					<Disclosure.Content>{content}</Disclosure.Content>

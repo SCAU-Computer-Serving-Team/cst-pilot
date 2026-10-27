@@ -37,7 +37,16 @@ export type SpecialToolView =
 	| (Base & {
 			kind: "runbook";
 			commands: { shell: string; admin: boolean; summary: string; command: string }[];
-			delivery?: { name: string; file: string; level: string; count: number | null };
+			level: string;
+			count: number | null;
+			version: number | null;
+			planned: boolean;
+			delivery?: {
+				name: string;
+				file: string;
+				level: string;
+				count: number | null;
+			};
 	  })
 	| (Base & { kind: "web-search"; queries: string[]; successful: number | null; unstructured: boolean })
 	| (Base & { kind: "bitlocker"; scope: "unlock" | "decrypt"; volumes: SpecialVolume[] });
@@ -93,7 +102,7 @@ export const lockLabel = (v: number | null) => (v === 0 ? "已解锁" : v === 1 
 
 export function specialToolKind(call: SpecialToolCall): SpecialToolKind | undefined {
 	if (call.name === "sys" && (call.arguments.scope ?? "overview") === "overview") return "sys-overview";
-	if (call.name === "runbook") return "runbook";
+	if (["runbook", "command_plan", "runbook_deliver"].includes(call.name)) return "runbook";
 	if (call.name === "web_search") return "web-search";
 	if (call.name === "bitlocker" && (call.arguments.scope === "unlock" || call.arguments.scope === "decrypt"))
 		return "bitlocker";
@@ -187,7 +196,14 @@ export function mapSpecialTool(call: SpecialToolCall, result?: Message, live = f
 		};
 	}
 	if (kind === "runbook") {
-		const source = record(details?.runbook);
+		let source = record(details?.runbook);
+		if (!source && result && !result.isError) {
+			try {
+				source = record(record(JSON.parse(raw))?.runbook);
+			} catch {
+				/* 原文不完整时使用调用预览。 */
+			}
+		}
 		const errors = [...commonErrors, ...errorsOf(source?.error)];
 		const status = !result ? initial : result.isError || errors.length ? "error" : !source ? "degraded" : "success";
 		const delivery =
@@ -199,18 +215,33 @@ export function mapSpecialTool(call: SpecialToolCall, result?: Message, live = f
 						count: number(source.items),
 					}
 				: undefined;
+		const resultCommands = objects(source?.commands);
+		const callCommands = objects(call.arguments.items);
+		const commands = (Array.isArray(source?.commands) ? resultCommands : callCommands).map((i) => ({
+			shell: string(i.shell, "环境未知"),
+			admin: i.admin === true,
+			summary: string(i.summary),
+			command: string(i.command),
+		}));
 		return {
 			...base,
 			kind,
 			status,
-			title: string(call.arguments.title, "命令清单"),
-			summary: !result ? base.summary : status === "error" ? "生成失败" : delivery ? "已生成" : "交付结果缺失",
-			commands: objects(call.arguments.items).map((i) => ({
-				shell: string(i.shell, "环境未知"),
-				admin: i.admin === true,
-				summary: string(i.summary),
-				command: string(i.command),
-			})),
+			title: string(source?.title, string(call.arguments.title, "命令清单")),
+			count: number(source?.items) ?? (commands.length || null),
+			level: string(source?.levelLabel, "风险档未知"),
+			version: number(source?.version),
+			planned: source?.action === "planned",
+			summary: !result
+				? base.summary
+				: status === "error"
+					? "生成失败"
+					: source?.action === "planned"
+						? "方案已保存"
+						: delivery
+							? "已生成"
+							: "交付结果缺失",
+			commands,
 			delivery,
 			fields: delivery ? [field("文件路径", delivery.file)] : [],
 			errors,

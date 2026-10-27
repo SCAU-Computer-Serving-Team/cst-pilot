@@ -11,7 +11,7 @@
 | 工程静态检查 | `npm run check:engineering --prefix agent` | MJS、JSON、CSS 的 Biome 规则与 PowerShell 语法／PSScriptAnalyzer 1.24.0 |
 | 后端格式与类型 | `npm run check --prefix agent` | `agent/home/extensions/` 全部扩展的 Biome 检查与严格 TypeScript 类型检查 |
 | 前端格式与类型 | `npm run lint --prefix src/web/frontend`、`npm run typecheck --prefix src/web/frontend` | React 规则检查、路由类型生成与 TypeScript 检查 |
-| 工具与文档契约 | `node --test src/test/*.test.mjs` | 诊断工具行为、BitLocker 替身与跨进程卷锁、runbook 原子写入、画布结构与颜色子集、Markdown 本地链接与锚点 |
+| 工具与文档契约 | `node --test src/test/*.test.mjs` | 诊断工具行为、BitLocker 替身与跨进程卷锁、命令方案版本与交付恢复、runbook 原子写入、画布结构与颜色子集、Markdown 本地链接与锚点 |
 | 发行脚本与策略 | `node --test pack/test/*.test.mjs` | 启动器权限与参数、TUN 放行策略、离线模型目录、发行树白名单与资源完整性 |
 | OAuth 扩展 | `npm run test:oauth --prefix agent` | CSTOA 设备码、轮询、续期、动态模型目录与凭据隔离 |
 | Web 后端 | `npm run test:web --prefix agent` | HTTP/SSE 接口、会话池、收件箱队列、鉴权、附件与故障恢复 |
@@ -81,6 +81,7 @@
 
 `npm run test:web:e2e --prefix agent` 覆盖以下完整浏览器链路：
 
+- **命令多轮与布局**：`runbook-roundtrip.e2e.ts` 使用实际方案存储生成两轮修订，覆盖重复调用 ID、结果缺少 `details`、复制、文件打开、压缩后刷新和服务重启恢复；在 1920、1366、960、390px 窗口覆盖正文与输入框边缘对齐、内容列宽度上限及浅深主题。
 - **消息、流式与工具**：首页发送、网络响应丢失后保留草稿并幂等重试、单工具独立计时与冻结、过程折叠、特殊工具组件（BitLocker、整机概览、runbook、联网检索）交互、Markdown 块间距与代码高亮。
 - **会话管理与分支**：侧栏日期分组、多选与整组勾选、乐观删除与失败回滚、`/fork` 派生选择、`/tree` 五档过滤与几何对齐、分支总结三选项与生成中取消。
 - **设置、登录与退出**：四分类设置路由、自定义模型服务增删改、模型范围拖拽与键盘排序、CSTOA 扫码与 APIKEY 登录、上下文额度面板、全局顶部通知、断线恢复、空闲与运行中安全退出确认。

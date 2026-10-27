@@ -66,6 +66,17 @@ test("设置页预加载目标数据后再滑动，快照不含加载占位", { 
 			"document.getAnimations().some(a=>a.effect?.pseudoElement==='::view-transition-old(settings-page)')",
 			"设置分类快照正在滑动",
 		);
+		const settingsMotion = await browser.evaluate<
+			{ pseudo: string; duration: number; frames: { transform?: string }[] }[]
+		>(
+			"document.getAnimations().filter(a=>a.effect?.pseudoElement?.includes('settings-page')).map(a=>({pseudo:a.effect.pseudoElement,duration:a.effect.getTiming().duration,frames:a.effect.getKeyframes()}))",
+		);
+		const oldPage = settingsMotion.find((item) => item.pseudo === "::view-transition-old(settings-page)");
+		const newPage = settingsMotion.find((item) => item.pseudo === "::view-transition-new(settings-page)");
+		assert.equal(oldPage?.duration, 80);
+		assert.equal(newPage?.duration, 150);
+		assert.match(oldPage?.frames.at(-1)?.transform ?? "", /-4px/);
+		assert.match(newPage?.frames[0]?.transform ?? "", /4px/);
 		assert.equal(
 			await browser.evaluate(
 				"getComputedStyle(document.documentElement,'::view-transition-old(settings-page)').mixBlendMode",
@@ -132,7 +143,7 @@ test("设置页预加载目标数据后再滑动，快照不含加载占位", { 
 					const effect = document.getAnimations().find(a=>a.effect?.pseudoElement==='::view-transition-old(settings-surface)').effect;
 					return { duration: effect.getTiming().duration, opacity: effect.getKeyframes().at(-1).opacity };
 				})()`),
-					{ duration: 150, opacity: "0" },
+					{ duration: 80, opacity: "0" },
 				);
 				await browser.evaluate("document.getAnimations().forEach(a=>a.finish())");
 				await browser.until("document.getAnimations().length===0", "整页退出结束");
@@ -140,9 +151,21 @@ test("设置页预加载目标数据后再滑动，快照不含加载占位", { 
 			}
 		}
 		await browser.navigate(`${origin}/settings`);
+		await browser.evaluate(`(() => {
+			const original = document.startViewTransition.bind(document);
+			document.startViewTransition = (...args) => {
+				const transition = original(...args);
+				transition.ready.then(() => { window.accountSnapshots = document.getAnimations().map(a => a.effect?.pseudoElement); });
+				return transition;
+			};
+		})()`);
 		await browser.click(".sidebar-account-trigger");
 		await browser.click('a[href="/account"]');
 		await browser.until("location.pathname==='/account'", "进入账号信息");
+		await browser.until("Array.isArray(window.accountSnapshots)", "账号页面快照");
+		assert.ok(
+			await browser.evaluate("window.accountSnapshots.includes('::view-transition-new(other-page-content)')"),
+		);
 		assert.equal(
 			await browser.evaluate(
 				"!!document.querySelector('.settings-workspace') || !!document.querySelector('.settings-route')",

@@ -36,6 +36,7 @@ export default function WorkspaceLayout() {
 	const chatTransition = useViewTransitionState("/s/*");
 	const accountTransition = useViewTransitionState("/account");
 	const settingsBoundary = settings && (homeTransition || chatTransition || accountTransition);
+	const sessionTransition = chatTransition && !homeTransition && !settingsBoundary && !settings;
 	const routeTransition = useViewTransitionState(pathname);
 	// 同一路径固定一次入场策略，快照结束后不补播局部动效。
 	const entry = useRef({ pathname, local: !routeTransition });
@@ -70,6 +71,8 @@ export default function WorkspaceLayout() {
 					ref={motion.root}
 					data-home-transition={homeTransition || undefined}
 					data-settings-boundary={settingsBoundary || undefined}
+					data-session-transition={sessionTransition || undefined}
+					data-content-transition={(routeTransition && !homeTransition && !settingsBoundary) || undefined}
 					data-route-entry={entry.current.local || undefined}
 					data-home-exit={homeExit || undefined}
 					data-view-transitions={typeof document.startViewTransition === "function"}

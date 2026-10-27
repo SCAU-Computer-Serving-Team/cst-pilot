@@ -16,7 +16,7 @@ import { CstoaAccount } from "./api/account.ts";
 import { createAuthRoutes } from "./api/auth.ts";
 import { listProjectFiles } from "./api/project-files.ts";
 import { getProviderQuota } from "./api/quota.ts";
-import { openDeliveredRunbook, RunbookOpenError } from "./api/runbook.ts";
+import { deliveredRunbookFile, openDeliveredRunbook, RunbookOpenError } from "./api/runbook.ts";
 import { type ImageRef, ImageStore } from "./session/attachments.ts";
 import { browserJson } from "./session/browser-json.ts";
 import { compactSession } from "./session/compaction.ts";
@@ -588,9 +588,12 @@ export function createWebApi(
 					if (!entry || entry.type !== "message" || entry.message.role !== "assistant")
 						throw new Error("请求对应的清单调用不存在");
 					const call = entry.message.content.find(
-						(part) => part.type === "toolCall" && part.id === input.toolCallId && part.name === "runbook",
+						(part) =>
+							part.type === "toolCall" &&
+							part.id === input.toolCallId &&
+							["runbook", "runbook_deliver"].includes(part.name),
 					);
-					if (!call) throw new Error("请求对应的清单调用不存在");
+					if (!call || call.type !== "toolCall") throw new Error("请求对应的清单调用不存在");
 					let delivered: ToolResultMessage | undefined;
 					for (const candidate of branch.slice(index + 1)) {
 						if (candidate.type !== "message") continue;
@@ -598,16 +601,15 @@ export function createWebApi(
 						if (
 							candidate.message.role === "toolResult" &&
 							candidate.message.toolCallId === input.toolCallId &&
-							candidate.message.toolName === "runbook"
+							candidate.message.toolName === call.name
 						) {
 							delivered = candidate.message;
 							break;
 						}
 					}
 					const early = slot.execution.resultFor(entry.message.timestamp, input.toolCallId as string);
-					if (!delivered && early?.role === "toolResult" && early.toolName === "runbook") delivered = early;
-					const details = delivered?.details as { runbook?: { file?: unknown } } | undefined;
-					const file = !delivered?.isError ? details?.runbook?.file : undefined;
+					if (!delivered && early?.role === "toolResult" && early.toolName === call.name) delivered = early;
+					const file = deliveredRunbookFile(delivered);
 					if (typeof file !== "string") throw new Error("请求对应的清单尚未交付或已失效");
 					await (options.openRunbook ?? openDeliveredRunbook)(file);
 					return { launched: true };

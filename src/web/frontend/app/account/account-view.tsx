@@ -2,6 +2,8 @@ import { Button } from "@heroui/react";
 import { KeyRound, LogOut, ScanQrCode } from "lucide-react";
 import { Link } from "react-router";
 import { loginPath } from "../auth/providers";
+import { formatQuotaBalance } from "../composer/quota-format";
+import { useProviderQuota } from "../composer/use-quota";
 import type { AccountStatus } from "../data/api";
 
 export function AccountView({
@@ -19,7 +21,10 @@ export function AccountView({
 	onRetry: () => void;
 	onLogout: () => void;
 }) {
-	const usable = account?.signedIn && !account.requiresLogin;
+	const usable = !!account?.signedIn && !account.requiresLogin;
+	const { quota, loading: quotaLoading, retry: retryQuota } = useProviderQuota("cstoa", usable);
+	const balance = formatQuotaBalance(quota);
+	const quotaText = !usable ? "登录后查看" : quotaLoading ? "正在查询…" : (balance ?? quota?.reason ?? "额度暂不可用");
 	const notice = error || (usable ? account.profile.reason : "");
 	const placeholder = error ? "暂不可用" : usable ? "暂未提供" : "登录后查看";
 	return (
@@ -41,6 +46,17 @@ export function AccountView({
 								<dd title={value}>{value}</dd>
 							</div>
 						))}
+						<div className="settings-row account-field">
+							<dt>剩余额度</dt>
+							<dd className="account-quota" aria-live="polite">
+								<span title={quotaText}>{quotaText}</span>
+								{usable && quota && balance === null && !quota.requiresLogin && (
+									<button type="button" className="context-more" disabled={quotaLoading} onClick={retryQuota}>
+										重试
+									</button>
+								)}
+							</dd>
+						</div>
 					</dl>
 					{notice || account?.requiresLogin ? (
 						<div className="account-notice">

@@ -19,7 +19,7 @@ CST Pilot 是计算机维护队（CST）的便携式现场诊断 Agent。维修�
 
 ## 命令交付需求
 
-常规修复由队员手动执行。模型通过 `runbook` 工具将待执行命令写入工具包 `outbox/<日期>/` 目录，生成纯文本清单。命令分档与编写规则由 [runbook SKILL](../agent/home/skills/runbook/SKILL.md) 约束。
+常规修复由队员手动执行。模型通过 `command_plan` 保存和修订方案，队员核对后由 `runbook_deliver` 将指定版本导出至工具包 `outbox/<日期>/<ID>/`。`runbook` 支持单步生成纯文本清单。命令分档与编写规则由 [runbook SKILL](../agent/home/skills/runbook/SKILL.md) 约束。
 
 | 编号 | 规则 |
 |---|---|

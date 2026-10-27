@@ -169,6 +169,15 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		);
 		assert.deepEqual(models, ["测试模型 two"]);
 		assert.equal(await browser.evaluate("document.querySelector('.model-popover input')===null"), true);
+		await browser.evaluate(
+			"Promise.all(document.querySelector('.composer-model .model-label svg').getAnimations().map(a=>a.finished))",
+		);
+		assert.ok(
+			await browser.evaluate(
+				"new DOMMatrix(getComputedStyle(document.querySelector('.composer-model .model-label svg')).transform).a < -0.99",
+			),
+			"模型菜单展开时箭头旋转",
+		);
 		for (const theme of ["light", "dark"]) {
 			await browser.evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
 			await browser.screenshot(join(root, `model-menu-${theme}.png`));
@@ -214,14 +223,83 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		assert.equal(outcome.tools, 1, "重试未重复执行已接受的工具调用");
 		assert.ok(outcome.result.includes("READ_E2E_OK"));
 		evidence.acceptedMessageRetry = { userMessages: outcome.users, toolResults: outcome.tools };
+		await browser.evaluate(
+			`window.__originalFetch=window.fetch;window.fetch=async(...args)=>{if(String(args[0]).endsWith('/api/sessions/${previous.id}'))await new Promise(r=>setTimeout(r,500));return window.__originalFetch(...args)};const start=document.startViewTransition.bind(document);document.startViewTransition=(...args)=>{const t=start(...args);t.ready.then(()=>{window.__sessionMotion=document.getAnimations().filter(a=>a.effect?.pseudoElement?.includes('session-messages')).map(a=>({pseudo:a.effect.pseudoElement,duration:a.effect.getTiming().duration,frames:a.effect.getKeyframes()}));});return t;};`,
+		);
+		await browser.click(`.sidebar-session[data-session-id="${previous.id}"]`);
+		await browser.until(
+			`location.pathname==='/s/${previous.id}' && !!document.querySelector('.chat-empty')`,
+			"切换到昨日会话并等待加载",
+		);
+		assert.equal(await browser.evaluate("!!document.querySelector('.chat-loaded')"), false, "加载期间不显示上一会话");
+		await browser.until("Array.isArray(window.__sessionMotion)", "会话切换快照");
+		const motion =
+			await browser.evaluate<{ pseudo: string; duration: number; frames: { transform?: string }[] }[]>(
+				"window.__sessionMotion",
+			);
+		const outgoing = motion.find((item) => item.pseudo === "::view-transition-old(session-messages)");
+		const incoming = motion.find((item) => item.pseudo === "::view-transition-new(session-messages)");
+		assert.equal(outgoing?.duration, 80);
+		assert.equal(incoming?.duration, 150);
+		assert.match(outgoing?.frames.at(-1)?.transform ?? "", /-4px/);
+		assert.match(incoming?.frames[0]?.transform ?? "", /4px/);
+		await browser.until("document.querySelector('.conversation')?.textContent.includes('昨日回答')", "昨日会话正文");
+		assert.equal(await browser.evaluate("document.querySelector('.chat-loaded').dataset.sessionId"), previous.id);
+		assert.ok(
+			await browser.evaluate(
+				"document.querySelector('.chat-loaded').getAnimations().some(a=>a.animationName==='chat-content-reveal')",
+			),
+			"加载完成时播放正文入场",
+		);
+		assert.ok(
+			await browser.evaluate(
+				"(()=>{const e=document.querySelector('.chat-loaded .markdown p');return CSS.supports('color','color-mix(in srgb-linear, black, white)') && !!e && e.getAnimations().some(a=>a.animationName==='linear-text-in')})()",
+			),
+			"正文使用线性光文字混合",
+		);
+		const linearTextColors = await browser.evaluate<{ start: string; end: string }>(
+			"(()=>{const e=document.querySelector('.chat-loaded .markdown p'),a=e?.getAnimations().find(a=>a.animationName==='linear-text-in');if(!e||!a)return {start:'',end:''};a.pause();a.currentTime=0;const start=getComputedStyle(e).color;a.currentTime=150;const end=getComputedStyle(e).color;a.cancel();return {start,end};})()",
+		);
+		assert.notEqual(linearTextColors.start, linearTextColors.end, JSON.stringify(linearTextColors));
+		assert.ok(
+			await browser.evaluate(
+				"(()=>{const a=document.querySelector('.chat-loaded').getAnimations().find(a=>a.animationName==='chat-content-reveal');return a.effect.getTiming().duration===150 && a.effect.getKeyframes().some(k=>Math.abs(k.offset-0.53333)<0.001 && k.filter==='blur(0px)')})()",
+			),
+			"正文切换 150ms，模糊在 80ms 内结束",
+		);
+		await browser.evaluate("window.fetch=window.__originalFetch");
+		await browser.click(`.sidebar-session[data-session-id="${id}"]`);
+		await browser.until(`document.querySelector('.chat-loaded')?.dataset.sessionId==='${id}'`, "切回当前会话");
+		await browser.call("Emulation.setEmulatedMedia", {
+			features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+		});
+		await browser.navigate(`${origin}/s/${id}`);
+		await browser.until("!!document.querySelector('.chat-loaded')", "减少动态下加载会话");
+		assert.equal(
+			await browser.evaluate("getComputedStyle(document.querySelector('.chat-loaded')).animationName"),
+			"none",
+		);
+		await browser.call("Emulation.setEmulatedMedia", { features: [] });
 		await browser.navigate(`${origin}/s/${id}`);
 		await browser.until(
 			"document.querySelector('.conversation')?.textContent.includes('测试回答')",
 			"刷新恢复真实对话历史",
 		);
 		await browser.until("!!document.querySelector('.turn-process-head')", "工具过程入口");
+		assert.ok(
+			await browser.evaluate(
+				"(()=>{const i=document.querySelector('.turn-process-head .disclosure__indicator'),m=new DOMMatrix(getComputedStyle(i).transform);return m.b < -.99 && getComputedStyle(i).rotate==='none'})()",
+			),
+			"折叠指示器朝右",
+		);
 		await browser.evaluate("document.querySelector('.turn-process-head').click()");
 		await browser.until("document.querySelector('.tool-group')?.getBoundingClientRect().width > 0", "工具分组展开");
+		assert.ok(
+			await browser.evaluate(
+				"(()=>{const i=document.querySelector('.tool-group-heading .disclosure__indicator');return new DOMMatrix(getComputedStyle(i).transform).b < -.99})()",
+			),
+			"父级展开时子级仍朝右",
+		);
 		await browser.click(".tool-group-heading");
 		await browser.click(".tool-card-heading");
 		await browser.evaluate(
@@ -229,6 +307,16 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		);
 		await browser.click(".tool-raw-toggle");
 		await browser.click(".thinking-trigger");
+		await browser.evaluate(
+			"Promise.all([...document.querySelectorAll('.disclosure__indicator')].flatMap(e=>e.getAnimations()).map(a=>a.finished))",
+		);
+		assert.equal(
+			await browser.evaluate(
+				"[...document.querySelectorAll('.turn-process-head, .tool-group-heading, .tool-card-heading, .thinking-trigger, .tool-raw-toggle')].every(e=>e.getAttribute('aria-expanded')==='true' && Math.abs(new DOMMatrix(getComputedStyle(e.querySelector('.disclosure__indicator')).transform).a-1)<.01 && getComputedStyle(e.querySelector('.disclosure__indicator')).rotate==='none')",
+			),
+			true,
+			"展开指示器统一朝下",
+		);
 		await browser.evaluate(
 			"Promise.all([...document.querySelectorAll('.disclosure__content')].flatMap(e=>e.getAnimations()).map(a=>a.finished))",
 		);
@@ -242,6 +330,52 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		);
 		assert.ok(await browser.evaluate("!!document.querySelector('.tool-card-detail .tool-raw')"), "原始数据可展开");
 		await browser.screenshot(join(root, "workspace-light.png"));
+		await browser.evaluate(
+			"(()=>{const c=document.querySelector('.conversation');c.scrollTop=0;c.dispatchEvent(new Event('scroll'))})()",
+		);
+		await browser.until("!!document.querySelector('.back-to-bottom')", "上翻显示回到底部");
+		assert.equal(
+			await browser.evaluate(
+				"(()=>{const b=document.querySelector('.back-to-bottom'),s=document.querySelector('.chat-message-surface'),r=b.getBoundingClientRect(),p=s.getBoundingClientRect(),c=getComputedStyle(b);return r.height>=40 && p.bottom-r.bottom<=16 && c.color!==c.backgroundColor})()",
+			),
+			true,
+			"按钮尺寸、位置和对比清晰",
+		);
+		const scrolling = await browser.evaluate<{ initial: number; middle: number; bottom: number; shown: boolean }>(
+			"(async()=>{const c=document.querySelector('.conversation'),initial=c.scrollTop,bottom=c.scrollHeight-c.clientHeight,reduced=matchMedia('(prefers-reduced-motion: reduce)').matches,duration=getComputedStyle(c).getPropertyValue('--duration-fast');document.querySelector('.back-to-bottom').click();const immediate=c.scrollTop;await new Promise(r=>setTimeout(r,80));return {initial,immediate,middle:c.scrollTop,bottom,shown:!!document.querySelector('.back-to-bottom'),reduced,duration};})()",
+		);
+		assert.ok(
+			scrolling.middle > scrolling.initial && scrolling.middle < scrolling.bottom - 1,
+			JSON.stringify(scrolling),
+		);
+		assert.equal(scrolling.shown, true, "滚动过程中保持按钮，避免闪烁");
+		await browser.until("!document.querySelector('.back-to-bottom')", "回到底部恢复跟随");
+		await browser.evaluate(
+			"(()=>{const c=document.querySelector('.conversation');c.scrollTop=0;c.dispatchEvent(new Event('scroll'))})()",
+		);
+		await browser.until("!!document.querySelector('.back-to-bottom')", "再次上翻");
+		const interrupted = await browser.evaluate<{ stopped: number; later: number; visible: boolean }>(
+			"(async()=>{const c=document.querySelector('.conversation');document.querySelector('.back-to-bottom').click();await new Promise(r=>setTimeout(r,50));c.dispatchEvent(new WheelEvent('wheel',{deltaY:-100,bubbles:true}));const stopped=c.scrollTop;await new Promise(r=>setTimeout(r,300));return {stopped,later:c.scrollTop,visible:!!document.querySelector('.back-to-bottom')};})()",
+		);
+		assert.equal(interrupted.later, interrupted.stopped, "用户滚动可打断动画");
+		assert.equal(interrupted.visible, true);
+		await browser.evaluate("document.querySelector('.back-to-bottom').click()");
+		await browser.call("Emulation.setEmulatedMedia", {
+			features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+		});
+		await browser.until("!document.querySelector('.back-to-bottom')", "中途启用减少动态时立即到达底部");
+		assert.ok(
+			await browser.evaluate(
+				"(()=>{const c=document.querySelector('.conversation');return c.scrollHeight-c.clientHeight-c.scrollTop<1})()",
+			),
+		);
+		await browser.evaluate(
+			"(()=>{const c=document.querySelector('.conversation');c.scrollTop=0;c.dispatchEvent(new Event('scroll'))})()",
+		);
+		await browser.until("!!document.querySelector('.back-to-bottom')", "减少动态时上翻");
+		await browser.click(".back-to-bottom");
+		await browser.until("!document.querySelector('.back-to-bottom')", "减少动态时立即到达底部");
+		await browser.call("Emulation.setEmulatedMedia", { features: [] });
 		await browser.evaluate("document.querySelector('.sidebar-account-trigger').click()");
 		await browser.until("!!document.querySelector('.sidebar-account-menu button[aria-label^=主题]')", "账号菜单");
 		await browser.evaluate("document.querySelector('.sidebar-account-menu button[aria-label^=主题]').click()");
@@ -251,6 +385,18 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		await browser.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
 		await browser.until("!document.querySelector('.sidebar-account-menu')", "菜单退出完成");
 		await browser.screenshot(join(root, "workspace-dark.png"));
+		await browser.evaluate(
+			"(()=>{const c=document.querySelector('.conversation');c.scrollTop=0;c.dispatchEvent(new Event('scroll'))})()",
+		);
+		await browser.until("!!document.querySelector('.back-to-bottom')", "深色主题显示回到底部");
+		assert.equal(
+			await browser.evaluate(
+				"(()=>{const c=getComputedStyle(document.querySelector('.back-to-bottom'));return c.color!==c.backgroundColor && Number(c.backgroundColor.match(/\\d+/)?.[0])>180})()",
+			),
+			true,
+		);
+		await browser.screenshot(join(root, "back-to-bottom-dark.png"));
+		await browser.click(".back-to-bottom");
 		await browser.click('[aria-label="收起侧栏"]');
 		await browser.until("document.querySelector('.sidebar').inert", "收起侧栏后隐藏交互");
 		evidence.sidebarToggle = true;

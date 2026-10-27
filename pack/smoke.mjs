@@ -75,7 +75,7 @@ export async function smokeRelease(source, workDir) {
     const output = await runOnce();
     const warmOutput = await runOnce();
     if (!output.includes('CST_SMOKE_OK') || !warmOutput.includes('CST_SMOKE_OK') || requests !== 2) throw new Error('首次或再次启动的模拟模型回合未完成');
-    for (const name of ['read', 'ls', 'disk', 'driver', 'eventlog', 'startup', 'sys', 'runbook', 'web_search', 'fetch_content']) {
+    for (const name of ['read', 'ls', 'disk', 'driver', 'eventlog', 'startup', 'sys', 'runbook', 'command_plan', 'runbook_deliver', 'web_search', 'fetch_content']) {
       if (!seen.has(name)) throw new Error(`冒烟缺少工具: ${name}`);
     }
     for (const name of ['write', 'edit', 'bash', 'powershell']) {

@@ -206,11 +206,12 @@ function Runbook({
 	}
 	return (
 		<>
-			{view.delivery && (
+			{view.status === "success" && (
 				<div className="special-tool-runbook-meta">
-					<span>{view.delivery.level}</span>
-					<span>{view.delivery.count ?? "未知"} 条命令</span>
-					<span>手动执行</span>
+					<span>{view.level}</span>
+					<span>{view.count ?? "未知"} 条命令</span>
+					{view.version !== null && <span>版本 {view.version}</span>}
+					<span>{view.planned ? "待核对，尚未导出文本" : "手动执行"}</span>
 				</div>
 			)}
 			<ol className="special-tool-commands">
@@ -219,7 +220,8 @@ function Runbook({
 						<div className="special-tool-command-heading">
 							<strong>{command.summary}</strong>
 							<small>
-								{command.shell} · {command.admin ? "管理员" : "普通权限"}
+								{command.shell === "powershell" ? "PowerShell" : command.shell} ·{" "}
+								{command.admin ? "管理员" : "普通权限"}
 							</small>
 						</div>
 						<div className="special-tool-command-line">

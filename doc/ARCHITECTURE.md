@@ -34,7 +34,7 @@ flowchart TB
 | 模块 | 代码路径 | 核心职责 | 模块文档 |
 |---|---|---|---|
 | `runtime` | `pi.cmd`、`launcher.ps1`、`agent/home/extensions/runtime/`、`branding/` | UAC 提权启动、便携环境隔离、TUI/Web 接管、跨进程会话写权、共享配置重读 | [SPEC](runtime/SPEC.md) · [ARCHITECTURE](runtime/ARCHITECTURE.md) |
-| `diagnostics` | `agent/home/extensions/diagnostics/`、`agent/home/skills/`、`pwsh/`、`wiztree/`、`lhm/` | 8 个注册工具、共享目录大小缓存、PowerShell 安全调用、BitLocker 双端交互与跨进程卷锁 | [SPEC](diagnostics/SPEC.md) · [ARCHITECTURE](diagnostics/ARCHITECTURE.md) · [API](diagnostics/API.md) |
+| `diagnostics` | `agent/home/extensions/diagnostics/`、`agent/home/skills/`、`pwsh/`、`wiztree/`、`lhm/` | 10 个注册工具、命令方案版本存储、共享目录大小缓存、PowerShell 安全调用、BitLocker 双端交互与跨进程卷锁 | [SPEC](diagnostics/SPEC.md) · [ARCHITECTURE](diagnostics/ARCHITECTURE.md) · [API](diagnostics/API.md) |
 | `web` | `agent/home/extensions/web/`、`src/web/frontend/`、`src/web/design/` | 本机 HTTP/SSE 服务、多会话池、持久化输入收件箱、React 19 静态 SPA、流式渲染与工具卡片 | [SPEC](web/SPEC.md) · [ARCHITECTURE](web/ARCHITECTURE.md) · [API](web/API.md) |
 | `auth` | `agent/home/extensions/oauth/`、`agent/home/extensions/web/server/api/` | `cstoa` 原生 Provider（设备码 OAuth 与 APIKEY）、动态模型目录、Pi 原生多服务登录与自定义服务 | [SPEC](auth/SPEC.md) · [ARCHITECTURE](auth/ARCHITECTURE.md) · [API](auth/API.md) |
 | `telemetry` | `agent/home/extensions/telemetry/`、`cst-pilot-server` | 会话统计采集、恢复草稿、回答结束/心跳/关闭统一提交、双端独立队列与 Go 接收端 | [SPEC](telemetry/SPEC.md) · [ARCHITECTURE](telemetry/ARCHITECTURE.md) · [API](telemetry/API.md) · [OPERATIONS](telemetry/OPERATIONS.md) |
@@ -63,7 +63,8 @@ flowchart TB
 | `agent/home/web-inbox/` | Web 已接受输入队列、回执、创建时间与会话图片附件 | Web 后端按会话维护；先落盘确认再投递给模型 |
 | `agent/home/web-access.log` | Web HTTP 与 API 访问诊断日志 | 追加请求方法、路径、响应状态与耗时；不记录查询参数或请求正文，当前无自动清理 |
 | `agent/home/telemetry/` | 匿名安装身份、会话恢复草稿、双端待发队列与诊断状态 | 遥测扩展维护；通过跨进程目录锁保护 |
-| `outbox/<YYYY-MM-DD>/` | `runbook` 交付的修复命令清单 TXT | `runbook` 工具写入；按日期目录跨进程互斥 |
+| `outbox/<YYYY-MM-DD>/` | 修复命令清单 TXT；版本化方案按 ID 分目录 | `runbook_deliver` 与 `runbook` 写入；同版本文件保持不变 |
+| `outbox/.plans/<ID>/` | 每个方案版本的完整 JSON | `command_plan` 原子保存；共享目录锁核对修订版本 |
 | `wiztree/tmp/` | WizTree 扫描导出的临时 CSV | 扫描期间写入，结束后清理 |
 | `.state/` | 启动器与运行期临时目录 | 启动器初始化，重定向 `TEMP`/`TMP` 至工具包内 |
 

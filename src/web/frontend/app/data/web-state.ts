@@ -290,6 +290,7 @@ export function useSessionDetail(id: string | undefined) {
 	useEffect(() => {
 		setDetail(undefined);
 		setStreaming(undefined);
+		setError("");
 		bitlockerState.current = { revision: -1, requests: [] };
 		if (!id) return;
 		void refresh();
@@ -385,5 +386,6 @@ export function useSessionDetail(id: string | undefined) {
 			events = undefined;
 		};
 	}, [id, refresh]);
-	return { detail, streaming, error, refresh, setDetail };
+	const currentDetail = detail?.id === id ? detail : undefined;
+	return { detail: currentDetail, streaming: currentDetail ? streaming : undefined, error, refresh, setDetail };
 }

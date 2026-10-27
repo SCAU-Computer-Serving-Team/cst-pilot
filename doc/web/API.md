@@ -40,10 +40,14 @@
 | `GET` | `/api/sessions/<id>/tree` | 读取会话分支树与当前叶节点 |
 | `POST` | `/api/sessions/<id>/tree/navigate`、`/tree/abort` | 执行分支导航（支持 `summarize` 与 `customInstructions`）/ 取消正在生成的分支总结 |
 | `GET` / `POST` | `/api/sessions/<id>/bitlocker`、`/bitlocker/<requestId>` | 读取当前 BitLocker 待处理请求 / 一次性提交本地恢复密码、解密确认或取消 |
-| `POST` | `/api/sessions/<id>/runbook/open` | 按助手条目与调用 ID 在系统记事本中打开已交付的 TXT 清单 |
+| `POST` | `/api/sessions/<id>/runbook/open` | 按助手条目与调用 ID 匹配 `runbook` / `runbook_deliver` 的结果，在系统记事本中打开已交付的 TXT 清单 |
 | `POST` | `/api/sessions/<id>/ui/<requestId>/response` | 回答扩展发起的选择、确认或输入请求 |
 | `POST` | `/api/sessions/<id>/compact` | 执行手动上下文压缩 |
 | `GET` | `/api/sessions/<id>/events` | 单会话 SSE 增量事件流（支持 `Last-Event-ID` 续传） |
+
+### 清单打开请求
+
+`POST /api/sessions/<id>/runbook/open` 正文为 `{ entryId, toolCallId }`，不接受浏览器指定文件路径。服务端按该次交付结果取路径；未导出的方案不能打开，文件不存在、无权限或记事本启动失败分别返回对应错误。
 
 ### 输入与队列请求
 

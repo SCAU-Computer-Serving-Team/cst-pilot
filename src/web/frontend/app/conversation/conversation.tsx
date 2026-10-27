@@ -1,6 +1,6 @@
 import { Button, Disclosure, Tooltip } from "@heroui/react";
 import { ArrowDown, ChevronDown, Copy, GitBranch, GitFork, X } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { matchToolResults } from "../cards/match-results";
 import { SpecialTool } from "../cards/special-tool";
 import type { PendingBitLocker } from "../data/bitlocker-state";
@@ -190,6 +190,7 @@ export function Conversation({
 	onFork: () => void;
 }) {
 	const scroll = useRef<HTMLDivElement>(null);
+	const scrollAnimation = useRef<number | null>(null);
 	const [following, setFollowing] = useState(true);
 	const [error, setError] = useState("");
 	const [visibleCount, setVisibleCount] = useState(80);
@@ -211,6 +212,63 @@ export function Conversation({
 	}, [history, visibleCount, streaming]);
 	const turns = useMemo(() => groupTurns(display), [display]);
 	const active = activeTurnIndex(turns, running);
+	const cancelScroll = useCallback(() => {
+		if (scrollAnimation.current === null) return;
+		cancelAnimationFrame(scrollAnimation.current);
+		scrollAnimation.current = null;
+	}, []);
+	function goToBottom() {
+		const el = scroll.current;
+		if (!el) return;
+		cancelScroll();
+		if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+			el.scrollTop = el.scrollHeight;
+			setFollowing(true);
+			return;
+		}
+		const start = el.scrollTop;
+		const started = performance.now();
+		const durationToken = getComputedStyle(el).getPropertyValue("--duration-fast").trim();
+		const durationValue = Number.parseFloat(durationToken);
+		const duration = Number.isFinite(durationValue) ? durationValue * (durationToken.endsWith("ms") ? 1 : 1000) : 250;
+		const step = (now: number) => {
+			const progress = Math.min((now - started) / duration, 1);
+			const eased = 1 - (1 - progress) ** 3;
+			el.scrollTop = start + (el.scrollHeight - el.clientHeight - start) * eased;
+			if (progress < 1) scrollAnimation.current = requestAnimationFrame(step);
+			else {
+				scrollAnimation.current = null;
+				setFollowing(true);
+			}
+		};
+		scrollAnimation.current = requestAnimationFrame(step);
+	}
+	useEffect(() => {
+		const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+		const onChange = () => {
+			if (!motion.matches || scrollAnimation.current === null) return;
+			cancelScroll();
+			if (scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
+			setFollowing(true);
+		};
+		const el = scroll.current;
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) cancelScroll();
+		};
+		motion.addEventListener("change", onChange);
+		el?.addEventListener("wheel", cancelScroll, { passive: true });
+		el?.addEventListener("touchstart", cancelScroll, { passive: true });
+		el?.addEventListener("pointerdown", cancelScroll);
+		el?.addEventListener("keydown", onKeyDown);
+		return () => {
+			cancelScroll();
+			motion.removeEventListener("change", onChange);
+			el?.removeEventListener("wheel", cancelScroll);
+			el?.removeEventListener("touchstart", cancelScroll);
+			el?.removeEventListener("pointerdown", cancelScroll);
+			el?.removeEventListener("keydown", onKeyDown);
+		};
+	}, [cancelScroll]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: entries 与 streaming 只作为滚动触发信号，不在 effect 体内读取
 	useEffect(() => {
 		if (following) scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
@@ -222,7 +280,8 @@ export function Conversation({
 				ref={scroll}
 				onScroll={() => {
 					const el = scroll.current;
-					if (el) setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 100);
+					if (el && scrollAnimation.current === null)
+						setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 100);
 				}}
 			>
 				{history.length > visibleCount && (
@@ -313,17 +372,8 @@ export function Conversation({
 				)}
 			</div>
 			{!following && (
-				<Button
-					className="back-to-bottom"
-					onPress={() => {
-						scroll.current?.scrollTo({
-							top: scroll.current.scrollHeight,
-							behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
-						});
-						setFollowing(true);
-					}}
-				>
-					<ArrowDown size={14} aria-hidden="true" />
+				<Button className="back-to-bottom" onPress={goToBottom}>
+					<ArrowDown size={16} aria-hidden="true" />
 					回到底部
 				</Button>
 			)}

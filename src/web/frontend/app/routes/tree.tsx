@@ -179,7 +179,7 @@ export default function SessionTree() {
 			if (event.key === "Escape") {
 				if (filterOpen) return;
 				event.preventDefault();
-				navigate(`/s/${sessionId}`);
+				navigate(`/s/${sessionId}`, { viewTransition: true });
 				return;
 			}
 			if (event.key.toLowerCase() === "o" && event.ctrlKey && !event.altKey && !event.metaKey) {
@@ -206,7 +206,7 @@ export default function SessionTree() {
 				body: { entryId },
 			});
 			if (result.editorText) sessionStorage.setItem(draftKey(sessionId), result.editorText);
-			navigate(`/s/${sessionId}`);
+			navigate(`/s/${sessionId}`, { viewTransition: true });
 		} catch (cause) {
 			setActionError(cause instanceof Error ? cause.message : "分支导航未完成");
 			await refresh();
@@ -218,7 +218,7 @@ export default function SessionTree() {
 		const entryId = choice;
 		setChoice("");
 		if (mode === "none") await jump(entryId);
-		else navigate(branchSummaryHref(sessionId, entryId, mode));
+		else navigate(branchSummaryHref(sessionId, entryId, mode), { viewTransition: true });
 	}
 	function toggleFold(row: TreeRow) {
 		const id = row.node.entry.id;
@@ -245,7 +245,7 @@ export default function SessionTree() {
 					isIconOnly
 					className="tree-close"
 					aria-label="关闭分支树，返回会话"
-					onPress={() => navigate(`/s/${sessionId}${preview ? "?preview=1" : ""}`)}
+					onPress={() => navigate(`/s/${sessionId}${preview ? "?preview=1" : ""}`, { viewTransition: true })}
 				>
 					<X size={18} />
 				</Button>

@@ -71,6 +71,41 @@ test("三档清单共用组件，失败无文件链接，历史命令来自调�
 		assert.equal(failed?.kind === "runbook" && failed.delivery, undefined);
 	}
 });
+test("清单以结果中的标题和命令为准，调用缺参也能恢复", () => {
+	const commands = [{ shell: "powershell", admin: false, summary: "输出新内容", command: "Write-Output latest" }];
+	const v = mapSpecialTool(
+		call("runbook", { title: "旧标题", items: [{ command: "stale" }] }),
+		result({ runbook: { title: "修订后清单", commands, file: "E:/outbox/a.txt", items: 1 } }),
+	);
+	assert.equal(v?.title, "修订后清单");
+	assert.deepEqual(v?.kind === "runbook" && v.commands, commands);
+	const restored = mapSpecialTool(call("runbook"), result({ runbook: { title: "修订后清单", commands } }));
+	assert.deepEqual(restored?.kind === "runbook" && restored.commands, commands);
+});
+test("方案和交付使用相同命令卡，文本结果也能独立恢复", () => {
+	const commands = [{ shell: "cmd", admin: false, summary: "说明", command: "echo restored" }];
+	for (const name of ["command_plan", "runbook_deliver"]) {
+		const details = {
+			runbook: {
+				title: "新方案",
+				version: 2,
+				levelLabel: "安全",
+				commands,
+				items: 1,
+				action: name === "command_plan" ? "planned" : "delivered",
+				...(name === "runbook_deliver" ? { file: "E:/outbox/plan.txt" } : {}),
+			},
+		};
+		const message = result(details);
+		delete message.details;
+		const view = mapSpecialTool(call(name), message);
+		assert.equal(view?.kind, "runbook");
+		if (view?.kind !== "runbook") throw new Error("命令卡缺失");
+		assert.deepEqual(view.commands, commands);
+		assert.equal(view.summary, name === "command_plan" ? "方案已保存" : "已生成");
+	}
+});
+
 test("BitLocker 请求、实际状态、取消与复查缺失独立映射", () => {
 	const c = call("bitlocker", { scope: "unlock", drive: "D:" });
 	const v = (operation: string, lockStatus: number | null = 0, extra = {}) =>

@@ -9,10 +9,6 @@ import { loadSetting, settingReady } from "./settings-resource-cache";
 const Feedback = createContext<(message?: string) => void>(() => {});
 export const useSettingsFeedback = () => useContext(Feedback);
 
-const settingIndex = (path: string) => {
-	if (path.startsWith("/settings/provider") || path === "/settings/add" || path === "/settings/custom") return 2;
-	return ["/settings/general", "/settings", "/settings/models", "/settings/shortcuts"].indexOf(path);
-};
 function resourceForSettingsRoute(path: string): string | undefined {
 	if (path === "/settings/general") return "/api/settings";
 	if (path === "/settings/models") return "/api/models";
@@ -51,8 +47,6 @@ export function SettingsLink({ to, onClick, ...props }: ComponentProps<typeof Li
 					void loadSetting(resource)
 						.then(() => {
 							if (window.location.pathname !== pathname) return;
-							document.documentElement.dataset.settingsDirection =
-								settingIndex(target) < settingIndex(pathname) ? "back" : "forward";
 							void navigate(to, { viewTransition: true });
 						})
 						.catch(() => {
@@ -63,8 +57,6 @@ export function SettingsLink({ to, onClick, ...props }: ComponentProps<typeof Li
 						});
 					return;
 				}
-				document.documentElement.dataset.settingsDirection =
-					settingIndex(target) < settingIndex(pathname) ? "back" : "forward";
 			}}
 		/>
 	);
@@ -147,7 +139,6 @@ export function SettingsHeading({
 			)
 				return;
 			event.preventDefault();
-			document.documentElement.dataset.settingsDirection = "back";
 			void navigate("/settings", { viewTransition: true });
 		};
 		document.addEventListener("keydown", onEscape);

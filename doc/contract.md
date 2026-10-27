@@ -124,7 +124,7 @@ environmentId = HMAC-SHA256(identityKey, message)
 | `degraded` / `truncated` | 结果标记 `degraded`（含 `disk usage` 降级 `node-walk`）次数 / 标记输出裁剪次数 |
 | `totalMs` / `maxMs` | 执行耗时总和 / 单次最大耗时（毫秒） |
 | `resultBytes` | 结果文本 UTF-8 字节数累计 |
-| `entriesTotal` | `runbook` 交付的命令条目总数 |
+| `entriesTotal` | `runbook` 与 `runbook_deliver` 成功交付的命令条目总数；`command_plan` 仅计工具调用，不计交付条目 |
 | `providers` / `modes` | `web_search` 服务分布对象 / `fetch_content` 模式分布对象 |
 
 ## 不采集清单

@@ -1,7 +1,7 @@
 import { Button, Popover } from "@heroui/react";
 import { Download, EllipsisVertical, HardDrive, ListTree, Share2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams, useSearchParams, useViewTransitionState } from "react-router";
 import { Composer } from "../composer/composer";
 import { Conversation } from "../conversation/conversation";
 import { visibleQueueItems } from "../conversation/conversation-parts";
@@ -30,6 +30,19 @@ export default function Chat() {
 	const [messageMenuOpen, setMessageMenuOpen] = useState(false);
 	usePanelDismiss(messageMenuOpen, () => setMessageMenuOpen(false));
 	const location = useLocation();
+	const transitioning = useViewTransitionState(location.pathname);
+	const entrance = useRef<{ id: string; snapshot: boolean } | null>(null);
+	if (entrance.current?.id !== sessionId) entrance.current = null;
+	if (detail && entrance.current?.id !== detail.id) {
+		const captured = document
+			.getAnimations()
+			.some(
+				(animation) =>
+					animation.effect instanceof KeyframeEffect &&
+					animation.effect.pseudoElement?.startsWith("::view-transition-"),
+			);
+		entrance.current = { id: detail.id, snapshot: transitioning && !captured };
+	}
 	const [forkSource, setForkSource] = useState("");
 	// 派生跳转带入的来源提示：换路由即读取，读后立刻清掉历史状态避免刷新后复现
 	useEffect(() => {
@@ -136,7 +149,7 @@ export default function Chat() {
 						</Button>
 						<Popover.Content placement="bottom end" className="sidebar-account-popover">
 							<Popover.Dialog aria-label="消息菜单" className="sidebar-account-menu">
-								<Link className="sidebar-account-item" to={`/s/${sessionId}/tree`}>
+								<Link className="sidebar-account-item" to={`/s/${sessionId}/tree`} viewTransition>
 									<ListTree size={18} aria-hidden="true" />
 									分支树
 								</Link>
@@ -171,17 +184,25 @@ export default function Chat() {
 			)}
 			<div className="chat-message-surface">
 				{detail ? (
-					<Conversation
-						id={detail.id}
-						entries={entries}
-						requests={detail.bitlocker?.requests ?? EMPTY_REQUESTS}
-						streaming={streaming}
-						running={!!detail.running}
-						summarizing={summarizing}
-						refresh={refresh}
-						onCancelSummary={cancelSummary}
-						onFork={example ? () => undefined : () => setForkOpen(true)}
-					/>
+					<div
+						key={detail.id}
+						className="chat-loaded"
+						data-session-id={detail.id}
+						data-snapshot-entered={entrance.current?.snapshot || undefined}
+						data-linear-text-enter={entrance.current?.snapshot ? undefined : "true"}
+					>
+						<Conversation
+							id={detail.id}
+							entries={entries}
+							requests={detail.bitlocker?.requests ?? EMPTY_REQUESTS}
+							streaming={streaming}
+							running={!!detail.running}
+							summarizing={summarizing}
+							refresh={refresh}
+							onCancelSummary={cancelSummary}
+							onFork={example ? () => undefined : () => setForkOpen(true)}
+						/>
+					</div>
 				) : (
 					<div className="chat-empty">
 						{example ? (
