@@ -228,10 +228,14 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		);
 		await browser.click(`.sidebar-session[data-session-id="${previous.id}"]`);
 		await browser.until(
-			`location.pathname==='/s/${previous.id}' && !!document.querySelector('.chat-empty')`,
-			"切换到昨日会话并等待加载",
+			`location.pathname==='/s/${previous.id}' && document.querySelector('.chat-loaded')?.dataset.sessionId==='${previous.id}'`,
+			"预载昨日会话直接切换",
 		);
-		assert.equal(await browser.evaluate("!!document.querySelector('.chat-loaded')"), false, "加载期间不显示上一会话");
+		assert.equal(
+			await browser.evaluate("document.body.textContent.includes('正在读取会话')"),
+			false,
+			"预载切页不出现读取占位",
+		);
 		await browser.until("Array.isArray(window.__sessionMotion)", "会话切换快照");
 		const motion =
 			await browser.evaluate<{ pseudo: string; duration: number; frames: { transform?: string }[] }[]>(
@@ -245,27 +249,12 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		assert.match(incoming?.frames[0]?.transform ?? "", /4px/);
 		await browser.until("document.querySelector('.conversation')?.textContent.includes('昨日回答')", "昨日会话正文");
 		assert.equal(await browser.evaluate("document.querySelector('.chat-loaded').dataset.sessionId"), previous.id);
-		assert.ok(
+		assert.equal(
 			await browser.evaluate(
 				"document.querySelector('.chat-loaded').getAnimations().some(a=>a.animationName==='chat-content-reveal')",
 			),
-			"加载完成时播放正文入场",
-		);
-		assert.ok(
-			await browser.evaluate(
-				"(()=>{const e=document.querySelector('.chat-loaded .markdown p');return CSS.supports('color','color-mix(in srgb-linear, black, white)') && !!e && e.getAnimations().some(a=>a.animationName==='linear-text-in')})()",
-			),
-			"正文使用线性光文字混合",
-		);
-		const linearTextColors = await browser.evaluate<{ start: string; end: string }>(
-			"(()=>{const e=document.querySelector('.chat-loaded .markdown p'),a=e?.getAnimations().find(a=>a.animationName==='linear-text-in');if(!e||!a)return {start:'',end:''};a.pause();a.currentTime=0;const start=getComputedStyle(e).color;a.currentTime=150;const end=getComputedStyle(e).color;a.cancel();return {start,end};})()",
-		);
-		assert.notEqual(linearTextColors.start, linearTextColors.end, JSON.stringify(linearTextColors));
-		assert.ok(
-			await browser.evaluate(
-				"(()=>{const a=document.querySelector('.chat-loaded').getAnimations().find(a=>a.animationName==='chat-content-reveal');return a.effect.getTiming().duration===150 && a.effect.getKeyframes().some(k=>Math.abs(k.offset-0.53333)<0.001 && k.filter==='blur(0px)')})()",
-			),
-			"正文切换 150ms，模糊在 80ms 内结束",
+			false,
+			"命中预载时由页面快照衔接，不叠加局部正文入场",
 		);
 		await browser.evaluate("window.fetch=window.__originalFetch");
 		await browser.click(`.sidebar-session[data-session-id="${id}"]`);

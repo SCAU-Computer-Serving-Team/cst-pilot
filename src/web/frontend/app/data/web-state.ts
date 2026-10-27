@@ -3,6 +3,8 @@ import type { TreeNode } from "../tree/branch-tree";
 import { apiJson } from "./api";
 import { type BitLockerSnapshot, newestBitLocker } from "./bitlocker-state";
 import { OptimisticSessionDeletion } from "./optimistic-session-deletion";
+import { recentSessionIds, SessionDetailCache } from "./session-cache";
+import { commitMessage, containsAssistant } from "./session-stream";
 import { StreamHealth } from "./stream-health";
 import { StreamPacer } from "./stream-player";
 
@@ -64,6 +66,12 @@ export type SessionDetail = {
 	ui: Question[];
 };
 
+const sessionDetails = new SessionDetailCache((id) =>
+	apiJson<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`),
+);
+
+let knownSessions: readonly SessionRow[] = [];
+
 type GlobalEventName = "open" | "state" | "reset" | "error";
 type GlobalEventHandler = (name: GlobalEventName, event: MessageEvent | undefined) => void;
 
@@ -109,8 +117,10 @@ export function useSessions() {
 	const [error, setError] = useState("");
 	const currentRows = useRef<SessionRow[]>([]);
 	const deletions = useRef(new OptimisticSessionDeletion());
+	const preloaded = useRef(false);
 	const updateRows = useCallback((rows: SessionRow[]) => {
 		currentRows.current = rows;
+		knownSessions = rows;
 		setSessions(rows);
 	}, []);
 	const requestSequence = useRef(0);
@@ -120,7 +130,15 @@ export function useSessions() {
 		try {
 			const state = await apiJson<{ sessions: SessionRow[]; stage: string }>("/api/state");
 			if (sequence !== requestSequence.current) return;
-			updateRows(deletions.current.reconcile(state.sessions));
+			const rows = deletions.current.reconcile(state.sessions);
+			updateRows(rows);
+			if (state.stage !== "preview") {
+				sessionDetails.reconcile(state.sessions);
+				if (!preloaded.current) {
+					preloaded.current = true;
+					void sessionDetails.preload(recentSessionIds(rows));
+				}
+			}
 			setStage(state.stage);
 			setError("");
 		} catch (cause) {
@@ -157,6 +175,7 @@ export function useSessions() {
 	);
 	const beginDeletion = useCallback(
 		(ids: readonly string[]) => {
+			for (const id of ids) sessionDetails.remove(id);
 			++requestSequence.current;
 			updateRows(deletions.current.begin(currentRows.current, ids));
 		},
@@ -234,7 +253,7 @@ export function useSessionTree(id: string | undefined) {
 
 /** 会话标题：从会话列表里查当前会话的名字，找不到用「新对话」。 */
 export function useSessionTitle(sessionId: string | undefined, initial: string, enabled = true) {
-	const [title, setTitle] = useState(initial);
+	const [title, setTitle] = useState(() => knownSessions.find((row) => row.id === sessionId)?.title ?? initial);
 	const [revision, setRevision] = useState(0);
 	useGlobalEvents((name, event) => {
 		if (name === "open" || name === "reset") setRevision((value) => value + 1);
@@ -245,9 +264,8 @@ export function useSessionTitle(sessionId: string | undefined, initial: string, 
 			/* 下一次会话事件重新同步。 */
 		}
 	}, enabled && !!sessionId);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: 会话 ID 变化时重置标题，即使占位文案相同
 	useEffect(() => {
-		setTitle(initial);
+		setTitle(knownSessions.find((row) => row.id === sessionId)?.title ?? initial);
 	}, [initial, sessionId]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: sessions_changed 版本号触发标题同步
 	useEffect(() => {
@@ -269,18 +287,21 @@ export function useSessionDetail(id: string | undefined) {
 	const activeId = useRef(id);
 	const requestSequence = useRef(0);
 	activeId.current = id;
-	const [detail, setDetail] = useState<SessionDetail>();
+	const [detail, setDetail] = useState<SessionDetail | undefined>(() => sessionDetails.peek(id));
 	const [streaming, setStreaming] = useState<Message>();
-	const bitlockerState = useRef<BitLockerSnapshot>({ revision: -1, requests: [] });
+	const bitlockerState = useRef<BitLockerSnapshot>(detail?.bitlocker ?? { revision: -1, requests: [] });
 	const [error, setError] = useState("");
 	const refresh = useCallback(async () => {
 		if (!id) return;
 		const sequence = ++requestSequence.current;
 		try {
-			const state = await apiJson<SessionDetail>(`/api/sessions/${encodeURIComponent(id)}`);
+			const state = await sessionDetails.load(id, true);
 			if (activeId.current !== id || sequence !== requestSequence.current) return;
 			bitlockerState.current = newestBitLocker(bitlockerState.current, state.bitlocker);
-			setDetail({ ...state, bitlocker: bitlockerState.current });
+			const next = { ...state, bitlocker: bitlockerState.current };
+			sessionDetails.put(next);
+			setDetail(next);
+			setStreaming((message) => (message && !containsAssistant(next, message) ? message : undefined));
 			setError("");
 		} catch (cause) {
 			if (activeId.current !== id || sequence !== requestSequence.current) return;
@@ -288,10 +309,11 @@ export function useSessionDetail(id: string | undefined) {
 		}
 	}, [id]);
 	useEffect(() => {
-		setDetail(undefined);
+		const cached = sessionDetails.peek(id);
+		setDetail(cached);
 		setStreaming(undefined);
 		setError("");
-		bitlockerState.current = { revision: -1, requests: [] };
+		bitlockerState.current = cached?.bitlocker ?? { revision: -1, requests: [] };
 		if (!id) return;
 		void refresh();
 		const pacer = new StreamPacer(setStreaming);
@@ -314,6 +336,20 @@ export function useSessionDetail(id: string | undefined) {
 			try {
 				const change = JSON.parse((event as MessageEvent).data);
 				if (change.type === "message_update" && change.message?.role === "assistant") pacer.update(change.message);
+				if (change.type === "message_end" && ["assistant", "user", "toolResult"].includes(change.message?.role)) {
+					if (change.message.role === "assistant") pacer.reset();
+					++requestSequence.current;
+					setDetail((state) => {
+						if (!state) return state;
+						const next = commitMessage(state, change.message);
+						sessionDetails.put(next);
+						return next;
+					});
+					if (change.message.role === "assistant") setStreaming(undefined);
+				}
+				if (change.type === "agent_start") {
+					setDetail((state) => (state ? { ...state, running: true } : state));
+				}
 				if (change.type === "bitlocker_requests_changed") {
 					bitlockerState.current = newestBitLocker(bitlockerState.current, change);
 					setDetail((state) => (state ? { ...state, bitlocker: bitlockerState.current } : state));
@@ -332,10 +368,7 @@ export function useSessionDetail(id: string | undefined) {
 						"tool_execution_update",
 					].includes(change.type)
 				) {
-					if (change.type === "message_end" || change.type === "agent_end") {
-						pacer.flush();
-						setStreaming(undefined);
-					}
+					if (change.type === "agent_end") pacer.flush();
 					scheduleRefresh();
 				}
 			} catch {
@@ -369,7 +402,6 @@ export function useSessionDetail(id: string | undefined) {
 				if (event.currentTarget !== events) return;
 				health.pulse();
 				pacer.reset();
-				setStreaming(undefined);
 				void refresh();
 			});
 			events.onerror = (event) => {
@@ -379,6 +411,7 @@ export function useSessionDetail(id: string | undefined) {
 		};
 		connect();
 		return () => {
+			++requestSequence.current;
 			pacer.reset();
 			window.clearTimeout(refreshTimer);
 			health.stop();
@@ -386,6 +419,6 @@ export function useSessionDetail(id: string | undefined) {
 			events = undefined;
 		};
 	}, [id, refresh]);
-	const currentDetail = detail?.id === id ? detail : undefined;
+	const currentDetail = detail?.id === id ? detail : sessionDetails.peek(id);
 	return { detail: currentDetail, streaming: currentDetail ? streaming : undefined, error, refresh, setDetail };
 }

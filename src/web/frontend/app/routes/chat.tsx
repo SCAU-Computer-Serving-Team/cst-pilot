@@ -21,6 +21,10 @@ const EMPTY_REQUESTS: PendingBitLocker[] = [];
 
 export default function Chat() {
 	const { sessionId } = useParams();
+	return <SessionChat key={sessionId} sessionId={sessionId} />;
+}
+
+function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 	const navigate = useNavigate();
 	const [params] = useSearchParams();
 	const example =
@@ -43,6 +47,15 @@ export default function Chat() {
 			);
 		entrance.current = { id: detail.id, snapshot: transitioning && !captured };
 	}
+	const [linearEntering, setLinearEntering] = useState(true);
+	const entranceId = detail?.id;
+	useEffect(() => {
+		if (!entranceId) return;
+		const token = getComputedStyle(document.documentElement).getPropertyValue("--duration-quick").trim();
+		const duration = Number.parseFloat(token) * (token.endsWith("ms") ? 1 : 1000);
+		const timer = window.setTimeout(() => setLinearEntering(false), Number.isFinite(duration) ? duration : 150);
+		return () => window.clearTimeout(timer);
+	}, [entranceId]);
 	const [forkSource, setForkSource] = useState("");
 	// 派生跳转带入的来源提示：换路由即读取，读后立刻清掉历史状态避免刷新后复现
 	useEffect(() => {
@@ -189,14 +202,16 @@ export default function Chat() {
 						className="chat-loaded"
 						data-session-id={detail.id}
 						data-snapshot-entered={entrance.current?.snapshot || undefined}
-						data-linear-text-enter={entrance.current?.snapshot ? undefined : "true"}
+						data-linear-text-enter={
+							linearEntering && !entrance.current?.snapshot && !detail.running && !streaming ? "true" : undefined
+						}
 					>
 						<Conversation
 							id={detail.id}
 							entries={entries}
 							requests={detail.bitlocker?.requests ?? EMPTY_REQUESTS}
 							streaming={streaming}
-							running={!!detail.running}
+							running={!!detail.running || !!streaming}
 							summarizing={summarizing}
 							refresh={refresh}
 							onCancelSummary={cancelSummary}
@@ -210,7 +225,7 @@ export default function Chat() {
 						) : error ? (
 							<ErrorNotice message={error} onRetry={() => void refresh()} />
 						) : (
-							"正在读取会话…"
+							<output className="session-pending" aria-label="会话加载中" />
 						)}
 					</div>
 				)}

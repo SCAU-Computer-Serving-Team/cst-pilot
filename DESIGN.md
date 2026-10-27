@@ -458,7 +458,7 @@ Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用�
 
 标题与正文按标题的段后取值，正文与标题按标题的段前取值；连续标题与分隔线按上表单独处理。长列表项保留正文行高，列表项内的多段正文仍相隔16px。读取区域使用专用间距，不改变全站 `--space-*` 变量，也不改变工具组件、思考原文、按钮和状态行。
 
-实现只在当前块前设置间距，不同时叠加统一 `gap` 和上下边距。流式定稿前缀与尾段处于同一内容容器，相邻规则跨分段生效。
+实现只在当前块前设置间距，不同时叠加统一 `gap` 和上下边距。流式与定稿共用内容容器与文本结构，追加段落保持已读节点和相邻块间距。
 
 参考：[Notion 相邻块排版](https://www.notion.com/blog/updating-the-design-of-notion-pages)、[Obsidian 字体变量](https://docs.obsidian.md/Reference/CSS+variables/Foundations/Typography)、[Minimal 间距变量](https://github.com/kepano/obsidian-minimal/blob/master/src/scss/variables/root.scss)、[GitHub Markdown](https://github.com/sindresorhus/github-markdown-css/blob/main/github-markdown.css)、[Tailwind Typography](https://github.com/tailwindlabs/tailwindcss-typography/blob/main/src/styles.js)。正文1.75行高参考Tailwind的16px/28px；0.02em字距按本项目中文字体确定。
 
@@ -584,6 +584,7 @@ Blue hour（首页）与 AIR（登录页）独立于通用色阶，各自使用�
 | 切页 | 按组件衔接标题、导航与内容；原生快照和局部入场只启用一组，避免重复位移。普通导航、历史返回和缺少快照能力时保留局部入场 |
 | 展开与收起 | 高度、内容透明度和指示图标同步；中途反向从当前呈现值继续，结束后恢复内容自适应 |
 | 正文呈现 | 会话内容加载完成或切换会话时用 150ms 淡入，2px 模糊在前 80ms 内消除；纯文字颜色使用 `srgb-linear` 线性光混合从背景色过渡到正文色，图片、表格与整页快照沿用原有淡化；流式刷新、定稿、缓存更新和重连不重播已读内容，不干扰选区与滚动 |
+| 运行中光影 | 工作中、当前思考与待完成工具的状态字形采用 `soft-light` 混合，自左向右扫光，周期 2000ms。特殊内嵌组件仅在右下角最多 180×48px 的区域扫光，不覆盖正文或控件；完成后停止，隐藏页与离屏时暂停，减少动态时取消扫光 |
 | 输入与操作 | 聚焦、悬停、校验、启用、保存和失败有及时反馈；按键输入与中文输入法组合不增加等待或逐字位移 |
 | 时间与性能 | 常规入场 250ms、反馈 150ms；逐组间隔 40ms，总延迟不超过 300ms。模糊只用于短暂入退场，完成后恢复清晰，无常驻合成层 |
 | 减少动态 | 跳过位移、模糊和依次入场，直接呈现完整内容与状态；系统偏好变化时结束正在进行的空间动效 |

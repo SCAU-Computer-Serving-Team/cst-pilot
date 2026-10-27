@@ -160,9 +160,10 @@ test("命令方案多轮修订、压缩后刷新与服务重启恢复，正文�
 			await browser.evaluate(
 				"document.fonts.ready.then(()=>Promise.all(document.getAnimations().map(a=>a.finished.catch(()=>{}))))",
 			);
-			const geometry: { leftDelta: number; rightDelta: number; width: number; overflow: boolean } = await browser.evaluate(
-				"(()=>{const m=document.querySelector('.markdown').getBoundingClientRect(),c=document.querySelector('.composer--chat').getBoundingClientRect();return {leftDelta:m.left-c.left,rightDelta:m.right-c.right,width:m.width,overflow:document.documentElement.scrollWidth>innerWidth}})()",
-			);
+			const geometry: { leftDelta: number; rightDelta: number; width: number; overflow: boolean } =
+				await browser.evaluate(
+					"(()=>{const m=document.querySelector('.markdown').getBoundingClientRect(),c=document.querySelector('.composer--chat').getBoundingClientRect();return {leftDelta:m.left-c.left,rightDelta:m.right-c.right,width:m.width,overflow:document.documentElement.scrollWidth>innerWidth}})()",
+				);
 			assert.ok(Math.abs(geometry.leftDelta) < 1, `宽 ${width} 正文与输入框左缘对齐`);
 			assert.ok(Math.abs(geometry.rightDelta) < 1, `宽 ${width} 正文与输入框右缘对齐`);
 			assert.ok(geometry.width <= 1144, `宽 ${width} 保留内容列宽度上限`);

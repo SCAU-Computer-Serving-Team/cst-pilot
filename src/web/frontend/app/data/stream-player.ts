@@ -94,10 +94,13 @@ export class StreamPacer {
 		if (this.projected.length > this.shown && this.timer === undefined) this.tick();
 	}
 
-	/** 消息结束/放弃追赶：停止步进（调用方随即清除流式态，全量由刷新落定）。 */
+	/** 放行剩余内容并保留最后一帧，直至结束事件或快照接替。 */
 	flush(): void {
-		if (this.message) this.shown = this.projected.length;
 		this.stop();
+		if (this.message) {
+			this.shown = this.projected.length;
+			this.publish(this.message);
+		}
 	}
 
 	reset(): void {

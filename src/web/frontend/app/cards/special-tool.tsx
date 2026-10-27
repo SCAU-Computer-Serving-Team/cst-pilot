@@ -17,6 +17,7 @@ import {
 	Shield,
 } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
+import { RunningCorner } from "../conversation/running-light";
 import { ApiFailure, apiJson, sessionPath } from "../data/api";
 import { type PendingBitLocker, requestForCall } from "../data/bitlocker-state";
 import type { Message } from "../data/web-state";
@@ -309,6 +310,7 @@ export const SpecialTool = memo(function SpecialTool({
 	if (view.kind === "web-search")
 		return (
 			<section className="special-tool special-tool--web-search" data-state={status} data-tool-call-id={call.id}>
+				<RunningCorner active={status === "running" || status === "pending"} />
 				<Disclosure className="special-tool-search">
 					<Disclosure.Heading>
 						<Disclosure.Trigger className="special-tool-search-trigger">
@@ -341,6 +343,7 @@ export const SpecialTool = memo(function SpecialTool({
 		);
 	return (
 		<section className={`special-tool special-tool--${view.kind}`} data-state={status} data-tool-call-id={call.id}>
+			<RunningCorner active={status === "running" || status === "pending"} />
 			<header className="special-tool-heading">
 				<Icon size={18} aria-hidden="true" />
 				<h3>{view.title}</h3>

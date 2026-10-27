@@ -1,6 +1,6 @@
 import { Button, Disclosure, Tooltip } from "@heroui/react";
 import { ArrowDown, ChevronDown, Copy, GitBranch, GitFork, X } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { matchToolResults } from "../cards/match-results";
 import { SpecialTool } from "../cards/special-tool";
 import type { PendingBitLocker } from "../data/bitlocker-state";
@@ -15,7 +15,7 @@ import {
 	type TurnEntry,
 	textOf,
 } from "./conversation-parts";
-import { LiveMarkdown, Markdown } from "./markdown";
+import { Markdown } from "./markdown";
 import { ProcessSegment } from "./process-segment";
 import { completedToolCalls, turnSegments } from "./turn-segments";
 
@@ -58,7 +58,7 @@ function AssistantTurnImpl({
 						{segment.parts.map(({ entry, final, part }) =>
 							part.kind === "special" ? (
 								<SpecialTool
-									key={`${entry.id ?? entry.message.timestamp}-${part.call.id}`}
+									key={`${entry.message.timestamp}-${part.call.id}`}
 									call={part.call}
 									sessionId={id}
 									entryId={entry.id}
@@ -86,7 +86,7 @@ function AssistantTurnImpl({
 					/>
 				),
 			)}
-			{finalText && (live ? <LiveMarkdown text={finalText} /> : <Markdown text={finalText} />)}
+			{finalText && <Markdown text={finalText} live={live} />}
 			{last?.message.stopReason === "error" && (
 				<ErrorNotice model message={last.message.errorMessage || "模型调用失败，请检查登录状态和模型设置。"} />
 			)}
@@ -270,7 +270,7 @@ export function Conversation({
 		};
 	}, [cancelScroll]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: entries 与 streaming 只作为滚动触发信号，不在 effect 体内读取
-	useEffect(() => {
+	useLayoutEffect(() => {
 		if (following) scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
 	}, [entries, streaming, following]);
 	return (
@@ -297,11 +297,7 @@ export function Conversation({
 					</Button>
 				)}
 				{turns.map((turn, turnIndex) => {
-					const turnKey =
-						turn.user?.id ??
-						turn.summary?.id ??
-						turn.assistants[0]?.id ??
-						`turn-${turn.user?.message.timestamp ?? turn.summary?.message.timestamp ?? turn.assistants[0]?.message.timestamp ?? turnIndex}`;
+					const turnKey = `turn-${turn.user?.message.timestamp ?? turn.summary?.message.timestamp ?? turn.assistants[0]?.message.timestamp ?? turnIndex}`;
 					if (turn.summary) return <SummaryEntry key={turnKey} entry={turn.summary} />;
 					const live = turnIndex === active;
 					return (

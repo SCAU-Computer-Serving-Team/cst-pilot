@@ -2,10 +2,41 @@ import { Disclosure } from "@heroui/react";
 import { Brain } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ToolGroup } from "../cards/tool-card";
-import type { Message } from "../data/web-state";
+import type { ContentPart, Message } from "../data/web-state";
 import type { TurnPart } from "./conversation-parts";
 import { Markdown } from "./markdown";
+import { RunningLight } from "./running-light";
 import { StreamWords } from "./stream-words";
+
+function Thinking({ part, live }: { part: Extract<ContentPart, { type: "thinking" }>; live: boolean }) {
+	const [opened, setOpened] = useState(false);
+	return (
+		<Disclosure
+			className="thinking-line"
+			isDisabled={part.redacted}
+			onExpandedChange={(value) => {
+				if (value) setOpened(true);
+			}}
+		>
+			<Disclosure.Heading>
+				<Disclosure.Trigger className="thinking-trigger">
+					<Brain size={16} aria-hidden="true" />
+					<RunningLight active={live}>{`已思考${part.redacted ? " · 内容不可用" : ""}`}</RunningLight>
+					<Disclosure.Indicator />
+				</Disclosure.Trigger>
+			</Disclosure.Heading>
+			<Disclosure.Content>
+				{opened && !part.redacted && (
+					<section className="tool-text">
+						<pre className="tool-raw">
+							<StreamWords text={part.thinking} />
+						</pre>
+					</section>
+				)}
+			</Disclosure.Content>
+		</Disclosure>
+	);
+}
 
 export function ProcessSegment({
 	parts,
@@ -36,35 +67,15 @@ export function ProcessSegment({
 		>
 			<Disclosure.Heading>
 				<Disclosure.Trigger className="turn-process-head">
-					<span>{label}</span>
+					<RunningLight active={live}>{label}</RunningLight>
 					<Disclosure.Indicator />
 				</Disclosure.Trigger>
 			</Disclosure.Heading>
 			<Disclosure.Content>
 				<div className="turn-process-body">
 					{parts.map(({ entry, final, part }, index) => {
-						const key = `${entry.id ?? entry.message.timestamp}-${index}`;
-						if (part.kind === "thinking")
-							return (
-								<Disclosure className="thinking-line" key={key} isDisabled={part.part.redacted}>
-									<Disclosure.Heading>
-										<Disclosure.Trigger className="thinking-trigger">
-											<Brain size={16} aria-hidden="true" />
-											<span>已思考{part.part.redacted ? " · 内容不可用" : ""}</span>
-											<Disclosure.Indicator />
-										</Disclosure.Trigger>
-									</Disclosure.Heading>
-									<Disclosure.Content>
-										{!part.part.redacted && (
-											<section className="tool-text">
-												<pre className="tool-raw">
-													{live && final ? <StreamWords text={part.part.thinking} /> : part.part.thinking}
-												</pre>
-											</section>
-										)}
-									</Disclosure.Content>
-								</Disclosure>
-							);
+						const key = `${entry.message.timestamp}-${index}`;
+						if (part.kind === "thinking") return <Thinking key={key} part={part.part} live={live && final} />;
 						if (part.kind === "tools")
 							return (
 								<ToolGroup

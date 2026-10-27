@@ -26,7 +26,7 @@ export function turnSegments(process: TurnPart[]): TurnSegment[] {
 			segments.push({
 				kind,
 				parts: [item],
-				key: `${kind}-${item.entry.id ?? item.entry.message.timestamp}-${segments.length}`,
+				key: `${kind}-${item.entry.message.timestamp}-${segments.length}`,
 			});
 	}
 	if (!segments.length || segments[0]?.kind !== "process")

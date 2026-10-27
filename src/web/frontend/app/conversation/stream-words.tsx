@@ -11,7 +11,8 @@ export function StreamWords({ text }: { text: string }) {
 				isSpace(token) ? (
 					token
 				) : (
-					<span key={`${index}-${token}`} className="t-stream-w">
+					// biome-ignore lint/suspicious/noArrayIndexKey: 追加式文本按词序固定，末词增长时保持节点与动效进度。
+					<span key={index} className="t-stream-w">
 						{token}
 					</span>
 				),

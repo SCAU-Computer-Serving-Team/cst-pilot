@@ -16,7 +16,7 @@
 | OAuth 扩展 | `npm run test:oauth --prefix agent` | CSTOA 设备码、轮询、续期、动态模型目录与凭据隔离 |
 | Web 后端 | `npm run test:web --prefix agent` | HTTP/SSE 接口、会话池、收件箱队列、鉴权、附件与故障恢复 |
 | 跨端共享专项 | `npm run test:web:shared-audit --prefix agent` | 独立 Pi 进程与 Web 共用设置、模型目录、凭据、历史 `cwd`、单写权与独立主题 |
-| 前端单元测试 | `npm test --prefix src/web/frontend` | 工具卡片映射、分支树几何算法、流式切分、草稿图片与通知状态机 |
+| 前端单元测试 | `npm test --prefix src/web/frontend` | 工具卡片映射、分支树几何算法、会话预载缓存与结束事件合并、草稿图片与通知状态机 |
 | 前端构建与字体 | `npm run build --prefix src/web/frontend`、`npm run test:fonts --prefix src/web/frontend` | 静态资源构建、三档 WOFF2 子集覆盖、哈希与许可校验 |
 | Web 浏览器端到端 | `npm run test:web:e2e --prefix agent` | 构建后在隔离 Chrome 中验证完整用户链路、持久化与进程重启 |
 | 遥测单元与跨仓库 | `npm run test:telemetry --prefix agent`、`npm run test:telemetry:e2e --prefix agent` | 统计采集、草稿恢复、扣点查询、双端队列、心跳与真实 Go 接收端联调（后者需设置 `CST_TELEMETRY_RECEIVER`） |
@@ -82,6 +82,7 @@
 `npm run test:web:e2e --prefix agent` 覆盖以下完整浏览器链路：
 
 - **命令多轮与布局**：`runbook-roundtrip.e2e.ts` 使用实际方案存储生成两轮修订，覆盖重复调用 ID、结果缺少 `details`、复制、文件打开、压缩后刷新和服务重启恢复；在 1920、1366、960、390px 窗口覆盖正文与输入框边缘对齐、内容列宽度上限及浅深主题。
+- **预载与流式连续性**：`session-preload.e2e.ts` 验证七天内最新十项自动预载，延迟刷新下同步切页、无旧正文、浅深与窄屏扫光及减少动态；`streaming-after-tool.e2e.ts` 验证追加段落与定稿后已读节点保留，延迟快照下正文不闪空。
 - **消息、流式与工具**：首页发送、网络响应丢失后保留草稿并幂等重试、单工具独立计时与冻结、过程折叠、特殊工具组件（BitLocker、整机概览、runbook、联网检索）交互、Markdown 块间距与代码高亮。
 - **会话管理与分支**：侧栏日期分组、多选与整组勾选、乐观删除与失败回滚、`/fork` 派生选择、`/tree` 五档过滤与几何对齐、分支总结三选项与生成中取消。
 - **设置、登录与退出**：四分类设置路由、自定义模型服务增删改、模型范围拖拽与键盘排序、CSTOA 扫码与 APIKEY 登录、上下文额度面板、全局顶部通知、断线恢复、空闲与运行中安全退出确认。

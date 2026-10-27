@@ -14,6 +14,7 @@ import {
 	TriangleAlert,
 } from "lucide-react";
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { RunningLight } from "../conversation/running-light";
 import type { ContentPart, Message } from "../data/web-state";
 import { type Block, mapTool } from "./map-tool";
 import { isStandaloneTool, splitToolCalls, type ToolState, toolState } from "./tool-state";
@@ -268,7 +269,9 @@ export const ToolCard = memo(function ToolCard({
 	const heading = (
 		<>
 			<StatusIcon state={state} />
-			<span>{state === "running" ? `正在调用 ${call.name} 工具` : `${invocation} · ${status}`}</span>
+			<RunningLight active={state === "running" || state === "pending"}>
+				{state === "running" ? `正在调用 ${call.name} 工具` : `${invocation} · ${status}`}
+			</RunningLight>
 			{elapsed && <time className="tool-elapsed">{elapsed}</time>}
 		</>
 	);
@@ -373,7 +376,7 @@ function CollapsedToolGroup({
 					) : (
 						<CheckCheck size={18} className="success-icon" aria-hidden="true" />
 					)}
-					<span className={!finished && live ? "tool-group-state--running" : undefined}>
+					<RunningLight active={!finished && !!live}>
 						{!finished
 							? live
 								? "正在调用多个工具…"
@@ -383,7 +386,7 @@ function CollapsedToolGroup({
 								: degraded
 									? "检查返回部分结果"
 									: "已完成检查"}
-					</span>
+					</RunningLight>
 					<small>{calls.length} 次工具调用</small>
 					<Disclosure.Indicator />
 				</Disclosure.Trigger>
