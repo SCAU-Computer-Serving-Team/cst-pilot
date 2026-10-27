@@ -12,19 +12,17 @@ export class WebSettings {
 	constructor(agentDir: string) {
 		this.file = join(agentDir, "web-settings.json");
 	}
-	async read(): Promise<{ theme: WebTheme; emptyModelScope: boolean }> {
+	async read(replacementTheme?: WebTheme): Promise<{ theme: WebTheme; emptyModelScope: boolean }> {
 		try {
 			const value: unknown = JSON.parse(await readFile(this.file, "utf8"));
-			if (
-				!value ||
-				typeof value !== "object" ||
-				!("theme" in value) ||
-				typeof value.theme !== "string" ||
-				!["light", "dark", "system"].includes(value.theme)
-			)
+			if (!value || typeof value !== "object" || Array.isArray(value))
+				throw new ConfigurationUnavailable("Web外观配置无法读取，请检查 web-settings.json 后重试。");
+			const theme = "theme" in value ? value.theme : undefined;
+			const validTheme = typeof theme === "string" && ["light", "dark", "system"].includes(theme);
+			if (!validTheme && replacementTheme === undefined)
 				throw new ConfigurationUnavailable("Web外观配置无法读取，请检查 web-settings.json 后重试。");
 			return {
-				theme: value.theme as WebTheme,
+				theme: validTheme ? (theme as WebTheme) : replacementTheme!,
 				emptyModelScope: "emptyModelScope" in value && value.emptyModelScope === true,
 			};
 		} catch (error) {
@@ -36,7 +34,7 @@ export class WebSettings {
 	}
 	private async update(change: Partial<{ theme: WebTheme; emptyModelScope: boolean }>) {
 		const task = this.tail.then(async () => {
-			const next = { ...(await this.read()), ...change };
+			const next = { ...(await this.read(change.theme)), ...change };
 			await mkdir(join(this.file, ".."), { recursive: true });
 			const temp = `${this.file}.${randomUUID()}.tmp`;
 			try {

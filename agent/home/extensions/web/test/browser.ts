@@ -171,8 +171,12 @@ export class BrowserProbe {
 		let point = await this.evaluate<{ x: number; y: number }>(`(() => {
 			const element = document.querySelector(${JSON.stringify(selector)});
 			if (!element) throw new Error("找不到可点击控件");
-			element.scrollIntoView({ block: "center" });
-			const rect = element.getBoundingClientRect();
+			let rect = element.getBoundingClientRect();
+			const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+			if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) {
+				element.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
+				rect = element.getBoundingClientRect();
+			}
 			return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 		})()`);
 		await this.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
