@@ -33,7 +33,7 @@
 - **sys proc / io 双采样**：`proc` 在同一 PowerShell 进程内间隔约 1.2 秒双采样，按 Stopwatch 实际间隔与逻辑核数计算 `cpuPct`，内存取工作集 `wsMB`；`io` 共用采样窗口读取物理盘忙碌度／队列长度（排除 `_Total`）与进程读写差分，两者口径不同不可直接相加。
 - **sys gpu 聚合与补充**：每进程 `gpuPct` 取跨适配器最繁忙引擎利用率，**不累加并行引擎**；专用显存仅统计 >1 MB 的实例。并行查询 `nvidia-smi`（带 `uuid` / `pciBusId`），程序缺失或失败时由随包 LHM 补充；PDH 性能计数器路径按系统语言动态本地化，引擎查询失败自动重试一次。
 - **sys sensor 能力边界**：零安装约束下不安装内核驱动（如 WinRing0 或 PawnIO），仅启用 LHM 的 CPU、GPU、主板用户态读数（过滤非有限值，上限 200 项）及 ACPI 热区（过滤 −50～150°C 外异常值）与逻辑核频率百分比。**低频率仅作排查线索，不能单独确认过热。**
-- **startup 禁用三态**：采集 HKLM/HKCU 的 `Run`、`RunOnce`、Wow6432Node `Run`、用户与公共启动文件夹及 `StartMode='Auto'` 服务。关联 `StartupApproved` 首字节奇偶判读 `disabled`（`true` 已禁用 / `false` 已启用 / `null` 无匹配记录），严禁将 `Run` 的禁用状态套给同名 `RunOnce` 项。PE 下采集的是 PE 自身注册表与服务。
+- **startup 禁用三态**：采集 HKLM/HKCU 的 `Run`、`RunOnce`、Wow6432Node `Run`、用户与公共启动文件夹及 `StartMode='Auto'` 服务。关联 `StartupApproved` 首字节奇偶判读 `disabled`（`true` 已禁用 / `false` 已启用 / `null` 无匹配记录），严禁将 `Run` 的禁用状态套给同名 `RunOnce` 项。PE 下采集的是 PE 自身注册表与服务；计划任务和 WMI 事件订阅不在采集范围。
 
 ### eventlog 与 driver（历史日志与设备状态）
 
@@ -51,7 +51,7 @@
 |---|---|
 | `status` | 实时调用 `Win32_EncryptableVolume` 方法查询指定盘或全部卷，不使用缓存快照 |
 | `unlock` | 仅支持 48 位数字恢复密码（`UnlockWithNumericalPassword`）。已解锁卷直接跳过；提交前复核卷标识与锁定状态，调用后通过 `GetLockStatus()` 确认解锁完成 |
-| `decrypt` | 执行前固定目标卷清单并在 TUI / Web 确认解除保护影响；锁定卷（`0x80310000`）或系统卷残留自动解锁密钥（`0x80310029`）原样报错，不自动解锁或删保护器。调用 `Decrypt()` 启动后台转换后立即返回，仅当 `GetConversionStatus()` 返回 `FullyDecrypted(0)` 时才确认完成 |
+| `decrypt` | 执行前固定目标卷清单并在 TUI / Web 确认解除保护影响；锁定卷（`0x80310000`）或系统卷残留自动解锁密钥（`0x80310029`）原样报错，不自动解锁或删保护器。调用 `Decrypt()` 启动后台转换后立即返回，仅当 `GetConversionStatus()` 返回 `FullyDecrypted(0)` 时才确认完成；结果为 `unknown` 时先查询卷状态，再决定后续操作 |
 
 凭据与互斥边界：
 

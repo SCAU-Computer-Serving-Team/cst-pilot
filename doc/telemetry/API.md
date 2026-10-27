@@ -64,10 +64,11 @@
   }
   ```
   - `acks[].status`：`"stored"`（新写入或替换低版本）、`"duplicate"`（同版本重传）、`"stale"`（服务端已有更高版本或已 `final`）均视为服务端已确认，客户端可从队列移除该版本；`"rejected"` 附 `reason`。
-  - **逐条拒收码（`reason`）**：`unknown-version`、`unsupported`（这两项客户端保留队列待服务端升级）、`bad-revision`、`bad-final-state`、`unknown-type`、`bad-record-id`、`too-many-elements`（`tools > 512` / `models > 32` / `errors > 10`）、`installation-mismatch`、`ownership-mismatch`。
+  - **逐条拒收处理**：客户端对 `bad-revision`、`bad-final-state`、`bad-record-id`、`unknown-type`、`too-many-elements`、`installation-mismatch`、`immutable-legacy-record`、`owner-mismatch`、`instance-mismatch`、`already-final` 与 `envelope-version-mismatch` 移除对应记录并记录拒收状态。其他拒收原因和缺失、重复或不匹配的确认保留记录，等待后续处理。
 - **HTTP 错误码处理**：
   - `401` / `403`：凭据或签名被拒；若当前使用 OA `Bearer`，客户端回退尝试 `Installation` 签名，记录保留在队列中。
   - `429` / `5xx` / 网络超时（单次 5 秒）：保留队列，等待下次触发或 30 秒重试。
+  - `400` / `413`：`0.2` 快照保留队列；`0.1` 批次从对应队列移除。
   - `404` / `410`：当前进程停止向该端点发送，保留磁盘队列。
 
 ### 3. CSTOA 请求账单查询：`POST /api/agent/llm/billing`

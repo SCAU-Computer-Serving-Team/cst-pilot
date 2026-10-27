@@ -1,12 +1,11 @@
 # 信息收集契约
 
-本文定义 CST Pilot 本地请求记录与远程会话遥测的字段含义、身份算法与隐私收集边界。统计口径见 [telemetry/SPEC.md](telemetry/SPEC.md)，传输协议与接口见 [telemetry/API.md](telemetry/API.md)。
+本文定义 CST Pilot 会话遥测的字段含义、身份算法与隐私收集边界。统计口径见 [telemetry/SPEC.md](telemetry/SPEC.md)，传输协议与接口见 [telemetry/API.md](telemetry/API.md)。
 
 ## 记录类型与提交边界
 
 | `type` | 粒度 | 保存与传输范围 |
 |---|---|---|
-| `request` | 一次主 Agent 逻辑模型调用 | 仅保存在本地请求日志，供仪表盘读取，不上传 |
 | `session` | 一场会话实例的累计统计 | 保存本地恢复草稿，并通过双端队列上传到 CSTOA 与 `timserver_1` |
 
 使用统计通过回答结束（`agent_settled`）、定时检查（每 30 秒）、正常关闭及启动恢复统一保存和提交。会话记录支持 `0.1` 最终记录与 `0.2` 版本化累计快照；同一实例的多次快照具有相同 `recordId` 与递增 `revision`，服务端仅保留最新有效快照，不重复累加会话数、模型用量或工具调用。
@@ -26,7 +25,7 @@
 | 字段 | 含义 | 示例 |
 |---|---|---|
 | `v` | 记录协议版本 | `"0.1"`、`"0.2"` |
-| `type` | 记录类型 | `"request"`、`"session"` |
+| `type` | 记录类型 | `"session"` |
 | `recordId` | 记录唯一标识，接收端去重主键 | UUID |
 | `kitVersion` | 工具包发行版本；读取失败为空字符串 | `"v0.5"` |
 | `revision` | `0.2` 会话快照的递增正整数版本 | `2` |
@@ -97,9 +96,9 @@ environmentId = HMAC-SHA256(identityKey, message)
 | `runtime.arch` | 运行时进程架构（`process.arch`） | `"x64"` |
 | `admin` | 当前进程是否具有管理员权限 | `true`、`false`、`null` |
 
-## 请求与模型用量字段
+## 模型用量字段
 
-本地请求记录包含 `sessionId`、会话内递增序号 `seq`、发起时刻 `requestedAt`、模型响应耗时 `durationMs`（不含工具执行）、首个非空增量等待 `ttftMs`、最终状态 `status`（`"ok"` / `"aborted"` / `"error"`）、HTTP 错误码 `errorCode`、结束原因 `stopReason`，以及下表模型字段。会话记录的 `models[]` 元素共用下表模型与用量字段：
+会话记录的 `models[]` 按服务、模型与思考强度聚合，字段如下：
 
 | 字段 | 含义 | 示例 |
 |---|---|---|

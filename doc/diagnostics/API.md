@@ -75,12 +75,12 @@
 |---|---|---|
 | `scope` | 全部 | `"recent"`（默认）、`"boot"`、`"crash"`、`"service"`、`"disk"`、`"security"`、`"query"`、`"detail"` |
 | `hours` / `top` | 除 `detail` 外 | 查询时间窗（默认 24，最大 720 小时）/ 返回样本数（默认及最大 100） |
-| `level` | `recent`、`query` | `"warn"`（Critical/Error/Warning，`recent` 默认）或 `"error"`（Critical/Error） |
+| `level` | `recent`、`query` | `"warn"`（Critical/Error/Warning，`recent` 默认）或 `"error"`（Critical/Error）；`query` 省略时不限级别 |
 | `kind` | `boot` | `"all"`（默认）、`"unexpected"`、`"bluescreen"` |
 | `type` | `security` | `"all"`（默认）、`"logonFail"`、`"lockout"` |
 | `app` / `name` / `msg` | `crash` / `service` / `query` | 消息字面子串（不区分大小写） |
 | `logName` / `ids` / `provider` | `query`（`logName` 亦用于 `detail`） | 通道名 / `0–65535` 整数数组 / 提供程序正则（忽略大小写，1 秒超时） |
-| `recordId` / `id` | `detail` | 二选一必填：`recordId` 精确记录号，或 `id` 取该事件 ID 最新一条 |
+| `recordId` / `id` | `detail` | 二选一必填：`recordId` 精确记录号，或 `id` 取该事件 ID 最新一条；同时必须提供 `logName` |
 
 - **返回（包装在 `result[scope]` 下）**：
   - 列表类 `scope`：`logs`、`hours`、`top`、`total`、`truncated`、`events[]: { logName, time, recordId, level, levelName, provider, id, msg }[]`（`msg` 最多 200 字符）、`counts[]: { key, provider, id, n, last }[]`（最多 100 组）、`countsTruncated`、`unreadable`、`firstTime`、`lastTime`、`admin`、`notice`、可选 `noMatch` / `degraded`。

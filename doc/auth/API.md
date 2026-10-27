@@ -53,4 +53,4 @@
 其他支持额度查询的服务：
 
 - `provider=deepseek`：返回账户余额与币种。
-- `provider=opencode-go` / `opencode-go-plus`：返回 5 小时、每周、每月三个用量窗口百分比与重置时间。
+- `provider=opencode-go`：返回 5 小时、每周、每月三个用量窗口百分比与重置时间。

@@ -1,6 +1,6 @@
 # 使用情况遥测规格
 
-`telemetry` 模块在 Pi 进程内采集会话级聚合统计与本地请求日志，并将会话快照同时上传至 CSTOA 与 `timserver_1` 两个独立接收端。字段定义与隐私边界以 [../contract.md](../contract.md) 为准，内部架构见 [ARCHITECTURE.md](ARCHITECTURE.md)，协议与接口见 [API.md](API.md)，部署运维见 [OPERATIONS.md](OPERATIONS.md)。
+`telemetry` 模块在 Pi 进程内采集会话级聚合统计，并将会话快照同时上传至 CSTOA 与 `timserver_1` 两个独立接收端。逐请求本地日志列入[后续迭代](../TASKS.md#功能迭代)。字段定义与隐私边界以 [../contract.md](../contract.md) 为准，内部架构见 [ARCHITECTURE.md](ARCHITECTURE.md)，协议与接口见 [API.md](API.md)，部署运维见 [OPERATIONS.md](OPERATIONS.md)。
 
 ## 启停与运行条件
 
@@ -10,7 +10,8 @@
 | `enabled=false` | 完全静默：不订阅事件、不拦截 CSTOA 请求、不查账单、不初始化安装身份、不探测系统、不写草稿或队列、不发心跳或上传 |
 | 存在有效 CSTOA OAuth 令牌 | 优先以 Bearer 令牌上传（`0.2` 同时附安装签名），服务端通过 OA 内省填充上传者 `mid` 与 `deviceId` |
 | 未登录、令牌过期或被拒（401/403） | 自动使用本地安装密钥（Ed25519）签名上传；两端首次验签通过后永久绑定该 `installationId` 的公钥 |
-| 网络故障或接收端 429/5xx | 快照保留在各端独立持久队列（每端上限 200 条）中，后续定时检查、唤醒或重启后自动补发；过期纯心跳直接丢弃 |
+| 网络故障或接收端 429/5xx | 快照保留在各端独立持久队列中，后续定时检查、唤醒或重启后自动补发；过期纯心跳直接丢弃 |
+| 队列容量与单条体积 | 每端最多保留 200 条不同实例记录，入队超过上限时丢弃最旧记录；单条 JSON 超过 1 MiB 时不入队。发送批次的记录总量上限为 900 KiB，队首单条超过该上限时会从队列移除 |
 
 ## 多触发提交与心跳在线规则
 
@@ -28,7 +29,7 @@
 | 模型用量 | 按 `provider + model + thinkingLevel` 聚合（最多 32 项）；缺少 usage、`totalTokens=0` 或以 `error/aborted` 结束的轮次计入 `incompleteUsageTurns` |
 | CSTOA 扣点 | `cstoaBilling` 按网关响应头 `x-oneapi-request-id` 向 OA 账单接口查询本人请求扣点，成对记录观察请求数 `requests`、已确认数 `settledRequests` 与确认总额 `quotaPoints`；没有任何已确认账单时 `quotaPoints=null` |
 | 上下文与工具 | 记录压缩次数、压缩前总 token、溢出触发次数、压缩失败数、上下文峰值与对应窗口；工具按 `name + scope` 聚合（最多 512 项），同次调用每项指标至多计 1 次 |
-| 错误与报错原文 | 统计非 2xx 状态码分布 `providerErrors`、无响应 `networkErrors` 与 `aborted`；按原文分组降序保留最多 10 组 `errors[].{message, count}`，单条记录超 1 MiB 不入队 |
+| 错误与报错原文 | 统计非 2xx 状态码分布 `providerErrors`、无响应 `networkErrors` 与 `aborted`；按原文分组降序保留最多 10 组 `errors[].{message, count}` |
 | 服务端保留期 | 会话统计、身份与每日汇总长期保留；`sessions.payload.errors` 满 180 天清除原文；上传日志 `uploads` 与运行在线状态 `process_runs` 满 90 天删除（数据库备份同步遵循该边界） |
 
 ## 验收条件

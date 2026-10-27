@@ -31,9 +31,10 @@
 | `POST` | `/api/sessions/<id>/open`、`/close` | 打开会话（由 TUI 持有时返回 409）/ 取消当前页面订阅 |
 | `POST` | `/api/sessions/<id>/messages` | 提交消息文本、技能标记与 Base64 图片（`delivery: "queue" \| "steer"`） |
 | `POST` | `/api/sessions/<id>/abort` | 停止当前轮次模型与工具执行，并暂停输入队列 |
-| `PATCH` / `DELETE` | `/api/sessions/<id>/queue/<itemId>` | 编辑或删除待投递／失败的排队项（校验队列 `revision`） |
-| `PUT` | `/api/sessions/<id>/queue/order` | 按条目 ID 数组重排待投递队列（校验 `revision`） |
-| `POST` | `/api/sessions/<id>/queue/<itemId>/steer` | 将待投递项改为插话模式（校验 `revision`） |
+| `PATCH` / `DELETE` | `/api/sessions/<id>/queue/<itemId>` | 编辑或删除待投递／失败的排队项（校验队列 `version`） |
+| `PUT` | `/api/sessions/<id>/queue/order` | 按条目 ID 数组重排待投递队列（校验 `version`） |
+| `POST` | `/api/sessions/<id>/queue/<itemId>/steer` | 将待投递项改为插话模式（校验 `version`） |
+| `POST` | `/api/sessions/<id>/queue/<itemId>/retry` | 重试失败条目并恢复队列（校验 `version`） |
 | `GET` | `/api/sessions/<id>/attachments/<attachmentId>` | 读取该会话已接受保存的图片字节 |
 | `POST` | `/api/sessions/<id>/fork` | 从指定用户消息 `entryId` 之前派生新会话 |
 | `GET` | `/api/sessions/<id>/tree` | 读取会话分支树与当前叶节点 |
@@ -43,6 +44,12 @@
 | `POST` | `/api/sessions/<id>/ui/<requestId>/response` | 回答扩展发起的选择、确认或输入请求 |
 | `POST` | `/api/sessions/<id>/compact` | 执行手动上下文压缩 |
 | `GET` | `/api/sessions/<id>/events` | 单会话 SSE 增量事件流（支持 `Last-Event-ID` 续传） |
+
+### 输入与队列请求
+
+- 消息请求正文为 `{ "id": "...", "text": "...", "delivery": "queue", "images": [], "skill": "..." }`；`images` 与 `skill` 可省略。接受后返回 HTTP `202` 与 `{ "item": ... }`，同一会话内按消息 `id` 和内容去重。
+- 队列操作正文包含快照中的整数 `version`；编辑还需 `text`，重排还需完整待排队条目的 `ids` 数组。成功返回 `{ "queue": ... }`，版本过期或条目状态不允许操作时返回 `409`。
+- `failed` 条目可编辑、删除或显式重试。重启时保留未确认的 `delivering` 条目，不自动重放；其后续处理见[待决议题](../TASKS.md#工程与安全边界)。
 
 ## 模型认证与账号接口
 
@@ -60,7 +67,7 @@ CSTOA 远端接口与字段映射见 [../auth/API.md](../auth/API.md)。本机 W
 | `POST` / `GET` / `PUT` | `/api/auth/<provider>/api-key/start`、`/status`、`/respond`、`/cancel`、`/api-key` | 多步或直接提交 APIKEY（可选附 `baseUrl`） |
 | `POST` | `/api/auth/<provider>/logout` | 清除指定 Provider 的本地凭据 |
 | `GET` | `/api/account` | 读取 CSTOA 登录状态与成员资料（`studentId`、`name`） |
-| `GET` | `/api/quota?provider=<id>` | 按需查询服务额度（支持 `cstoa`、`deepseek`、`opencode-go`，`refresh=1` 强制刷新） |
+| `GET` | `/api/quota?provider=<id>` | 按需查询 `cstoa`、`deepseek`、`opencode-go` 额度；CSTOA 支持 `refresh=1` 强制刷新 |
 
 ## 设置与运行时接口
 
@@ -68,14 +75,16 @@ CSTOA 远端接口与字段映射见 [../auth/API.md](../auth/API.md)。本机 W
 |---|---|---|
 | `GET` / `PATCH` | `/api/settings` | 读取或更新 Web 设置（如主题 `theme`） |
 | `GET` | `/api/state` | 启动快照（工具包版本、会话列表、可用命令与技能清单） |
+| `GET` | `/api/health` | 返回连接状态及是否正在退出（`connected`、`stopping`） |
+| `GET` | `/api/lifecycle` | 返回退出状态与当前会话运行情况 |
 | `GET` | `/api/events` | 全局 SSE 事件流（会话列表、写权占用、设置、凭据与模型目录变化） |
-| `GET` | `/api/files?sessionId=<id>` | 按会话 `cwd` 枚举项目文件清单（限深 6 层、最多 4000 条，30 秒缓存），供 `@` 补全使用 |
+| `GET` | `/api/files?sessionId=<id>&query=<text>` | 按会话 `cwd` 枚举文件，忽略隐藏项及常见依赖／构建目录；限深 6 层、最多扫描 4000 条、缓存 30 秒。按 `query` 过滤后返回最多 50 条与扫描总数，供 `@` 补全使用 |
 | `POST` | `/api/lifecycle/telemetry` | 页面 `pagehide` / `pageshow` / `online` 触发遥测检查与心跳（2 秒内合并） |
 | `POST` | `/api/lifecycle/exit` | 停止所有会话、完成保存与遥测定稿后关闭 Web 服务与待机宿主 |
 
 ## 安全、幂等与错误处理约定
 
-1. **回环与同源防护**：服务仅绑定 `127.0.0.1`；校验 `Host` 头，所有写请求必须携带同源 `Origin`、`Content-Type: application/json` 与自定义头 `X-CST-Web-Request: 1`，拒绝任何跨站 CORS 预检。
-2. **幂等与版本并发控制**：写请求携带 `Idempotency-Key`；消息提交另按消息 `id` 去重（仅当会话、正文、图片与投递方式完全一致时视为幂等重试，否则返回 `409`）。队列修改与自定义服务编辑额外校验 `revision`，过期返回 `409`。BitLocker 本地凭据提交使用一次性 `requestId`，不写入持久化幂等日志。
-3. **体积限制**：单次提交的原始图片合计不超过 `12 MiB`（仅限 PNG/JPEG/GIF/WebP），整条 JSON 请求体不超过 `17 MiB`。
+1. **回环与同源防护**：服务仅绑定 `127.0.0.1` 并校验 `Host`；写请求须携带同源 `Origin` 与 `X-CST-Web-Request: 1`，带请求体的接口使用 `Content-Type: application/json`。跨站请求与 CORS 预检被拒绝。
+2. **幂等与版本并发控制**：一般写操作携带 `Idempotency-Key`，长度为 1–128 位，仅允许字母、数字、下划线和连字符。同一键用于不同操作、或重启后操作结果未确认时返回 `409`；消息提交按会话内消息 `id`、正文、图片、技能与投递方式去重。队列使用整数 `version`，自定义服务编辑使用 `revision`，过期返回 `409`。BitLocker 本地凭据提交使用一次性 `requestId`，不写入持久化幂等日志。
+3. **体积限制**：消息提交的原始图片合计不超过 `12 MiB`（仅限 PNG/JPEG/GIF/WebP），消息 JSON 请求体不超过 `17 MiB`；其他调用 JSON 正文的接口默认上限为 `128 KiB`。
 4. **统一错误结构**：所有接口错误返回 `{ "error": { "code": "...", "message": "..." } }`，不含敏感配置原文或凭据。

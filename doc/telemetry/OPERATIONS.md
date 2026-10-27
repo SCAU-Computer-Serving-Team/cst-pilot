@@ -40,6 +40,12 @@ OA_SERVICE_TOKEN=<仅保存在服务器的内省服务凭据>
 | `telemetry-receiver rollup` | 清空派生汇总并从 `sessions` 原始记录全量重算 `daily_rollup` |
 | `telemetry-receiver delete --mid <id> \| --device <id> \| --installation <id>` | 按上传成员、OA 设备或匿名安装删除会话记录并重算汇总；按安装删除时保留 `installations` 表中的公钥绑定，防止其他密钥冒用同一安装 ID |
 
+## 客户端投递诊断
+
+`agent/home/telemetry/status.json` 记录本地保存的快照、各端最近入队和确认、心跳确认及最近失败类型。端点以 URL 的 SHA-256 前 16 位标识；文件不记录正文、凭据或原始端点地址。
+
+失败类型包括 `storage`、`auth`、`capability`、`protocol`、`network`、`timeout`、`tls` 与 `http`。诊断状态有数量限制，不能代替完整上传历史；诊断写入失败不会阻塞业务或删除队列。
+
 ## 发布与回退
 
 双端接收端已完成快照与心跳能力部署。OA 请求级账单接口、客户端便携包发布及真实设备验收待完成。

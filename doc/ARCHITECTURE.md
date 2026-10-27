@@ -37,7 +37,7 @@ flowchart TB
 | `diagnostics` | `agent/home/extensions/diagnostics/`、`agent/home/skills/`、`pwsh/`、`wiztree/`、`lhm/` | 8 个注册工具、共享目录大小缓存、PowerShell 安全调用、BitLocker 双端交互与跨进程卷锁 | [SPEC](diagnostics/SPEC.md) · [ARCHITECTURE](diagnostics/ARCHITECTURE.md) · [API](diagnostics/API.md) |
 | `web` | `agent/home/extensions/web/`、`src/web/frontend/`、`src/web/design/` | 本机 HTTP/SSE 服务、多会话池、持久化输入收件箱、React 19 静态 SPA、流式渲染与工具卡片 | [SPEC](web/SPEC.md) · [ARCHITECTURE](web/ARCHITECTURE.md) · [API](web/API.md) |
 | `auth` | `agent/home/extensions/oauth/`、`agent/home/extensions/web/server/api/` | `cstoa` 原生 Provider（设备码 OAuth 与 APIKEY）、动态模型目录、Pi 原生多服务登录与自定义服务 | [SPEC](auth/SPEC.md) · [ARCHITECTURE](auth/ARCHITECTURE.md) · [API](auth/API.md) |
-| `telemetry` | `agent/home/extensions/telemetry/`、`cst-pilot-server` | 会话统计与请求日志采集、恢复草稿、回答结束/心跳/关闭统一提交、双端独立队列与 Go 接收端 | [SPEC](telemetry/SPEC.md) · [ARCHITECTURE](telemetry/ARCHITECTURE.md) · [API](telemetry/API.md) · [OPERATIONS](telemetry/OPERATIONS.md) |
+| `telemetry` | `agent/home/extensions/telemetry/`、`cst-pilot-server` | 会话统计采集、恢复草稿、回答结束/心跳/关闭统一提交、双端独立队列与 Go 接收端 | [SPEC](telemetry/SPEC.md) · [ARCHITECTURE](telemetry/ARCHITECTURE.md) · [API](telemetry/API.md) · [OPERATIONS](telemetry/OPERATIONS.md) |
 | `release` | `pack/`、`src/web/frontend/scripts/` | 官方二进制锁定、扩展 esbuild 预打包、WOFF2 字体子集构建、干净发行树校验与自动冒烟 | [SPEC](release/SPEC.md) · [ARCHITECTURE](release/ARCHITECTURE.md) |
 
 ## 全局运行边界
@@ -55,12 +55,13 @@ flowchart TB
 | `agent/home/APPEND_SYSTEM.md` | 项目级 Agent 提示词 | 随包只读分发，由 Pi 自动附加到系统提示词末尾 |
 | `agent/home/settings.json` | 默认模型、启用范围、思考强度、TUI 主题 | TUI 与 Web 共用；按字段合并写入，操作前重读 |
 | `agent/home/web-settings.json` | Web 主题与空模型范围标记 | Web 独占；默认 `light`，串行原子替换 |
-| `agent/home/models.json` | 自定义模型服务与服务地址覆盖 | TUI 与 Web 共用；原子替换后刷新 `ModelRuntime` |
+| `agent/home/models.json` | 自定义模型服务、服务地址覆盖及可选 API key | TUI 与 Web 共用；原子替换后刷新 `ModelRuntime`，不得进入发行包 |
 | `agent/home/models-store.json` | 离线与动态模型目录缓存 | 发行包预置上游目录与默认模型；CSTOA 登录后按凭据更新 |
 | `agent/home/auth.json` | 各模型服务的 OAuth 令牌与 APIKEY | Pi `AuthStorage` 管理；严禁进入浏览器存储、日志或发行包 |
 | `agent/home/device.json` | CSTOA 设备标识 | 首次登录生成，随 U 盘保留 |
 | `agent/home/sessions/` | 会话历史 JSONL | TUI 与 Web 共用；按会话 ID 跨进程互斥持有写权 |
 | `agent/home/web-inbox/` | Web 已接受输入队列、回执、创建时间与会话图片附件 | Web 后端按会话维护；先落盘确认再投递给模型 |
+| `agent/home/web-access.log` | Web HTTP 与 API 访问诊断日志 | 追加请求方法、路径、响应状态与耗时；不记录查询参数或请求正文，当前无自动清理 |
 | `agent/home/telemetry/` | 匿名安装身份、会话恢复草稿、双端待发队列与诊断状态 | 遥测扩展维护；通过跨进程目录锁保护 |
 | `outbox/<YYYY-MM-DD>/` | `runbook` 交付的修复命令清单 TXT | `runbook` 工具写入；按日期目录跨进程互斥 |
 | `wiztree/tmp/` | WizTree 扫描导出的临时 CSV | 扫描期间写入，结束后清理 |
