@@ -7,7 +7,7 @@
 | 待办 | 依据 |
 |---|---|
 | 兼容版：面向 Chromium 86 单独构建样式并验证交互 | [浏览器基线](web/SPEC/frontend.md#浏览器基线) |
-| 使用统计：累计快照与心跳实机验收，双端接收端先行发布 | [改造计划](telemetry/trigger-upgrade-plan.md)、[验收](test/telemetry.md) |
+| 使用统计：双端接收端已发布，待累计快照与心跳实机验收、客户端便携包发布 | [改造计划](telemetry/trigger-upgrade-plan.md)、[验收](test/telemetry.md) |
 | 仪表盘：实现用量概览、趋势、筛选与日志 | [仪表盘](web/SPEC/dashboard.md) |
 | 会话导出与分享：确定格式、附件范围、脱敏和分享销毁规则 | [命令规格](web/SPEC/commands.md)、[分享](web/SPEC/session-runtime.md#分享) |
 | 会话内搜索与会话列表搜索 | [范围边界](web/MVP.md#七范围边界) |
@@ -29,7 +29,7 @@
 | 待办 | 依据 |
 |---|---|
 | BitLocker 凭据边界：模型请求、Windows 审计、终端录制与其他扩展实测；完善 Web 草稿、收件箱、图像与附件脱敏 | [凭据边界](tool/bitlocker.md#凭据与-skill)、[执行限制](tool/bitlocker.md#限制) |
-| 发布 CSTOA 请求级扣点能力并核对真实账单 | [遥测部署](telemetry/deployment.md#cstoa-扣点能力发布)、[遥测测试](test/telemetry.md) |
+| 接收端扣点支持已发布；待 OA 账单接口、客户端发布及真实账单核对 | [遥测部署](telemetry/deployment.md#cstoa-扣点能力发布)、[遥测测试](test/telemetry.md) |
 | 遥测多成员上传、两端异机备份与完整恢复、清理和汇总监控 | [遥测运维](issues.md#遥测运维) |
 
 ## 待补画布
