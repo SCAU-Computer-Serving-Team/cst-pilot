@@ -11,7 +11,7 @@
 | `web` | 会话导出与分享：确定格式、附件范围、脱敏与分享销毁规则并实现接口 | [web/SPEC.md](web/SPEC.md#命令与功能对应) |
 | `web` | 会话内搜索与侧栏会话列表搜索 | [web/SPEC.md](web/SPEC.md#聊天工作台) |
 | `web` | 补齐画布：分支树视图过滤下拉弹层、分支树标记编辑入口／标记时间／条目复制与键盘跳段 | [DESIGN.md](../DESIGN.md#画布定位)、[web/SPEC.md](web/SPEC.md#分支树与分支总结) |
-| `telemetry` | 生产发布：上线 OA 请求级扣点接口、双端接收端 `0.2` 快照与心跳能力，再启用客户端多触发提交 | [telemetry/OPERATIONS.md](telemetry/OPERATIONS.md#发布与回退) |
+| `telemetry` | 生产发布：上线 OA 请求级扣点接口，完成累计快照与心跳实机验收并发布客户端便携包 | [telemetry/OPERATIONS.md](telemetry/OPERATIONS.md#发布与回退) |
 
 ## 待决议题
 
