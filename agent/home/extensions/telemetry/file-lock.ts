@@ -3,6 +3,26 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { setTimeout } from "node:timers/promises";
+import { draftOwner, ownerAlive } from "./draft-owner.ts";
+
+async function abandonedLock(lock: string): Promise<boolean> {
+	const info = await stat(lock).catch(() => undefined);
+	if (!info) return false;
+	try {
+		const owner = JSON.parse(await readFile(`${lock}/owner.json`, "utf8"));
+		if (owner.proof) return !(await ownerAlive(owner.proof));
+		if (Number.isInteger(owner.pid) && owner.pid > 0) {
+			try {
+				process.kill(owner.pid, 0);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "ESRCH") return true;
+			}
+		}
+	} catch {
+		/* owner 尚未写完时，等待短事务完成。 */
+	}
+	return Date.now() - info.mtimeMs > 120_000;
+}
 
 export async function withFileLock<T>(target: string, operation: () => Promise<T>): Promise<T> {
 	await mkdir(dirname(target), { recursive: true });
@@ -11,7 +31,7 @@ export async function withFileLock<T>(target: string, operation: () => Promise<T
 		try {
 			await mkdir(lock);
 			try {
-				await writeFile(`${lock}/owner.json`, JSON.stringify({ pid: process.pid }));
+				await writeFile(`${lock}/owner.json`, JSON.stringify({ pid: process.pid, proof: await draftOwner() }));
 			} catch (error) {
 				await rm(lock, { recursive: true, force: true });
 				throw error;
@@ -19,42 +39,14 @@ export async function withFileLock<T>(target: string, operation: () => Promise<T
 			break;
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-			const info = await stat(lock).catch(() => undefined);
-			let abandoned = false;
-			try {
-				const owner = JSON.parse(await readFile(`${lock}/owner.json`, "utf8"));
-				if (Number.isInteger(owner.pid) && owner.pid > 0) {
-					try {
-						process.kill(owner.pid, 0);
-					} catch (error) {
-						abandoned = (error as NodeJS.ErrnoException).code === "ESRCH";
-					}
-				}
-			} catch {
-				abandoned = !!info && Date.now() - info.mtimeMs > 120_000;
-			}
-			if (abandoned) {
+			if (await abandonedLock(lock)) {
 				// 仅一个进程清理失效锁，取得清理权后重新核对 owner。
 				const recovery = `${lock}.recovery`;
 				let held = false;
 				try {
 					await mkdir(recovery);
 					held = true;
-					const owner = await readFile(`${lock}/owner.json`, "utf8")
-						.then((text) => JSON.parse(text))
-						.catch(() => undefined);
-					let dead = false;
-					if (Number.isInteger(owner?.pid) && owner.pid > 0) {
-						try {
-							process.kill(owner.pid, 0);
-						} catch (error) {
-							dead = (error as NodeJS.ErrnoException).code === "ESRCH";
-						}
-					} else {
-						const latest = await stat(lock);
-						dead = Date.now() - latest.mtimeMs > 120_000;
-					}
-					if (dead) {
+					if (await abandonedLock(lock)) {
 						const stale = `${lock}.stale-${randomUUID()}`;
 						await rename(lock, stale);
 						await rm(stale, { recursive: true, force: true });

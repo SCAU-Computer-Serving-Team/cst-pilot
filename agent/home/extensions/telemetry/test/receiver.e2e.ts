@@ -11,7 +11,7 @@ import { WebSessionPool } from "../../web/server/session/sessions.ts";
 import { freePort } from "../../web/test/browser.ts";
 import { testRoot } from "../../web/test/support.ts";
 import { newState } from "../collect.ts";
-import { flushEndpoints } from "../delivery.ts";
+import { flushEndpoints, queueRecord } from "../delivery.ts";
 import { loadInstallation } from "../installation.ts";
 import { appendRecord, readAll } from "../outbox.ts";
 import { buildRecord } from "../record.ts";
@@ -193,6 +193,27 @@ test(
 			pool = new WebSessionPool(options);
 			let slot = await pool.create();
 			await slot.session.prompt("未登录遥测测试");
+			await until(
+				async () => (await health(0)).sessions === 1 && (await health(1)).sessions === 1,
+				"回答结束且实例仍活动时，两端应已收到快照",
+			);
+			await slot.session.prompt("同一实例继续提问");
+			for (const index of [0, 1]) {
+				const activeCsv = join(root, `active-${index}.csv`);
+				await until(async () => {
+					execFileSync(binary, ["export-csv", activeCsv], {
+						env: { ...process.env, TELEMETRY_DB: join(root, `receiver-${index}.db`) },
+					});
+					const lines = (await readFile(activeCsv, "utf8")).trim().split("\n");
+					const columns = lines[0].split(",");
+					const row = lines[1]?.split(",");
+					return (
+						lines.length === 2 &&
+						row?.[columns.indexOf("turns")] === "2" &&
+						row?.[columns.indexOf("snapshot_final")] === "0"
+					);
+				}, "再次提问应更新同一活动记录的累计值");
+			}
 			await pool.close();
 			pool = undefined;
 			await until(
@@ -348,6 +369,63 @@ test(
 				(await readFile(csvFile, "utf8")).includes(`${retry.recordId},,,`),
 				"OA 凭据被拒后应降级安装签名，上传者为空",
 			);
+			// 新协议跨仓库联调：同一实例累计更新，两端逐版本确认且条数不增加。
+			const cumulative = {
+				...offline,
+				v: "0.2",
+				recordId: crypto.randomUUID(),
+				revision: 1,
+				final: false,
+				endReason: "",
+				turns: 2,
+			};
+			const counts = await Promise.all([health(0), health(1)]);
+			for (const snapshot of [
+				cumulative,
+				{ ...cumulative, revision: 2, final: true, endReason: "quit", turns: 5 },
+			]) {
+				await queueRecord(home, snapshot, endpoints);
+				await flushEndpoints(home, { installation, access: "test-agent-token" }, endpoints);
+				for (const [index, endpoint] of endpoints.entries()) {
+					assert.deepEqual(await readAll(home, endpoint.url), []);
+					assert.equal((await health(index)).sessions, counts[index].sessions + 1);
+				}
+			}
+			for (const [index, endpoint] of endpoints.entries()) {
+				const heartbeat = {
+					runId: crypto.randomUUID(),
+					sequence: 1,
+					sentAt: new Date().toISOString(),
+					status: "idle" as const,
+					identity: cumulative.identity,
+					lastActivityAt: null,
+					snapshots: [{ recordId: cumulative.recordId, revision: 2 }],
+				};
+				const pulse = await sendBatch(endpoint.url, installation, [], undefined, heartbeat);
+				assert.equal(pulse.kind, "accepted");
+				if (pulse.kind === "accepted") assert.equal(pulse.heartbeatAcknowledged, true);
+				const closed = await sendBatch(endpoint.url, { installation, access: "test-agent-token" }, [], undefined, {
+					...heartbeat,
+					sequence: 2,
+					status: "closed",
+				});
+				assert.equal(closed.kind, "accepted");
+				if (closed.kind === "accepted") assert.equal(closed.heartbeatAcknowledged, true);
+				assert.equal((await health(index)).sessions, counts[index].sessions + 1, "纯心跳不创建会话");
+				const result = await sendBatch(endpoint.url, installation, [cumulative]);
+				assert.equal(result.kind, "accepted");
+				if (result.kind === "accepted") assert.deepEqual(result.acknowledged, [cumulative]);
+				execFileSync(binary, ["export-csv", csvFile], {
+					env: { ...process.env, TELEMETRY_DB: join(root, `receiver-${index}.db`) },
+				});
+				const rows = (await readFile(csvFile, "utf8")).trim().split("\n");
+				const header = rows[0].split(",");
+				const row = rows.find((line) => line.startsWith(`${cumulative.recordId},`))!.split(",");
+				assert.equal(row[header.indexOf("turns")], "5");
+				assert.equal(row[header.indexOf("snapshot_revision")], "2");
+				assert.equal(row[header.indexOf("snapshot_final")], "1");
+				assert.equal(row[header.indexOf("mid")], "test-member", "安装签名重传保留首次账号");
+			}
 		} finally {
 			await pool?.close();
 			for (const child of children) {

@@ -23,14 +23,30 @@ async function lines(agentDir: string, endpoint?: string): Promise<string[]> {
 	return text.split("\n").filter((entry) => entry.trim() !== "");
 }
 
-export async function appendRecord(agentDir: string, record: SessionRecord, endpoint?: string): Promise<void> {
+export async function appendRecord(
+	agentDir: string,
+	record: SessionRecord,
+	endpoint?: string,
+): Promise<SessionRecord | undefined> {
 	return enqueue(() =>
 		withFileLock(pendingPath(agentDir, endpoint), async () => {
 			const line = JSON.stringify(record);
 			if (Buffer.byteLength(line, "utf8") > RECORD_MAX_BYTES) return;
 			await mkdir(join(agentDir, "telemetry"), { recursive: true });
+			const existing = await lines(agentDir, endpoint);
+			if (record.v === "0.2") {
+				for (const entry of existing) {
+					try {
+						const current = JSON.parse(entry) as SessionRecord;
+						if (current.recordId === record.recordId && (current.revision ?? 0) >= (record.revision ?? 0))
+							return current;
+					} catch {
+						/* 损坏行由下一次重写清理。 */
+					}
+				}
+			}
 			// 相同草稿在恢复或迁移重试中不会占用多个队列位置。
-			const previous = (await lines(agentDir, endpoint)).filter((entry) => {
+			const previous = existing.filter((entry) => {
 				try {
 					return (JSON.parse(entry) as SessionRecord).recordId !== record.recordId;
 				} catch {
@@ -40,6 +56,7 @@ export async function appendRecord(agentDir: string, record: SessionRecord, endp
 			const kept = previous.slice(-(OUTBOX_MAX_RECORDS - 1));
 			kept.push(line);
 			await rewritePending(agentDir, kept, endpoint);
+			return record;
 		}),
 	);
 }
@@ -56,7 +73,9 @@ export async function readAll(agentDir: string, endpoint?: string): Promise<Sess
 	});
 }
 
-export async function removeRecords(agentDir: string, recordIds: Set<string>, endpoint?: string): Promise<void> {
+/** 仅删除实际发送的内容，发送期间产生的同实例更新继续保留。 */
+export async function removeRecords(agentDir: string, records: SessionRecord[], endpoint?: string): Promise<void> {
+	const acknowledged = new Set(records.map((record) => JSON.stringify(record)));
 	return enqueue(() =>
 		withFileLock(pendingPath(agentDir, endpoint), async () => {
 			const previous = await lines(agentDir, endpoint);
@@ -64,7 +83,7 @@ export async function removeRecords(agentDir: string, recordIds: Set<string>, en
 			const kept = previous
 				.filter((line) => {
 					try {
-						return !recordIds.has((JSON.parse(line) as SessionRecord).recordId);
+						return !acknowledged.has(JSON.stringify(JSON.parse(line)));
 					} catch {
 						return false;
 					}

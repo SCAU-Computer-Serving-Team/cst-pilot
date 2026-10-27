@@ -119,6 +119,18 @@ test("单端点队列迁移到两端，迁移重试不会复制同一 recordId",
 	}
 });
 
+test("低版本恢复和重复入队不会覆盖待发的更高版本", async () => {
+	const dir = await home("snapshot-order");
+	const first = { ...record(), v: "0.2", revision: 1, final: false, endReason: "" };
+	const latest = { ...first, revision: 2, turns: 3, final: true, endReason: "quit" };
+	const endpoint = { url: "https://first.example/api" };
+	await queueRecord(dir, latest, [endpoint]);
+	await queueRecord(dir, first, [endpoint]);
+	assert.deepEqual(await readAll(dir, endpoint.url), [latest]);
+	await queueRecord(dir, latest, [endpoint]);
+	assert.deepEqual(await readAll(dir, endpoint.url), [latest]);
+});
+
 test("每端点 200 条上限独立，同一记录重写只占一个位置", async () => {
 	const dir = await home("bounds");
 	const endpoints = [{ url: "https://first.example/" }, { url: "https://second.example/" }];
@@ -150,6 +162,76 @@ test("并发触发单飞；发送期间追加的新记录继续发送", async ()
 		assert.deepEqual(await readAll(dir, target.endpoint.url), []);
 	} finally {
 		await target.close();
+	}
+});
+
+test("发送中的旧快照确认不会删除同一实例的新快照", async () => {
+	const dir = await home("snapshot-ack");
+	const target = await mock(202, 80);
+	try {
+		const first = record();
+		const updated = { ...first, turns: first.turns + 1 };
+		await queueRecord(dir, first, [target.endpoint]);
+		const flushing = flushEndpoints(dir, "test-token", [target.endpoint]);
+		while (!target.payloads.length) await new Promise((resolve) => setTimeout(resolve, 5));
+		await queueRecord(dir, updated, [target.endpoint]);
+		await flushing;
+		assert.deepEqual(target.payloads, [[first], [updated]]);
+		assert.deepEqual(await readAll(dir, target.endpoint.url), []);
+	} finally {
+		await target.close();
+	}
+});
+
+test("新快照在旧接收端保留，逐版本确认后才清除", async () => {
+	const dir = await home("versioned-protocol");
+	const value = { ...record(), v: "0.2", revision: 1, final: true };
+	const requests: string[] = [];
+	let capable = false;
+	let accurate = false;
+	const server = createServer(async (request, response) => {
+		requests.push(request.method ?? "");
+		if (request.method === "GET") {
+			response.writeHead(capable ? 200 : 405);
+			response.end(
+				capable
+					? JSON.stringify({ protocols: ["0.2"], capabilities: ["session-snapshots", "revision-acks"] })
+					: "{}",
+			);
+			return;
+		}
+		for await (const _chunk of request) {
+			/* 接收完整请求 */
+		}
+		response.writeHead(202);
+		response.end(
+			accurate
+				? JSON.stringify({
+						v: "0.2",
+						acks: [{ recordId: value.recordId, revision: value.revision, status: "stored" }],
+					})
+				: JSON.stringify({ accepted: 0, rejected: 1, reasons: { "unknown-version": 1 } }),
+		);
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const address = server.address();
+	assert.ok(address && typeof address !== "string");
+	const endpoint = { url: `http://127.0.0.1:${address.port}/v1/sessions` };
+	const auth = { installationId: randomUUID(), identityKey: Buffer.alloc(32, 1).toString("base64") };
+	try {
+		await queueRecord(dir, value, [endpoint]);
+		await flushEndpoints(dir, auth, [endpoint]);
+		assert.deepEqual(requests, ["GET"]);
+		assert.deepEqual(await readAll(dir, endpoint.url), [value]);
+		capable = true;
+		await flushEndpoints(dir, auth, [endpoint]);
+		assert.deepEqual(await readAll(dir, endpoint.url), [value]);
+		accurate = true;
+		await flushEndpoints(dir, auth, [endpoint]);
+		assert.deepEqual(await readAll(dir, endpoint.url), []);
+	} finally {
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
 	}
 });
 

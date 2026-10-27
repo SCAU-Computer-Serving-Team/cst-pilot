@@ -7,6 +7,7 @@
 | 待办 | 依据 |
 |---|---|
 | 兼容版：面向 Chromium 86 单独构建样式并验证交互 | [浏览器基线](web/SPEC/frontend.md#浏览器基线) |
+| 使用统计：累计快照与心跳实机验收，双端接收端先行发布 | [改造计划](telemetry/trigger-upgrade-plan.md)、[验收](test/telemetry.md) |
 | 仪表盘：实现用量概览、趋势、筛选与日志 | [仪表盘](web/SPEC/dashboard.md) |
 | 会话导出与分享：确定格式、附件范围、脱敏和分享销毁规则 | [命令规格](web/SPEC/commands.md)、[分享](web/SPEC/session-runtime.md#分享) |
 | 会话内搜索与会话列表搜索 | [范围边界](web/MVP.md#七范围边界) |

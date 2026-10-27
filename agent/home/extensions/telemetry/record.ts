@@ -23,6 +23,9 @@ export interface SessionRecord extends EnvironmentSnapshot {
 	v: string;
 	type: "session";
 	recordId: string;
+	/** 0.2 累计快照；0.1 最终记录不包含版本和最终状态字段。 */
+	revision?: number;
+	final?: boolean;
 	kitVersion: string;
 	sessionId: string;
 	channel: "tui" | "web";
@@ -71,7 +74,7 @@ function modelEntries(models: Map<string, ModelAgg>): Omit<ModelAgg, never>[] {
 
 function toolEntries(tools: Map<string, ToolAgg>): object[] {
 	return [...tools.values()].map((agg) => {
-		const entry: Record<string, unknown> = { ...agg };
+		const entry: Record<string, unknown> = { ...structuredClone(agg) };
 		if (entry.scope === undefined) delete entry.scope;
 		if (agg.entriesTotal === undefined) delete entry.entriesTotal;
 		if (agg.providers === undefined) delete entry.providers;
@@ -140,6 +143,7 @@ export function crashRecord(draft: SessionRecord, lastTurnEndedAt: number): Sess
 		...draft,
 		recordId: draft.recordId || randomUUID(),
 		endReason: "crash",
+		...(draft.v === "0.2" ? { revision: (draft.revision ?? 0) + 1, final: true } : {}),
 		endedAt: localIso(endedAt),
 		durationMs: endedAt - Date.parse(draft.startedAt),
 	};

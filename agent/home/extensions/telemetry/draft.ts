@@ -1,19 +1,23 @@
 /**
- * 轮次级草稿：进行中会话的落盘形态，agent/home/telemetry/drafts/<sessionId>.json。
- * 每 turn_end 整体重写（先写临时文件再改名）；定稿后删除；进程启动时恢复残留草稿。
- * 按会话分文件，多实例并行写互不干扰，不经共享串行队列。
+ * 实例草稿：agent/home/telemetry/drafts/<recordId>.json。
+ * 原子替换；最终快照全部入队后删除。恢复兼容按 sessionId 命名的草稿。
+ * 每文件事务锁协调保存和恢复，锁内不等待账单或端点队列。
  */
 
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { BillingRequest } from "./billing.ts";
+import { diagnose } from "./diagnostics.ts";
+import { type DraftOwner, ownerAlive } from "./draft-owner.ts";
+import { withFileLock } from "./file-lock.ts";
 import { crashRecord, type SessionRecord } from "./record.ts";
 
 export interface DraftFile {
 	record: SessionRecord;
 	lastTurnEndedAt: number;
 	ownerPid?: number;
+	owner?: DraftOwner;
 	cstoaRequests?: BillingRequest[];
 }
 
@@ -27,13 +31,17 @@ function draftPath(agentDir: string, sessionId: string): string {
 
 export async function writeDraft(agentDir: string, sessionId: string, draft: DraftFile): Promise<void> {
 	const target = draftPath(agentDir, sessionId);
+	await withFileLock(target, () => replaceDraft(target, draft));
+}
+
+async function replaceDraft(target: string, draft: DraftFile): Promise<void> {
 	const temp = `${target}.${randomUUID()}.tmp`;
 	try {
-		await mkdir(draftsDir(agentDir), { recursive: true });
 		await writeFile(temp, JSON.stringify({ ...draft, ownerPid: draft.ownerPid ?? process.pid }), "utf8");
 		await rename(temp, target);
-	} catch {
+	} catch (error) {
 		await rm(temp, { force: true }).catch(() => undefined);
+		throw error;
 	}
 }
 
@@ -60,23 +68,37 @@ export async function recoverDrafts(
 	const records: SessionRecord[] = [];
 	for (const name of files) {
 		try {
-			const draft = JSON.parse(await readFile(join(dir, name), "utf8")) as DraftFile;
-			if (draft.ownerPid && draft.ownerPid !== process.pid) {
-				try {
-					process.kill(draft.ownerPid, 0);
-					continue;
-				} catch (error) {
-					if ((error as NodeJS.ErrnoException).code !== "ESRCH") continue;
+			const target = join(dir, name);
+			const candidate = await withFileLock(target, async () => {
+				const raw = await readFile(target, "utf8");
+				const draft = JSON.parse(raw) as DraftFile;
+				if (await ownerAlive(draft.owner)) return;
+				const record = draft.record;
+				if (!record || !(record.turns > 0 || record.prompts > 0 || (record.cstoaBilling?.requests ?? 0) > 0)) {
+					await rm(target, { force: true });
+					return;
 				}
-			}
-			const record = draft.record;
-			if (record && (record.turns > 0 || record.prompts > 0)) {
-				let recovered = record.endReason ? record : crashRecord(record, draft.lastTurnEndedAt ?? 0);
-				if (!record.endReason && prepare) recovered = await prepare(recovered, draft);
-				await persist(recovered);
-				records.push(recovered);
-			}
-			await rm(join(dir, name), { force: true });
+				return { raw, draft };
+			});
+			if (!candidate) continue;
+			const { draft, raw } = candidate;
+			let recovered = draft.record.endReason ? draft.record : crashRecord(draft.record, draft.lastTurnEndedAt ?? 0);
+			if (!draft.record.endReason && prepare) recovered = await prepare(recovered, draft);
+			const sealed = await withFileLock(target, async () => {
+				if ((await readFile(target, "utf8")) !== raw) return;
+				// 入队前封存恢复结果；其他恢复进程只能重用此版本。
+				await replaceDraft(target, { ...draft, owner: undefined, record: recovered });
+				return readFile(target, "utf8");
+			});
+			if (sealed === undefined) continue;
+			await diagnose(agentDir, {
+				saved: { recordId: recovered.recordId, revision: recovered.revision, final: recovered.final },
+			});
+			await persist(recovered);
+			records.push(recovered);
+			await withFileLock(target, async () => {
+				if ((await readFile(target, "utf8")) === sealed) await rm(target, { force: true });
+			});
 		} catch {
 			// 损坏或入队失败时保留源文件，后续启动重试。
 		}

@@ -13,22 +13,10 @@ import { refreshCstoaModels } from "../../../oauth/sync.ts";
 import { installRuntimeAdapter, registerRuntimeSession } from "../../../runtime/adapter.ts";
 import { checkSharedConfiguration } from "../../../runtime/configuration.ts";
 import { ownSession } from "../../../runtime/owner.ts";
+import { finalizeSession as finalizeTelemetrySession, processCloseBudget } from "../../../telemetry/shared.ts";
 import { replaceFile } from "./replace-file.ts";
 import { ToolExecutions } from "./tool-executions.ts";
 import { WebUiBridge } from "./ui.ts";
-
-/** 遥测扩展挂在 globalThis 的定稿入口；扩展未启用时无副作用。 */
-async function finalizeTelemetrySession(sessionId: string, reason: string): Promise<void> {
-	const holder = globalThis as Record<
-		symbol,
-		{ finalizers?: Map<string, (r: string) => Promise<void> | void> } | undefined
-	>;
-	try {
-		await holder[Symbol.for("cst-pilot/telemetry")]?.finalizers?.get(sessionId)?.(reason);
-	} catch {
-		// 遥测定稿失败不影响销毁流程。
-	}
-}
 
 // The browser must never choose tools. Keep the set no broader than the kit's read/diagnostic tools.
 const WEB_TOOLS = [
@@ -483,9 +471,12 @@ export class WebSessionPool {
 			this.closed = false;
 			throw new Error("会话尚未停止，未关闭程序。请稍后重试。");
 		}
-		for (const { session, ui, id, execution } of this.slots.values()) {
+		const telemetryBudget = processCloseBudget(this.options.agentDir) ?? AbortSignal.timeout(5_000);
+		await Promise.allSettled(
+			[...this.slots.keys()].map((id) => finalizeTelemetrySession(id, "quit", telemetryBudget)),
+		);
+		for (const { session, ui, execution } of this.slots.values()) {
 			execution.close();
-			await finalizeTelemetrySession(id, "quit");
 			ui.close();
 			session.dispose();
 		}
