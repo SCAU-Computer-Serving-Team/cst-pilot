@@ -6,8 +6,14 @@ export default [
 		index("routes/home.tsx"),
 		route("s/:sessionId", "routes/chat.tsx"),
 		route("s/:sessionId/tree", "routes/tree.tsx"),
-		route("settings", "routes/settings.tsx"),
-		route("settings/provider", "routes/provider.tsx"),
+		route("settings", "routes/settings.tsx", [
+			index("routes/settings-services.tsx"),
+			route("general", "routes/settings-general.tsx"),
+			route("models", "routes/settings-models.tsx"),
+			route("shortcuts", "routes/settings-shortcuts.tsx"),
+			route("add", "routes/settings-add.tsx"),
+			route("provider", "routes/provider.tsx"),
+		]),
 		route("account", "routes/account.tsx"),
 	]),
 ] satisfies RouteConfig;

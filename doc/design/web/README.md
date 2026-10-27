@@ -13,4 +13,4 @@
 | [branch-summary](branch-summary.md) | 跨页待办、Pi 调用、取消与浏览器测试 |
 | [tool](tool/README.md) | 工具组件、结果映射与逐工具模板 |
 
-测试命令见[前端检查](frontend.md#检查)，执行结果与未完成范围由 MVP 和测试记录承载。
+测试命令见[前端检查](frontend.md#检查)，测试方法见[测试指南](../../test/README.md)，后续工作见[待办清单](../../Todo.md)。

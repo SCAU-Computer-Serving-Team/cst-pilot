@@ -31,6 +31,7 @@ export default function WorkspaceLayout() {
 	const [params] = useSearchParams();
 	const preview = params.get("preview") === "1";
 	const home = pathname === "/";
+	const settings = pathname === "/settings" || pathname.startsWith("/settings/");
 	const homeTransition = useViewTransitionState("/");
 	const [settledHome, setSettledHome] = useState(home);
 	const homeExit = homeTransition && settledHome;
@@ -38,6 +39,7 @@ export default function WorkspaceLayout() {
 		if (!homeTransition) setSettledHome(home);
 	}, [home, homeTransition]);
 	const narrow = useMediaQuery(NARROW_QUERY);
+	const mobile = useMediaQuery("(max-width: 760px)");
 	const [collapsed, setCollapsed] = useState(() => {
 		const stored = localStorage.getItem(SIDEBAR_KEY);
 		if (stored) return stored === "1";
@@ -51,16 +53,17 @@ export default function WorkspaceLayout() {
 		motion.capture();
 		setCollapsed(value);
 	}
-	const overlay = narrow && !collapsed;
+	const overlayLayout = settings ? mobile : narrow;
+	const overlay = overlayLayout && !collapsed;
 	return (
 		<AccountProvider enabled={!preview}>
-			<NotificationRegion>
+			<NotificationRegion contentInset={collapsed || (settings && mobile) ? 0 : 264}>
 				<div
 					ref={motion.root}
 					data-home-transition={homeTransition || undefined}
 					data-home-exit={homeExit || undefined}
 					data-view-transitions={typeof document.startViewTransition === "function"}
-					className={`app-layout ${home ? "home-layout" : "chat-layout"} ${collapsed ? "sidebar-collapsed" : ""}`}
+					className={`app-layout ${home ? "home-layout" : "chat-layout"} ${settings ? "settings-layout" : ""} ${collapsed ? "sidebar-collapsed" : ""}`}
 				>
 					{overlay && (
 						<div className="sidebar-backdrop" aria-hidden="true" onClick={() => changeCollapsed(true)} />

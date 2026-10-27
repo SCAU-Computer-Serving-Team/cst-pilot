@@ -91,7 +91,7 @@ test(
 						.map((model: { id: string; name: string }) => ({ id: model.id, name: model.name })),
 					modelIds.map((id) => ({ id, name: id })),
 				);
-				await browser.navigate(`${origin}/settings`);
+				await browser.navigate(`${origin}/settings/models`);
 				await browser.until("!!document.querySelector('.settings-search input')", "模型设置");
 				await browser.fill(".settings-search input", "cstoa");
 				await browser.until("document.querySelectorAll('.settings-model').length===2", "CSTOA 两个可用模型");

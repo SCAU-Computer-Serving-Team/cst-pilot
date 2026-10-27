@@ -6,6 +6,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import type { CstoaBilling } from "./billing.ts";
 import { type CurrencyMap, currencyOf } from "./config.ts";
 
 export interface ModelAgg {
@@ -18,8 +19,9 @@ export interface ModelAgg {
 	cacheRead: number;
 	cacheWrite: number;
 	totalTokens: number;
-	cost: number;
+	cost: number | null;
 	currency: string;
+	incompleteUsageTurns: number;
 }
 
 export interface ToolAgg {
@@ -55,6 +57,7 @@ export interface SessionState {
 	activeMs: number;
 	// 模型
 	models: Map<string, ModelAgg>;
+	cstoaBilling?: CstoaBilling;
 	// 上下文
 	compactions: number;
 	compactionTokens: number;
@@ -234,20 +237,23 @@ export function onTurnEnd(
 				cacheRead: 0,
 				cacheWrite: 0,
 				totalTokens: 0,
-				cost: 0,
+				cost: message.provider === "cstoa" ? null : 0,
 				currency: currencyOf(currency, message.provider ?? ""),
+				incompleteUsageTurns: 0,
 			};
 			state.models.set(key, agg);
 		}
 		agg.turns++;
 		const usage = message.usage;
+		if (!usage || !usage.totalTokens || message.stopReason === "aborted" || message.stopReason === "error")
+			agg.incompleteUsageTurns++;
 		if (usage) {
 			agg.input += usage.input ?? 0;
 			agg.output += usage.output ?? 0;
 			agg.cacheRead += usage.cacheRead ?? 0;
 			agg.cacheWrite += usage.cacheWrite ?? 0;
 			agg.totalTokens += usage.totalTokens ?? 0;
-			agg.cost += usage.cost?.total ?? 0;
+			if (agg.cost !== null) agg.cost += usage.cost?.total ?? 0;
 		}
 	}
 

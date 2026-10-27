@@ -409,8 +409,13 @@ export function Composer({
 		if (name === "open" || name === "reset") setModelRevision((value) => value + 1);
 		if (name !== "state") return;
 		try {
-			const type = JSON.parse(event?.data ?? "null")?.type;
-			if (type === "auth_changed" || type === "settings_changed") setModelRevision((value) => value + 1);
+			const data = JSON.parse(event?.data ?? "null");
+			if (
+				data?.type === "auth_changed" ||
+				data?.type === "settings_changed" ||
+				(data?.type === "usage_changed" && data.sessionId === sessionId)
+			)
+				setModelRevision((value) => value + 1);
 		} catch {
 			/* 后续重连重新读取。 */
 		}

@@ -5,16 +5,16 @@
 | 目录或文件 | 内容 |
 |---|---|
 | [PRD.md](PRD.md) | 产品需求：诊断工具、命令交付、UI 通道与 Web 需求、约束 |
-| [Todo.md](Todo.md) | 待办清单与画布待补项 |
+| [Todo.md](Todo.md) | MVP 完成后的功能迭代、发行验证、安全运维与画布待补项 |
 | [issues.md](issues.md) | 未决产品选择与未完成验证 |
 | [engineering-audit.html](engineering-audit.html) | 工程核对结果、代码证据与待决方案，离线可打开 |
 | [Notice.md](Notice.md) | 与常规 pi 用法不同的运行注意事项 |
 | [contract.md](contract.md) | 信息收集契约：记录字段、身份来源、计费币种、不采集清单 |
 | [tool/](tool/) | 八个注册工具的调用方式、返回字段与限制 |
 | [design/](design/) | 诊断工具与 Web 的实现设计 |
-| [web/](web/) | Web 端：MVP、行为规格与实测依据 |
+| [web/](web/) | Web 端：已完成的 MVP 范围、行为规格与实现依据 |
 | [telemetry/](telemetry/) | 遥测系统：架构、数据契约、发送端与接收端 |
 | [auth/](auth/) | OA 登录与模型接入、pi 扩展方案 |
-| [test/](test/) | 测试方法、环境覆盖与执行记录 |
+| [test/](test/) | 测试分工、执行入口、判定规则与环境覆盖要求 |
 
 视觉规范见根目录 [DESIGN.md](../DESIGN.md)，开发与检查命令见 [CONTRIBUTING.md](../CONTRIBUTING.md)。

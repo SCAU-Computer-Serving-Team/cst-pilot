@@ -33,7 +33,7 @@ OAuth 设备协议使用 Node 内置模块与 `fetch`；Provider 和推理复用
 - [账号与模型规格](README.md)：设备授权、APIKEY、有效期、积分和安全规则。
 - [Pi 扩展实现](pi-extension.md)：Provider、凭据、动态目录和推理适配。
 - [Web 登录规格](../web/SPEC/auth.md)：登录、取消、账号、启用模型和退出。
-- [账号验证](../test/account-report.md)：隔离测试、服务端发布和真实账号验收范围。
-- [遥测验证](../test/telemetry-report.md)：OAuth 上传身份和接收端验证。
+- [账号测试](../test/account.md)：隔离测试分工、核对项目和真实账号验证方法。
+- [遥测测试](../test/telemetry.md)：OAuth 上传身份、请求账单和双端接收验证方法。
 
 隔离测试使用 `agent/home/extensions/oauth/test/mock-oa.ts`，不读取用户凭据。真实手机授权和积分扣减使用获准的测试账号单独验证。

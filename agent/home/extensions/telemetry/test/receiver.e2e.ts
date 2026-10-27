@@ -11,7 +11,7 @@ import { WebSessionPool } from "../../web/server/session/sessions.ts";
 import { freePort } from "../../web/test/browser.ts";
 import { testRoot } from "../../web/test/support.ts";
 import { newState } from "../collect.ts";
-import { flushEndpoints } from "../delivery.ts";
+import { flushEndpoints, queueRecord } from "../delivery.ts";
 import { loadInstallation } from "../installation.ts";
 import { appendRecord, readAll } from "../outbox.ts";
 import { buildRecord } from "../record.ts";
@@ -31,6 +31,10 @@ test(
 		const home = join(root, "home");
 		await mkdir(home);
 		await cp(fileURLToPath(new URL("../", import.meta.url)), join(home, "extensions", "telemetry"), {
+			recursive: true,
+			filter: (file) => !file.replaceAll("\\", "/").includes("/test"),
+		});
+		await cp(fileURLToPath(new URL("../../oauth/", import.meta.url)), join(home, "extensions", "oauth"), {
 			recursive: true,
 			filter: (file) => !file.replaceAll("\\", "/").includes("/test"),
 		});
@@ -87,11 +91,35 @@ test(
 				),
 			);
 		});
+		let billingQueries = 0;
 		const model = createServer(async (request, response) => {
+			if (request.url?.endsWith("/models")) {
+				response.setHeader("Content-Type", "application/json");
+				response.end(JSON.stringify({ data: [{ id: "one" }] }));
+				return;
+			}
+			if (request.url === "/api/agent/llm/billing") {
+				assert.equal(request.headers.authorization, "Bearer test-agent-token");
+				let body = "";
+				for await (const chunk of request) body += chunk;
+				assert.deepEqual(JSON.parse(body).requestIds, ["cstoa-request"]);
+				billingQueries++;
+				response.setHeader("Content-Type", "application/json");
+				response.end(
+					JSON.stringify({
+						result: true,
+						data: {
+							unit: "quota_point",
+							requests: [{ requestId: "cstoa-request", quotaPoints: billingQueries === 1 ? null : 198 }],
+						},
+					}),
+				);
+				return;
+			}
 			for await (const _ of request) {
 				/* consume request */
 			}
-			response.writeHead(200, { "Content-Type": "text/event-stream" });
+			response.writeHead(200, { "Content-Type": "text/event-stream", "x-oneapi-request-id": "cstoa-request" });
 			const frames = [
 				{
 					id: "fixture",
@@ -112,6 +140,7 @@ test(
 		const children: ReturnType<typeof spawn>[] = [];
 		const previousHome = process.env.PI_CODING_AGENT_DIR;
 		const previousOffline = process.env.PI_OFFLINE;
+		const previousOaHost = process.env.CSTOA_OA_HOST;
 		let pool: WebSessionPool | undefined;
 		const health = async (index: number): Promise<{ ok: boolean; sessions: number }> =>
 			(await fetch(`http://127.0.0.1:${ports[index]}/healthz`)).json();
@@ -154,6 +183,7 @@ test(
 			for (let index = 0; index < 2; index++) await startReceiver(index);
 			process.env.PI_CODING_AGENT_DIR = home;
 			process.env.PI_OFFLINE = "1";
+			process.env.CSTOA_OA_HOST = `http://127.0.0.1:${ports[3]}`;
 			const options = {
 				cwd: home,
 				agentDir: home,
@@ -163,6 +193,27 @@ test(
 			pool = new WebSessionPool(options);
 			let slot = await pool.create();
 			await slot.session.prompt("未登录遥测测试");
+			await until(
+				async () => (await health(0)).sessions === 1 && (await health(1)).sessions === 1,
+				"回答结束且实例仍活动时，两端应已收到快照",
+			);
+			await slot.session.prompt("同一实例继续提问");
+			for (const index of [0, 1]) {
+				const activeCsv = join(root, `active-${index}.csv`);
+				await until(async () => {
+					execFileSync(binary, ["export-csv", activeCsv], {
+						env: { ...process.env, TELEMETRY_DB: join(root, `receiver-${index}.db`) },
+					});
+					const lines = (await readFile(activeCsv, "utf8")).trim().split("\n");
+					const columns = lines[0].split(",");
+					const row = lines[1]?.split(",");
+					return (
+						lines.length === 2 &&
+						row?.[columns.indexOf("turns")] === "2" &&
+						row?.[columns.indexOf("snapshot_final")] === "0"
+					);
+				}, "再次提问应更新同一活动记录的累计值");
+			}
 			await pool.close();
 			pool = undefined;
 			await until(
@@ -213,17 +264,37 @@ test(
 						type: "oauth",
 						access: "test-agent-token",
 						refresh: "test-refresh",
-						expires: Date.now() + 60_000,
+						expires: Date.now() + 3_600_000,
 					},
 				}),
 			);
+			const settings = JSON.parse(await readFile(join(home, "settings.json"), "utf8"));
+			await writeFile(
+				join(home, "settings.json"),
+				JSON.stringify({ ...settings, defaultProvider: "cstoa", defaultModel: "one" }),
+			);
 			pool = new WebSessionPool(options);
+			await (await pool.getServices()).modelRuntime.refresh({
+				allowNetwork: true,
+				force: true,
+				providers: ["cstoa"],
+			});
 			slot = await pool.create();
+			const runtime = (await pool.getServices()).modelRuntime;
+			const refreshed = await runtime.refresh({ providers: ["cstoa"], allowNetwork: true, force: true });
+			assert.equal(refreshed.errors.size, 0, [...refreshed.errors.values()].map((error) => error.message).join(","));
+			const cstoaModel = runtime.getModel("cstoa", "one");
+			assert.ok(cstoaModel);
+			await slot.session.setModel(cstoaModel);
+			assert.equal(slot.session.model?.provider, "cstoa");
 			await until(
 				async () => (await health(0)).sessions === 1 && (await health(1)).sessions === 2,
 				"新会话启动未独立补发缓存",
 			);
 			await slot.session.prompt("已登录遥测测试");
+			const reply = slot.session.messages.filter((message) => message.role === "assistant").at(-1);
+			assert.ok(reply && reply.role === "assistant");
+			assert.notEqual(reply.stopReason, "error", reply.errorMessage);
 			await pool.close();
 			pool = undefined;
 			await until(
@@ -237,6 +308,7 @@ test(
 					),
 				"两端未独立确认清空队列",
 			);
+			assert.ok(billingQueries >= 2, "账单延迟应在定稿时补查");
 			for (const [index, endpoint] of endpoints.entries()) {
 				const csvFile = join(root, `receiver-${index}.csv`);
 				execFileSync(binary, ["export-csv", csvFile], {
@@ -246,6 +318,15 @@ test(
 				const csv = await readFile(csvFile, "utf8");
 				assert.equal(csv.trim().split("\n").length, index === 0 ? 3 : 4);
 				assert.ok(csv.includes(",test-member,test-device,"), "上传账号来自 OA 内省");
+				const lines = csv.trim().split("\n");
+				const columns = lines[0].split(",");
+				const logged = lines
+					.find((line) => line.includes(",test-member,test-device,") && !line.startsWith(`${offline.recordId},`))!
+					.split(",");
+				assert.equal(logged[columns.indexOf("cstoa_quota_points")], "198");
+				assert.equal(logged[columns.indexOf("cstoa_requests")], "1");
+				assert.equal(logged[columns.indexOf("cstoa_settled_requests")], "1");
+				assert.equal(logged[columns.indexOf("unpriced_turns")], "1");
 				if (index === 1) {
 					assert.ok(csv.includes("environment-on-computer-a"));
 					assert.ok(csv.includes("Offline Windows fixture"));
@@ -288,6 +369,63 @@ test(
 				(await readFile(csvFile, "utf8")).includes(`${retry.recordId},,,`),
 				"OA 凭据被拒后应降级安装签名，上传者为空",
 			);
+			// 新协议跨仓库联调：同一实例累计更新，两端逐版本确认且条数不增加。
+			const cumulative = {
+				...offline,
+				v: "0.2",
+				recordId: crypto.randomUUID(),
+				revision: 1,
+				final: false,
+				endReason: "",
+				turns: 2,
+			};
+			const counts = await Promise.all([health(0), health(1)]);
+			for (const snapshot of [
+				cumulative,
+				{ ...cumulative, revision: 2, final: true, endReason: "quit", turns: 5 },
+			]) {
+				await queueRecord(home, snapshot, endpoints);
+				await flushEndpoints(home, { installation, access: "test-agent-token" }, endpoints);
+				for (const [index, endpoint] of endpoints.entries()) {
+					assert.deepEqual(await readAll(home, endpoint.url), []);
+					assert.equal((await health(index)).sessions, counts[index].sessions + 1);
+				}
+			}
+			for (const [index, endpoint] of endpoints.entries()) {
+				const heartbeat = {
+					runId: crypto.randomUUID(),
+					sequence: 1,
+					sentAt: new Date().toISOString(),
+					status: "idle" as const,
+					identity: cumulative.identity,
+					lastActivityAt: null,
+					snapshots: [{ recordId: cumulative.recordId, revision: 2 }],
+				};
+				const pulse = await sendBatch(endpoint.url, installation, [], undefined, heartbeat);
+				assert.equal(pulse.kind, "accepted");
+				if (pulse.kind === "accepted") assert.equal(pulse.heartbeatAcknowledged, true);
+				const closed = await sendBatch(endpoint.url, { installation, access: "test-agent-token" }, [], undefined, {
+					...heartbeat,
+					sequence: 2,
+					status: "closed",
+				});
+				assert.equal(closed.kind, "accepted");
+				if (closed.kind === "accepted") assert.equal(closed.heartbeatAcknowledged, true);
+				assert.equal((await health(index)).sessions, counts[index].sessions + 1, "纯心跳不创建会话");
+				const result = await sendBatch(endpoint.url, installation, [cumulative]);
+				assert.equal(result.kind, "accepted");
+				if (result.kind === "accepted") assert.deepEqual(result.acknowledged, [cumulative]);
+				execFileSync(binary, ["export-csv", csvFile], {
+					env: { ...process.env, TELEMETRY_DB: join(root, `receiver-${index}.db`) },
+				});
+				const rows = (await readFile(csvFile, "utf8")).trim().split("\n");
+				const header = rows[0].split(",");
+				const row = rows.find((line) => line.startsWith(`${cumulative.recordId},`))!.split(",");
+				assert.equal(row[header.indexOf("turns")], "5");
+				assert.equal(row[header.indexOf("snapshot_revision")], "2");
+				assert.equal(row[header.indexOf("snapshot_final")], "1");
+				assert.equal(row[header.indexOf("mid")], "test-member", "安装签名重传保留首次账号");
+			}
 		} finally {
 			await pool?.close();
 			for (const child of children) {
@@ -304,7 +442,9 @@ test(
 			else process.env.PI_CODING_AGENT_DIR = previousHome;
 			if (previousOffline === undefined) delete process.env.PI_OFFLINE;
 			else process.env.PI_OFFLINE = previousOffline;
-			await rm(root, { recursive: true, force: true });
+			if (previousOaHost === undefined) delete process.env.CSTOA_OA_HOST;
+			else process.env.CSTOA_OA_HOST = previousOaHost;
+			await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 		}
 	},
 );

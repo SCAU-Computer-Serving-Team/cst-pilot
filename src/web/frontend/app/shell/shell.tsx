@@ -22,6 +22,7 @@ import { useAccount } from "../account/use-account";
 import { accountProvider, loginPath } from "../auth/providers";
 import { Composer, type ComposerConfig } from "../composer/composer";
 import { apiJson, type ProviderStatus } from "../data/api";
+import { attachTelemetryHints } from "../data/telemetry-hints";
 import { useGlobalEvents, useSessions } from "../data/web-state";
 import { BlueHour } from "./blue-hour";
 import { ExitDialog } from "./exit-dialog";
@@ -47,6 +48,9 @@ export function Sidebar({
 	onCollapse: () => void;
 	onNavigate?: () => void;
 }) {
+	useEffect(() => {
+		if (!preview) return attachTelemetryHints(window);
+	}, [preview]);
 	const location = useLocation();
 	const state = useSessions();
 	const sessions: { id: string; title: string; group?: string; updatedAt?: string }[] = preview

@@ -100,14 +100,18 @@ test("CSTOA：身份展示、上下文额度、零值、重试、模型隔离与
 			await browser.navigate(`${origin}/settings`);
 			if (width < 900) await hideSidebar();
 			await browser.until(
-				"document.querySelector('.settings-account')?.innerText.includes('测试队员')",
+				"document.querySelector('.settings-service-row[data-provider=cstoa]')?.innerText.includes('测试队员')",
 				"设置页身份显示",
 			);
 			assert.equal(
-				await browser.evaluate("document.querySelector('.settings-account').innerText.includes('额度')"),
+				await browser.evaluate(
+					"document.querySelector('.settings-service-row[data-provider=cstoa]').innerText.includes('额度')",
+				),
 				false,
 			);
-			await browser.evaluate("document.querySelector('.settings-account').scrollIntoView({block:'center'})");
+			await browser.evaluate(
+				"document.querySelector('.settings-service-row[data-provider=cstoa]').scrollIntoView({block:'center'})",
+			);
 			await browser.screenshot(join(root, `settings-${theme}.png`));
 			await browser.navigate(`${origin}/s/${slot.id}`);
 			if (width < 900) await hideSidebar();

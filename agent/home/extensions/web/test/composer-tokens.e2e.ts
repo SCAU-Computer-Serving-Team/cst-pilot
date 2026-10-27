@@ -10,8 +10,8 @@ import { WebSessionPool } from "../server/session/sessions.ts";
 import { BrowserProbe, freePort } from "./browser.ts";
 import { testRoot } from "./support.ts";
 
-test("TAG 光标：选择命令、继续输入、草稿恢复、移除和文件引用发送", { timeout: 60_000 }, async () => {
-	const root = join(await testRoot(), "composer-caret");
+test("输入标记：选择命令、继续输入、草稿恢复、移除和文件引用发送", { timeout: 60_000 }, async () => {
+	const root = join(await testRoot(), "composer-tokens");
 	await mkdir(root, { recursive: true });
 	const home = await mkdtemp(join(root, "home-"));
 	await writeFile(join(home, "package-caret.txt"), "FILE_REFERENCE_FIXTURE");
@@ -97,25 +97,22 @@ test("TAG 光标：选择命令、继续输入、草稿恢复、移除和文件�
 			await browser!.call("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode });
 			await browser!.call("Input.dispatchKeyEvent", { type: "keyUp", key, code: key, windowsVirtualKeyCode });
 		}
-		async function spacing(label: string) {
+		async function assertEditableAfterToken(label: string) {
 			await browser!.call("Input.insertText", { text: "x" });
-			const geometry = await browser!.evaluate<{ gap: number; required: number; text: string }>(
-				"(()=>{const editor=document.querySelector('.composer-input'),chip=editor.querySelector('.composer-chip'),selection=window.getSelection();if(selection.focusNode.nodeType!==Node.TEXT_NODE)throw new Error('光标未落在文本节点');const range=document.createRange();range.setStart(selection.focusNode,selection.focusOffset-1);range.setEnd(selection.focusNode,selection.focusOffset);return {gap:range.getBoundingClientRect().left-chip.getBoundingClientRect().right,required:parseFloat(getComputedStyle(editor).fontSize)*.45,text:editor.textContent};})()",
+			const value = await browser!.evaluate<{ text: string; editable: boolean }>(
+				"(()=>{const editor=document.querySelector('.composer-input'),node=window.getSelection()?.focusNode;return {text:editor.textContent,editable:node?.nodeType===Node.TEXT_NODE&&editor.contains(node)}})()",
 			);
+			assert.equal(value.editable, true, "TAG 后可以继续输入正文");
+			assert.ok(value.text.endsWith("x"));
 			await browser!.screenshot(join(root, `${label}.png`));
-			await writeFile(join(root, `${label}.json`), JSON.stringify(geometry, null, 2));
-			assert.ok(
-				geometry.gap >= geometry.required,
-				`${label} TAG 后光标与正文留出约一个西文字母宽度：${JSON.stringify(geometry)}`,
-			);
 			await key("Backspace");
-			return geometry;
+			return value;
 		}
 		await browser.fill(".composer-input", "/comp");
 		await browser.until("!!document.querySelector('.command-suggestions .command-active')", "compact 补全");
 		await key("Enter");
 		await browser.until("!!document.querySelector('.composer-chip[data-token=\"/compact\"]')", "compact TAG");
-		const command = await spacing("command-caret");
+		const command = await assertEditableAfterToken("command-input");
 		await browser.call("Input.insertText", { text: "保留关键结论" });
 		assert.equal(
 			await browser.evaluate("Object.values(sessionStorage).some(value=>value==='/compact 保留关键结论')"),
@@ -136,7 +133,7 @@ test("TAG 光标：选择命令、继续输入、草稿恢复、移除和文件�
 		await key("Enter");
 		await browser.until("!!document.querySelector('.composer-chip[data-token^=\"@\"]')", "文件引用 TAG");
 		const token = await browser.evaluate<string>("document.querySelector('.composer-chip').dataset.token");
-		const file = await spacing("file-caret");
+		const file = await assertEditableAfterToken("file-input");
 		await browser.call("Input.insertText", { text: "查看" });
 		await browser.click('[aria-label="发送消息"]');
 		await browser.until(

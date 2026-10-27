@@ -1,4 +1,5 @@
 import type { TelemetryEndpoint } from "./config.ts";
+import { diagnose } from "./diagnostics.ts";
 import { appendRecord, BATCH_MAX_RECORDS, readAll, removeRecords } from "./outbox.ts";
 import type { SessionRecord } from "./record.ts";
 import { shared } from "./shared.ts";
@@ -12,8 +13,20 @@ export async function queueRecord(
 	record: SessionRecord,
 	endpoints: TelemetryEndpoint[],
 ): Promise<void> {
-	const results = await Promise.allSettled(endpoints.map((endpoint) => appendRecord(agentDir, record, endpoint.url)));
-	if (results.some((result) => result.status === "rejected")) throw new Error("遥测队列写入失败");
+	const results = await Promise.allSettled(
+		endpoints.map(async (endpoint) => {
+			const queued = await appendRecord(agentDir, record, endpoint.url);
+			if (!queued) throw new Error("遥测记录超过队列大小限制");
+			await diagnose(agentDir, {
+				endpoint: endpoint.url,
+				queued: { recordId: queued.recordId, revision: queued.revision, final: queued.final },
+			});
+		}),
+	);
+	if (results.some((result) => result.status === "rejected")) {
+		await diagnose(agentDir, { failure: "storage" });
+		throw new Error("遥测队列写入失败");
+	}
 }
 
 /** 先复制到所有目标，再清除单端点队列；中断重试使用 recordId 去重。 */
@@ -21,7 +34,7 @@ export async function migratePending(agentDir: string, endpoints: TelemetryEndpo
 	if (endpoints.length === 0) return;
 	const pending = await readAll(agentDir);
 	for (const record of pending) await queueRecord(agentDir, record, endpoints);
-	await removeRecords(agentDir, new Set(pending.map((record) => record.recordId)));
+	await removeRecords(agentDir, pending);
 }
 
 export async function flushEndpoints(
@@ -33,7 +46,10 @@ export async function flushEndpoints(
 }
 
 async function flushEndpoint(agentDir: string, access: UploadAuth, endpoint: TelemetryEndpoint): Promise<void> {
-	if (endpoint.unavailable) return;
+	if (endpoint.unavailable) {
+		await diagnose(agentDir, { endpoint: endpoint.url, failure: "tls" });
+		return;
+	}
 	const deliveries = shared().deliveries;
 	const key = `${agentDir}\0${endpoint.url}`;
 	let state = deliveries.get(key);
@@ -56,24 +72,44 @@ async function flushEndpoint(agentDir: string, access: UploadAuth, endpoint: Tel
 				const batch: SessionRecord[] = [];
 				let bytes = 0;
 				for (const record of pending) {
+					if (record.v !== pending[0].v) break;
 					const size = Buffer.byteLength(JSON.stringify(record), "utf8");
 					if (batch.length >= BATCH_MAX_RECORDS || bytes + size > BATCH_MAX_BYTES) break;
 					batch.push(record);
 					bytes += size;
 				}
 				if (batch.length === 0) {
-					await removeRecords(agentDir, new Set([pending[0].recordId]), endpoint.url);
+					await removeRecords(agentDir, [pending[0]], endpoint.url);
 					continue;
 				}
 				const outcome = await sendBatch(endpoint.url, access, batch, endpoint.ca);
-				if (outcome.kind === "accepted" || outcome.kind === "bad")
-					await removeRecords(agentDir, new Set(batch.map((record) => record.recordId)), endpoint.url);
+				if (outcome.kind === "accepted") {
+					const acknowledged = outcome.acknowledged ?? batch;
+					await removeRecords(agentDir, acknowledged, endpoint.url);
+					await diagnose(agentDir, {
+						endpoint: endpoint.url,
+						acks: acknowledged.map((record) => ({
+							recordId: record.recordId,
+							revision: record.revision,
+							status: outcome.rejected?.includes(record) ? "rejected" : "confirmed",
+						})),
+					});
+					if (acknowledged.length < batch.length) {
+						await diagnose(agentDir, { endpoint: endpoint.url, failure: "protocol" });
+						return;
+					}
+				} else if (outcome.kind === "bad") await removeRecords(agentDir, batch, endpoint.url);
+				if (outcome.kind !== "accepted")
+					await diagnose(agentDir, {
+						endpoint: endpoint.url,
+						failure: outcome.failure ?? (outcome.kind === "auth" ? "auth" : "http"),
+					});
 				if (outcome.kind === "stop") state.stopped = true;
 				if (outcome.kind !== "accepted") return;
 			}
 		} while (state.rerun);
 	} catch {
-		// 单端点故障保留本地数据，不传播到其他端点或诊断。
+		await diagnose(agentDir, { endpoint: endpoint.url, failure: "storage" });
 	} finally {
 		state.inflight = false;
 	}

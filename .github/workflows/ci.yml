@@ -24,7 +24,10 @@ jobs:
         shell: pwsh
         run: |
           $modules = Join-Path $env:RUNNER_TEMP "cst-check-modules"
-          Save-Module -Name PSScriptAnalyzer -RequiredVersion 1.24.0 -Repository PSGallery -Path $modules -Force
+          if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+            Register-PSRepository -Default -ErrorAction Stop
+          }
+          Save-Module -Name PSScriptAnalyzer -RequiredVersion 1.24.0 -Repository PSGallery -Path $modules -Force -ErrorAction Stop
           "CST_PSSCRIPTANALYZER_MODULE=$modules/PSScriptAnalyzer/1.24.0/PSScriptAnalyzer.psd1" | Out-File -FilePath $env:GITHUB_ENV -Append
       - run: npm run check:engineering --prefix agent
       - run: npm run test:oauth --prefix agent
@@ -98,13 +101,13 @@ jobs:
             ${{ runner.temp }}/**/first-turn-status/*.png
             ${{ runner.temp }}/**/first-turn-status/report.json
             ${{ runner.temp }}/**/first-turn-status/first-observation.json
-            ${{ runner.temp }}/**/composer-caret/*.png
-            ${{ runner.temp }}/**/composer-caret/*.json
+            ${{ runner.temp }}/**/composer-tokens/*.png
+            ${{ runner.temp }}/**/composer-tokens/*.json
             ${{ runner.temp }}/**/account-profile/*.png
             ${{ runner.temp }}/**/cstoa-key-login/*.png
             ${{ runner.temp }}/**/session-management/*.png
             ${{ runner.temp }}/**/session-management/report.json
-            ${{ runner.temp }}/**/session-group-motion/*.png
-            ${{ runner.temp }}/**/session-group-motion/report.json
+            ${{ runner.temp }}/**/session-groups/*.png
+            ${{ runner.temp }}/**/session-groups/report.json
           if-no-files-found: ignore
           retention-days: 7

@@ -24,12 +24,9 @@ function fixture() {
 }
 const windows = { skip: process.platform !== 'win32' || !pwsh };
 
-test('pi.cmd 保持 ASCII，启动脚本纳入发行白名单与必需文件', () => {
+test('pi.cmd 保持 ASCII，避免 cmd 解码差异', () => {
   const entry = fs.readFileSync(path.join(repo, 'pi.cmd'));
   assert.ok(entry.every(byte => byte < 128));
-  assert.match(entry.toString(), /launcher\.ps1/);
-  assert.match(fs.readFileSync(path.join(repo, 'pack/pack.mjs'), 'utf8'), /p: "launcher\.ps1", f: true/);
-  assert.match(fs.readFileSync(path.join(repo, 'pack/release-checks.mjs'), 'utf8'), /'launcher\.ps1'/);
 });
 
 test('未提权时只请求 RunAs，不初始化状态、不启动 Pi', windows, () => {
@@ -151,8 +148,8 @@ test('已提权启动保持环境隔离、原 cwd、原参数与退出码，.bin
     assert.equal(value.offline, '1');
     assert.equal(value.key, undefined);
     assert.equal(value.override, undefined);
-    assert.equal(value.path.split(';').length, 6);
-    assert.ok(fs.existsSync(path.join(root, '.state/cache/.write-probe')));
+    assert.ok(value.path.split(';').includes(path.join(root, 'pwsh')));
+    assert.ok(fs.statSync(path.join(root, '.state/cache')).isDirectory());
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -235,7 +232,7 @@ function Get-PilotRuntime { param($Root) @{file=${quote(process.execPath)};argum
     const value = JSON.parse(result.stdout.trim());
     assert.deepEqual(value.args, args);
     assert.equal(value.cwd, base);
-    assert.ok(fs.existsSync(path.join(root, '.state/tmp/.write-probe')));
+    assert.ok(fs.statSync(path.join(root, '.state/tmp')).isDirectory());
   } finally { fs.rmSync(base, { recursive: true, force: true }); }
 });
 

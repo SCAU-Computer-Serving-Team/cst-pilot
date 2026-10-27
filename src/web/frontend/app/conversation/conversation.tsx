@@ -38,9 +38,7 @@ function AssistantTurnImpl({
 }) {
 	const { process, finalText } = splitTurn(turn.assistants);
 	const last = turn.assistants.at(-1);
-	// 计时：运行中每秒推进，结束时冻结；历史轮次取轮内最后一个时间戳（助手消息的时间戳是消息开始时刻，为近似值）。
-	const wasLive = useRef(false);
-	const [frozenAt, setFrozenAt] = useState<number>();
+	// 完成时间由服务端随会话保存，刷新和切换页面沿用同一工作区间。
 	const [now, setNow] = useState(() => Date.now());
 	useEffect(() => {
 		if (!live) return;
@@ -48,21 +46,10 @@ function AssistantTurnImpl({
 		const timer = window.setInterval(() => setNow(Date.now()), 1000);
 		return () => window.clearInterval(timer);
 	}, [live]);
-	useEffect(() => {
-		if (live) wasLive.current = true;
-		else if (wasLive.current && frozenAt === undefined) setFrozenAt(Date.now());
-	}, [live, frozenAt]);
-	const startedAt = turn.user?.message.timestamp ?? turn.assistants[0]?.message.timestamp ?? now;
-	const historyEnd = Math.max(
-		startedAt,
-		...turn.assistants.flatMap((entry) => [
-			entry.message.timestamp,
-			...[...(resultsByTurn.get(entry.id ?? `stamp:${entry.message.timestamp}`)?.values() ?? [])].map(
-				(result) => result.timestamp,
-			),
-		]),
-	);
-	const elapsed = formatDuration(Math.max((live ? now : (frozenAt ?? historyEnd)) - startedAt, live ? 1000 : 0));
+	const work = turn.assistants.map(({ message }) => message.work).filter((value) => value !== undefined);
+	const startedAt = turn.user?.message.timestamp ?? work[0]?.startedAt ?? turn.assistants[0]?.message.timestamp ?? now;
+	const endedAt = work.length ? Math.max(...work.map((value) => value.endedAt)) : undefined;
+	const elapsed = formatDuration(Math.max((live ? now : (endedAt ?? startedAt)) - startedAt, live ? 1000 : 0));
 	return (
 		<article className="assistant-block assistant-turn" data-live={live || undefined}>
 			{turnSegments(process).map((segment, index) =>
@@ -89,7 +76,9 @@ function AssistantTurnImpl({
 						live={live}
 						label={
 							index === 0
-								? `${live ? "工作中" : "已工作"} ${elapsed}`
+								? !live && endedAt === undefined
+									? "已完成"
+									: `${live ? "工作中" : "已工作"} ${elapsed}`
 								: `已完成 ${completedToolCalls(segment.parts, resultsByTurn)} 次工具调用`
 						}
 						waiting={live && !process.length && !finalText}

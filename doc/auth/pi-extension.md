@@ -12,6 +12,7 @@
 | `device.ts` | U 盘设备标识 |
 | `models.ts` | 动态模型目录、元数据、凭据隔离、缓存与发布 |
 | `sync.ts` | TUI/Web 自动刷新，合并同一运行实例的并发请求 |
+| `request-observer.ts` | 遥测启用时按会话观察推理 HTTP 尝试与网关请求 ID，不读取正文或凭据 |
 | `test/` | OAuth、模型目录和真实 Pi 加载测试 |
 
 凭据由 Pi 保存到 `agent/home/auth.json`，动态目录由 Pi 保存到 `models-store.json`。目录只包含模型元数据和凭据摘要，不包含令牌或密钥。Web 本人资料与额度由 `web/server/api/account.ts` 查询，浏览器不读取已有凭据。
@@ -42,7 +43,7 @@ Provider 的 `refreshModels(context)` 通过 `context.publish()` 发布清单与
 - 登录后预取，进入模型界面或发送输入时自动检查。成功缓存五分钟，失败后等待三十秒再尝试。
 - 换凭据或服务地址时清除不匹配的目录，缓存不能使其他账号的模型可用。会话当前模型已从 CSTOA 目录移除时，发送前提示重新选择；模型选择和切换仍可操作。
 - 模型名称与请求 ID 均保留网关原始 ID，恢复已存目录时同样保持一致。能力与上下文参数复用 Pi 的已知目录，元数据别名只影响能力参数。未知模型使用保守参数，上游返回的 URL 和请求头不作为连接配置。
-- 推理使用 Pi 内置 Chat Completions 实现，保留工具调用、流式输出和取消行为。模型本地费用为零，真实积分由 New API 扣除。
+- 推理使用 Pi 内置 Chat Completions 实现，保留工具调用、流式输出和取消行为。SDK 价目表使用零值占位，真实积分由 New API 扣除；会话遥测将 CSTOA 估算费用标为未定价，并单独记录[请求账单扣点](../telemetry/schema.md#cstoa-扣点)。
 
 `PI_OFFLINE=1` 继续关闭 Pi 全局启动联网。项目只主动更新 CSTOA，不开启其他 Provider 的启动联网。
 
@@ -55,6 +56,6 @@ node --test agent/home/extensions/web/test/cstoa-credentials.test.ts
 node --test agent/home/extensions/web/test/cstoa-login.e2e.ts agent/home/extensions/web/test/account.e2e.ts
 ```
 
-浏览器测试先构建 Web。隔离测试覆盖双方式登录、实际 Pi 推理路径、积分刷新、目录持久化与凭据隔离，入口见[账号验证](../test/account-report.md)。真实手机授权和实际积分扣减需使用获准的测试账号单独验证。
+浏览器测试先构建 Web。隔离测试覆盖双方式登录、实际 Pi 推理路径、积分刷新、目录持久化与凭据隔离，入口与真实服务边界见[账号测试](../test/account.md)。
 
 发行包复制扩展源码，排除个人凭据和设备标识。首次使用后在工具包目录生成运行态文件。

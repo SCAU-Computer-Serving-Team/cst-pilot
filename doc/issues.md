@@ -1,6 +1,6 @@
 # 待处理议题
 
-更新：2026-10-23。本页只记录未决产品选择与未完成验证。实施范围见 [MVP](web/MVP.md)，待办见 [Todo](Todo.md)。
+MVP 阶段已完成。本页记录后续迭代的未决产品选择与验证事项。已交付范围见 [MVP](web/MVP.md)，实施任务见 [Todo](Todo.md)。
 
 ## 工程边界
 
@@ -25,7 +25,7 @@
 | 生产网络 | 供应商/OA 实际授权，真实延迟与中断 | 真实服务、取消与失败提示 |
 | 并发与强制退出 | 全部多标签队列与附件组合，宿主强制终止后的提示与恢复 | 完整用户链路与存储证据 |
 
-本机覆盖与边界见[Checkpoint 5 报告](test/checkpoint5-report.md)和[共享专项报告](test/shared-backend-report.md)。
+执行方法见[Web 实机验证](test/web-e2e.md#实机与发行验证)和[共享后端测试](test/shared-backend.md)。
 
 ## CSTOA 模型
 
@@ -44,7 +44,7 @@
 | 汇总导出 | 按日汇总 CSV；当前命令行只提供会话明细导出 |
 | 成员资料 | 成员资料的导入、同步与导出姓名核对 |
 
-部署入口见[遥测部署](telemetry/deployment.md)，已执行结果见[遥测验证](test/telemetry-report.md)。
+部署入口见[遥测部署](telemetry/deployment.md)，测试分工与判定见[遥测测试](test/telemetry.md)。
 
 ## 遥测数据定义
 

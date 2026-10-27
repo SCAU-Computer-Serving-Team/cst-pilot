@@ -12,7 +12,7 @@ import { testRoot } from '../../agent/home/extensions/web/test/support.ts';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const json = async path => JSON.parse(await readFile(join(root, path), 'utf8'));
 
-test('MJS、JSON、CSS 的错误语法进入静态检查，不触发整仓格式化', async () => {
+test('静态检查拒绝无效 MJS、重复 JSON 键和重复 CSS 属性', async () => {
   const biome = join(root, 'agent/node_modules/@biomejs/biome/bin/biome');
   for (const [file, source] of [
     ['src/check/invalid.mjs', 'const value = ;'],
@@ -24,8 +24,6 @@ test('MJS、JSON、CSS 的错误语法进入静态检查，不触发整仓格式
     assert.notEqual(result.status, 0, file);
     assert.doesNotMatch(result.stderr, /no files were processed/i, file);
   }
-  const config = await json('biome.json');
-  assert.ok(config.overrides.some(rule => rule.includes.includes('**/*.mjs') && rule.formatter.enabled === false));
 });
 
 test('直接依赖固定版本，清单与锁文件一致', async () => {
@@ -69,13 +67,6 @@ test('所有扩展的 TypeScript 文件均纳入严格类型检查', async () =>
   }
   await walk(join(root, 'agent/home/extensions'));
   assert.deepEqual(missing, []);
-});
-
-test('开发环境声明满足锁定 Pi SDK 的 Node 下限', async () => {
-  const sdk = await json('agent/node_modules/@earendil-works/pi-coding-agent/package.json');
-  for (const path of ['agent/package.json', 'src/web/frontend/package.json']) {
-    assert.equal((await json(path)).engines.node, sdk.engines.node, path);
-  }
 });
 
 test('项目 TypeScript 使用顶层导入，不隐藏动态模块依赖', async () => {

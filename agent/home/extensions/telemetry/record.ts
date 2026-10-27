@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import type { BillingSummary } from "./billing.ts";
 import type { ModelAgg, SessionState, ToolAgg } from "./collect.ts";
 
 import { type EnvironmentSnapshot, unknownEnvironment } from "./environment.ts";
@@ -22,6 +23,9 @@ export interface SessionRecord extends EnvironmentSnapshot {
 	v: string;
 	type: "session";
 	recordId: string;
+	/** 0.2 累计快照；0.1 最终记录不包含版本和最终状态字段。 */
+	revision?: number;
+	final?: boolean;
 	kitVersion: string;
 	sessionId: string;
 	channel: "tui" | "web";
@@ -35,6 +39,7 @@ export interface SessionRecord extends EnvironmentSnapshot {
 	turns: number;
 	contextEntries?: number;
 	models: ReturnType<typeof modelEntries>;
+	cstoaBilling?: BillingSummary;
 	compactions: number;
 	compactionTokens: number;
 	compactionOverflows: number;
@@ -64,12 +69,12 @@ export function localIso(epoch: number): string {
 }
 
 function modelEntries(models: Map<string, ModelAgg>): Omit<ModelAgg, never>[] {
-	return [...models.values()];
+	return [...models.values()].map((model) => ({ ...model }));
 }
 
 function toolEntries(tools: Map<string, ToolAgg>): object[] {
 	return [...tools.values()].map((agg) => {
-		const entry: Record<string, unknown> = { ...agg };
+		const entry: Record<string, unknown> = { ...structuredClone(agg) };
 		if (entry.scope === undefined) delete entry.scope;
 		if (agg.entriesTotal === undefined) delete entry.entriesTotal;
 		if (agg.providers === undefined) delete entry.providers;
@@ -126,6 +131,7 @@ export function buildRecord(
 		...environment,
 		admin,
 	};
+	if (state.cstoaBilling?.summary()) record.cstoaBilling = state.cstoaBilling.summary();
 	if (input.contextEntries !== undefined) record.contextEntries = input.contextEntries;
 	return record;
 }
@@ -137,6 +143,7 @@ export function crashRecord(draft: SessionRecord, lastTurnEndedAt: number): Sess
 		...draft,
 		recordId: draft.recordId || randomUUID(),
 		endReason: "crash",
+		...(draft.v === "0.2" ? { revision: (draft.revision ?? 0) + 1, final: true } : {}),
 		endedAt: localIso(endedAt),
 		durationMs: endedAt - Date.parse(draft.startedAt),
 	};

@@ -30,9 +30,9 @@ test("首轮工作时长：主页发送、纯正文回复完成、后续对话�
 		response.write(
 			`data: ${JSON.stringify({ id: `turn-${turn}`, choices: [{ index: 0, delta: { role: "assistant", content: `第${turn}轮纯正文回答。` }, finish_reason: null }] })}\n\n`,
 		);
-		await new Promise((resolve) => setTimeout(resolve, 300));
+		await new Promise((resolve) => setTimeout(resolve, 1800));
 		response.end(
-			`data: ${JSON.stringify({ id: `turn-${turn}`, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`,
+			`data: ${JSON.stringify({ id: `turn-${turn}`, choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110, prompt_tokens_details: { cached_tokens: turn === 1 ? 20 : 80 } } })}\n\ndata: [DONE]\n\n`,
 		);
 	});
 	const modelPort = await freePort();
@@ -104,6 +104,10 @@ test("首轮工作时长：主页发送、纯正文回复完成、后续对话�
 			"document.querySelector('.conversation')?.textContent.includes('第1轮纯正文回答。') && !!document.querySelector('[aria-label=发送消息]')",
 			"首轮回复结束",
 		);
+		await browser.until(
+			"document.querySelector('.context-row--sub .context-value')?.textContent==='20.0%'",
+			"首轮完成即时刷新缓存命中率",
+		);
 		const completed = await browser.evaluate<{
 			label: string;
 			kept: boolean;
@@ -114,6 +118,7 @@ test("首轮工作时长：主页发送、纯正文回复完成、后续对话�
 		await writeFile(join(root, "first-observation.json"), JSON.stringify(completed, null, 2));
 		await browser.screenshot(join(root, "first-completed.png"));
 		assert.match(completed.label, /已工作 \d+ 秒/, "首轮纯正文完成后保留工作时长");
+		assert.doesNotMatch(completed.label, /不足 1 秒/, "完成时间包含正文流式输出耗时");
 		assert.equal(completed.kept, true, "完成状态更新不卸载已显示的过程头");
 		assert.ok(
 			completed.history.every((frame) => frame.connected),
@@ -140,6 +145,10 @@ test("首轮工作时长：主页发送、纯正文回复完成、后续对话�
 		await browser.until(
 			"document.querySelector('.conversation')?.textContent.includes('第2轮纯正文回答。') && !!document.querySelector('[aria-label=发送消息]')",
 			"第二轮回复完成",
+		);
+		await browser.until(
+			"document.querySelector('.context-row--sub .context-value')?.textContent==='50.0%'",
+			"第二轮完成无需刷新页面即更新累计命中率",
 		);
 		assert.equal(
 			await browser.evaluate(
@@ -177,7 +186,42 @@ test("首轮工作时长：主页发送、纯正文回复完成、后续对话�
 			true,
 			"历史轮次默认折叠",
 		);
+		assert.equal(
+			await browser.evaluate("document.querySelector('.turn-process-head').textContent"),
+			completed.label,
+			"刷新后保留相同的真实完成耗时",
+		);
 		await browser.screenshot(join(root, "after-refresh.png"));
+		const beforeRestart = await (await fetch(`${origin}/api/sessions/${id}`)).json();
+		const durations = beforeRestart.messages
+			.filter((message: { role: string }) => message.role === "assistant")
+			.map((message: { work: unknown }) => message.work);
+		assert.ok(
+			durations.every((work: unknown) => work !== undefined),
+			"助手完成时间进入会话快照",
+		);
+		await pool.close();
+		const reopened = new WebSessionPool({
+			cwd: home,
+			agentDir: home,
+			sessionDir: join(home, "sessions"),
+			withLoader: (load) => load(),
+		});
+		try {
+			const slot = await reopened.openSaved(id);
+			const restored = JSON.parse(
+				JSON.stringify(slot.session.messages.map((message) => slot.execution.decorate(message))),
+			);
+			assert.deepEqual(
+				restored
+					.filter((message: { role: string }) => message.role === "assistant")
+					.map((message: { work: unknown }) => message.work),
+				durations,
+				"销毁实例重新读取会话后工作时间一致",
+			);
+		} finally {
+			await reopened.close();
+		}
 		await writeFile(
 			join(root, "report.json"),
 			JSON.stringify(

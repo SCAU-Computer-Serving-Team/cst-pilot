@@ -11,6 +11,7 @@ import {
 	bitLockerWebInteractions,
 } from "../../diagnostics/bitlocker-web.ts";
 import { SessionOwnerConflict } from "../../runtime/owner.ts";
+import { announceProcessClose, beginProcessClose, cancelProcessClose, hintTelemetry } from "../../telemetry/shared.ts";
 import { CstoaAccount } from "./api/account.ts";
 import { createAuthRoutes } from "./api/auth.ts";
 import { listProjectFiles } from "./api/project-files.ts";
@@ -157,6 +158,7 @@ export function createWebApi(
 				}),
 			);
 			slot.session.subscribe((event) => {
+				if (event.type === "agent_end") globalEvents.publish("state", { type: "usage_changed", sessionId: id });
 				if (event.type === "agent_end" && slot.session.model?.provider === "cstoa") {
 					account.invalidate();
 					globalEvents.publish("state", { type: "quota_changed", providerId: "cstoa" });
@@ -253,6 +255,16 @@ export function createWebApi(
 				});
 				return true;
 			}
+			if (pathname === "/api/lifecycle/telemetry" && method === "POST") {
+				const { reason } = await body(request);
+				if (reason !== "pagehide" && reason !== "pageshow" && reason !== "online") {
+					problem(response, 400, "invalid_hint", "无效的遥测提示");
+					return true;
+				}
+				if (!stopping) hintTelemetry(agentDir, reason);
+				send(response, 202, { accepted: true });
+				return true;
+			}
 			if (pathname === "/api/lifecycle/exit" && method === "POST") {
 				const input = await body(request);
 				if (input.confirm !== "stop") throw new Error("请求须明确确认停止任务");
@@ -264,7 +276,14 @@ export function createWebApi(
 					stopping = true;
 					exitTask = (async () => {
 						await Promise.all([...inboxes.values()].map((box) => box.pause()));
-						await pool.close();
+						const budget = beginProcessClose(agentDir);
+						try {
+							await pool.close();
+						} catch (error) {
+							cancelProcessClose(agentDir, budget);
+							throw error;
+						}
+						announceProcessClose(agentDir);
 					})().catch((error) => {
 						stopping = false;
 						exitTask = undefined;

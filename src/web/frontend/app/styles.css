@@ -1305,7 +1305,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
   .tree-counter { flex: 0 0 auto; }
 }
 
-.notification-region { position: fixed; z-index: 60; top: 20px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: var(--space-inline); width: min(520px, calc(100vw - 48px)); pointer-events: none; }
+.notification-region { position: fixed; z-index: 60; top: 20px; left: calc(50% + var(--notification-inset, 0px) / 2); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: var(--space-inline); width: min(520px, calc(100vw - var(--notification-inset, 0px) - 48px)); pointer-events: none; }
 .notification { position: relative; display: flex; align-items: center; flex: none; gap: var(--space-component); width: max-content; max-width: 100%; min-height: 44px; padding: var(--space-inline) var(--space-section); border: 1px solid var(--chat-border); border-radius: var(--radius-row); background: var(--chat-row); color: var(--chat-ink); font-size: var(--font-body); line-height: 1.5; pointer-events: auto; box-shadow: var(--shadow-menu); font-weight: 400; opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
 .notification:has(.notification-detail[data-open="true"]) { z-index: 1; }
 .notification[data-state="entering"] { animation: notification-in var(--duration-fast) var(--ease-smooth-out) both; will-change: transform, opacity, filter; }

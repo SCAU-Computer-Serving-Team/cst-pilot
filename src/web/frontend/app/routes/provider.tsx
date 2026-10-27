@@ -1,38 +1,32 @@
-import { Button } from "@heroui/react";
-import { ArrowLeft, Pencil } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router";
-import { ProviderLoginForm } from "../auth/provider-login-form";
-import { returnPath } from "../auth/providers";
+import { Link, useSearchParams } from "react-router";
+import type { ProviderStatus } from "../data/api";
+import { ProviderConfigurationForm } from "../settings/provider-configuration";
+import { SettingsHeading, SettingsLoadState } from "../settings/settings-frame";
+import { useSettingsResource } from "../settings/use-settings-resource";
 
 export default function ProviderConfiguration() {
-	const navigate = useNavigate();
 	const [params] = useSearchParams();
-	const destination = returnPath(params.get("returnTo") ?? "/settings#accounts");
+	const state = useSettingsResource<{ providers: ProviderStatus[] }>("/api/auth");
+	const providerId = params.get("provider");
+	const provider = state.data?.providers.find((item) => item.id === providerId);
 	return (
-		<main className="chat-main settings-main provider-config-main">
-			<header className="chat-header settings-header">
-				<Pencil size={22} aria-hidden="true" />
-				<h1>配置模型服务</h1>
-				<Button
-					type="button"
-					variant="ghost"
-					isIconOnly
-					className="provider-config-close"
-					aria-label="返回设置"
-					aria-keyshortcuts="Escape"
-					onPress={() => void navigate(destination)}
-				>
-					<ArrowLeft size={22} aria-hidden="true" />
-				</Button>
-			</header>
-			<div className="settings-scroll">
-				<section className="settings-content provider-config-content" aria-labelledby="provider-group-title">
-					<header className="settings-group-head">
-						<h2 id="provider-group-title">模型服务</h2>
-					</header>
-					<ProviderLoginForm standalone />
-				</section>
-			</div>
-		</main>
+		<>
+			<SettingsLoadState {...state} onRetry={() => void state.refresh()} />
+			{provider ? (
+				<ProviderConfigurationForm
+					key={provider.id}
+					provider={provider}
+					requestedMethod={params.get("method")}
+					onRefresh={state.refresh}
+				/>
+			) : !state.loading && !state.error ? (
+				<>
+					<SettingsHeading title="模型服务不存在" back />
+					<p className="settings-empty">
+						请返回<Link to="/settings/add">添加服务</Link>重新选择。
+					</p>
+				</>
+			) : null}
+		</>
 	);
 }

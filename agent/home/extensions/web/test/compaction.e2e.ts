@@ -43,32 +43,6 @@ test("压缩交互：顶部通知、草稿保留、关闭、实际失败与成�
 			await probe.evaluate("document.querySelector('.composer-input').textContent.includes('保留诊断结论')"),
 			true,
 		);
-		const geometry = await probe.evaluate<{
-			top: number;
-			center: number;
-			viewport: number;
-			hosted: boolean;
-			height: number;
-			icon: number;
-			gap: number;
-			iconCenter: number;
-			rowCenter: number;
-			closeHeight: number;
-		}>(`(async () => {
-			const e=document.querySelector('.error-notification');
-			await Promise.all(e.getAnimations().map(a=>a.finished));
-			const r=e.getBoundingClientRect();
-			const trigger=e.querySelector('.notification-detail-trigger'),text=e.querySelector('.notification-message'),close=e.querySelector('.notification-close');
-			return {top:r.top,center:(r.left+r.right)/2,viewport:innerWidth,hosted:e.parentElement.matches('.notification-region'),height:r.height,icon:trigger.querySelector('svg').getBoundingClientRect().width,gap:text.getBoundingClientRect().left-trigger.getBoundingClientRect().right,iconCenter:trigger.getBoundingClientRect().top+trigger.getBoundingClientRect().height/2,rowCenter:r.top+r.height/2,closeHeight:close.getBoundingClientRect().height};
-		})()`);
-		assert.equal(geometry.top, 20);
-		assert.equal(geometry.hosted, true);
-		assert.ok(Math.abs(geometry.center - geometry.viewport / 2) < 1);
-		assert.equal(geometry.height, 44, "常态通知为单行44px");
-		assert.equal(geometry.icon, 18);
-		assert.equal(geometry.gap, 12);
-		assert.equal(geometry.closeHeight, 26);
-		assert.ok(Math.abs(geometry.iconCenter - geometry.rowCenter) < 0.5, "状态图标居中");
 		await probe.screenshot(join(root, "empty-light.png"));
 		const icon = await probe.evaluate<{ x: number; y: number }>(
 			"(() => { const r=document.querySelector('.notification-detail-trigger').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}; })()",

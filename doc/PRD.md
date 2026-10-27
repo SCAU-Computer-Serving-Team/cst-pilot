@@ -41,7 +41,7 @@
 
 ## BitLocker 执行能力
 
-工具与 SKILL 已接入 Agent、TUI 和 Web，接口见 [bitlocker](tool/bitlocker.md)。真实加密卷与实际终端交互的验收仍需补齐。
+工具与 SKILL 已接入 Agent、TUI 和 Web，接口见 [bitlocker](tool/bitlocker.md)。真实加密卷与实际终端交互按[测试指南](test/README.md#bitlocker-验收)单独验证，后续任务见[待办清单](Todo.md)。
 
 | # | 需求 |
 |---|---|
@@ -55,7 +55,7 @@
 | 通道 | 入口 | 说明 |
 |---|---|---|
 | TUI | `pi.cmd` | 当前可用通道；启动 Web 后留作待机宿主，停止接收交互 |
-| Web | 启动 pi 后执行 `/web` | 提供本机回环接口与六个页面，预构建资源已接入便携试用包；正式发行与目标环境验收待完成 |
+| Web | 启动 pi 后执行 `/web` | 提供本机回环接口与六个页面，随工具包提供预构建资源；已交付范围见 [Web MVP](web/MVP.md) |
 
 ## Web 通道需求
 
@@ -64,7 +64,7 @@
 | W1 | 高度定制；第三方库可大方引入，打包分发保持简单 |
 | W2 | 设计稿走专用设计软件（Figma 类），动效专门设计 |
 | W3 | 现代观感：动效精美、UI 极简；每个诊断工具一张卡片 |
-| W4 | 兼容版以 2020 年内核（Chromium 86 级）为目标，**排在 MVP 之后**；React 19 与 react-router 的产物已实测通过，Tailwind 需分两版 |
+| W4 | 兼容版以 2020 年内核（Chromium 86 级）为目标，**列入后续迭代**；React 19 与 react-router 的产物已实测通过，Tailwind 需分两版 |
 | W5 | 在本项目开放的能力范围内完整替代 TUI 操作界面，包括会话管理、模型与凭据配置，以及 `/new`、`/resume`、`/model`、`/tree`、`/settings`、`/login`、`/compact` 等内置命令；TUI 通道保留 |
 | W6 | 基于 pi 内核，在 TUI 中执行 `/web` 后由 Web 接管操作；TUI 进程和窗口保留待机，禁用输入。Web 共用会话记录、模型配置与凭据；同一会话只有一个执行实例，工具权限由后端控制 |
 | W7 | 随便携发行版提供预构建产物，现场无需安装运行时或执行构建命令 |

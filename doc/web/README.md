@@ -1,8 +1,10 @@
 # Web 文档
 
+MVP 阶段已完成。已交付范围见 [MVP](MVP.md)，后续功能、发行验证与运维任务见[待办清单](../Todo.md)。
+
 | 范围 | 职责 |
 |---|---|
-| [MVP](MVP.md) | 阶段范围与验收状态 |
+| [MVP](MVP.md) | 已交付范围、完成情况与后续边界 |
 | [SPEC](SPEC/) | 当前行为、接口、约束与验收标准 |
 | [实现设计](../design/web/README.md) | 模块、算法、存储、接线、构建与测试入口 |
 | [research](research/) | 调研依据与实测 |
@@ -24,7 +26,7 @@
 | [branch-summary](SPEC/branch-summary.md) | 三种选择、待办、结果与取消 |
 | [commands](SPEC/commands.md) | 命令映射、范围与快捷键 |
 | [diagnostic-cards](SPEC/diagnostic-cards.md) | 14 个工具的状态与展示要求 |
-| [dashboard](SPEC/dashboard.md) | MVP 后的用量页面与计数口径 |
+| [dashboard](SPEC/dashboard.md) | 后续迭代的用量页面与计数口径 |
 
 ## 调研与资源
 

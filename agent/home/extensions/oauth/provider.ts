@@ -2,6 +2,7 @@ import type { Credential, Provider } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import { CstoaModels, modelBaseUrl, PROVIDER_ID, PROVIDER_NAME } from "./models.ts";
 import { login, oaHost, refresh } from "./oa.ts";
+import { requestFetch } from "./request-observer.ts";
 
 /** 双登录方式共享同一 Provider；Pi 负责凭据保存、刷新互斥和模型持久化。 */
 export function cstoaProvider(agentDir: string): Provider {
@@ -22,6 +23,17 @@ export function cstoaProvider(agentDir: string): Provider {
 		id: PROVIDER_ID,
 		name: PROVIDER_NAME,
 		baseUrl: modelBaseUrl("oauth"),
+		stream: (model, context, options) =>
+			completions.stream(
+				model,
+				context,
+				Object.assign({}, options, { fetch: requestFetch(options?.sessionId, options?.fetch) }),
+			),
+		streamSimple: (model, context, options) =>
+			completions.streamSimple(model, context, {
+				...options,
+				fetch: requestFetch(options?.sessionId, options?.fetch),
+			}),
 		auth: {
 			oauth: {
 				name: PROVIDER_NAME,

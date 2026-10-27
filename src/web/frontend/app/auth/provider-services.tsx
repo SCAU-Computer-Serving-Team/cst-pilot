@@ -1,173 +1,41 @@
-import { Button } from "@heroui/react";
-import { ChevronRight, CircleCheck, ExternalLink, Pencil, TriangleAlert } from "lucide-react";
-import { Fragment, useEffect, useState } from "react";
+import { TriangleAlert } from "lucide-react";
 import { Link } from "react-router";
 import { describeAccount } from "../account/format";
 import { useAccount } from "../account/use-account";
 import type { ProviderStatus } from "../data/api";
-import { SettingsSegment } from "../settings/settings-segment";
-import { LoginMethods } from "./login-methods";
-import { CSTOA_PROVIDER, configurationPath, type ProviderFilter, providerGroups } from "./providers";
+import { providerDescription } from "../settings/provider-list";
+import { configurationPath, initialLogin } from "./providers";
 
-const filters = [
-	{ id: "all", label: "全部" },
-	{ id: "oauth", label: "OAuth" },
-	{ id: "api_key", label: "API KEY" },
-];
-
-function ProviderRow({
-	provider,
-	working,
-	onLogout,
-}: {
-	provider: ProviderStatus;
-	working: boolean;
-	onLogout: (id: string) => void;
-}) {
-	const signedIn = !!provider.type && !provider.requiresLogin;
-	const status = signedIn ? "已登录" : provider.requiresLogin ? "需要重新登录" : "未登录";
+export function ProviderServices({ providers, adding = false }: { providers: ProviderStatus[]; adding?: boolean }) {
+	const { account } = useAccount();
+	const identity = describeAccount(account);
 	return (
-		<div className="settings-row settings-provider">
-			<span className="settings-provider-name">{provider.name}</span>
-			<LoginMethods provider={provider} />
-			<span
-				className={`settings-badge settings-status-icon ${signedIn ? "settings-badge-success" : "settings-badge-warning"}`}
-				role="img"
-				aria-label={status}
-				title={status}
-			>
-				{signedIn ? <CircleCheck size={14} aria-hidden="true" /> : <TriangleAlert size={14} aria-hidden="true" />}
-			</span>
-			<span className="settings-spacer" />
-			<div className="settings-provider-actions">
-				{provider.supportsApiKey && (
-					<Link
-						className="settings-action settings-icon-action"
-						to={configurationPath(provider.id, "api_key")}
-						aria-label={`配置 ${provider.name} API KEY`}
-						title="配置 API KEY"
-						aria-disabled={working}
-						onClick={(event) => {
-							if (working) event.preventDefault();
-						}}
-					>
-						<Pencil size={16} aria-hidden="true" />
-					</Link>
-				)}
-				{provider.supportsOAuth && (
-					<Link
-						className="settings-action settings-icon-action"
-						to={configurationPath(provider.id, "oauth")}
-						aria-label={`通过 OAuth 登录 ${provider.name}`}
-						title={provider.id === "cstoa" ? "CSTOA 扫码登录" : "OAuth 登录"}
-						aria-disabled={working}
-						onClick={(event) => {
-							if (working) event.preventDefault();
-						}}
-					>
-						<ExternalLink size={16} aria-hidden="true" />
-					</Link>
-				)}
-				{provider.type && (
-					<Button
-						type="button"
-						variant="ghost"
-						className="settings-action settings-action-danger"
-						isDisabled={working}
-						aria-label={`退出 ${provider.name}`}
-						onPress={() => onLogout(provider.id)}
-					>
-						退出
-					</Button>
-				)}
-			</div>
-		</div>
-	);
-}
-
-export function ProviderServices({
-	providers,
-	working,
-	onLogout,
-}: {
-	providers: ProviderStatus[];
-	working: boolean;
-	onLogout: (id: string) => void;
-}) {
-	const [open, setOpen] = useState(false);
-	const [filter, setFilter] = useState<ProviderFilter>("all");
-	const { primary, others } = providerGroups(providers, filter);
-	// 专属账号挂在 cstoa 服务行下面；登录态变化由 useAccount 自身订阅刷新。
-	const { account, refresh } = useAccount();
-	useEffect(() => {
-		void refresh();
-	}, [refresh]);
-	const summary = describeAccount(account);
-	return (
-		<>
-			<div className="settings-provider-head">
-				<h3>登录状态</h3>
-				<SettingsSegment
-					label="筛选模型服务登录方式"
-					value={filter}
-					items={filters}
-					onChange={(value) => {
-						if (value === "all" || value === "oauth" || value === "api_key") {
-							setFilter(value);
-							setOpen(false);
-						}
-					}}
-				/>
-			</div>
-			<div className="settings-card">
-				{primary.map((provider) => (
-					<Fragment key={provider.id}>
-						<ProviderRow
-							provider={
-								provider.id === CSTOA_PROVIDER && account?.requiresLogin
-									? { ...provider, requiresLogin: true }
-									: provider
-							}
-							working={working}
-							onLogout={onLogout}
-						/>
-						{/* 账号从属于上面的服务：加小标题并缩进，排在服务行下面。 */}
-						{provider.id === CSTOA_PROVIDER && summary && (
-							<div className="settings-account">
-								<span className="settings-account-title">账号</span>
-								<div className="settings-account-line">
-									<span className="settings-provider-name" title={summary.identity}>
-										{summary.identity}
-									</span>
-									<span className="settings-spacer" />
-								</div>
-							</div>
-						)}
-					</Fragment>
-				))}
-				{primary.length === 0 && others.length === 0 && <p className="settings-empty">没有匹配的模型服务</p>}
-				{others.length > 0 && (
-					<div className="settings-collapse t-acc" data-open={open}>
-						<button
-							type="button"
-							className="t-acc-head settings-row"
-							aria-expanded={open}
-							aria-controls="other-model-services"
-							onClick={() => setOpen((value) => !value)}
-						>
-							{open ? "收起模型服务" : "查看全部模型服务"}（{primary.length + others.length}）
-							<ChevronRight size={14} className="settings-provider-chevron" aria-hidden="true" />
-						</button>
-						<div className="t-acc-panel" inert={!open} id="other-model-services">
-							<div className="t-acc-panel-inner settings-other-providers">
-								{others.map((provider) => (
-									<ProviderRow key={provider.id} provider={provider} working={working} onLogout={onLogout} />
-								))}
-							</div>
+		<div className="settings-card settings-services">
+			{providers.map((item) => {
+				const provider = item.id === "cstoa" && account?.requiresLogin ? { ...item, requiresLogin: true } : item;
+				const initial = initialLogin([provider], provider.id, provider.type);
+				const status = providerDescription(provider);
+				return (
+					<div className="settings-flat-row settings-service-row" key={provider.id} data-provider={provider.id}>
+						<div className="settings-row-copy">
+							<span className="settings-service-name">{provider.name}</span>
+							<span className="settings-description" data-warning={provider.requiresLogin || undefined}>
+								{provider.requiresLogin && <TriangleAlert size={14} aria-hidden="true" />}
+								{provider.id === "cstoa" && identity && !provider.requiresLogin
+									? `${identity.identity} · ${status}`
+									: status}
+							</span>
 						</div>
+						<Link
+							className="settings-action"
+							to={configurationPath(provider.id, initial?.method ?? "api_key")}
+							aria-label={`${adding ? "连接" : provider.requiresLogin ? "重新登录" : "管理"} ${provider.name}`}
+						>
+							{adding ? "连接" : provider.requiresLogin ? "重新登录" : "管理"}
+						</Link>
 					</div>
-				)}
-			</div>
-		</>
+				);
+			})}
+		</div>
 	);
 }

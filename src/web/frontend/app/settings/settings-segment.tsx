@@ -1,4 +1,5 @@
-import { ToggleButton, ToggleButtonGroup } from "@heroui/react";
+import { ToggleButton, ToggleButtonGroup, Tooltip } from "@heroui/react";
+import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
 export function SettingsSegment({
@@ -10,7 +11,7 @@ export function SettingsSegment({
 }: {
 	label: string;
 	value: string;
-	items: readonly { id: string; label: string }[];
+	items: readonly { id: string; label: string; icon?: LucideIcon }[];
 	disabled?: boolean;
 	onChange: (value: string) => void;
 }) {
@@ -53,11 +54,22 @@ export function SettingsSegment({
 			}}
 		>
 			<span className="t-tabs-pill" aria-hidden="true" />
-			{items.map((item) => (
-				<ToggleButton key={item.id} id={item.id} className="t-tab">
-					{item.label}
-				</ToggleButton>
-			))}
+			{items.map((item) =>
+				item.icon ? (
+					<Tooltip key={item.id}>
+						<ToggleButton id={item.id} className="t-tab settings-icon-tab" aria-label={item.label}>
+							<span title={item.label}>
+								<item.icon size={16} aria-hidden="true" />
+							</span>
+						</ToggleButton>
+						<Tooltip.Content>{item.label}</Tooltip.Content>
+					</Tooltip>
+				) : (
+					<ToggleButton key={item.id} id={item.id} className="t-tab">
+						{item.label}
+					</ToggleButton>
+				),
+			)}
 		</ToggleButtonGroup>
 	);
 }
