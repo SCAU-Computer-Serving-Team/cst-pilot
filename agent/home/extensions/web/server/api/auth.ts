@@ -1,8 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { SessionEvents } from "../session/events.ts";
 import { InboxConflict } from "../session/inbox.ts";
 import type { WebSessionPool } from "../session/sessions.ts";
 import type { CstoaAccount } from "./account.ts";
+import {
+	deleteCustomProvider,
+	readCustomProvider,
+	readCustomProviders,
+	saveCustomProvider,
+} from "./custom-provider.ts";
 import { OAuthFlows } from "./oauth-flow.ts";
 import { withProviderEndpoint } from "./provider-endpoint.ts";
 
@@ -30,6 +37,43 @@ export function createAuthRoutes({
 	serialize,
 	send,
 }: AuthRoutesOptions) {
+	const refreshes = new Map<string, { controller: AbortController; task: Promise<void> }>();
+	let closing = false;
+	function refreshProviderCatalog(providerId: string, runtime: ModelRuntime): void {
+		if (closing) return;
+		refreshes.get(providerId)?.controller.abort();
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 15_000);
+		const task = (async () => {
+			try {
+				// 沿用 Pi 登录后的单 Provider 刷新；项目启动时关闭目录联网，登录动作显式允许此服务联网。
+				const result = await runtime.refresh({
+					providers: [providerId],
+					allowNetwork: true,
+					signal: controller.signal,
+				});
+				if (!closing && refreshes.get(providerId)?.controller === controller)
+					globalEvents.publish("state", {
+						type: "models_changed",
+						providerId,
+						...(result.aborted || result.errors.size ? { warning: "模型目录刷新失败，正在使用缓存模型。" } : {}),
+					});
+			} catch {
+				if (!closing && refreshes.get(providerId)?.controller === controller)
+					globalEvents.publish("state", {
+						type: "models_changed",
+						providerId,
+						warning: "模型目录刷新失败，正在使用缓存模型。",
+					});
+			} finally {
+				clearTimeout(timeout);
+			}
+		})();
+		refreshes.set(providerId, { controller, task });
+		void task.finally(() => {
+			if (refreshes.get(providerId)?.task === task) refreshes.delete(providerId);
+		});
+	}
 	const oauthFlows = new OAuthFlows((providerId, view) => {
 		globalEvents.publish("state", { type: "oauth_state", providerId, ...view });
 		if (view.deviceCode) globalEvents.publish("state", { type: "oauth_device_code", providerId, ...view.deviceCode });
@@ -38,6 +82,10 @@ export function createAuthRoutes({
 			if (providerId === "cstoa") account.invalidate();
 			globalEvents.publish("state", { type: "oauth_result", providerId, ok: true });
 			globalEvents.publish("state", { type: "auth_changed", providerId });
+			void pool
+				.getServices()
+				.then(({ modelRuntime }) => refreshProviderCatalog(providerId, modelRuntime))
+				.catch(() => {});
 		}
 	});
 
@@ -50,8 +98,11 @@ export function createAuthRoutes({
 		if (pathname === "/api/auth" && method === "GET") {
 			const { modelRuntime } = await pool.refreshServices();
 			const credentials = await modelRuntime.listCredentials();
+			const customIds = new Set(await readCustomProviders(agentDir));
 			send(response, 200, {
 				providers: modelRuntime.getProviders().map((provider) => ({
+					custom: customIds.has(provider.id),
+					configured: modelRuntime.getProviderAuthStatus(provider.id).configured,
 					id: provider.id,
 					name: provider.name,
 					supportsApiKey: !!provider.auth.apiKey?.login,
@@ -60,6 +111,61 @@ export function createAuthRoutes({
 					requiresLogin: invalidAuth.has(provider.id),
 				})),
 			});
+			return true;
+		}
+		if (pathname === "/api/auth/custom" && method === "POST") {
+			const input = await body(request);
+			const result = await writeOnce(request, pathname, input, () =>
+				serialize("auth-config:all", async () => {
+					const { modelRuntime } = await pool.getServices();
+					const providerId = input.id;
+					if (
+						typeof providerId === "string" &&
+						pool
+							.snapshot()
+							.some(({ id, running }) => running && pool.get(id)?.session.model?.provider === providerId)
+					)
+						throw new InboxConflict("此模型服务的会话正在执行，请完成后再修改配置");
+					const saved = await saveCustomProvider(agentDir, input, modelRuntime);
+					globalEvents.publish("state", { type: "auth_changed", providerId: saved.id });
+					globalEvents.publish("state", { type: "models_changed", providerId: saved.id });
+					return saved;
+				}),
+			);
+			send(response, 200, result);
+			return true;
+		}
+		const customPath = /^\/api\/auth\/custom\/([a-z][a-z0-9_-]{1,63})$/.exec(pathname);
+		if (customPath && method === "GET") {
+			const provider = await readCustomProvider(agentDir, customPath[1]);
+			if (!provider) return false;
+			send(response, 200, provider);
+			return true;
+		}
+		if (customPath && method === "DELETE") {
+			const input = await body(request);
+			if (typeof input.revision !== "string" || Object.keys(input).length !== 1) throw new Error("配置版本无效");
+			const result = await writeOnce(request, pathname, input, () =>
+				serialize("auth-config:all", async () => {
+					if (
+						pool
+							.snapshot()
+							.some(({ id, running }) => running && pool.get(id)?.session.model?.provider === customPath[1])
+					)
+						throw new InboxConflict("此模型服务的会话正在执行，请完成后再移除");
+					const { modelRuntime } = await pool.getServices();
+					const deleted = await deleteCustomProvider(
+						agentDir,
+						customPath[1],
+						input.revision as string,
+						modelRuntime,
+					);
+					globalEvents.publish("state", { type: "auth_changed", providerId: deleted.id });
+					globalEvents.publish("state", { type: "models_changed", providerId: deleted.id });
+					return deleted;
+				}),
+			);
+			send(response, 200, result);
 			return true;
 		}
 		if (pathname === "/api/account" && method === "GET") {
@@ -225,6 +331,7 @@ export function createAuthRoutes({
 					invalidAuth.delete(providerId);
 					if (providerId === "cstoa") account.invalidate();
 					globalEvents.publish("state", { type: "auth_changed", providerId });
+					refreshProviderCatalog(providerId, modelRuntime);
 					return responseBody;
 				}),
 			);
@@ -248,5 +355,12 @@ export function createAuthRoutes({
 		}
 		return false;
 	};
-	return Object.assign(handle, { close: () => oauthFlows.close() });
+	return Object.assign(handle, {
+		close: async () => {
+			closing = true;
+			await oauthFlows.close();
+			for (const { controller } of refreshes.values()) controller.abort();
+			await Promise.allSettled([...refreshes.values()].map(({ task }) => task));
+		},
+	});
 }

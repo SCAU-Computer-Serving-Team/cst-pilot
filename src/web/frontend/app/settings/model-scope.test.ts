@@ -3,15 +3,15 @@ import { test } from "node:test";
 import { moveModel, normalizeScope, toggleModel } from "./model-scope.ts";
 
 const all = ["a/one", "a/two", "b/three", "b/four"];
-test("启用范围空值和全选沿用 Pi 默认，部分选择保留顺序并去重", () => {
-	assert.equal(normalizeScope([], all), null);
+test("清空保留空选择；全选沿用 Pi 默认，部分选择保留顺序并去重", () => {
+	assert.deepEqual(normalizeScope([], all), []);
 	assert.equal(normalizeScope([...all].reverse(), all), null);
 	assert.deepEqual(normalizeScope(["a/two", "a/two", "missing", "a/one"], all), ["a/two", "a/one"]);
-	assert.equal(normalizeScope([], []), null);
+	assert.deepEqual(normalizeScope([], []), []);
 });
-test("默认范围取消勾选生成子集；最后一个取消或补齐所有项目恢复默认", () => {
+test("默认范围取消勾选生成子集；最后一个取消后保持空选择", () => {
 	assert.deepEqual(toggleModel(null, all, "a/one"), all.slice(1));
-	assert.equal(toggleModel(["a/two"], all, "a/two"), null);
+	assert.deepEqual(toggleModel(["a/two"], all, "a/two"), []);
 	assert.equal(toggleModel(all.slice(1), all, "a/one"), null);
 });
 test("排序支持双向移动且不修改输入；非启用项目与默认范围保持不变", () => {

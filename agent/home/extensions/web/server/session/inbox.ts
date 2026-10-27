@@ -139,7 +139,7 @@ export class SessionInbox {
 				delivery === "queue" &&
 				!current.paused &&
 				!this.executor.isBusy() &&
-				!current.items.some((entry) => ["pending", "delivering", "failed"].includes(entry.status));
+				!current.items.some((entry) => ["pending", "delivering"].includes(entry.status));
 			const added: InboxItem = {
 				id,
 				text,
@@ -174,12 +174,16 @@ export class SessionInbox {
 	async change(
 		id: string,
 		version: number,
-		edit: { text?: string; delivery?: Delivery; remove?: boolean },
+		edit: { text?: string; delivery?: Delivery; remove?: boolean; retry?: boolean },
 	): Promise<InboxSnapshot> {
 		const result = await this.transact(async (current) => {
 			if (current.version !== version) throw new InboxConflict("队列已更新，请重新读取");
-			const target = current.items.find((item) => item.id === id && item.status === "pending");
-			if (!target) throw new InboxConflict("条目已投递或不存在");
+			const target = current.items.find((item) => item.id === id);
+			if (!target || (target.status !== "pending" && target.status !== "failed"))
+				throw new InboxConflict("条目已投递或不存在");
+			if (edit.retry && target.status !== "failed") throw new InboxConflict("仅失败条目可以重试");
+			if (edit.delivery && target.status !== "pending") throw new InboxConflict("失败条目请先重试");
+			if (edit.retry && edit.remove) throw new Error("操作无效");
 			if (
 				edit.text !== undefined &&
 				((!edit.text.trim() && target.images.length === 0 && !target.skill) || edit.text.length > 100_000)
@@ -192,12 +196,16 @@ export class SessionInbox {
 					? {
 							...item,
 							text: edit.text ?? item.text,
-							delivery: edit.delivery ?? item.delivery,
-							status: edit.remove ? ("cancelled" as const) : item.status,
+							delivery:
+								edit.retry && item.delivery === "direct"
+									? ("queue" as const)
+									: (edit.delivery ?? item.delivery),
+							status: edit.remove ? ("cancelled" as const) : edit.retry ? ("pending" as const) : item.status,
+							error: edit.retry ? undefined : item.error,
 						}
 					: item,
 			);
-			const next = { ...current, version: version + 1, items };
+			const next = { ...current, paused: edit.retry ? false : current.paused, version: version + 1, items };
 			await this.save(next);
 			return structuredClone(next);
 		});
@@ -261,7 +269,8 @@ export class SessionInbox {
 		try {
 			while (true) {
 				const next = await this.transact(async (current) => {
-					if (current.paused || current.items.some((item) => item.status === "failed")) return undefined;
+					if (current.paused) return undefined;
+					const failed = current.items.some((item) => item.status === "failed");
 					const busy = this.executor.isBusy();
 					if (busy && current.items.some((item) => item.status === "pending" && item.delivery === "direct")) {
 						await this.save({
@@ -276,7 +285,9 @@ export class SessionInbox {
 						return undefined;
 					}
 					const pending = current.items.find(
-						(item) => item.status === "pending" && (item.delivery === "steer" || !busy),
+						(item) =>
+							item.status === "pending" &&
+							(failed ? item.delivery === "direct" && !busy : item.delivery === "steer" || !busy),
 					);
 					if (!pending) return undefined;
 					const item = { ...pending, status: "delivering" as const };

@@ -1,7 +1,7 @@
-/** null 与空范围均沿用 Pi 默认；全部选中归一为 null。 */
+/** null 表示默认范围，[] 表示 Web 端明确清空；全部选中归一为 null。 */
 export function normalizeScope(ids: string[], all: string[]): string[] | null {
 	const selected = [...new Set(ids.filter((id) => all.includes(id)))];
-	return !selected.length || (selected.length === all.length && all.every((id) => selected.includes(id)))
+	return selected.length > 0 && selected.length === all.length && all.every((id) => selected.includes(id))
 		? null
 		: selected;
 }

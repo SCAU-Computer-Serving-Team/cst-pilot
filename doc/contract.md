@@ -1,195 +1,141 @@
 # 信息收集契约
 
-本文定义字段、含义、示例和收集边界。会话统计口径见[会话记录](telemetry/schema.md)，传输与鉴权见[发送端](telemetry/sender/SPEC.md)和[接收端](telemetry/receiver/SPEC.md)。
+本文定义 CST Pilot 本地请求记录与远程会话遥测的字段含义、身份算法与隐私收集边界。统计口径见 [telemetry/SPEC.md](telemetry/SPEC.md)，传输协议与接口见 [telemetry/API.md](telemetry/API.md)。
 
-会话上传支持 `0.1` 最终记录与 `0.2` 累计快照，读取记录时允许新增字段缺失。验证方法见[遥测测试](test/telemetry.md)。
+## 记录类型与提交边界
 
-## 记录类型
-
-| `type` | 粒度 | 保存范围 |
+| `type` | 粒度 | 保存与传输范围 |
 |---|---|---|
-| `request` | 一次主 Agent 模型请求 | 本地请求日志与仪表盘，不上传 |
-| `session` | 一场会话实例 | 遥测上传，字段见[会话记录](telemetry/schema.md) |
+| `request` | 一次主 Agent 逻辑模型调用 | 仅保存在本地请求日志，供仪表盘读取，不上传 |
+| `session` | 一场会话实例的累计统计 | 保存本地恢复草稿，并通过双端队列上传到 CSTOA 与 `timserver_1` |
 
-示例中的 UUID、时间和摘要均为格式示意。计数为非负整数，耗时单位为毫秒；缺失信息不能补成真实的零值。新增可空字段使用 `null`，兼容读取时接受字段缺失。
+使用统计通过回答结束（`agent_settled`）、定时检查（每 30 秒）、正常关闭及启动恢复统一保存和提交。会话记录支持 `0.1` 最终记录与 `0.2` 版本化累计快照；同一实例的多次快照具有相同 `recordId` 与递增 `revision`，服务端仅保留最新有效快照，不重复累加会话数、模型用量或工具调用。
 
-## 保存与提交边界
-
-本契约的使用统计通过回答结束、定时检查、关闭及恢复统一保存、提交，覆盖本地请求记录和会话遥测。请求记录按模型调用统计，会话记录按实例累计；各事件先更新指标，各次提交固定对应边界并保存已知统计，未返回的用量保留未知。
-
-回答结束采用 `agent_settled`，成功、失败和取消均保留已发生用量；事件含义见[Pi 事件与消息字段](telemetry/sender/SPEC.md#pi-事件与消息字段)。提交与关闭规则见[发送端](telemetry/sender/SPEC.md#提交触发)。
-
-回答结束或定时检查发现变化时提交累计快照，实例继续存在；实例关闭提交最终快照。同一实例的多次快照不得重复增加会话数、模型用量或工具调用，更新协议见[版本化提交](telemetry/schema.md#版本化提交)。
+计数为非负整数，耗时单位为毫秒。缺失信息使用 `null` 或省略可选对象，禁止将未知值补成 `0`。兼容读取时允许新增字段缺失。
 
 ## 在线状态边界
 
-心跳只报告已有安装与环境、本次运行实例、活动状态、心跳序号和快照版本，不携带对话或工具正文。运行实例 ID 每次进程启动生成，区分并行进程与重启，不作为新增自然人或硬件标识。
+心跳仅报告安装与环境标识、进程级运行实例 `runId`、递增序号 `sequence`、活动状态（`idle` / `busy` / `closed`）、最后活动时刻与当前快照版本数组，不包含对话或工具正文。
 
-接收端依据自身接收时间判断在线；失联只表示当前不可联，不推断用户在操作、程序崩溃或会话结束。纯心跳不产生用量，历史统计补发不恢复原进程在线状态；规则见[发送端](telemetry/sender/SPEC.md#心跳)与[接收端](telemetry/receiver/SPEC.md#在线状态)。
+`runId` 在每次进程启动时随机生成，仅用于区分并行进程与重启。接收端按服务端接收时间判断在线（90 秒超时标记失联）；失联仅表示当前不可联，不推断程序崩溃或会话结束，也不推进会话时长或产生用量。
 
-在线状态字段、信封版本与保留期见[心跳信封](telemetry/schema.md#心跳信封)。实施状态见[改造计划](telemetry/trigger-upgrade-plan.md)，生产尚未启用新机制。
+## 公共与信封字段
 
-## 记录自带
+### 记录公共字段
 
-| 字段 | 含义 | 取值举例 |
+| 字段 | 含义 | 示例 |
 |---|---|---|
-| `v` | 记录协议版本，字符串 | `"0.1"`、`"0.2"` |
+| `v` | 记录协议版本 | `"0.1"`、`"0.2"` |
 | `type` | 记录类型 | `"request"`、`"session"` |
-| `recordId` | 记录唯一标识，接收端去重依据 | `"31de2e2e-816e-4cdc-8f35-c8eae6e69272"` |
-| `kitVersion` | 工具包发行版本；读取失败为空字符串 | `"0.3.1"` |
-| `revision`、`final` | `0.2` 会话的递增版本及最终关闭标记，见[版本化提交](telemetry/schema.md#版本化提交) | `2`、`false` |
+| `recordId` | 记录唯一标识，接收端去重主键 | UUID |
+| `kitVersion` | 工具包发行版本；读取失败为空字符串 | `"v0.5"` |
+| `revision` | `0.2` 会话快照的递增正整数版本 | `2` |
+| `final` | `0.2` 会话快照是否为实例最终关闭状态 | `false` |
 
-重传保留同一 `recordId`。协议版本与标识算法分别管理，不增加算法版本字段。
+### 上传信封字段
 
-## 上传信封
-
-| 字段 | 含义 | 取值举例 |
+| 字段 | 含义 | 示例 |
 |---|---|---|
-| `v` | 上传协议版本 | `"0.1"`、`"0.2"` |
-| `batchId` | 本次上传批次标识；重新组批可改变 | UUID |
-| `sentAt` | 客户端发送时刻，仅作参考 | `"2026-10-15T09:00:00+08:00"` |
-| `records` | 会话记录数组；每批最多 50 条，完整请求体最多 1 MiB；仅 `0.2` 纯心跳允许空数组 | `[{ "type": "session", "recordId": "…" }]` |
-| `heartbeat` | `0.2` 可选的当前运行状态，见[心跳信封](telemetry/schema.md#心跳信封) | `{ "runId": "…", "sequence": 1, "status": "idle", "…": "…" }` |
+| `v` | 上传信封协议版本 | `"0.1"`、`"0.2"` |
+| `batchId` | 本次上传批次 UUID，重发可更换 | UUID |
+| `sentAt` | 客户端发送时刻（ISO 8601），仅作参考 | `"2026-10-15T09:00:00+08:00"` |
+| `records` | 会话记录数组，每批最多 50 条、请求体最多 1 MiB；仅 `0.2` 纯心跳允许空数组 | `[...]` |
+| `heartbeat` | `0.2` 可选的当前进程运行状态对象 | `{ "runId": "...", "sequence": 1, "status": "idle" }` |
 
-同一记录发送到两个接收端，各端独立确认和去重。凭据只放鉴权头，不进入信封或记录正文；上传权限不能由匿名标识证明。
+凭据与签名仅放在 HTTP 请求头，不进入信封或记录正文。
 
 ## 身份来源
 
-### 会话自带标识
+### 客户端匿名标识
 
-| 字段 | 含义 | 取值举例 |
+| 字段 | 含义 | 取值 |
 |---|---|---|
-| `identity.installationId` | U 盘中一份已初始化的工具包配置，作为匿名使用来源 | UUID 或 `null` |
-| `identity.environmentId` | 该工具包标识体系下的操作系统安装环境 | 64 位十六进制摘要或 `null` |
-| `identity.environmentSource` | 环境标识来源；无法取得时明确未知 | `"windows-machine-guid"`、`"unavailable"` |
+| `identity.installationId` | U 盘工具包初始化生成的匿名安装标识 | UUID 或 `null` |
+| `identity.environmentId` | 当前工具包密钥下的操作系统环境摘要 | 64 位小写十六进制或 `null` |
+| `identity.environmentSource` | 环境标识来源 | `"windows-machine-guid"`、`"unavailable"` |
 
-`installationId` 首次运行随机生成，与 32 字节随机密钥 `identityKey` 一起保存在工具包 `agent/home/telemetry/identity.json`。`identityKey` 仅供本地计算，不上传。环境标识采用 HMAC-SHA256（带密钥的摘要）：
+`installationId` 与 32 字节随机密钥 `identityKey` 在首次运行时写入 `agent/home/telemetry/identity.json`。`identityKey` 仅留本地，不上传。环境标识通过 HMAC-SHA256 派生，原始 `MachineGuid` 不落盘、不上传：
 
 ```text
 message = UTF-8(JSON.stringify(["environment", MachineGuid.trim().toLowerCase()]))
-environmentId = HMAC-SHA256(identityKey, message)，输出小写十六进制
+environmentId = HMAC-SHA256(identityKey, message)
 ```
 
-安装上传使用从本地密钥独立派生的签名密钥，服务端只绑定公钥；安装标识本身不授予上传权限。签名与 OA 鉴权规则见[发送端](telemetry/sender/SPEC.md#凭据与配置)。
-
-服务端将标识作为不透明字符串比较，不解析内部格式。算法调整须保留已保存标识或提供关联迁移；字段类型兼容不保证新旧计算结果相同。
-
-| U 盘使用场景 | 标识含义与限制 |
+| 使用场景 | 标识行为与边界 |
 |---|---|
-| 换电脑使用 | 安装标识保持，环境标识随系统环境改变 |
-| 同一系统切换账户或提权 | 环境标识保持；不读取账户 SID 推断操作队员 |
-| 系统重装或 PE | 环境标识可能改变；PE 中无法确认来源可靠时为 `null` |
-| 不同工具包访问同一电脑 | 密钥不同，环境标识不同，不跨工具包关联电脑 |
-| 复制已初始化目录 | 副本继承安装标识与密钥，无法自动区分原件和副本 |
-| 多人共用 U 盘 | 匿名记录只能归到工具包，实际自然人保持未知 |
-| 首次初始化无法落盘 | 标识留空，不反复生成临时安装编号；已有标识可只读复用 |
+| 换电脑使用同一 U 盘 | `installationId` 保持不变，`environmentId` 随目标系统改变 |
+| 同一系统切换账户或提权 | `environmentId` 保持不变；不采集账户 SID |
+| Windows PE 或来源不可靠 | `environmentId` 为 `null`，`environmentSource` 为 `"unavailable"` |
+| 不同工具包访问同一电脑 | `identityKey` 不同，生成的 `environmentId` 不同，不可跨工具包关联电脑 |
+| 复制已初始化的工具包目录 | 副本继承同一 `installationId` 与密钥，服务端无法区分原件与副本 |
+| 首次运行介质只读无法落盘 | 标识保持 `null`，不生成一次性临时安装标识 |
 
-发行包不携带安装标识、密钥或运行状态。不在机主电脑上写标识文件；原始 MachineGuid 不进入遥测文件或日志。标识与环境在会话开始时固定，换电脑补发保留原值。
+会话开始时固定 `identity` 与环境字段，后续快照、跨机恢复与补发均保持原值。
 
 ### 服务端补充字段
 
-| 字段 | 含义 | 取值举例 |
+| 字段 | 含义 | 取值 |
 |---|---|---|
-| `mid` | 本次上传凭据经 OA 内省确认的队员编号；匿名上传为空 | `"20230001"` 或 `null` |
-| `deviceId` | OA 凭据绑定的工具包登录标识，来自内省 `device_id` | `"dev_…"` 或 `null` |
-| `receivedAt` | 服务端接收时刻 | `"2026-10-15T01:00:00Z"` |
-| `ip` | 上传连接的来源网段 | `"203.0.113.0/24"` |
+| `mid` | 本次上传凭据经 OA 内省确认的队员学号／编号；安装签名上传时为 `null` | `"20230001"` 或 `null` |
+| `deviceId` | OA 凭据绑定的登录设备标识（`device_id`） | `"dev_..."` 或 `null` |
+| `receivedAt` | 服务端首次接收时刻（UTC ISO 8601） | `"2026-10-15T01:00:00Z"` |
+| `ip` | 上传连接的来源 IPv4 `/24` 网段 | `"203.0.113.0/24"` |
 
-客户端不能自行声明已验证的 OA 身份。`mid`、`deviceId` 只证明上传时的账号与登录标识，不证明排队期间每场会话的操作人；后续登录不能覆盖历史匿名归属。
-
-安装、环境和 OA 身份分别统计。相同 IP、系统版本、模型或硬件配置不能作为合并用户的依据；匿名标识可持续关联使用来源，但无法准确计数自然人。
+客户端提交的同名字段由服务端覆盖清除。`mid` 与 `deviceId` 仅代表本次上传请求的凭据持有人，不回填覆盖历史匿名记录的归属。
 
 ## 环境字段
 
-描述工具包当次运行所在系统，与安装标识、操作队员分别记录。不要求上传诊断工具返回的硬件或文件内容。
-
-| 字段 | 含义 | 取值举例 |
+| 字段 | 含义 | 示例 |
 |---|---|---|
-| `os.platform` | 操作系统平台 | `"win32"`、`"linux"` |
-| `os.name` | 系统名称，Windows 包含版本类别 | `"Windows 11 Pro"` 或 `null` |
-| `os.version` | 系统内核版本，来自运行时 `os.release()` | `"10.0.26100"` |
+| `os.platform` | 操作系统平台 | `"win32"` |
+| `os.name` | 系统版本名称 | `"Windows 11 Pro"` 或 `null` |
+| `os.version` | 系统内核版本（`os.release()`） | `"10.0.26100"` |
 | `os.displayVersion` | Windows 功能版本 | `"24H2"` 或 `null` |
-| `os.arch` | 系统原生架构，独立探测 | `"x64"`、`"arm64"` 或 `null` |
-| `os.isPE` | 是否 Windows PE，无法判断时未知 | `true`、`false`、`null` |
+| `os.arch` | 独立探测的操作系统原生架构 | `"x64"`、`"arm64"` 或 `null` |
+| `os.isPE` | 是否运行于 Windows PE | `true`、`false`、`null` |
 | `runtime.version` | Node 运行时版本 | `"24.15.0"` |
-| `runtime.arch` | Node 进程架构，来自 `process.arch` | `"x64"`、`"arm64"` |
-| `admin` | 当前进程是否管理员运行；探测失败为未知 | `true`、`false`、`null` |
+| `runtime.arch` | 运行时进程架构（`process.arch`） | `"x64"` |
+| `admin` | 当前进程是否具有管理员权限 | `true`、`false`、`null` |
 
-系统名称允许采集，机主自定义的计算机名不采集。系统原生架构不能从进程架构直接推断；`runtime.arch` 缺失的记录不保证 `os.arch` 表示原生架构。环境标识缺失时仍可记录已有环境字段。
+## 请求与模型用量字段
 
-## 请求记录字段
+本地请求记录包含 `sessionId`、会话内递增序号 `seq`、发起时刻 `requestedAt`、模型响应耗时 `durationMs`（不含工具执行）、首个非空增量等待 `ttftMs`、最终状态 `status`（`"ok"` / `"aborted"` / `"error"`）、HTTP 错误码 `errorCode`、结束原因 `stopReason`，以及下表模型字段。会话记录的 `models[]` 元素共用下表模型与用量字段：
 
-### 关联
-
-| 字段 | 含义 | 取值举例 |
+| 字段 | 含义 | 示例 |
 |---|---|---|
-| `sessionId` | Pi 会话标识，关联本地会话文件 | UUID |
-| `seq` | 会话内请求序号，从 1 开始 | `17` |
-
-### 时间
-
-| 字段 | 含义 | 取值举例 |
-|---|---|---|
-| `requestedAt` | 发起模型请求时刻，带本地时区偏移 | `"2026-10-15T09:00:00+08:00"` |
-| `durationMs` | 请求开始至助手消息结束，不计后续工具执行 | `4820` |
-| `ttftMs` | 请求开始至首个非空正文、思考或工具调用增量；无有效增量时缺失 | `640` |
-
-### 模型与用量
-
-以下字段用于请求记录，以及会话记录的 `models[]` 元素。
-
-| 字段 | 含义 | 取值举例 |
-|---|---|---|
-| `provider` | 模型供应商，与上传身份无关 | `"opencode-go"`、`"cstoa"` |
-| `model` | 实际使用的模型 ID | `"deepseek-v4.1-flash"` |
-| `thinkingLevel` | 请求发起时的思考强度；未知为空字符串 | `"off"`、`"minimal"`、`"low"`、`"medium"`、`"high"`、`"xhigh"`、`"max"` |
-| `input` | 未命中缓存的输入 token | `8432` |
-| `output` | 输出 token | `1286` |
-| `cacheRead` | 缓存读取 token | `32768` |
-| `cacheWrite` | 缓存写入 token | `0` |
+| `provider` | 模型服务标识 | `"opencode-go"`、`"cstoa"` |
+| `model` | 实际模型 ID | `"deepseek-v4.1-flash"` |
+| `thinkingLevel` | 请求发起时的思考强度；未知为空字符串 | `"off"`、`"low"`、`"medium"`、`"high"` |
+| `input` / `output` | 未命中缓存的输入 token / 输出 token（含思考） | `8432` / `1286` |
+| `cacheRead` / `cacheWrite` | 缓存读取 token / 缓存写入 token | `32768` / `0` |
 | `totalTokens` | 供应商返回的 token 总量 | `42486` |
-| `cost` | Pi 模型价目表的估算费用，使用 `usage.cost.total`；会话中 CSTOA 为 `null`，计入未定价 | `0.2438`、`null` |
-| `currency` | 与费用数值对应的币种；未知为空字符串 | `"CNY"`、`"USD"` |
+| `cost` | Pi 价目表估算费用；会话记录中 `cstoa` 固定为 `null` | `0.2438`、`null` |
+| `currency` | 与 `cost` 对应的币种（来自 `currency.json`）；未知为空字符串 | `"CNY"`、`"USD"` |
 
-会话 `models[]` 另含 `incompleteUsageTurns`，标记未取得完整 usage 的轮次；CSTOA 实际扣点单独保存在 `cstoaBilling`。定义见[会话用量](telemetry/schema.md#用量与模型)和[CSTOA 扣点](telemetry/schema.md#cstoa-扣点)。本地请求日志继续保存 SDK 费用值。
+不同币种分别汇总，不做汇率换算。CSTOA 真实消费以请求级账单查询返回的额度点（`cstoaBilling`）为准，与估算费用独立统计。
 
-### 结果
+## 工具采集字段
 
-| 字段 | 含义 | 取值举例 |
-|---|---|---|
-| `status` | 请求最终结果；成功前的重试失败不改变最终状态 | `"ok"`、`"aborted"`、`"error"` |
-| `errorCode` | 最终失败且收到响应时的 HTTP 状态码；网络无响应时缺失 | `429` |
-| `stopReason` | Pi 模型结束原因，中间态不记录 | `"stop"`、`"length"`、`"toolUse"`、`"error"`、`"aborted"`、`"deferred"` |
+会话记录的 `tools[]` 按实际调用的 `name + scope` 聚合（无 `scope` 的工具仅按 `name` 聚合）：
 
-## 计费币种
+| 字段 | 含义 |
+|---|---|
+| `name` / `scope` | 工具名与子功能名（省略参数时取默认 `scope`） |
+| `calls` / `failures` | 已结束调用次数 / `isError=true` 次数 |
+| `degraded` / `truncated` | 结果标记 `degraded`（含 `disk usage` 降级 `node-walk`）次数 / 标记输出裁剪次数 |
+| `totalMs` / `maxMs` | 执行耗时总和 / 单次最大耗时（毫秒） |
+| `resultBytes` | 结果文本 UTF-8 字节数累计 |
+| `entriesTotal` | `runbook` 交付的命令条目总数 |
+| `providers` / `modes` | `web_search` 服务分布对象 / `fetch_content` 模式分布对象 |
 
-`cost` 与 `currency` 必须对应同一份价目表，不做汇率换算；不同币种分别汇总。供应商经过中转不改变币种，实际金额以账单为准。CSTOA 扣点单位为额度点，与估算费用分别统计，不换算人民币；币种映射存在也不能将未知价格补成零费用。
+## 不采集清单
 
-币种映射由扩展的 `currency.json` 提供，例如 `{ "cstoa": "CNY", "anthropic": "USD" }`。映射可用但缺少供应商时取 `USD`；映射不可读或无效时留空，计入未定价，不并入任何币种费用。
+以下内容禁止作为遥测字段上传：
 
-## 工具采集
+- 用户输入正文、系统提示词、模型回复正文、思考内容
+- 工具调用的业务参数（文件路径、搜索词、URL、命令正文、BitLocker 恢复密码）与工具返回正文
+- 会话标题、机主计算机名、Windows 用户名、账户 SID、原始 `MachineGuid`
+- 模型 APIKEY、OAuth 令牌、网关请求 ID（`x-oneapi-request-id` 仅存本地草稿用于查账）
+- 硬件序列号、U 盘序列号、MAC 地址、具体 CPU／内存／显卡型号与磁盘文件列表
 
-会话记录的 `tools[]` 按实际启用的工具采集。每个元素按 `name + scope` 聚合；无 scope 时仅按工具名分组。
-
-| 字段 | 含义 | 取值举例 |
-|---|---|---|
-| `name` | 工具名 | `"disk"`、`"bitlocker"` |
-| `scope` | 子功能；省略参数时使用工具默认值，无子功能时缺失 | `"usage"`、`"status"` |
-| `calls` | 已结束的调用次数 | `2` |
-| `failures` | `isError=true` 的调用次数 | `1` |
-| `degraded` | 结构化结果明确标记降级的调用次数 | `1` |
-| `totalMs` | 配对执行开始与结束事件的耗时总和 | `41200` |
-| `maxMs` | 单次最大耗时 | `38000` |
-| `resultBytes` | 结果文本 UTF-8 字节数累计，不保存正文 | `21000` |
-| `truncated` | 结构化结果明确标记裁剪的调用次数 | `0` |
-| `entriesTotal` | runbook 交付的命令条目数累计 | `12` |
-| `providers` | web_search 使用的服务分布 | `{ "tavily": 5 }` |
-| `modes` | fetch_content 使用的方式分布 | `{ "readable": 3, "raw": 1 }` |
-
-每次调用的每项指标最多计一次。工具参数只提取 scope 等上述分类字段，搜索词、URL、路径、命令正文和恢复密码不进入统计。
-
-## 不采集
-
-对话正文、系统提示词、模型输出、工具参数与结果正文、文件路径、会话名、计算机名、用户名、账户 SID、模型凭据、原始 MachineGuid、硬件与 U 盘序列号、MAC 地址、CPU／内存／显卡配置均不作为常规字段上传。
-
-唯一正文例外为会话 `errors[].message`：保留选中错误组的完整模型请求报错，不截断、不上传前脱敏，可能回显路径、账号或请求片段。服务端 180 天后清除报错原文；组数上限见[会话记录](telemetry/schema.md#报错原文)。
+**唯一正文例外**：会话记录的 `errors[].message` 保留最多 10 组高频模型请求错误原文（不截断、不上传前脱敏），服务端在接收 180 天后自动清除错误原文。

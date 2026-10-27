@@ -1,18 +1,97 @@
 import { Button } from "@heroui/react";
-import { ArrowLeft, CircleCheck, X } from "lucide-react";
-import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { ArrowLeft, CircleCheck, TriangleAlert, X } from "lucide-react";
+import { type ComponentProps, createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router";
+import { useGlobalEvents } from "../data/web-state";
 import { Notification } from "../shell/notification";
+import { loadSetting, settingReady } from "./settings-resource-cache";
 
 const Feedback = createContext<(message?: string) => void>(() => {});
 export const useSettingsFeedback = () => useContext(Feedback);
 
+const settingIndex = (path: string) => {
+	if (path.startsWith("/settings/provider") || path === "/settings/add" || path === "/settings/custom") return 2;
+	return ["/settings/general", "/settings", "/settings/models", "/settings/shortcuts"].indexOf(path);
+};
+function resourceForSettingsRoute(path: string): string | undefined {
+	if (path === "/settings/general") return "/api/settings";
+	if (path === "/settings/models") return "/api/models";
+	if (path === "/settings" || path === "/settings/add" || path === "/settings/provider" || path === "/settings/custom")
+		return "/api/auth";
+	return undefined;
+}
+export function SettingsLink({ to, onClick, ...props }: ComponentProps<typeof Link>) {
+	const { pathname } = useLocation();
+	const navigate = useNavigate();
+	const waiting = useRef(false);
+	return (
+		<Link
+			{...props}
+			to={to}
+			viewTransition
+			prefetch={props.prefetch ?? "intent"}
+			onClick={(event) => {
+				onClick?.(event);
+				if (
+					event.defaultPrevented ||
+					event.button !== 0 ||
+					event.metaKey ||
+					event.ctrlKey ||
+					event.shiftKey ||
+					event.altKey ||
+					typeof to !== "string"
+				)
+					return;
+				const target = to.split("?")[0];
+				const resource = resourceForSettingsRoute(target);
+				if (resource && !settingReady(resource)) {
+					event.preventDefault();
+					if (waiting.current) return;
+					waiting.current = true;
+					void loadSetting(resource)
+						.then(() => {
+							if (window.location.pathname !== pathname) return;
+							document.documentElement.dataset.settingsDirection =
+								settingIndex(target) < settingIndex(pathname) ? "back" : "forward";
+							void navigate(to, { viewTransition: true });
+						})
+						.catch(() => {
+							if (window.location.pathname === pathname) void navigate(to);
+						})
+						.finally(() => {
+							waiting.current = false;
+						});
+					return;
+				}
+				document.documentElement.dataset.settingsDirection =
+					settingIndex(target) < settingIndex(pathname) ? "back" : "forward";
+			}}
+		/>
+	);
+}
+
 export function SettingsFeedback({ children }: { children: ReactNode }) {
-	const [notice, setNotice] = useState<{ message: string; revision: number } | null>(null);
+	const [notice, setNotice] = useState<{ message: string; revision: number; kind: "success" | "warning" } | null>(
+		null,
+	);
+	useGlobalEvents((name, raw) => {
+		if (name !== "state") return;
+		try {
+			const event = JSON.parse(raw?.data ?? "null");
+			if (event?.type === "models_changed" && typeof event.warning === "string")
+				setNotice((previous) => ({
+					message: event.warning,
+					kind: "warning",
+					revision: (previous?.revision ?? 0) + 1,
+				}));
+		} catch {
+			/* 重连后由设置页统一重读。 */
+		}
+	});
 	return (
 		<Feedback
 			value={(message = "已自动保存") =>
-				setNotice((previous) => ({ message, revision: (previous?.revision ?? 0) + 1 }))
+				setNotice((previous) => ({ message, kind: "success", revision: (previous?.revision ?? 0) + 1 }))
 			}
 		>
 			{children}
@@ -21,11 +100,15 @@ export function SettingsFeedback({ children }: { children: ReactNode }) {
 					lifetimeKey={notice.revision}
 					className="settings-notification"
 					label={notice.message}
-					kind="success"
+					kind={notice.kind}
 					duration={2600}
 					onDismiss={() => setNotice(null)}
 				>
-					<CircleCheck size={18} aria-hidden="true" />
+					{notice.kind === "warning" ? (
+						<TriangleAlert size={18} aria-hidden="true" />
+					) : (
+						<CircleCheck size={18} aria-hidden="true" />
+					)}
 					<span className="notification-message">{notice.message}</span>
 					<button
 						type="button"
@@ -64,7 +147,8 @@ export function SettingsHeading({
 			)
 				return;
 			event.preventDefault();
-			void navigate("/settings");
+			document.documentElement.dataset.settingsDirection = "back";
+			void navigate("/settings", { viewTransition: true });
 		};
 		document.addEventListener("keydown", onEscape);
 		return () => document.removeEventListener("keydown", onEscape);
@@ -72,10 +156,10 @@ export function SettingsHeading({
 	return (
 		<>
 			{back && (
-				<Link to="/settings" className="settings-back">
+				<SettingsLink to="/settings" className="settings-back">
 					<ArrowLeft size={16} aria-hidden="true" />
 					模型服务
-				</Link>
+				</SettingsLink>
 			)}
 			<div className="settings-page-heading">
 				<div>

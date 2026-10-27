@@ -1,105 +1,55 @@
-# 系统架构
+# 遥测系统架构
 
-发送端在 Pi 进程内采集会话统计，并将同一记录上传到 CSTOA 与 Tim 两个独立接收端。累计快照采用协议 `0.2`，保留 `0.1` 最终记录兼容。字段与隐私边界见[信息收集契约](../contract.md)，验证方法见[遥测测试](../test/telemetry.md)。
+本页说明遥测发送端扩展与双端 Go 接收端的内部组成、生命周期状态流转、跨进程锁与数据库存储结构。行为规则见 [SPEC.md](SPEC.md)，协议格式见 [API.md](API.md)。
 
-## 组成
-
-| 组成 | 职责 |
-|---|---|
-| 发送端扩展 | 按会话实例累计、保存草稿，协调回答结束、心跳、关闭与恢复的提交，维护各端待发队列和确认状态 |
-| CSTOA 账单接口 | 按请求 ID 读取网关消费日志，校验成员与 APIKEY 归属，返回扣点或未知 |
-| CSTOA 接收端 | 校验安装签名或 OA 令牌，存入队伍服务器 SQLite，提供命令行导出 |
-| Tim 接收端 | 使用同款 Go 程序，校验安装签名或 OA 令牌，独立存入 `timserver_1` SQLite |
+## 数据流与组成
 
 ```mermaid
 flowchart LR
-    subgraph member[队员机器]
-        pi[Pi 会话] --> sender[发送端扩展]
-        triggers[回答结束 / 定时 / 关闭 / 恢复] --> sender
-        sender --> oaQueue[CSTOA 待发队列]
-        sender --> timQueue[Tim 待发队列]
+    subgraph Client[队员端 Pi 进程]
+        Events[Pi 会话与 HTTP 事件] --> Collect[collect.ts 内存累计]
+        Collect --> Draft[draft.ts 实例恢复草稿]
+        Triggers[agent_settled / 30s 心跳 / 关闭 / 启动恢复] --> Submit[submission.ts 冻结与版本递增]
+        Submit <-->|有界查询 ≤4.5s| Bill[OA /api/agent/llm/billing]
+        Submit --> Q1[CSTOA 队列 pending-*.jsonl]
+        Submit --> Q2[Tim 队列 pending-*.jsonl]
+        HB[heartbeat.ts 进程在线状态]
     end
-    oaQueue -- HTTPS POST --> oa[CSTOA 接收端]
-    timQueue -- HTTPS POST --> tim[Tim 接收端]
-    sender -- HTTPS 心跳 --> oa
-    sender -- HTTPS 心跳 --> tim
-    oa --> oaDB[(队伍 SQLite)]
-    tim --> timDB[(Tim SQLite)]
+    Q1 & HB -->|HTTPS POST| R1[CSTOA 接收端 SQLite]
+    Q2 & HB -->|HTTPS + 专用 CA| R2[timserver_1 接收端 SQLite]
 ```
 
-遥测上传使用批量 HTTPS POST，无长连接或命令下发。发送端另向 OA 只读账单接口查询本实例的请求扣点；两个接收端不查账。两端收到同一版本的会话快照，各自补充接收时间与身份；各自确认、去重和保留数据。更新与确认规则见[版本化提交](schema.md#版本化提交)。
+## 发送端模块划分
 
-本地队列为 JSONL，每个端点一个 `pending-<URL的SHA256>.jsonl` 文件。会话草稿使用 `drafts/<recordId>.json`；接收端原始记录保存在 `sessions.payload`。
-
-## 多触发提交与心跳
-
-改造采用普通 HTTPS 心跳，无持续连接和服务端命令下发。回答结束、定时检查、关闭及恢复进入同一快照提交入口；统计先本地持久化，再分别发送到两个接收端，字段不按触发来源重复累计。
-
-进程级运行身份与会话实例分别管理。一个进程、home 维护一组定时任务，并协调其中全部会话；接收端分别维护该进程的在线状态与会话最新统计，失联只改变在线状态。
-
-心跳默认每 30 秒发送，90 秒未收到有效更新标记失联；过期心跳不积压，统计快照进入持久队列。纯心跳不推进使用时间，断网恢复时发送当前状态并补发历史统计。
-
-累计快照采用版本化更新，客户端确认不能删除更新版本，服务端汇总只使用一个实例的最新有效快照。协议见[版本化提交](schema.md#版本化提交)；接收端先发布能力，再启用客户端新协议，顺序见[改造计划](trigger-upgrade-plan.md)。
-
-Pi 事件与字段见[发送端事件定义](sender/SPEC.md#pi-事件与消息字段)。触发、心跳及在线判定分别见[发送端](sender/SPEC.md#提交触发)与[接收端](receiver/SPEC.md#在线状态)。
-
-## 会话生命周期
-
-| 时机 | 动作 |
-|---|---|
-| CSTOA HTTP 开始／响应 | 记录尝试及请求 ID，异步写草稿 |
-| 轮次结束 `turn_end` | 累计统计并重写恢复草稿 |
-| 回答结束 | 收到 `agent_settled` 后冻结累计统计、持久化，再写入全部端点队列并分别上传 |
-| 定时心跳 | 检查所有活动实例，有变化则持久化并提交；同时发送当前在线状态 |
-| 唤醒或网络恢复 | 合并错过的触发，检查持久快照与待发队列，立即尝试当前心跳及补发 |
-| 会话实例结束 | 提交带结束原因的最终快照，全部端点入队成功后清理该实例草稿 |
-| 进程启动 | 恢复已关闭进程的残留草稿，按 `crash` 补齐最终状态；补发各端点未确认快照 |
-| 某端点确认 | 仅确认该端点实际发送的快照，保留发送期间产生的更新及其他端点状态 |
-
-全部字段共用统一提交入口。回答结束保留实例，后续提问继续累计；TUI 的 `session_shutdown`、Web 删除会话与退出程序提交最终快照。页面刷新、标签页关闭与系统关闭通知仅尽力触发保存，强制重启依靠启动恢复；规则见[发送端](sender/SPEC.md#回答结束与关闭)。
-
-正常退出等待草稿链、有限账单查询和最终快照落盘，不等待上传确认；等待上限见[发送端](sender/SPEC.md#cstoa-账单查询)。
-
-TUI 与多个 Web 会话分别累计、各写草稿。队列更新经进程内串行队列和跨进程目录锁，同一端点的统计与心跳各自单飞，心跳不等待统计积压。一个端点超时、拒绝或停采不阻塞其他端点。
-
-强杀时，已入队的回答快照可独立补发，下次启动恢复最后已写草稿；已记录的请求尝试可以补查账单，未完成轮次的 usage 可能缺失。磁盘写入失败、队列淘汰和进程强杀允许有限丢失。详细规则见[发送端](sender/SPEC.md)。
-
-## 技术与部署
-
-| 层 | 实现 |
-|---|---|
-| 发送端 | TypeScript Pi 扩展，无新增 npm 依赖 |
-| 传输 | HTTPS POST + JSON；CSTOA 使用系统证书验证，Tim 使用随扩展发行的专用公开 CA |
-| 身份 | 未登录时校验安装签名并各自绑定公钥；OA 凭据由两端分别内省，账号仅表示上传者 |
-| CSTOA | systemd、nginx、Go、SQLite |
-| Tim | 独立 Docker Compose、Caddy、同款 Go、SQLite；证书自动续签，每日一致性备份 |
-
-数据同时落在队伍服务器与 Tim 的 `timserver_1`，不经过第三方数据接收服务。报错原文是可能包含敏感片段的例外，两端执行相同保留期。
-
-发送端位于 `agent/home/extensions/telemetry/`，随本仓库发行；服务端代码位于独立仓库 `cst-pilot-server`，以本仓库契约为共享依据。部署入口、存储位置和运维边界见[遥测部署](deployment.md)。
-
-## 发送端模块
+发送端位于 `agent/home/extensions/telemetry/`，零外部 npm 依赖，跨会话共享状态挂载于 `globalThis`：
 
 | 模块 | 职责 |
 |---|---|
-| `index.ts` | 注册会话事件，连接采集、草稿、回答与关闭快照及发送 |
-| `submission.ts` | 冻结统计、串行保存、变化提交、账单更新与可重试最终快照 |
-| `collect.ts`、`record.ts` | 内存统计与记录序列化；版本从工具包读取 |
-| `draft.ts`、`draft-owner.ts` | 实例草稿原子替换、本机所有者证明、恢复封存及失败重试 |
-| `billing.ts`、`../oauth/request-observer.ts` | 按会话观察 CSTOA HTTP 尝试、只读账单查询与可空扣点汇总 |
-| `environment.ts`、`installation.ts` | 会话环境快照、安装身份初始化、环境摘要与上传签名 |
-| `file-lock.ts` | FAT/exFAT 可用的跨进程目录锁，用于身份、队列与草稿事务 |
-| `config.ts`、`credential.ts` | 读取配置、币种及有效 OA 上传凭据 |
-| `outbox.ts` | 各端点队列的追加、去重、淘汰和确认删除 |
-| `delivery.ts` | 队列迁移、批次大小限制与各端点发送 |
-| `transport.ts` | HTTPS、超时、状态分类与专用 CA 校验 |
-| `shared.ts` | 进程级文件队列、各端点发送状态、草稿恢复标记、运行身份及快照提交入口 |
-| `heartbeat.ts` | 当前运行状态、递增序号、逐端单飞、待发心跳合并与过期丢弃 |
-| `close-budget.ts` | 统一截止时刻内等待任务，超时后保留后台本地保存 |
-| `diagnostics.ts` | 有界保存、入队、逐端确认、心跳与失败状态，不记录正文或凭据 |
+| `index.ts` / `shared.ts` | 订阅 Pi 事件，管理进程级 `runId`、单组定时调度器、文件操作串行队列与 Web 显式定稿入口 |
+| `collect.ts` / `record.ts` | 内存指标累加与 `0.1` / `0.2` 会话记录序列化 |
+| `draft.ts` / `draft-owner.ts` | `drafts/<recordId>.json` 原子写入、本机内核资源（命名管道／回环端口）所有者存活证明与崩溃草稿恢复封存 |
+| `submission.ts` / `close-budget.ts` | 串行冻结快照、递增 `revision`、协调后台账单回填，以及进程退出时 5 秒统一截止预算控制 |
+| `billing.ts` | 读取本地有效 CSTOA 凭据，批量查询网关请求 ID 对应的真实消费额度点 |
+| `environment.ts` / `installation.ts` | 系统环境独立探测、`identity.json` 初始化、`MachineGuid` HMAC 摘要与 Ed25519 上传签名 |
+| `outbox.ts` / `delivery.ts` / `transport.ts` | 按端点 URL 哈希维护独立 JSONL 队列（上限 200 条，按 `recordId` 保留最新 `revision`）、能力协商、每端单飞发送与专用 CA 证书校验 |
+| `heartbeat.ts` / `diagnostics.ts` | 进程级在线状态单飞发送（慢端合并最新状态，不写持久队列）与 `telemetry/status.json` 有界诊断记录 |
+| `file-lock.ts` | 兼容 FAT/exFAT 的跨进程目录锁（附本机所有者存活证明，防止复制 U 盘或 PID 碰撞导致死锁） |
 
-页面辅助提示复用本机 Web API，不改变运行层生命周期。本地诊断规则见[发送端](sender/SPEC.md#诊断状态)，实施与发布状态见[改造计划](trigger-upgrade-plan.md#涉及模块)。
+## 关键并发与恢复机制
 
-Pi 扩展加载时不共享模块缓存，因此跨会话状态挂在 `globalThis`。正常销毁在统一预算内等待本地保存、有限查账和队列写入，再释放会话；上传独立执行。
+1. **草稿所有者证明**：每个活跃草稿绑定当前进程的命名管道（Windows）或回环端口。启动恢复扫描 `drafts/` 时通过尝试连接该内核资源判断原进程是否仍在本机存活，彻底避免跨机换盘或系统重启后的 PID 碰撞误判。
+2. **版本化队列确认**：`outbox.ts` 在同一 `recordId` 产生新 `revision` 时原地替换为更高版本快照；收到服务端 `202` 确认删除队列项时，严格比对确认的 `revision`（或实际发送字节），确保网络在途的旧版本确认绝不会删除发送期间新生成的快照版本。
+3. **Web 会话销毁定稿**：Pi SDK 的 `AgentSession.dispose()` 不触发 `session_shutdown` 事件；Web 会话池在删除会话或退出服务时显式调用遥测公开定稿入口，等待最终快照落盘入队后再销毁实例。
 
-`AgentSession.dispose()` 不派发会话结束事件，Web 运行层通过公开定稿入口通知遥测。TUI 使用 `session_shutdown`，两端的统计口径相同。
+## 接收端存储架构
+
+两个接收端运行独立仓库 `cst-pilot-server` 的同款纯 Go + SQLite（WAL 模式）程序，在同一事务中写入原始 JSON 与派生列：
+
+| 数据表 | 主键与存储内容 |
+|---|---|
+| `sessions` | `record_id` 主键；保存原始 `payload`、上传者 `mid`/`device_id`、首次 `received_at`、`updated_at`、`snapshot_revision`、`snapshot_final`、`owner_installation`，以及身份、系统环境、模型费用、`cstoa_*` 扣点与 `incomplete_usage_turns` 派生列 |
+| `installations` | `installation_id` 主键；绑定首次验签通过的 Ed25519 公钥与注册时间 |
+| `process_runs` | `run_id` 主键；绑定安装与环境，保存最新心跳序号、状态（`idle/busy/closed/offline`）、服务端接收时间与最近快照引用 |
+| `devices` / `members` | OA 设备最近接入时间表 / 队员学号与姓名展示映射表（无强外键约束） |
+| `daily_rollup` | 按首次接收时间的 `+08:00` 日期、`mid`、`installation_id`、`environment_id` 聚合统计；按实例最新有效快照计算，不累加中间版本 |
+| `uploads` | 上传批次审计日志（条数、接受／拒收原因、状态码与耗时，不含正文或凭据） |

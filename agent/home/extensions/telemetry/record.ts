@@ -1,5 +1,5 @@
 /**
- * 定稿序列化：累计状态 → 一条会话记录（形状见 doc/telemetry/schema.md）。
+ * 定稿序列化：累计状态 → 一条会话记录（形状见 doc/telemetry/API.md 与 doc/contract.md）。
  * endedAt / endReason / contextEntries 在定稿时补齐；crash 恢复路径见 draft.ts。
  */
 

@@ -5,19 +5,29 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const spec = resolve(root, 'doc/web/SPEC');
-const design = resolve(root, 'doc/design/web');
+
+async function collectMarkdown(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const results = [];
+  for (const entry of entries) {
+    const full = resolve(directory, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...(await collectMarkdown(full)));
+    } else if (entry.isFile() && entry.name.endsWith('.md')) {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
 const files = [
-  ...await readdir(spec).then(names => names.filter(name => name.endsWith('.md')).map(name => resolve(spec, name))),
-  ...await readdir(design).then(names => names.filter(name => name.endsWith('.md')).map(name => resolve(design, name))),
-  ...(await Promise.all(['doc/telemetry', 'doc/telemetry/sender', 'doc/telemetry/receiver', 'doc/test'].map(async directory =>
-    (await readdir(resolve(root, directory))).filter(name => name.endsWith('.md')).map(name => resolve(root, directory, name))
-  ))).flat(),
-  ...['README.md', 'CHANGELOG.md', 'doc/PRD.md', 'doc/Notice.md', 'doc/contract.md', 'pack/README.md', 'doc/web/README.md', 'doc/web/MVP.md', 'doc/design/README.md', 'doc/design/release.md', 'doc/design/web/tool/mapping.md', 'doc/Todo.md', 'doc/issues.md', 'doc/auth/README.md', 'doc/auth/integration.md', 'DESIGN.md', 'CONTRIBUTING.md'].map(name => resolve(root, name)),
+  ...(await collectMarkdown(resolve(root, 'doc'))),
+  ...(await collectMarkdown(resolve(root, 'src/web/design/asset'))),
+  ...['README.md', 'CHANGELOG.md', 'DESIGN.md', 'CONTRIBUTING.md', 'AGENTS.md', 'pack/README.md', 'lhm/README.md'].map(name => resolve(root, name)),
 ];
 const slug = text => text.toLowerCase().replace(/`/g, '').replace(/[^\p{L}\p{N}_\- ]/gu, '').replace(/ /g, '-');
 
-test('Web、认证与验收文档的本地 Markdown 链接及锚点可用', async () => {
+test('全项目文档的本地 Markdown 链接及锚点可用', async () => {
   const failures = [];
   for (const file of files) {
     const content = await readFile(file, 'utf8');

@@ -32,9 +32,9 @@
 8. 把需要手动执行的修复命令整理成 txt 清单，保存在工具包的 `outbox/` 下，按风险分档，供队员逐条复制执行。
 9. 在 TUI 或 Web 查询 BitLocker 状态，使用恢复密码解锁卷，或经本地确认发起完整解密。
 
-**MVP 阶段已完成。** 支持终端和本机 Web 界面。启动后执行 `/web`，即可在浏览器中聊天、查看历史会话、切换模型和管理授权。后续迭代与发行验证见[待办清单](doc/Todo.md)。
+支持终端和本机 Web 界面。启动后执行 `/web`，即可在浏览器中聊天、查看历史会话、切换模型和管理授权。后续迭代与发行验证见[待办与议题](doc/TASKS.md)。
 
-具体用法与权限、硬件限制见 [工具文档](doc/tool/README.md)。
+具体用法与权限、硬件限制见 [诊断工具规格](doc/diagnostics/SPEC.md) 与 [工具接口](doc/diagnostics/API.md)。
 
 ## 目录结构
 
@@ -80,7 +80,7 @@ cst-pilot/
 4. 项目遥测默认启用，未登录时使用工具包安装签名上传，会话统计同时发送到 CSTOA 服务器和 Tim 的 `timserver_1`。CSTOA 登录仅提供经验证的上传账号。可在 `agent/home/telemetry.json` 中将 `enabled` 设为 `false`；收集范围见 [信息收集契约](doc/contract.md)。
 5. WizTree 仅个人使用免费，商业使用需授权。本项目采用 [MIT 许可证](LICENSE)，第三方条款见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
-其他运行限制见 [运行注意事项](doc/Notice.md)。
+其他运行限制见 [运行时规格](doc/runtime/SPEC.md)。
 
 ## 使用方式
 
@@ -97,4 +97,4 @@ cst-pilot/
 
 名称中的 **pilot** 致敬本项目所基于的 [pi coding agent](https://github.com/earendil-works/pi)。感谢这个开源项目。
 
-[更新记录](CHANGELOG.md) · [产品需求](doc/PRD.md) · [文档索引](doc/README.md)
+[更新记录](CHANGELOG.md) · [产品规格](doc/SPEC.md) · [文档索引](doc/README.md)

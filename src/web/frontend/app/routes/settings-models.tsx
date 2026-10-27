@@ -1,12 +1,13 @@
 import { Button, Checkbox, ListBox, Select } from "@heroui/react";
 import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { apiJson } from "../data/api";
 import type { Model } from "../data/web-state";
 import { modelListRows } from "../settings/model-list";
 import { moveModel, normalizeScope, toggleModel } from "../settings/model-scope";
 import { SettingsHeading, SettingsLoadState, SettingsSection, useSettingsFeedback } from "../settings/settings-frame";
 import { SettingsSearch } from "../settings/settings-search";
+import { useAnimatedHeight } from "../settings/use-animated-height";
 import { useSettingsResource } from "../settings/use-settings-resource";
 
 type ModelsPayload = { models: Model[]; enabled: string[] | null; unavailableEnabled: string[] };
@@ -23,10 +24,15 @@ export default function ModelPreferences() {
 	const allIds = models.map(fullId);
 	const byId = useMemo(() => new Map(models.map((model) => [fullId(model), model])), [models]);
 	const providers = [...new Set(models.map((model) => model.provider))];
-	const sorted =
-		selection === null
-			? allIds
-			: [...selection.filter((id) => byId.has(id)), ...allIds.filter((id) => !selection.includes(id))];
+	// 勾选变化不重新排列可见行；取消勾选的模型留在原位。
+	const displayOrder = useRef<string[]>([]);
+	if (displayOrder.current.length !== allIds.length || displayOrder.current.some((id) => !byId.has(id))) {
+		displayOrder.current =
+			selection === null
+				? allIds
+				: [...selection.filter((id) => byId.has(id)), ...allIds.filter((id) => !selection.includes(id))];
+	}
+	const sorted = displayOrder.current;
 	const needle = query.trim().toLocaleLowerCase();
 	const matches = (id: string) =>
 		(provider === "all" || byId.get(id)?.provider === provider) &&
@@ -36,6 +42,7 @@ export default function ModelPreferences() {
 		(id) => (provider === "all" || id.startsWith(`${provider}/`)) && id.toLocaleLowerCase().includes(needle),
 	);
 	const listed = modelListRows(visible, unavailable, expanded || !!needle);
+	const list = useAnimatedHeight(`${expanded}:${query}:${provider}:${listed.total}`);
 	const enabledCount = selection === null ? models.length : selection.filter((id) => byId.has(id)).length;
 	async function save(next: string[] | null) {
 		if (!state.data || state.working) return;
@@ -43,9 +50,9 @@ export default function ModelPreferences() {
 		const ok = await state.mutate(async (current) => {
 			const result = await apiJson<{ enabled: string[] | null }>("/api/models/scoped", {
 				method: "POST",
-				body: { patterns: next ?? [] },
+				body: { patterns: next ?? [], empty: next !== null && next.length === 0 },
 			});
-			return { ...current, enabled: result.enabled?.length ? result.enabled : null, unavailableEnabled: [] };
+			return { ...current, enabled: result.enabled, unavailableEnabled: [] };
 		}, optimistic);
 		if (ok) feedback();
 	}
@@ -53,7 +60,10 @@ export default function ModelPreferences() {
 		if (!dragId || !selection) return;
 		const next = moveModel(selection, dragId, target);
 		setDragId(null);
-		if (next !== selection) void save(next);
+		if (next !== selection) {
+			displayOrder.current = [...next!, ...sorted.filter((id) => !next?.includes(id))];
+			void save(next);
+		}
 	}
 	return (
 		<>
@@ -72,7 +82,10 @@ export default function ModelPreferences() {
 							<Select.Trigger>
 								<Select.Value /> <ChevronDown size={14} aria-hidden="true" />
 							</Select.Trigger>
-							<Select.Popover className="login-provider-popover">
+							<Select.Popover
+								className="login-provider-popover settings-provider-popover"
+								placement="bottom end"
+							>
 								<ListBox aria-label="模型服务">
 									<ListBox.Item id="all" textValue="全部">
 										全部
@@ -125,7 +138,12 @@ export default function ModelPreferences() {
 							</Button>
 							{state.working && <output>正在保存…</output>}
 						</div>
-						<div className="settings-card settings-model-card" data-expanded={expanded} aria-busy={state.working}>
+						<div
+							className="settings-card settings-model-card"
+							ref={list}
+							data-expanded={expanded}
+							aria-busy={state.working}
+						>
 							<ul className="settings-models" id="enabled-model-list">
 								{listed.ids.map((id) => {
 									const model = byId.get(id)!;
@@ -193,7 +211,10 @@ export default function ModelPreferences() {
 														event.preventDefault();
 														const target =
 															selection[selection.indexOf(id) + (event.key === "ArrowUp" ? -1 : 1)];
-														if (target) void save(moveModel(selection, id, target));
+														if (target) {
+															displayOrder.current = moveModel(sorted, id, target) ?? sorted;
+															void save(moveModel(selection, id, target));
+														}
 													}}
 												>
 													<GripVertical size={16} aria-hidden="true" />
@@ -234,7 +255,6 @@ export default function ModelPreferences() {
 								</button>
 							)}
 						</div>
-						<p className="settings-scope-note">全部启用或清空范围时，恢复默认模型范围。</p>
 					</SettingsSection>
 				</>
 			)}

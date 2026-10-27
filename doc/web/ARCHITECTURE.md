@@ -1,0 +1,93 @@
+# Web 前后端架构
+
+本页说明 Web 前后端目录组织、流式渲染与状态同步、草稿图片存储回收、分支树几何算法及 14 个工具卡片的数据转换管线。行为要求见 [SPEC.md](SPEC.md)，接口定义见 [API.md](API.md)。
+
+## 工程边界与静态服务
+
+前端源码位于 `src/web/frontend/`（包名 `@cst-pilot/web`，React 19 + Vite + Tailwind v4 + react-router 框架模式 `ssr: false`），构建产物输出至 `agent/home/extensions/web/static/`。后端位于 `agent/home/extensions/web/server/`。
+
+```text
+src/web/frontend/app/
+├── routes/         路由页面装配（主页、工作台、树、设置、登录、账号）
+├── cards/          14 个工具的结果转换（map-tool.ts / special-tool-data.ts）与渲染组件
+├── conversation/   对话流、过程分段、Markdown 安全切分、排队面板与扩展提问
+├── composer/       输入框行内标记编辑器、补全面板、草稿与 IndexedDB 图片引用、上下文额度
+├── tree/           分支树可见重挂、几何列计算（branch-tree.ts）与分支总结参数编解码
+├── settings/       设置资源并发缓存、高度过渡钩子、模型范围排序与自定义服务表单
+├── auth/ & account/ OAuth 弹窗隔离、多步授权面板与 CSTOA 账号资料展示
+├── shell/          侧栏日期分组、乐观批量删除、全局通知栈、断线提示、Blue hour / AIR WebGL 背景
+└── data/           HTTP/SSE 客户端、24ms 流式播放器、连接健康检查与错误格式化
+```
+
+依赖方向固定为 `routes -> 功能域 -> data`；浏览器代码严禁引入 Node 原生模块或直接读取凭据文件。
+
+静态服务（`web/server/http.ts`）路由规则：
+
+- `/api/*` 交由 API 路由处理，未命中返回结构化 404 JSON。
+- 命中 `static/` 下真实存在的文件时按 MIME 类型返回；带内容哈希的 `/assets/*` 资源配长缓存，`index.html` 每次重验证。
+- 未命中文件但 `Accept` 包含 `text/html`、路径不属于资源目录且无文件扩展名时，返回 `index.html` 供前端路由解析（并按主题 Cookie 写入 `data-theme`）。
+
+## 流式渲染与 SSE 状态同步
+
+1. **Markdown 前缀定稿切分（`markdown-split.ts`）**：流式输出期间将正文按安全边界（避开未闭合代码块、列表、表格与引用块）切分为“已定稿前缀 + 流式尾段”。前缀经 `memo` 缓存并完成代码高亮，每帧仅重解析尾段，两者直接渲染在同一 `.markdown` 容器内以保持块间距一致；消息结束时整体定稿高亮。
+2. **平滑步进播放（`stream-player.ts`）**：按 24ms 步进消费接收缓冲，每步输出 1–12 个字符（随积压动态加速）并吸附词边界，消息结束时立即刷出全部剩余文本。
+3. **SSE 背压与断流恢复**：服务端对单连接未发送积压允许至多 8 MiB 缓冲（容纳大体积思考或工具结果），每 20 秒发送一次心跳注释帧；前端连续 45 秒未收到业务帧或心跳时判定断流，携带 `Last-Event-ID` 重连续传，序号超出保留窗口时收到 `reset` 信号并全量重取会话快照。
+4. **轮次耗时持久化**：助手回复完成时，后端向会话写入 `cst-web-work-duration` 自定义条目（不进入模型上下文），在 HTTP 快照的 `message.work` 中返回精确起止耗时，保证刷新或重开后过程头耗时不变。
+
+## 草稿图片存储与跨页回收
+
+未发送草稿保存在当前标签页 `sessionStorage`；未发送图片的原始字节按 SHA-256 存入浏览器 `IndexedDB`：
+
+- `localStorage` 仅发布各标签页持有的图片哈希引用表与心跳时间戳。
+- 配合浏览器 `Web Locks API` 存活锁与 60 秒页面刷新宽限期：仅当图片未被任何存活标签页、正在进行的异步读取或宽限期内的刷新页引用时，才在删除、发送成功或启动检查时清理 `IndexedDB` 孤儿字节。
+- 消息被后端 `POST /api/sessions/:id/messages` 接受后，图片字节按 SHA-256 写入服务端会话附件目录，后续通过 `/api/sessions/:id/attachments/:attachmentId` 读取，删除会话时同步清理附件目录。
+
+## 分支树几何算法
+
+`app/tree/branch-tree.ts` 将后端 `getTree()` 转换为与 Pi TUI `TreeList` 几何语义完全一致的展示行（由 `tree-parity.test.ts` 与真实 Pi 对照验证）：
+
+1. 在原始树上按“当前叶所在路径优先、其余兄弟按时间”执行深度优先遍历，固定每条目的 `activePath` 与 `traversalOrder`。
+2. 应用五档过滤，将隐藏条目的可见子条目重挂到最近的可见祖先，保持原始 `traversalOrder` 不重排。
+3. 计算每行几何属性：根节点 `indent = 0`；真实分叉的子条目 `indent + 1` 且标记 `showConnector = true`（绘制方框，位于 `connectorColumn = indent - 1`）；段首的第一代后代 `indent + 1`；非末位兄弟的子树在对应列延续竖线 `gutters`。有后代的连接符行在槽位后额外预留 `32px`，使分支起始行图标与后续单链内容对齐。
+
+## 工具卡片转换
+
+### 通用骨架与 Block 联合类型
+
+`app/cards/map-tool.ts` 将工具原始返回（优先读未裁剪的 `details`，缺失时读 `content`）转换为统一的 `CardView`，交由 `tool-card.tsx`（基于 HeroUI `Card`、`Disclosure`、`Alert`、`Button`）渲染：
+
+```ts
+type Block =
+  | { kind: "fields"; id: string; title?: string; rows: { label: string; value: string }[] }
+  | { kind: "listing"; id: string; items: { name: string; metrics: { label: string; value: string }[] }[] }
+  | { kind: "text"; id: string; text: string }
+  | { kind: "image"; id: string; mimeType: string; data: string }
+  | { kind: "notice"; id: string; text: string; status: "default" | "warning" | "danger" }
+  | { kind: "commands"; id: string; items: { shell: string; summary: string; command: string; admin: boolean }[] };
+```
+
+### 14 个工具的主模板与字段来源
+
+整次 `isError: true` 统一使用错误**原文块**；正常或降级返回按下表映射：
+
+| 工具 | 渲染形态／主模板 | 核心字段来源与转换规则 |
+|---|---|---|
+| `disk` | 概览组（`space/info/health/all`）<br>排行组（`usage`） | `space[]`、`volumes[]`、`physicalDisks[]`、`smart[]` 每项生成字段组；`usage` 将 `topDirs`、`topFiles`、`extAgg`、`staleFiles` 生成排行组；保留 `infoNotice`、`smartErrors`、`degradedFrom` |
+| `ls` | 排行组 | `path/totalChildren/totalSize/method` 生成目录概况字段组；`entries[]` 生成大小排行组；`omitted` 生成截断提示；任一子项不完整时 `pct` 保持为空 |
+| `sys` | 特殊组件（`overview`）<br>排行组（`proc/gpu/io`）<br>概览组（`sensor`） | `overview` 走内嵌组件（内存 MB 转 GB）；`proc` 生成 CPU／内存双排行；`gpu` 生成进程排行 + 适配器／NVIDIA／LHM 字段组；`io` 生成磁盘与进程排行；`sensor` 生成硬件读数、热区与频率字段组 |
+| `startup` | 概览组 | 依次生成自启概况、`regItems[]`（`disabled` 映射为已禁用／未禁用／状态未知）、`startupFolders[]`、`services[]` 字段组 |
+| `eventlog` | 概览组（列表类）<br>原文块（`detail`） | 列表类将 `events[]` 生成事件字段组，`counts[]` 生成来源排行组，附范围统计与 `security` 权限降级提示；`detail` 生成事件头字段组 + `msg` 原文块 |
+| `driver` | 概览组 | `problem/find` 生成匹配设备与汇总字段组；`core` 按网卡、蓝牙、音频、显示、服务、驱动分组；`external` 按外设与可移动存储分组 |
+| `runbook` | 特殊组件 | 标题与命令条目取自调用参数 `items[]`，文件路径、序号与风险档取自 `details.runbook` |
+| `bitlocker` | 概览组（`status`）<br>特殊组件（`unlock/decrypt`） | `status` 按卷生成状态字段组；`unlock/decrypt` 走特殊组件，合并 `details.bitlocker.volumes[]`、每卷 `operation` 与会话待处理交互请求 |
+| `web_search` | 特殊组件 | 行内展示检索状态，展开调用参数 `queries / query`，状态比对 `successfulQueries` 与 `queryCount` |
+| `source_check` | 概览组 | 依次展示主张判断（`claims[]`）、来源排行（`sources[]`）、引文原文块（`passages[]`）与续读标识 |
+| `fetch_content` | 原文块 | 抓取概况字段组（`urls/successful/mode/totalChars`）+ `content` 文本原文块或图片组 + 截断续读提示 |
+| `get_search_content` | 原文块 | 按搜索、研究（JSON 片段）或网页抓取来源生成元数据字段组 + `content` 原文块 |
+| `fffind` / `ffgrep` | 原文块 | `details.totalMatched/totalFiles` 统计字段组 + `content[].text` 路径或代码匹配原文块（不将 `totalFiles` 误作命中数） |
+| `read` | 原文块 / 图片例外 | 文本读取展示绝对路径字段组 + 正文原文块；图片读取优先展示图片块，再展示绝对路径，忽略 `Read image file [...]` 标注文本 |
+
+### 特殊工具交互
+
+- **BitLocker 本地输入与确认**：Web 后端在内存中维护绑定 `sessionId + entryId + toolCallId + requestId` 的待处理请求（3 分钟有效期，带递增版本），随会话快照与 SSE 下发。前端 `bitlocker-input.tsx` 通过 `POST /api/sessions/:id/bitlocker/:requestId` 一次性提交恢复密码或确认解密，绕过持久化幂等日志，确保恢复密码永不落盘。
+- **Runbook 文件打开**：点击卡片文件名调用 `POST /api/sessions/:id/runbook/open`，后端校验该会话历史条目对应的 `outbox/` 文件存在后启动系统记事本，并对重复点击做去重保护。

@@ -16,7 +16,7 @@ TFM 选型：pwsh 7.6 运行于 .NET 10，故取 net10.0（HidSharp 取 netstand
 1. `https://www.nuget.org/api/v2/package/LibreHardwareMonitorLib/` 下载最新 nupkg（zip）
 2. 解出 `runtimes/win-x64/lib/net10.0/LibreHardwareMonitorLib.dll`
 3. 按 nuspec 依赖清单更新各依赖 DLL
-4. 按[测试指南](../doc/test/README.md)验证 `sys gpu` 与 `sys sensor`；API 变化时同步 `sys-commands.ts` 的采集模板
+4. 按[测试规范](../doc/TESTING.md)验证 `sys gpu` 与 `sys sensor`；API 变化时同步 `sys-commands.ts` 的采集模板
 
 ## PawnIO 不附带（零安装约束）
 

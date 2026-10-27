@@ -258,14 +258,47 @@ test("特殊工具状态、详情、复制、固定目标与提交恢复", { tim
 			await browser.evaluate("document.querySelector('[data-tool-call-id=unlock-recheck]').dataset.state"),
 			"degraded",
 		);
-		await browser.click('[data-tool-call-id="overview-normal"] summary');
 		assert.equal(
-			await browser.evaluate("document.querySelector('[data-tool-call-id=overview-normal] details').open"),
+			await browser.evaluate(
+				"(()=>{const footer=document.querySelector('[data-tool-call-id=overview-normal] .special-tool-footer'),trigger=footer.querySelector('.special-tool-detail-trigger'),range=document.createRange();range.selectNodeContents(trigger.firstChild);const label=range.getBoundingClientRect(),time=footer.querySelector('small').getBoundingClientRect(),icon=trigger.querySelector('svg').getBoundingClientRect();return label.left>=time.right+12&&Math.abs(icon.left-label.right-8)<1&&icon.width===12})()",
+			),
 			true,
-			"详情可展开",
+			"详情文字与箭头紧靠右侧，不与运行时长重叠",
+		);
+		await browser.click('[data-tool-call-id="overview-normal"] .special-tool-details button');
+		assert.equal(
+			await browser.evaluate(
+				"document.querySelector('[data-tool-call-id=overview-normal] .special-tool-details button').getAttribute('aria-expanded')",
+			),
+			"true",
+			"详情沿用其他工具的渐进展开控件",
+		);
+		assert.equal(
+			await browser.evaluate(
+				"(()=>{const style=getComputedStyle(document.querySelector('[data-tool-call-id=overview-normal] .disclosure__content'));return style.transitionProperty.includes('height')&&style.transitionProperty.includes('opacity')})()",
+			),
+			true,
+			"详情高度与透明度沿用通用工具过渡",
+		);
+		await browser.click('[data-tool-call-id="search-success"] .special-tool-search-trigger');
+		assert.equal(
+			await browser.evaluate(
+				"document.querySelector('[data-tool-call-id=search-success] .special-tool-search-trigger').getAttribute('aria-expanded')",
+			),
+			"true",
+			"联网检索详情沿用相同折叠动效",
+		);
+		await browser.evaluate("new Promise(resolve=>setTimeout(resolve,300))");
+		assert.equal(
+			await browser.evaluate(
+				"getComputedStyle(document.querySelector('[data-tool-call-id=overview-normal] .disclosure__indicator')).rotate",
+			),
+			"none",
+			"展开箭头由 transform 单独旋转，避免叠加组件默认旋转",
 		);
 		await browser.screenshot(join(root, "overview-expanded-light.png"));
 		await browser.evaluate("document.documentElement.dataset.theme='dark'");
+		await browser.evaluate("new Promise(resolve=>setTimeout(resolve,300))");
 		await browser.screenshot(join(root, "overview-expanded-dark.png"));
 		await browser.call("Emulation.setDeviceMetricsOverride", {
 			width: 390,

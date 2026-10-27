@@ -16,6 +16,7 @@
   ],
   "theme": "light/dark",
   "enabledModels": [
+    "cstoa/deepseek-flash",
     "opencode-go/deepseek-v4.1-flash"
   ]
 }

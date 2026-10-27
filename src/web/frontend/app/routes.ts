@@ -12,6 +12,7 @@ export default [
 			route("models", "routes/settings-models.tsx"),
 			route("shortcuts", "routes/settings-shortcuts.tsx"),
 			route("add", "routes/settings-add.tsx"),
+			route("custom", "routes/settings-custom.tsx"),
 			route("provider", "routes/provider.tsx"),
 		]),
 		route("account", "routes/account.tsx"),

@@ -1,7 +1,7 @@
 /**
  * OA 登录扩展 · 设备授权与令牌交换。
  *
- * 规格：doc/auth/README.md「范围与流程」「OA 接口」「登录有效期」。
+ * 规格与接口：doc/auth/SPEC.md、doc/auth/API.md。
  * 协议是 OAuth 2.0 设备授权流（RFC 8628），只使用 Node 内置模块与全局 fetch：
  *
  * 1. POST /api/oauth/device_authorization 申请设备码（按 IP 限流，无需鉴权）。

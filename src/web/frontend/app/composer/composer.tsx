@@ -1,4 +1,4 @@
-import { Button, Label, ListBox, Select } from "@heroui/react";
+import { Button, ListBox, Select } from "@heroui/react";
 import {
 	ArrowUp,
 	Brain,
@@ -412,6 +412,7 @@ export function Composer({
 			const data = JSON.parse(event?.data ?? "null");
 			if (
 				data?.type === "auth_changed" ||
+				data?.type === "models_changed" ||
 				data?.type === "settings_changed" ||
 				(data?.type === "usage_changed" && data.sessionId === sessionId)
 			)
@@ -477,7 +478,7 @@ export function Composer({
 			setSelected(null);
 			return;
 		}
-		const choice = (home ? scoped : models).find((item) => `${item.provider}/${item.id}` === key);
+		const choice = scoped.find((item) => `${item.provider}/${item.id}` === key);
 		if (!choice) return;
 		try {
 			const changed = await apiJson<{ thinkingLevel?: string; thinkingLevels?: string[] }>("/api/models/select", {
@@ -552,13 +553,6 @@ export function Composer({
 				await onCommand("compact", body);
 			} else {
 				if (!onSend) throw new Error("当前无法提交消息");
-				if (
-					home &&
-					(!scoped.length ||
-						(selected &&
-							!scoped.some((model) => model.provider === selected.provider && model.id === selected.id)))
-				)
-					throw new Error("当前范围没有可用模型，请在设置中调整范围或登录。");
 				await onSend(body, {
 					provider: selected?.provider,
 					modelId: selected?.id,
@@ -759,7 +753,10 @@ export function Composer({
 						isOpen={modelMenuOpen}
 						onOpenChange={(open) => {
 							setModelMenuOpen(open);
-							if (open) setThinkingMenuOpen(false);
+							if (open) {
+								setThinkingMenuOpen(false);
+								setModelRevision((value) => value + 1);
+							}
 						}}
 						aria-label="模型"
 						selectedKey={modelKey}
@@ -768,7 +765,6 @@ export function Composer({
 						}}
 						className="model-select"
 					>
-						<Label className="visually-hidden">模型</Label>
 						<Select.Trigger className="composer-model">
 							<span className="model-label">
 								{models.find((item) => `${item.provider}/${item.id}` === modelKey)?.name ?? "自动选择"}
@@ -810,12 +806,13 @@ export function Composer({
 							}}
 							className="thinking-select"
 						>
-							<Label className="visually-hidden">思考强度</Label>
 							<Select.Trigger className="composer-thinking">
 								<Brain size={16} aria-hidden="true" />
-								{thinking === "off"
-									? "Off"
-									: (thinkingOptions.find((option) => option.id === thinking)?.label ?? thinking)}
+								<span className="composer-thinking-label">
+									{thinking === "off"
+										? "Off"
+										: (thinkingOptions.find((option) => option.id === thinking)?.label ?? thinking)}
+								</span>
 								<ChevronDown size={14} />
 							</Select.Trigger>
 							<Select.Popover className="composer-popover thinking-popover" placement="top end">

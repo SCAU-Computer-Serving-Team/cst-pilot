@@ -1,7 +1,7 @@
 // 分支树的纯逻辑：可见性过滤、排序、层级与连接符/竖线的推导、折叠、行文案。
 // 对齐 pi TUI 的 TreeList（dist/modes/interactive/components/tree-selector.js）：
 //   flattenTree / recalculateVisualStructure 决定 indent、showConnector、gutters；
-//   isFoldable 决定可折叠行。规则说明见 doc/web/SPEC/branch-tree.md。
+//   isFoldable 决定可折叠行。规则说明见 doc/web/SPEC.md 与 doc/web/ARCHITECTURE.md。
 
 export type TreeMessage = {
 	role: string;

@@ -5,6 +5,8 @@ export type ProviderStatus = {
 	supportsOAuth: boolean;
 	type: string | null;
 	requiresLogin: boolean;
+	configured?: boolean;
+	custom?: boolean;
 };
 
 export type OauthDeviceCode = {
