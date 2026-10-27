@@ -1,6 +1,6 @@
 # 构建发行版
 
-本页说明装配命令、输入与校验。运行组成见[便携发行方案](../doc/design/release.md)，体积与运行时依据见[可行性分析](../doc/web/research/release-feasibility.md)。
+本页说明装配命令、输入与校验。发行组成与红线见[便携发行规格](../doc/release/SPEC.md)，装配管线见[发行与构建架构](../doc/release/ARCHITECTURE.md)。
 
 在已取得管理员权限的终端中，从项目根目录运行。自动冒烟需要保持输入输出连接，未提权时直接报错，不弹出 UAC：
 
@@ -12,7 +12,7 @@ node\node.exe pack\pack.mjs --official <官方ZIP或目录> --out <新的输出�
 
 发行树校验分两类：`checkReleaseTree` 拒绝项目 `AGENTS.md`、运行态、凭据与密钥；`checkReleaseContent` 要求 Web 入口页与样式表引用的资源、随包许可证文件齐备，缺一即拒绝打包。装配完成后 `SHA256SUMS` 覆盖全部发行文件，并在打包后复核。
 
-TUI 默认主题由 Pi 设置管理。Web 默认浅色，运行后保存到独立 `web-settings.json`，不复制构建机的外观选择。项目 `AGENTS.md` 不参与发行，运行指令由 `agent/home/APPEND_SYSTEM.md` 提供，见[运行注意事项](../doc/Notice.md)。
+TUI 默认主题由 Pi 设置管理。Web 默认浅色，运行后保存到独立 `web-settings.json`，不复制构建机的外观选择。项目 `AGENTS.md` 不参与发行，运行指令由 `agent/home/APPEND_SYSTEM.md` 提供，见[运行时规格](../doc/runtime/SPEC.md)。
 
 发行配置默认使用 OpenCode Go 的 `deepseek-v4.1-flash`（DeepSeek V4.1 Flash）。离线目录沿用 Pi 上游 `https://pi.dev/api/models`；打包时保留已有上游条目，缺少默认模型时补全。不复制本机 `auth.json`；运行时由队员在本机登录。
 
@@ -26,4 +26,4 @@ TUI 默认主题由 Pi 设置管理。Web 默认浅色，运行后保存到独�
 
 升级依赖时一起更新锁文件并重新验收。
 
-发布输出目录中的 ZIP、VERSION 和 SHA256SUMS。不要再次压缩运行过的目录。自动冒烟覆盖启动、工具注册与 Web API 实际工具链路，实际 TUI 待机/浏览器与跨机诊断仍需按 `doc/test/README.md` 验收。
+发布输出目录中的 ZIP、VERSION 和 SHA256SUMS。不要再次压缩运行过的目录。自动冒烟覆盖启动、工具注册与 Web API 实际工具链路，实际 TUI 待机/浏览器与跨机诊断仍需按 [测试规范](../doc/TESTING.md) 验收。

@@ -1,10 +1,10 @@
 # 提示词
 
 ## 初始化
-1. 若从未阅读过，按照一下顺序阅读文档，获取关键信息
-  1. 基本情况：`doc\PRD.md`、`README.md`、通过 ls 获取文档结构。
-  2. 开发情况和已开发内容： `doc\Todo.md`、`doc\tool\README.md`、`doc\Notice.md`、`doc\test\README.md`、`doc\design\README.md` 。
-  3. 其他与任务相关的文档
+1. 若从未阅读过，按照以下顺序阅读文档，获取关键信息
+  1. 基本情况：`doc\SPEC.md`、`README.md`、`doc\README.md`。
+  2. 架构、待办与测试：`doc\ARCHITECTURE.md`、`doc\TASKS.md`、`doc\TESTING.md`。
+  3. 按任务阅读对应模块目录（`doc\runtime\`、`doc\diagnostics\`、`doc\web\`、`doc\auth\`、`doc\telemetry\`、`doc\release\`）下的 `SPEC.md`、`ARCHITECTURE.md`、`API.md`。
 2. 请大概了解 `earendil-works/pi`，本项目基于 Pi 二次开发，但是要遵循 Pi 的工程规范。有充足的文档可供后续阅读。
 
 ## 文档规范

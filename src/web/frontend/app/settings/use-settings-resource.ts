@@ -1,74 +1,80 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiJson } from "../data/api";
-import { useGlobalEvents } from "../data/web-state";
+import {
+	cachedSetting,
+	cacheSetting,
+	invalidateSetting,
+	loadSetting,
+	subscribeSetting,
+} from "./settings-resource-cache";
 
-/** 一个设置资源串行写入；写入期间失效的读请求不再覆盖本地状态。 */
+/** 读请求由设置页共用并预加载；写入串行，失败恢复已确认值。 */
 export function useSettingsResource<T>(path: string) {
-	const [data, setData] = useState<T | null>(null);
+	const [data, setData] = useState<T | null>(() => cachedSetting<T>(path) ?? null);
 	const [error, setError] = useState("");
-	const [loading, setLoading] = useState(true);
+	const [loading, setLoading] = useState(() => cachedSetting(path) === undefined);
 	const [working, setWorking] = useState(false);
 	const mounted = useRef(false);
-	const request = useRef<AbortController | null>(null);
 	const sequence = useRef(0);
 	const locked = useRef(false);
 	const stale = useRef(false);
-	const refresh = useCallback(async () => {
-		if (locked.current) {
-			stale.current = true;
-			return;
-		}
-		request.current?.abort();
-		const controller = new AbortController();
-		request.current = controller;
-		const revision = ++sequence.current;
-		try {
-			const value = await apiJson<T>(path, { signal: controller.signal });
-			if (mounted.current && revision === sequence.current) {
-				setData(value);
-				setError("");
+	const read = useCallback(
+		async (force: boolean) => {
+			if (locked.current) {
+				stale.current = true;
+				return;
 			}
-		} catch (cause) {
-			if (mounted.current && !controller.signal.aborted && revision === sequence.current)
-				setError(cause instanceof Error ? cause.message : "设置加载失败，请重试。");
-		} finally {
-			if (mounted.current && revision === sequence.current) setLoading(false);
-		}
-	}, [path]);
+			if (force) invalidateSetting(path);
+			const revision = ++sequence.current;
+			try {
+				const value = await loadSetting<T>(path);
+				if (mounted.current && revision === sequence.current) {
+					setData(value);
+					setError("");
+				}
+			} catch (cause) {
+				if (mounted.current && revision === sequence.current)
+					setError(cause instanceof Error ? cause.message : "设置加载失败，请重试。");
+			} finally {
+				if (mounted.current && revision === sequence.current) setLoading(false);
+			}
+		},
+		[path],
+	);
+	const refresh = useCallback(() => read(true), [read]);
 	useEffect(() => {
 		mounted.current = true;
-		void refresh();
+		const unsubscribe = subscribeSetting(path, (value, cause) => {
+			if (!mounted.current) return;
+			if (locked.current) {
+				stale.current = true;
+				return;
+			}
+			if (cause) setError(cause.message);
+			else {
+				setData(value as T);
+				setError("");
+			}
+			setLoading(false);
+		});
+		void read(false);
 		return () => {
 			mounted.current = false;
 			sequence.current++;
-			request.current?.abort();
+			unsubscribe();
 		};
-	}, [refresh]);
-	useGlobalEvents((name, raw) => {
-		if (name === "open" || name === "reset") {
-			void refresh();
-			return;
-		}
-		if (name !== "state") return;
-		try {
-			const event = JSON.parse(raw?.data ?? "null");
-			if (event?.type === "auth_changed" || event?.type === "settings_changed") void refresh();
-		} catch {
-			/* 重连时重读。 */
-		}
-	});
+	}, [path, read]);
 	async function mutate(action: (current: T) => Promise<T>, optimistic?: T) {
 		if (locked.current || data === null) return false;
 		locked.current = true;
-		request.current?.abort();
 		sequence.current++;
 		const previous = data;
+		let confirmed: T | undefined;
 		setWorking(true);
 		setError("");
 		if (optimistic !== undefined) setData(optimistic);
 		try {
-			const value = await action(previous);
-			if (mounted.current) setData(value);
+			confirmed = await action(previous);
+			if (mounted.current) setData(confirmed);
 			return true;
 		} catch (cause) {
 			if (mounted.current) {
@@ -78,6 +84,7 @@ export function useSettingsResource<T>(path: string) {
 			return false;
 		} finally {
 			locked.current = false;
+			if (confirmed !== undefined) cacheSetting(path, confirmed);
 			if (mounted.current) {
 				setWorking(false);
 				if (stale.current) {

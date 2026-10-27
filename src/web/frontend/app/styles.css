@@ -80,6 +80,7 @@
   --control-inline: 22px;
   --control: 26px;
   --control-lg: 32px;
+  --control-field: 42px;
   --control-menu: 42px;
   --icon-inline: 14px;
   --icon-body: 16px;
@@ -496,7 +497,10 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .composer--chat .composer-actions .composer-icon { width: var(--control); height: var(--control); min-width: var(--control); min-height: var(--control); padding: 0; }
 .composer--chat .composer-actions .composer-model, .composer--chat .composer-actions .composer-thinking { height: var(--control); min-height: var(--control); padding: 0 var(--space-inline); border-radius: var(--radius-row); font-size: var(--font-label); }
 .composer--chat .composer-actions .composer-model { gap: var(--space-inline); color: var(--chat-ink); font-family: Inter, "CST UI Sans", sans-serif; }
-.composer--chat .composer-actions .composer-thinking { gap: var(--space-tight); }
+.composer--chat .composer-actions .composer-thinking { display: inline-flex; justify-content: center; align-items: center; gap: var(--space-tight); }
+.composer-thinking-label { display: inline-flex; align-items: center; line-height: 1; }
+/* React Aria 的空 template 是 DOM 占位，不参与操作栏间距。 */
+.composer-actions > template { display: none; }
 .composer--chat .composer-actions .composer-icon > svg { width: 16px; height: 16px; }
 .model-label { display: inline-flex; align-items: center; gap: var(--space-inline); min-width: 0; }
 /* 操作栏图标用 flex 居中；状态行的光学位移遵循 DESIGN.md。 */
@@ -588,6 +592,13 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .assistant-turn[data-live="true"] .turn-process { animation: part-in var(--duration-fast) var(--ease-smooth-out) backwards; }
 .assistant-turn[data-live="true"] .turn-process-body > * { animation: part-in var(--duration-fast) var(--ease-smooth-out) backwards; }
 @keyframes part-in { from { opacity: 0; transform: translateY(var(--distance-micro)); filter: blur(var(--blur-small)); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
+/* 普通导航与首次进入按组件衔接；快照切页由外壳关闭这组动效。 */
+.app-layout[data-route-entry] :is(.chat-header, .chat-message-surface, .chat-composer-area, .settings-nav, .account-content > .settings-card, .tree-toolbar, .tree-scroll),
+.app-layout[data-route-entry] .settings-route > :is(.settings-page-heading, .settings-section, .settings-search, .settings-model-filters),
+.app-layout[data-route-entry] .settings-custom-form > .settings-section { animation:route-part-in var(--duration-fast) var(--ease-smooth-out) var(--route-entry-delay, 0ms) backwards; }
+.app-layout[data-route-entry] :is(.settings-route > .settings-section, .settings-custom-form > .settings-section, .chat-message-surface) { --route-entry-delay:var(--duration-stagger); }
+.app-layout[data-route-entry] .settings-custom-form > .settings-section:nth-of-type(n+2) { --route-entry-delay:calc(var(--duration-stagger) * 2); }
+@keyframes route-part-in { from { opacity:0; transform:translateY(var(--distance-base)); filter:blur(var(--blur-medium)); } to { opacity:1; transform:translateY(0); filter:blur(0); } }
 /* t-stream-w：流式正文逐词显现（transitions.dev 30-streaming-text，按项目令牌映射） */
 .t-stream-w { animation: t-stream-in var(--duration-medium) var(--ease-smooth-out) backwards; }
 @keyframes t-stream-in { from { opacity: 0; filter: blur(var(--blur-small)); } to { opacity: 1; filter: blur(0); } }
@@ -1381,6 +1392,12 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .app-layout[data-home-transition] .chat-composer-area { view-transition-name: workspace-composer; }
 .app-layout[data-home-transition] .chat-header { view-transition-name: workspace-header; }
 .app-layout[data-home-transition] .chat-message-surface { view-transition-name: workspace-messages; }
+/* 设置路由卸载后仍需保留退出规则；整页背景和组件使用同一快照。 */
+.app-layout[data-settings-boundary] .settings-main { view-transition-name: settings-surface; }
+.app-layout[data-settings-boundary] :is(.settings-header, .settings-route) { view-transition-name: none; }
+::view-transition-group(settings-surface) { z-index: 4; animation: none; }
+::view-transition-old(settings-surface) { animation: workspace-messages-out var(--duration-quick) var(--ease-smooth-out) both; mix-blend-mode: normal; }
+::view-transition-new(settings-surface) { animation: workspace-messages-in var(--duration-fast) var(--ease-smooth-out) var(--duration-quick) both; mix-blend-mode: normal; }
 /* biome-ignore lint/correctness/noUnknownTypeSelector: root 是浏览器视图过渡的快照名。 */
 :root:has([data-home-transition])::view-transition-old(root) { animation: none; mix-blend-mode: normal; }
 /* biome-ignore lint/correctness/noUnknownTypeSelector: root 是浏览器视图过渡的快照名。 */
@@ -1412,10 +1429,10 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 ::view-transition-old(workspace-header) { animation: workspace-header-out var(--duration-quick) var(--ease-smooth-out) both; }
 ::view-transition-new(workspace-messages) { animation: workspace-messages-in var(--duration-fast) var(--ease-smooth-out) var(--duration-quick) both; }
 ::view-transition-old(workspace-messages) { animation: workspace-messages-out var(--duration-quick) var(--ease-smooth-out) both; }
-@keyframes home-background-out { to { transform: translate3d(0, -100%, 0); } }
-@keyframes home-background-in { from { transform: translate3d(0, -100%, 0); opacity: 0; } }
-@keyframes home-mark-out { to { transform: translate3d(0, calc(-1 * var(--distance-large)), 0); opacity: 0; } }
-@keyframes home-mark-in { from { transform: translate3d(0, calc(-1 * var(--distance-large)), 0); opacity: 0; } }
+@keyframes home-background-out { to { transform: translate3d(0, -100%, 0); filter: blur(var(--page-transition-blur-medium)); } }
+@keyframes home-background-in { from { transform: translate3d(0, -100%, 0); opacity: 0; filter: blur(var(--page-transition-blur-medium)); } }
+@keyframes home-mark-out { to { transform: translate3d(0, calc(-1 * var(--distance-large)), 0); opacity: 0; filter: blur(var(--page-transition-blur-medium)); } }
+@keyframes home-mark-in { from { transform: translate3d(0, calc(-1 * var(--distance-large)), 0); opacity: 0; filter: blur(var(--page-transition-blur-medium)); } }
 @keyframes home-text-out { to { transform: translateY(calc(-1 * var(--distance-medium))); opacity: 0; filter: blur(var(--page-transition-blur-small)); } }
 @keyframes home-text-in { from { transform: translateY(calc(-1 * var(--distance-medium))); opacity: 0; filter: blur(var(--page-transition-blur-small)); } }
 @keyframes composer-out { to { transform: translateY(var(--distance-medium)); opacity: 0; filter: blur(var(--page-transition-blur-small)); } }

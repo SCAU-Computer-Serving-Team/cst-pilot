@@ -32,6 +32,15 @@ test("浏览器点击等待异步定位进入视口，永久遮挡仍失败", { 
 		})()`);
 		await browser.click("#option");
 		assert.equal(await browser.evaluate("window.listReset && window.optionClicked"), true);
+		await browser.evaluate(`(() => {
+			const list = document.createElement('div');
+			list.style.cssText = 'position:fixed;left:400px;top:200px;width:120px;height:120px;overflow:auto';
+			list.innerHTML = '<div style="height:30px"></div><button id="visible" onclick="window.visibleClicked=true">visible</button><div style="height:600px"></div>';
+			list.addEventListener('scroll', () => { window.visibleScrolled = true; });
+			document.body.append(list);
+		})()`);
+		await browser.click("#visible");
+		assert.equal(await browser.evaluate("window.visibleClicked && !window.visibleScrolled"), true);
 		const current = browser;
 		await assert.rejects(() => current.click("#blocked"), /遮挡|不可点击|未停止/);
 	} finally {

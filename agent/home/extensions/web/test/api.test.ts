@@ -169,6 +169,66 @@ test("custom BaseURL uses Pi's provider model metadata and persists separately f
 	assert.equal((await post("/api/auth/openai/logout", {})).status, 200);
 });
 
+test("custom providers use Pi models.json and reflect TUI edits without exposing keys", async () => {
+	const file = join(home, "models.json");
+	const base = JSON.parse(await readFile(file, "utf8"));
+	base.providers["tui-probe"] = {
+		name: "TUI Probe",
+		baseUrl: "https://api.example.test/v1",
+		api: "openai-completions",
+		apiKey: "tui-secret-never-in-response",
+		models: [{ id: "one", name: "One", contextWindow: 32000, maxTokens: 4096 }],
+	};
+	await writeFile(file, JSON.stringify(base, null, 2));
+	const status = await (await fetch(`${origin}/api/auth`)).json();
+	assert.equal(status.providers.find((provider: { id: string }) => provider.id === "tui-probe")?.configured, true);
+	assert.equal(status.providers.find((provider: { id: string }) => provider.id === "tui-probe")?.custom, true);
+	assert.equal(JSON.stringify(status).includes("tui-secret"), false);
+	assert.ok(
+		(await (await fetch(`${origin}/api/models`)).json()).models.some(
+			(model: { provider: string; id: string }) => model.provider === "tui-probe" && model.id === "one",
+		),
+	);
+	const detail = await (await fetch(`${origin}/api/auth/custom/tui-probe`)).json();
+	assert.equal(JSON.stringify(detail).includes("tui-secret"), false);
+	assert.equal(detail.apiKeySet, true);
+	const input = {
+		id: "web-probe",
+		name: "Web Probe",
+		baseUrl: "https://api.example.test/v1",
+		api: "openai-completions",
+		apiKey: "web-secret-never-in-response",
+		models: [{ id: "alpha", name: "Alpha", contextWindow: 32000, maxTokens: 4096, reasoning: false, image: false }],
+	};
+	const created = await post("/api/auth/custom", input);
+	assert.equal(created.status, 200, await created.text().catch(() => ""));
+	const saved = await (await fetch(`${origin}/api/auth/custom/web-probe`)).json();
+	assert.equal(saved.apiKeySet, true);
+	assert.equal(JSON.stringify(saved).includes("web-secret"), false);
+	assert.equal(JSON.parse(await readFile(file, "utf8")).providers["web-probe"].apiKey, input.apiKey);
+	assert.equal((await post("/api/auth/custom", { ...input, revision: "0".repeat(64) })).status, 409);
+	const edited = await post("/api/auth/custom", {
+		...input,
+		name: "Web Probe 2",
+		apiKey: undefined,
+		revision: saved.revision,
+	});
+	assert.equal(edited.status, 200);
+	assert.equal(JSON.parse(await readFile(file, "utf8")).providers["web-probe"].apiKey, input.apiKey);
+	const deleted = await fetch(`${origin}/api/auth/custom/web-probe`, {
+		method: "DELETE",
+		headers: {
+			Origin: origin,
+			"X-CST-Web-Request": "1",
+			"Content-Type": "application/json",
+			"Idempotency-Key": randomUUID(),
+		},
+		body: JSON.stringify({ revision: (await (await fetch(`${origin}/api/auth/custom/web-probe`)).json()).revision }),
+	});
+	assert.equal(deleted.status, 200);
+	assert.equal(JSON.parse(await readFile(file, "utf8")).providers["web-probe"], undefined);
+});
+
 test("an extension question can be answered once from another browser request", async () => {
 	const waiting = slot.ui.context().select("选择设备", ["A", "B"]);
 	const detail = await (await fetch(`${origin}/api/sessions/${slot.id}`)).json();

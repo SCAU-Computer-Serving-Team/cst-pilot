@@ -310,7 +310,8 @@ export function createWebApi(
 			}
 			if (pathname === "/api/settings") {
 				if (method === "GET") {
-					send(response, 200, await webSettings.read());
+					const { theme } = await webSettings.read();
+					send(response, 200, { theme });
 					return true;
 				}
 				if (method === "PATCH") {
@@ -346,6 +347,7 @@ export function createWebApi(
 				const patterns = settingsManager.getEnabledModels();
 				let enabled: string[] | null = null;
 				let unavailableEnabled: string[] = [];
+				if (!patterns?.length && (await webSettings.read()).emptyModelScope) enabled = [];
 				if (patterns?.length) {
 					const scope = await resolveModelScopeWithDiagnostics(patterns, modelRuntime);
 					const listed = new Set(available.map((model) => `${model.provider}/${model.id}`));
@@ -447,6 +449,7 @@ export function createWebApi(
 								? await resolveModelScopeWithDiagnostics(patterns, modelRuntime)
 								: undefined;
 							settingsManager.setDefaultModelAndProvider(model.provider, model.id);
+							await webSettings.saveEmptyModelScope(false);
 							if (
 								patterns?.length &&
 								scope &&
@@ -455,6 +458,7 @@ export function createWebApi(
 								)
 							) {
 								settingsManager.setEnabledModels([...patterns, `${model.provider}/${model.id}`]);
+								await webSettings.saveEmptyModelScope(false);
 								pool.setScopedModels([...scope.scopedModels, { model }]);
 							}
 						}
@@ -490,6 +494,8 @@ export function createWebApi(
 				if (
 					!Array.isArray(input.patterns) ||
 					input.patterns.length > 100 ||
+					(input.empty !== undefined && typeof input.empty !== "boolean") ||
+					(input.empty === true && input.patterns.length !== 0) ||
 					!input.patterns.every((pattern) => typeof pattern === "string" && pattern.length <= 200)
 				)
 					throw new Error("请求的模型范围无效");
@@ -506,8 +512,9 @@ export function createWebApi(
 						availableIds.every((id) => patterns.includes(id));
 					settingsManager.setEnabledModels(coversAll ? undefined : patterns);
 					pool.setScopedModels(coversAll ? [] : scope.scopedModels);
+					await webSettings.saveEmptyModelScope(input.empty === true);
 					globalEvents.publish("state", { type: "settings_changed" });
-					return { enabled: settingsManager.getEnabledModels() ?? null };
+					return { enabled: input.empty === true ? [] : (settingsManager.getEnabledModels() ?? null) };
 				});
 				send(response, 200, result);
 				return true;
@@ -881,7 +888,7 @@ export function createWebApi(
 				send(response, 200, result);
 				return true;
 			}
-			const itemMatch = /^queue\/([\w-]{1,128})(?:\/(steer))?$/.exec(suffix);
+			const itemMatch = /^queue\/([\w-]{1,128})(?:\/(steer|retry))?$/.exec(suffix);
 			if (itemMatch && ["PATCH", "DELETE", "POST"].includes(method)) {
 				const input = await body(request);
 				if (!Number.isSafeInteger(input.version)) throw new Error("缺少队列版本");
@@ -889,11 +896,13 @@ export function createWebApi(
 				const edit =
 					method === "DELETE"
 						? { remove: true }
-						: itemMatch[2] === "steer" && method === "POST"
-							? { delivery: "steer" as const }
-							: method === "PATCH" && typeof input.text === "string"
-								? { text: input.text }
-								: undefined;
+						: itemMatch[2] === "retry" && method === "POST"
+							? { retry: true }
+							: itemMatch[2] === "steer" && method === "POST"
+								? { delivery: "steer" as const }
+								: method === "PATCH" && typeof input.text === "string"
+									? { text: input.text }
+									: undefined;
 				if (!edit) throw new Error("操作无效");
 				const result = await writeOnce(request, pathname, input, async () => ({
 					queue: await box.change(itemMatch[1], input.version as number, edit),

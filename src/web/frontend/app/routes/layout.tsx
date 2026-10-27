@@ -1,5 +1,5 @@
 import { PanelLeft } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useSearchParams, useViewTransitionState } from "react-router";
 import { AccountProvider } from "../account/use-account";
 import { BlueHour } from "../shell/blue-hour";
@@ -33,6 +33,14 @@ export default function WorkspaceLayout() {
 	const home = pathname === "/";
 	const settings = pathname === "/settings" || pathname.startsWith("/settings/");
 	const homeTransition = useViewTransitionState("/");
+	const chatTransition = useViewTransitionState("/s/*");
+	const accountTransition = useViewTransitionState("/account");
+	const settingsBoundary = settings && (homeTransition || chatTransition || accountTransition);
+	const routeTransition = useViewTransitionState(pathname);
+	// 同一路径固定一次入场策略，快照结束后不补播局部动效。
+	const entry = useRef({ pathname, local: !routeTransition });
+	if (entry.current.pathname !== pathname) entry.current = { pathname, local: !routeTransition };
+	if (routeTransition || homeTransition) entry.current.local = false;
 	const [settledHome, setSettledHome] = useState(home);
 	const homeExit = homeTransition && settledHome;
 	useEffect(() => {
@@ -61,6 +69,8 @@ export default function WorkspaceLayout() {
 				<div
 					ref={motion.root}
 					data-home-transition={homeTransition || undefined}
+					data-settings-boundary={settingsBoundary || undefined}
+					data-route-entry={entry.current.local || undefined}
 					data-home-exit={homeExit || undefined}
 					data-view-transitions={typeof document.startViewTransition === "function"}
 					className={`app-layout ${home ? "home-layout" : "chat-layout"} ${settings ? "settings-layout" : ""} ${collapsed ? "sidebar-collapsed" : ""}`}

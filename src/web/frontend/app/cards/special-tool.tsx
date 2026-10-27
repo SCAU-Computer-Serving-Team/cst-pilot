@@ -1,4 +1,5 @@
 import "./special-tool.css";
+import { Disclosure } from "@heroui/react";
 import {
 	ChevronRight,
 	CircleAlert,
@@ -88,39 +89,46 @@ function ToolDetails({
 		.map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
 		.join(", ");
 	return (
-		<details className="special-tool-details">
-			<summary>
-				详情 <ChevronRight size={12} aria-hidden="true" />
-			</summary>
-			<div className="special-tool-detail-body">
-				<code className="special-tool-invocation">
-					{call.name}({args})
-				</code>
-				<dl>
-					{view.fields.map((f, index) => (
-						<div className="special-tool-field" key={`${f.label}-${index}`}>
-							<dt>{f.label}</dt>
-							<dd>{f.value}</dd>
-						</div>
+		<Disclosure className="special-tool-details">
+			<Disclosure.Heading>
+				<Disclosure.Trigger className="special-tool-detail-trigger">
+					详情{" "}
+					<Disclosure.Indicator>
+						<ChevronRight size={12} aria-hidden="true" />
+					</Disclosure.Indicator>
+				</Disclosure.Trigger>
+			</Disclosure.Heading>
+			<Disclosure.Content>
+				<div className="special-tool-detail-body">
+					<code className="special-tool-invocation">
+						{call.name}({args})
+					</code>
+					<dl>
+						{view.fields.map((f, index) => (
+							<div className="special-tool-field" key={`${f.label}-${index}`}>
+								<dt>{f.label}</dt>
+								<dd>{f.value}</dd>
+							</div>
+						))}
+						{request?.targets.map((target) => (
+							<div className="special-tool-field" key={target.volumeId}>
+								<dt>固定目标</dt>
+								<dd>
+									{target.drive ?? "无盘符"} · {target.volumeId}
+								</dd>
+							</div>
+						))}
+					</dl>
+					{view.errors.map((error, index) => (
+						<p className="special-tool-detail-error" key={`${index}-${error}`}>
+							<CircleAlert size={12} aria-hidden="true" />
+							{error}
+						</p>
 					))}
-					{request?.targets.map((target) => (
-						<div className="special-tool-field" key={target.volumeId}>
-							<dt>固定目标</dt>
-							<dd>
-								{target.drive ?? "无盘符"} · {target.volumeId}
-							</dd>
-						</div>
-					))}
-				</dl>
-				{view.errors.map((error, index) => (
-					<p className="special-tool-detail-error" key={`${index}-${error}`}>
-						<CircleAlert size={12} aria-hidden="true" />
-						{error}
-					</p>
-				))}
-				{view.raw && <pre className="special-tool-raw">{view.raw}</pre>}
-			</div>
-		</details>
+					{view.raw && <pre className="special-tool-raw">{view.raw}</pre>}
+				</div>
+			</Disclosure.Content>
+		</Disclosure>
 	);
 }
 function Overview({ view }: { view: Extract<SpecialToolView, { kind: "sys-overview" }> }) {
@@ -299,28 +307,34 @@ export const SpecialTool = memo(function SpecialTool({
 	if (view.kind === "web-search")
 		return (
 			<section className="special-tool special-tool--web-search" data-state={status} data-tool-call-id={call.id}>
-				<details className="special-tool-search">
-					<summary>
-						<Globe size={18} aria-hidden="true" />
-						<span>{summary}</span>
-						<StateIcon status={status} />
-						<ChevronRight className="special-tool-chevron" size={12} aria-hidden="true" />
-						<small>{view.queries.length} 个关键词</small>
-					</summary>
-					<div>
-						{view.queries.map((query, index) => (
-							<p key={`${index}-${query}`}>{query}</p>
-						))}
-						{view.unstructured && !view.errors.length && view.raw && (
-							<pre className="special-tool-raw">{view.raw}</pre>
-						)}
-						{view.errors.map((error, index) => (
-							<p key={`${index}-${error}`} className="special-tool-detail-error">
-								{error}
-							</p>
-						))}
-					</div>
-				</details>
+				<Disclosure className="special-tool-search">
+					<Disclosure.Heading>
+						<Disclosure.Trigger className="special-tool-search-trigger">
+							<Globe size={18} aria-hidden="true" />
+							<span>{summary}</span>
+							<StateIcon status={status} />
+							<Disclosure.Indicator>
+								<ChevronRight className="special-tool-chevron" size={12} aria-hidden="true" />
+							</Disclosure.Indicator>
+							<small>{view.queries.length} 个关键词</small>
+						</Disclosure.Trigger>
+					</Disclosure.Heading>
+					<Disclosure.Content>
+						<div>
+							{view.queries.map((query, index) => (
+								<p key={`${index}-${query}`}>{query}</p>
+							))}
+							{view.unstructured && !view.errors.length && view.raw && (
+								<pre className="special-tool-raw">{view.raw}</pre>
+							)}
+							{view.errors.map((error, index) => (
+								<p key={`${index}-${error}`} className="special-tool-detail-error">
+									{error}
+								</p>
+							))}
+						</div>
+					</Disclosure.Content>
+				</Disclosure>
 			</section>
 		);
 	return (
@@ -328,7 +342,7 @@ export const SpecialTool = memo(function SpecialTool({
 			<header className="special-tool-heading">
 				<Icon size={18} aria-hidden="true" />
 				<h3>{view.title}</h3>
-				<output className="special-tool-status">
+				<output className="special-tool-status" key={status}>
 					<StateIcon status={status} />
 					{summary}
 				</output>

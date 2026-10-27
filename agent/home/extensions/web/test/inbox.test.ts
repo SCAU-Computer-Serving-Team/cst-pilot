@@ -176,7 +176,10 @@ test("an in-flight input is visible but never resent after a simulated process r
 		},
 		steer: async () => {},
 	});
-	assert.equal((await restarted.snapshot()).items[0].status, "delivering");
+	const uncertain = await restarted.snapshot();
+	assert.equal(uncertain.items[0].status, "delivering");
+	for (const edit of [{ retry: true }, { text: "changed" }, { remove: true }])
+		await assert.rejects(restarted.change("request", uncertain.version, edit), InboxConflict);
 	restarted.wake();
 	await new Promise((resolve) => setTimeout(resolve, 30));
 	assert.equal(calls, 1);
@@ -207,6 +210,106 @@ test("failed delivery is not replayed after restart", async () => {
 	assert.equal((await restored.snapshot()).items[0].error, "model unavailable");
 	assert.deepEqual(calls, []);
 	await assert.rejects(restored.accept("a", "changed", "queue"), InboxConflict);
+});
+
+test("model failure reports each new idle message without trapping it behind the failed item", async () => {
+	const calls: string[] = [];
+	const inbox = new SessionInbox(root, "failed-then-send", {
+		isBusy: () => false,
+		prompt: async (text) => {
+			calls.push(text);
+			throw new Error("model unavailable");
+		},
+		steer: async () => {},
+	});
+	await inbox.accept("first", "one", "queue");
+	await waitFor(async () => (await inbox.snapshot()).items[0]?.status === "failed");
+	const second = await inbox.accept("second", "two", "queue");
+	assert.equal(second.delivery, "direct");
+	await waitFor(async () => (await inbox.snapshot()).items[1]?.status === "failed");
+	assert.deepEqual(calls, ["one", "two"]);
+	await inbox.close();
+});
+
+test("failed items can be edited, retried once with attachments and skill, or deleted", async () => {
+	let fail = true;
+	let busy = false;
+	const calls: { text: string; images: unknown; skill?: string }[] = [];
+	const images = [{ id: "image", mimeType: "image/png", bytes: 12 }];
+	const inbox = new SessionInbox(root, "recover", {
+		isBusy: () => busy,
+		prompt: async (text, images, skill) => {
+			calls.push({ text, images, skill });
+			if (fail) throw new Error("service unavailable");
+		},
+		steer: async () => {
+			throw new Error("must not steer");
+		},
+	});
+	try {
+		await inbox.accept("a", "original", "queue", images, "sys");
+		await waitFor(async () => (await inbox.snapshot()).items[0]?.status === "failed");
+		let state = await inbox.snapshot();
+		await assert.rejects(inbox.change("a", state.version - 1, { retry: true }), InboxConflict);
+		state = await inbox.change("a", state.version, { text: "edited" });
+		assert.equal(state.items[0].status, "failed", "editing must not resubmit");
+		assert.equal(calls.length, 1);
+		fail = false;
+		busy = true;
+		const version = state.version;
+		state = await inbox.change("a", version, { retry: true });
+		assert.equal(state.items[0].status, "pending");
+		assert.equal(state.items[0].delivery, "queue");
+		assert.equal(state.items[0].error, undefined);
+		await assert.rejects(inbox.change("a", version, { retry: true }), InboxConflict);
+		busy = false;
+		inbox.wake();
+		await waitFor(async () => (await inbox.snapshot()).items[0]?.status === "delivered");
+		assert.deepEqual(calls, [
+			{ text: "original", images, skill: "sys" },
+			{ text: "edited", images, skill: "sys" },
+		]);
+		assert.equal((await inbox.accept("a", "original", "queue", images, "sys")).status, "delivered");
+		assert.equal(calls.length, 2);
+		fail = true;
+		await inbox.accept("b", "delete me", "queue");
+		await waitFor(async () => (await inbox.snapshot()).items[1]?.status === "failed");
+		state = await inbox.snapshot();
+		state = await inbox.change("b", state.version, { remove: true });
+		assert.equal(state.items[1].status, "cancelled");
+		await assert.rejects(inbox.change("a", state.version, { retry: true }), InboxConflict);
+	} finally {
+		await inbox.close();
+	}
+});
+
+test("deleting a failed head releases queued work; editing alone never skips it", async () => {
+	let busy = true;
+	const calls: string[] = [];
+	const inbox = new SessionInbox(root, "recover-order", {
+		isBusy: () => busy,
+		prompt: async (text) => {
+			calls.push(text);
+			if (text === "first") throw new Error("unavailable");
+		},
+		steer: async () => {},
+	});
+	try {
+		await inbox.accept("first", "first", "queue");
+		await inbox.accept("next", "next", "queue");
+		busy = false;
+		inbox.wake();
+		await waitFor(async () => (await inbox.snapshot()).items[0]?.status === "failed");
+		let state = await inbox.snapshot();
+		state = await inbox.change("first", state.version, { text: "changed" });
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		assert.deepEqual(calls, ["first"]);
+		await inbox.change("first", state.version, { remove: true });
+		await waitFor(async () => (await inbox.snapshot()).items[1]?.status === "delivered");
+		assert.deepEqual(calls, ["first", "next"]);
+	} finally {
+		await inbox.close();
+	}
 });
 
 test("failed persistence never calls the model", async () => {

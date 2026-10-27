@@ -20,7 +20,7 @@ import { errorMessage, ROOT_DIR } from "./runtime.ts";
  * - 序号是「一次生成」的编号，当天唯一递增；沿用序号重写就是修正那一份。
  * - 版式由本工具拼装，模型只提供字段，避免 Markdown 与格式漂移。
  *
- * 需求见 doc/PRD.md「命令交付需求」（D1–D12）；命令内容规范见 skills/runbook。
+ * 需求见 doc/SPEC.md「命令交付需求」与 doc/diagnostics/SPEC.md；命令内容规范见 skills/runbook。
  */
 
 const OUTBOX_DIR = join(ROOT_DIR, "outbox");

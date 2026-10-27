@@ -140,10 +140,29 @@ test("输入标记：选择命令、继续输入、草稿恢复、移除和文�
 			"location.pathname.startsWith('/s/')&&document.querySelector('.conversation')?.textContent.includes('已收到文件引用')",
 			"文件引用真实发送",
 		);
+		assert.equal(
+			await browser.evaluate(
+				"(()=>{const rect=s=>document.querySelector(s).getBoundingClientRect();const model=rect('.composer-model'),thinking=rect('.composer-thinking'),send=rect('.composer-send');return Math.abs((thinking.left-model.right)-(send.left-thinking.right))<1&&Math.abs(thinking.top+thinking.height/2-(send.top+send.height/2))<1})()",
+			),
+			true,
+			"思考档位在模型与发送之间等距居中",
+		);
 		assert.ok(
 			received.some((text) => text === `${token} 查看`),
 			`模型收到规范文件引用和正文，视觉间距不进入请求：${JSON.stringify({ token, received })}`,
 		);
+		const hoverAction = async (selector: string, label: string) => {
+			const point = await browser!.evaluate<{ x: number; y: number }>(
+				`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2}})()`,
+			);
+			await browser!.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+			await browser!.until(
+				`document.querySelector('[role=tooltip]')?.textContent.includes(${JSON.stringify(label)})`,
+				`${label} 提示`,
+			);
+		};
+		await hoverAction('.answer-actions [aria-label="复制回答"]', "复制");
+		await hoverAction('.answer-actions [aria-label="从此处分支新会话"]', "从此处分支新会话");
 		await browser.fill(".composer-input", "/skill:bit");
 		await browser.until("!!document.querySelector('.command-suggestions .command-active')", "BitLocker 技能补全");
 		await key("Enter");

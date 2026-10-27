@@ -1,4 +1,4 @@
-import { Button, Disclosure } from "@heroui/react";
+import { Button, Disclosure, Tooltip } from "@heroui/react";
 import { ArrowDown, ChevronDown, Copy, GitBranch, GitFork, X } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { matchToolResults } from "../cards/match-results";
@@ -93,21 +93,27 @@ function AssistantTurnImpl({
 			{last?.message.stopReason === "aborted" && <p className="message-warning">已停止生成</p>}
 			{last?.id && last.message.stopReason != null && last.message.stopReason !== "toolUse" && (
 				<div className="answer-actions">
-					<Button
-						variant="ghost"
-						isIconOnly
-						aria-label="复制回答"
-						onPress={() => {
-							void navigator.clipboard
-								.writeText(textOf(last.message))
-								.catch(() => onError("无法复制，请检查浏览器权限。"));
-						}}
-					>
-						<Copy size={16} />
-					</Button>
-					<Button variant="ghost" isIconOnly aria-label="派生会话" onPress={() => onFork()}>
-						<GitFork size={16} />
-					</Button>
+					<Tooltip delay={80} closeDelay={0}>
+						<Button
+							variant="ghost"
+							isIconOnly
+							aria-label="复制回答"
+							onPress={() => {
+								void navigator.clipboard
+									.writeText(textOf(last.message))
+									.catch(() => onError("无法复制，请检查浏览器权限。"));
+							}}
+						>
+							<Copy size={16} />
+						</Button>
+						<Tooltip.Content placement="top">复制</Tooltip.Content>
+					</Tooltip>
+					<Tooltip delay={80} closeDelay={0}>
+						<Button variant="ghost" isIconOnly aria-label="从此处分支新会话" onPress={() => onFork()}>
+							<GitFork size={16} />
+						</Button>
+						<Tooltip.Content placement="top">从此处分支新会话</Tooltip.Content>
+					</Tooltip>
 					<span>
 						{new Date(last.message.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}
 					</span>

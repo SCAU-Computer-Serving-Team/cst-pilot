@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -9,7 +10,8 @@ const inventory = execFileSync('git', ['ls-files', '--cached', '--others', '--ex
 });
 const files = [...new Set(inventory.split('\0').filter(file =>
   /\.(?:mjs|json|css)$/.test(file) &&
-  !/(?:^|\/)(?:node_modules|build|static|\.react-router)\//.test(file)
+  !/(?:^|\/)(?:node_modules|build|static|\.react-router)\//.test(file) &&
+  existsSync(join(root, file))
 ))];
 const biome = spawnSync(process.execPath, [
   join(root, 'agent/node_modules/@biomejs/biome/bin/biome'),

@@ -5,48 +5,56 @@ import { ConfigurationUnavailable } from "../../../runtime/configuration.ts";
 import { replaceFile } from "./replace-file.ts";
 
 export type WebTheme = "light" | "dark" | "system";
-/** Web外观独立于Pi settings.json，缺省浅色。每次读取文件，写入串行且原子替换。 */
+/** Web主题与空模型选择独立保存；Pi 的空 enabledModels 表示默认范围。 */
 export class WebSettings {
 	private readonly file: string;
 	private tail: Promise<void> = Promise.resolve();
 	constructor(agentDir: string) {
 		this.file = join(agentDir, "web-settings.json");
 	}
-	async read(): Promise<{ theme: WebTheme }> {
+	async read(replacementTheme?: WebTheme): Promise<{ theme: WebTheme; emptyModelScope: boolean }> {
 		try {
 			const value: unknown = JSON.parse(await readFile(this.file, "utf8"));
-			if (
-				!value ||
-				typeof value !== "object" ||
-				!("theme" in value) ||
-				typeof value.theme !== "string" ||
-				!["light", "dark", "system"].includes(value.theme)
-			)
+			if (!value || typeof value !== "object" || Array.isArray(value))
 				throw new ConfigurationUnavailable("Web外观配置无法读取，请检查 web-settings.json 后重试。");
-			return { theme: value.theme as WebTheme };
+			const theme = "theme" in value ? value.theme : undefined;
+			const validTheme = typeof theme === "string" && ["light", "dark", "system"].includes(theme);
+			if (!validTheme && replacementTheme === undefined)
+				throw new ConfigurationUnavailable("Web外观配置无法读取，请检查 web-settings.json 后重试。");
+			return {
+				theme: validTheme ? (theme as WebTheme) : replacementTheme!,
+				emptyModelScope: "emptyModelScope" in value && value.emptyModelScope === true,
+			};
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "ENOENT") return { theme: "light" };
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") return { theme: "light", emptyModelScope: false };
 			if (error instanceof SyntaxError)
 				throw new ConfigurationUnavailable("Web外观配置无法读取，请检查 web-settings.json 后重试。");
 			throw error;
 		}
 	}
-	async save(theme: WebTheme): Promise<{ theme: WebTheme }> {
+	private async update(change: Partial<{ theme: WebTheme; emptyModelScope: boolean }>) {
 		const task = this.tail.then(async () => {
+			const next = { ...(await this.read(change.theme)), ...change };
 			await mkdir(join(this.file, ".."), { recursive: true });
 			const temp = `${this.file}.${randomUUID()}.tmp`;
 			try {
-				await writeFile(temp, JSON.stringify({ theme }), { flag: "wx" });
+				await writeFile(temp, JSON.stringify(next), { flag: "wx" });
 				await replaceFile(temp, this.file);
 			} finally {
 				await rm(temp, { force: true });
 			}
-			return { theme };
+			return next;
 		});
 		this.tail = task.then(
 			() => undefined,
 			() => undefined,
 		);
 		return task;
+	}
+	async save(theme: WebTheme) {
+		return this.update({ theme });
+	}
+	async saveEmptyModelScope(emptyModelScope: boolean) {
+		return this.update({ emptyModelScope });
 	}
 }

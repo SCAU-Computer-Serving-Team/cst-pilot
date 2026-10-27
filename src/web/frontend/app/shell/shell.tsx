@@ -555,7 +555,7 @@ export function Sidebar({
 					<Button variant="ghost" isIconOnly className="sidebar-account-trigger" aria-label="账号菜单">
 						<Settings size={22} aria-hidden="true" />
 					</Button>
-					<Popover.Content placement="top end" className="sidebar-account-popover">
+					<Popover.Content placement="right bottom" offset={20} className="sidebar-account-popover">
 						<Popover.Dialog aria-label="账号菜单" className="sidebar-account-menu">
 							{cstoaSummary && (
 								<>

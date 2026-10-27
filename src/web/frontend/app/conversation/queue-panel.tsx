@@ -1,5 +1,5 @@
 import { Button, Input, Label, TextField, Tooltip } from "@heroui/react";
-import { ArrowUp, CircleHelp, GripVertical, Pencil, Trash2 } from "lucide-react";
+import { ArrowUp, CircleHelp, GripVertical, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { apiJson, sessionPath } from "../data/api";
 import type { InboxSnapshot } from "../data/web-state";
@@ -81,15 +81,25 @@ export function QueuePanel({ id, queue, refresh }: { id: string; queue: InboxSna
 							<>
 								<GripVertical size={16} aria-hidden="true" className="queue-grip" />
 								<span>{item.text || "图片消息"}</span>
-								{item.status === "pending" && (
+								{(item.status === "pending" || item.status === "failed") && (
 									<>
 										<Button
 											variant="ghost"
 											className="queue-steer"
-											onPress={() => void change(`queue/${item.id}/steer`, "POST", {})}
+											onPress={() =>
+												void change(
+													`queue/${item.id}/${item.status === "failed" ? "retry" : "steer"}`,
+													"POST",
+													{},
+												)
+											}
 										>
-											<ArrowUp size={14} aria-hidden="true" />
-											立即
+											{item.status === "failed" ? (
+												<RotateCcw size={14} aria-hidden="true" />
+											) : (
+												<ArrowUp size={14} aria-hidden="true" />
+											)}
+											{item.status === "failed" ? "重试" : "立即"}
 										</Button>
 										<Button
 											variant="ghost"

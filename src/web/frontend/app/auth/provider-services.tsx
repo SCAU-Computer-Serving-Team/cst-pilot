@@ -1,16 +1,24 @@
 import { TriangleAlert } from "lucide-react";
-import { Link } from "react-router";
 import { describeAccount } from "../account/format";
 import { useAccount } from "../account/use-account";
 import type { ProviderStatus } from "../data/api";
 import { providerDescription } from "../settings/provider-list";
+import { SettingsLink } from "../settings/settings-frame";
 import { configurationPath, initialLogin } from "./providers";
 
-export function ProviderServices({ providers, adding = false }: { providers: ProviderStatus[]; adding?: boolean }) {
+export function ProviderServices({
+	providers,
+	adding = false,
+	unframed = false,
+}: {
+	providers: ProviderStatus[];
+	adding?: boolean;
+	unframed?: boolean;
+}) {
 	const { account } = useAccount();
 	const identity = describeAccount(account);
 	return (
-		<div className="settings-card settings-services">
+		<div className={unframed ? "settings-services" : "settings-card settings-services"}>
 			{providers.map((item) => {
 				const provider = item.id === "cstoa" && account?.requiresLogin ? { ...item, requiresLogin: true } : item;
 				const initial = initialLogin([provider], provider.id, provider.type);
@@ -26,13 +34,17 @@ export function ProviderServices({ providers, adding = false }: { providers: Pro
 									: status}
 							</span>
 						</div>
-						<Link
+						<SettingsLink
 							className="settings-action"
-							to={configurationPath(provider.id, initial?.method ?? "api_key")}
+							to={
+								provider.custom
+									? `/settings/custom?provider=${encodeURIComponent(provider.id)}`
+									: configurationPath(provider.id, initial?.method ?? "api_key")
+							}
 							aria-label={`${adding ? "连接" : provider.requiresLogin ? "重新登录" : "管理"} ${provider.name}`}
 						>
 							{adding ? "连接" : provider.requiresLogin ? "重新登录" : "管理"}
-						</Link>
+						</SettingsLink>
 					</div>
 				);
 			})}
