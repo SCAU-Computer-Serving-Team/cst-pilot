@@ -11,7 +11,7 @@ export function requireSmokeAdministrator(root) {
   const result = spawnSync(path.join(root, 'pwsh/pwsh.exe'), [
     '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64'),
   ], { encoding: 'utf8', windowsHide: true, timeout: 15_000 });
-  if (result.error || result.status !== 0) throw new Error('发行冒烟需要在已取得管理员权限的终端运行，不自动请求 UAC。' + (result.error ? ` ${result.error.message}` : ''));
+  if (result.error || result.status !== 0) throw new Error(`发行冒烟需要在已取得管理员权限的终端运行，不自动请求 UAC。${result.error ? ` ${result.error.message}` : ''}`);
 }
 
 // 在独立副本启动实际发行程序；模拟模型只检查工具注册，不执行系统诊断。

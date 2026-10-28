@@ -16,6 +16,17 @@ python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 
 `agent` 是扩展与工具的后端，`src/web/frontend` 是 Web 前端源码。两处依赖各自独立。Python 与 FontTools 仅用于开发和 CI 的字体生成，不进入现场运行链；详见[字体构建与分发](doc/release/ARCHITECTURE.md#字体构建与分发)。
 
+## 代码规范
+
+项目沿用 [Pi 0.85.1 的工程规范](https://github.com/earendil-works/pi/blob/v0.85.1/AGENTS.md)，检查命令与目录以本仓库为准。
+
+- TypeScript 使用严格模式与可擦除语法，不使用 `any`；外部接口类型从已安装依赖确认。
+- 模块依赖放在顶层导入，不使用动态导入或行内类型导入。
+- 请求数据先校验，再以局部常量保留类型收窄结果，避免在异步回调中强制断言。
+- 按职责组织模块；单次调用的单行辅助函数直接内联。
+- 扩展通过 Pi SDK 集成，不修改 SDK 或全局 Pi；快捷键沿用 Pi 的可配置绑定。
+- 直接依赖固定版本；保留已有工作区改动。功能调整与代码整理分开验证，提交须取得授权。
+
 ## 检查与测试
 
 | 范围 | 命令 | 说明 |

@@ -63,6 +63,19 @@ test("计划中的导出与分享不提供可执行接口", async () => {
 	}
 });
 
+test("每个 API 实例只向自己的目录记录访问日志", async () => {
+	const otherHome = await mkdtemp(join(base, "cst-web-api-log-"));
+	const other = createWebApi(pool, otherHome, port);
+	try {
+		assert.equal((await fetch(`${origin}/api/health`)).status, 200);
+		assert.match(await readFile(join(home, "web-access.log"), "utf8"), /GET \/api\/health -> finish 200/);
+		await assert.rejects(readFile(join(otherHome, "web-access.log")), { code: "ENOENT" });
+	} finally {
+		await other.close();
+		await rm(otherHome, { recursive: true, force: true });
+	}
+});
+
 test("creating a session with the same request key returns the same session", async () => {
 	const key = "new-session-once";
 	const first = await post("/api/sessions", {}, { "Idempotency-Key": key });

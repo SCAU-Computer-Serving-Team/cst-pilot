@@ -10,6 +10,7 @@ import {
 	readCustomProviders,
 	saveCustomProvider,
 } from "./custom-provider.ts";
+import { body, send } from "./http.ts";
 import { OAuthFlows } from "./oauth-flow.ts";
 import { withProviderEndpoint } from "./provider-endpoint.ts";
 
@@ -19,10 +20,8 @@ interface AuthRoutesOptions {
 	invalidAuth: Set<string>;
 	globalEvents: SessionEvents;
 	account: CstoaAccount;
-	body(request: IncomingMessage): Promise<Record<string, unknown>>;
 	writeOnce<T>(request: IncomingMessage, pathname: string, input: unknown, action: () => Promise<T>): Promise<T>;
 	serialize<T>(id: string, action: () => Promise<T>): Promise<T>;
-	send(response: ServerResponse, status: number, body: unknown): void;
 }
 
 /** Credential management stays within the API's origin and idempotency checks. */
@@ -32,10 +31,8 @@ export function createAuthRoutes({
 	invalidAuth,
 	globalEvents,
 	account,
-	body,
 	writeOnce,
 	serialize,
-	send,
 }: AuthRoutesOptions) {
 	const refreshes = new Map<string, { controller: AbortController; task: Promise<void> }>();
 	let closing = false;
@@ -144,7 +141,8 @@ export function createAuthRoutes({
 		}
 		if (customPath && method === "DELETE") {
 			const input = await body(request);
-			if (typeof input.revision !== "string" || Object.keys(input).length !== 1) throw new Error("配置版本无效");
+			const { revision } = input;
+			if (typeof revision !== "string" || Object.keys(input).length !== 1) throw new Error("配置版本无效");
 			const result = await writeOnce(request, pathname, input, () =>
 				serialize("auth-config:all", async () => {
 					if (
@@ -154,12 +152,7 @@ export function createAuthRoutes({
 					)
 						throw new InboxConflict("此模型服务的会话正在执行，请完成后再移除");
 					const { modelRuntime } = await pool.getServices();
-					const deleted = await deleteCustomProvider(
-						agentDir,
-						customPath[1],
-						input.revision as string,
-						modelRuntime,
-					);
+					const deleted = await deleteCustomProvider(agentDir, customPath[1], revision, modelRuntime);
 					globalEvents.publish("state", { type: "auth_changed", providerId: deleted.id });
 					globalEvents.publish("state", { type: "models_changed", providerId: deleted.id });
 					return deleted;
@@ -191,13 +184,13 @@ export function createAuthRoutes({
 			}
 			if (method !== "POST") return false;
 			const input = await body(request);
+			const { key, baseUrl, flowId, promptId, value } = input;
 			if (action === "start") {
 				if (
 					(type === "oauth" && Object.keys(input).length) ||
 					Object.keys(input).some((key) => !["key", "baseUrl"].includes(key)) ||
-					(input.key !== undefined &&
-						(typeof input.key !== "string" || !input.key.trim() || input.key.length > 8192)) ||
-					(input.baseUrl !== undefined && typeof input.baseUrl !== "string")
+					(key !== undefined && (typeof key !== "string" || !key.trim() || key.length > 8192)) ||
+					(baseUrl !== undefined && typeof baseUrl !== "string")
 				)
 					throw new Error("请求的登录参数无效");
 				const result = await writeOnce(request, pathname, input, () =>
@@ -207,9 +200,9 @@ export function createAuthRoutes({
 							await oauthFlows.cancelAndWait(providerId);
 						const flow = oauthFlows.start(modelRuntime, providerId, {
 							type,
-							key: typeof input.key === "string" ? input.key : undefined,
+							key: typeof key === "string" ? key : undefined,
 							wrap:
-								typeof input.baseUrl === "string"
+								typeof baseUrl === "string"
 									? (login) =>
 											serialize("auth-config:all", async () => {
 												if (
@@ -221,13 +214,7 @@ export function createAuthRoutes({
 														)
 												)
 													throw new InboxConflict("此 Provider 的会话正在执行，请完成后再修改 BaseURL");
-												return withProviderEndpoint(
-													agentDir,
-													providerId,
-													input.baseUrl as string,
-													modelRuntime,
-													login,
-												);
+												return withProviderEndpoint(agentDir, providerId, baseUrl, modelRuntime, login);
 											})
 									: undefined,
 						});
@@ -240,12 +227,12 @@ export function createAuthRoutes({
 			if (action === "cancel") {
 				if (
 					Object.keys(input).some((key) => key !== "flowId") ||
-					(input.flowId !== undefined && typeof input.flowId !== "string")
+					(flowId !== undefined && typeof flowId !== "string")
 				)
 					throw new Error("请求格式无效");
 				const result = await writeOnce(request, pathname, input, () =>
 					serialize(`auth:${providerId}`, async () => ({
-						cancelled: oauthFlows.cancel(providerId, input.flowId as string | undefined),
+						cancelled: oauthFlows.cancel(providerId, flowId),
 					})),
 				);
 				send(response, 200, result);
@@ -254,19 +241,14 @@ export function createAuthRoutes({
 			if (action === "respond") {
 				if (
 					Object.keys(input).some((key) => !["flowId", "promptId", "value"].includes(key)) ||
-					typeof input.flowId !== "string" ||
-					typeof input.promptId !== "string" ||
-					typeof input.value !== "string"
+					typeof flowId !== "string" ||
+					typeof promptId !== "string" ||
+					typeof value !== "string"
 				)
 					throw new Error("请求的授权回答无效");
 				const result = await writeOnce(request, pathname, input, () =>
 					serialize(`auth:${providerId}`, async () => {
-						oauthFlows.respond(
-							providerId,
-							input.flowId as string,
-							input.promptId as string,
-							input.value as string,
-						);
+						oauthFlows.respond(providerId, flowId, promptId, value);
 						return { accepted: true };
 					}),
 				);
@@ -283,12 +265,13 @@ export function createAuthRoutes({
 		if (!authProvider) throw new Error("请求的模型服务不存在");
 		if (action === "api-key" && !authProvider.auth.apiKey) throw new Error("请求的模型服务不支持 API KEY 登录");
 		const input = await body(request);
+		const { key, baseUrl } = input;
 		if (action === "api-key" && method === "PUT") {
 			if (
-				typeof input.key !== "string" ||
-				!input.key.trim() ||
-				input.key.length > 8_192 ||
-				(input.baseUrl !== undefined && typeof input.baseUrl !== "string") ||
+				typeof key !== "string" ||
+				!key.trim() ||
+				key.length > 8_192 ||
+				(baseUrl !== undefined && typeof baseUrl !== "string") ||
 				Object.keys(input).some((key) => key !== "key" && key !== "baseUrl")
 			)
 				throw new Error("请求的密钥或 BaseURL 格式无效");
@@ -301,14 +284,14 @@ export function createAuthRoutes({
 							prompt: async (question) => {
 								if (++prompts !== 1 || question.type !== "secret")
 									throw new Error("该模型服务需要其他登录信息");
-								return input.key as string;
+								return key;
 							},
 							notify: () => {},
 						});
 						return { providerId, type: "api_key" };
 					};
 					const responseBody =
-						typeof input.baseUrl === "string"
+						typeof baseUrl === "string"
 							? await serialize("auth-config:all", async () => {
 									if (
 										pool
@@ -319,13 +302,7 @@ export function createAuthRoutes({
 											)
 									)
 										throw new InboxConflict("此 Provider 的会话正在执行，请完成后再修改 BaseURL");
-									return withProviderEndpoint(
-										agentDir,
-										providerId,
-										input.baseUrl as string,
-										modelRuntime,
-										login,
-									);
+									return withProviderEndpoint(agentDir, providerId, baseUrl, modelRuntime, login);
 								})
 							: await login();
 					invalidAuth.delete(providerId);

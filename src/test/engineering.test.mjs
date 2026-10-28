@@ -16,6 +16,7 @@ test('静态检查拒绝无效 MJS、重复 JSON 键和重复 CSS 属性', async
   const biome = join(root, 'agent/node_modules/@biomejs/biome/bin/biome');
   for (const [file, source] of [
     ['src/check/invalid.mjs', 'const value = ;'],
+    ['src/check/template.mjs', 'console.log("prefix" + process.argv[0]);'],
     ['pack/invalid.json', '{"key": 1, "key": 2}'],
     ['src/web/frontend/app/invalid.css', '.x { color: red; color: blue; }'],
   ]) {
@@ -67,6 +68,18 @@ test('所有扩展的 TypeScript 文件均纳入严格类型检查', async () =>
   }
   await walk(join(root, 'agent/home/extensions'));
   assert.deepEqual(missing, []);
+});
+
+test('前后端统一使用严格、可直接擦除的 TypeScript 和显式类型规则', async () => {
+  for (const path of ['agent/tsconfig.json', 'src/web/frontend/tsconfig.json']) {
+    const { compilerOptions } = await json(path);
+    for (const key of ['strict', 'erasableSyntaxOnly', 'noUnusedLocals', 'noUnusedParameters']) {
+      assert.equal(compilerOptions[key], true, `${path}: ${key}`);
+    }
+  }
+  const { linter } = await json('biome.json');
+  assert.equal(linter.rules.suspicious.noExplicitAny, 'error');
+  assert.equal(linter.rules.style.useTemplate, 'error');
 });
 
 test('项目 TypeScript 使用顶层导入，不隐藏动态模块依赖', async () => {

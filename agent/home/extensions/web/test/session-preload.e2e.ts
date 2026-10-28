@@ -145,21 +145,48 @@ test("启动预载近七天最新十项，慢请求下缓存秒切，运行状�
 		await browser.evaluate(
 			"Promise.all(document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))",
 		);
-		const motion = await browser.evaluate<{
-			text: string;
-			blend: string;
-			corner: string;
-			width: number;
-			card: number;
-		}>(
-			"(()=>{const t=document.querySelector('.running-light[data-running]'),c=document.querySelector('.running-corner[data-running]');return {text:getComputedStyle(t,'::after').animationName,blend:getComputedStyle(t,'::after').mixBlendMode,corner:getComputedStyle(c,'::after').animationName,width:c.getBoundingClientRect().width,card:c.parentElement.getBoundingClientRect().width};})()",
+		assert.ok(
+			((await browser.evaluate("document.querySelectorAll('.running-glyph').length")) as number) > 9,
+			"状态按完整字素分别渲染",
 		);
-		assert.equal(motion.text, "running-light-sweep");
-		assert.equal(motion.blend, "soft-light");
+		const sampleGlyphs = () =>
+			browser!.evaluate<{ strengths: number[]; brightness: number[] }>(
+				`(()=>{const line=[...document.querySelectorAll('.running-light[data-running]')].find(e=>e.querySelectorAll('.running-glyph').length>=9);window.__glyphLine=line;const glyphs=[...line.querySelectorAll('.running-glyph')],center=4;for(const glyph of glyphs)for(const a of glyph.getAnimations()){a.pause();a.currentTime=a.effect.getTiming().duration*(center+3)/(glyphs.length+5);}const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');return {strengths:glyphs.map(e=>parseFloat(getComputedStyle(e).getPropertyValue('--running-glyph-strength'))),brightness:glyphs.map(e=>{ctx.fillStyle=getComputedStyle(e).color;ctx.fillRect(0,0,1,1);return [...ctx.getImageData(0,0,1,1).data].slice(0,3).reduce((a,b)=>a+b,0);})};})()`,
+			);
+		const lightGlyphs = await sampleGlyphs();
+		assert.deepEqual(
+			lightGlyphs.strengths.map((v) => Math.round(v * 100)),
+			[0, 0, 8, 24, 48, 24, 8, ...Array(lightGlyphs.strengths.length - 7).fill(0)],
+		);
+		assert.ok(
+			lightGlyphs.brightness[4] > lightGlyphs.brightness[3] &&
+				lightGlyphs.brightness[3] > lightGlyphs.brightness[2] &&
+				lightGlyphs.brightness[2] > lightGlyphs.brightness[1],
+			"浅色中心字最亮，旁边两档递减",
+		);
+		const motion = await browser.evaluate<{ corner: string; mask: string; width: number; card: number }>(
+			"(()=>{const c=document.querySelector('.running-corner[data-running]');return {corner:getComputedStyle(c,'::after').animationName,mask:getComputedStyle(c).maskImage,width:c.getBoundingClientRect().width,card:c.parentElement.getBoundingClientRect().width};})()",
+		);
 		assert.equal(motion.corner, "running-light-sweep");
-		assert.ok(motion.width < motion.card / 2);
+		assert.ok(Math.abs(motion.width - motion.card) < 3, "柔边三角形按卡片整体比例计算");
+		assert.ok(!motion.mask.includes("radial-gradient"), "角落光影使用斜向渐淡，消除椭圆边缘");
+		const mask = await browser.evaluate<{ area: number; near: number; middle: number; far: number }>(
+			`(async()=>{const c=document.querySelector('.running-corner'),url=getComputedStyle(c).maskImage.slice(4,-1).replace(/^"|"$/g,''),img=new Image();img.src=url;await img.decode();const canvas=document.createElement('canvas');canvas.width=canvas.height=200;const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,200,200);const data=ctx.getImageData(0,0,200,200).data;let covered=0;for(let i=3;i<data.length;i+=4)if(data[i]>1)covered++;const alpha=(x,y)=>data[(y*200+x)*4+3]/255;return {area:covered/40000,near:alpha(198,198),middle:alpha(160,160),far:alpha(80,80)};})()`,
+		);
+		assert.ok(mask.area > 0.32 && mask.area < 0.45, `柔化三角形覆盖比例 ${mask.area}`);
+		assert.ok(mask.near > mask.middle && mask.middle > mask.far && mask.far === 0, "距离右下角越远越淡");
+		await browser.evaluate(
+			"for(const a of document.querySelector('.running-corner').getAnimations({subtree:true})){a.pause();a.currentTime=Number(a.effect.getTiming().duration)*2/3;}",
+		);
 		await browser.screenshot(join(root, "running-light.png"));
 		await browser.evaluate("document.documentElement.dataset.theme='dark'");
+		const darkGlyphs = await sampleGlyphs();
+		assert.ok(
+			darkGlyphs.brightness[4] < darkGlyphs.brightness[3] &&
+				darkGlyphs.brightness[3] < darkGlyphs.brightness[2] &&
+				darkGlyphs.brightness[2] < darkGlyphs.brightness[1],
+			"深色中心字最暗，旁边两档递减",
+		);
 		await browser.screenshot(join(root, "running-dark.png"));
 		await browser.call("Emulation.setDeviceMetricsOverride", {
 			width: 390,
@@ -175,9 +202,9 @@ test("启动预载近七天最新十项，慢请求下缓存秒切，运行状�
 		await browser.call("Emulation.setEmulatedMedia", {
 			features: [{ name: "prefers-reduced-motion", value: "reduce" }],
 		});
-		assert.equal(
-			await browser.evaluate("getComputedStyle(document.querySelector('.running-light'),'::after').display"),
-			"none",
+		await browser.until(
+			"document.querySelectorAll('.running-glyph').length && [...document.querySelectorAll('.running-glyph')].every(e=>e.getAnimations().length===0 && parseFloat(getComputedStyle(e).getPropertyValue('--running-glyph-strength'))===0)",
+			"减少动态时取消逐字光照并恢复原色",
 		);
 		assert.equal(
 			await browser.evaluate("getComputedStyle(document.querySelector('.running-corner'),'::after').display"),

@@ -15,7 +15,7 @@ export default function(pi){const c=getWebContainer();if(c.loadingWebSession>0)r
  const deadline=Date.now()+60000;const wait=async check=>{while(Date.now()<deadline){if(spawnError)throw spawnError;if(child.exitCode!==null)throw Error(`Web冒烟进程提前退出: ${child.exitCode} ${stderr}`);if(await check())return;await new Promise(r=>setTimeout(r,100));}throw Error('Web发行冒烟超时');};
  try{await wait(()=>fs.existsSync(ready));const {port}=JSON.parse(fs.readFileSync(ready,'utf8')),origin=`http://127.0.0.1:${port}`;
  const api=async(url,method='GET',body)=>{const response=await fetch(origin+url,{method,headers:method==='GET'?{}:{Origin:origin,'Content-Type':'application/json','X-CST-Web-Request':'1','Idempotency-Key':crypto.randomUUID()},body:method==='GET'?undefined:JSON.stringify(body??{})});if(!response.ok)throw Error(`Web冒烟HTTP ${response.status}: ${await response.text()}`);return response.json();};
- const page=await fetch(origin+'/');if(!page.ok||!(await page.text()).includes('/assets/'))throw Error('发行Web页面/静态引用缺失');
+ const page=await fetch(`${origin}/`);if(!page.ok||!(await page.text()).includes('/assets/'))throw Error('发行Web页面/静态引用缺失');
  const models=await api('/api/models');if(!models.models.some(m=>m.provider==='cst-build-smoke'&&m.id==='smoke'))throw Error('发行Web未读取隔离模型');
  const {id}=await api('/api/sessions','POST',{provider:'cst-build-smoke',modelId:'smoke'});
  await api(`/api/sessions/${id}/messages`,'POST',{id:crypto.randomUUID(),text:'CST_WEB_SMOKE',delivery:'queue'});let state;

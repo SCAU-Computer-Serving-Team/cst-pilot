@@ -628,12 +628,15 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .markdown[data-streaming="true"] .t-stream-w, .thinking-line .t-stream-w { animation: t-stream-in var(--duration-medium) var(--ease-smooth-out) backwards; }
 @keyframes t-stream-in { from { opacity: 0; filter: blur(var(--blur-small)); } to { opacity: 1; filter: blur(0); } }
 /* 运行反馈：2000ms 沿用 thinking-states 的扫光节奏。 */
-:root { --running-light-duration: 2000ms; }
-.running-light { position: relative; display: inline-block; isolation: isolate; }
-.running-light[data-running]::after { content: attr(data-text); position: absolute; inset: 0; pointer-events: none; color: transparent; background: linear-gradient(90deg, transparent 35%, var(--chat-ink) 50%, transparent 65%) 100% 0 / 400% 100% no-repeat; background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; mix-blend-mode: soft-light; animation: running-light-sweep var(--running-light-duration) var(--ease-linear) infinite; }
+:root { --running-light-duration: 2000ms; --running-glyph-target: #ffffff; }
+:root[data-theme="dark"] { --running-glyph-target: #060b0e; }
+@media (prefers-color-scheme: dark) { :root[data-theme="system"] { --running-glyph-target: #060b0e; } }
+@property --running-glyph-strength { syntax: "<number>"; inherits: false; initial-value: 0; }
+.running-light { display: inline-block; white-space: pre-wrap; }
+.running-glyph { color: color-mix(in srgb, currentColor, var(--running-glyph-target) calc(var(--running-glyph-strength) * 100%)); }
 @keyframes running-light-sweep { from { background-position: 100% 0; } to { background-position: 0% 0; } }
-.running-light[data-paused]::after, .running-corner[data-paused]::after { animation-play-state: paused; }
-@media (prefers-reduced-motion: reduce) { .running-light::after, .running-corner::after { display: none; animation: none !important; } }
+.running-corner[data-paused]::after { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .running-glyph { color: inherit; } .running-corner::after { display: none; animation: none !important; } }
 /* t-shimmer：等待首个内容的加载文字（transitions.dev 15-shimmer-text） */
 .t-shimmer { position: relative; display: inline-block; color: var(--shimmer-base); }
 .t-shimmer::before {

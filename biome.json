@@ -7,6 +7,7 @@
 			"style": {
 				"noNonNullAssertion": "off",
 				"useConst": "error",
+				"useTemplate": "error",
 				"useNodejsImportProtocol": "off"
 			},
 			"suspicious": {

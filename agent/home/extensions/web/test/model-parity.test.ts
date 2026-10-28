@@ -83,6 +83,36 @@ test("Web 模型清单与 TUI 共用可用口径、scoped 设置和下一次启�
 			"one",
 			"工作台模型选择也更新默认模型",
 		);
+		const post = (path: string, input: unknown) =>
+			fetch(`${origin}${path}`, {
+				method: "POST",
+				headers: {
+					Origin: origin,
+					"X-CST-Web-Request": "1",
+					"Content-Type": "application/json",
+					"Idempotency-Key": crypto.randomUUID(),
+				},
+				body: JSON.stringify(input),
+			});
+		assert.equal((await post("/api/models/thinking", { sessionId: slot.id, level: "off" })).status, 200);
+		assert.equal(slot.session.thinkingLevel, "off");
+		for (const input of [
+			{ sessionId: slot.id, level: "unknown" },
+			{ sessionId: 42, level: "off" },
+		]) {
+			assert.equal((await post("/api/models/thinking", input)).status, 400);
+		}
+		for (const input of [
+			{ patterns: ["probe/one", 42] },
+			{ patterns: ["probe/one"], empty: true },
+			{ patterns: "probe/one" },
+			{ patterns: ["probe/missing"] },
+		]) {
+			assert.equal((await post("/api/models/scoped", input)).status, 400);
+		}
+		assert.equal((await post("/api/models/scoped", { patterns: [], empty: true })).status, 200);
+		assert.deepEqual((await (await fetch(`${origin}/api/models`)).json()).enabled, []);
+		assert.equal((await fetch(`${origin}/api/models/select`, { method: "POST", body: "{}" })).status, 403);
 		const saved = await fetch(`${origin}/api/models/scoped`, {
 			method: "POST",
 			headers: {

@@ -232,7 +232,7 @@ for (const b of CONFIG.BUNDLE) {
   if (!fs.existsSync(entry)) die(`扩展入口不存在: ${entry}`);
   const outdir = path.join(packagesDir, b.name);
   fs.mkdirSync(outdir, { recursive: true });
-  const externals = b.externals.flatMap((e) => ["--external:" + e]);
+  const externals = b.externals.map((e) => `--external:${e}`);
   run(process.execPath, [
     ...(esbuildPath ? [path.resolve(esbuildPath)] : [npxCli, "-y", `esbuild@${CONFIG.ESBUILD_VERSION}`]),
     "--bundle", entry, "--format=esm", "--platform=node", "--target=node20",
@@ -302,23 +302,23 @@ for (const f of CONFIG.REPO_HOME_FILES) {
 }
 const catalogPath = path.join(out, "agent", "home", "models-store.json");
 const catalog = supplementGoFlash(JSON.parse(fs.readFileSync(catalogPath, "utf8")));
-fs.writeFileSync(catalogPath, JSON.stringify(catalog, null, 2) + "\n");
+fs.writeFileSync(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`);
 console.log("  仓库侧: pi.cmd/文档/pwsh/wiztree/lhm/home 资源（含 Go Flash 离线模型）");
 fs.cpSync(path.join(scriptDir, "licenses"), path.join(out, "licenses"), { recursive: true });
 
 // ---------- [4] 发行 settings.json ----------
 
 banner("生成发行 settings.json 与 telemetry.json（pi 自带遥测关闭，项目遥测开启）");
-fs.writeFileSync(path.join(out, "agent", "home", "settings.json"), JSON.stringify(RELEASE_SETTINGS, null, 2) + "\n");
-fs.writeFileSync(path.join(out, "agent", "home", "telemetry.json"), JSON.stringify(RELEASE_TELEMETRY, null, 2) + "\n");
-fs.writeFileSync(path.join(out, "agent", "home", "web-search.json"), JSON.stringify(RELEASE_WEB_SEARCH, null, 2) + "\n");
+fs.writeFileSync(path.join(out, "agent", "home", "settings.json"), `${JSON.stringify(RELEASE_SETTINGS, null, 2)}\n`);
+fs.writeFileSync(path.join(out, "agent", "home", "telemetry.json"), `${JSON.stringify(RELEASE_TELEMETRY, null, 2)}\n`);
+fs.writeFileSync(path.join(out, "agent", "home", "web-search.json"), `${JSON.stringify(RELEASE_WEB_SEARCH, null, 2)}\n`);
 
-fs.writeFileSync(path.join(out, "BUILD-INFO.json"), JSON.stringify({
+fs.writeFileSync(path.join(out, "BUILD-INFO.json"), `${JSON.stringify({
   version: CONFIG.VERSION, piVersion: CONFIG.PI_VERSION, piExeSha256: CONFIG.PI_EXE_SHA256,
   sourceRevision: spawnSync("git",["rev-parse","HEAD"],{cwd:repoRoot,encoding:"utf8"}).stdout?.trim() ?? null,
   sourceDirty: Boolean(spawnSync("git",["status","--porcelain"],{cwd:repoRoot,encoding:"utf8"}).stdout?.trim()),
   esbuildVersion: CONFIG.ESBUILD_VERSION, extensionLockSha256: sha256(fs.readFileSync(sourceLockPath)), installedPackages,
-}, null, 2) + "\n");
+}, null, 2)}\n`);
 
 // ---------- [5] 检查干净发行树并生成清单 ----------
 
@@ -332,7 +332,7 @@ const sums = files.map((rel) => {
   h.update(fs.readFileSync(path.join(out, rel)));
   return `${h.digest("hex")}  ${rel}`;
 });
-fs.writeFileSync(path.join(out, "SHA256SUMS"), sums.join("\n") + "\n");
+fs.writeFileSync(path.join(out, "SHA256SUMS"), `${sums.join("\n")}\n`);
 console.log(`  VERSION: cst-pilot ${CONFIG.VERSION} / pi ${CONFIG.PI_VERSION}`);
 console.log(`  SHA256SUMS: ${files.length} 个文件`);
 
@@ -368,7 +368,7 @@ if (wantZip) {
   const zipPath = path.join(buildRoot, `cst-pilot-${CONFIG.VERSION}.zip`);
   const listPath = path.join(buildRoot, "_zip-inputs.txt");
   const expected = releaseFiles.map((rel) => `cst-pilot/${rel}`);
-  fs.writeFileSync(listPath, expected.join("\0") + "\0");
+  fs.writeFileSync(listPath, `${expected.join("\0")}\0`);
   run("tar.exe", ["-a", "-c", "-f", zipPath, "-C", buildRoot, "--null", "-T", listPath]);
   const listing = spawnSync("tar.exe", ["-tf", zipPath], { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
   if (listing.status !== 0 || listing.stdout.trim().split(/\r?\n/).sort().join("\n") !== expected.sort().join("\n")) die("最终 ZIP 文件清单不一致");

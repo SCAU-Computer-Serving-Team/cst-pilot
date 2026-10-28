@@ -4,71 +4,26 @@ import { rm } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
-import { resolveModelScopeWithDiagnostics } from "@earendil-works/pi-coding-agent";
-import {
-	BitLockerExpiredError,
-	BitLockerInputError,
-	bitLockerWebInteractions,
-} from "../../diagnostics/bitlocker-web.ts";
-import { SessionOwnerConflict } from "../../runtime/owner.ts";
+import { BitLockerExpiredError, bitLockerWebInteractions } from "../../diagnostics/bitlocker-web.ts";
 import { announceProcessClose, beginProcessClose, cancelProcessClose, hintTelemetry } from "../../telemetry/shared.ts";
 import { CstoaAccount } from "./api/account.ts";
 import { createAuthRoutes } from "./api/auth.ts";
+import { sendError } from "./api/errors.ts";
+import { body, problem, send } from "./api/http.ts";
+import { createModelRoutes } from "./api/models.ts";
 import { listProjectFiles } from "./api/project-files.ts";
 import { getProviderQuota } from "./api/quota.ts";
-import { deliveredRunbookFile, openDeliveredRunbook, RunbookOpenError } from "./api/runbook.ts";
+import { deliveredRunbookFile, openDeliveredRunbook } from "./api/runbook.ts";
 import { type ImageRef, ImageStore } from "./session/attachments.ts";
 import { browserJson } from "./session/browser-json.ts";
 import { compactSession } from "./session/compaction.ts";
 import { SessionEvents } from "./session/events.ts";
-import { type Delivery, InboxConflict, SessionInbox } from "./session/inbox.ts";
+import { InboxConflict, SessionInbox } from "./session/inbox.ts";
 import { MutationReceipts } from "./session/receipts.ts";
 import type { WebSessionPool } from "./session/sessions.ts";
-import { WebSettings, type WebTheme } from "./session/web-settings.ts";
+import { WebSettings } from "./session/web-settings.ts";
 
-function send(
-	response: ServerResponse,
-	status: number,
-	body: unknown,
-	serialize: (value: unknown) => string = JSON.stringify,
-): void {
-	// Connection close：短响应用完即断，避免与 SSE 长连接争抢浏览器每域 6 连接限制（同 http.ts）。
-	response.writeHead(status, {
-		"Content-Type": "application/json; charset=utf-8",
-		"Cache-Control": "no-store",
-		Connection: "close",
-	});
-	response.end(serialize(body));
-}
-function problem(response: ServerResponse, status: number, code: string, message: string): void {
-	send(response, status, { error: { code, message } });
-}
-async function body(request: IncomingMessage, limit = 128 * 1024): Promise<Record<string, unknown>> {
-	if (!request.headers["content-type"]?.startsWith("application/json")) throw new Error("请求须为 JSON");
-	let size = 0;
-	const parts: Buffer[] = [];
-	for await (const chunk of request) {
-		size += chunk.length;
-		if (size > limit) throw new Error("请求内容过大");
-		parts.push(chunk);
-	}
-	const value: unknown = JSON.parse(Buffer.concat(parts).toString("utf8"));
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("请求格式无效");
-	return value as Record<string, unknown>;
-}
-
-/** 临时访问日志：诊断响应挂起问题用，逐行追加，不改行为。 */
-let accessLogPath: string | null = null;
-function accessLog(line: string): void {
-	if (!accessLogPath) return;
-	try {
-		appendFileSync(accessLogPath, `${new Date().toISOString()} ${line}\n`);
-	} catch {
-		/* 诊断日志失败不影响请求 */
-	}
-}
-
-/** A deliberately narrow first API slice: unsupported operations remain 404. */
+/** 同源校验、写入串行化与会话路由的统一入口。 */
 export function createWebApi(
 	pool: WebSessionPool,
 	agentDir: string,
@@ -79,7 +34,14 @@ export function createWebApi(
 	let stopping = false;
 	let exitTask: Promise<void> | undefined;
 	let shutdownScheduled = false;
-	accessLogPath = join(agentDir, "web-access.log");
+	const accessLogPath = join(agentDir, "web-access.log");
+	function accessLog(line: string): void {
+		try {
+			appendFileSync(accessLogPath, `${new Date().toISOString()} ${line}\n`);
+		} catch {
+			/* 诊断日志失败不影响请求 */
+		}
+	}
 	const webSettings = new WebSettings(agentDir);
 	const inboxes = new Map<string, SessionInbox>();
 	const streams = new Map<string, SessionEvents>();
@@ -127,11 +89,10 @@ export function createWebApi(
 		invalidAuth,
 		globalEvents,
 		account,
-		body,
 		writeOnce,
 		serialize,
-		send,
 	});
+	const modelRoutes = createModelRoutes({ pool, webSettings, globalEvents, writeOnce, serialize });
 	const imageContent = async (id: string, refs: ImageRef[]) =>
 		Promise.all(
 			refs.map(async (ref) => ({
@@ -316,85 +277,18 @@ export function createWebApi(
 				}
 				if (method === "PATCH") {
 					const input = await body(request);
-					if (Object.keys(input).length !== 1 || !["light", "dark", "system"].includes(input.theme as string))
+					const { theme } = input;
+					if (Object.keys(input).length !== 1 || (theme !== "light" && theme !== "dark" && theme !== "system"))
 						throw new Error("请求的主题设置无效");
 					const result = await writeOnce(request, pathname, input, async () => {
-						await webSettings.save(input.theme as WebTheme);
+						await webSettings.save(theme);
 						globalEvents.publish("state", { type: "settings_changed" });
-						return { theme: input.theme };
+						return { theme };
 					});
 					response.setHeader("Set-Cookie", `cst-theme=${result.theme}; Path=/; SameSite=Strict`);
 					send(response, 200, result);
 					return true;
 				}
-			}
-			if (pathname === "/api/models" && method === "GET") {
-				const { modelRuntime, settingsManager } = await pool.refreshServices();
-				const sessionId = new URL(request.url ?? "/", origin).searchParams.get("sessionId");
-				const slot = sessionId ? await pool.openSaved(sessionId) : undefined;
-				const stats = slot?.session.getSessionStats();
-				// 未指定会话（首页）或会话未选模型时，回退到全局默认模型：新会话实际会使用它。
-				const fallbackProvider = settingsManager.getDefaultProvider();
-				const fallbackModel = settingsManager.getDefaultModel();
-				const selectedModel =
-					slot?.session.model ??
-					(fallbackProvider && fallbackModel && modelRuntime.getModel(fallbackProvider, fallbackModel)
-						? { provider: fallbackProvider, id: fallbackModel }
-						: undefined);
-				// 与 /scoped-models 同口径：清单只含可用模型；存储的启用模式展开为具体 id，未匹配的单独返回
-				// 模型可用性沿用 Pi，包含持久凭据、配置与环境变量；不增加 Web 专属过滤。
-				const available = await modelRuntime.getAvailable();
-				const patterns = settingsManager.getEnabledModels();
-				let enabled: string[] | null = null;
-				let unavailableEnabled: string[] = [];
-				if (!patterns?.length && (await webSettings.read()).emptyModelScope) enabled = [];
-				if (patterns?.length) {
-					const scope = await resolveModelScopeWithDiagnostics(patterns, modelRuntime);
-					const listed = new Set(available.map((model) => `${model.provider}/${model.id}`));
-					enabled = [];
-					unavailableEnabled = [];
-					for (const scoped of scope.scopedModels) {
-						const id = `${scoped.model.provider}/${scoped.model.id}`;
-						(listed.has(id) ? enabled : unavailableEnabled).push(id);
-					}
-					for (const diagnostic of scope.diagnostics)
-						if (diagnostic.code === "no-match") unavailableEnabled.push(diagnostic.pattern);
-				}
-				send(response, 200, {
-					models: available.map((model) => ({
-						id: model.id,
-						provider: model.provider,
-						name: model.name,
-						input: model.input,
-						reasoning: model.reasoning,
-						contextWindow: model.contextWindow,
-						maxTokens: model.maxTokens,
-					})),
-					enabled,
-					unavailableEnabled,
-					thinkingLevels: slot?.session.getAvailableThinkingLevels() ?? [],
-					contextUsage: stats?.contextUsage ?? null,
-					usage: stats
-						? {
-								tokens: stats.tokens,
-								cacheHitRate:
-									stats.tokens.input + stats.tokens.cacheRead > 0
-										? stats.tokens.cacheRead / (stats.tokens.input + stats.tokens.cacheRead)
-										: null,
-							}
-						: null,
-					selected: selectedModel
-						? {
-								provider: selectedModel.provider,
-								id: selectedModel.id,
-								thinkingLevel:
-									slot?.session.thinkingLevel ??
-									settingsManager.getModelThinkingLevel(selectedModel.provider, selectedModel.id) ??
-									undefined,
-							}
-						: null,
-				});
-				return true;
 			}
 			if (pathname === "/api/quota" && method === "GET") {
 				const params = new URL(request.url ?? "/", origin).searchParams;
@@ -427,98 +321,7 @@ export function createWebApi(
 				});
 				return true;
 			}
-			if (pathname === "/api/models/select" && method === "POST") {
-				const input = await body(request);
-				if (
-					(input.sessionId !== undefined && typeof input.sessionId !== "string") ||
-					typeof input.provider !== "string" ||
-					typeof input.modelId !== "string"
-				)
-					throw new Error("请求的模型选择无效");
-				const { modelRuntime, settingsManager } = await pool.getServices();
-				const slot = typeof input.sessionId === "string" ? await pool.openSaved(input.sessionId) : undefined;
-				const model = modelRuntime.getModel(input.provider, input.modelId);
-				if (!model) throw new Error("请求的模型不存在");
-				const result = await writeOnce(request, pathname, input, () =>
-					serialize("model-default", async () => {
-						if (slot) await slot.session.setModel(model, { persist: true });
-						else {
-							if (!(await modelRuntime.checkAuth(model.provider))) throw new Error("请求的模型服务尚未配置凭据");
-							const patterns = settingsManager.getEnabledModels();
-							const scope = patterns?.length
-								? await resolveModelScopeWithDiagnostics(patterns, modelRuntime)
-								: undefined;
-							settingsManager.setDefaultModelAndProvider(model.provider, model.id);
-							await webSettings.saveEmptyModelScope(false);
-							if (
-								patterns?.length &&
-								scope &&
-								!scope.scopedModels.some(
-									(item) => item.model.provider === model.provider && item.model.id === model.id,
-								)
-							) {
-								settingsManager.setEnabledModels([...patterns, `${model.provider}/${model.id}`]);
-								await webSettings.saveEmptyModelScope(false);
-								pool.setScopedModels([...scope.scopedModels, { model }]);
-							}
-						}
-						globalEvents.publish("state", { type: "settings_changed" });
-						return {
-							provider: model.provider,
-							id: model.id,
-							thinkingLevel:
-								slot?.session.thinkingLevel ?? settingsManager.getModelThinkingLevel(model.provider, model.id),
-							thinkingLevels: slot?.session.getAvailableThinkingLevels() ?? [],
-						};
-					}),
-				);
-				send(response, 200, result);
-				return true;
-			}
-			if (pathname === "/api/models/thinking" && method === "POST") {
-				const input = await body(request);
-				if (typeof input.sessionId !== "string" || typeof input.level !== "string")
-					throw new Error("请求的思考强度无效");
-				const slot = await pool.openSaved(input.sessionId);
-				if (!slot.session.getAvailableThinkingLevels().includes(input.level as never))
-					throw new Error("请求的思考强度无效");
-				const result = await writeOnce(request, pathname, input, async () => {
-					slot.session.setThinkingLevel(input.level as typeof slot.session.thinkingLevel);
-					return { level: slot.session.thinkingLevel };
-				});
-				send(response, 200, result);
-				return true;
-			}
-			if (pathname === "/api/models/scoped" && method === "POST") {
-				const input = await body(request);
-				if (
-					!Array.isArray(input.patterns) ||
-					input.patterns.length > 100 ||
-					(input.empty !== undefined && typeof input.empty !== "boolean") ||
-					(input.empty === true && input.patterns.length !== 0) ||
-					!input.patterns.every((pattern) => typeof pattern === "string" && pattern.length <= 200)
-				)
-					throw new Error("请求的模型范围无效");
-				const { settingsManager, modelRuntime } = await pool.getServices();
-				const result = await writeOnce(request, pathname, input, async () => {
-					const patterns = input.patterns as string[];
-					const scope = await resolveModelScopeWithDiagnostics(patterns, modelRuntime);
-					if (scope.diagnostics.length) throw new Error("请求的模型范围没有匹配项");
-					// 与 /scoped-models 保存一致：全部可用模型使用默认范围，顺序由用户保存。
-					const availableIds = (await modelRuntime.getAvailable()).map((model) => `${model.provider}/${model.id}`);
-					const coversAll =
-						patterns.length > 0 &&
-						patterns.length === availableIds.length &&
-						availableIds.every((id) => patterns.includes(id));
-					settingsManager.setEnabledModels(coversAll ? undefined : patterns);
-					pool.setScopedModels(coversAll ? [] : scope.scopedModels);
-					await webSettings.saveEmptyModelScope(input.empty === true);
-					globalEvents.publish("state", { type: "settings_changed" });
-					return { enabled: input.empty === true ? [] : (settingsManager.getEnabledModels() ?? null) };
-				});
-				send(response, 200, result);
-				return true;
-			}
+			if (await modelRoutes(request, response, pathname, method)) return true;
 			if (await authRoutes(request, response, pathname, method)) return true;
 			if (pathname === "/api/sessions" && method === "GET") {
 				send(response, 200, { sessions: await pool.list() });
@@ -528,30 +331,31 @@ export function createWebApi(
 				const key = request.headers["idempotency-key"];
 				if (typeof key !== "string" || !/^[\w-]{1,128}$/.test(key)) throw new Error("缺少有效的去重键");
 				const input = await body(request);
+				const { provider, modelId, thinkingLevel } = input;
 				if (
 					Object.keys(input).some((field) => !["provider", "modelId", "thinkingLevel"].includes(field)) ||
-					(input.provider === undefined) !== (input.modelId === undefined) ||
-					(input.provider !== undefined &&
-						(typeof input.provider !== "string" || typeof input.modelId !== "string")) ||
-					(input.thinkingLevel !== undefined && typeof input.thinkingLevel !== "string")
+					(provider === undefined) !== (modelId === undefined) ||
+					(provider !== undefined && (typeof provider !== "string" || typeof modelId !== "string")) ||
+					(thinkingLevel !== undefined && typeof thinkingLevel !== "string")
 				)
 					throw new Error("请求的新会话配置无效");
 				if (
-					typeof input.provider === "string" &&
-					!(await pool.getServices()).modelRuntime.getModel(input.provider, input.modelId as string)
+					typeof provider === "string" &&
+					typeof modelId === "string" &&
+					!(await pool.getServices()).modelRuntime.getModel(provider, modelId)
 				)
 					throw new Error("请求的模型不存在");
 				const result = await writeOnce(request, pathname, input, async () => {
 					const slot = await pool.createWithKey(key);
-					if (typeof input.provider === "string" && typeof input.modelId === "string") {
-						const model = slot.session.modelRuntime.getModel(input.provider, input.modelId);
+					if (typeof provider === "string" && typeof modelId === "string") {
+						const model = slot.session.modelRuntime.getModel(provider, modelId);
 						if (!model) throw new Error("请求的模型不存在");
 						await serialize("model-default", () => slot.session.setModel(model, { persist: true }));
 					}
-					if (typeof input.thinkingLevel === "string") {
-						if (!slot.session.getAvailableThinkingLevels().includes(input.thinkingLevel as never))
-							throw new Error("请求的思考强度无效");
-						slot.session.setThinkingLevel(input.thinkingLevel as typeof slot.session.thinkingLevel);
+					if (typeof thinkingLevel === "string") {
+						const selected = slot.session.getAvailableThinkingLevels().find((level) => level === thinkingLevel);
+						if (!selected) throw new Error("请求的思考强度无效");
+						slot.session.setThinkingLevel(selected);
 					}
 					globalEvents.publish("state", { type: "sessions_changed" });
 					return { id: slot.id };
@@ -574,23 +378,20 @@ export function createWebApi(
 			const [, id, suffix = ""] = match;
 			if (suffix === "runbook/open" && method === "POST") {
 				const input = await body(request, 4096);
-				if (
-					typeof input.entryId !== "string" ||
-					typeof input.toolCallId !== "string" ||
-					Object.keys(input).length !== 2
-				)
+				const { entryId, toolCallId } = input;
+				if (typeof entryId !== "string" || typeof toolCallId !== "string" || Object.keys(input).length !== 2)
 					throw new Error("请求须指定清单交付记录");
 				const result = await writeOnce(request, pathname, input, async () => {
 					const slot = await pool.openSaved(id);
 					const branch = slot.session.sessionManager.getBranch();
-					const index = branch.findIndex((entry) => entry.id === input.entryId);
+					const index = branch.findIndex((entry) => entry.id === entryId);
 					const entry = branch[index];
 					if (!entry || entry.type !== "message" || entry.message.role !== "assistant")
 						throw new Error("请求对应的清单调用不存在");
 					const call = entry.message.content.find(
 						(part) =>
 							part.type === "toolCall" &&
-							part.id === input.toolCallId &&
+							part.id === toolCallId &&
 							["runbook", "runbook_deliver"].includes(part.name),
 					);
 					if (!call || call.type !== "toolCall") throw new Error("请求对应的清单调用不存在");
@@ -600,14 +401,14 @@ export function createWebApi(
 						if (candidate.message.role === "assistant" || candidate.message.role === "user") break;
 						if (
 							candidate.message.role === "toolResult" &&
-							candidate.message.toolCallId === input.toolCallId &&
+							candidate.message.toolCallId === toolCallId &&
 							candidate.message.toolName === call.name
 						) {
 							delivered = candidate.message;
 							break;
 						}
 					}
-					const early = slot.execution.resultFor(entry.message.timestamp, input.toolCallId as string);
+					const early = slot.execution.resultFor(entry.message.timestamp, toolCallId);
 					if (!delivered && early?.role === "toolResult" && early.toolName === call.name) delivered = early;
 					const file = deliveredRunbookFile(delivered);
 					if (typeof file !== "string") throw new Error("请求对应的清单尚未交付或已失效");
@@ -703,16 +504,12 @@ export function createWebApi(
 			}
 			if (suffix === "" && method === "PATCH") {
 				const input = await body(request);
-				if (
-					typeof input.name !== "string" ||
-					!input.name.trim() ||
-					input.name.length > 160 ||
-					Object.keys(input).length !== 1
-				)
+				const { name } = input;
+				if (typeof name !== "string" || !name.trim() || name.length > 160 || Object.keys(input).length !== 1)
 					throw new Error("请求的会话名称无效");
 				const result = await writeOnce(request, pathname, input, async () => {
 					const slot = await pool.openSaved(id);
-					slot.session.setSessionName((input.name as string).trim());
+					slot.session.setSessionName(name.trim());
 					globalEvents.publish("state", { type: "sessions_changed" });
 					return { id, name: slot.session.sessionManager.getSessionName() };
 				});
@@ -721,10 +518,10 @@ export function createWebApi(
 			}
 			if (suffix === "fork" && method === "POST") {
 				const input = await body(request);
-				if (typeof input.entryId !== "string" || Object.keys(input).length !== 1)
-					throw new Error("请求的分支节点无效");
+				const { entryId } = input;
+				if (typeof entryId !== "string" || Object.keys(input).length !== 1) throw new Error("请求的分支节点无效");
 				const result = await writeOnce(request, pathname, input, async () => {
-					const forked = await pool.fork(id, input.entryId as string);
+					const forked = await pool.fork(id, entryId);
 					globalEvents.publish("state", { type: "sessions_changed" });
 					return { id: forked.id };
 				});
@@ -741,11 +538,12 @@ export function createWebApi(
 			}
 			if (suffix === "tree/navigate" && method === "POST") {
 				const input = await body(request);
+				const { customInstructions } = input;
 				if (input.summarize !== undefined && typeof input.summarize !== "boolean")
 					throw new Error("请求的总结开关无效");
 				if (
-					input.customInstructions !== undefined &&
-					(typeof input.customInstructions !== "string" || input.customInstructions.length > 20_000)
+					customInstructions !== undefined &&
+					(typeof customInstructions !== "string" || customInstructions.length > 20_000)
 				)
 					throw new Error("请求的总结提示无效");
 				const result = await writeOnce(request, pathname, input, async () => {
@@ -760,7 +558,7 @@ export function createWebApi(
 						throw new Error("请求的分支节点不存在");
 					const navigated = await slot.session.navigateTree(input.entryId, {
 						summarize: input.summarize === true,
-						customInstructions: input.customInstructions as string | undefined,
+						customInstructions,
 					});
 					// 取消由用户发起（点取消总结触发 /abort），属于正常结果；报 409 会让前端把主动取消当成冲突。
 					if (navigated.cancelled) return { id, entryId: input.entryId, cancelled: true };
@@ -784,15 +582,13 @@ export function createWebApi(
 			}
 			if (suffix === "compact" && method === "POST") {
 				const input = await body(request);
-				if (
-					input.instructions !== undefined &&
-					(typeof input.instructions !== "string" || input.instructions.length > 20_000)
-				)
+				const { instructions } = input;
+				if (instructions !== undefined && (typeof instructions !== "string" || instructions.length > 20_000))
 					throw new Error("请求的压缩提示无效");
 				const result = await writeOnce(request, pathname, input, async () => {
 					const slot = await pool.openSaved(id);
 					if (!slot.session.isIdle) throw new InboxConflict("会话正在执行，请等待完成后再压缩");
-					await compactSession(slot.session, input.instructions as string | undefined);
+					await compactSession(slot.session, instructions);
 					return { id, compacted: true };
 				});
 				send(response, 200, result);
@@ -836,25 +632,20 @@ export function createWebApi(
 			}
 			if (suffix === "messages" && method === "POST") {
 				const input = await body(request, 17 * 1024 * 1024);
+				const { id: messageId, text, delivery, skill } = input;
 				if (Object.keys(input).some((key) => !["id", "text", "delivery", "images", "skill"].includes(key)))
 					throw new Error("消息字段不受支持");
 				if (
-					typeof input.id !== "string" ||
-					typeof input.text !== "string" ||
-					(input.delivery !== "queue" && input.delivery !== "steer") ||
-					(input.skill !== undefined && typeof input.skill !== "string")
+					typeof messageId !== "string" ||
+					typeof text !== "string" ||
+					(delivery !== "queue" && delivery !== "steer") ||
+					(skill !== undefined && typeof skill !== "string")
 				)
 					throw new Error("消息格式无效");
 				const item = await serialize(id, async () => {
 					const box = await inbox(id);
 					const refs = await images.accept(id, input.images ?? []);
-					return box.accept(
-						input.id as string,
-						input.text as string,
-						input.delivery as Delivery,
-						refs,
-						input.skill as string | undefined,
-					);
+					return box.accept(messageId, text, delivery, refs, skill);
 				});
 				globalEvents.publish("state", { type: "sessions_changed", sessionId: id });
 				send(response, 202, { item });
@@ -893,7 +684,8 @@ export function createWebApi(
 			const itemMatch = /^queue\/([\w-]{1,128})(?:\/(steer|retry))?$/.exec(suffix);
 			if (itemMatch && ["PATCH", "DELETE", "POST"].includes(method)) {
 				const input = await body(request);
-				if (!Number.isSafeInteger(input.version)) throw new Error("缺少队列版本");
+				const { version } = input;
+				if (typeof version !== "number" || !Number.isSafeInteger(version)) throw new Error("缺少队列版本");
 				const box = await inbox(id);
 				const edit =
 					method === "DELETE"
@@ -907,58 +699,31 @@ export function createWebApi(
 									: undefined;
 				if (!edit) throw new Error("操作无效");
 				const result = await writeOnce(request, pathname, input, async () => ({
-					queue: await box.change(itemMatch[1], input.version as number, edit),
+					queue: await box.change(itemMatch[1], version, edit),
 				}));
 				send(response, 200, result);
 				return true;
 			}
 			if (suffix === "queue/order" && method === "PUT") {
 				const input = await body(request);
+				const { ids, version } = input;
 				if (
-					!Number.isSafeInteger(input.version) ||
-					!Array.isArray(input.ids) ||
-					!input.ids.every((id) => typeof id === "string")
+					typeof version !== "number" ||
+					!Number.isSafeInteger(version) ||
+					!Array.isArray(ids) ||
+					!ids.every((id): id is string => typeof id === "string")
 				) {
 					throw new Error("队列排序格式无效");
 				}
 				const result = await writeOnce(request, pathname, input, async () => ({
-					queue: await (await inbox(id)).reorder(input.ids as string[], input.version as number),
+					queue: await (await inbox(id)).reorder(ids, version),
 				}));
 				send(response, 200, result);
 				return true;
 			}
 			problem(response, 404, "not_found", "接口不存在");
 		} catch (error) {
-			const diskCode = (error as NodeJS.ErrnoException).code;
-			if (error instanceof RunbookOpenError) problem(response, error.status, error.code, error.message);
-			else if (error instanceof BitLockerInputError)
-				problem(response, 400, "invalid_bitlocker_input", error.message);
-			else if (error instanceof BitLockerExpiredError) problem(response, 409, "expired_request", error.message);
-			else if (diskCode === "ENOSPC") problem(response, 507, "storage_full", "工具包存储空间不足，输入未被接受");
-			else if (["EACCES", "EPERM", "EROFS", "ENOTDIR", "EEXIST"].includes(diskCode ?? ""))
-				problem(response, 500, "storage_unavailable", "工具包目录无法写入，输入未被接受");
-			else if (error instanceof Error && error.message === "Already compacted")
-				problem(response, 409, "already_compacted", "会话已压缩，继续对话后可再次压缩");
-			else if (error instanceof Error && error.message === "Nothing to compact (session too small)")
-				problem(response, 409, "nothing_to_compact", "当前没有可压缩的较早内容");
-			else if (diskCode === "CST_CONFIGURATION_UNAVAILABLE" && error instanceof Error)
-				problem(response, 503, "configuration_unavailable", error.message);
-			else if (error instanceof SessionOwnerConflict || diskCode === "CST_SESSION_OWNED")
-				problem(
-					response,
-					409,
-					"session_owned",
-					error instanceof Error ? error.message : "该会话正由另一端使用，请先关闭持有该会话的程序。",
-				);
-			else if (error instanceof InboxConflict) problem(response, 409, "conflict", error.message);
-			else if (error instanceof SyntaxError) problem(response, 400, "invalid_json", "请求须为有效 JSON");
-			else if (error instanceof Error && /^(请求|消息|队列|缺少|操作|提交|图片|回答|选项)/.test(error.message)) {
-				problem(response, 400, "invalid_request", error.message);
-			} else if (error instanceof Error && /会话已删除/.test(error.message))
-				problem(response, 409, "conflict", "创建请求对应的会话已删除");
-			else if (error instanceof Error && /会话不存在/.test(error.message))
-				problem(response, 404, "not_found", "会话不存在");
-			else problem(response, 500, "server_error", "操作未完成，请稍后重试");
+			sendError(response, error);
 		}
 		return true;
 	};

@@ -87,7 +87,7 @@ try {
   const manifest = JSON.parse(await readFile(resolve(temporary, "subset.json"), "utf8"));
   manifest.recipe = recipe;
   manifest.sourceRevision = revision;
-  await writeFile(resolve(temporary, "subset.json"), JSON.stringify(manifest, null, 2) + "\n");
+  await writeFile(resolve(temporary, "subset.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   for (const name of ["CSTUISans-Regular.woff2", "CSTUISans-Medium.woff2", "CSTUISans-Bold.woff2", "subset.json"]) {
     await save(resolve(publicFonts, name), await readFile(resolve(temporary, name)));
   }
