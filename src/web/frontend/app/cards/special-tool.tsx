@@ -1,4 +1,3 @@
-import "./special-tool.css";
 import { Disclosure } from "@heroui/react";
 import {
 	ChevronRight,

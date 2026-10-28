@@ -73,7 +73,7 @@ export function activeTurnIndex(turns: Turn[], running: boolean): number {
 
 export type TurnPart = { entry: TurnEntry; final: boolean; part: ConversationPart };
 
-/** 一轮里除最后的正文以外都是过程内容；最后的正文 = 最后一条助手消息的末尾非空文本段。 */
+/** 最后一条助手消息的末尾非空文本放在过程外；末尾思考不遮住正文，工具调用仍划分过程边界。 */
 export function splitTurn(assistants: TurnEntry[]): { process: TurnPart[]; finalText: string } {
 	const process: TurnPart[] = [];
 	let finalText = "";
@@ -84,8 +84,14 @@ export function splitTurn(assistants: TurnEntry[]): { process: TurnPart[]; final
 				? [{ type: "text", text: entry.message.content }]
 				: entry.message.content;
 		const parts = orderedParts(content);
+		let finalIndex = parts.length - 1;
+		while (finalIndex >= 0) {
+			const part = parts[finalIndex];
+			if (part.kind !== "thinking" && (part.kind !== "text" || part.text.trim())) break;
+			finalIndex -= 1;
+		}
 		parts.forEach((part, partIndex) => {
-			if (final && partIndex === parts.length - 1 && part.kind === "text" && part.text.trim()) {
+			if (final && partIndex === finalIndex && part.kind === "text") {
 				finalText = part.text;
 				return;
 			}

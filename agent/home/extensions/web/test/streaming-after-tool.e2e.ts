@@ -108,7 +108,15 @@ test("长思考与特殊工具之后，正文逐段显示，不等待重连集�
 		await browser.click('[aria-label="发送消息"]');
 		await browser.until("document.body.textContent.includes('stream-marker-0')", "首段正文");
 		await browser.evaluate(
-			`window.__firstParagraph=document.querySelector('.assistant-turn > .markdown p');window.__streamGaps=[];window.__streamWatch=new MutationObserver(()=>{if(!window.__firstParagraph?.isConnected)window.__streamGaps.push(document.querySelector('.assistant-turn > .markdown')?.textContent??'');});window.__streamWatch.observe(document.querySelector('.conversation'),{childList:true,subtree:true});const original=window.fetch;window.fetch=async(...args)=>{if(String(args[0]).endsWith('/api/sessions/${slot.id}'))await new Promise(r=>setTimeout(r,400));return original(...args);};`,
+			`window.__firstParagraph=document.querySelector('.assistant-turn > .markdown p');window.__firstWord=window.__firstParagraph.querySelector('.t-stream-w');window.__streamGaps=[];window.__streamWatch=new MutationObserver(()=>{if(!window.__firstParagraph?.isConnected)window.__streamGaps.push(document.querySelector('.assistant-turn > .markdown')?.textContent??'');});window.__streamWatch.observe(document.querySelector('.conversation'),{childList:true,subtree:true});const original=window.fetch;window.fetch=async(...args)=>{if(String(args[0]).endsWith('/api/sessions/${slot.id}'))await new Promise(r=>setTimeout(r,400));return original(...args);};`,
+		);
+		assert.equal(
+			await browser.evaluate("!!document.querySelector('.assistant-turn[data-live] .turn-process-body')"),
+			true,
+			"运行中过程立即挂载",
+		);
+		await browser.evaluate(
+			"window.__liveProcess = document.querySelector('.assistant-turn[data-live] .turn-process-body'); void 0",
 		);
 		const lag = Date.now() - firstSent;
 		assert.equal(finished, false, "首段必须在模型完成之前显示");
@@ -120,7 +128,9 @@ test("长思考与特殊工具之后，正文逐段显示，不等待重连集�
 			true,
 			"追加段落与定稿保持已读段落节点，不闪回",
 		);
+		assert.equal(await browser.evaluate("!!window.__firstWord?.isConnected"), true, "流式正文定稿保留已有逐词节点");
 		assert.deepEqual(await browser.evaluate("window.__streamGaps"), [], "延迟快照下流式正文不消失");
+		assert.equal(await browser.evaluate("window.__liveProcess.isConnected"), true, "完成后折叠过程仍保留运行时节点");
 		await writeFile(
 			join(root, "timing.json"),
 			JSON.stringify({ firstVisibleDelayMs: lag, incremental: true }, null, 2),

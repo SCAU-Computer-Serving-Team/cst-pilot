@@ -117,6 +117,38 @@ test("splitTurn keeps only the trailing text of the last assistant message outsi
 	assert.equal(finalText, "最后正文");
 });
 
+test("splitTurn keeps final prose visible when reasoning follows it in the provider message", () => {
+	const { process, finalText } = splitTurn([
+		entry(
+			"assistant",
+			1,
+			[
+				{ type: "text", text: "最后正文" },
+				{ type: "thinking", thinking: "思考" },
+			],
+			"stop",
+		),
+	]);
+	assert.equal(finalText, "最后正文");
+	assert.deepEqual(
+		process.map((item) => item.part.kind),
+		["thinking"],
+	);
+	const unfinished = splitTurn([
+		entry(
+			"assistant",
+			1,
+			[{ type: "text", text: "检查前说明" }, { type: "thinking", thinking: "思考" }, call("a")],
+			"toolUse",
+		),
+	]);
+	assert.equal(unfinished.finalText, "");
+	assert.deepEqual(
+		unfinished.process.map((item) => item.part.kind),
+		["text", "thinking", "tools"],
+	);
+});
+
 test("splitTurn leaves everything in the process when the turn has no final text", () => {
 	const { process, finalText } = splitTurn([entry("assistant", 1, [call("a")], "toolUse")]);
 	assert.equal(process.length, 1);

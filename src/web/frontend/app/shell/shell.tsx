@@ -15,7 +15,7 @@ import {
 	Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router";
+import { Link, PrefetchPageLinks, useLocation, useNavigate, useNavigation } from "react-router";
 import { describeAccount } from "../account/format";
 import { useAccount } from "../account/use-account";
 import { accountProvider, loginPath } from "../auth/providers";
@@ -36,6 +36,23 @@ import {
 } from "./session-management";
 import { currentTheme, nextTheme, type Theme, themeLabels } from "./theme";
 
+/** 点击时直接启动选区移动，路由提交与取消仍由 React Router 校正。 */
+function moveSidebarSelection(top: HTMLElement, selection: HTMLElement, active: HTMLElement, animate: boolean) {
+	const origin = top.getBoundingClientRect();
+	const target = active.getBoundingClientRect();
+	const transform = `translate3d(0px, ${target.top - origin.top + top.scrollTop}px, 0px)`;
+	// 宽度变化与重复测量不取消仍在播放的滑动。
+	if (selection.style.transform === transform && selection.style.visibility === "visible") return;
+	if (!animate) selection.style.transition = "none";
+	selection.style.transform = transform;
+	selection.style.visibility = "visible";
+	if (!animate) {
+		void selection.offsetWidth;
+		selection.style.transition = "";
+	}
+	top.dataset.selectionReady = "true";
+}
+
 export function Sidebar({
 	preview = false,
 	collapsed = false,
@@ -51,6 +68,8 @@ export function Sidebar({
 		if (!preview) return attachTelemetryHints(window);
 	}, [preview]);
 	const location = useLocation();
+	const navigation = useNavigation();
+	const selectionPath = navigation.location?.pathname ?? location.pathname;
 	const state = useSessions();
 	const sessions: { id: string; title: string; group?: string; updatedAt?: string }[] = preview
 		? sampleSessions
@@ -125,32 +144,23 @@ export function Sidebar({
 		setMenu(null);
 		finishManagement();
 	}, [location.pathname, collapsed, finishManagement]);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: 选区高亮的位置跟随路由与列表内容，二者不在 effect 体内读取
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 列表与导航完成/取消后重新测量，含同路径导航
 	useLayoutEffect(() => {
 		const top = topRef.current;
 		const selection = selectionRef.current;
 		const active = management.managing
 			? null
-			: top?.querySelector<HTMLElement>(".sidebar-new.selected, .sidebar-session.selected");
+			: Array.from(top?.querySelectorAll<HTMLAnchorElement>(".sidebar-new, .sidebar-session") ?? []).find(
+					(row) => new URL(row.href).pathname === selectionPath,
+				);
 		if (!top || !selection) return;
 		if (!active) {
 			delete top.dataset.selectionReady;
 			selection.style.visibility = "hidden";
 			return;
 		}
-		const move = (animate: boolean) => {
-			if (!animate) selection.style.transition = "none";
-			const origin = top.getBoundingClientRect();
-			const target = active.getBoundingClientRect();
-			selection.style.transform = `translate3d(0, ${target.top - origin.top + top.scrollTop}px, 0)`;
-			selection.style.visibility = "visible";
-			if (!animate) {
-				void selection.offsetWidth;
-				selection.style.transition = "";
-			}
-		};
+		const move = (animate: boolean) => moveSidebarSelection(top, selection, active, animate);
 		move(top.dataset.selectionReady === "true");
-		top.dataset.selectionReady = "true";
 		let topWidth = top.clientWidth;
 		let activeWidth = active.offsetWidth;
 		let activeHeight = active.offsetHeight;
@@ -172,7 +182,7 @@ export function Sidebar({
 			observer.disconnect();
 			window.removeEventListener("resize", moveOnResize);
 		};
-	}, [location.pathname, sessions, management.managing]);
+	}, [selectionPath, location.key, navigation.state, sessions, management.managing]);
 	useLayoutEffect(() => {
 		if (!menu) return;
 		const element = menuRef.current;
@@ -305,6 +315,8 @@ export function Sidebar({
 			inert={collapsed}
 			aria-hidden={collapsed}
 		>
+			{/* 所有会话共用聊天路由，只插入一份预载声明。 */}
+			{sessions[0] && <PrefetchPageLinks page={`/s/${sessions[0].id}${preview ? "?preview=1" : ""}`} />}
 			<div className="sidebar-top" ref={topRef}>
 				<span className="sidebar-selection" ref={selectionRef} aria-hidden="true" />
 				<div className="sidebar-brand">
@@ -378,12 +390,16 @@ export function Sidebar({
 										<Link
 											className={`sidebar-session ${management.managing ? "sidebar-session-select" : ""} ${!management.managing && location.pathname === `/s/${session.id}` ? "selected" : ""}`}
 											data-session-id={session.id}
+											aria-current={
+												!management.managing && location.pathname === `/s/${session.id}`
+													? "page"
+													: undefined
+											}
 											data-selected={
 												(management.managing && management.selection?.has(session.id)) || undefined
 											}
 											data-disabled={(management.managing && management.busy) || undefined}
 											to={`/s/${session.id}${preview ? "?preview=1" : ""}`}
-											viewTransition
 											role={management.managing ? "checkbox" : undefined}
 											aria-checked={
 												management.managing ? (management.selection?.has(session.id) ?? false) : undefined
@@ -391,6 +407,19 @@ export function Sidebar({
 											aria-disabled={(management.managing && management.busy) || undefined}
 											onClick={(event) => {
 												if (!management.managing) {
+													if (
+														event.defaultPrevented ||
+														event.button !== 0 ||
+														event.metaKey ||
+														event.ctrlKey ||
+														event.shiftKey ||
+														event.altKey
+													)
+														return;
+													const top = topRef.current;
+													const selection = selectionRef.current;
+													if (top && selection)
+														moveSidebarSelection(top, selection, event.currentTarget, true);
 													onNavigate?.();
 													return;
 												}

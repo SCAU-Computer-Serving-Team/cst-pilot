@@ -52,7 +52,10 @@ export function ProcessSegment({
 	results: Map<string, Map<string, Message>>;
 }) {
 	const [open, setOpen] = useState(live),
-		[touched, setTouched] = useState(false);
+		[touched, setTouched] = useState(false),
+		[opened, setOpened] = useState(live);
+	// 运行时立即挂载；首次展开后保留节点和工具内部状态。
+	if (live && !opened) setOpened(true);
 	useEffect(() => {
 		if (!touched) setOpen(live);
 	}, [live, touched]);
@@ -62,6 +65,7 @@ export function ProcessSegment({
 			isExpanded={open}
 			onExpandedChange={(value) => {
 				setTouched(true);
+				if (value) setOpened(true);
 				setOpen(value);
 			}}
 		>
@@ -72,27 +76,29 @@ export function ProcessSegment({
 				</Disclosure.Trigger>
 			</Disclosure.Heading>
 			<Disclosure.Content>
-				<div className="turn-process-body">
-					{parts.map(({ entry, final, part }, index) => {
-						const key = `${entry.message.timestamp}-${index}`;
-						if (part.kind === "thinking") return <Thinking key={key} part={part.part} live={live && final} />;
-						if (part.kind === "tools")
-							return (
-								<ToolGroup
-									key={key}
-									calls={part.calls}
-									results={results.get(entry.id ?? `stamp:${entry.message.timestamp}`) ?? new Map()}
-									live={live && final}
-								/>
-							);
-						return part.kind === "text" ? <Markdown key={key} text={part.text} /> : null;
-					})}
-					{waiting && (
-						<span className="t-shimmer" data-text="......">
-							......
-						</span>
-					)}
-				</div>
+				{opened && (
+					<div className="turn-process-body">
+						{parts.map(({ entry, final, part }, index) => {
+							const key = `${entry.message.timestamp}-${index}`;
+							if (part.kind === "thinking") return <Thinking key={key} part={part.part} live={live && final} />;
+							if (part.kind === "tools")
+								return (
+									<ToolGroup
+										key={key}
+										calls={part.calls}
+										results={results.get(entry.id ?? `stamp:${entry.message.timestamp}`) ?? new Map()}
+										live={live && final}
+									/>
+								);
+							return part.kind === "text" ? <Markdown key={key} text={part.text} /> : null;
+						})}
+						{waiting && (
+							<span className="t-shimmer" data-text="......">
+								......
+							</span>
+						)}
+					</div>
+				)}
 			</Disclosure.Content>
 		</Disclosure>
 	);

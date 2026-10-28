@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./cards/special-tool.css";
 @import "@heroui/styles";
 @import "@fontsource/inter/latin-400.css";
 @import "@fontsource/inter/latin-600.css";
@@ -1233,6 +1234,8 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .sidebar-top[data-selection-ready="true"] :is(.sidebar-new, .sidebar-session) { transition: color var(--duration-quick) var(--ease-smooth-out); }
 .sidebar-top[data-selection-ready="true"] :is(.sidebar-new.selected, .sidebar-session.selected),
 .sidebar-top[data-selection-ready="true"] .sidebar-session.selected:is(:hover, [data-hovered="true"], :active, [data-pressed="true"]):not(:disabled, [aria-disabled="true"]) { background-color: transparent; }
+.sidebar-top .sidebar-session:not(.sidebar-session-select):active:not([aria-disabled="true"]) { opacity: .65; }
+.sidebar-session:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
 :is(.composer-model, .composer-thinking, .sidebar-account-trigger)[aria-expanded="true"] { color: var(--app-ink); }
 .composer-actions .composer-send, .login-card .login-submit { --button-bg-hover: var(--app-send-hover); --button-bg-pressed: var(--app-send-pressed); }
 :is(.composer-actions .composer-send, .login-card .login-submit):is(:hover, [data-hovered="true"]):not(:disabled, [aria-disabled="true"]) { background-color: var(--app-send-hover); }

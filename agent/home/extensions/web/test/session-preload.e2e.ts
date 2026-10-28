@@ -20,6 +20,7 @@ test("启动预载近七天最新十项，慢请求下缓存秒切，运行状�
 	rows.push({ id: "old", title: "七天之外", updatedAt: new Date(now - 8 * 86400000).toISOString(), running: false });
 	const loaded = new Set<string>();
 	const reads: string[] = [];
+	const assets: string[] = [];
 	const clients = new Set<ServerResponse>();
 	let slow = false,
 		completed = false;
@@ -79,6 +80,7 @@ test("启动预载近七天最新十项，慢请求下缓存秒切，运行状�
 		port,
 		() => ({ sessions: rows, stage: "preload-test" }),
 		async (_req, res, path) => {
+			if (path.startsWith("/assets/") && /\.(js|css)$/.test(path)) assets.push(path);
 			if (!path.startsWith("/api/")) return false;
 			if (path.endsWith("/events")) {
 				res.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -123,16 +125,37 @@ test("启动预载近七天最新十项，慢请求下缓存秒切，运行状�
 			"自动预载严格限定十个近期会话",
 		);
 		await browser.until("!!document.querySelector('.workspace-content')", "预载后页面保持可用");
+		await browser.until(
+			`(() => {
+				const links = [...document.querySelectorAll('link[rel="modulepreload"][href*="/chat-"]')];
+				const loaded = new Set(performance.getEntriesByType('resource').map(e => e.name));
+				return links.length > 0 && links.every(link => loaded.has(link.href));
+			})()`,
+			"点击前路由入口及依赖已加载",
+		);
+		const assetsBeforeNavigation = assets.length;
 		slow = true;
+		await browser.evaluate(`(() => {
+			window.__sessionTransitionCount = 0;
+			const original = document.startViewTransition.bind(document);
+			document.startViewTransition = (...args) => {
+				window.__sessionTransitionCount++;
+				return original(...args);
+			};
+		})()`);
 		await browser.evaluate(
 			"window.__cacheFrames=[];new MutationObserver(()=>{const id=location.pathname.split('/')[2];if(id)window.__cacheFrames.push({id,shown:document.querySelector('.chat-loaded')?.getAttribute('data-session-id'),loading:document.body.textContent.includes('正在读取会话')});}).observe(document.querySelector('.workspace-content'),{subtree:true,childList:true});",
 		);
+		const switchTimings: { id: string; elapsed: number }[] = [];
 		for (const id of ["s1", "s2", "s1", "s0"]) {
 			const elapsed = await browser.evaluate<number>(
 				`(async()=>{const start=performance.now();document.querySelector('[data-session-id="${id}"].sidebar-session').click();for(let i=0;i<20;i++){await new Promise(r=>requestAnimationFrame(r));if(document.querySelector('.chat-loaded')?.dataset.sessionId==='${id}')return performance.now()-start;}return 9999;})()`,
 			);
+			switchTimings.push({ id, elapsed });
 			assert.ok(elapsed < 600, `${id} 切换 ${elapsed}ms，不能等待1800ms的刷新`);
 		}
+		assert.deepEqual(assets.slice(assetsBeforeNavigation), [], "首次及重复切换均无需请求额外 JS 或 CSS");
+		assert.equal(await browser.evaluate("window.__sessionTransitionCount"), 0, "侧栏切换会话不等待页面快照");
 		assert.equal(
 			await browser.evaluate("window.__cacheFrames.some(f=>f.loading || (f.shown && f.id!==f.shown))"),
 			false,
@@ -216,7 +239,10 @@ test("启动预载近七天最新十项，慢请求下缓存秒切，运行状�
 			"!document.querySelector('.running-light[data-running], .running-corner[data-running]')",
 			"完成后停止扫光",
 		);
-		await writeFile(join(root, "evidence.json"), JSON.stringify({ loaded: [...loaded], reads, motion }, null, 2));
+		await writeFile(
+			join(root, "evidence.json"),
+			JSON.stringify({ loaded: [...loaded], reads, assets, switchTimings, motion }, null, 2),
+		);
 		console.log("PRELOAD_EVIDENCE", root);
 	} finally {
 		await browser?.close();

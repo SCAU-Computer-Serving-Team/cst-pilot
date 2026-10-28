@@ -224,7 +224,7 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		assert.ok(outcome.result.includes("READ_E2E_OK"));
 		evidence.acceptedMessageRetry = { userMessages: outcome.users, toolResults: outcome.tools };
 		await browser.evaluate(
-			`window.__originalFetch=window.fetch;window.fetch=async(...args)=>{if(String(args[0]).endsWith('/api/sessions/${previous.id}'))await new Promise(r=>setTimeout(r,500));return window.__originalFetch(...args)};const start=document.startViewTransition.bind(document);document.startViewTransition=(...args)=>{const t=start(...args);t.ready.then(()=>{window.__sessionMotion=document.getAnimations().filter(a=>a.effect?.pseudoElement?.includes('session-messages')).map(a=>({pseudo:a.effect.pseudoElement,duration:a.effect.getTiming().duration,frames:a.effect.getKeyframes()}));});return t;};`,
+			`window.__originalFetch=window.fetch;window.fetch=async(...args)=>{if(String(args[0]).endsWith('/api/sessions/${previous.id}'))await new Promise(r=>setTimeout(r,500));return window.__originalFetch(...args)};window.__sessionTransitionCount=0;const start=document.startViewTransition.bind(document);document.startViewTransition=(...args)=>{window.__sessionTransitionCount++;return start(...args);};`,
 		);
 		await browser.click(`.sidebar-session[data-session-id="${previous.id}"]`);
 		await browser.until(
@@ -236,25 +236,13 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 			false,
 			"预载切页不出现读取占位",
 		);
-		await browser.until("Array.isArray(window.__sessionMotion)", "会话切换快照");
-		const motion =
-			await browser.evaluate<{ pseudo: string; duration: number; frames: { transform?: string }[] }[]>(
-				"window.__sessionMotion",
-			);
-		const outgoing = motion.find((item) => item.pseudo === "::view-transition-old(session-messages)");
-		const incoming = motion.find((item) => item.pseudo === "::view-transition-new(session-messages)");
-		assert.equal(outgoing?.duration, 80);
-		assert.equal(incoming?.duration, 150);
-		assert.match(outgoing?.frames.at(-1)?.transform ?? "", /-4px/);
-		assert.match(incoming?.frames[0]?.transform ?? "", /4px/);
+		assert.equal(await browser.evaluate("window.__sessionTransitionCount"), 0, "侧栏切换不等待页面快照");
 		await browser.until("document.querySelector('.conversation')?.textContent.includes('昨日回答')", "昨日会话正文");
 		assert.equal(await browser.evaluate("document.querySelector('.chat-loaded').dataset.sessionId"), previous.id);
 		assert.equal(
-			await browser.evaluate(
-				"document.querySelector('.chat-loaded').getAnimations().some(a=>a.animationName==='chat-content-reveal')",
-			),
-			false,
-			"命中预载时由页面快照衔接，不叠加局部正文入场",
+			await browser.evaluate("getComputedStyle(document.querySelector('.chat-loaded')).animationName"),
+			"chat-content-reveal",
+			"缓存命中保留正文淡入",
 		);
 		await browser.evaluate("window.fetch=window.__originalFetch");
 		await browser.click(`.sidebar-session[data-session-id="${id}"]`);
@@ -273,6 +261,13 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		await browser.until(
 			"document.querySelector('.conversation')?.textContent.includes('测试回答')",
 			"刷新恢复真实对话历史",
+		);
+		assert.equal(
+			await browser.evaluate(
+				"document.querySelector('.assistant-turn > .markdown')?.textContent.includes('测试回答')",
+			),
+			true,
+			"正文后跟思考内容时，刷新后正文仍显示在过程外",
 		);
 		await browser.until("!!document.querySelector('.turn-process-head')", "工具过程入口");
 		assert.ok(
