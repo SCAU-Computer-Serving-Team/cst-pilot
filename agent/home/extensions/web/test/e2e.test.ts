@@ -130,12 +130,6 @@ test("HTTP 端到端冒烟：并发会话与队列、幂等重放、模型范围
 				body: JSON.stringify(input),
 			});
 		const runtime = (await pool.getServices()).modelRuntime;
-		const originalRefresh = runtime.refresh.bind(runtime);
-		let providerCatalogRefreshes = 0;
-		runtime.refresh = (options) => {
-			if (options?.providers?.includes("probe") && options.signal) providerCatalogRefreshes++;
-			return originalRefresh(options);
-		};
 		const login = await fetch(`${origin}/api/auth/probe/api-key`, {
 			method: "PUT",
 			headers: {
@@ -147,9 +141,14 @@ test("HTTP 端到端冒烟：并发会话与队列、幂等重放、模型范围
 			body: JSON.stringify({ key: "mock-secret" }),
 		});
 		assert.equal(login.status, 200);
-		for (let attempt = 0; attempt < 50 && !providerCatalogRefreshes; attempt++)
-			await new Promise((resolve) => setTimeout(resolve, 10));
-		assert.equal(providerCatalogRefreshes, 1, "登录后按 Pi 的方式刷新该 Provider 模型目录");
+		assert.equal(
+			(await runtime.listCredentials()).find((credential) => credential.providerId === "probe")?.type,
+			"api_key",
+		);
+		assert.ok(
+			(await runtime.getAvailable("probe")).some((model) => model.id === "mock"),
+			"登录后模型立即可用",
+		);
 		const [one, two] = await Promise.all([
 			send("/api/sessions", { provider: "probe", modelId: "mock", thinkingLevel: "off" }, "new-one").then(
 				(response) => response.json(),

@@ -16,6 +16,8 @@ interface Binding {
 	refresh: ModelRuntime["refresh"];
 	login: ModelRuntime["login"];
 	logout: ModelRuntime["logout"];
+	setRuntimeApiKey: ModelRuntime["setRuntimeApiKey"];
+	removeRuntimeApiKey: ModelRuntime["removeRuntimeApiKey"];
 	tail: Promise<unknown>;
 	users: number;
 }
@@ -26,6 +28,7 @@ export class ModelCatalog {
 	private readonly createRuntime: () => Promise<ModelRuntime>;
 	private readonly automatic: boolean;
 	private worker?: Promise<ModelRuntime>;
+	private readonly appliedRuntimeKeys = new Map<string, string>();
 	private readonly home: string;
 	private readonly bindings = new Map<ModelRuntime, Binding>();
 	private readonly listeners = new Set<(update: CatalogUpdate) => void>();
@@ -34,6 +37,7 @@ export class ModelCatalog {
 	private active?: AbortController;
 	private generation = 0;
 	private credentialWrites = 0;
+	private readonly changedCredentials = new Set<string>();
 	private nextCheckAt = 0;
 	private timer?: ReturnType<typeof setInterval>;
 	private closed = false;
@@ -62,6 +66,8 @@ export class ModelCatalog {
 				refresh: runtime.refresh.bind(runtime),
 				login: runtime.login.bind(runtime),
 				logout: runtime.logout.bind(runtime),
+				setRuntimeApiKey: runtime.setRuntimeApiKey.bind(runtime),
+				removeRuntimeApiKey: runtime.removeRuntimeApiKey.bind(runtime),
 				tail: Promise.resolve(),
 				users: 0,
 			};
@@ -70,27 +76,12 @@ export class ModelCatalog {
 			// 原生 TUI 选择器调用 refresh({signal})，仍沿用其缓存首屏与异步更新流程。
 			runtime.refresh = (options = {}) =>
 				options.allowNetwork === false ? this.reload(original, options) : this.refresh(options);
-			runtime.login = async (...args) => {
-				this.credentialWrites++;
-				this.invalidate();
-				try {
-					return await original.login(...args);
-				} finally {
-					this.credentialWrites--;
-					this.invalidate();
-					this.check();
-				}
-			};
-			runtime.logout = async (...args) => {
-				this.credentialWrites++;
-				this.invalidate();
-				try {
-					await original.logout(...args);
-				} finally {
-					this.credentialWrites--;
-					this.invalidate();
-				}
-			};
+			runtime.login = (...args) => this.changeCredential(args[0], () => original.login(...args));
+			runtime.logout = (...args) => this.changeCredential(args[0], () => original.logout(...args));
+			runtime.setRuntimeApiKey = (...args) =>
+				this.changeCredential(args[0], () => original.setRuntimeApiKey(...args));
+			runtime.removeRuntimeApiKey = (...args) =>
+				this.changeCredential(args[0], () => original.removeRuntimeApiKey(...args));
 		}
 		binding.users++;
 		if (this.automatic && !this.timer) {
@@ -108,9 +99,31 @@ export class ModelCatalog {
 			runtime.refresh = binding.refresh;
 			runtime.login = binding.login;
 			runtime.logout = binding.logout;
+			runtime.setRuntimeApiKey = binding.setRuntimeApiKey;
+			runtime.removeRuntimeApiKey = binding.removeRuntimeApiKey;
 			this.bindings.delete(runtime);
 			if (!this.bindings.size) void this.close();
 		};
+	}
+
+	/** 凭据操作共用取消和刷新入口，连续变更只在完成后刷新受影响的服务。 */
+	private async changeCredential<T>(providerId: string, action: () => Promise<T>): Promise<T> {
+		this.credentialWrites++;
+		this.invalidate();
+		try {
+			const result = await action();
+			this.changedCredentials.add(providerId);
+			return result;
+		} finally {
+			this.credentialWrites--;
+			this.invalidate();
+			if (!this.credentialWrites && this.changedCredentials.size) {
+				const providers = [...this.changedCredentials];
+				this.changedCredentials.clear();
+				this.nextCheckAt = Date.now() + 30_000;
+				void this.refresh({ providers, force: true });
+			}
+		}
 	}
 
 	subscribe(listener: (update: CatalogUpdate) => void): () => void {
@@ -167,6 +180,29 @@ export class ModelCatalog {
 		});
 	}
 
+	/** 临时密钥只复制到后台运行时内存；文件凭据与 OAuth 继续由 Pi 管理。 */
+	private async syncRuntimeKeys(worker: ModelRuntime, signal: AbortSignal): Promise<void> {
+		const keys = new Map<string, string>();
+		for (const runtime of this.bindings.keys()) {
+			for (const provider of runtime.getProviders()) {
+				if (runtime.getProviderAuthStatus(provider.id).source !== "runtime" || !worker.getProvider(provider.id))
+					continue;
+				const resolved = await runtime.getAuth(provider.id, { signal });
+				if (resolved?.auth.apiKey) keys.set(provider.id, resolved.auth.apiKey);
+			}
+		}
+		for (const id of this.appliedRuntimeKeys.keys()) {
+			if (keys.has(id)) continue;
+			await worker.removeRuntimeApiKey(id, { signal });
+			this.appliedRuntimeKeys.delete(id);
+		}
+		for (const [id, key] of keys) {
+			if (this.appliedRuntimeKeys.get(id) === key) continue;
+			await worker.setRuntimeApiKey(id, key, { signal });
+			this.appliedRuntimeKeys.set(id, key);
+		}
+	}
+
 	private async run(options: ModelsRefreshOptions, generation: number): Promise<ModelsRefreshResult> {
 		if (this.closed || this.credentialWrites || generation !== this.generation) return cancelled();
 		const controller = new AbortController();
@@ -179,6 +215,7 @@ export class ModelCatalog {
 			const worker = await this.worker;
 			for (const [id, factory] of catalogProviderFactories(this.home))
 				if (!worker.getRegisteredNativeProvider(id)) worker.registerNativeProvider(factory());
+			await this.syncRuntimeKeys(worker, controller.signal);
 			if (controller.signal.aborted) return cancelled();
 			const before = JSON.stringify(worker.getModels());
 			result = await worker.refresh({
@@ -202,6 +239,7 @@ export class ModelCatalog {
 			result = { aborted: result.aborted, errors };
 		} catch {
 			this.worker = undefined;
+			this.appliedRuntimeKeys.clear();
 			result = {
 				aborted: controller.signal.aborted,
 				errors: new Map([["catalog", new Error("模型目录暂时无法更新。")]]),
@@ -231,6 +269,7 @@ export class ModelCatalog {
 		this.invalidate();
 		await this.tail;
 		this.worker = undefined;
+		this.appliedRuntimeKeys.clear();
 	}
 }
 

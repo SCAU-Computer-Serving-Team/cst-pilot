@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { SessionEvents } from "../session/events.ts";
 import { InboxConflict } from "../session/inbox.ts";
 import type { WebSessionPool } from "../session/sessions.ts";
@@ -34,43 +33,6 @@ export function createAuthRoutes({
 	writeOnce,
 	serialize,
 }: AuthRoutesOptions) {
-	const refreshes = new Map<string, { controller: AbortController; task: Promise<void> }>();
-	let closing = false;
-	function refreshProviderCatalog(providerId: string, runtime: ModelRuntime): void {
-		if (closing) return;
-		refreshes.get(providerId)?.controller.abort();
-		const controller = new AbortController();
-		const timeout = setTimeout(() => controller.abort(), 15_000);
-		const task = (async () => {
-			try {
-				// 沿用 Pi 登录后的单 Provider 刷新；项目启动时关闭目录联网，登录动作显式允许此服务联网。
-				const result = await runtime.refresh({
-					providers: [providerId],
-					allowNetwork: true,
-					signal: controller.signal,
-				});
-				if (!closing && refreshes.get(providerId)?.controller === controller)
-					globalEvents.publish("state", {
-						type: "models_changed",
-						providerId,
-						...(result.aborted || result.errors.size ? { warning: "模型目录刷新失败，正在使用缓存模型。" } : {}),
-					});
-			} catch {
-				if (!closing && refreshes.get(providerId)?.controller === controller)
-					globalEvents.publish("state", {
-						type: "models_changed",
-						providerId,
-						warning: "模型目录刷新失败，正在使用缓存模型。",
-					});
-			} finally {
-				clearTimeout(timeout);
-			}
-		})();
-		refreshes.set(providerId, { controller, task });
-		void task.finally(() => {
-			if (refreshes.get(providerId)?.task === task) refreshes.delete(providerId);
-		});
-	}
 	const oauthFlows = new OAuthFlows((providerId, view) => {
 		globalEvents.publish("state", { type: "oauth_state", providerId, ...view });
 		if (view.deviceCode) globalEvents.publish("state", { type: "oauth_device_code", providerId, ...view.deviceCode });
@@ -79,10 +41,6 @@ export function createAuthRoutes({
 			if (providerId === "cstoa") account.invalidate();
 			globalEvents.publish("state", { type: "oauth_result", providerId, ok: true });
 			globalEvents.publish("state", { type: "auth_changed", providerId });
-			void pool
-				.getServices()
-				.then(({ modelRuntime }) => refreshProviderCatalog(providerId, modelRuntime))
-				.catch(() => {});
 		}
 	});
 
@@ -310,7 +268,6 @@ export function createAuthRoutes({
 					invalidAuth.delete(providerId);
 					if (providerId === "cstoa") account.invalidate();
 					globalEvents.publish("state", { type: "auth_changed", providerId });
-					refreshProviderCatalog(providerId, modelRuntime);
 					return responseBody;
 				}),
 			);
@@ -335,11 +292,6 @@ export function createAuthRoutes({
 		return false;
 	};
 	return Object.assign(handle, {
-		close: async () => {
-			closing = true;
-			await oauthFlows.close();
-			for (const { controller } of refreshes.values()) controller.abort();
-			await Promise.allSettled([...refreshes.values()].map(({ task }) => task));
-		},
+		close: () => oauthFlows.close(),
 	});
 }

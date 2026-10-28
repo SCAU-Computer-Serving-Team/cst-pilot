@@ -3,18 +3,24 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { test } from "node:test";
+import type { Provider } from "@earendil-works/pi-ai";
 import { initTheme, ModelRuntime, ModelSelectorComponent } from "@earendil-works/pi-coding-agent";
 import {
 	type Terminal,
 	TuiMainScreen,
 } from "../../../../node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-tui/dist/index.js";
+import { catalogProviderFactories } from "../../oauth/catalog-factories.ts";
 import { ModelCatalog } from "../../runtime/model-catalog.ts";
 import { testRoot } from "./support.ts";
 
-async function fixture(automatic = false) {
+async function fixture(automatic = false, storedKey = true, beforeAttach?: (runtime: ModelRuntime) => Promise<void>) {
 	const home = await mkdtemp(join(await testRoot(), "catalog-refresh-"));
-	await writeFile(join(home, "auth.json"), JSON.stringify({ deepseek: { type: "api_key", key: "test-only-secret" } }));
+	await writeFile(
+		join(home, "auth.json"),
+		JSON.stringify(storedKey ? { deepseek: { type: "api_key", key: "test-only-secret" } } : {}),
+	);
 	let requests = 0;
+	const requestListeners = new Set<() => void>();
 	let fail = false;
 	let release: (() => void) | undefined;
 	let waiting: Promise<void> | undefined;
@@ -32,6 +38,7 @@ async function fixture(automatic = false) {
 	};
 	const server = createServer((request, response) => {
 		requests++;
+		for (const listener of requestListeners) listener();
 		assert.equal(request.headers.authorization, undefined);
 		void (async () => {
 			await waiting;
@@ -59,6 +66,7 @@ async function fixture(automatic = false) {
 		});
 	const catalog = new ModelCatalog(home, { createRuntime, automatic });
 	const runtime = await createRuntime();
+	await beforeAttach?.(runtime);
 	const detach = catalog.attach(runtime);
 	return {
 		home,
@@ -66,6 +74,16 @@ async function fixture(automatic = false) {
 		catalog,
 		model,
 		requests: () => requests,
+		waitForRequests: (count: number) =>
+			new Promise<void>((resolve) => {
+				const ready = () => {
+					if (requests < count) return;
+					requestListeners.delete(ready);
+					resolve();
+				};
+				requestListeners.add(ready);
+				ready();
+			}),
 		fail: () => {
 			fail = true;
 		},
@@ -168,6 +186,95 @@ test("取消一个调用者不取消其他调用者，退出登录会取消旧�
 			false,
 		);
 	} finally {
+		await f.close();
+	}
+});
+
+test("CLI 在接入前设置的临时密钥可用于目录刷新，且不落盘", async () => {
+	const previousKey = process.env.DEEPSEEK_API_KEY;
+	delete process.env.DEEPSEEK_API_KEY;
+	const f = await fixture(false, false, (runtime) => runtime.setRuntimeApiKey("deepseek", "ephemeral-cli-key"));
+	try {
+		const result = await f.runtime.refresh({ providers: ["deepseek"], force: true });
+		assert.equal(result.errors.size, 0);
+		assert.equal(f.requests(), 1);
+		assert.ok(f.runtime.getModel("deepseek", f.model.id));
+		assert.equal(await readFile(join(f.home, "auth.json"), "utf8"), "{}");
+		assert.equal((await readFile(join(f.home, "models-store.json"), "utf8")).includes("ephemeral-cli-key"), false);
+	} finally {
+		await f.close();
+		if (previousKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+		else process.env.DEEPSEEK_API_KEY = previousKey;
+	}
+});
+
+test("移除临时密钥取消在途请求，后续刷新不继续使用旧密钥", { timeout: 5000 }, async () => {
+	const previousKey = process.env.DEEPSEEK_API_KEY;
+	delete process.env.DEEPSEEK_API_KEY;
+	const f = await fixture(false, false, (runtime) => runtime.setRuntimeApiKey("deepseek", "temporary-key"));
+	try {
+		await f.runtime.refresh({ providers: ["deepseek"], force: true });
+		f.hold();
+		const pending = f.catalog.refresh({ providers: ["deepseek"], force: true });
+		await f.waitForRequests(2);
+		await f.runtime.removeRuntimeApiKey("deepseek");
+		f.release();
+		assert.equal((await pending).aborted, true);
+		await f.catalog.refresh({ providers: ["deepseek"], force: true });
+		assert.equal(f.requests(), 2);
+		assert.equal(await readFile(join(f.home, "auth.json"), "utf8"), "{}");
+	} finally {
+		await f.close();
+		if (previousKey === undefined) delete process.env.DEEPSEEK_API_KEY;
+		else process.env.DEEPSEEK_API_KEY = previousKey;
+	}
+});
+
+test("添加、替换和移除临时密钥及登录共用单服务刷新，不重复拉取", async () => {
+	const f = await fixture();
+	const base = f.runtime.getProvider("deepseek");
+	assert.ok(base);
+	const observed: string[] = [];
+	const factory = (): Provider => ({
+		...base,
+		id: "key-probe",
+		auth: {
+			apiKey: {
+				name: "test-key",
+				login: async (interaction) => ({
+					type: "api_key",
+					key: await interaction.prompt({ type: "secret", message: "key" }),
+				}),
+				resolve: async ({ credential }) => (credential?.key ? { auth: { apiKey: credential.key } } : undefined),
+			},
+		},
+		getModels: () => [],
+		refreshModels: async (context) => {
+			if (context.allowNetwork && context.credential?.type === "api_key")
+				observed.push(context.credential.key ?? "");
+		},
+	});
+	catalogProviderFactories(f.home).set("key-probe", factory);
+	f.runtime.registerNativeProvider(factory());
+	const refreshed = () => f.catalog.refresh({ providers: ["key-probe"], force: true });
+	try {
+		await f.runtime.setRuntimeApiKey("key-probe", "first-key");
+		await refreshed();
+		assert.deepEqual(observed, ["first-key"]);
+		await f.runtime.setRuntimeApiKey("key-probe", "second-key");
+		await refreshed();
+		assert.deepEqual(observed, ["first-key", "second-key"]);
+		await f.runtime.removeRuntimeApiKey("key-probe");
+		await refreshed();
+		assert.deepEqual(observed, ["first-key", "second-key"]);
+		await f.runtime.login("key-probe", "api_key", { prompt: async () => "login-key", notify: () => {} });
+		f.catalog.check();
+		await refreshed();
+		assert.deepEqual(observed, ["first-key", "second-key", "login-key"]);
+		const auth = await readFile(join(f.home, "auth.json"), "utf8");
+		assert.equal(auth.includes("first-key") || auth.includes("second-key"), false);
+	} finally {
+		catalogProviderFactories(f.home).delete("key-probe");
 		await f.close();
 	}
 });
