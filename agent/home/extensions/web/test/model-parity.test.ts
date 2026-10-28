@@ -56,6 +56,18 @@ test("Web 模型清单与 TUI 共用可用口径、scoped 设置和下一次启�
 			tui.map((m) => `${m.provider}/${m.id}`).sort(),
 		);
 		assert.deepEqual(web.enabled, ["probe/two"]);
+		const refresh = await fetch(`${origin}/api/models/refresh`, {
+			method: "POST",
+			headers: {
+				Origin: origin,
+				"X-CST-Web-Request": "1",
+				"Content-Type": "application/json",
+				"Idempotency-Key": "manual-model-refresh",
+			},
+			body: "{}",
+		});
+		assert.equal(refresh.status, 200);
+		assert.deepEqual(await refresh.json(), { aborted: false, failedProviders: [] });
 		const select = (input: unknown, key: string) =>
 			fetch(`${origin}/api/models/select`, {
 				method: "POST",

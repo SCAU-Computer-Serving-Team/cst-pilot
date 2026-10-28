@@ -6,7 +6,7 @@ import { useGlobalEvents } from "../data/web-state";
 import { Notification } from "../shell/notification";
 import { loadSetting, settingReady } from "./settings-resource-cache";
 
-const Feedback = createContext<(message?: string) => void>(() => {});
+const Feedback = createContext<(message?: string, kind?: "success" | "warning") => void>(() => {});
 export const useSettingsFeedback = () => useContext(Feedback);
 
 function resourceForSettingsRoute(path: string): string | undefined {
@@ -82,8 +82,8 @@ export function SettingsFeedback({ children }: { children: ReactNode }) {
 	});
 	return (
 		<Feedback
-			value={(message = "已自动保存") =>
-				setNotice((previous) => ({ message, kind: "success", revision: (previous?.revision ?? 0) + 1 }))
+			value={(message = "已自动保存", kind = "success") =>
+				setNotice((previous) => ({ message, kind, revision: (previous?.revision ?? 0) + 1 }))
 			}
 		>
 			{children}

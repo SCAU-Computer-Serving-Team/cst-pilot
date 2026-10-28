@@ -96,6 +96,14 @@ export async function apiJson<T>(
 	return data as T;
 }
 
+export type CatalogRefreshResult = {
+	aborted: boolean;
+	failedProviders: string[];
+};
+
+export function refreshModelCatalog(): Promise<CatalogRefreshResult> {
+	return apiJson<CatalogRefreshResult>("/api/models/refresh", { method: "POST" });
+}
 export function startOauthLogin(
 	providerId: string,
 	method: "oauth" | "api_key" = "oauth",

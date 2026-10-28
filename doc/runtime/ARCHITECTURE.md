@@ -25,10 +25,18 @@ Pi `0.85.1` 扩展 API 未直接暴露获取当前 `AgentSession` 实例或拦�
 | 子模块 | 实现机制 |
 |---|---|
 | `adapter.ts` | 包装 `AgentSession.prototype.bindExtensions`，在实例绑定扩展时登记该会话，并包装其 `prompt`、`cycleModel` 与 `dispose` 方法；扩展重载时复用 `globalThis` 上的进程级登记 |
+| `model-catalog.ts` | 按工具包目录共享后台 `ModelRuntime`，与界面实例共用目录缓存和凭据；统一目录联网、任务合并、取消与变化订阅 |
 | `owner.ts` | 管理基于 Windows 命名管道（非 Windows 回退本机回环监听端口）的跨进程会话独占锁 |
 | `configuration.ts` | 在 TUI 打开模型菜单、范围菜单、触发模型循环快捷键（读取 `KeybindingsManager` 实时键位）及每次 `prompt` 前重读 `settings.json`、`models.json`、`models-store.json` 与 `auth.json` |
 
 TUI 进入 Web 待机后，扩展通过终端原始输入拦截器消费全部按键，此时运行协调不再触发配置刷新或分发模型菜单。
+
+## 模型目录刷新
+
+1. `model-catalog.ts` 包装界面实例的公开 `refresh`、`login` 和 `logout`。原生 TUI 的默认刷新转交后台运行时并显式开启联网；`allowNetwork: false` 保持本地重读。
+2. 后台运行时独立执行联网，界面缓存重读不会取消后台请求。相同请求合并，其他刷新串行执行，联网任务总预算为 15 秒；单个菜单取消只结束自己的等待。
+3. 缓存由 Pi `FileModelsStore` 锁定写入。成功后重读各界面实例，再通过订阅通知 Web；会话在空闲时更新当前模型元数据。
+4. 登录、退出与服务配置变更使旧任务失效。最后一个使用者释放后清理定时器与在途任务；Provider 工厂通过进程级登记共享，OAuth 扩展可独立加载。
 
 ## 跨进程会话写权锁
 

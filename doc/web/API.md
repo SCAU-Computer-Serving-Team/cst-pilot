@@ -62,6 +62,7 @@ CSTOA 远端接口与字段映射见 [../auth/API.md](../auth/API.md)。本机 W
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/api/models` | 可用模型清单、启用范围（`enabled=null` 表全启用）、未匹配的 `unavailableEnabled` 及可选 `sessionId` 当前选择 |
+| `POST` | `/api/models/refresh` | 正文 `{}`，强制刷新已配置供应商目录；返回 `{ aborted, failedProviders }`，部分失败仍返回 200，沿用同源校验与去重键 |
 | `POST` | `/api/models/select` | 保存跨端默认模型；传入 `sessionId` 时同步切换该会话模型 |
 | `POST` | `/api/models/scoped` | 更新启用模型范围与顺序（全选可用模型时归一为 `null`） |
 | `POST` | `/api/models/thinking` | 按 `sessionId` 设置思考强度 |

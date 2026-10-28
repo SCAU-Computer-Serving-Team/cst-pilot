@@ -2,6 +2,7 @@ import { ChevronRight, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 import { ProviderServices } from "../auth/provider-services";
 import type { ProviderStatus } from "../data/api";
+import { CatalogRefreshButton } from "../settings/catalog-refresh-button";
 import { modelListRows } from "../settings/model-list";
 import { settingsProviders } from "../settings/provider-list";
 import { SettingsHeading, SettingsLink, SettingsLoadState, SettingsSection } from "../settings/settings-frame";
@@ -22,7 +23,7 @@ export default function AddModelService() {
 	const list = useAnimatedHeight(`${expanded}:${query}:${listed.total}`);
 	return (
 		<>
-			<SettingsHeading title="添加服务" back />
+			<SettingsHeading title="添加服务" back action={<CatalogRefreshButton />} />
 			<SettingsSearch label="搜索模型服务" value={query} onChange={setQuery} />
 			<SettingsLoadState {...state} onRetry={() => void state.refresh()} />
 			{state.data && (

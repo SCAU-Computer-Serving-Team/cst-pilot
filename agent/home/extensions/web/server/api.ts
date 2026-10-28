@@ -46,6 +46,14 @@ export function createWebApi(
 	const inboxes = new Map<string, SessionInbox>();
 	const streams = new Map<string, SessionEvents>();
 	const globalEvents = new SessionEvents();
+	const offCatalog = pool.catalog.subscribe((update) => {
+		globalEvents.publish("state", {
+			type: "models_changed",
+			...(update.aborted || update.failedProviders.length
+				? { warning: "部分模型目录未能更新，正在使用已有目录。" }
+				: {}),
+		});
+	});
 	const invalidAuth = new Set<string>();
 	const images = new ImageStore(join(agentDir, "web-inbox", "attachments"));
 	const receipts = new MutationReceipts(join(agentDir, "web-inbox", "receipts"));
@@ -729,6 +737,7 @@ export function createWebApi(
 	};
 	return Object.assign(handle, {
 		close: async () => {
+			offCatalog();
 			account.invalidate();
 			await authRoutes.close();
 			await Promise.all([...inboxes.values()].map((box) => box.close()));

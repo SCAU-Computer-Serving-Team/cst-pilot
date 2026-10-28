@@ -56,7 +56,7 @@ flowchart TB
 | `agent/home/settings.json` | 默认模型、启用范围、思考强度、TUI 主题 | TUI 与 Web 共用；按字段合并写入，操作前重读 |
 | `agent/home/web-settings.json` | Web 主题与空模型范围标记 | Web 独占；默认 `light`，串行原子替换 |
 | `agent/home/models.json` | 自定义模型服务、服务地址覆盖及可选 API key | TUI 与 Web 共用；原子替换后刷新 `ModelRuntime`，不得进入发行包 |
-| `agent/home/models-store.json` | 离线与动态模型目录缓存 | 发行包预置上游目录与默认模型；CSTOA 登录后按凭据更新 |
+| `agent/home/models-store.json` | 离线与动态模型目录缓存 | 发行包预置上游目录与默认模型；已配置供应商后台更新，CSTOA 目录按凭据隔离 |
 | `agent/home/auth.json` | 各模型服务的 OAuth 令牌与 APIKEY | Pi `AuthStorage` 管理；严禁进入浏览器存储、日志或发行包 |
 | `agent/home/device.json` | CSTOA 设备标识 | 首次登录生成，随 U 盘保留 |
 | `agent/home/sessions/` | 会话历史 JSONL | TUI 与 Web 共用；按会话 ID 跨进程互斥持有写权 |
@@ -75,6 +75,6 @@ flowchart TB
 
 ### 网络与代理边界
 
-- 启动器设置 `PI_OFFLINE=1` 并配置 `enableInstallTelemetry: false`，关闭 Pi 内置的版本检查、包更新、模型目录拉取与官方遥测。
+- 启动器设置 `PI_OFFLINE=1` 并配置 `enableInstallTelemetry: false`，关闭 Pi 默认的版本检查、包更新与官方遥测。模型目录由项目协调器显式传入 `allowNetwork: true` 后台更新，环境变量保持不变。
 - `PI_OFFLINE=1` 不拦截扩展发起的请求：模型推理、联网检索工具、CSTOA 认证与动态目录、项目双端遥测按各自配置访问网络。
 - 发行包生成最小 `agent/home/web-search.json`，仅配置 `ssrf.allowRanges: ["198.18.0.0/15"]` 与 `trustEnvProxy: false`，使 `pi-web-access` 在机主开启 TUN 假 IP 代理时可抓取公开网页，同时继续拦截回环地址、其他私网网段与私网重定向。

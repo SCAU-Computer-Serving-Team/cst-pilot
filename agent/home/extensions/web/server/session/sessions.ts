@@ -9,9 +9,9 @@ import {
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { BitLockerWebInteraction, bitLockerWebInteractions } from "../../../diagnostics/bitlocker-web.ts";
-import { refreshCstoaModels } from "../../../oauth/sync.ts";
 import { installRuntimeAdapter, registerRuntimeSession } from "../../../runtime/adapter.ts";
 import { checkSharedConfiguration } from "../../../runtime/configuration.ts";
+import { getModelCatalog, type ModelCatalog } from "../../../runtime/model-catalog.ts";
 import { ownSession } from "../../../runtime/owner.ts";
 import { finalizeSession as finalizeTelemetrySession, processCloseBudget } from "../../../telemetry/shared.ts";
 import { replaceFile } from "./replace-file.ts";
@@ -51,6 +51,7 @@ export interface WebSessionPoolOptions {
 	cwd: string;
 	agentDir: string;
 	sessionDir: string;
+	catalog?: ModelCatalog;
 	/** Suppress registration of the Web extension while its own loader runs. */
 	withLoader<T>(load: () => Promise<T>): Promise<T>;
 }
@@ -64,9 +65,12 @@ export class WebSessionPool {
 	private refreshing?: Promise<AgentSessionServices>;
 	private closed = false;
 	private readonly options: WebSessionPoolOptions;
+	readonly catalog: ModelCatalog;
+	private detachCatalog?: () => void;
 
 	constructor(options: WebSessionPoolOptions) {
 		this.options = options;
+		this.catalog = options.catalog ?? getModelCatalog(options.agentDir);
 		installRuntimeAdapter();
 	}
 
@@ -84,6 +88,9 @@ export class WebSessionPool {
 					noSkills: true,
 					additionalSkillPaths: [join(this.options.agentDir, "skills")],
 				},
+			}).then((services) => {
+				if (!this.closed) this.detachCatalog = this.catalog.attach(services.modelRuntime);
+				return services;
 			}),
 		);
 		return this.canonical;
@@ -95,7 +102,7 @@ export class WebSessionPool {
 		const task = this.getServices().then(async (services) => {
 			await services.settingsManager.reload();
 			await services.modelRuntime.refresh({ allowNetwork: false });
-			await refreshCstoaModels(services.modelRuntime);
+			this.catalog.check();
 			checkSharedConfiguration(services.settingsManager, services.modelRuntime);
 			return services;
 		});
@@ -147,7 +154,7 @@ export class WebSessionPool {
 			// 遥测按会话起因分类；缺省会是 startup，丢失 new/resume/fork 语义。
 			sessionStartEvent: { type: "session_start", reason: startReason },
 		});
-		registerRuntimeSession(session, this.options.agentDir, release);
+		registerRuntimeSession(session, this.options.agentDir, release, this.catalog);
 		const ui = new WebUiBridge();
 		const bitlocker = new BitLockerWebInteraction();
 		bitLockerWebInteractions.set(session.sessionId, bitlocker);
@@ -483,5 +490,7 @@ export class WebSessionPool {
 			session.dispose();
 		}
 		this.slots.clear();
+		this.detachCatalog?.();
+		this.detachCatalog = undefined;
 	}
 }

@@ -8932,7 +8932,7 @@
               "id": "ief2m",
               "name": "关闭、Esc 与完成后返回设置；自定义地址按需展开；授权使用服务返回的步骤",
               "fill": "#5F676C",
-              "content": "关闭、Esc 与完成返回设置；自动回调优先，手动输入按需展开；不加重复引导",
+              "content": "添加服务标题右侧：更新模型，104×32，图标14、间距8；更新中禁用，完成与失败使用顶部通知。关闭、Esc 与完成返回设置；自动回调优先。",
               "fontFamily": "Source Han Sans CN",
               "fontSize": 14,
               "fontWeight": "normal"
@@ -16915,6 +16915,47 @@
                           "fontWeight": "600"
                         }
                       ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "gL294",
+                      "name": "按钮 · 更新模型",
+                      "width": 104,
+                      "height": 32,
+                      "fill": "#FFFFFF",
+                      "cornerRadius": 6,
+                      "stroke": "#D5D5D5",
+                      "strokeWidth": 1,
+                      "gap": 8,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "Fj0p9",
+                          "name": "refresh-cw 图标",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "refresh-cw",
+                          "library": "lucide",
+                          "fill": "#202020"
+                        },
+                        {
+                          "type": "text",
+                          "id": "OyBqs",
+                          "name": "更新模型",
+                          "fill": "#202020",
+                          "content": "更新模型",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "400"
+                        }
+                      ]
                     }
                   ]
                 },
@@ -18350,6 +18391,47 @@
                           "fontFamily": "Source Han Sans CN",
                           "fontSize": 24,
                           "fontWeight": "600"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "AWTkn",
+                      "name": "按钮 · 更新模型",
+                      "width": 104,
+                      "height": 32,
+                      "fill": "#0B1215",
+                      "cornerRadius": 6,
+                      "stroke": "#3C4448",
+                      "strokeWidth": 1,
+                      "gap": 8,
+                      "padding": [
+                        0,
+                        12
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "Z8vYvl",
+                          "name": "refresh-cw 图标",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "refresh-cw",
+                          "library": "lucide",
+                          "fill": "#E0EAEE"
+                        },
+                        {
+                          "type": "text",
+                          "id": "Z0sK3h",
+                          "name": "更新模型",
+                          "fill": "#E0EAEE",
+                          "content": "更新模型",
+                          "lineHeight": 1.5,
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
+                          "fontWeight": "400"
                         }
                       ]
                     }

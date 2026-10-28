@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { AgentSession, resolveModelScopeWithDiagnostics } from "@earendil-works/pi-coding-agent";
-import { refreshCstoaModels } from "../oauth/sync.ts";
 import { checkSharedConfiguration } from "./configuration.ts";
+import { getModelCatalog, type ModelCatalog } from "./model-catalog.ts";
 import { ownSession } from "./owner.ts";
 
 interface RuntimeEntry {
@@ -10,10 +10,12 @@ interface RuntimeEntry {
 	id: string;
 	release: () => void;
 	refreshing?: Promise<void>;
+	catalog: ModelCatalog;
 }
 interface AdapterState {
 	entries: Map<string, RuntimeEntry>;
 	homes: WeakMap<AgentSession, string>;
+	catalogs: WeakMap<AgentSession, ModelCatalog>;
 	sessions: WeakMap<AgentSession, RuntimeEntry>;
 	releases: WeakMap<AgentSession, () => void>;
 	installed: WeakSet<object>;
@@ -23,6 +25,7 @@ const holder = globalThis as typeof globalThis & { [key]?: AdapterState };
 const state = holder[key] ?? {
 	entries: new Map(),
 	homes: new WeakMap(),
+	catalogs: new WeakMap(),
 	sessions: new WeakMap(),
 	releases: new WeakMap(),
 	installed: new WeakSet(),
@@ -32,18 +35,24 @@ function identity(home: string, id: string): string {
 	const root = resolve(home);
 	return `${process.platform === "win32" ? root.toLowerCase() : root}\0${id}`;
 }
-export function registerRuntimeSession(session: AgentSession, home: string, release?: () => void): void {
+export function registerRuntimeSession(
+	session: AgentSession,
+	home: string,
+	release?: () => void,
+	catalog?: ModelCatalog,
+): void {
 	state.homes.set(session, home);
+	if (catalog) state.catalogs.set(session, catalog);
 	if (release) state.releases.set(session, release);
 }
-export async function refreshRuntime(session: AgentSession): Promise<void> {
+export async function refreshRuntime(session: AgentSession, checkCatalog = true): Promise<void> {
 	const entry = state.sessions.get(session);
 	if (!entry) return;
 	if (entry.refreshing) return entry.refreshing;
 	const task = (async () => {
 		await session.settingsManager.reload();
 		await session.modelRuntime.refresh({ allowNetwork: false });
-		await refreshCstoaModels(session.modelRuntime);
+		if (checkCatalog) entry.catalog.check();
 		checkSharedConfiguration(session.settingsManager, session.modelRuntime);
 		if (!process.argv.some((arg) => arg === "--models" || arg.startsWith("--models="))) {
 			const scope = await resolveModelScopeWithDiagnostics(
@@ -84,7 +93,15 @@ export function installRuntimeAdapter(): void {
 		if (!state.sessions.has(this)) {
 			const id = this.sessionId,
 				release = state.releases.get(this) ?? (await ownSession(home, id)),
-				entry = { session: this, home, id, release };
+				catalog = state.catalogs.get(this) ?? getModelCatalog(home),
+				entry = { session: this, home, id, release, catalog };
+			const detachCatalog = catalog.attach(this.modelRuntime);
+			const unsubscribeCatalog = catalog.subscribe(({ changed }) => {
+				if (changed) void refreshRuntime(this, false).catch(() => undefined);
+			});
+			const unsubscribeSettled = this.subscribe((event) => {
+				if (event.type === "agent_settled") void refreshRuntime(this, false).catch(() => undefined);
+			});
 			state.entries.set(identity(home, id), entry);
 			state.sessions.set(this, entry);
 			const dispose = this.dispose.bind(this),
@@ -93,6 +110,9 @@ export function installRuntimeAdapter(): void {
 			this.dispose = () => {
 				if (state.sessions.has(this)) {
 					release();
+					unsubscribeCatalog();
+					unsubscribeSettled();
+					detachCatalog();
 					state.sessions.delete(this);
 					state.entries.delete(identity(home, id));
 				}

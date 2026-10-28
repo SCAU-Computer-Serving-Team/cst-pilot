@@ -25,6 +25,8 @@
 .settings-description svg { flex: none; }
 .settings-workspace .settings-action { display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex: none; min-width: 64px; height: 32px; min-height: 32px; padding: 0 12px; font-size: 14px; font-weight: 400; text-decoration: none; transition: background var(--duration-fast) var(--ease-smooth-out), color var(--duration-fast) var(--ease-smooth-out); }
 .settings-workspace .settings-action:hover { background: var(--chat-bubble); }
+.settings-workspace .settings-catalog-refresh { min-width: 104px; }
+.settings-catalog-refresh:disabled { opacity: .6; cursor: wait; }
 .settings-workspace .settings-add-action, .settings-workspace .settings-add-action:hover { background: var(--chat-ink); color: var(--settings-surface); border-color: transparent; }
 .settings-workspace .settings-empty { font-size: 14px; }
 .settings-empty a { color: var(--chat-ink); margin-inline: 4px; text-underline-offset: 3px; }

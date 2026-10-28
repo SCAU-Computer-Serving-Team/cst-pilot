@@ -123,6 +123,7 @@ export function createAuthRoutes({
 							.some(({ id, running }) => running && pool.get(id)?.session.model?.provider === providerId)
 					)
 						throw new InboxConflict("此模型服务的会话正在执行，请完成后再修改配置");
+					pool.catalog.invalidate();
 					const saved = await saveCustomProvider(agentDir, input, modelRuntime);
 					globalEvents.publish("state", { type: "auth_changed", providerId: saved.id });
 					globalEvents.publish("state", { type: "models_changed", providerId: saved.id });
@@ -152,6 +153,7 @@ export function createAuthRoutes({
 					)
 						throw new InboxConflict("此模型服务的会话正在执行，请完成后再移除");
 					const { modelRuntime } = await pool.getServices();
+					pool.catalog.invalidate();
 					const deleted = await deleteCustomProvider(agentDir, customPath[1], revision, modelRuntime);
 					globalEvents.publish("state", { type: "auth_changed", providerId: deleted.id });
 					globalEvents.publish("state", { type: "models_changed", providerId: deleted.id });

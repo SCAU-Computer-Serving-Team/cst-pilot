@@ -20,6 +20,17 @@ export function createModelRoutes({ pool, webSettings, globalEvents, writeOnce, 
 		pathname: string,
 		method: string,
 	): Promise<boolean> => {
+		if (pathname === "/api/models/refresh" && method === "POST") {
+			const input = await body(request);
+			if (Object.keys(input).length) throw new Error("请求的模型刷新参数无效");
+			const result = await writeOnce(request, pathname, input, async () => {
+				await pool.getServices();
+				const refresh = await pool.catalog.refresh({ force: true });
+				return { aborted: refresh.aborted, failedProviders: [...refresh.errors.keys()] };
+			});
+			send(response, 200, result);
+			return true;
+		}
 		if (pathname === "/api/models" && method === "GET") {
 			const { modelRuntime, settingsManager } = await pool.refreshServices();
 			const sessionId = new URL(request.url ?? "/", "http://localhost").searchParams.get("sessionId");

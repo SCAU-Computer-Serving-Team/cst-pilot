@@ -8,7 +8,7 @@
 |---|---|
 | `agent/home/extensions/oauth/index.ts`、`provider.ts` | 注册原生 `cstoa` Provider，按凭据类型路由至 OAuth 代理（`/api/agent/llm/v1`）或网关直连（`/v1`），复用 Pi Chat Completions 适配器 |
 | `agent/home/extensions/oauth/oa.ts`、`device.ts` | RFC 8628 设备码申请、轮询、令牌交换／刷新，以及 `agent/home/device.json` 持久化 |
-| `agent/home/extensions/oauth/models.ts`、`sync.ts` | 动态模型目录拉取、凭据指纹隔离、5 分钟缓存／30 秒失败退避、并发刷新合并与 `context.publish()` 发布 |
+| `agent/home/extensions/oauth/models.ts`、`catalog-factories.ts` | CSTOA 动态目录、凭据指纹隔离、5 分钟缓存／30 秒失败退避、独立 Provider 工厂登记与 `context.publish()` 发布 |
 | `agent/home/extensions/oauth/request-observer.ts` | 遥测启用时按 `sessionId` 观察 CSTOA 推理 HTTP 尝试并提取 `x-oneapi-request-id`，不读取请求或响应正文 |
 | `agent/home/extensions/web/server/api/oauth-flow.ts` | 将 Pi `ModelRuntime.login` 的交互回调转换为带 `flowId` 与递增 `revision` 的 Web 异步状态机 |
 | `agent/home/extensions/web/server/api/custom-provider.ts` | 校验并原子读写 `models.json`，带配置版本（`revision`）防并发覆盖，更新后刷新 `ModelRuntime` |
@@ -17,7 +17,7 @@
 
 ## CSTOA 动态目录与离线共存
 
-启动器设置 `PI_OFFLINE=1` 关闭 Pi 对所有上游 Provider 的启动联网。`oauth` 扩展仅针对 `cstoa` 主动执行模型目录同步：
+启动器保留 `PI_OFFLINE=1`。项目目录协调器显式允许目录联网，普通内置供应商复用 Pi 的目录协议；`oauth` 提供独立 CSTOA Provider 工厂供后台运行时使用。CSTOA 按以下规则同步：
 
 1. 将当前凭据摘要与服务地址作为缓存隔离键写入 `models-store.json`（不含明文令牌）。
 2. 模型能力（是否支持思考、图片输入、上下文窗口）优先匹配 Pi 内置已知模型元数据；网关新增的未知模型采用安全保守默认值，忽略上游返回的非标 URL 或请求头。
