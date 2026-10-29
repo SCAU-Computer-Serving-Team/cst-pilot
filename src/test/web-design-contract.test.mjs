@@ -35,7 +35,14 @@ test("自定义服务浅深画布归属设置区，与下方分区不重叠", ()
         assert.equal(node.height, node.name.startsWith("接口协议") ? 32 : 42);
         for (const child of node.children ?? []) if (child.type === "text") assert.equal(child.fontSize, node.name.startsWith("接口协议") ? 14 : 16);
       }
-      if (node.name?.endsWith("· 启用按钮")) { assert.equal(node.width, 72); assert.equal(node.height, 32); assert.equal(node.cornerRadius, 6); }
+      if (node.name?.endsWith("· 启用按钮")) {
+        assert.equal(node.width, 72);
+        assert.equal(node.height, 32);
+        const radius = typeof node.cornerRadius === "string" && node.cornerRadius.startsWith("$")
+          ? canvas.variables[node.cornerRadius.slice(1)].value
+          : node.cornerRadius;
+        assert.equal(radius, 4);
+      }
       for (const child of node.children ?? []) visit(child);
     }
     visit(page);

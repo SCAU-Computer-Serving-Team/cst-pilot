@@ -125,7 +125,7 @@ test("设置用户链路：分类导航、自动保存、失败回滚、凭据�
 			await browser.evaluate(
 				"getComputedStyle(document.querySelector('.settings-custom-actions button')).borderRadius",
 			),
-			"6px",
+			"4px",
 			"主按钮圆角沿用控件规范",
 		);
 		assert.equal(

@@ -26,7 +26,6 @@ type NotificationProps = {
 type ExitStyle = CSSProperties & {
 	"--notification-exit-opacity": string;
 	"--notification-exit-transform": string;
-	"--notification-exit-filter": string;
 };
 type Notice = { id: string; props: NotificationProps; exiting: boolean; exitStyle?: ExitStyle };
 type Registry = {
@@ -55,7 +54,6 @@ export function NotificationRegion({ children, contentInset = 0 }: { children: R
 					? {
 							"--notification-exit-opacity": style.opacity,
 							"--notification-exit-transform": style.transform,
-							"--notification-exit-filter": style.filter,
 						}
 					: undefined;
 				setNotices((current) =>

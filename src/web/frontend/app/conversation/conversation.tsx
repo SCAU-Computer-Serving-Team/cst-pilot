@@ -5,6 +5,7 @@ import { matchToolResults } from "../cards/match-results";
 import { SpecialTool } from "../cards/special-tool";
 import type { PendingBitLocker } from "../data/bitlocker-state";
 import type { Message } from "../data/web-state";
+import { PreviewableImage } from "../images/image-preview";
 import { ErrorNotice } from "../shell/error-notice";
 import {
 	activeTurnIndex,
@@ -192,6 +193,7 @@ export function Conversation({
 	const scroll = useRef<HTMLDivElement>(null);
 	const scrollAnimation = useRef<number | null>(null);
 	const [following, setFollowing] = useState(true);
+	const [showBottom, setShowBottom] = useState(false);
 	const [error, setError] = useState("");
 	const [visibleCount, setVisibleCount] = useState(80);
 	const [mountedAt] = useState(() => Date.now());
@@ -269,6 +271,26 @@ export function Conversation({
 			el?.removeEventListener("keydown", onKeyDown);
 		};
 	}, [cancelScroll]);
+	useEffect(() => {
+		if (!following) {
+			setShowBottom(true);
+			return;
+		}
+		if (!showBottom) return;
+		const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+		const token = getComputedStyle(document.documentElement).getPropertyValue("--duration-quick").trim();
+		const value = Number.parseFloat(token);
+		const duration = Number.isFinite(value) ? value * (token.endsWith("ms") ? 1 : 1000) : 150;
+		const timer = window.setTimeout(() => setShowBottom(false), motion.matches ? 0 : duration);
+		const finish = () => {
+			if (motion.matches) setShowBottom(false);
+		};
+		motion.addEventListener("change", finish);
+		return () => {
+			window.clearTimeout(timer);
+			motion.removeEventListener("change", finish);
+		};
+	}, [following, showBottom]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: entries 与 streaming 只作为滚动触发信号，不在 effect 体内读取
 	useLayoutEffect(() => {
 		if (following) scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
@@ -313,7 +335,7 @@ export function Conversation({
 											turn.user.message.content
 												.filter((part) => part.type === "image")
 												.map((part, imageIndex) => (
-													<img
+													<PreviewableImage
 														key={`${imageIndex}-${part.mimeType}`}
 														className="message-image"
 														alt={`附图 ${imageIndex + 1}`}
@@ -367,8 +389,14 @@ export function Conversation({
 					</p>
 				)}
 			</div>
-			{!following && (
-				<Button className="back-to-bottom" onPress={goToBottom}>
+			{(!following || showBottom) && (
+				<Button
+					className="back-to-bottom"
+					data-hiding={following || undefined}
+					aria-hidden={following || undefined}
+					isDisabled={following}
+					onPress={goToBottom}
+				>
 					<ArrowDown size={16} aria-hidden="true" />
 					回到底部
 				</Button>

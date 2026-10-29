@@ -2,8 +2,12 @@
 .settings-workspace { display: flex; flex-direction: column; }
 .settings-workspace .settings-pages { width: min(816px, calc(100% - 96px)); margin: 0 auto; padding: 24px 0 64px; gap: 24px; }
 .settings-nav { display: flex; align-items: center; flex: none; gap: 24px; min-height: 40px; border-bottom: 1px solid var(--chat-border); }
-.settings-nav-link { display: flex; align-items: center; justify-content: center; height: 40px; border-bottom: 2px solid transparent; color: var(--chat-muted); font-size: 16px; text-decoration: none; white-space: nowrap; }
-.settings-nav-link.is-current { border-color: var(--chat-ink); color: var(--chat-ink); font-weight: 600; }
+.settings-nav-link { position: relative; display: flex; align-items: center; justify-content: center; height: 40px; border-bottom: 2px solid transparent; color: var(--chat-muted); font-size: 16px; text-decoration: none; white-space: nowrap; }
+.settings-nav-link.is-current { color: var(--chat-ink); font-weight: 600; }
+.settings-nav-indicator { position: absolute; bottom: -2px; left: 0; width: 100%; height: 2px; background: var(--chat-ink); view-transition-name: settings-tab-indicator; }
+.app-layout[data-settings-boundary] .settings-nav-indicator { view-transition-name: none; }
+::view-transition-group(settings-tab-indicator) { animation-duration: var(--duration-fast); animation-timing-function: var(--ease-smooth-out); }
+::view-transition-old(settings-tab-indicator), ::view-transition-new(settings-tab-indicator) { animation: none; }
 .settings-nav-link:hover, .settings-back:hover { color: var(--chat-ink); }
 .settings-nav-link, .settings-back { transition: color var(--duration-fast) var(--ease-smooth-out), border-color var(--duration-fast) var(--ease-smooth-out); }
 .settings-nav-link:focus-visible, .settings-back:focus-visible, .settings-advanced-trigger:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
@@ -18,7 +22,7 @@
 .settings-section > header > span { color: var(--chat-muted); font-size: 14px; }
 .settings-flat-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 72px; padding: 12px 16px; border-bottom: 1px solid var(--chat-border); }
 .settings-flat-row:last-child { border-bottom: 0; }
-.settings-row-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; font-size: 16px; }
+.settings-row-copy { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; font-size: 16px; }
 .settings-workspace .settings-service-name { font-size: 16px; font-weight: 500; }
 .settings-description { display: flex; align-items: center; gap: 8px; color: var(--chat-muted); font-size: 14px; overflow-wrap: anywhere; }
 .settings-description[data-warning="true"] { color: var(--settings-warn-tx); }
@@ -104,6 +108,15 @@
 ::view-transition-old(settings-page), ::view-transition-new(settings-page) { animation-timing-function: var(--ease-in-out); mix-blend-mode: plus-lighter; }
 ::view-transition-old(settings-page) { animation-name: text-surface-out; animation-duration: var(--duration-micro); }
 ::view-transition-new(settings-page) { animation-name: text-surface-in; animation-duration: var(--duration-quick); }
+/* transitions.dev page-side-by-side：分类按菜单次序双向滑动，沿用原生快照保留出场内容。 */
+:root:has(.settings-workspace[data-settings-slide]) { --settings-page-from-x: var(--distance-base); }
+:root:has(.settings-workspace[data-settings-slide="backward"]) { --settings-page-from-x: calc(-1 * var(--distance-base)); }
+:root:has(.settings-workspace[data-settings-slide])::view-transition-group(settings-page) { animation: none; }
+:root:has(.settings-workspace[data-settings-slide])::view-transition-old(settings-page) { animation: settings-page-slide-out var(--duration-fast) var(--ease-smooth-out) both; }
+:root:has(.settings-workspace[data-settings-slide])::view-transition-new(settings-page) { animation: settings-page-slide-in var(--duration-fast) var(--ease-smooth-out) both; }
+.app-layout[data-view-transitions="false"] .settings-workspace[data-settings-slide] .settings-route { animation: settings-page-slide-in var(--duration-fast) var(--ease-smooth-out) both; }
+@keyframes settings-page-slide-in { from { opacity: 0; transform: translateX(var(--settings-page-from-x)); } to { opacity: 1; transform: translateX(0); } }
+@keyframes settings-page-slide-out { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(calc(-1 * var(--settings-page-from-x))); } }
 .settings-shortcuts .settings-flat-row { min-height: 56px; font-size: 16px; }
 .settings-shortcuts kbd { height: 26px; min-width: max-content; padding: 0 8px; border-radius: var(--radius-control); background: var(--chat-bubble); color: var(--chat-ink); font-family: inherit; font-size: 14px; box-shadow: none; }
 .settings-credential-form { margin: 0; }
@@ -154,4 +167,5 @@
 @media (prefers-reduced-motion: reduce) {
  .settings-advanced-trigger svg, .settings-nav-link, .settings-back, .settings-workspace .settings-action, .settings-capability-button { transition:none; }
  .settings-model-card[data-expanded="true"] .settings-model:nth-child(n+7), .settings-service-card[data-expanded="true"] .settings-service-row:nth-child(n+7), ::view-transition-old(settings-page), ::view-transition-new(settings-page) { animation: none; }
+ .app-layout[data-view-transitions="false"] .settings-workspace[data-settings-slide] .settings-route { animation: none; }
 }

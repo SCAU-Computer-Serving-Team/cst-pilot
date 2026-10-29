@@ -31,6 +31,15 @@ export default function WorkspaceLayout() {
 	const [params] = useSearchParams();
 	const preview = params.get("preview") === "1";
 	const home = pathname === "/";
+	const [startup, setStartup] = useState(() => home && window.location.hash === "#cst-web-start");
+	const startupRequested = useRef(startup);
+	if (!home) startupRequested.current = false;
+	useEffect(() => {
+		if (!startup) return;
+		window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+		const timer = window.setTimeout(() => setStartup(false), 1200);
+		return () => window.clearTimeout(timer);
+	}, [startup]);
 	const settings = pathname === "/settings" || pathname.startsWith("/settings/");
 	const homeTransition = useViewTransitionState("/");
 	const chatTransition = useViewTransitionState("/s/*");
@@ -69,6 +78,9 @@ export default function WorkspaceLayout() {
 			<NotificationRegion contentInset={collapsed || (settings && mobile) ? 0 : 264}>
 				<div
 					ref={motion.root}
+					data-startup={(startup && home && !homeTransition && !collapsed) || undefined}
+					data-home-startup={(startup && home && !homeTransition) || undefined}
+					data-startup-origin={(startupRequested.current && home) || undefined}
 					data-home-transition={homeTransition || undefined}
 					data-settings-boundary={settingsBoundary || undefined}
 					data-session-transition={sessionTransition || undefined}
@@ -83,6 +95,7 @@ export default function WorkspaceLayout() {
 					)}
 					<Sidebar
 						preview={preview}
+						startup={startupRequested.current && home && !homeTransition && !collapsed}
 						collapsed={collapsed}
 						onCollapse={() => changeCollapsed(true)}
 						onNavigate={overlay ? () => changeCollapsed(true) : undefined}

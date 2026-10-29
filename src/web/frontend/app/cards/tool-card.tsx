@@ -16,6 +16,7 @@ import {
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { RunningLight } from "../conversation/running-light";
 import type { ContentPart, Message } from "../data/web-state";
+import { PreviewableImage } from "../images/image-preview";
 import { type Block, mapTool } from "./map-tool";
 import { isStandaloneTool, splitToolCalls, type ToolState, toolState } from "./tool-state";
 
@@ -109,7 +110,11 @@ function renderBlock(block: Block) {
 		);
 	if (block.kind === "image")
 		return ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(block.mimeType) ? (
-			<img className="tool-image" src={`data:${block.mimeType};base64,${block.data}`} alt="工具返回的图片" />
+			<PreviewableImage
+				className="tool-image"
+				src={`data:${block.mimeType};base64,${block.data}`}
+				alt="工具返回的图片"
+			/>
 		) : (
 			<p>图片格式不支持显示</p>
 		);

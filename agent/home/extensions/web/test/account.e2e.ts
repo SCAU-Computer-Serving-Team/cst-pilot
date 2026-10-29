@@ -37,6 +37,7 @@ test("CSTOA：身份展示、上下文额度、零值、重试、模型隔离与
 		withLoader: (load) => load(),
 	});
 	const { modelRuntime } = await pool.refreshServices();
+	await pool.catalog.refresh({ providers: ["cstoa"], force: true });
 	const model = modelRuntime.getModels("cstoa")[0];
 	assert.ok(model);
 	await modelRuntime.login("openai", "api_key", { prompt: async () => "test-other-key", notify: () => {} });

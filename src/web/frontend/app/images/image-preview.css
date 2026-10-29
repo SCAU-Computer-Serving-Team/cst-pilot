@@ -1,0 +1,13 @@
+/* 图片由原位放大到中央，不加卡片边框；预览背景跟随浅深主题。 */
+.image-open { display: block; max-width: 100%; padding: 0; border: 0; border-radius: var(--radius-row); background: transparent; color: inherit; cursor: zoom-in; }
+.image-open:focus-visible, .draft-image-open:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
+.image-preview { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: var(--space-group); border: 0; background: transparent; color: var(--chat-ink); overflow: hidden; cursor: zoom-out; }
+.image-preview[open] { display: grid; place-items: center; }
+.image-preview::backdrop { background: transparent; }
+.image-preview-scrim { position: absolute; inset: 0; background: var(--chat-bg); pointer-events: none; }
+.image-preview .image-preview-zoom { position: relative; display: block; width: auto; height: auto; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: zoom-out; }
+.image-preview-zoom img { display: block; width: auto; height: auto; max-width: calc(100vw - var(--space-group) * 2); max-height: calc(100dvh - var(--space-group) * 2); object-fit: contain; user-select: none; }
+.image-preview .image-preview-close { position: absolute; top: var(--space-section); right: var(--space-section); z-index: 1; display: grid; place-items: center; width: var(--control-field); height: var(--control-field); padding: 0; border: 0; border-radius: var(--radius-row); background: transparent; color: var(--chat-muted); cursor: pointer; transition: color var(--duration-quick) var(--ease-smooth-out), background-color var(--duration-quick) var(--ease-smooth-out); }
+.image-preview-close:hover { color: var(--chat-ink); background: var(--app-hover); }
+.image-preview button:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
+@media (prefers-reduced-motion: reduce) { .image-preview .image-preview-close { transition: none; } }

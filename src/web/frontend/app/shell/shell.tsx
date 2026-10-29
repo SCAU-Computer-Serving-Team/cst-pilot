@@ -14,7 +14,7 @@ import {
 	SunMoon,
 	Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, PrefetchPageLinks, useLocation, useNavigate, useNavigation } from "react-router";
 import { describeAccount } from "../account/format";
 import { useAccount } from "../account/use-account";
@@ -55,11 +55,13 @@ function moveSidebarSelection(top: HTMLElement, selection: HTMLElement, active: 
 
 export function Sidebar({
 	preview = false,
+	startup = false,
 	collapsed = false,
 	onCollapse,
 	onNavigate,
 }: {
 	preview?: boolean;
+	startup?: boolean;
 	collapsed?: boolean;
 	onCollapse: () => void;
 	onNavigate?: () => void;
@@ -71,6 +73,20 @@ export function Sidebar({
 	const navigation = useNavigation();
 	const selectionPath = navigation.location?.pathname ?? location.pathname;
 	const state = useSessions();
+	const startupPending = useRef(startup);
+	const [startupRows, setStartupRows] = useState(false);
+	useLayoutEffect(() => {
+		if (!startup) {
+			startupPending.current = false;
+			setStartupRows(false);
+			return;
+		}
+		if (!startupPending.current || !state.stage) return;
+		startupPending.current = false;
+		setStartupRows(true);
+		const timer = window.setTimeout(() => setStartupRows(false), 1100);
+		return () => window.clearTimeout(timer);
+	}, [startup, state.stage]);
 	const sessions: { id: string; title: string; group?: string; updatedAt?: string }[] = preview
 		? sampleSessions
 		: state.sessions;
@@ -312,6 +328,7 @@ export function Sidebar({
 			className="sidebar"
 			aria-label="会话导航"
 			data-managing={management.managing || undefined}
+			data-startup-rows={startupRows || undefined}
 			inert={collapsed}
 			aria-hidden={collapsed}
 		>
@@ -352,11 +369,16 @@ export function Sidebar({
 				{sessions.length > 0 ? (
 					sessionGroups.map((group) => {
 						const list = sessions.filter((session) => groupOf(session) === group);
+						const earlier = sessionGroups.slice(0, sessionGroups.indexOf(group));
+						const rowStart = earlier.reduce((count, name) => {
+							const size = sessions.filter((session) => groupOf(session) === name).length;
+							return count + (size ? size + 1 : 0);
+						}, 0);
 						const ids = list.map((session) => session.id);
 						const groupState = groupSelection(ids, management.selection);
 						return list.length === 0 ? null : (
 							<section className="sidebar-group" key={group} aria-label={group}>
-								<h2>
+								<h2 style={{ "--startup-row": Math.min(rowStart, 11) } as CSSProperties}>
 									{/* biome-ignore lint/a11y/useSemanticElements: 分组使用三态checkbox按钮，保留DOM承载进退过渡 */}
 									<button
 										type="button"
@@ -385,8 +407,12 @@ export function Sidebar({
 									</button>
 									<span className="sidebar-selection-text">{group}</span>
 								</h2>
-								{list.map((session) => (
-									<div className="sidebar-session-row" key={session.id}>
+								{list.map((session, index) => (
+									<div
+										className="sidebar-session-row"
+										key={session.id}
+										style={{ "--startup-row": Math.min(rowStart + index + 1, 11) } as CSSProperties}
+									>
 										<Link
 											className={`sidebar-session ${management.managing ? "sidebar-session-select" : ""} ${!management.managing && location.pathname === `/s/${session.id}` ? "selected" : ""}`}
 											data-session-id={session.id}
@@ -400,6 +426,7 @@ export function Sidebar({
 											}
 											data-disabled={(management.managing && management.busy) || undefined}
 											to={`/s/${session.id}${preview ? "?preview=1" : ""}`}
+											viewTransition={location.pathname.startsWith("/settings")}
 											role={management.managing ? "checkbox" : undefined}
 											aria-checked={
 												management.managing ? (management.selection?.has(session.id) ?? false) : undefined
@@ -452,9 +479,9 @@ export function Sidebar({
 							</section>
 						);
 					})
-				) : (
+				) : state.stage || preview ? (
 					<p className="sidebar-empty">暂无会话</p>
-				)}
+				) : null}
 				{state.error && (
 					<p className="sidebar-error" role="alert">
 						{state.error}

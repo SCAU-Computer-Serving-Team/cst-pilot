@@ -8,7 +8,7 @@ import { getWebContainer } from "./server/container.ts";
 import { createWebServer, listenWebServer, setHttpAccessLog, WEB_PORT } from "./server/http.ts";
 import { WebSessionPool } from "./server/session/sessions.ts";
 
-const url = `http://127.0.0.1:${WEB_PORT}/`;
+const url = `http://127.0.0.1:${WEB_PORT}/#cst-web-start`;
 const staticDirectory = fileURLToPath(new URL("./static/", import.meta.url));
 
 class ParkedEditor extends CustomEditor {

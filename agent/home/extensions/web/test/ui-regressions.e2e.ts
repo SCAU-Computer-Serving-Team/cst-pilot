@@ -333,6 +333,10 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 			JSON.stringify(scrolling),
 		);
 		assert.equal(scrolling.shown, true, "滚动过程中保持按钮，避免闪烁");
+		await browser.until(
+			"document.querySelector('.back-to-bottom[data-hiding]')?.getAnimations().some(a=>a.transitionProperty==='opacity')",
+			"回到底部后淡出",
+		);
 		await browser.until("!document.querySelector('.back-to-bottom')", "回到底部恢复跟随");
 		await browser.evaluate(
 			"(()=>{const c=document.querySelector('.conversation');c.scrollTop=0;c.dispatchEvent(new Event('scroll'))})()",

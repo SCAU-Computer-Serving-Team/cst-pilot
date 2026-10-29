@@ -1,0 +1,15 @@
+/* biome-ignore-all lint/correctness/noUnknownProperty: CSS Borders Level 4 的 corner-shape 使用特性检测。 */
+/* biome-ignore-all lint/correctness/noUnknownFunction: superellipse() 属于 corner-shape 标准语法。 */
+/* 圆角渐进增强；旧浏览器继续使用 border-radius。圆形和胶囊保持圆弧。 */
+@supports (corner-shape: superellipse(1.25)) {
+  :where(*) { corner-shape: superellipse(1.25); }
+  ::before, ::after { corner-shape: inherit; }
+  :is(.context-meter, .context-ring, .context-progress, .context-progress > span, .draft-image-remove, .t-tabs, .t-tab, .t-tabs-pill, .rounded-full, [data-corner="round"]),
+  .context-meter:is(:hover, :focus-visible)::before,
+  .sidebar-group-select[data-mixed] .session-check-control::after,
+  .special-tool progress, .special-tool-meter-empty { corner-shape: round; }
+  .special-tool progress::-webkit-progress-bar { corner-shape: round; }
+  .special-tool progress::-webkit-progress-value { corner-shape: round; }
+  .special-tool progress::-moz-progress-bar { corner-shape: round; }
+  .settings-segment.t-tabs, .settings-segment .t-tab, .settings-segment .t-tabs-pill { corner-shape: superellipse(1.25); }
+}

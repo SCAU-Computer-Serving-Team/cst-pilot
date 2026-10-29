@@ -73,10 +73,10 @@ test("设置页预加载目标数据后再滑动，快照不含加载占位", { 
 		);
 		const oldPage = settingsMotion.find((item) => item.pseudo === "::view-transition-old(settings-page)");
 		const newPage = settingsMotion.find((item) => item.pseudo === "::view-transition-new(settings-page)");
-		assert.equal(oldPage?.duration, 80);
-		assert.equal(newPage?.duration, 150);
-		assert.match(oldPage?.frames.at(-1)?.transform ?? "", /-4px/);
-		assert.match(newPage?.frames[0]?.transform ?? "", /4px/);
+		assert.equal(oldPage?.duration, 250);
+		assert.equal(newPage?.duration, 250);
+		assert.match(oldPage?.frames.at(-1)?.transform ?? "", /translate(?:X)?\(8px\)/);
+		assert.match(newPage?.frames[0]?.transform ?? "", /translate(?:X)?\(-8px\)/);
 		assert.equal(
 			await browser.evaluate(
 				"getComputedStyle(document.documentElement,'::view-transition-old(settings-page)').mixBlendMode",

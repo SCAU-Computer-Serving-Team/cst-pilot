@@ -1,6 +1,6 @@
 import "../settings/settings.css";
 import { Settings as SettingsIcon } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router";
 import { useGlobalEvents } from "../data/web-state";
 import { SettingsFeedback, SettingsLink } from "../settings/settings-frame";
@@ -17,6 +17,15 @@ export default function Settings() {
 	const activePath = ["/settings/add", "/settings/provider", "/settings/custom"].includes(pathname)
 		? "/settings"
 		: pathname;
+	const index = tabs.findIndex((tab) => tab.to === activePath);
+	const [navigation, setNavigation] = useState({ pathname, index, direction: 0 });
+	if (navigation.pathname !== pathname) {
+		setNavigation({
+			pathname,
+			index,
+			direction: index < 0 || navigation.index < 0 ? 0 : Math.sign(index - navigation.index),
+		});
+	}
 	useEffect(() => {
 		void preloadSettings();
 		return () => {
@@ -39,7 +48,12 @@ export default function Settings() {
 		void preloadSettings(paths);
 	});
 	return (
-		<main className="chat-main settings-main settings-workspace">
+		<main
+			className="chat-main settings-main settings-workspace"
+			data-settings-slide={
+				navigation.direction === 0 ? undefined : navigation.direction > 0 ? "forward" : "backward"
+			}
+		>
 			<header className="chat-header settings-header">
 				<SettingsIcon size={22} aria-hidden="true" />
 				<h1>设置</h1>
@@ -57,6 +71,7 @@ export default function Settings() {
 									prefetch="render"
 								>
 									{tab.label}
+									{activePath === tab.to && <span className="settings-nav-indicator" aria-hidden="true" />}
 								</SettingsLink>
 							))}
 						</nav>

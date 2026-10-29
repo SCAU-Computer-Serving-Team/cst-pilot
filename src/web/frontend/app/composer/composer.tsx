@@ -16,6 +16,7 @@ import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState } 
 import { useNavigate } from "react-router";
 import { apiJson } from "../data/api";
 import { type Model, useGlobalEvents } from "../data/web-state";
+import { PreviewableImage } from "../images/image-preview";
 import { ErrorNotice } from "../shell/error-notice";
 import { usePanelDismiss } from "../shell/panel-dismiss";
 import { chipCaretSpace, editorHtml, extractPayload, fileReference, parseEditor } from "./composer-editor";
@@ -30,7 +31,6 @@ import {
 	releaseImageHolds,
 } from "./draft-images";
 import { draftKey as makeDraftKey } from "./drafts";
-import { ImagePreview } from "./image-preview";
 import { scopedModels } from "./scoped-models";
 
 type Selection = { provider: string; id: string; thinkingLevel?: string } | null;
@@ -109,7 +109,6 @@ export function Composer({
 	const [attaching, setAttaching] = useState(false);
 	const attachmentBusy = useRef(false);
 	const imageGeneration = useRef(0);
-	const [previewImage, setPreviewImage] = useState<string | null>(null);
 	const imagesRef = useRef(images);
 	imagesRef.current = images;
 	const fileInput = useRef<HTMLInputElement>(null);
@@ -366,7 +365,6 @@ export function Composer({
 		if (sending || attaching) return;
 		const removed = imagesRef.current[index];
 		if (!removed) return;
-		if (previewImage === removed.url) setPreviewImage(null);
 		URL.revokeObjectURL(removed.url);
 		const next = imagesRef.current.filter((_, at) => at !== index);
 		sessionStorage.setItem(`${draftKey}:images`, JSON.stringify(next.map((image) => image.hash)));
@@ -562,7 +560,6 @@ export function Composer({
 					skill: command.startsWith("/skill:") ? command.slice(7) : undefined,
 				});
 			}
-			setPreviewImage(null);
 			images.forEach((image) => {
 				URL.revokeObjectURL(image.url);
 			});
@@ -623,14 +620,12 @@ export function Composer({
 				<ul className="composer-attachments" aria-label="待发送图片">
 					{images.map((image, index) => (
 						<li className="draft-image" key={`${image.hash}-${index}`}>
-							<button
-								className="draft-image-open"
-								type="button"
-								aria-label={`查看图片 ${index + 1}`}
-								onClick={() => setPreviewImage(image.url)}
-							>
-								<img src={image.url} alt={`待发送图片 ${index + 1}`} />
-							</button>
+							<PreviewableImage
+								buttonClassName="draft-image-open"
+								label={`查看图片 ${index + 1}`}
+								src={image.url}
+								alt={`待发送图片 ${index + 1}`}
+							/>
 							<button
 								className="draft-image-remove"
 								type="button"
@@ -845,7 +840,6 @@ export function Composer({
 					</Button>
 				</div>
 			</section>
-			{previewImage && <ImagePreview src={previewImage} onClose={() => setPreviewImage(null)} />}
 		</div>
 	);
 }

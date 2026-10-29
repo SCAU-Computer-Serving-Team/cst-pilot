@@ -68,7 +68,36 @@ test("会话日期分组、整组勾选、管理可访问性与减少动态", { 
 	try {
 		browser = await BrowserProbe.launch(root);
 		const probe = browser;
+		await probe.call("Page.addScriptToEvaluateOnNewDocument", {
+			source: `(() => {
+				if (location.hash !== '#cst-web-start') return;
+				const sample = () => {
+					const row = document.querySelector('.sidebar-group h2');
+					if (row) window.__firstSessionFrame = { animated: !!row.closest('[data-startup-rows]'), opacity: getComputedStyle(row).opacity };
+					else requestAnimationFrame(sample);
+				};
+				requestAnimationFrame(sample);
+			})()`,
+		});
+		await probe.call("Page.navigate", { url: `http://127.0.0.1:${port}/#cst-web-start` });
+		await probe.until("!!document.querySelector('.sidebar[data-startup-rows] .sidebar-group h2')", "启动会话入场");
+		assert.equal(await probe.evaluate("location.hash"), "", "启动标记消费后从地址移除");
+		await probe.until("!!window.__firstSessionFrame", "会话列表首帧");
+		assert.equal(await probe.evaluate("window.__firstSessionFrame.animated"), true, "列表首帧已进入入场状态");
+		assert.deepEqual(
+			await probe.evaluate<number[]>(
+				"[...document.querySelectorAll('.sidebar-group h2, .sidebar-session-row')].map(e=>Number(e.style.getPropertyValue('--startup-row')))",
+			),
+			[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+			"日期和会话按近到远依次入场",
+		);
+		await probe.until("!document.querySelector('.sidebar[data-startup-rows]')", "启动入场结束");
 		await probe.navigate(`http://127.0.0.1:${port}/`);
+		assert.equal(
+			await probe.evaluate("!!document.querySelector('[data-home-startup]')"),
+			false,
+			"普通打开不播放开场",
+		);
 		await probe.until("document.querySelectorAll('.sidebar-session').length===6", "分组列表");
 		assert.equal(
 			await probe.evaluate(
@@ -137,6 +166,18 @@ test("会话日期分组、整组勾选、管理可访问性与减少动态", { 
 		await probe.call("Emulation.setEmulatedMedia", {
 			features: [{ name: "prefers-reduced-motion", value: "reduce" }],
 		});
+		await probe.call("Page.navigate", { url: "about:blank" });
+		await probe.until("location.href === 'about:blank'", "关闭原页面");
+		await probe.call("Page.navigate", { url: `http://127.0.0.1:${port}/#cst-web-start` });
+		await probe.until(
+			"!!document.querySelector('.sidebar[data-startup-rows] .sidebar-group h2')",
+			"减少动态下的启动列表",
+		);
+		assert.equal(
+			await probe.evaluate("getComputedStyle(document.querySelector('.sidebar-group h2')).animationName"),
+			"none",
+			"减少动态时不播放启动滑入",
+		);
 		await enter();
 		await probe.click('[aria-label="选择今天的会话"]');
 		await probe.click(".session-management-toolbar button:last-of-type");

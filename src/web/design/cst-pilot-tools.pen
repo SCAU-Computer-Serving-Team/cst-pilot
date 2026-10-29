@@ -10,7 +10,7 @@
       "width": 4800,
       "height": 240,
       "fill": "#FAFDFF",
-      "cornerRadius": 16,
+      "cornerRadius": "$radius-composer",
       "stroke": "#D5DEE3",
       "strokeWidth": 1,
       "layout": "vertical",
@@ -268,7 +268,7 @@
           },
           "width": 2400,
           "fill": "#FAFDFF",
-          "cornerRadius": 16,
+          "cornerRadius": "$radius-composer",
           "stroke": "#D5DEE3",
           "strokeWidth": 1,
           "layout": "vertical",
@@ -324,7 +324,7 @@
                   "name": "基板 · 浅深主题",
                   "width": "fill_container",
                   "fill": "#FFFFFF",
-                  "cornerRadius": 12,
+                  "cornerRadius": "$radius-menu",
                   "stroke": "#D5DEE3",
                   "strokeWidth": 1,
                   "layout": "vertical",
@@ -395,7 +395,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-control",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -523,7 +523,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-control",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -616,7 +616,7 @@
                       "fill": "#5F676C",
                       "textGrowth": "fixed-width",
                       "width": "fill_container",
-                      "content": "圆角 12 · 内边距 16 · 边缘 1 · 顶部轻高光",
+                      "content": "基板圆角12 · 内边距16 · 内层输入、命令、按钮圆角4 · 进度条全圆",
                       "lineHeight": 1.5,
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": 12,
@@ -630,7 +630,7 @@
                   "name": "排版 · 间距",
                   "width": "fill_container",
                   "fill": "#FFFFFF",
-                  "cornerRadius": 12,
+                  "cornerRadius": "$radius-menu",
                   "stroke": "#D5DEE3",
                   "strokeWidth": 1,
                   "layout": "vertical",
@@ -706,7 +706,7 @@
                   "name": "工具匹配规范",
                   "width": "fill_container",
                   "fill": "#FFFFFF",
-                  "cornerRadius": 12,
+                  "cornerRadius": "$radius-menu",
                   "stroke": "#D5DEE3",
                   "strokeWidth": 1,
                   "layout": "vertical",
@@ -856,7 +856,7 @@
                   "name": "聊天排列 · 响应布局",
                   "width": "fill_container",
                   "fill": "#FFFFFF",
-                  "cornerRadius": 12,
+                  "cornerRadius": "$radius-menu",
                   "stroke": "#D5DEE3",
                   "strokeWidth": 1,
                   "layout": "vertical",
@@ -891,7 +891,7 @@
                           "width": "fill_container",
                           "height": 48,
                           "fill": "#FAFDFF",
-                          "cornerRadius": 6,
+                          "cornerRadius": "$radius-control",
                           "padding": 12,
                           "justifyContent": "center",
                           "alignItems": "center",
@@ -916,7 +916,7 @@
                           "width": "fill_container",
                           "height": 48,
                           "fill": "#F0F0F0",
-                          "cornerRadius": 6,
+                          "cornerRadius": "$radius-control",
                           "padding": 12,
                           "justifyContent": "center",
                           "alignItems": "center",
@@ -941,7 +941,7 @@
                           "width": "fill_container",
                           "height": 48,
                           "fill": "#FAFDFF",
-                          "cornerRadius": 6,
+                          "cornerRadius": "$radius-control",
                           "padding": 12,
                           "justifyContent": "center",
                           "alignItems": "center",
@@ -966,7 +966,7 @@
                           "width": "fill_container",
                           "height": 48,
                           "fill": "#FAFDFF",
-                          "cornerRadius": 6,
+                          "cornerRadius": "$radius-control",
                           "padding": 12,
                           "justifyContent": "center",
                           "alignItems": "center",
@@ -1096,11 +1096,8 @@
                       "id": "HEgft",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -1838,11 +1835,8 @@
                       "id": "nyu7v",
                       "name": "调用语句",
                       "fill": "#1D2428",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -2580,11 +2574,8 @@
                       "id": "VqxGF",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -2964,11 +2955,8 @@
                       "id": "IZqOY",
                       "name": "调用语句",
                       "fill": "#1D2428",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -3348,11 +3336,8 @@
                       "id": "Gf1pU",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -3530,7 +3515,7 @@
                       "name": "原文块",
                       "width": "fill_container",
                       "fill": "#F6F6F6",
-                      "cornerRadius": 6,
+                      "cornerRadius": "$radius-control",
                       "padding": 12,
                       "children": [
                         {
@@ -3702,11 +3687,8 @@
                       "id": "JjvPQ",
                       "name": "调用语句",
                       "fill": "#1D2428",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -3884,7 +3866,7 @@
                       "name": "原文块",
                       "width": "fill_container",
                       "fill": "#0B1215",
-                      "cornerRadius": 6,
+                      "cornerRadius": "$radius-control",
                       "padding": 12,
                       "children": [
                         {
@@ -3984,7 +3966,7 @@
               "name": "调用条",
               "width": "fill_container",
               "fill": "#F6F6F6",
-              "cornerRadius": 8,
+              "cornerRadius": "$radius-row",
               "stroke": "#FFFFFF00",
               "strokeWidth": 1,
               "gap": 8,
@@ -4025,7 +4007,7 @@
               "name": "调用条",
               "width": "fill_container",
               "fill": "#F6F6F6",
-              "cornerRadius": 8,
+              "cornerRadius": "$radius-row",
               "stroke": "#FFFFFF00",
               "strokeWidth": 1,
               "gap": 8,
@@ -4146,7 +4128,7 @@
                   "name": "工具行 · disk",
                   "width": "fill_container",
                   "fill": "#FFFFFF00",
-                  "cornerRadius": 8,
+                  "cornerRadius": "$radius-row",
                   "stroke": "#FFFFFF00",
                   "strokeWidth": 1,
                   "gap": 8,
@@ -4285,11 +4267,8 @@
                               "id": "k36WeM",
                               "name": "调用语句",
                               "fill": "#F0F0F0",
-                              "cornerRadius": 4,
-                              "padding": [
-                                2,
-                                8
-                              ],
+                              "cornerRadius": "$radius-control",
+                              "padding": [4, 8],
                               "children": [
                                 {
                                   "type": "text",
@@ -4326,7 +4305,7 @@
                   "name": "工具行 · sys",
                   "width": "fill_container",
                   "fill": "#FFFFFF00",
-                  "cornerRadius": 8,
+                  "cornerRadius": "$radius-row",
                   "stroke": "#FFFFFF00",
                   "strokeWidth": 1,
                   "gap": 8,
@@ -4380,7 +4359,7 @@
                   "name": "工具行 · eventlog",
                   "width": "fill_container",
                   "fill": "#FFFFFF00",
-                  "cornerRadius": 8,
+                  "cornerRadius": "$radius-row",
                   "stroke": "#FFFFFF00",
                   "strokeWidth": 1,
                   "gap": 8,
@@ -4602,11 +4581,8 @@
                               "id": "r3Myx",
                               "name": "调用语句",
                               "fill": "#F0F0F0",
-                              "cornerRadius": 4,
-                              "padding": [
-                                2,
-                                8
-                              ],
+                              "cornerRadius": "$radius-control",
+                              "padding": [4, 8],
                               "children": [
                                 {
                                   "type": "text",
@@ -5643,7 +5619,7 @@
                       "context": "HeroUI Ghost Button · 消息菜单。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
                       "width": 32,
                       "height": 32,
-                      "cornerRadius": 16,
+                      "cornerRadius": "$radius-full",
                       "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
@@ -5685,11 +5661,8 @@
                           "id": "xG1sT",
                           "name": "用户气泡",
                           "fill": "#F0F0F0",
-                          "cornerRadius": 12,
-                          "padding": [
-                            11,
-                            16
-                          ],
+                          "cornerRadius": "$radius-menu",
+                          "padding": [12, 16],
                           "alignItems": "center",
                           "children": [
                             {
@@ -5801,7 +5774,7 @@
                           "context": "Markdown 表格 · 设备与空间。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
                           "clip": true,
                           "width": 816,
-                          "cornerRadius": 8,
+                          "cornerRadius": "$radius-row",
                           "stroke": "#E0E0E0",
                           "strokeWidth": 1,
                           "layout": "vertical",
@@ -6251,7 +6224,7 @@
                               "name": "HeroUI Ghost Button · 复制回答",
                               "width": 26,
                               "height": 26,
-                              "cornerRadius": 14,
+                              "cornerRadius": "$radius-full",
                               "justifyContent": "center",
                               "alignItems": "center",
                               "children": [
@@ -6273,7 +6246,7 @@
                               "name": "HeroUI Ghost Button · 分叉",
                               "width": 26,
                               "height": 26,
-                              "cornerRadius": 14,
+                              "cornerRadius": "$radius-full",
                               "justifyContent": "center",
                               "alignItems": "center",
                               "children": [
@@ -6295,7 +6268,7 @@
                               "name": "HeroUI Ghost Button · 导出",
                               "width": 26,
                               "height": 26,
-                              "cornerRadius": 14,
+                              "cornerRadius": "$radius-full",
                               "justifyContent": "center",
                               "alignItems": "center",
                               "children": [
@@ -6344,11 +6317,8 @@
                           "id": "Rztlv",
                           "name": "用户气泡",
                           "fill": "#F0F0F0",
-                          "cornerRadius": 12,
-                          "padding": [
-                            11,
-                            16
-                          ],
+                          "cornerRadius": "$radius-menu",
+                          "padding": [12, 16],
                           "alignItems": "center",
                           "children": [
                             {
@@ -6555,7 +6525,7 @@
                   "width": 1144,
                   "height": 105,
                   "fill": "#FFFFFF",
-                  "cornerRadius": 16,
+                  "cornerRadius": "$radius-composer",
                   "stroke": "#D5D5D5",
                   "strokeWidth": 1,
                   "layout": "vertical",
@@ -6590,7 +6560,7 @@
                           "name": "HeroUI Ghost Button · 添加附件",
                           "width": 26,
                           "height": 26,
-                          "cornerRadius": 13,
+                          "cornerRadius": "$radius-full",
                           "justifyContent": "center",
                           "alignItems": "center",
                           "children": [
@@ -6617,12 +6587,9 @@
                           "type": "frame",
                           "id": "eqIHc",
                           "name": "HeroUI Select · 模型",
-                          "cornerRadius": 8,
+                          "cornerRadius": "$radius-control",
                           "gap": 8,
-                          "padding": [
-                            2,
-                            8
-                          ],
+                          "padding": [0, 8],
                           "alignItems": "center",
                           "children": [
                             {
@@ -6695,12 +6662,9 @@
                           "type": "frame",
                           "id": "X6pVaM",
                           "name": "HeroUI Select · 思考强度",
-                          "cornerRadius": 8,
+                          "cornerRadius": "$radius-control",
                           "gap": 4,
-                          "padding": [
-                            2,
-                            8
-                          ],
+                          "padding": [0, 8],
                           "alignItems": "center",
                           "children": [
                             {
@@ -6744,13 +6708,13 @@
                           "width": 26,
                           "height": 26,
                           "fill": "#465A9F",
-                          "cornerRadius": 6,
+                          "cornerRadius": "$radius-control",
                           "justifyContent": "center",
                           "alignItems": "center",
                           "children": [
                             {
                               "type": "rectangle",
-                              "cornerRadius": 2,
+                              "cornerRadius": "$radius-control",
                               "id": "x9cju",
                               "name": "停止图标",
                               "fill": "#FFFFFF",
@@ -6935,7 +6899,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -7124,7 +7088,7 @@
                                   "width": "fill_container",
                                   "height": 42,
                                   "fill": "$embedded-control",
-                                  "cornerRadius": 8,
+                                  "cornerRadius": "$radius-control",
                                   "stroke": "$embedded-muted",
                                   "strokeWidth": 1,
                                   "effect": {
@@ -7180,7 +7144,7 @@
                                       "name": "解锁 D: · 按钮",
                                       "height": 32,
                                       "fill": "$embedded-button",
-                                      "cornerRadius": 6,
+                                      "cornerRadius": "$radius-control",
                                       "stroke": "#FFFFFF00",
                                       "effect": [
                                         {
@@ -7230,7 +7194,7 @@
                                       "name": "取消 · 按钮",
                                       "height": 32,
                                       "fill": "$embedded-control",
-                                      "cornerRadius": 6,
+                                      "cornerRadius": "$radius-control",
                                       "stroke": "$embedded-border",
                                       "strokeWidth": 1,
                                       "gap": 8,
@@ -7364,7 +7328,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -7553,7 +7517,7 @@
                                   "width": "fill_container",
                                   "height": 42,
                                   "fill": "$embedded-control",
-                                  "cornerRadius": 8,
+                                  "cornerRadius": "$radius-control",
                                   "stroke": "$embedded-danger",
                                   "strokeWidth": 1,
                                   "gap": 12,
@@ -7617,7 +7581,7 @@
                                       "opacity": 0.45,
                                       "height": 32,
                                       "fill": "$embedded-control",
-                                      "cornerRadius": 6,
+                                      "cornerRadius": "$radius-control",
                                       "stroke": "$embedded-border",
                                       "strokeWidth": 1,
                                       "gap": 8,
@@ -7647,7 +7611,7 @@
                                       "name": "取消 · 按钮",
                                       "height": 32,
                                       "fill": "$embedded-control",
-                                      "cornerRadius": 6,
+                                      "cornerRadius": "$radius-control",
                                       "stroke": "$embedded-border",
                                       "strokeWidth": 1,
                                       "gap": 8,
@@ -7791,7 +7755,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -8031,7 +7995,7 @@
                                       "name": "确认解锁 D: · 按钮",
                                       "height": 32,
                                       "fill": "$embedded-button",
-                                      "cornerRadius": 6,
+                                      "cornerRadius": "$radius-control",
                                       "stroke": "#FFFFFF00",
                                       "effect": [
                                         {
@@ -8081,7 +8045,7 @@
                                       "name": "取消 · 按钮",
                                       "height": 32,
                                       "fill": "$embedded-control",
-                                      "cornerRadius": 6,
+                                      "cornerRadius": "$radius-control",
                                       "stroke": "$embedded-border",
                                       "strokeWidth": 1,
                                       "gap": 8,
@@ -8166,7 +8130,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -8553,7 +8517,7 @@
                                       "name": "确认关闭加密 · 按钮",
                                       "height": 32,
                                       "fill": "$embedded-button",
-                                      "cornerRadius": 6,
+                                      "cornerRadius": "$radius-control",
                                       "stroke": "#FFFFFF00",
                                       "effect": [
                                         {
@@ -8603,7 +8567,7 @@
                                       "name": "取消 · 按钮",
                                       "height": 32,
                                       "fill": "$embedded-control",
-                                      "cornerRadius": 6,
+                                      "cornerRadius": "$radius-control",
                                       "stroke": "$embedded-border",
                                       "strokeWidth": 1,
                                       "gap": 8,
@@ -8697,7 +8661,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -8929,11 +8893,11 @@
                                           "width": "fill_container",
                                           "height": 4,
                                           "fill": "$embedded-track",
-                                          "cornerRadius": 2,
+                                          "cornerRadius": "$radius-control",
                                           "children": [
                                             {
                                               "type": "rectangle",
-                                              "cornerRadius": 2,
+                                              "cornerRadius": "$radius-full",
                                               "id": "UQ3ng",
                                               "name": "剩余加密量",
                                               "fill": "$embedded-muted",
@@ -9091,7 +9055,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -9685,7 +9649,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -10044,7 +10008,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -10426,7 +10390,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -10665,7 +10629,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -11036,7 +11000,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -11249,7 +11213,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -11620,7 +11584,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -11892,7 +11856,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -12112,7 +12076,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -12472,7 +12436,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -12627,7 +12591,7 @@
                                       "opacity": 0.45,
                                       "height": 32,
                                       "fill": "$embedded-control",
-                                      "cornerRadius": 6,
+                                      "cornerRadius": "$radius-control",
                                       "stroke": "$embedded-border",
                                       "strokeWidth": 1,
                                       "gap": 8,
@@ -12817,7 +12781,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -13006,7 +12970,7 @@
                                   "width": "fill_container",
                                   "height": 42,
                                   "fill": "$embedded-control",
-                                  "cornerRadius": 8,
+                                  "cornerRadius": "$radius-control",
                                   "stroke": "$embedded-danger",
                                   "strokeWidth": 1,
                                   "gap": 12,
@@ -13070,7 +13034,7 @@
                                       "opacity": 0.45,
                                       "height": 32,
                                       "fill": "$embedded-control",
-                                      "cornerRadius": 6,
+                                      "cornerRadius": "$radius-control",
                                       "stroke": "$embedded-border",
                                       "strokeWidth": 1,
                                       "gap": 8,
@@ -13100,7 +13064,7 @@
                                       "name": "取消 · 按钮",
                                       "height": 32,
                                       "fill": "$embedded-control",
-                                      "cornerRadius": 6,
+                                      "cornerRadius": "$radius-control",
                                       "stroke": "$embedded-border",
                                       "strokeWidth": 1,
                                       "gap": 8,
@@ -13244,7 +13208,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -13484,7 +13448,7 @@
                                       "name": "确认解锁 D: · 按钮",
                                       "height": 32,
                                       "fill": "$embedded-button",
-                                      "cornerRadius": 6,
+                                      "cornerRadius": "$radius-control",
                                       "stroke": "#FFFFFF00",
                                       "effect": [
                                         {
@@ -13534,7 +13498,7 @@
                                       "name": "取消 · 按钮",
                                       "height": 32,
                                       "fill": "$embedded-control",
-                                      "cornerRadius": 6,
+                                      "cornerRadius": "$radius-control",
                                       "stroke": "$embedded-border",
                                       "strokeWidth": 1,
                                       "gap": 8,
@@ -13679,7 +13643,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -13911,11 +13875,11 @@
                                           "width": "fill_container",
                                           "height": 4,
                                           "fill": "$embedded-track",
-                                          "cornerRadius": 2,
+                                          "cornerRadius": "$radius-control",
                                           "children": [
                                             {
                                               "type": "rectangle",
-                                              "cornerRadius": 2,
+                                              "cornerRadius": "$radius-full",
                                               "id": "e1k7Z",
                                               "name": "剩余加密量",
                                               "fill": "$embedded-muted",
@@ -14073,7 +14037,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -14667,7 +14631,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -15026,7 +14990,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -15408,7 +15372,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -15647,7 +15611,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -16018,7 +15982,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -16231,7 +16195,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -16602,7 +16566,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -16874,7 +16838,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -17094,7 +17058,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -17454,7 +17418,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -17609,7 +17573,7 @@
                                       "opacity": 0.45,
                                       "height": 32,
                                       "fill": "$embedded-control",
-                                      "cornerRadius": 6,
+                                      "cornerRadius": "$radius-control",
                                       "stroke": "$embedded-border",
                                       "strokeWidth": 1,
                                       "gap": 8,
@@ -17774,7 +17738,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -17978,11 +17942,11 @@
                                           "width": "fill_container",
                                           "height": 4,
                                           "fill": "$embedded-track",
-                                          "cornerRadius": 2,
+                                          "cornerRadius": "$radius-control",
                                           "children": [
                                             {
                                               "type": "rectangle",
-                                              "cornerRadius": 2,
+                                              "cornerRadius": "$radius-full",
                                               "id": "iQj8j",
                                               "name": "CPU比例",
                                               "fill": "$embedded-muted",
@@ -18060,11 +18024,11 @@
                                           "width": "fill_container",
                                           "height": 4,
                                           "fill": "$embedded-track",
-                                          "cornerRadius": 2,
+                                          "cornerRadius": "$radius-control",
                                           "children": [
                                             {
                                               "type": "rectangle",
-                                              "cornerRadius": 2,
+                                              "cornerRadius": "$radius-full",
                                               "id": "dcPwy",
                                               "name": "内存比例",
                                               "fill": "$embedded-muted",
@@ -18259,7 +18223,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -18468,7 +18432,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -18824,7 +18788,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -19028,11 +18992,11 @@
                                           "width": "fill_container",
                                           "height": 4,
                                           "fill": "$embedded-track",
-                                          "cornerRadius": 2,
+                                          "cornerRadius": "$radius-control",
                                           "children": [
                                             {
                                               "type": "rectangle",
-                                              "cornerRadius": 2,
+                                              "cornerRadius": "$radius-full",
                                               "id": "I9pX76",
                                               "name": "CPU比例",
                                               "fill": "$embedded-muted",
@@ -19110,11 +19074,11 @@
                                           "width": "fill_container",
                                           "height": 4,
                                           "fill": "$embedded-track",
-                                          "cornerRadius": 2,
+                                          "cornerRadius": "$radius-control",
                                           "children": [
                                             {
                                               "type": "rectangle",
-                                              "cornerRadius": 2,
+                                              "cornerRadius": "$radius-full",
                                               "id": "DtVGI",
                                               "name": "内存比例",
                                               "fill": "$embedded-muted",
@@ -19494,7 +19458,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -19940,7 +19904,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -20149,7 +20113,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -20505,7 +20469,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -20709,11 +20673,11 @@
                                           "width": "fill_container",
                                           "height": 4,
                                           "fill": "$embedded-track",
-                                          "cornerRadius": 2,
+                                          "cornerRadius": "$radius-control",
                                           "children": [
                                             {
                                               "type": "rectangle",
-                                              "cornerRadius": 2,
+                                              "cornerRadius": "$radius-full",
                                               "id": "PoZR6",
                                               "name": "CPU比例",
                                               "fill": "$embedded-muted",
@@ -20791,11 +20755,11 @@
                                           "width": "fill_container",
                                           "height": 4,
                                           "fill": "$embedded-track",
-                                          "cornerRadius": 2,
+                                          "cornerRadius": "$radius-control",
                                           "children": [
                                             {
                                               "type": "rectangle",
-                                              "cornerRadius": 2,
+                                              "cornerRadius": "$radius-full",
                                               "id": "FlDTj",
                                               "name": "内存比例",
                                               "fill": "$embedded-muted",
@@ -21175,7 +21139,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -21515,7 +21479,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -21740,7 +21704,7 @@
                                           "name": "命令原文与复制",
                                           "width": "fill_container",
                                           "fill": "$embedded-control",
-                                          "cornerRadius": 8,
+                                          "cornerRadius": "$radius-control",
                                           "gap": 12,
                                           "padding": 12,
                                           "alignItems": "center",
@@ -21764,7 +21728,7 @@
                                               "name": "复制命令 · 图标按钮",
                                               "width": 32,
                                               "height": 32,
-                                              "cornerRadius": 6,
+                                              "cornerRadius": "$radius-control",
                                               "justifyContent": "center",
                                               "alignItems": "center",
                                               "children": [
@@ -21959,7 +21923,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -22165,7 +22129,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -22368,7 +22332,7 @@
                                       "name": "命令原文与复制",
                                       "width": "fill_container",
                                       "fill": "$embedded-control",
-                                      "cornerRadius": 8,
+                                      "cornerRadius": "$radius-control",
                                       "gap": 12,
                                       "padding": 12,
                                       "alignItems": "center",
@@ -22392,7 +22356,7 @@
                                           "name": "复制命令 · 图标按钮",
                                           "width": 32,
                                           "height": 32,
-                                          "cornerRadius": 6,
+                                          "cornerRadius": "$radius-control",
                                           "justifyContent": "center",
                                           "alignItems": "center",
                                           "children": [
@@ -22575,7 +22539,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -22800,7 +22764,7 @@
                                           "name": "命令原文与复制",
                                           "width": "fill_container",
                                           "fill": "$embedded-control",
-                                          "cornerRadius": 8,
+                                          "cornerRadius": "$radius-control",
                                           "gap": 12,
                                           "padding": 12,
                                           "alignItems": "center",
@@ -22824,7 +22788,7 @@
                                               "name": "复制命令 · 图标按钮",
                                               "width": 32,
                                               "height": 32,
-                                              "cornerRadius": 6,
+                                              "cornerRadius": "$radius-control",
                                               "justifyContent": "center",
                                               "alignItems": "center",
                                               "children": [
@@ -23255,7 +23219,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -23461,7 +23425,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -23664,7 +23628,7 @@
                                       "name": "命令原文与复制",
                                       "width": "fill_container",
                                       "fill": "$embedded-control",
-                                      "cornerRadius": 8,
+                                      "cornerRadius": "$radius-control",
                                       "gap": 12,
                                       "padding": 12,
                                       "alignItems": "center",
@@ -23688,7 +23652,7 @@
                                           "name": "复制命令 · 图标按钮",
                                           "width": 32,
                                           "height": 32,
-                                          "cornerRadius": 6,
+                                          "cornerRadius": "$radius-control",
                                           "justifyContent": "center",
                                           "alignItems": "center",
                                           "children": [
@@ -23871,7 +23835,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -24096,7 +24060,7 @@
                                           "name": "命令原文与复制",
                                           "width": "fill_container",
                                           "fill": "$embedded-control",
-                                          "cornerRadius": 8,
+                                          "cornerRadius": "$radius-control",
                                           "gap": 12,
                                           "padding": 12,
                                           "alignItems": "center",
@@ -24120,7 +24084,7 @@
                                               "name": "复制命令 · 图标按钮",
                                               "width": 32,
                                               "height": 32,
-                                              "cornerRadius": 6,
+                                              "cornerRadius": "$radius-control",
                                               "justifyContent": "center",
                                               "alignItems": "center",
                                               "children": [
@@ -24433,7 +24397,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -24634,7 +24598,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -24844,7 +24808,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -25045,7 +25009,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -25268,7 +25232,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -25495,7 +25459,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -25731,7 +25695,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -26119,7 +26083,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -26329,7 +26293,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -26530,7 +26494,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -26753,7 +26717,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -26980,7 +26944,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -27216,7 +27180,7 @@
                                   }
                                 ]
                               },
-                              "cornerRadius": 12,
+                              "cornerRadius": "$radius-menu",
                               "stroke": {
                                 "type": "gradient",
                                 "gradientType": "linear",
@@ -27541,11 +27505,8 @@
                       "id": "T0wed",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -27667,11 +27628,8 @@
                       "id": "Tq9Zn",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -28214,11 +28172,8 @@
                       "id": "UvEVa",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -28428,11 +28383,8 @@
                       "id": "B1mctM",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -29128,11 +29080,8 @@
                       "id": "Qy0J8",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -30025,11 +29974,8 @@
                       "id": "O9H3ld",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -30684,11 +30630,8 @@
                       "id": "DqinI",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -30810,11 +30753,8 @@
                       "id": "jqip6",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -31524,11 +31464,8 @@
                       "id": "NJKI4",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -31741,11 +31678,8 @@
                       "id": "OTv8P",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -31867,11 +31801,8 @@
                       "id": "KR4cl",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -32493,11 +32424,8 @@
                       "id": "ezXBW",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -32725,11 +32653,8 @@
                       "id": "whevt",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -32851,11 +32776,8 @@
                       "id": "eKtAI",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -33775,11 +33697,8 @@
                       "id": "Z9UKgI",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -33989,11 +33908,8 @@
                       "id": "Fx72t",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -34218,7 +34134,7 @@
                       "name": "原文块 · msg",
                       "width": "fill_container",
                       "fill": "#F6F6F6",
-                      "cornerRadius": 6,
+                      "cornerRadius": "$radius-control",
                       "padding": 12,
                       "children": [
                         {
@@ -34390,11 +34306,8 @@
                       "id": "SVXlQ",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -34637,11 +34550,8 @@
                       "id": "r61l9",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -34763,11 +34673,8 @@
                       "id": "we98Y",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -35765,11 +35672,8 @@
                       "id": "xCVkY",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -35982,11 +35886,8 @@
                       "id": "g0zSs",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -36108,11 +36009,8 @@
                       "id": "pWucZ",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -36702,11 +36600,8 @@
                       "id": "mi1Fd",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -36982,11 +36877,8 @@
                       "id": "dVx1W",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -37108,11 +37000,8 @@
                       "id": "dhXQ7",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -37750,11 +37639,8 @@
                       "id": "WawQE",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -37982,11 +37868,8 @@
                       "id": "TiSjB",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -38108,11 +37991,8 @@
                       "id": "XpdPD",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -38291,7 +38171,7 @@
                       "name": "原文块",
                       "width": "fill_container",
                       "fill": "#F6F6F6",
-                      "cornerRadius": 6,
+                      "cornerRadius": "$radius-control",
                       "padding": 12,
                       "children": [
                         {
@@ -38463,11 +38343,8 @@
                       "id": "Sb0Ab",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -38695,11 +38572,8 @@
                       "id": "elXXo",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -38821,11 +38695,8 @@
                       "id": "cvKgd",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -39003,7 +38874,7 @@
                       "name": "原文块",
                       "width": "fill_container",
                       "fill": "#F6F6F6",
-                      "cornerRadius": 6,
+                      "cornerRadius": "$radius-control",
                       "padding": 12,
                       "children": [
                         {
@@ -39218,11 +39089,8 @@
                       "id": "ASbX8",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -39450,11 +39318,8 @@
                       "id": "ZOm7u",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -39576,11 +39441,8 @@
                       "id": "deKHw",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -39684,7 +39546,7 @@
                       "name": "原文块",
                       "width": "fill_container",
                       "fill": "#F6F6F6",
-                      "cornerRadius": 6,
+                      "cornerRadius": "$radius-control",
                       "padding": 12,
                       "children": [
                         {
@@ -39856,11 +39718,8 @@
                       "id": "NE2jV",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -39964,7 +39823,7 @@
                       "name": "原文块",
                       "width": "fill_container",
                       "fill": "#F6F6F6",
-                      "cornerRadius": 6,
+                      "cornerRadius": "$radius-control",
                       "padding": 12,
                       "children": [
                         {
@@ -40154,11 +40013,8 @@
                       "id": "ylnxx",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -40280,11 +40136,8 @@
                       "id": "PdIVm",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -40462,7 +40315,7 @@
                       "name": "原文块",
                       "width": "fill_container",
                       "fill": "#F6F6F6",
-                      "cornerRadius": 6,
+                      "cornerRadius": "$radius-control",
                       "padding": 12,
                       "children": [
                         {
@@ -40634,11 +40487,8 @@
                       "id": "gZsLm",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -40816,7 +40666,7 @@
                       "name": "原文块",
                       "width": "fill_container",
                       "fill": "#F6F6F6",
-                      "cornerRadius": 6,
+                      "cornerRadius": "$radius-control",
                       "padding": 12,
                       "children": [
                         {
@@ -41006,11 +40856,8 @@
                       "id": "GvR5r",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -41132,11 +40979,8 @@
                       "id": "BHIYd",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -41203,7 +41047,7 @@
                       "name": "原文块",
                       "width": "fill_container",
                       "fill": "#F6F6F6",
-                      "cornerRadius": 6,
+                      "cornerRadius": "$radius-control",
                       "padding": 12,
                       "children": [
                         {
@@ -41375,11 +41219,8 @@
                       "id": "etEM4",
                       "name": "调用语句",
                       "fill": "#F0F0F0",
-                      "cornerRadius": 4,
-                      "padding": [
-                        2,
-                        8
-                      ],
+                      "cornerRadius": "$radius-control",
+                      "padding": [4, 8],
                       "children": [
                         {
                           "type": "text",
@@ -42065,7 +41906,7 @@
                       "context": "HeroUI Ghost Button · 消息菜单。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
                       "width": 32,
                       "height": 32,
-                      "cornerRadius": 16,
+                      "cornerRadius": "$radius-full",
                       "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
@@ -42107,11 +41948,8 @@
                           "id": "y8MoN",
                           "name": "用户消息气泡",
                           "fill": "$embedded-bubble",
-                          "cornerRadius": 12,
-                          "padding": [
-                            11,
-                            16
-                          ],
+                          "cornerRadius": "$radius-menu",
+                          "padding": [12, 16],
                           "alignItems": "center",
                           "children": [
                             {
@@ -42489,7 +42327,7 @@
                   "width": 1144,
                   "height": 105,
                   "fill": "$embedded-page",
-                  "cornerRadius": 16,
+                  "cornerRadius": "$radius-composer",
                   "stroke": "$embedded-border",
                   "strokeWidth": 1,
                   "layout": "vertical",
@@ -42524,7 +42362,7 @@
                           "name": "HeroUI Ghost Button · 添加附件",
                           "width": 26,
                           "height": 26,
-                          "cornerRadius": 13,
+                          "cornerRadius": "$radius-full",
                           "justifyContent": "center",
                           "alignItems": "center",
                           "children": [
@@ -42551,12 +42389,9 @@
                           "type": "frame",
                           "id": "WW8Mx",
                           "name": "HeroUI Select · 模型",
-                          "cornerRadius": 8,
+                          "cornerRadius": "$radius-control",
                           "gap": 8,
-                          "padding": [
-                            2,
-                            8
-                          ],
+                          "padding": [0, 8],
                           "alignItems": "center",
                           "children": [
                             {
@@ -42629,12 +42464,9 @@
                           "type": "frame",
                           "id": "Mtoyr",
                           "name": "HeroUI Select · 思考强度",
-                          "cornerRadius": 8,
+                          "cornerRadius": "$radius-control",
                           "gap": 4,
-                          "padding": [
-                            2,
-                            8
-                          ],
+                          "padding": [0, 8],
                           "alignItems": "center",
                           "children": [
                             {
@@ -42678,7 +42510,7 @@
                           "width": 26,
                           "height": 26,
                           "fill": "$embedded-button",
-                          "cornerRadius": 6,
+                          "cornerRadius": "$radius-control",
                           "effect": [
                             {
                               "type": "shadow",
@@ -42705,7 +42537,7 @@
                           "children": [
                             {
                               "type": "rectangle",
-                              "cornerRadius": 2,
+                              "cornerRadius": "$radius-control",
                               "id": "LD9V6",
                               "name": "停止图标",
                               "fill": "$embedded-page",
@@ -43186,7 +43018,7 @@
                       "context": "HeroUI Ghost Button · 消息菜单。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
                       "width": 32,
                       "height": 32,
-                      "cornerRadius": 16,
+                      "cornerRadius": "$radius-full",
                       "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
@@ -43228,11 +43060,8 @@
                           "id": "u8mZdE",
                           "name": "用户消息气泡",
                           "fill": "$embedded-bubble",
-                          "cornerRadius": 12,
-                          "padding": [
-                            11,
-                            16
-                          ],
+                          "cornerRadius": "$radius-menu",
+                          "padding": [12, 16],
                           "alignItems": "center",
                           "children": [
                             {
@@ -43610,7 +43439,7 @@
                   "width": 1144,
                   "height": 105,
                   "fill": "$embedded-page",
-                  "cornerRadius": 16,
+                  "cornerRadius": "$radius-composer",
                   "stroke": "$embedded-border",
                   "strokeWidth": 1,
                   "layout": "vertical",
@@ -43645,7 +43474,7 @@
                           "name": "HeroUI Ghost Button · 添加附件",
                           "width": 26,
                           "height": 26,
-                          "cornerRadius": 13,
+                          "cornerRadius": "$radius-full",
                           "justifyContent": "center",
                           "alignItems": "center",
                           "children": [
@@ -43672,12 +43501,9 @@
                           "type": "frame",
                           "id": "QmmT3",
                           "name": "HeroUI Select · 模型",
-                          "cornerRadius": 8,
+                          "cornerRadius": "$radius-control",
                           "gap": 8,
-                          "padding": [
-                            2,
-                            8
-                          ],
+                          "padding": [0, 8],
                           "alignItems": "center",
                           "children": [
                             {
@@ -43750,12 +43576,9 @@
                           "type": "frame",
                           "id": "h5aVnr",
                           "name": "HeroUI Select · 思考强度",
-                          "cornerRadius": 8,
+                          "cornerRadius": "$radius-control",
                           "gap": 4,
-                          "padding": [
-                            2,
-                            8
-                          ],
+                          "padding": [0, 8],
                           "alignItems": "center",
                           "children": [
                             {
@@ -43799,7 +43622,7 @@
                           "width": 26,
                           "height": 26,
                           "fill": "$embedded-button",
-                          "cornerRadius": 6,
+                          "cornerRadius": "$radius-control",
                           "effect": [
                             {
                               "type": "shadow",
@@ -43826,7 +43649,7 @@
                           "children": [
                             {
                               "type": "rectangle",
-                              "cornerRadius": 2,
+                              "cornerRadius": "$radius-control",
                               "id": "akhGJ",
                               "name": "停止图标",
                               "fill": "$embedded-page",
@@ -44307,7 +44130,7 @@
                       "context": "HeroUI Ghost Button · 消息菜单。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
                       "width": 32,
                       "height": 32,
-                      "cornerRadius": 16,
+                      "cornerRadius": "$radius-full",
                       "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
@@ -44349,11 +44172,8 @@
                           "id": "WKzNr",
                           "name": "用户消息气泡",
                           "fill": "$embedded-bubble",
-                          "cornerRadius": 12,
-                          "padding": [
-                            11,
-                            16
-                          ],
+                          "cornerRadius": "$radius-menu",
+                          "padding": [12, 16],
                           "alignItems": "center",
                           "children": [
                             {
@@ -44451,7 +44271,7 @@
                           }
                         ]
                       },
-                      "cornerRadius": 12,
+                      "cornerRadius": "$radius-menu",
                       "stroke": {
                         "type": "gradient",
                         "gradientType": "linear",
@@ -44640,7 +44460,7 @@
                           "width": "fill_container",
                           "height": 42,
                           "fill": "$embedded-control",
-                          "cornerRadius": 8,
+                          "cornerRadius": "$radius-control",
                           "stroke": "$embedded-muted",
                           "strokeWidth": 1,
                           "effect": {
@@ -44696,7 +44516,7 @@
                               "name": "解锁 D: · 按钮",
                               "height": 32,
                               "fill": "$embedded-button",
-                              "cornerRadius": 6,
+                              "cornerRadius": "$radius-control",
                               "stroke": "#FFFFFF00",
                               "effect": [
                                 {
@@ -44746,7 +44566,7 @@
                               "name": "取消 · 按钮",
                               "height": 32,
                               "fill": "$embedded-control",
-                              "cornerRadius": 6,
+                              "cornerRadius": "$radius-control",
                               "stroke": "$embedded-border",
                               "strokeWidth": 1,
                               "gap": 8,
@@ -44873,7 +44693,7 @@
                           }
                         ]
                       },
-                      "cornerRadius": 12,
+                      "cornerRadius": "$radius-menu",
                       "stroke": {
                         "type": "gradient",
                         "gradientType": "linear",
@@ -45090,7 +44910,7 @@
                               "name": "命令原文与复制",
                               "width": "fill_container",
                               "fill": "$embedded-control",
-                              "cornerRadius": 8,
+                              "cornerRadius": "$radius-control",
                               "gap": 12,
                               "padding": 12,
                               "alignItems": "center",
@@ -45114,7 +44934,7 @@
                                   "name": "复制命令 · 图标按钮",
                                   "width": 32,
                                   "height": 32,
-                                  "cornerRadius": 6,
+                                  "cornerRadius": "$radius-control",
                                   "justifyContent": "center",
                                   "alignItems": "center",
                                   "children": [
@@ -45264,7 +45084,7 @@
                   "width": 1144,
                   "height": 105,
                   "fill": "$embedded-page",
-                  "cornerRadius": 16,
+                  "cornerRadius": "$radius-composer",
                   "stroke": "$embedded-border",
                   "strokeWidth": 1,
                   "layout": "vertical",
@@ -45299,7 +45119,7 @@
                           "name": "HeroUI Ghost Button · 添加附件",
                           "width": 26,
                           "height": 26,
-                          "cornerRadius": 13,
+                          "cornerRadius": "$radius-full",
                           "justifyContent": "center",
                           "alignItems": "center",
                           "children": [
@@ -45326,12 +45146,9 @@
                           "type": "frame",
                           "id": "z7wJzO",
                           "name": "HeroUI Select · 模型",
-                          "cornerRadius": 8,
+                          "cornerRadius": "$radius-control",
                           "gap": 8,
-                          "padding": [
-                            2,
-                            8
-                          ],
+                          "padding": [0, 8],
                           "alignItems": "center",
                           "children": [
                             {
@@ -45404,12 +45221,9 @@
                           "type": "frame",
                           "id": "UUyhQ",
                           "name": "HeroUI Select · 思考强度",
-                          "cornerRadius": 8,
+                          "cornerRadius": "$radius-control",
                           "gap": 4,
-                          "padding": [
-                            2,
-                            8
-                          ],
+                          "padding": [0, 8],
                           "alignItems": "center",
                           "children": [
                             {
@@ -45453,7 +45267,7 @@
                           "width": 26,
                           "height": 26,
                           "fill": "$embedded-button",
-                          "cornerRadius": 6,
+                          "cornerRadius": "$radius-control",
                           "effect": [
                             {
                               "type": "shadow",
@@ -45480,7 +45294,7 @@
                           "children": [
                             {
                               "type": "rectangle",
-                              "cornerRadius": 2,
+                              "cornerRadius": "$radius-control",
                               "id": "sJ2mU",
                               "name": "停止图标",
                               "fill": "$embedded-page",
@@ -45961,7 +45775,7 @@
                       "context": "HeroUI Ghost Button · 消息菜单。视觉规则引用 DESIGN.md、主画布规范总板与本文件模板；工具返回语义见 doc/design/web/tool/。画布数值为展示示例。",
                       "width": 32,
                       "height": 32,
-                      "cornerRadius": 16,
+                      "cornerRadius": "$radius-full",
                       "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
@@ -46003,11 +45817,8 @@
                           "id": "Hqj8i",
                           "name": "用户消息气泡",
                           "fill": "$embedded-bubble",
-                          "cornerRadius": 12,
-                          "padding": [
-                            11,
-                            16
-                          ],
+                          "cornerRadius": "$radius-menu",
+                          "padding": [12, 16],
                           "alignItems": "center",
                           "children": [
                             {
@@ -46105,7 +45916,7 @@
                           }
                         ]
                       },
-                      "cornerRadius": 12,
+                      "cornerRadius": "$radius-menu",
                       "stroke": {
                         "type": "gradient",
                         "gradientType": "linear",
@@ -46294,7 +46105,7 @@
                           "width": "fill_container",
                           "height": 42,
                           "fill": "$embedded-control",
-                          "cornerRadius": 8,
+                          "cornerRadius": "$radius-control",
                           "stroke": "$embedded-muted",
                           "strokeWidth": 1,
                           "effect": {
@@ -46350,7 +46161,7 @@
                               "name": "解锁 D: · 按钮",
                               "height": 32,
                               "fill": "$embedded-button",
-                              "cornerRadius": 6,
+                              "cornerRadius": "$radius-control",
                               "stroke": "#FFFFFF00",
                               "effect": [
                                 {
@@ -46400,7 +46211,7 @@
                               "name": "取消 · 按钮",
                               "height": 32,
                               "fill": "$embedded-control",
-                              "cornerRadius": 6,
+                              "cornerRadius": "$radius-control",
                               "stroke": "$embedded-border",
                               "strokeWidth": 1,
                               "gap": 8,
@@ -46527,7 +46338,7 @@
                           }
                         ]
                       },
-                      "cornerRadius": 12,
+                      "cornerRadius": "$radius-menu",
                       "stroke": {
                         "type": "gradient",
                         "gradientType": "linear",
@@ -46744,7 +46555,7 @@
                               "name": "命令原文与复制",
                               "width": "fill_container",
                               "fill": "$embedded-control",
-                              "cornerRadius": 8,
+                              "cornerRadius": "$radius-control",
                               "gap": 12,
                               "padding": 12,
                               "alignItems": "center",
@@ -46768,7 +46579,7 @@
                                   "name": "复制命令 · 图标按钮",
                                   "width": 32,
                                   "height": 32,
-                                  "cornerRadius": 6,
+                                  "cornerRadius": "$radius-control",
                                   "justifyContent": "center",
                                   "alignItems": "center",
                                   "children": [
@@ -46918,7 +46729,7 @@
                   "width": 1144,
                   "height": 105,
                   "fill": "$embedded-page",
-                  "cornerRadius": 16,
+                  "cornerRadius": "$radius-composer",
                   "stroke": "$embedded-border",
                   "strokeWidth": 1,
                   "layout": "vertical",
@@ -46953,7 +46764,7 @@
                           "name": "HeroUI Ghost Button · 添加附件",
                           "width": 26,
                           "height": 26,
-                          "cornerRadius": 13,
+                          "cornerRadius": "$radius-full",
                           "justifyContent": "center",
                           "alignItems": "center",
                           "children": [
@@ -46980,12 +46791,9 @@
                           "type": "frame",
                           "id": "OZTFk",
                           "name": "HeroUI Select · 模型",
-                          "cornerRadius": 8,
+                          "cornerRadius": "$radius-control",
                           "gap": 8,
-                          "padding": [
-                            2,
-                            8
-                          ],
+                          "padding": [0, 8],
                           "alignItems": "center",
                           "children": [
                             {
@@ -47058,12 +46866,9 @@
                           "type": "frame",
                           "id": "RvNYS",
                           "name": "HeroUI Select · 思考强度",
-                          "cornerRadius": 8,
+                          "cornerRadius": "$radius-control",
                           "gap": 4,
-                          "padding": [
-                            2,
-                            8
-                          ],
+                          "padding": [0, 8],
                           "alignItems": "center",
                           "children": [
                             {
@@ -47107,7 +46912,7 @@
                           "width": 26,
                           "height": 26,
                           "fill": "$embedded-button",
-                          "cornerRadius": 6,
+                          "cornerRadius": "$radius-control",
                           "effect": [
                             {
                               "type": "shadow",
@@ -47134,7 +46939,7 @@
                           "children": [
                             {
                               "type": "rectangle",
-                              "cornerRadius": 2,
+                              "cornerRadius": "$radius-control",
                               "id": "bD3NV",
                               "name": "停止图标",
                               "fill": "$embedded-page",
@@ -47681,7 +47486,7 @@
                   }
                 ]
               },
-              "cornerRadius": 12,
+              "cornerRadius": "$radius-menu",
               "stroke": {
                 "type": "gradient",
                 "gradientType": "linear",
@@ -47870,7 +47675,7 @@
                   "width": "fill_container",
                   "height": 42,
                   "fill": "$embedded-control",
-                  "cornerRadius": 8,
+                  "cornerRadius": "$radius-control",
                   "stroke": "$embedded-muted",
                   "strokeWidth": 1,
                   "effect": {
@@ -47934,7 +47739,7 @@
                           "name": "解锁 D: · 按钮",
                           "height": 32,
                           "fill": "$embedded-button",
-                          "cornerRadius": 6,
+                          "cornerRadius": "$radius-control",
                           "stroke": "#FFFFFF00",
                           "effect": [
                             {
@@ -47984,7 +47789,7 @@
                           "name": "取消 · 按钮",
                           "height": 32,
                           "fill": "$embedded-control",
-                          "cornerRadius": 6,
+                          "cornerRadius": "$radius-control",
                           "stroke": "$embedded-border",
                           "strokeWidth": 1,
                           "gap": 8,
@@ -48230,7 +48035,7 @@
                   "width": "fill_container",
                   "height": 42,
                   "fill": "$embedded-control",
-                  "cornerRadius": 12,
+                  "cornerRadius": "$radius-menu",
                   "stroke": "$embedded-border",
                   "strokeWidth": 1,
                   "padding": [
@@ -48798,7 +48603,7 @@
                   }
                 ]
               },
-              "cornerRadius": 12,
+              "cornerRadius": "$radius-menu",
               "stroke": {
                 "type": "gradient",
                 "gradientType": "linear",
@@ -48987,7 +48792,7 @@
                   "width": "fill_container",
                   "height": 42,
                   "fill": "$embedded-control",
-                  "cornerRadius": 8,
+                  "cornerRadius": "$radius-control",
                   "stroke": "$embedded-muted",
                   "strokeWidth": 1,
                   "effect": {
@@ -49051,7 +48856,7 @@
                           "name": "解锁 D: · 按钮",
                           "height": 32,
                           "fill": "$embedded-button",
-                          "cornerRadius": 6,
+                          "cornerRadius": "$radius-control",
                           "stroke": "#FFFFFF00",
                           "effect": [
                             {
@@ -49101,7 +48906,7 @@
                           "name": "取消 · 按钮",
                           "height": 32,
                           "fill": "$embedded-control",
-                          "cornerRadius": 6,
+                          "cornerRadius": "$radius-control",
                           "stroke": "$embedded-border",
                           "strokeWidth": 1,
                           "gap": 8,
@@ -49347,7 +49152,7 @@
                   "width": "fill_container",
                   "height": 42,
                   "fill": "$embedded-control",
-                  "cornerRadius": 12,
+                  "cornerRadius": "$radius-menu",
                   "stroke": "$embedded-border",
                   "strokeWidth": 1,
                   "padding": [
@@ -49397,7 +49202,7 @@
   "variables": {
     "radius-control": {
       "type": "number",
-      "value": 6
+      "value": 4
     },
     "radius-row": {
       "type": "number",
@@ -49959,6 +49764,22 @@
           }
         }
       ]
+    },
+    "radius-card": {
+      "type": "number",
+      "value": 24
+    },
+    "radius-panel": {
+      "type": "number",
+      "value": 32
+    },
+    "radius-full": {
+      "type": "number",
+      "value": 9999
+    },
+    "space-micro": {
+      "type": "number",
+      "value": 4
     }
   },
   "fonts": [
