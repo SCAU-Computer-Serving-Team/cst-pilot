@@ -196,7 +196,7 @@ test("会话管理：多选、取消、真实删除、运行冲突、断线与�
 		await probe.navigate(`${origin}/s/${current.id}`);
 		await probe.until("document.querySelectorAll('.sidebar-session').length===4", "真实会话列表");
 		await manage(current.id);
-		assert.equal(await probe.evaluate("document.querySelectorAll('.sidebar-session[aria-checked=true]').length"), 1);
+		assert.equal(await probe.evaluate("document.querySelectorAll('.sidebar-session:has(input:checked)').length"), 1);
 		await rightClick(other.id);
 		assert.deepEqual(
 			await probe.evaluate<string[]>(
@@ -205,7 +205,7 @@ test("会话管理：多选、取消、真实删除、运行冲突、断线与�
 			["删除"],
 		);
 		assert.equal(
-			await probe.evaluate("document.querySelectorAll('.sidebar-session[aria-checked=true]').length"),
+			await probe.evaluate("document.querySelectorAll('.sidebar-session:has(input:checked)').length"),
 			1,
 			"右键未选项不改变集合",
 		);
@@ -223,9 +223,9 @@ test("会话管理：多选、取消、真实删除、运行冲突、断线与�
 		await rightClick(other.id);
 		assert.equal(await probe.evaluate("!!document.querySelector('.session-menu')"), false, "零项不提供删除");
 		await probe.click(".session-management-toolbar button:first-of-type");
-		assert.equal(await probe.evaluate("document.querySelectorAll('.sidebar-session[aria-checked=true]').length"), 4);
+		assert.equal(await probe.evaluate("document.querySelectorAll('.sidebar-session:has(input:checked)').length"), 4);
 		await probe.click(".session-management-toolbar button:first-of-type");
-		assert.equal(await probe.evaluate("document.querySelectorAll('.sidebar-session[aria-checked=true]').length"), 0);
+		assert.equal(await probe.evaluate("document.querySelectorAll('.sidebar-session:has(input:checked)').length"), 0);
 		await probe.click(row(current.id));
 		await probe.click(row(other.id));
 		assert.equal(await probe.evaluate("location.pathname"), `/s/${current.id}`, "选择不导航");
@@ -238,7 +238,7 @@ test("会话管理：多选、取消、真实删除、运行冲突、断线与�
 		assert.equal(await probe.evaluate("document.activeElement.textContent"), "取消");
 		await pressEscape();
 		await probe.until("!document.querySelector('.session-delete-dialog')", "取消确认");
-		assert.equal(await probe.evaluate("document.querySelectorAll('.sidebar-session[aria-checked=true]').length"), 2);
+		assert.equal(await probe.evaluate("document.querySelectorAll('.sidebar-session:has(input:checked)').length"), 2);
 		await rightClick(keep.id);
 		await probe.screenshot(join(root, "multi-light.png"));
 		await probe.evaluate(
@@ -356,7 +356,10 @@ test("会话管理：多选、取消、真实删除、运行冲突、断线与�
 		assert.ok(pool.get(running.id)?.session.isStreaming, "失败不能停止运行中的会话");
 		assert.ok((await pool.list()).some((item) => item.id === running.id));
 		assert.ok((await pool.list()).every((item) => item.id !== partial.id));
-		assert.equal(await probe.evaluate("document.querySelectorAll('.sidebar-session[role=checkbox]').length"), 0);
+		assert.equal(
+			await probe.evaluate("document.querySelectorAll('.sidebar-session input[type=checkbox]').length"),
+			0,
+		);
 		await assertNoticeVisible("partial-dark");
 		await manage(running.id);
 		await confirmDelete(keep.id);
@@ -389,7 +392,7 @@ test("会话管理：多选、取消、真实删除、运行冲突、断线与�
 		await manage(keep.id);
 		await probe.click(".session-management-toolbar button:last-of-type");
 		assert.equal(
-			await probe.evaluate("document.querySelectorAll('.sidebar-session[role=checkbox]').length"),
+			await probe.evaluate("document.querySelectorAll('.sidebar-session input[type=checkbox]').length"),
 			0,
 			"完成清除选择",
 		);

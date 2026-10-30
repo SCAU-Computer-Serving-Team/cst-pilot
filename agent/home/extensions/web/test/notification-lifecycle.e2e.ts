@@ -29,6 +29,15 @@ test("通知关闭清理、详情键盘操作、断线恢复与减少动态", { 
 			"getComputedStyle(document.querySelector('.notification-detail')).visibility==='visible'",
 			"键盘焦点展示详情",
 		);
+		await probe.evaluate(
+			"window.__copied=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>window.__copied.push(text)}})",
+		);
+		await probe.click(".notification-detail .code-copy-button");
+		assert.equal(
+			await probe.evaluate("window.__copied[0]===document.querySelector('.notification-detail pre').textContent"),
+			true,
+			"技术详情只复制原文",
+		);
 		await probe.call("Input.dispatchKeyEvent", {
 			type: "keyDown",
 			key: "Escape",
@@ -38,6 +47,11 @@ test("通知关闭清理、详情键盘操作、断线恢复与减少动态", { 
 		await probe.until(
 			"getComputedStyle(document.querySelector('.notification-detail')).visibility==='hidden'",
 			"Esc 关闭详情",
+		);
+		assert.equal(
+			await probe.evaluate("document.activeElement===document.querySelector('.notification-detail-trigger')"),
+			true,
+			"复制后 Esc 关闭详情并返回入口焦点",
 		);
 		await probe.evaluate("document.querySelector('.notification-close').click()");
 		assert.equal(

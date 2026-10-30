@@ -1,5 +1,8 @@
 import type { ContentPart, Message } from "../data/web-state";
 import type { CardView } from "./map-tool";
+import { isStandaloneTool } from "./tool-kind.ts";
+
+export { isStandaloneTool } from "./tool-kind.ts";
 
 type Call = Extract<ContentPart, { type: "toolCall" }>;
 export type ToolState = CardView["status"] | "pending" | "running" | "interrupted";
@@ -26,13 +29,4 @@ export function splitToolCalls(
 		else segments.push({ kind, calls: [call] });
 	}
 	return segments;
-}
-
-export function isStandaloneTool(call: Call, result?: Message): boolean {
-	return (
-		call.name === "web_search" ||
-		["runbook", "command_plan", "runbook_deliver"].includes(call.name) ||
-		(call.name === "sys" && (call.arguments.scope ?? "overview") === "overview") ||
-		(call.name === "read" && Array.isArray(result?.content) && result.content.some((part) => part.type === "image"))
-	);
 }

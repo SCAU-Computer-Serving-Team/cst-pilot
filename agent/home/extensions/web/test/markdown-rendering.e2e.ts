@@ -141,10 +141,26 @@ test("Markdown结构渲染、流式完成、浅深主题、窄幅与放大", { t
 		await browser.evaluate("document.fonts.ready.then(()=>true)");
 		const live = await browser.evaluate<Metrics>(metrics());
 		verify(live);
+		await browser.evaluate(
+			"window.__copied=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>window.__copied.push(text)}})",
+		);
+		await browser.click(".markdown .code-copy-button");
+		assert.equal(
+			await browser.evaluate("window.__copied[0]===document.querySelector('.markdown pre code').textContent"),
+			true,
+			"流式阶段可复制当前代码原文",
+		);
+		await browser.until("!document.querySelector('.markdown .code-copy-button[data-copied]')", "复制反馈恢复");
 		release();
 		await browser.until("!document.querySelector('.assistant-turn[data-live]')", "模型完成");
 		const finished = await browser.evaluate<Metrics>(metrics());
 		verify(finished);
+		await browser.click(".markdown .code-copy-button");
+		assert.equal(
+			await browser.evaluate("window.__copied[1]===document.querySelector('.markdown pre code').textContent"),
+			true,
+			"定稿高亮后仍复制相同原文",
+		);
 		assert.equal(
 			finished.text.replace(/\s+/g, " ").trim(),
 			live.text.replace(/\s+/g, " ").trim(),

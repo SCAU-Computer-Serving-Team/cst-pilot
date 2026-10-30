@@ -6,6 +6,7 @@ import { SpecialTool } from "../cards/special-tool";
 import type { PendingBitLocker } from "../data/bitlocker-state";
 import type { Message } from "../data/web-state";
 import { PreviewableImage } from "../images/image-preview";
+import { CodeBlock } from "../shell/code-block";
 import { ErrorNotice } from "../shell/error-notice";
 import {
 	activeTurnIndex,
@@ -18,7 +19,7 @@ import {
 } from "./conversation-parts";
 import { Markdown } from "./markdown";
 import { ProcessSegment } from "./process-segment";
-import { completedToolCalls, turnSegments } from "./turn-segments";
+import { processSegmentLabel, turnSegments } from "./turn-segments";
 
 function AssistantTurnImpl({
 	id,
@@ -53,40 +54,44 @@ function AssistantTurnImpl({
 	const elapsed = formatDuration(Math.max((live ? now : (endedAt ?? startedAt)) - startedAt, live ? 1000 : 0));
 	return (
 		<article className="assistant-block assistant-turn" data-live={live || undefined}>
-			{turnSegments(process).map((segment, index) =>
-				segment.kind === "visible" ? (
-					<div className="turn-visible" key={segment.key}>
-						{segment.parts.map(({ entry, final, part }) =>
-							part.kind === "special" ? (
-								<SpecialTool
-									key={`${entry.message.timestamp}-${part.call.id}`}
-									call={part.call}
-									sessionId={id}
-									entryId={entry.id}
-									requests={requests}
-									result={resultsByTurn.get(entry.id ?? `stamp:${entry.message.timestamp}`)?.get(part.call.id)}
-									live={live && final}
-								/>
-							) : null,
-						)}
-					</div>
-				) : (
+			{turnSegments(process).map((segment, index) => {
+				if (segment.kind === "visible")
+					return (
+						<div className="turn-visible" key={segment.key}>
+							{segment.parts.map(({ entry, final, part }) =>
+								part.kind === "special" ? (
+									<SpecialTool
+										key={`${entry.message.timestamp}-${part.call.id}`}
+										call={part.call}
+										sessionId={id}
+										entryId={entry.id}
+										requests={requests}
+										result={resultsByTurn
+											.get(entry.id ?? `stamp:${entry.message.timestamp}`)
+											?.get(part.call.id)}
+										live={live && final}
+									/>
+								) : null,
+							)}
+						</div>
+					);
+				const label =
+					index === 0
+						? !live && endedAt === undefined
+							? "已完成"
+							: `${live ? "工作中" : "已工作"} ${elapsed}`
+						: processSegmentLabel(segment.parts, resultsByTurn, live);
+				return label ? (
 					<ProcessSegment
 						key={segment.key}
 						parts={segment.parts}
 						live={live}
-						label={
-							index === 0
-								? !live && endedAt === undefined
-									? "已完成"
-									: `${live ? "工作中" : "已工作"} ${elapsed}`
-								: `已完成 ${completedToolCalls(segment.parts, resultsByTurn)} 次工具调用`
-						}
+						label={label}
 						waiting={live && !process.length && !finalText}
 						results={resultsByTurn}
 					/>
-				),
-			)}
+				) : null;
+			})}
 			{finalText && <Markdown text={finalText} live={live} />}
 			{last?.message.stopReason === "error" && (
 				<ErrorNotice model message={last.message.errorMessage || "模型调用失败，请检查登录状态和模型设置。"} />
@@ -161,7 +166,7 @@ const SummaryEntry = memo(function SummaryEntry({ entry }: { entry: TurnEntry })
 				</Disclosure.Heading>
 				<Disclosure.Content>
 					<section className="tool-text">
-						<pre className="tool-raw">{entry.message.summary ?? ""}</pre>
+						<CodeBlock className="tool-raw">{entry.message.summary ?? ""}</CodeBlock>
 					</section>
 				</Disclosure.Content>
 			</Disclosure>

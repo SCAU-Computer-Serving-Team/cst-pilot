@@ -17,7 +17,7 @@ flowchart TB
             TeleExt[telemetry 遥测扩展]
         end
         Bin[随包组件: pwsh / wiztree / lhm]
-        State[(agent/home · .state · outbox · wiztree/tmp)]
+        State[(agent/home · .state · artifacts · wiztree/tmp)]
     end
     Browser[机主本机浏览器] <-->|127.0.0.1 HTTP / SSE| WebExt
     Launcher -->|UAC 提权与环境隔离| Host
@@ -63,8 +63,10 @@ flowchart TB
 | `agent/home/web-inbox/` | Web 已接受输入队列、回执、创建时间与会话图片附件 | Web 后端按会话维护；先落盘确认再投递给模型 |
 | `agent/home/web-access.log` | Web HTTP 与 API 访问诊断日志 | 追加请求方法、路径、响应状态与耗时；不记录查询参数或请求正文，当前无自动清理 |
 | `agent/home/telemetry/` | 匿名安装身份、会话恢复草稿、双端待发队列与诊断状态 | 遥测扩展维护；通过跨进程目录锁保护 |
-| `outbox/<YYYY-MM-DD>/` | 修复命令清单 TXT；版本化方案按 ID 分目录 | `runbook_deliver` 与 `runbook` 写入；同版本文件保持不变 |
-| `outbox/.plans/<ID>/` | 每个方案版本的完整 JSON | `command_plan` 原子保存；共享目录锁核对修订版本 |
+| `artifacts/<YYYY-MM-DD>/runbook/` | 修复命令清单 TXT；版本化方案按 ID 分目录 | `runbook_deliver` 与 `runbook` 写入；同版本文件保持不变 |
+| `artifacts/<YYYY-MM-DD>/sessions/` | 会话 PNG 与离线 HTML | 后端导出 API 保存，分享复用；目录内直接存放文件 |
+| `agent/home/session-exports/` | 导出任务登记与渲染临时文件 | 完成后仅保留文件登记；中断任务重开时标记失败 |
+| `agent/home/command-plans/<ID>/` | 每个方案版本的完整 JSON | `command_plan` 原子保存；共享目录锁核对修订版本 |
 | `wiztree/tmp/` | WizTree 扫描导出的临时 CSV | 扫描期间写入，结束后清理 |
 | `.state/` | 启动器与运行期临时目录 | 启动器初始化，重定向 `TEMP`/`TMP` 至工具包内 |
 

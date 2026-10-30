@@ -113,7 +113,7 @@
 
 | 工具 | 参数 | 返回 `result.runbook` |
 |---|---|---|
-| `command_plan` | `title`、`level`、`items`；修订时同时传 `runbookId` 与 `baseVersion` | `runbookId`（UUID）、递增 `version`、`day`、`createdAt`、`timeText`、`title`、`level`、`levelLabel`、完整 `commands[]`、`items` 条数、`action: "planned"` |
+| `command_plan` | `title`、`level`、`items`、可选 `date`（归档日期）；修订时同时传 `runbookId` 与 `baseVersion` | `runbookId`（UUID）、递增 `version`、`day`、`createdAt`、`timeText`、`title`、`level`、`levelLabel`、完整 `commands[]`、`items` 条数、`action: "planned"` |
 | `runbook_deliver` | `runbookId: string`、`version: number` | 上述方案字段，加 `file`、`dir`、`name`、`bytes`、`encoding: "utf-8-bom"`、`action: "delivered"` |
 
 `items` 参数沿用下方命令条目约束。`commands[]` 返回规范化的 `{ summary, command, shell, admin }`，`admin` 始终为布尔值。修订版本冲突、方案不存在、过期版本导出、已导出文本被修改时调用失败。
@@ -124,6 +124,7 @@
   - `title: string`（必填，1–48 字，自动过滤文件名非法字符）
   - `level: "safe" | "low" | "confirm"`（必填）
   - `sequence?: number`（可选，1–999，指定时覆盖修正已有序号清单）
+  - `date?: string`（可选，有效的 `YYYY-MM-DD`，默认本机当天；方案修订保持原归档日期）
   - `items: { summary: string, command: string, shell: "cmd" | "powershell", admin?: boolean }[]`（必填，1–20 条；`summary` ≤300 字，`command` 单行 ≤2000 字）
 - **返回（包装在 `result.runbook` 下）**：`{ title, action: "created" | "replaced", file, dir, name, sequence, level, levelLabel, items, commands[], bytes, encoding: "utf-8-bom", notice }`。`runbook` 提供单步写入；多轮修订使用 `command_plan` 与 `runbook_deliver`。
 

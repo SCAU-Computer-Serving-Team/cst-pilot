@@ -16,6 +16,17 @@ test("界面画布的节点 ID 唯一，工作帧没有遗留占位标记", () =
   }
 });
 
+test("会话导出预览与保存结果有浅深画布且不覆盖其他分区", () => {
+  const canvas = JSON.parse(readFileSync(new URL("../web/design/cst-pilot-web.pen", import.meta.url), "utf8"));
+  for (const state of ["预览", "保存结果"]) for (const theme of ["浅色", "深色"]) {
+    const page = canvas.children.find(node => node.name === `会话导出 · ${state} · ${theme}`);
+    assert.ok(page, "导出页状态画布齐全");
+    assert.equal(page.clip, true);
+    const overlaps = canvas.children.filter(other => other !== page && typeof other.width === "number" && typeof other.height === "number" && page.x < other.x + other.width && page.x + page.width > other.x && page.y < other.y + other.height && page.y + page.height > other.y);
+    assert.deepEqual(overlaps.map(node => node.name), []);
+  }
+});
+
 test("模型选择与协议菜单的浅深主题使用独立画布", () => {
   const canvas = JSON.parse(readFileSync(new URL("../web/design/cst-pilot-web.pen", import.meta.url), "utf8"));
   for (const prefix of ["默认模型选择 · 展开与未配置", "自定义协议菜单"]) {

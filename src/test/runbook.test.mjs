@@ -33,6 +33,33 @@ async function harness(t) {
   return { run, kit, home, loader, call, reload: () => loader.reload() };
 }
 
+test('指定日期统一写入 artifacts 日期目录，非法日期拒绝且不越界', async t => {
+  const { run, call, kit } = await harness(t);
+  const single = await run({ date: '2026-10-29' });
+  assert.equal(single.dir, join(kit, 'artifacts', '2026-10-29', 'runbook'));
+  const plan = await call('command_plan', { ...parameters, date: '2026-10-28' });
+  const delivered = await call('runbook_deliver', { runbookId: plan.runbookId, version: 1 });
+  assert.equal(delivered.dir, join(kit, 'artifacts', '2026-10-28', 'runbook', plan.runbookId));
+  await assert.rejects(run({ date: '2026-02-30' }), /日期/);
+  await assert.rejects(call('command_plan', { ...parameters, date: '../outside' }), /日期/);
+  await assert.rejects(call('command_plan', { ...parameters, runbookId: plan.runbookId, baseVersion: 1, date: '2026-10-27' }), /日期/);
+});
+
+test('已有方案保留，重新加载后可读取并交付到统一产物目录', async t => {
+  const { call, kit, home, reload } = await harness(t);
+  const plan = await call('command_plan', parameters);
+  const saved = join(home, 'command-plans', plan.runbookId);
+  const retained = join(kit, 'outbox', '.plans', plan.runbookId);
+  await cp(saved, retained, { recursive: true });
+  await rm(join(home, 'command-plans'), { recursive: true });
+  await reload();
+  const delivered = await call('runbook_deliver', { runbookId: plan.runbookId, version: 1 });
+  assert.ok(delivered.file.startsWith(join(kit, 'artifacts', plan.day, 'runbook')));
+  assert.ok(await readFile(join(retained, 'v1.json'), 'utf8'));
+  const revised = await call('command_plan', { ...parameters, runbookId: plan.runbookId, baseVersion: 1 });
+  assert.equal(revised.version, 2);
+});
+
 test('真实 Pi 连续两轮执行方案与交付，模型收到新工具及上一版完整结果', async t => {
   const h = await harness(t);
   await writeFile(join(h.home, 'models.json'), JSON.stringify({ providers: { fixture: { baseUrl: 'http://127.0.0.1/v1', api: 'openai-completions', apiKey: 'fixture-only', models: [{ id: 'fixture', name: 'fixture', reasoning: false, input: ['text'], contextWindow: 16000, maxTokens: 300 }] } } }));
@@ -81,7 +108,7 @@ test('方案可跨加载恢复，交付不需要重复命令，同版本重试�
   const again = await call('runbook_deliver', { runbookId: plan.runbookId, version: plan.version });
   assert.equal(again.file, delivered.file);
   assert.equal((await readdir(delivered.dir)).filter(name => name.endsWith('.txt')).length, 1);
-  assert.ok(delivered.file.startsWith(join(kit, 'outbox')));
+  assert.ok(delivered.file.startsWith(join(kit, 'artifacts', plan.day, 'runbook')));
 });
 
 test('修订保持 ID 并递增版本，旧版本和并发覆盖被拒绝，导出内容互不改写', async t => {

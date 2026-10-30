@@ -3,6 +3,7 @@ import { Brain } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ToolGroup } from "../cards/tool-card";
 import type { ContentPart, Message } from "../data/web-state";
+import { CodeBlock } from "../shell/code-block";
 import type { TurnPart } from "./conversation-parts";
 import { Markdown } from "./markdown";
 import { RunningLight } from "./running-light";
@@ -28,9 +29,9 @@ function Thinking({ part, live }: { part: Extract<ContentPart, { type: "thinking
 			<Disclosure.Content>
 				{opened && !part.redacted && (
 					<section className="tool-text">
-						<pre className="tool-raw">
+						<CodeBlock className="tool-raw">
 							<StreamWords text={part.thinking} />
-						</pre>
+						</CodeBlock>
 					</section>
 				)}
 			</Disclosure.Content>

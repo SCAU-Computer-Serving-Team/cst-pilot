@@ -1,0 +1,3 @@
+.markdown :is(.hljs-keyword, .hljs-built_in, .hljs-title, .hljs-type) { color: var(--chat-tool); }
+.markdown :is(.hljs-string, .hljs-number, .hljs-literal, .hljs-attr) { color: var(--chat-success); }
+.markdown :is(.hljs-comment, .hljs-quote) { color: var(--chat-muted); }

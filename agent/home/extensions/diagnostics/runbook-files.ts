@@ -1,17 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
-import { errorMessage, ROOT_DIR } from "./runtime.ts";
+import { ARTIFACTS_DIR, artifactDate, artifactDirectory, ensureArtifactDirectory } from "./artifact-paths.ts";
+import { errorMessage } from "./runtime.ts";
 
 /**
  * runbook - 命令交付工具（cst-pilot 定制）
  *
  * 本工具只交付需由队员手动执行的修复命令，把待执行的命令写成 txt，
- * 落在工具包 outbox\<日期>\ 下，队员打开文件逐条复制，不必从聊天记录里翻找。
+ * 落在工具包 artifacts\<日期>\runbook\ 下，队员打开文件逐条复制，不必从聊天记录里翻找。
  *
  * 边界：
- * - 只写工具包自身的 outbox 目录，不碰机主文件、注册表与系统配置。
+ * - 只写工具包自身的 artifacts 日期/runbook 目录，不碰机主文件、注册表与系统配置。
  * - 只写 .txt，不生成 .bat/.cmd/.ps1，避免双击即执行。
  * - 一次调用只产出一个文件；命令按风险分档，同一档合并成一份清单。
  * - 序号是「一次生成」的编号，当天唯一递增；沿用序号重写就是修正那一份。
@@ -20,7 +21,6 @@ import { errorMessage, ROOT_DIR } from "./runtime.ts";
  * 需求见 doc/SPEC.md「命令交付需求」与 doc/diagnostics/SPEC.md；命令内容规范见 skills/runbook。
  */
 
-export const OUTBOX_DIR = join(ROOT_DIR, "outbox");
 const MAX_ITEMS = 20;
 const MAX_TITLE = 48;
 const MAX_SUMMARY = 300;
@@ -52,6 +52,7 @@ export type RunbookParams = {
 	level: string;
 	items: readonly RunbookItem[];
 	sequence?: number;
+	date?: string;
 };
 
 function pad(value: number): string {
@@ -248,12 +249,14 @@ export function validateRunbook(params: RunbookParams): { title: string; level: 
 
 export async function deliverRunbook(params: RunbookParams): Promise<Record<string, unknown>> {
 	const { title, level, items } = validateRunbook(params);
-	const stamp = localStamp(new Date());
-	const dir = join(OUTBOX_DIR, stamp.dir);
+	const now = new Date();
+	const stamp = localStamp(now);
+	const day = artifactDate(params.date, now);
+	const dir = artifactDirectory(ARTIFACTS_DIR, day, "runbook");
 	const body = buildBody(title, level, items, stamp.text);
 	try {
 		const written = await serialize(async () => {
-			await mkdir(dir, { recursive: true });
+			await ensureArtifactDirectory(ARTIFACTS_DIR, day, "runbook");
 			return withDirectoryLock(dir, async () => {
 				const sequence = params.sequence ?? (await nextSequence(dir));
 				if (sequence > 999) throw new Error("当天序号已达到 999，请在次日生成新清单");
@@ -281,7 +284,7 @@ export async function deliverRunbook(params: RunbookParams): Promise<Record<stri
 				bytes: Buffer.byteLength(body, "utf8"),
 				encoding: "utf-8-bom",
 				notice:
-					`清单只写工具包 outbox，未改动机主系统。本次序号 ${written.sequence}（当天唯一递增）。` +
+					`清单只写工具包 artifacts/<日期>/runbook，未改动机主系统。本次序号 ${written.sequence}（当天唯一递增）。` +
 					`队员要改这一份命令时，沿用 sequence=${written.sequence} 重写即可，不会新增文件。` +
 					"文件是纯文本，不会自动执行；请把 file 路径原样转述给队员，队员打开后逐条复制命令。",
 			},

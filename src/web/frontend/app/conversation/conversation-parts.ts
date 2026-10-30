@@ -1,4 +1,4 @@
-import { specialToolKind } from "../cards/special-tool-data.ts";
+import { specialToolKind } from "../cards/tool-kind.ts";
 import type { ContentPart, Message, QueueItem } from "../data/web-state";
 
 type Thinking = Extract<ContentPart, { type: "thinking" }>;

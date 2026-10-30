@@ -5,6 +5,7 @@ import { AccountProvider } from "../account/use-account";
 import { BlueHour } from "../shell/blue-hour";
 import { ConnectionStatus } from "../shell/connection-status";
 import { NotificationRegion } from "../shell/notification";
+import { SessionsProvider } from "../shell/sessions-context";
 import { Sidebar } from "../shell/shell";
 import { useSidebarMotion } from "../shell/sidebar-motion";
 
@@ -75,52 +76,54 @@ export default function WorkspaceLayout() {
 	const overlay = overlayLayout && !collapsed;
 	return (
 		<AccountProvider enabled={!preview}>
-			<NotificationRegion contentInset={collapsed || (settings && mobile) ? 0 : 264}>
-				<div
-					ref={motion.root}
-					data-startup={(startup && home && !homeTransition && !collapsed) || undefined}
-					data-home-startup={(startup && home && !homeTransition) || undefined}
-					data-startup-origin={(startupRequested.current && home) || undefined}
-					data-home-transition={homeTransition || undefined}
-					data-settings-boundary={settingsBoundary || undefined}
-					data-session-transition={sessionTransition || undefined}
-					data-content-transition={(routeTransition && !homeTransition && !settingsBoundary) || undefined}
-					data-route-entry={entry.current.local || undefined}
-					data-home-exit={homeExit || undefined}
-					data-view-transitions={typeof document.startViewTransition === "function"}
-					className={`app-layout ${home ? "home-layout" : "chat-layout"} ${settings ? "settings-layout" : ""} ${collapsed ? "sidebar-collapsed" : ""}`}
-				>
-					{overlay && (
-						<div className="sidebar-backdrop" aria-hidden="true" onClick={() => changeCollapsed(true)} />
-					)}
-					<Sidebar
-						preview={preview}
-						startup={startupRequested.current && home && !homeTransition && !collapsed}
-						collapsed={collapsed}
-						onCollapse={() => changeCollapsed(true)}
-						onNavigate={overlay ? () => changeCollapsed(true) : undefined}
-					/>
-					{collapsed && (
-						<button
-							type="button"
-							className="sidebar-restore"
-							aria-label="展开侧栏"
-							onClick={() => changeCollapsed(false)}
-						>
-							<PanelLeft size={22} aria-hidden="true" />
-						</button>
-					)}
-					<div className="workspace-content">
-						{home && (
-							<div className="home-backdrop" aria-hidden="true">
-								<BlueHour kind="home" />
-							</div>
+			<SessionsProvider>
+				<NotificationRegion contentInset={collapsed || (settings && mobile) ? 0 : 264}>
+					<div
+						ref={motion.root}
+						data-startup={(startup && home && !homeTransition && !collapsed) || undefined}
+						data-home-startup={(startup && home && !homeTransition) || undefined}
+						data-startup-origin={(startupRequested.current && home) || undefined}
+						data-home-transition={homeTransition || undefined}
+						data-settings-boundary={settingsBoundary || undefined}
+						data-session-transition={sessionTransition || undefined}
+						data-content-transition={(routeTransition && !homeTransition && !settingsBoundary) || undefined}
+						data-route-entry={entry.current.local || undefined}
+						data-home-exit={homeExit || undefined}
+						data-view-transitions={typeof document.startViewTransition === "function"}
+						className={`app-layout ${home ? "home-layout" : "chat-layout"} ${settings ? "settings-layout" : ""} ${collapsed ? "sidebar-collapsed" : ""}`}
+					>
+						{overlay && (
+							<div className="sidebar-backdrop" aria-hidden="true" onClick={() => changeCollapsed(true)} />
 						)}
-						<ConnectionStatus enabled={!preview} />
-						<Outlet />
+						<Sidebar
+							preview={preview}
+							startup={startupRequested.current && home && !homeTransition && !collapsed}
+							collapsed={collapsed}
+							onCollapse={() => changeCollapsed(true)}
+							onNavigate={overlay ? () => changeCollapsed(true) : undefined}
+						/>
+						{collapsed && (
+							<button
+								type="button"
+								className="sidebar-restore"
+								aria-label="展开侧栏"
+								onClick={() => changeCollapsed(false)}
+							>
+								<PanelLeft size={22} aria-hidden="true" />
+							</button>
+						)}
+						<div className="workspace-content">
+							{home && (
+								<div className="home-backdrop" aria-hidden="true">
+									<BlueHour kind="home" />
+								</div>
+							)}
+							<ConnectionStatus enabled={!preview} />
+							<Outlet />
+						</div>
 					</div>
-				</div>
-			</NotificationRegion>
+				</NotificationRegion>
+			</SessionsProvider>
 		</AccountProvider>
 	);
 }

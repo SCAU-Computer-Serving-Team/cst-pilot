@@ -17,7 +17,7 @@ export function checkReleaseTree(root, files) {
       const name = {oauth:'OAuth',web:'Web',telemetry:'Telemetry'}[rel.split('/')[3].toLowerCase()];
       throw new Error(`${name} 测试文件不得进入发行包: ${rel}`);
     }
-    if (/(^|\/)(\.state|\.git|sessions|\.cache)(\/|$)|^agent\/home\/(auth\.json|models\.json|web-settings\.json|fff\/|npm\/|telemetry\/)|^wiztree\/(tmp\/|WizTree3\.ini(?:\.bad)?$)|(^|\/)\.env(?:\.|$)/i.test(rel)) {
+    if (/(^|\/)(\.state|\.git|sessions|\.cache)(\/|$)|^(artifacts|outbox)\/|^agent\/home\/(auth\.json|models\.json|web-settings\.json|fff\/|npm\/|telemetry\/|session-exports\/|command-plans\/)|^wiztree\/(tmp\/|WizTree3\.ini(?:\.bad)?$)|(^|\/)\.env(?:\.|$)/i.test(rel)) {
       throw new Error(`发行树含运行状态或凭据路径: ${rel}`);
     }
     if (/^agent\/home\/extensions\/web\/static\/fonts\/.*\.otf$/i.test(rel)) {

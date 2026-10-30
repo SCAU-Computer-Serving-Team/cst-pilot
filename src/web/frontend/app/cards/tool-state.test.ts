@@ -27,10 +27,29 @@ test("failure and partial results keep separate visual states", () => {
 });
 
 test("canvas exceptions render outside the collapsed tool group", () => {
-	for (const value of [call("web_search"), call("runbook"), call("sys"), call("sys", "overview")]) {
+	for (const value of [
+		call("web_search"),
+		call("runbook"),
+		call("command_plan"),
+		call("runbook_deliver"),
+		call("sys"),
+		call("sys", "overview"),
+		call("bitlocker", "unlock"),
+		call("bitlocker", "decrypt"),
+	]) {
 		assert.equal(isStandaloneTool(value, result), true);
 	}
-	for (const value of [call("disk"), call("sys", "proc"), call("read"), call("fffind")]) {
+	for (const value of [
+		call("disk"),
+		call("sys", "proc"),
+		call("sys", "gpu"),
+		call("sys", "io"),
+		call("sys", "sensor"),
+		call("bitlocker"),
+		call("bitlocker", "status"),
+		call("read"),
+		call("fffind"),
+	]) {
 		assert.equal(isStandaloneTool(value, result), false);
 	}
 });

@@ -1,8 +1,8 @@
-import type { ContentPart, Message } from "../data/web-state";
+import type { Message } from "../data/web-state";
+import { type SpecialToolCall, specialToolKind } from "./tool-kind.ts";
 import { type ToolState, toolState } from "./tool-state.ts";
 
-export type SpecialToolCall = Extract<ContentPart, { type: "toolCall" }>;
-export type SpecialToolKind = "sys-overview" | "runbook" | "web-search" | "bitlocker";
+export { type SpecialToolCall, type SpecialToolKind, specialToolKind } from "./tool-kind.ts";
 export type SpecialStatus = ToolState | "cancelled" | "unknown";
 export type SpecialField = { label: string; value: string };
 export type SpecialVolume = {
@@ -99,15 +99,6 @@ export const conversionLabel = (v: number | null) =>
 				>
 			)[v] ?? `未知状态 (${v})`);
 export const lockLabel = (v: number | null) => (v === 0 ? "已解锁" : v === 1 ? "已锁定" : "锁定状态未确认");
-
-export function specialToolKind(call: SpecialToolCall): SpecialToolKind | undefined {
-	if (call.name === "sys" && (call.arguments.scope ?? "overview") === "overview") return "sys-overview";
-	if (["runbook", "command_plan", "runbook_deliver"].includes(call.name)) return "runbook";
-	if (call.name === "web_search") return "web-search";
-	if (call.name === "bitlocker" && (call.arguments.scope === "unlock" || call.arguments.scope === "decrypt"))
-		return "bitlocker";
-	return undefined;
-}
 
 export function mapSpecialTool(call: SpecialToolCall, result?: Message, live = false): SpecialToolView | undefined {
 	const kind = specialToolKind(call);

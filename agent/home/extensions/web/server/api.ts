@@ -10,11 +10,13 @@ import { announceProcessClose, beginProcessClose, cancelProcessClose, hintTeleme
 import { CstoaAccount } from "./api/account.ts";
 import { createAuthRoutes } from "./api/auth.ts";
 import { sendError } from "./api/errors.ts";
+import { createExportRoutes } from "./api/exports.ts";
 import { body, problem, send } from "./api/http.ts";
 import { createModelRoutes } from "./api/models.ts";
 import { listProjectFiles } from "./api/project-files.ts";
 import { getProviderQuota } from "./api/quota.ts";
 import { deliveredRunbookFile, openDeliveredRunbook } from "./api/runbook.ts";
+import type { ExportRenderer } from "./exports/render.ts";
 import { type ImageRef, ImageStore } from "./session/attachments.ts";
 import { browserJson } from "./session/browser-json.ts";
 import { compactSession } from "./session/compaction.ts";
@@ -30,7 +32,11 @@ export function createWebApi(
 	agentDir: string,
 	port: number,
 	shutdown?: () => void,
-	options: { openRunbook?: (file: string) => Promise<void> } = {},
+	options: {
+		openRunbook?: (file: string) => Promise<void>;
+		artifactsRoot?: string;
+		exportRenderer?: ExportRenderer;
+	} = {},
 ) {
 	let stopping = false;
 	let exitTask: Promise<void> | undefined;
@@ -111,6 +117,7 @@ export function createWebApi(
 			})),
 		);
 	const origin = `http://127.0.0.1:${port}`;
+	const exportRoutes = createExportRoutes(pool, agentDir, origin, writeOnce, options);
 	async function inbox(id: string): Promise<SessionInbox> {
 		const slot = await pool.openSaved(id);
 		let instance = inboxes.get(id);
@@ -330,6 +337,7 @@ export function createWebApi(
 				});
 				return true;
 			}
+			if (await exportRoutes(request, response, pathname, method)) return true;
 			if (await modelRoutes(request, response, pathname, method)) return true;
 			if (await authRoutes(request, response, pathname, method)) return true;
 			if (pathname === "/api/sessions" && method === "GET") {
@@ -750,6 +758,7 @@ export function createWebApi(
 			offCatalog();
 			account.invalidate();
 			await authRoutes.close();
+			await exportRoutes.close();
 			await Promise.all([...inboxes.values()].map((box) => box.close()));
 			for (const stream of streams.values()) stream.close();
 			globalEvents.close();

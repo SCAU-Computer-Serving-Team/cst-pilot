@@ -17,6 +17,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { RunningLight } from "../conversation/running-light";
 import type { ContentPart, Message } from "../data/web-state";
 import { PreviewableImage } from "../images/image-preview";
+import { CodeBlock } from "../shell/code-block";
 import { type Block, mapTool } from "./map-tool";
 import { isStandaloneTool, splitToolCalls, type ToolState, toolState } from "./tool-state";
 
@@ -54,8 +55,8 @@ function StatusIcon({ state, size = 16 }: { state: ToolState; size?: number }) {
 	);
 }
 
-function Listing({ block }: { block: Extract<Block, { kind: "listing" }> }) {
-	const [visible, setVisible] = useState(40);
+function Listing({ block, all = false }: { block: Extract<Block, { kind: "listing" }>; all?: boolean }) {
+	const [visible, setVisible] = useState(all ? block.items.length : 40);
 	return (
 		<section aria-label={block.id} className="tool-listing">
 			<ol>
@@ -85,7 +86,7 @@ function Notice({ block }: { block: Extract<Block, { kind: "notice" }> }) {
 		</p>
 	);
 }
-function renderBlock(block: Block) {
+function renderBlock(block: Block, all = false) {
 	if (block.kind === "fields")
 		return (
 			<section aria-label={block.title ?? block.id} className="tool-fields">
@@ -100,12 +101,12 @@ function renderBlock(block: Block) {
 				</dl>
 			</section>
 		);
-	if (block.kind === "listing") return <Listing block={block} />;
+	if (block.kind === "listing") return <Listing block={block} all={all} />;
 	if (block.kind === "notice") return <Notice block={block} />;
 	if (block.kind === "text")
 		return (
 			<section className="tool-text">
-				<pre className="tool-raw">{block.text}</pre>
+				<CodeBlock className="tool-raw">{block.text}</CodeBlock>
 			</section>
 		);
 	if (block.kind === "image")
@@ -144,6 +145,11 @@ function renderBlock(block: Block) {
 			</ol>
 		</section>
 	);
+}
+
+/** 聊天卡片与只读导出共用块渲染；导出完整展示列表。 */
+export function ToolBlocks({ blocks, all = false }: { blocks: Block[]; all?: boolean }) {
+	return blocks.map((block) => <div key={block.id}>{renderBlock(block, all)}</div>);
 }
 
 function SearchRow({
@@ -290,7 +296,7 @@ export const ToolCard = memo(function ToolCard({
 							<p>无返回结果</p>
 						)
 					) : (
-						view.blocks.map((block) => <div key={block.id}>{renderBlock(block)}</div>)
+						<ToolBlocks blocks={view.blocks} />
 					)}
 				</div>
 			</Card.Content>
@@ -307,10 +313,10 @@ export const ToolCard = memo(function ToolCard({
 						</Disclosure.Trigger>
 					</Disclosure.Heading>
 					<Disclosure.Content>
-						<pre className="tool-raw">
+						<CodeBlock className="tool-raw">
 							{(view?.raw || JSON.stringify(details) || "无原始结果").slice(0, 100000)}
 							{(view?.raw.length ?? 0) > 100000 && "\n……显示已截断"}
-						</pre>
+						</CodeBlock>
 					</Disclosure.Content>
 				</Disclosure>
 			)}

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { artifactDate, ensureArtifactDirectory } from "./artifact-paths.ts";
 import {
 	buildBody,
 	LEVELS,
@@ -31,10 +32,16 @@ const validId = (value: string) => /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}
 /** 方案版本是事实来源；文本文件按指定版本导出，重试沿用同一路径。 */
 export class CommandPlanStore {
 	private readonly plans: string;
-	private readonly outbox: string;
-	constructor(outbox: string) {
-		this.outbox = outbox;
-		this.plans = join(outbox, ".plans");
+	private readonly artifacts: string;
+	private readonly legacyPlans?: string;
+	constructor(
+		artifacts: string,
+		plans = join(artifacts, "..", "agent", "home", "command-plans"),
+		legacyPlans?: string,
+	) {
+		this.artifacts = artifacts;
+		this.plans = plans;
+		this.legacyPlans = legacyPlans;
 	}
 
 	private async locked<T>(task: () => Promise<T>): Promise<T> {
@@ -46,8 +53,14 @@ export class CommandPlanStore {
 
 	private async latest(runbookId: string): Promise<Plan> {
 		if (!validId(runbookId)) throw new Error("清单 ID 无效");
-		const dir = join(this.plans, runbookId);
-		const versions = await readdir(dir).catch((cause: NodeJS.ErrnoException) => {
+		let dir = join(this.plans, runbookId);
+		const versions = await readdir(dir).catch(async (cause: NodeJS.ErrnoException) => {
+			if (cause.code === "ENOENT" && this.legacyPlans) {
+				dir = join(this.legacyPlans, runbookId);
+				return readdir(dir).catch(() => {
+					throw new Error("命令方案不存在，请先调用 command_plan");
+				});
+			}
 			if (cause.code === "ENOENT") throw new Error("命令方案不存在，请先调用 command_plan");
 			throw cause;
 		});
@@ -95,10 +108,12 @@ export class CommandPlanStore {
 			if (previous && previous.version !== input.baseVersion)
 				throw new Error(`方案已有新版本 ${previous.version}，请核对最新命令后再修订`);
 			const now = new Date();
+			const day = artifactDate(input.date ?? previous?.day, now);
+			if (previous && day !== previous.day) throw new Error("已有方案的归档日期不能修改");
 			const plan: Plan = {
 				runbookId: previous?.runbookId ?? randomUUID(),
 				version: (previous?.version ?? 0) + 1,
-				day: previous?.day ?? localStamp(now).dir,
+				day,
 				createdAt: now.toISOString(),
 				timeText: localStamp(now).text,
 				title,
@@ -118,7 +133,8 @@ export class CommandPlanStore {
 		return this.locked(async () => {
 			const plan = await this.latest(runbookId);
 			if (plan.version !== version) throw new Error(`方案已有新版本 ${plan.version}，请核对后交付最新版本`);
-			const dir = join(this.outbox, plan.day, plan.runbookId);
+			const base = await ensureArtifactDirectory(this.artifacts, plan.day, "runbook");
+			const dir = join(base, plan.runbookId);
 			const name = `v${plan.version}-${plan.levelLabel}-${plan.title}.txt`;
 			const file = join(dir, name);
 			const body = buildBody(plan.title, plan.level, plan.commands, plan.timeText);

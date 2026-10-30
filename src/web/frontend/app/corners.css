@@ -6,7 +6,6 @@
   ::before, ::after { corner-shape: inherit; }
   :is(.context-meter, .context-ring, .context-progress, .context-progress > span, .draft-image-remove, .t-tabs, .t-tab, .t-tabs-pill, .rounded-full, [data-corner="round"]),
   .context-meter:is(:hover, :focus-visible)::before,
-  .sidebar-group-select[data-mixed] .session-check-control::after,
   .special-tool progress, .special-tool-meter-empty { corner-shape: round; }
   .special-tool progress::-webkit-progress-bar { corner-shape: round; }
   .special-tool progress::-webkit-progress-value { corner-shape: round; }

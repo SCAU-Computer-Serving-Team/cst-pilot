@@ -1,24 +1,33 @@
-import { useEffect, useRef } from "react";
+import { type RefObject, useEffect, useRef } from "react";
 
 const overlays = ".composer-popover, .sidebar-account-popover, .login-provider-popover, .context-panel";
-const dismissers = new Set<() => void>();
+const dismissers = new Set<(event: Event) => void>();
 
 function pageScroll(event: Event) {
 	if (event.target instanceof Element && event.target.closest(overlays)) return;
-	for (const dismiss of dismissers) dismiss();
+	for (const dismiss of dismissers) dismiss(event);
 }
 function escapeKey(event: KeyboardEvent) {
 	if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
-	for (const dismiss of dismissers) dismiss();
+	for (const dismiss of dismissers) dismiss(event);
 }
 
-/** 共用一组页面监听；面板内部滚动保留打开状态。 */
-export function usePanelDismiss(open: boolean, onDismiss: () => void) {
+/** 共用页面监听；有锚点时只响应会移动锚点的滚动。 */
+export function usePanelDismiss(open: boolean, onDismiss: () => void, anchor?: RefObject<HTMLElement | null>) {
 	const callback = useRef(onDismiss);
 	callback.current = onDismiss;
 	useEffect(() => {
 		if (!open) return;
-		const dismiss = () => callback.current();
+		const dismiss = (event: Event) => {
+			if (
+				event.type === "scroll" &&
+				anchor?.current &&
+				event.target instanceof Element &&
+				!event.target.contains(anchor.current)
+			)
+				return;
+			callback.current();
+		};
 		dismissers.add(dismiss);
 		if (dismissers.size === 1) {
 			window.addEventListener("scroll", pageScroll, true);
@@ -31,5 +40,5 @@ export function usePanelDismiss(open: boolean, onDismiss: () => void) {
 				window.removeEventListener("keydown", escapeKey);
 			}
 		};
-	}, [open]);
+	}, [open, anchor]);
 }

@@ -20,6 +20,12 @@ test('遥测测试和待发队列不得进入发行树', () => {
   assert.throws(()=>checkReleaseTree('.', ['agent/home/telemetry/pending-target.jsonl']), /运行状态或凭据路径/);
 });
 
+test('会话导出、命令清单与产物登记不得进入发行树', () => {
+  for (const file of ['artifacts/2026-10-30/sessions/fixture.html', 'artifacts/2026-10-30/runbook/fixture.txt', 'outbox/2026-10-30/fixture.txt', 'agent/home/session-exports/job.json', 'agent/home/command-plans/plan.json']) {
+    assert.throws(() => checkReleaseTree('.', [file]), /运行状态或凭据路径/);
+  }
+});
+
 test('完整 OTF 字体不得进入 Web 发行树', () => {
   assert.throws(() => checkReleaseTree('.', ['agent/home/extensions/web/static/fonts/SourceHanSansCN-Regular.otf']), /完整 OTF 不得进入 Web 分发包/);
 });

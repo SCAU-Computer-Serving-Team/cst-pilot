@@ -1,0 +1,50 @@
+.export-workspace { flex: 1; min-width: 0; height: 100%; overflow: auto; background: var(--chat-bg); color: var(--chat-ink); }
+.export-toolbar { display: flex; align-items: center; gap: 24px; padding: 24px 32px; border-bottom: 1px solid var(--chat-border); }
+.export-toolbar h1 { margin: 0; font-size: 20px; font-weight: 600; }
+.export-back { display: inline-flex; align-items: center; gap: 8px; color: var(--chat-muted); font-size: 14px; }
+.export-layout { display: grid; grid-template-columns: 288px minmax(0, 1fr); gap: 32px; padding: 32px; align-items: start; }
+.export-controls { display: grid; gap: 20px; min-width: 0; }
+.export-controls fieldset { display: grid; gap: 18px; min-width: 0; border: 0; margin: 0; padding: 0; }
+.export-controls legend { margin-bottom: 24px; font-weight: 600; }
+.export-controls label { display: grid; gap: 8px; font-size: 14px; }
+.export-controls select, .export-controls input[type="date"] { width: 100%; min-height: 40px; padding: 8px 12px; border: 1px solid var(--chat-input-border); border-radius: var(--radius-control); color: var(--chat-ink); background: var(--app-control); font: inherit; color-scheme: inherit; }
+.export-controls label.export-check, .export-turns label { display: flex; align-items: flex-start; gap: 10px; }
+.export-controls input[type="checkbox"] { flex: none; width: 16px; height: 16px; margin-top: 2px; accent-color: var(--app-send); }
+.export-turns { display: grid; gap: 12px; max-height: 240px; overflow: auto; padding: 12px; border: 1px solid var(--chat-border); border-radius: var(--radius-row); }
+.export-turns span { overflow-wrap: anywhere; }
+.export-note, .export-preview-label { margin: 0; font-size: 13px; line-height: 1.6; color: var(--chat-muted); overflow-wrap: anywhere; }
+.export-generate { color: var(--app-send-icon); background: var(--app-send); }
+.export-generate:disabled { opacity: .5; }
+.export-preview-panel { min-width: 0; }
+.export-preview-label { margin-bottom: 12px; }
+.export-preview-viewport { overflow: hidden; width: 100%; border: 1px solid var(--chat-border); border-radius: var(--radius-row); background: var(--chat-bg); }
+.export-preview-viewport iframe { display: block; width: 1240px; max-width: none; border: 0; transform-origin: top left; }
+.export-result { display: grid; gap: 12px; }
+.export-result h2 { margin: 0; font-size: 16px; }
+.export-result p, .export-result a { margin: 0; overflow-wrap: anywhere; font-size: 13px; }
+.export-result a { color: var(--chat-tool); text-decoration: underline; }
+.export-page { height: auto; min-height: 100vh; margin: 0; overflow: visible; color: var(--chat-ink); background: var(--chat-bg); }
+.export-document { box-sizing: border-box; width: 100%; max-width: 1240px; margin: 0 auto; padding: 48px; color: var(--chat-ink); background: var(--chat-bg); }
+.export-heading { margin-bottom: 48px; padding-bottom: 24px; border-bottom: 1px solid var(--chat-border); }
+.export-heading > span { font-size: 14px; font-weight: 600; }
+.export-heading h1 { margin: 16px 0 8px; font-size: 26px; font-weight: 600; overflow-wrap: anywhere; }
+.export-heading p { margin: 0; color: var(--chat-muted); font-size: 13px; }
+.export-document .export-transcript { width: 100%; max-width: none; margin: 0; padding: 0; }
+.export-message { margin-bottom: 32px; break-inside: avoid; }
+.export-document .user-line { margin-bottom: 32px; }
+.export-document .user-bubble { white-space: pre-wrap; }
+.export-answer { min-width: 0; width: 100%; }
+.export-document .assistant-block { margin-bottom: 32px; }
+.export-document .markdown { overflow-wrap: anywhere; }
+.export-document .markdown-table { overflow: visible; }
+.export-document table { width: 100%; table-layout: fixed; }
+.export-document :is(th, td) { overflow-wrap: anywhere; white-space: normal; }
+.export-document :is(pre, .tool-raw, .special-tool-command-line code) { max-height: none; overflow: visible; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.export-document .message-image { display: block; max-width: 100%; max-height: 720px; height: auto; width: auto; object-fit: contain; margin-top: 12px; }
+.export-document :is(button, .code-copy-feedback, .special-tool-details, .special-tool-delivery) { display: none !important; }
+.export-document :is(.export-process, .export-tool) { margin: 16px 0; padding: 16px; border: 1px solid var(--chat-border); border-radius: var(--radius-row); }
+.export-document summary { color: var(--chat-muted); cursor: pointer; font-size: 14px; margin-bottom: 12px; }
+.export-document *, .export-document *::before, .export-document *::after { animation: none !important; transition: none !important; }
+@media (max-width: 960px) { .export-layout { grid-template-columns: 1fr; padding: 20px; gap: 24px; } .export-controls { max-width: none; } .export-toolbar { padding: 20px; gap: 16px; } }
+@media (max-width: 600px) { .export-document { padding: 24px 16px; } .export-heading { margin-bottom: 32px; } }
+@media print { .export-page { background: white; } .export-document { max-width: none; padding: 0; } .export-message { break-inside: auto; } }

@@ -28,6 +28,9 @@ agent/home/sessions/
 agent/home/web-inbox/
 agent/home/web-access.log
 outbox/
+artifacts/
+agent/home/command-plans/
+agent/home/session-exports/
 
 # ---- 设计资产（发行版需要，开发仓库不存；可由上游 OFL 字体包重建）----
 src/web/design/fonts/

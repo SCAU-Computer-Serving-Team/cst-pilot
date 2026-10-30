@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
 import { realpath, stat } from "node:fs/promises";
-import { dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
+import { ARTIFACTS_DIR } from "../../../diagnostics/artifact-paths.ts";
+import { ROOT_DIR } from "../../../diagnostics/runtime.ts";
 
 export function deliveredRunbookFile(message?: ToolResultMessage): string | undefined {
 	if (!message || message.isError) return undefined;
@@ -23,7 +24,6 @@ export function deliveredRunbookFile(message?: ToolResultMessage): string | unde
 	return typeof source?.runbook?.file === "string" ? source.runbook.file : undefined;
 }
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../..");
 export class RunbookOpenError extends Error {
 	readonly status: number;
 	readonly code: string;
@@ -33,18 +33,21 @@ export class RunbookOpenError extends Error {
 		this.code = code;
 	}
 }
-export async function openDeliveredRunbook(
-	file: string,
-	open = openTextFile,
-	root = resolve(ROOT, "outbox"),
-): Promise<void> {
+export async function openDeliveredRunbook(file: string, open = openTextFile, root?: string): Promise<void> {
 	let target: string;
 	try {
-		const paths = await Promise.all([realpath(root), realpath(file)]);
-		const base = paths[0];
-		target = paths[1];
-		const path = relative(base, target);
-		if (isAbsolute(path) || path === ".." || path.startsWith(`..${sep}`) || extname(target).toLowerCase() !== ".txt")
+		target = await realpath(file);
+		const bases = await Promise.all(
+			(root ? [root] : [ARTIFACTS_DIR, resolve(ROOT_DIR, "outbox")]).map((base) =>
+				realpath(base).catch(() => undefined),
+			),
+		);
+		const contained = bases.some((base) => {
+			if (!base) return false;
+			const path = relative(base, target);
+			return !isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`);
+		});
+		if (!contained || extname(target).toLowerCase() !== ".txt")
 			throw new RunbookOpenError(400, "runbook_invalid_file", "文件不属于已交付的文本清单");
 		if (!(await stat(target)).isFile())
 			throw new RunbookOpenError(400, "runbook_invalid_file", "交付路径未指向文本文件");

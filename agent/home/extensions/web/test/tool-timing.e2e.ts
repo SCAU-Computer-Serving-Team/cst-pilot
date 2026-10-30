@@ -147,6 +147,10 @@ test("单工具执行：read独立完成并冻结计时，ls继续运行；刷�
 		);
 		assert.equal(await read(), frozen);
 		assert.deepEqual(await expandedCards(), ["false", "false"], "刷新运行态后，子项仍默认折叠");
+		await browser.until(
+			`[...document.querySelectorAll(".tool-card-heading")].some(e=>e.textContent.includes("正在调用 ls") && parseFloat(e.querySelector("time")?.textContent ?? "") > ${parseFloat(frozen)} + 1.2)`,
+			"慢工具的实际执行时长足以区分独立计时",
+		);
 		await writeFile(gate, "go");
 		await browser.until("document.body.textContent.includes('TIMING_COMPLETE')", "ls结束及续答");
 		await browser.click(".turn-process-head");
@@ -155,11 +159,15 @@ test("单工具执行：read独立完成并冻结计时，ls继续运行；刷�
 			"两个工具完成",
 		);
 		assert.deepEqual(await expandedCards(), ["false", "false"], "结果返回后，子项保持折叠");
+		await browser.until(
+			"document.querySelectorAll('.tool-group .tool-card-heading time').length===2",
+			"两项已完成耗时从快照同步",
+		);
 		const times = await browser.evaluate<string[]>(
-			"[...document.querySelectorAll('.tool-elapsed')].map(e=>e.textContent)",
+			"[...document.querySelectorAll('.tool-group .tool-card-heading time')].map(e=>e.textContent)",
 		);
 		assert.equal(times[0], frozen);
-		assert.ok(parseFloat(times[1]!) > parseFloat(times[0]!) + 1, "两工具耗时独立");
+		assert.ok(parseFloat(times[1]!) > parseFloat(times[0]!) + 1, `两工具耗时独立：${JSON.stringify(times)}`);
 		await browser.screenshot(join(root, "both-finished.png"));
 		await browser.navigate(`${origin}/s/${id}`);
 		await browser.click(".turn-process-head");

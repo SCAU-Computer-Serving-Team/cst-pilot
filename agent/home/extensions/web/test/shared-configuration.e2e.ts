@@ -168,8 +168,13 @@ test("跨端用户链路：网页保存范围和模型、原生扫码、服务�
 		await browser.until("!!document.querySelector('.account-actions a')", "专属账号页");
 		await browser.click(".account-actions a");
 		await browser.until(
-			"document.querySelector('.login-qr-code')?.textContent.includes('123456')",
-			"真实 cstoa 扩展请求设备码",
+			"!!document.querySelector('.login-qr-box svg') && document.querySelector('.login-qr-countdown')?.textContent.includes('二维码剩余')",
+			"真实 cstoa 扩展请求二维码",
+		);
+		assert.equal(
+			await browser.evaluate("document.querySelector('.login-panel').textContent.includes('123456')"),
+			false,
+			"CSTOA 登录不显示设备授权码",
 		);
 		await browser.click(".login-close");
 		await browser.until("location.pathname==='/account'", "取消返回账号页");

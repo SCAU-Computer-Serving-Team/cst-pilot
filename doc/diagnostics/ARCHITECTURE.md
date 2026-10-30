@@ -11,7 +11,7 @@
 | `index.ts` | 扩展入口，创建 `wz-index` 实例并注册 10 个工具 |
 | `ls.ts`、`startup.ts` | 独立查询工具的参数校验、执行与返回封装 |
 | `runbook.ts` / `runbook-files.ts` | 命令工具注册、共用参数校验、文本格式、单步写入及文件锁 |
-| `command-plan.ts` / `command-plan-store.ts` | 方案／交付工具注册与版本存储；`outbox/.plans/<ID>/v<版本>.json` 为方案事实来源，导出文本保持版本内容 |
+| `command-plan.ts` / `command-plan-store.ts` | 方案／交付工具注册与版本存储；`agent/home/command-plans/<ID>/v<版本>.json` 为方案事实来源，导出文本保持版本内容 |
 | `disk.ts` / `disk-core.ts` | 存储工具注册与空间、物理盘、SMART、WizTree／Node 扫描实现 |
 | `sys.ts` / `sys-commands.ts` | 实时负载与传感器注册、采集编排及 PowerShell 采样脚本模板 |
 | `driver.ts` / `driver-core.ts` / `driver-data.ts` | 设备与驱动工具注册、WMI 查询、Node 侧过滤与结果 Schema 校验 |
@@ -57,7 +57,7 @@ flowchart LR
 
 ## 跨进程互斥锁
 
-- **方案版本锁**：`command_plan` 与 `runbook_deliver` 共用 `outbox/.plans` 目录锁。读取当前版本、核对版本和原子发布均在锁内完成；JSON 与 TXT 经临时文件重命名发布，失败后清理临时文件。
+- **方案版本锁**：`command_plan` 与 `runbook_deliver` 共用 `agent/home/command-plans` 目录锁。读取当前版本、核对版本和原子发布均在锁内完成；JSON 与 TXT 经临时文件重命名发布，失败后清理临时文件。
 
-- **runbook 日期目录锁**：同一进程内通过串行队列排队；跨进程按 `outbox/<YYYY-MM-DD>` 路径哈希建立 Windows 命名管道锁，冲突时直接拒绝写入，防止多进程分配重复序号或覆盖修正文件。
+- **runbook 日期目录锁**：同一进程内通过串行队列排队；跨进程按 `artifacts/<YYYY-MM-DD>/runbook` 路径哈希建立 Windows 命名管道锁，冲突时直接拒绝写入，防止多进程分配重复序号或覆盖修正文件。
 - **bitlocker 同卷锁**：按规范化 `volumeId`（统一大写与尾部反斜线，不含盘符或会话 ID）建立本机命名管道锁 `bitlocker-lock.ts`。取得锁后重新调用 Windows 接口核实卷身份与当前状态，覆盖本地确认、提交与状态复查，进程退出时由操作系统自动释放。

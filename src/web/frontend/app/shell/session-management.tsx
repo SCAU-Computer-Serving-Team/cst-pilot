@@ -9,7 +9,6 @@ import {
 	deletionReason,
 	deletionTitle,
 } from "./session-deletion";
-import { toggleSessionGroup } from "./session-groups";
 
 export function useSessionManagement(
 	sessions: readonly DeletionTarget[],
@@ -32,10 +31,10 @@ export function useSessionManagement(
 		setSelection(null);
 		setTargets(null);
 	}, []);
-	function start(id: string) {
+	function start(id?: string) {
 		if (working.current) return;
 		setResult(null);
-		setSelection(new Set([id]));
+		setSelection(new Set(id ? [id] : []));
 	}
 	function toggle(id: string) {
 		if (working.current) return;
@@ -46,10 +45,6 @@ export function useSessionManagement(
 			else next.add(id);
 			return next;
 		});
-	}
-	function toggleGroup(ids: readonly string[]) {
-		if (working.current) return;
-		setSelection((previous) => (previous ? toggleSessionGroup(ids, previous) : previous));
 	}
 	function toggleAll() {
 		if (working.current) return;
@@ -91,7 +86,6 @@ export function useSessionManagement(
 		start,
 		finish,
 		toggle,
-		toggleGroup,
 		toggleAll,
 		requestDelete,
 		confirm,

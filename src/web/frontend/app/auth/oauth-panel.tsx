@@ -202,8 +202,8 @@ export function OAuthPanel({
 									title={team ? "OA 授权二维码" : `${providerName} 授权二维码`}
 								/>
 							</div>
-							<p className="login-qr-hint">{team ? "OA 扫码授权" : "扫码授权"}</p>
-							<p className="login-qr-code">授权码：{status.deviceCode.userCode}</p>
+							<p className="login-qr-hint">{team ? "手机扫码，在 OA 页面完成授权" : "扫码授权"}</p>
+							{!team && <p className="login-qr-code">授权码：{status.deviceCode.userCode}</p>}
 							<p className="login-qr-countdown">
 								二维码剩余 {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}
 							</p>

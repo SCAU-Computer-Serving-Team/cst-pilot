@@ -20,6 +20,7 @@ import { RunningCorner } from "../conversation/running-light";
 import { ApiFailure, apiJson, sessionPath } from "../data/api";
 import { type PendingBitLocker, requestForCall } from "../data/bitlocker-state";
 import type { Message } from "../data/web-state";
+import { CodeBlock } from "../shell/code-block";
 import { BitLockerInput } from "./bitlocker-input";
 import {
 	mapSpecialTool,
@@ -125,7 +126,7 @@ function ToolDetails({
 							{error}
 						</p>
 					))}
-					{view.raw && <pre className="special-tool-raw">{view.raw}</pre>}
+					{view.raw && <CodeBlock className="special-tool-raw">{view.raw}</CodeBlock>}
 				</div>
 			</Disclosure.Content>
 		</Disclosure>
@@ -328,7 +329,7 @@ export const SpecialTool = memo(function SpecialTool({
 								<p key={`${index}-${query}`}>{query}</p>
 							))}
 							{view.unstructured && !view.errors.length && view.raw && (
-								<pre className="special-tool-raw">{view.raw}</pre>
+								<CodeBlock className="special-tool-raw">{view.raw}</CodeBlock>
 							)}
 							{view.errors.map((error, index) => (
 								<p key={`${index}-${error}`} className="special-tool-detail-error">

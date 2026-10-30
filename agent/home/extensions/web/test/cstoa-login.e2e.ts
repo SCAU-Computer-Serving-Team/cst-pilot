@@ -11,7 +11,7 @@ import { BrowserProbe, freePort } from "./browser.ts";
 import { testRoot } from "./support.ts";
 
 test(
-	"浏览器 CSTOA APIKEY 登录：账号页退出、侧栏菜单、固定地址与自动模型，桌面浅色和窄屏深色",
+	"浏览器 CSTOA APIKEY 登录：账号页退出、侧栏菜单、固定地址与模型目录，桌面浅色和窄屏深色",
 	{ timeout: 90_000 },
 	async () => {
 		const root = join(await testRoot(), "cstoa-key-login");
@@ -131,6 +131,7 @@ test(
 			await browser?.close();
 			await api.close();
 			await pool.close();
+			await pool.catalog.close();
 			server.closeAllConnections();
 			await new Promise<void>((resolve) => server.close(() => resolve()));
 			await oa.close();

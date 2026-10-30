@@ -10,23 +10,25 @@ export default function registerRunbook(pi: ExtensionAPI) {
 		name: "runbook",
 		label: "Command Runbook",
 		description:
-			"把需要队员手动执行的命令写成 txt 清单，落在工具包 outbox\\<日期>\\ 下（只写工具包，不动机主系统，不执行任何命令）。" +
+			"把需要队员手动执行的命令写成 txt 清单，落在工具包 artifacts\\<日期>\\runbook\\ 下（只写工具包，不动机主系统，不执行任何命令）。" +
 			"一次调用产出一个文件，序号当天唯一递增；命令按风险分档（safe=安全 / low=较安全 / confirm=需与机主确认），同一档合并成一份清单。" +
 			"要改已经写好的某一份，用它的 sequence 重写，不会新增文件。" +
 			"每条命令必须是一行、可整行复制，并带一句说明功能与影响。" +
 			"中等及以上风险、不可逆且无退路的操作不要写入任何清单。" +
 			" 输出 JSON 最多 50 KiB，超限标注 outputTruncated。",
-		promptSnippet: "Write a copy-paste command runbook (txt) into the toolkit outbox for the member to run manually",
+		promptSnippet:
+			"Write a copy-paste command runbook (txt) into the toolkit artifacts date/runbook directory for the member to run manually",
 		promptGuidelines: [
 			OUTPUT_GUIDELINE,
 			"Use command_plan followed by runbook_deliver for new or revised command plans, including follow-up turns. Use this single-step runbook only when the member explicitly requests immediate TXT delivery or revises a sequence-based file.",
 			"Call it once per risk level, not once per command: merge similar operations into one command and put every command of the same level in the same file.",
 			"Sequences are unique and increasing within a day. To revise a runbook you already wrote, call again with its sequence; omit sequence to get a new one.",
 			"Do not put medium-or-higher risk or irreversible operations into a runbook; explain those in chat instead. Read skills/runbook/SKILL.md before the first call.",
-			"Always repeat the returned file path verbatim; the member locates the file from the toolkit outbox folder.",
+			"Always repeat the returned file path verbatim; the member locates the file from the toolkit artifacts date/runbook directory folder.",
 		],
 		parameters: Type.Object({
 			title: Type.String({ description: "清单标题，进入文件名，如「清理 C 盘临时文件」" }),
+			date: Type.Optional(Type.String({ description: "归档日期 YYYY-MM-DD，默认本机当天" })),
 			level: Type.Union([Type.Literal("safe"), Type.Literal("low"), Type.Literal("confirm")], {
 				description: "风险档：safe=安全，low=较安全，confirm=需与机主确认",
 			}),

@@ -105,9 +105,13 @@ jobs:
             ${{ runner.temp }}/**/composer-tokens/*.json
             ${{ runner.temp }}/**/account-profile/*.png
             ${{ runner.temp }}/**/cstoa-key-login/*.png
+            ${{ runner.temp }}/**/cstoa-login/*.png
+            ${{ runner.temp }}/**/session-export/*.png
+            ${{ runner.temp }}/**/special-tool-process/*.png
+            ${{ runner.temp }}/**/session-export/**/artifacts/**/*.html
             ${{ runner.temp }}/**/session-management/*.png
             ${{ runner.temp }}/**/session-management/report.json
-            ${{ runner.temp }}/**/session-groups/*.png
-            ${{ runner.temp }}/**/session-groups/report.json
+            ${{ runner.temp }}/**/session-list/*.png
+            ${{ runner.temp }}/**/code-copy-*/*.png
           if-no-files-found: ignore
           retention-days: 7

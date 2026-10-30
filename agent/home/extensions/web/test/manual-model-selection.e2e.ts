@@ -107,6 +107,28 @@ test("首次使用：默认模型身份、缺密钥弹窗、草稿返回、独�
 		});
 		await browser.evaluate("document.documentElement.dataset.theme='light'");
 		await browser.click(".model-key-close");
+		await browser.click(".sidebar-all");
+		await browser.until("location.pathname==='/sessions'", "离开首页");
+		await browser.click("a.sidebar-new");
+		await browser.until(
+			"location.pathname==='/'&&document.querySelector('.composer-model')?.textContent.includes('DeepSeek V4.1 Flash')",
+			"切页后重新加载默认模型",
+		);
+		assert.equal(
+			await browser.evaluate("!!document.querySelector('.model-key-dialog[open]')"),
+			false,
+			"切页返回不重复自动提示",
+		);
+		await browser.navigate(`${origin}/`);
+		await browser.until(
+			"document.querySelector('.composer-model')?.textContent.includes('DeepSeek V4.1 Flash')",
+			"刷新后加载默认模型",
+		);
+		assert.equal(
+			await browser.evaluate("!!document.querySelector('.model-key-dialog[open]')"),
+			false,
+			"同一标签页刷新不重复自动提示",
+		);
 		await browser.fill(".composer-input", "检查电脑运行缓慢的原因");
 		await browser.click(".composer-send");
 		await browser.until(
@@ -114,6 +136,13 @@ test("首次使用：默认模型身份、缺密钥弹窗、草稿返回、独�
 			"发送前拦截",
 		);
 		assert.equal(pool.snapshot().length, 0, "没有创建空会话");
+		await browser.click(".model-key-close");
+		await browser.click(".composer-send");
+		await browser.until(
+			"document.querySelector('.model-key-dialog')?.textContent.includes('草稿已保留')",
+			"主动重试发送仍检查凭据并提示",
+		);
+		assert.equal(pool.snapshot().length, 0, "重复发送未创建空会话");
 		await browser.click(".model-key-configure");
 		await browser.until(
 			"location.pathname==='/settings/provider'&&!!document.querySelector('.settings-key-input input')",

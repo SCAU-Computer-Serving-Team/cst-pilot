@@ -6,7 +6,7 @@ import { BrowserProbe } from "./browser.ts";
 import { compactionFixture } from "./compaction-fixture.ts";
 import { testRoot } from "./support.ts";
 
-test("消息菜单仅分支树可用，导出与分享置灰且不发请求", { timeout: 40_000 }, async () => {
+test("消息菜单开放分支树与导出页面，分享置灰且不发请求", { timeout: 40_000 }, async () => {
 	const root = join(await testRoot(), "message-menu");
 	await mkdir(root, { recursive: true });
 	const fixture = await compactionFixture();
@@ -32,9 +32,13 @@ test("消息菜单仅分支树可用，导出与分享置灰且不发请求", { 
 			),
 			[
 				{ text: "分支树", disabled: false },
-				{ text: "导出会话", disabled: true },
+				{ text: "导出会话", disabled: false },
 				{ text: "分享", disabled: true },
 			],
+		);
+		assert.equal(
+			await probe.evaluate(`document.querySelector('.sidebar-account-menu a[href="/s/${slot.id}/export"]')!==null`),
+			true,
 		);
 		await probe.evaluate("document.querySelectorAll('.sidebar-account-menu button').forEach(e=>e.click())");
 		assert.deepEqual(await probe.evaluate("window.__plannedRequests"), []);
@@ -45,10 +49,8 @@ test("消息菜单仅分支树可用，导出与分享置灰且不发请求", { 
 		await probe.screenshot(join(root, "message-menu-dark.png"));
 		await probe.click(".sidebar-account-menu a");
 		await probe.until(`location.pathname==='/s/${slot.id}/tree'`, "分支树仍可导航");
-		for (const suffix of ["export", "share"]) {
-			const response = await fetch(`${fixture.origin}/api/sessions/${slot.id}/${suffix}`);
-			assert.equal(response.status, 404);
-		}
+		assert.equal((await fetch(`${fixture.origin}/api/sessions/${slot.id}/exports`)).status, 200);
+		assert.equal((await fetch(`${fixture.origin}/api/sessions/${slot.id}/share`)).status, 404);
 	} finally {
 		await browser?.close();
 		await fixture.close();

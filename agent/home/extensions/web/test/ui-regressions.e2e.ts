@@ -158,8 +158,10 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 			"首页配置与昨日记录",
 		);
 		assert.equal(
-			await browser.evaluate("[...document.querySelectorAll('.sidebar-group h2')].some(e=>e.textContent==='今天')"),
-			false,
+			await browser.evaluate(
+				"[...document.querySelectorAll('.sidebar-recent-heading')].some(e=>e.textContent.trim()==='最近')",
+			),
+			true,
 		);
 		await browser.screenshot(join(root, "home-desktop-light.png"));
 		await browser.evaluate("document.querySelector('.composer-model').click()");
@@ -170,11 +172,11 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		assert.deepEqual(models, ["测试模型 one", "测试模型 two"], "范围变化保留当前模型身份");
 		assert.equal(await browser.evaluate("document.querySelector('.model-popover input')===null"), true);
 		await browser.evaluate(
-			"Promise.all(document.querySelector('.composer-model .model-label svg').getAnimations().map(a=>a.finished))",
+			"Promise.all(document.querySelector('.composer-model .model-chevron').getAnimations().map(a=>a.finished))",
 		);
 		assert.ok(
 			await browser.evaluate(
-				"new DOMMatrix(getComputedStyle(document.querySelector('.composer-model .model-label svg')).transform).a < -0.99",
+				"new DOMMatrix(getComputedStyle(document.querySelector('.composer-model .model-chevron')).transform).a < -0.99",
 			),
 			"模型菜单展开时箭头旋转",
 		);
@@ -201,8 +203,8 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		await browser.evaluate("window.fetch=window.__fetchBeforeFault");
 		await browser.click('[aria-label="发送消息"]');
 		await browser.until(
-			"location.pathname.startsWith('/s/') && [...document.querySelectorAll('.sidebar-group h2')].some(e=>e.textContent==='今天') && [...document.querySelectorAll('.sidebar-session')].some(e=>e.textContent.includes('新会话实时记录'))",
-			"新会话在今天分类中实时出现",
+			"location.pathname.startsWith('/s/') && [...document.querySelectorAll('.sidebar-recent-heading')].some(e=>e.textContent.trim()==='最近') && [...document.querySelectorAll('.sidebar-session')].some(e=>e.textContent.includes('新会话实时记录'))",
+			"新会话在最近列表中实时出现",
 		);
 		evidence.realtimeSidebar = true;
 		await browser.until("window.__transitions.length>0", "路由触发原生页面过渡");

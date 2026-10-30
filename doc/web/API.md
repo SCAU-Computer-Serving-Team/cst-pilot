@@ -7,8 +7,11 @@
 | 路径 | 页面 | 说明 |
 |---|---|---|
 | `/` | 主页 | 欢迎语、新会话输入框与侧栏会话列表 |
+| `/sessions` | 全部会话 | 按更新时间倒序的完整列表、重命名与批量删除 |
 | `/s/<sessionId>` | 聊天工作台 | 会话消息流、过程折叠、工具卡片、输入队列与编辑器 |
 | `/s/<sessionId>/tree` | 分支树 | 会话条目树、五档过滤、搜索、折叠与分支总结导航 |
+| `/s/<sessionId>/export` | 导出会话 | 日期、格式、主题、选轮、只读预览与文件保存 |
+| `/_export` | 只读文档 | 页面预览与后端渲染共用，独立主题，无模型或账号调用 |
 | `/dashboard` | 仪表盘 | 后续迭代：本地请求用量概览、趋势与日志 |
 | `/login` | 登录页 | 居中面板（`cstoa` 扫码 / Pi OAuth / APIKEY） |
 | `/settings` | 模型服务设置 | 默认设置页（兼容 `/settings#accounts`），管理已配置与失效服务 |
@@ -54,6 +57,42 @@
 - 消息请求正文为 `{ "id": "...", "text": "...", "delivery": "queue", "images": [], "skill": "..." }`；`images` 与 `skill` 可省略。接受后返回 HTTP `202` 与 `{ "item": ... }`，同一会话内按消息 `id` 和内容去重。
 - 队列操作正文包含快照中的整数 `version`；编辑还需 `text`，重排还需完整待排队条目的 `ids` 数组。成功返回 `{ "queue": ... }`，版本过期或条目状态不允许操作时返回 `409`。
 - `failed` 条目可编辑、删除或显式重试。重启时保留未确认的 `delivering` 条目，不自动重放；其后续处理见[待决议题](../TASKS.md#工程与安全边界)。
+
+## 会话导出接口
+
+导出由后端保存到工具包根目录的 `artifacts/<YYYY-MM-DD>/sessions/`，目录内直接放 PNG 或 HTML。网页、自行调用 API 和后续分享共用这些接口。
+
+| 方法 | 路径 | 返回与用途 |
+|---|---|---|
+| `POST` | `/api/sessions/<id>/exports/preview` | 200；返回筛选和脱敏后的当前分支快照，不落盘 |
+| `POST` | `/api/sessions/<id>/exports` | 202；固定快照并创建后台任务，须携带去重键 |
+| `GET` | `/api/sessions/<id>/exports` | 最近 50 条导出记录，按快照时间倒序 |
+| `GET` | `/api/exports/<exportId>` | 状态、选项、保存目录、文件列表或错误 |
+| `GET` | `/api/exports/<exportId>/files/<index>` | 从 0 起读取已登记文件；被修改返回 409，移走返回 404 |
+
+POST 参数：
+
+```json
+{
+  "format": "html",
+  "theme": "dark",
+  "date": "2026-10-30",
+  "includeThinking": false,
+  "includeTools": false,
+  "turnIds": ["用户消息条目ID"]
+}
+```
+
+- `format` 为 `png`（默认）或 `html`；`theme` 为 `light`（默认）或 `dark`。
+- `date` 默认本机当天，须为有效的 `YYYY-MM-DD`；两项包含选项默认 `false`。
+- 省略 `turnIds` 导出当前分支全部对话。指定时须为非空、不重复的用户消息条目 ID 数组，每项包含该提问和随后的完整轮次；ID 从会话快照的 `entries` 取得。
+- 未知参数、失效轮次和非法日期返回 400。沿用本页同源请求头；重复去重键返回同一任务，参数变化返回 409。
+
+任务字段为 `id`、`sessionId`、`title`、`capturedAt`、`options`、`status`、`directory`、`files: {name, bytes, url}[]`，失败时附 `error: {code, message}`。状态为 `queued`、`rendering`、`completed` 或 `failed`。先创建任务，再轮询记录，完成后读取文件；离开页面不会取消任务，程序退出会停止未完成任务。
+
+渲染使用已安装的 Edge 或 Chrome，以隔离配置启动；可通过 `CST_EXPORT_BROWSER` 指定路径，无浏览器时任务返回 `export_browser_missing`。同时最多接纳 8 个任务，单任务超时 120 秒；快照上限 32 MiB，产物合计上限 200 MiB。PNG 使用 1240 CSS 像素宽度与 2 倍像素密度，长文分图；超过 100000 CSS 像素高度时提示减少轮次或改用 HTML。
+
+`GET /api/exports/<id>/snapshot` 供隔离渲染器使用，需要任务专属 `X-CST-Export-Token`，任务结束后失效。分享读取已登记产物。
 
 ## 模型认证与账号接口
 

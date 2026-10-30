@@ -36,6 +36,7 @@ import { draftKey as makeDraftKey } from "./drafts";
 import { scopedModels } from "./scoped-models";
 
 type Selection = ModelChoice | null;
+const initialKeyPromptStorageKey = "cst-model-key-prompt-shown";
 // 档位与 pi 的 ThinkingLevel 一一对应（off/minimal/low/medium/high/xhigh/max），面板内用英文短名。
 const thinkingOptions = [
 	{ id: "off", label: "Off" },
@@ -442,8 +443,15 @@ export function Composer({
 					setSelected((current) => refreshManualSelection(current, data, !sessionId && manualHomeModel.current));
 					if (!initialKeyPrompt.current && onSend && data.selected) {
 						initialKeyPrompt.current = true;
-						if (!data.selected.credentialReady && data.selected.catalogPresent)
+						if (
+							!data.selected.credentialReady &&
+							data.selected.catalogPresent &&
+							sessionStorage.getItem(initialKeyPromptStorageKey) !== "1"
+						) {
+							// 标签页内共用提示记录，切页重挂载和刷新均不重复自动弹窗。
+							sessionStorage.setItem(initialKeyPromptStorageKey, "1");
 							setMissingKey({ model: data.selected, unsent: false });
+						}
 					}
 					setMissingKey((current) =>
 						current &&
@@ -794,7 +802,9 @@ export function Composer({
 						<Select.Trigger className="composer-model">
 							<span className="model-label">
 								{selected?.name ?? "选择模型"}
-								<ChevronDown size={14} />
+								<span className="model-chevron">
+									<ChevronDown size={14} aria-hidden="true" />
+								</span>
 							</span>
 						</Select.Trigger>
 						<Select.Popover className="composer-popover model-popover" placement="top end">

@@ -1,6 +1,7 @@
 import { ChevronRight, CircleAlert, Info, KeyRound, WifiOff, X } from "lucide-react";
 import { Link } from "react-router";
 import { presentError } from "../data/error-presenter";
+import { CodeBlock } from "./code-block";
 import { Notification, NotificationDetail } from "./notification";
 
 export function ErrorNotice({
@@ -43,7 +44,7 @@ export function ErrorNotice({
 				<NotificationDetail icon={<Icon size={18} aria-hidden="true" />}>
 					{error.description && <span className="notification-detail-description">{error.description}</span>}
 					<span className="notification-detail-label">技术详情</span>
-					<code>{error.detail}</code>
+					<CodeBlock>{error.detail}</CodeBlock>
 				</NotificationDetail>
 				<span className="notification-message">{error.title}</span>
 				{error.kind === "auth" ? (
@@ -86,7 +87,7 @@ export function ErrorNotice({
 				<summary>
 					技术详情 <ChevronRight size={14} aria-hidden="true" />
 				</summary>
-				<pre>{error.detail}</pre>
+				<CodeBlock>{error.detail}</CodeBlock>
 			</details>
 		</div>
 	);

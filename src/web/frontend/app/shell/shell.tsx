@@ -1,20 +1,17 @@
-import { Button, Popover } from "@heroui/react";
+import { Button, Disclosure, Popover } from "@heroui/react";
 import {
-	Check,
 	CircleUserRound,
-	ListChecks,
+	LayoutDashboard,
 	LogIn,
 	MessageSquareWarning,
 	Monitor,
 	PanelLeft,
-	Pencil,
 	Power,
 	Settings,
 	SquarePen,
 	SunMoon,
-	Trash2,
 } from "lucide-react";
-import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, PrefetchPageLinks, useLocation, useNavigate, useNavigation } from "react-router";
 import { describeAccount } from "../account/format";
 import { useAccount } from "../account/use-account";
@@ -22,18 +19,16 @@ import { accountProvider, loginPath } from "../auth/providers";
 import { Composer, type ComposerConfig } from "../composer/composer";
 import { apiJson, type ProviderStatus } from "../data/api";
 import { attachTelemetryHints } from "../data/telemetry-hints";
-import { useGlobalEvents, useSessions } from "../data/web-state";
+import { useGlobalEvents } from "../data/web-state";
 import { BlueHour } from "./blue-hour";
 import { ExitDialog } from "./exit-dialog";
 import { usePanelDismiss } from "./panel-dismiss";
 import { sampleSessions } from "./sample-sessions";
-import { dayGroup, groupSelection, sessionGroups } from "./session-groups";
-import {
-	SessionDeleteDialog,
-	SessionDeleteNotice,
-	SessionManagementToolbar,
-	useSessionManagement,
-} from "./session-management";
+import { SessionActionsOverlay, useSessionActions } from "./session-actions";
+import { SessionEntry } from "./session-entry";
+import { orderedSessions, RECENT_SESSION_LIMIT } from "./session-list";
+import { SessionManagementToolbar } from "./session-management";
+import { useWorkspaceSessions } from "./sessions-context";
 import { currentTheme, nextTheme, type Theme, themeLabels } from "./theme";
 
 /** 点击时直接启动选区移动，路由提交与取消仍由 React Router 校正。 */
@@ -42,9 +37,16 @@ function moveSidebarSelection(top: HTMLElement, selection: HTMLElement, active: 
 	const target = active.getBoundingClientRect();
 	const transform = `translate3d(0px, ${target.top - origin.top + top.scrollTop}px, 0px)`;
 	// 宽度变化与重复测量不取消仍在播放的滑动。
-	if (selection.style.transform === transform && selection.style.visibility === "visible") return;
+	const height = `${target.height}px`;
+	if (
+		selection.style.transform === transform &&
+		selection.style.height === height &&
+		selection.style.visibility === "visible"
+	)
+		return;
 	if (!animate) selection.style.transition = "none";
 	selection.style.transform = transform;
+	selection.style.height = height;
 	selection.style.visibility = "visible";
 	if (!animate) {
 		void selection.offsetWidth;
@@ -72,7 +74,8 @@ export function Sidebar({
 	const location = useLocation();
 	const navigation = useNavigation();
 	const selectionPath = navigation.location?.pathname ?? location.pathname;
-	const state = useSessions();
+	const state = useWorkspaceSessions();
+	const [recentOpen, setRecentOpen] = useState(true);
 	const startupPending = useRef(startup);
 	const [startupRows, setStartupRows] = useState(false);
 	useLayoutEffect(() => {
@@ -87,12 +90,10 @@ export function Sidebar({
 		const timer = window.setTimeout(() => setStartupRows(false), 1100);
 		return () => window.clearTimeout(timer);
 	}, [startup, state.stage]);
-	const sessions: { id: string; title: string; group?: string; updatedAt?: string }[] = preview
-		? sampleSessions
-		: state.sessions;
-	const groupOf = (session: { group?: string; updatedAt?: string }) =>
-		preview ? (session.group ?? "今天") : dayGroup(session.updatedAt);
-	const navigate = useNavigate();
+	const sessions = useMemo(
+		() => orderedSessions(preview ? sampleSessions : state.sessions).slice(0, RECENT_SESSION_LIMIT),
+		[preview, state.sessions],
+	);
 	const [providers, setProviders] = useState<ProviderStatus[]>([]);
 	const team = accountProvider(providers);
 	const teamSignedIn = team?.type === "oauth" || team?.type === "api_key";
@@ -104,92 +105,54 @@ export function Sidebar({
 	const { account: cstoaAccount, refresh: refreshCstoaAccount } = useAccount();
 	const cstoaSummary = describeAccount(cstoaAccount);
 	const teamRequiresLogin = team?.requiresLogin || cstoaAccount?.requiresLogin;
-	usePanelDismiss(accountMenuOpen, () => setAccountMenuOpen(false));
+	const accountTriggerRef = useRef<HTMLButtonElement>(null);
+	usePanelDismiss(accountMenuOpen, () => setAccountMenuOpen(false), accountTriggerRef);
 	function closeAccountMenu() {
 		setAccountMenuOpen(false);
 		onNavigate?.();
 	}
 	const [theme, setTheme] = useState<Theme>(currentTheme);
-	const [menu, setMenu] = useState<{ id: string; title: string; x: number; y: number } | null>(null);
-	const menuRef = useRef<HTMLDivElement>(null);
 	const topRef = useRef<HTMLDivElement>(null);
 	const selectionRef = useRef<HTMLSpanElement>(null);
-	const focusSession = useCallback((id: string) => {
+	const focusSession = useCallback((id?: string) => {
 		requestAnimationFrame(() => {
-			const row = topRef.current?.querySelector<HTMLElement>(`[data-session-id="${CSS.escape(id)}"]`);
+			const row = id
+				? topRef.current?.querySelector<HTMLElement>(`[data-session-id="${CSS.escape(id)}"]`)
+				: topRef.current?.querySelector<HTMLElement>(".sidebar-new");
 			(row?.querySelector<HTMLElement>("input") ?? row)?.focus();
 		});
 	}, []);
-	const deletionRoute = useRef<{ id: string; from: string; homeKey?: string } | null>(null);
-	const management = useSessionManagement(sessions, {
-		onStart: async (targets) => {
-			state.beginDeletion(targets.map((session) => session.id));
-			const current = targets.find(
-				(session) => location.pathname === `/s/${session.id}` || location.pathname.startsWith(`/s/${session.id}/`),
-			);
-			if (!current) return;
-			const route: { id: string; from: string; homeKey?: string } = {
-				id: current.id,
-				from: location.pathname + location.search,
-			};
-			deletionRoute.current = route;
-			await navigate("/", { replace: true });
-			if (window.location.pathname === "/") route.homeKey = window.history.state?.key;
-		},
-		onComplete: (report) => {
-			state.settleDeletion(
-				report.deleted.map((session) => session.id),
-				report.failed.map((session) => session.id),
-			);
-			const route = deletionRoute.current;
-			deletionRoute.current = null;
-			if (
-				route?.homeKey &&
-				window.location.pathname === "/" &&
-				window.history.state?.key === route.homeKey &&
-				report.failed.some((session) => session.id === route.id)
-			) {
-				void navigate(route.from, { replace: true });
-			}
-			void state.refresh();
-		},
-	});
+	const actions = useSessionActions(sessions, focusSession, preview);
+	const { management, setMenu, openSessionMenu } = actions;
 	const finishManagement = management.finish;
-	// biome-ignore lint/correctness/useExhaustiveDependencies: 路由与侧栏折叠变化触发取消未提交的管理，已提交的删除继续等待结果
 	useEffect(() => {
-		setMenu(null);
-		finishManagement();
-	}, [location.pathname, collapsed, finishManagement]);
+		if (collapsed) {
+			setMenu(null);
+			finishManagement();
+		}
+	}, [collapsed, finishManagement, setMenu]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: 列表与导航完成/取消后重新测量，含同路径导航
 	useLayoutEffect(() => {
 		const top = topRef.current;
 		const selection = selectionRef.current;
 		const active = management.managing
 			? null
-			: Array.from(top?.querySelectorAll<HTMLAnchorElement>(".sidebar-new, .sidebar-session") ?? []).find(
-					(row) => new URL(row.href).pathname === selectionPath,
-				);
+			: Array.from(
+					top?.querySelectorAll<HTMLAnchorElement>("a.sidebar-new, a.sidebar-session, a.sidebar-all") ?? [],
+				).find((row) => new URL(row.href).pathname === selectionPath);
 		if (!top || !selection) return;
-		if (!active) {
+		if (!active || (!recentOpen && active.classList.contains("sidebar-session"))) {
 			delete top.dataset.selectionReady;
 			selection.style.visibility = "hidden";
 			return;
 		}
 		const move = (animate: boolean) => moveSidebarSelection(top, selection, active, animate);
 		move(top.dataset.selectionReady === "true");
-		let topWidth = top.clientWidth;
-		let activeWidth = active.offsetWidth;
-		let activeHeight = active.offsetHeight;
-		const observer = new ResizeObserver(() => {
-			if (top.clientWidth === topWidth && active.offsetWidth === activeWidth && active.offsetHeight === activeHeight)
-				return;
-			topWidth = top.clientWidth;
-			activeWidth = active.offsetWidth;
-			activeHeight = active.offsetHeight;
-			move(false);
-		});
+		const observer = new ResizeObserver(() => move(false));
 		observer.observe(top);
 		observer.observe(active);
+		const panel = top.querySelector(".sidebar-recent .disclosure__content");
+		if (panel) observer.observe(panel);
 		window.addEventListener("resize", moveOnResize);
 		function moveOnResize() {
 			move(false);
@@ -198,63 +161,7 @@ export function Sidebar({
 			observer.disconnect();
 			window.removeEventListener("resize", moveOnResize);
 		};
-	}, [selectionPath, location.key, navigation.state, sessions, management.managing]);
-	useLayoutEffect(() => {
-		if (!menu) return;
-		const element = menuRef.current;
-		if (!element) return;
-		const bounds = element.getBoundingClientRect();
-		element.style.left = `${Math.max(8, Math.min(menu.x, window.innerWidth - bounds.width - 8))}px`;
-		element.style.top = `${Math.max(8, Math.min(menu.y, window.innerHeight - bounds.height - 8))}px`;
-		element.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
-	}, [menu]);
-	useEffect(() => {
-		if (!menu) return;
-		const close = (event: Event) => {
-			if (!menuRef.current?.contains(event.target as Node)) setMenu(null);
-		};
-		const dismiss = () => setMenu(null);
-		window.addEventListener("pointerdown", close);
-		window.addEventListener("scroll", dismiss, true);
-		window.addEventListener("resize", dismiss);
-		return () => {
-			window.removeEventListener("pointerdown", close);
-			window.removeEventListener("scroll", dismiss, true);
-			window.removeEventListener("resize", dismiss);
-		};
-	}, [menu]);
-	useEffect(() => {
-		if (!menu && !management.managing) return;
-		const closeOnEscape = (event: KeyboardEvent) => {
-			if (event.key !== "Escape" || event.defaultPrevented || event.isComposing || management.targets) return;
-			if (menu) {
-				event.preventDefault();
-				setMenu(null);
-				focusSession(menu.id);
-			} else if (!management.busy) {
-				event.preventDefault();
-				finishManagement();
-				topRef.current?.querySelector<HTMLElement>(".sidebar-new")?.focus();
-			}
-		};
-		window.addEventListener("keydown", closeOnEscape);
-		return () => window.removeEventListener("keydown", closeOnEscape);
-	}, [menu, management.managing, management.targets, management.busy, finishManagement, focusSession]);
-	function openSessionMenu(session: { id: string; title: string }, x: number, y: number) {
-		if (preview || management.busy || (management.managing && !management.count)) return;
-		setMenu({ ...session, x, y });
-	}
-	async function rename(id: string, current: string) {
-		setMenu(null);
-		const name = window.prompt("会话名称", current);
-		if (!name || !name.trim() || name.trim() === current) return;
-		try {
-			await apiJson(`/api/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: { name: name.trim() } });
-			await state.refresh();
-		} catch (cause) {
-			window.alert(cause instanceof Error ? cause.message : "重命名失败");
-		}
-	}
+	}, [selectionPath, location.key, navigation.state, sessions, management.managing, recentOpen]);
 	const refreshAccount = useCallback(async () => {
 		if (preview) return;
 		try {
@@ -319,10 +226,6 @@ export function Sidebar({
 			setAccountWorking(false);
 		}
 	}
-	function remove(id: string) {
-		setMenu(null);
-		management.requestDelete(sessions.filter((session) => session.id === id));
-	}
 	return (
 		<aside
 			className="sidebar"
@@ -351,7 +254,9 @@ export function Sidebar({
 						viewTransition
 						onClick={onNavigate}
 					>
-						<SquarePen size={18} />
+						<span className="sidebar-nav-icon">
+							<SquarePen size={18} aria-hidden="true" />
+						</span>
 						新对话
 					</Link>
 					<SessionManagementToolbar
@@ -366,210 +271,90 @@ export function Sidebar({
 						}}
 					/>
 				</div>
-				{sessions.length > 0 ? (
-					sessionGroups.map((group) => {
-						const list = sessions.filter((session) => groupOf(session) === group);
-						const earlier = sessionGroups.slice(0, sessionGroups.indexOf(group));
-						const rowStart = earlier.reduce((count, name) => {
-							const size = sessions.filter((session) => groupOf(session) === name).length;
-							return count + (size ? size + 1 : 0);
-						}, 0);
-						const ids = list.map((session) => session.id);
-						const groupState = groupSelection(ids, management.selection);
-						return list.length === 0 ? null : (
-							<section className="sidebar-group" key={group} aria-label={group}>
-								<h2 style={{ "--startup-row": Math.min(rowStart, 11) } as CSSProperties}>
-									{/* biome-ignore lint/a11y/useSemanticElements: 分组使用三态checkbox按钮，保留DOM承载进退过渡 */}
-									<button
-										type="button"
-										className="sidebar-group-select"
-										role="checkbox"
-										aria-label={`选择${group}的会话`}
-										aria-checked={groupState.mixed ? "mixed" : groupState.checked}
-										aria-hidden={!management.managing}
-										tabIndex={management.managing ? 0 : -1}
-										disabled={management.busy}
-										data-selected={groupState.checked || undefined}
-										data-mixed={groupState.mixed || undefined}
-										onClick={() => {
-											setMenu(null);
-											management.toggleGroup(ids);
-										}}
-										onContextMenu={(event) => {
-											event.preventDefault();
-											if (management.managing && list[0])
-												openSessionMenu(list[0], event.clientX, event.clientY);
-										}}
-									>
-										<span className="session-check-control" aria-hidden="true">
-											<Check size={12} />
-										</span>
-									</button>
-									<span className="sidebar-selection-text">{group}</span>
-								</h2>
-								{list.map((session, index) => (
-									<div
-										className="sidebar-session-row"
-										key={session.id}
-										style={{ "--startup-row": Math.min(rowStart + index + 1, 11) } as CSSProperties}
-									>
-										<Link
-											className={`sidebar-session ${management.managing ? "sidebar-session-select" : ""} ${!management.managing && location.pathname === `/s/${session.id}` ? "selected" : ""}`}
-											data-session-id={session.id}
-											aria-current={
-												!management.managing && location.pathname === `/s/${session.id}`
-													? "page"
-													: undefined
-											}
-											data-selected={
-												(management.managing && management.selection?.has(session.id)) || undefined
-											}
-											data-disabled={(management.managing && management.busy) || undefined}
-											to={`/s/${session.id}${preview ? "?preview=1" : ""}`}
-											viewTransition={location.pathname.startsWith("/settings")}
-											role={management.managing ? "checkbox" : undefined}
-											aria-checked={
-												management.managing ? (management.selection?.has(session.id) ?? false) : undefined
-											}
-											aria-disabled={(management.managing && management.busy) || undefined}
-											onClick={(event) => {
-												if (!management.managing) {
-													if (
-														event.defaultPrevented ||
-														event.button !== 0 ||
-														event.metaKey ||
-														event.ctrlKey ||
-														event.shiftKey ||
-														event.altKey
-													)
-														return;
-													const top = topRef.current;
-													const selection = selectionRef.current;
-													if (top && selection)
-														moveSidebarSelection(top, selection, event.currentTarget, true);
-													onNavigate?.();
-													return;
-												}
-												event.preventDefault();
-												setMenu(null);
-												management.toggle(session.id);
-											}}
-											onKeyDown={(event) => {
-												if (management.managing && event.key === " ") {
-													event.preventDefault();
-													management.toggle(session.id);
-												}
-											}}
-											onContextMenu={
-												preview
-													? undefined
-													: (event) => {
-															event.preventDefault();
-															openSessionMenu(session, event.clientX, event.clientY);
-														}
-											}
-										>
-											<span className="session-check-control" aria-hidden="true">
-												<Check size={12} />
-											</span>
-											<span className="sidebar-selection-text">{session.title}</span>
-										</Link>
-									</div>
-								))}
-							</section>
-						);
-					})
-				) : state.stage || preview ? (
-					<p className="sidebar-empty">暂无会话</p>
-				) : null}
+				<button type="button" className="sidebar-new sidebar-dashboard" disabled title="仪表盘功能计划中">
+					<span className="sidebar-nav-icon">
+						<LayoutDashboard size={18} aria-hidden="true" />
+					</span>
+					仪表盘
+				</button>
+				<Disclosure
+					className="sidebar-recent"
+					isExpanded={recentOpen}
+					onExpandedChange={(open) => {
+						setMenu(null);
+						if (!open) finishManagement();
+						setRecentOpen(open);
+					}}
+				>
+					<Disclosure.Heading>
+						<Disclosure.Trigger
+							className="sidebar-recent-heading"
+							style={{ "--startup-row": 0 } as CSSProperties}
+						>
+							最近
+							<Disclosure.Indicator />
+						</Disclosure.Trigger>
+					</Disclosure.Heading>
+					<Disclosure.Content inert={!recentOpen} aria-hidden={!recentOpen}>
+						<div className="sidebar-recent-list">
+							{sessions.map((session, index) => (
+								<SessionEntry
+									key={session.id}
+									session={session}
+									index={index}
+									active={
+										location.pathname === `/s/${session.id}` ||
+										location.pathname.startsWith(`/s/${session.id}/`)
+									}
+									managing={management.managing}
+									selected={management.selection?.has(session.id) ?? false}
+									disabled={management.busy}
+									preview={preview}
+									viewTransition={location.pathname.startsWith("/settings")}
+									onToggle={() => {
+										setMenu(null);
+										management.toggle(session.id);
+									}}
+									onNavigate={(event) => {
+										if (
+											event.defaultPrevented ||
+											event.button !== 0 ||
+											event.metaKey ||
+											event.ctrlKey ||
+											event.shiftKey ||
+											event.altKey
+										)
+											return;
+										if (topRef.current && selectionRef.current)
+											moveSidebarSelection(topRef.current, selectionRef.current, event.currentTarget, true);
+										onNavigate?.();
+									}}
+									onContextMenu={(event) => {
+										event.preventDefault();
+										openSessionMenu(session, event.clientX, event.clientY);
+									}}
+								/>
+							))}
+							{!sessions.length && (state.stage || preview) && <p className="sidebar-empty">暂无会话</p>}
+						</div>
+					</Disclosure.Content>
+				</Disclosure>
+				<Link
+					className={`sidebar-all ${location.pathname === "/sessions" ? "selected" : ""}`}
+					to={preview ? "/sessions?preview=1" : "/sessions"}
+					aria-current={location.pathname === "/sessions" ? "page" : undefined}
+					viewTransition
+					onClick={onNavigate}
+				>
+					查看全部
+				</Link>
 				{state.error && (
 					<p className="sidebar-error" role="alert">
 						{state.error}
 					</p>
 				)}
 			</div>
-			{menu && (
-				<div
-					className="session-menu"
-					ref={menuRef}
-					role="menu"
-					aria-label={management.managing ? "批量会话操作" : `会话 ${menu.title}`}
-					style={{ left: menu.x, top: menu.y }}
-					onKeyDown={(event) => {
-						if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-						event.preventDefault();
-						const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
-						const current = items.indexOf(document.activeElement as HTMLElement);
-						const index =
-							event.key === "Home"
-								? 0
-								: event.key === "End"
-									? items.length - 1
-									: (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-						items[index]?.focus();
-					}}
-				>
-					{management.managing ? (
-						<button
-							type="button"
-							role="menuitem"
-							className="sidebar-account-item sidebar-menu-delete"
-							onClick={() => {
-								setMenu(null);
-								management.requestDelete();
-							}}
-						>
-							<Trash2 size={18} aria-hidden="true" />
-							删除
-						</button>
-					) : (
-						<>
-							<button
-								type="button"
-								role="menuitem"
-								className="sidebar-account-item"
-								onClick={() => void rename(menu.id, menu.title)}
-							>
-								<Pencil size={18} aria-hidden="true" />
-								重命名
-							</button>
-							<button
-								type="button"
-								role="menuitem"
-								className="sidebar-account-item"
-								onClick={() => {
-									setMenu(null);
-									management.start(menu.id);
-									focusSession(menu.id);
-								}}
-							>
-								<ListChecks size={18} aria-hidden="true" />
-								管理
-							</button>
-							<hr className="session-menu-divider" />
-							<button
-								type="button"
-								role="menuitem"
-								className="sidebar-account-item sidebar-menu-delete"
-								onClick={() => remove(menu.id)}
-							>
-								<Trash2 size={18} aria-hidden="true" />
-								删除
-							</button>
-						</>
-					)}
-				</div>
-			)}
-			{management.targets && (
-				<SessionDeleteDialog
-					count={management.targets.length}
-					onCancel={management.cancel}
-					onConfirm={() => void management.confirm()}
-				/>
-			)}
-			{management.result && !management.busy && (
-				<SessionDeleteNotice result={management.result} onClose={management.dismissResult} />
-			)}
+			<SessionActionsOverlay actions={actions} />
 			<div className="sidebar-footer">
 				<div className="device-icon">
 					<Monitor size={18} />
@@ -595,7 +380,13 @@ export function Sidebar({
 						if (open) void refreshCstoaAccount();
 					}}
 				>
-					<Button variant="ghost" isIconOnly className="sidebar-account-trigger" aria-label="账号菜单">
+					<Button
+						ref={accountTriggerRef}
+						variant="ghost"
+						isIconOnly
+						className="sidebar-account-trigger"
+						aria-label="账号菜单"
+					>
 						<Settings size={22} aria-hidden="true" />
 					</Button>
 					<Popover.Content placement="right bottom" offset={20} className="sidebar-account-popover">

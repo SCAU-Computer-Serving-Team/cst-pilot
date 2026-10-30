@@ -8,7 +8,7 @@
 
 ```text
 src/web/frontend/app/
-├── routes/         路由页面装配（主页、工作台、树、设置、登录、账号）
+├── routes/         路由页面装配（主页、全部会话、工作台、树、设置、登录、账号）
 ├── cards/          开放工具的结果转换（map-tool.ts / special-tool-data.ts）与渲染组件
 ├── conversation/   对话流、过程分段、Markdown 安全切分、排队面板与扩展提问
 ├── composer/       输入框行内标记编辑器、补全面板、草稿与 IndexedDB 图片引用、上下文额度
@@ -16,7 +16,7 @@ src/web/frontend/app/
 ├── tree/           分支树可见重挂、几何列计算（branch-tree.ts）与分支总结参数编解码
 ├── settings/       设置资源并发缓存、高度过渡钩子、模型范围排序与自定义服务表单
 ├── auth/ & account/ OAuth 弹窗隔离、多步授权面板与 CSTOA 账号资料展示
-├── shell/          侧栏日期分组、乐观批量删除、全局通知栈、断线提示、Blue hour / AIR WebGL 背景
+├── shell/          最近会话、共享列表状态、乐观批量删除、全局通知栈、断线提示、Blue hour / AIR WebGL 背景
 └── data/           HTTP/SSE 客户端、24ms 流式播放器、连接健康检查与错误格式化
 ```
 
@@ -40,13 +40,33 @@ src/web/frontend/app/
 
 ## 流式渲染与 SSE 状态同步
 
-1. **Markdown 连续更新（`markdown.tsx`）**：流式与完成态共用同一组件、容器和文本包装结构，按块序号更新；追加段落不移动已读段落。高亮只在定稿时处理代码块，逐词节点按词序保持身份；历史正文不播放逐词动画。
+1. **Markdown 连续更新（`markdown.tsx`）**：流式与完成态共用同一组件、容器和文本包装结构，按块序号更新；追加段落不移动已读段落。高亮只在定稿时处理代码块，逐词节点按词序保持身份；历史正文不播放逐词动画。块级代码与原文共用 `shell/code-block.tsx`，复制时读取正文节点的当前 `textContent`，排除按钮与反馈；复制状态按块隔离，卸载时清理反馈计时器。
 2. **平滑步进播放（`stream-player.ts`）**：按 24ms 步进消费接收缓冲，每步输出 1–12 个字符（随积压动态加速）并吸附词边界，消息结束时立即刷出全部剩余文本。
 3. **SSE 背压与断流恢复**：服务端对单连接未发送积压允许至多 8 MiB 缓冲（容纳大体积思考或工具结果），每 20 秒发送一次 `heartbeat` 事件，心跳不占用业务回放序号；前端连续 45 秒未收到业务帧或心跳时判定断流。服务端在进程内保留最近 256 条业务事件，重连携带 `Last-Event-ID`；序号超出保留窗口或进程重启时收到 `reset` 信号并全量重取会话快照。
 4. **结束事件与快照衔接（`session-stream.ts`）**：`message_end` 直接合并完整的用户、助手和工具结果消息，助手结束时清除该消息的播放态；新一轮用户消息先进入展示，快速回复不会短暂归入上一轮。延迟快照不得覆盖更新。轮次、过程与工具组件按消息时间戳保持身份，HTTP 返回持久化条目 ID 时不重新挂载。连接重置保留正文，等待新快照接替；滚动跟随在绘制前完成。
 5. **轮次耗时持久化**：助手回复完成时，后端向会话写入 `cst-web-work-duration` 自定义条目（不进入模型上下文），在 HTTP 快照的 `message.work` 中返回精确起止耗时，保证刷新或重开后过程头耗时不变。
 
+## 会话导出与产物保存
+
+| 模块 | 职责 |
+|---|---|
+| `shared/conversation.ts`、`shared/exports.ts` | 前后端共用消息、导出选项、快照与任务契约；仅包含类型 |
+| `server/exports/snapshot.ts` | 当前分支投影、参数校验、按用户消息选轮、过程筛选与导出副本脱敏 |
+| `server/exports/store.ts` | 有界串行队列、后台任务、文件原子登记、失败回收与完整性核验 |
+| `server/exports/browser.ts`、`render.ts` | 启动隔离 Edge / Chrome，通过浏览器调试协议取得 HTML 或逐页 PNG；结束后释放进程和配置 |
+| `server/api/exports.ts` | 同源 API，创建、预览、查询及文件读取；与入口写入去重共用 |
+| `app/routes/export.tsx`、`export-render.tsx` | 导出工作区与独立只读文档；预览主题不改变工作区主题 |
+| `app/exports/` | 共用文档呈现、离线 HTML 序列化与页面布局 |
+
+创建任务先固定快照并写入内部登记，随后释放会话写锁，渲染过程不调用模型。临时页面通过任务令牌读取快照；令牌放在 URL 片段中，不进入访问日志，任务结束后失效。
+
+登记与渲染临时文件位于 `agent/home/session-exports/`，最终产物位于 `artifacts/<日期>/sessions/`。全部页面生成后才发布文件与完成状态；失败回收已发布文件。文件名携带导出 ID，读取时校验目录真实路径与 SHA-256，分享使用同一份已登记产物。
+
+离线文档复用 Markdown、代码、工具块、特殊工具与聊天主题。字体和附图内嵌，动作控件和脚本移除，内容安全策略关闭脚本、表单及外部资源加载。HTML 使用原生 `details` 保留折叠，不依赖现场服务。
+
 ## 会话预载与缓存
+
+`WorkspaceLayout` 挂载唯一的 `SessionsProvider`，共用列表请求、全局事件订阅与乐观删除状态。侧栏显示排序后的前 10 项，`/sessions` 显示完整列表；`SessionEntry` 共用会话行，`useSessionActions` 与 `SessionActionsOverlay` 共用菜单、重命名、删除确认及失败恢复。管理模式使用原生复选框，焦点回到对应会话或管理入口。
 
 侧栏取得会话列表后，用 React Router 的 `PrefetchPageLinks` 预载共用的聊天路由入口及其依赖，只为一个会话插入预载声明。特殊工具样式并入全局样式，首次进入聊天无需再请求样式文件。
 
@@ -98,6 +118,12 @@ src/web/frontend/app/
 2. 应用五档过滤，将隐藏条目的可见子条目重挂到最近的可见祖先，保持原始 `traversalOrder` 不重排。
 3. 计算每行几何属性：根节点 `indent = 0`；真实分叉的子条目 `indent + 1` 且标记 `showConnector = true`（绘制方框，位于 `connectorColumn = indent - 1`）；段首的第一代后代 `indent + 1`；非末位兄弟的子树在对应列延续竖线 `gutters`。有后代的连接符行在槽位后额外预留 `32px`，使分支起始行图标与后续单链内容对齐。
 
+## 工具分类与过程计数
+
+`app/cards/tool-kind.ts` 统一判断特殊组件与独立展示工具，供内容分段、工具分组与过程计数共用。`sys overview`（含缺省 scope）、`web_search`、命令方案与交付，以及 BitLocker 解锁／解密独立呈现；BitLocker 状态查询和其他 sys 查询保持普通工具，读取图片保留独立图片卡片。
+
+`turn-segments.ts` 根据普通调用的实际结果生成后续过程标题。思考、正文和图片保留内容入口，空段省略；首段工作时长入口保持稳定，流式结束和刷新不会因计数变化而移除。
+
 ## 工具卡片转换
 
 ### 通用骨架与 Block 联合类型
@@ -138,4 +164,4 @@ type Block =
 ### 特殊工具交互
 
 - **BitLocker 本地输入与确认**：Web 后端在内存中维护绑定 `sessionId + entryId + toolCallId + requestId` 的待处理请求（3 分钟有效期，带递增版本），随会话快照与 SSE 下发。前端 `bitlocker-input.tsx` 通过 `POST /api/sessions/:id/bitlocker/:requestId` 一次性提交恢复密码或确认解密，绕过持久化幂等日志，确保恢复密码永不落盘。
-- **Runbook 文件打开**：点击卡片文件名调用 `POST /api/sessions/:id/runbook/open`，后端按助手条目和调用 ID 匹配 `runbook` 或 `runbook_deliver` 的结果，从结果读取路径，校验文件属于 `outbox/` 后启动系统记事本，并对重复点击做去重保护。
+- **Runbook 文件打开**：点击卡片文件名调用 `POST /api/sessions/:id/runbook/open`，后端按助手条目和调用 ID 匹配 `runbook` 或 `runbook_deliver` 的结果，从结果读取路径，校验文件属于 `artifacts/` 后启动系统记事本，并对重复点击做去重保护。

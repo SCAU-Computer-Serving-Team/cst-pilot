@@ -178,6 +178,13 @@ export function NotificationDetail({ icon, children }: { icon: ReactNode; childr
 		<fieldset
 			aria-label="通知详情"
 			className="notification-disclosure"
+			onKeyDown={(event) => {
+				if (event.key !== "Escape") return;
+				event.preventDefault();
+				event.stopPropagation();
+				event.currentTarget.querySelector<HTMLButtonElement>(".notification-detail-trigger")?.focus();
+				setOpen(false);
+			}}
 			onPointerEnter={() => setOpen(true)}
 			onPointerLeave={(event) => {
 				if (!event.currentTarget.contains(document.activeElement)) setOpen(false);
@@ -190,22 +197,16 @@ export function NotificationDetail({ icon, children }: { icon: ReactNode; childr
 				type="button"
 				className="notification-detail-trigger"
 				aria-label="查看通知详情"
-				aria-describedby={open ? id : undefined}
+				aria-controls={id}
 				aria-expanded={open}
 				onFocus={() => setOpen(true)}
 				onClick={() => setOpen(true)}
-				onKeyDown={(event) => {
-					if (event.key === "Escape") {
-						event.stopPropagation();
-						setOpen(false);
-					}
-				}}
 			>
 				{icon}
 			</button>
-			<span id={id} className="notification-detail" role="tooltip" data-open={open}>
+			<section id={id} className="notification-detail" aria-label="通知详情" data-open={open} inert={!open}>
 				{children}
-			</span>
+			</section>
 		</fieldset>
 	);
 }

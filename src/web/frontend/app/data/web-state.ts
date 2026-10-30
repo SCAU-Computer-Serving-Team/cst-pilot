@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { Message } from "../../../../../agent/home/extensions/web/shared/conversation";
 import type { TreeNode } from "../tree/branch-tree";
 import { apiJson } from "./api";
 import { type BitLockerSnapshot, newestBitLocker } from "./bitlocker-state";
@@ -8,35 +9,11 @@ import { commitMessage, containsAssistant } from "./session-stream";
 import { StreamHealth } from "./stream-health";
 import { StreamPacer } from "./stream-player";
 
+export type { ContentPart, Message } from "../../../../../agent/home/extensions/web/shared/conversation";
+
 export type SessionRow = { id: string; title: string; updatedAt?: string; running: boolean };
 /** /api/models 返回的模型条目：reasoning 标记是否支持思考强度。 */
 export type Model = { id: string; provider: string; name: string; reasoning: boolean };
-export type ContentPart =
-	| { type: "text"; text: string }
-	| { type: "thinking"; thinking: string; redacted?: boolean }
-	| { type: "image"; mimeType: string; data: string }
-	| {
-			type: "toolCall";
-			id: string;
-			name: string;
-			arguments: Record<string, unknown>;
-			execution?: { startedAt: number; endedAt?: number; stage?: string; result?: Message };
-	  };
-export type Message = {
-	role: "user" | "assistant" | "toolResult" | "branchSummary";
-	content: string | ContentPart[];
-	timestamp: number;
-	work?: { startedAt: number; endedAt: number };
-	/** 分支总结消息的正文（role 为 branchSummary 时，pi 只给 summary）。 */
-	summary?: string;
-	fromId?: string;
-	toolCallId?: string;
-	toolName?: string;
-	isError?: boolean;
-	details?: unknown;
-	stopReason?: string;
-	errorMessage?: string;
-};
 export type QueueItem = {
 	id: string;
 	text: string;

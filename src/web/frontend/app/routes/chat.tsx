@@ -166,10 +166,14 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 									<ListTree size={18} aria-hidden="true" />
 									分支树
 								</Link>
-								<button type="button" className="sidebar-account-item" disabled title="计划中">
+								<Link
+									className="sidebar-account-item"
+									to={`/s/${sessionId}/export`}
+									onClick={() => setMessageMenuOpen(false)}
+								>
 									<Download size={18} aria-hidden="true" />
 									导出会话
-								</button>
+								</Link>
 								<button type="button" className="sidebar-account-item" disabled title="计划中">
 									<Share2 size={18} aria-hidden="true" />
 									分享
