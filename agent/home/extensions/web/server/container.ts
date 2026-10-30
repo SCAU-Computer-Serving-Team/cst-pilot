@@ -8,6 +8,7 @@ export interface WebContainer {
 	starting?: Promise<void>;
 	loadingWebSession: number;
 	parked: boolean;
+	releaseTerminalInput?: () => void;
 	pool?: WebSessionPool;
 	closeApi?: () => Promise<void>;
 }

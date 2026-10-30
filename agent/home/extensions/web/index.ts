@@ -2,7 +2,8 @@ import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { CustomEditor, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Editor, type TUI } from "@earendil-works/pi-tui";
 import { createWebApi } from "./server/api.ts";
 import { getWebContainer } from "./server/container.ts";
 import { createWebServer, listenWebServer, setHttpAccessLog, WEB_PORT } from "./server/http.ts";
@@ -12,8 +13,15 @@ const url = `http://127.0.0.1:${WEB_PORT}/#cst-web-start`;
 const staticDirectory = fileURLToPath(new URL("./static/", import.meta.url));
 
 class ParkedEditor extends CustomEditor {
-	handleInput(_data: string): void {
-		// Do not dispatch editor bindings: built-in commands run before extension input hooks.
+	onParkedSubmit: (text: string) => void = () => {};
+
+	setAutocompleteProvider(_provider: Parameters<CustomEditor["setAutocompleteProvider"]>[0]): void {}
+
+	handleInput(data: string): void {
+		// Pi copies its submit and application callbacks when installing a custom editor.
+		// Use only text editing, and replace submit before every input to keep commands local.
+		this.onSubmit = this.onParkedSubmit;
+		Editor.prototype.handleInput.call(this, data);
 	}
 }
 
@@ -28,12 +36,34 @@ export default function web(pi: ExtensionAPI): void {
 	const container = getWebContainer();
 	if (container.loadingWebSession > 0) return;
 
+	function parkTerminal(ctx: ExtensionContext): void {
+		container.releaseTerminalInput?.();
+		let editor: ParkedEditor | undefined;
+		let terminal: TUI | undefined;
+		ctx.ui.setEditorComponent((tui, theme, keys) => {
+			terminal = tui;
+			editor = new ParkedEditor(tui, theme, keys);
+			editor.onParkedSubmit = (text) => {
+				if (text.trim() !== "/web") {
+					ctx.ui.notify("终端待机中，仅支持输入 /web 重新打开网页。", "info");
+					return;
+				}
+				if (container.server?.listening) openBrowser();
+				else ctx.ui.notify("Web 服务当前不可用。", "warning");
+			};
+			return editor;
+		});
+		container.releaseTerminalInput = ctx.ui.onTerminalInput((data) => {
+			if (!container.parked) return;
+			editor?.handleInput(data);
+			terminal?.requestRender();
+			return { consume: true };
+		});
+		ctx.ui.setWidget("cst-web-parked", ["会话已由 Web 接管。输入 /web 可重新打开网页。关闭终端将结束服务。"]);
+	}
+
 	pi.on("session_start", (_event, ctx) => {
-		if (container.parked && ctx.mode === "tui") {
-			ctx.ui.onTerminalInput(() => ({ consume: container.parked }));
-			ctx.ui.setEditorComponent((tui, theme, keys) => new ParkedEditor(tui, theme, keys));
-			ctx.ui.setWidget("cst-web-parked", ["会话已由 Web 接管，请在浏览器中操作。关闭终端将结束服务。"]);
-		}
+		if (container.parked && ctx.mode === "tui") parkTerminal(ctx);
 	});
 
 	pi.registerCommand("web", {
@@ -121,11 +151,13 @@ export default function web(pi: ExtensionAPI): void {
 					if (result.cancelled) throw new Error("TUI 会话切换被取消");
 					switched = true;
 					// 其他扩展可能在session_start后覆盖编辑器；原始输入监听先于所有快捷键。
-					parkedContext?.ui.onTerminalInput(() => ({ consume: container.parked }));
+					if (parkedContext) parkTerminal(parkedContext);
 					if (oldFile) await pool.openHandoff(oldId, oldFile);
 					else await pool.create();
 				} catch (error) {
 					container.parked = false;
+					container.releaseTerminalInput?.();
+					container.releaseTerminalInput = undefined;
 					if (switched && parkedContext) {
 						parkedContext.ui.setEditorComponent(undefined);
 						parkedContext.ui.setWidget("cst-web-parked", undefined);
@@ -145,7 +177,7 @@ export default function web(pi: ExtensionAPI): void {
 				await start;
 				openBrowser();
 				// After ctx.newSession, the old command context is stale. Use only the fresh context here.
-				parkedContext?.ui.notify("Web 已启动，终端已进入待机。请在浏览器中继续操作。", "info");
+				parkedContext?.ui.notify("Web 已启动。终端待机中，输入 /web 可重新打开网页。", "info");
 			} catch (error) {
 				const message =
 					(error as NodeJS.ErrnoException).code === "EADDRINUSE"
@@ -161,6 +193,8 @@ export default function web(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", async (event) => {
 		if (event.reason !== "quit") return;
 		if (container.starting) await container.starting.catch(() => undefined);
+		container.releaseTerminalInput?.();
+		container.releaseTerminalInput = undefined;
 		const server = container.server;
 		container.server = undefined;
 		if (server?.listening) {
