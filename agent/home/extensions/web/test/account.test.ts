@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { CstoaLoginRequired } from "../../oauth/errors.ts";
 import { CstoaAccount } from "../server/api/account.ts";
 
 type Runtime = Pick<ModelRuntime, "listCredentials" | "getAuth">;
@@ -73,7 +74,7 @@ test("零额度有效；额度不可用或格式错误仍返回姓名，不伪�
 	}
 });
 
-test("未登录、明确失效、无访问令牌和 Pi 刷新失败均不请求 OA", async () => {
+test("未登录、明确失效、无访问令牌和 Pi 暂时故障均不请求 OA", async () => {
 	let calls = 0;
 	const service = new CstoaAccount(async () => {
 		calls++;
@@ -87,10 +88,27 @@ test("未登录、明确失效、无访问令牌和 Pi 刷新失败均不请求 
 		throw new Error("test-agent-token");
 	};
 	const account = await service.getAccount(failing);
-	assert.equal(account.requiresLogin, true);
+	assert.equal(account.requiresLogin, false);
+	assert.equal(account.signedIn, true);
+	assert.match(account.profile.reason ?? "", /重试/);
 	assert.equal(account.profile.studentId, null);
 	assert.equal(JSON.stringify(account).includes("test-agent-token"), false);
 	assert.equal(calls, 0);
+});
+
+test("Pi 包装的 CSTOA 明确失效错误要求重新登录，错误内容不进入响应", async () => {
+	const current = runtime();
+	current.getAuth = async () => {
+		throw new Error("OAuth refresh failed", { cause: new CstoaLoginRequired("test-agent-token") });
+	};
+	const service = new CstoaAccount(async () => {
+		throw new Error("不应调用 OA");
+	});
+	const account = await service.getAccount(current);
+	assert.equal(account.signedIn, true);
+	assert.equal(account.requiresLogin, true);
+	assert.equal((await service.getQuota(current)).requiresLogin, true);
+	assert.equal(JSON.stringify(account).includes("test-agent-token"), false);
 });
 
 test("HTTP 401/403 和 OA 19008 清空资料并提示重新登录", async () => {

@@ -7,7 +7,7 @@
 | 路径 | 职责 |
 |---|---|
 | `agent/home/extensions/oauth/index.ts`、`provider.ts` | 注册原生 `cstoa` Provider，按凭据类型路由至 OAuth 代理（`/api/agent/llm/v1`）或网关直连（`/v1`），复用 Pi Chat Completions 适配器 |
-| `agent/home/extensions/oauth/oa.ts`、`device.ts` | RFC 8628 设备码申请、轮询、令牌交换／刷新，以及 `agent/home/device.json` 持久化 |
+| `agent/home/extensions/oauth/oa.ts`、`device.ts`、`errors.ts` | RFC 8628 设备码申请、轮询、令牌交换／刷新、授权失效错误分类，以及 `agent/home/device.json` 持久化 |
 | `agent/home/extensions/oauth/models.ts`、`catalog-factories.ts` | CSTOA 动态目录、凭据指纹隔离、5 分钟缓存／30 秒失败退避、独立 Provider 工厂登记与 `context.publish()` 发布 |
 | `agent/home/extensions/oauth/request-observer.ts` | 遥测启用时按 `sessionId` 观察 CSTOA 推理 HTTP 尝试并提取 `x-oneapi-request-id`，不读取请求或响应正文 |
 | `agent/home/extensions/web/server/api/oauth-flow.ts` | 将 Pi `ModelRuntime.login` 的交互回调转换为带 `flowId` 与递增 `revision` 的 Web 异步状态机 |
@@ -42,6 +42,12 @@ sequenceDiagram
 
 - **单飞与版本保护**：每个 Provider 同时只维护一条进行中流程；切换认证方式、退出登录或关闭页面时通过 `AbortController` 取消旧流程。所有步骤响应校验 `flowId` 与 `promptId`，过期提交返回 `409`。
 - **授权窗口隔离**：前端 `oauth-window.ts` 在用户点击同步上下文中打开空白窗口并立即断开 `opener`，再跳转至供应商授权 URL；本机回环回调与手动粘贴输入并行等待，先完成者生效并取消另一路。
+
+## 凭据续期与失效分类
+
+1. Pi 在到期前 5 分钟进入刷新窗口。CSTOA 无刷新令牌时保留尚未过期的访问令牌；临时刷新故障同样允许使用到实际到期时间，取消请求时立即终止。
+2. 实际到期且无刷新令牌、或令牌端点返回 `401`、`403`、`invalid_grant` 时，扩展抛出 `cstoa_login_required` 错误。服务端设备撤销与密码变更校验继续生效。
+3. Web 沿 Pi 包装错误的 `cause` 链识别该错误码。临时读取或刷新故障返回可重试说明，不标记登录失效、不缓存失败，也不向浏览器返回原始错误。账号接口明确拒绝授权时仍要求重新登录。
 
 ## 账号资料与额度缓存
 

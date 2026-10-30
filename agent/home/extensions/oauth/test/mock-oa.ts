@@ -11,6 +11,10 @@ export interface MockOptions {
 	slowDownOnce?: boolean;
 	/** 授权结果；默认 approve。 */
 	outcome?: "approve" | "deny" | "expire";
+	/** 令牌有效期与刷新状态，用于验证过期和临时故障。 */
+	expiresInSeconds?: number;
+	refreshToken?: string;
+	refreshStatus?: number;
 	/** 账号接口状态，可在浏览器测试中切换以覆盖重试。 */
 	profileStatus?: number;
 	models?: string[];
@@ -56,13 +60,18 @@ export async function startMockOa(options: MockOptions = {}): Promise<MockOa> {
 		}
 		if (request.url === "/api/oauth/token") {
 			if (body.grant_type === "refresh_token") {
+				if (options.refreshStatus && options.refreshStatus !== 200) {
+					response.statusCode = options.refreshStatus;
+					response.end(JSON.stringify({ error: "temporarily_unavailable" }));
+					return;
+				}
 				if (body.refresh_token === "refresh-1") {
 					response.end(
 						JSON.stringify({
 							access_token: "access-2",
 							refresh_token: "refresh-2",
 							token_type: "Bearer",
-							expires_in: 7200,
+							expires_in: options.expiresInSeconds ?? 86400,
 						}),
 					);
 				} else {
@@ -94,9 +103,9 @@ export async function startMockOa(options: MockOptions = {}): Promise<MockOa> {
 			response.end(
 				JSON.stringify({
 					access_token: "access-1",
-					refresh_token: "refresh-1",
+					refresh_token: options.refreshToken ?? "refresh-1",
 					token_type: "Bearer",
-					expires_in: 7200,
+					expires_in: options.expiresInSeconds ?? 86400,
 				}),
 			);
 			return;

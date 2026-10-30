@@ -20,6 +20,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getDeviceId } from "./device.ts";
+import { CstoaLoginRequired } from "./errors.ts";
 
 const DEFAULT_HOST = "https://www.cstoa.top";
 const DEFAULT_POLL_INTERVAL_SECONDS = 5;
@@ -197,7 +198,7 @@ function credentialsFrom(body: Record<string, unknown>): OaCredentials {
 	if (typeof access !== "string" || !access) {
 		throw new Error("令牌响应缺少 access_token。");
 	}
-	const seconds = typeof expiresIn === "number" && Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 7200;
+	const seconds = typeof expiresIn === "number" && Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 86400;
 	return {
 		access,
 		refresh: typeof body.refresh_token === "string" ? body.refresh_token : "",
@@ -265,20 +266,30 @@ export async function login(agentDir: string, callbacks: DeviceCodeCallbacks): P
 
 export async function refresh(credentials: OaCredentials, signal: AbortSignal): Promise<OaCredentials> {
 	const refreshToken = typeof credentials.refresh === "string" ? credentials.refresh : "";
+	signal.throwIfAborted();
 	if (!refreshToken) {
-		throw new Error("没有可用的刷新令牌，请重新登录。");
+		// Pi 会提前刷新；无刷新令牌的登录仍可使用到实际过期时间。
+		if (Date.now() < credentials.expires) return credentials;
+		throw new CstoaLoginRequired("没有可用的刷新令牌，请重新登录。");
 	}
-	const { response, body } = await requestJson(
-		`${oaHost()}/api/oauth/token`,
-		{ grant_type: "refresh_token", refresh_token: refreshToken },
-		signal,
-	);
-	if (response.ok && body && typeof body.access_token === "string") {
-		return credentialsFrom(body);
+	try {
+		const { response, body } = await requestJson(
+			`${oaHost()}/api/oauth/token`,
+			{ grant_type: "refresh_token", refresh_token: refreshToken },
+			signal,
+		);
+		if (response.ok && body && typeof body.access_token === "string") {
+			return credentialsFrom(body);
+		}
+		const error = typeof body?.error === "string" ? body.error : "";
+		if (response.status === 401 || response.status === 403 || error === "invalid_grant") {
+			throw new CstoaLoginRequired("登录状态已失效，请重新登录。");
+		}
+		throw new Error(`令牌刷新失败（HTTP ${response.status}），请检查网络后重试。`);
+	} catch (error) {
+		signal.throwIfAborted();
+		// 临时刷新失败时继续使用有效访问令牌，服务端明确拒绝的授权不回退。
+		if (!(error instanceof CstoaLoginRequired) && Date.now() < credentials.expires) return credentials;
+		throw error;
 	}
-	const error = typeof body?.error === "string" ? body.error : "";
-	if (response.status === 401 || response.status === 403 || error === "invalid_grant" || error === "invalid_request") {
-		throw new Error("登录状态已失效，请重新登录。");
-	}
-	throw new Error(`令牌刷新失败（HTTP ${response.status}），请检查网络后重试。`);
 }

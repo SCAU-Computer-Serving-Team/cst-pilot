@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { CstoaLoginRequired } from "../../oauth/errors.ts";
 import { type MockOptions, startMockOa } from "../../oauth/test/mock-oa.ts";
 import { createWebApi } from "../server/api.ts";
 import { createWebServer, listenWebServer } from "../server/http.ts";
@@ -33,7 +34,7 @@ modelRuntime.registerProvider("cstoa", {
 		name: "CSTOA API",
 		login: async () => ({ access: "access-1", refresh: "", expires: Date.now() + 3_600_000 }),
 		refreshToken: async () => {
-			throw new Error("测试凭据不可刷新");
+			throw new CstoaLoginRequired("测试凭据不可刷新");
 		},
 		getApiKey: (credentials) => credentials.access,
 	},

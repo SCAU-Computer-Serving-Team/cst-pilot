@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { requiresCstoaLogin } from "../../../oauth/errors.ts";
 import { oaHost } from "../../../oauth/oa.ts";
 import type { ProviderQuota } from "./quota.ts";
 
@@ -70,8 +71,10 @@ export class CstoaAccount {
 		if (!signedIn || invalidAuth) return empty(signedIn, signedIn && invalidAuth);
 		try {
 			return (await runtime.getAuth("cstoa"))?.auth?.apiKey || empty(true, true);
-		} catch {
-			return empty(true, true);
+		} catch (error) {
+			return requiresCstoaLogin(error)
+				? empty(true, true)
+				: empty(true, false, "登录凭据暂时无法读取或刷新，请检查网络和存储后重试。");
 		}
 	}
 

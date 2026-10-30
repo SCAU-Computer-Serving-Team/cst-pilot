@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { getDeviceId, resetDeviceIdCache } from "../device.ts";
+import { CstoaLoginRequired } from "../errors.ts";
 import { login, refresh } from "../oa.ts";
 import { startMockOa } from "./mock-oa.ts";
 
@@ -54,6 +55,24 @@ test("login：完整设备流返回凭据、通知完整授权链接并生成设
 		assert.deepEqual(authorization.body.scope, ["llm:chat"]);
 	} finally {
 		await mock.close();
+	}
+});
+
+test("login：默认使用一天，服务端明确给出的有效期优先", async () => {
+	for (const [expiresInSeconds, expectedSeconds] of [
+		[0, 86400],
+		[3600, 3600],
+	]) {
+		const mock = await startMockOa({ expiresInSeconds });
+		process.env.CSTOA_OA_HOST = mock.host;
+		try {
+			const before = Date.now();
+			const credentials = await login(await makeAgentDir(), { onDeviceCode: () => {} });
+			assert.ok(credentials.expires >= before + expectedSeconds * 1000);
+			assert.ok(credentials.expires <= Date.now() + expectedSeconds * 1000);
+		} finally {
+			await mock.close();
+		}
 	}
 });
 
@@ -150,6 +169,37 @@ test("refresh：刷新令牌失效时提示重新登录", async () => {
 	} finally {
 		await mock.close();
 	}
+});
+
+test("refresh：无刷新令牌时访问令牌可用到 expires，到期后要求重新登录", async (context) => {
+	context.mock.timers.enable({ apis: ["Date"], now: 1000 });
+	const credentials = { access: "access-1", refresh: "", expires: 2000 };
+	assert.deepEqual(await refresh(credentials, new AbortController().signal), credentials);
+	context.mock.timers.setTime(2000);
+	await assert.rejects(refresh(credentials, new AbortController().signal), CstoaLoginRequired);
+});
+
+test("refresh：临时故障保留尚未过期的访问令牌，已过期则返回可重试错误", async () => {
+	const mock = await startMockOa({ refreshStatus: 503 });
+	process.env.CSTOA_OA_HOST = mock.host;
+	try {
+		const credentials = { access: "access-1", refresh: "refresh-1", expires: Date.now() + 240_000 };
+		assert.deepEqual(await refresh(credentials, AbortSignal.timeout(5000)), credentials);
+		await assert.rejects(
+			refresh({ ...credentials, expires: 0 }, AbortSignal.timeout(5000)),
+			(error: unknown) =>
+				error instanceof Error && !(error instanceof CstoaLoginRequired) && /重试/.test(error.message),
+		);
+	} finally {
+		await mock.close();
+	}
+});
+
+test("refresh：网络不可达时保留有效访问令牌，取消时不返回凭据", async () => {
+	process.env.CSTOA_OA_HOST = "http://127.0.0.1:9";
+	const credentials = { access: "access-1", refresh: "refresh-1", expires: Date.now() + 240_000 };
+	assert.deepEqual(await refresh(credentials, AbortSignal.timeout(5000)), credentials);
+	await assert.rejects(refresh(credentials, AbortSignal.abort()));
 });
 
 test("device：device.json 持久化，重复读取返回同一标识", async () => {
