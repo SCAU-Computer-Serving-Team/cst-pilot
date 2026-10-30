@@ -24,18 +24,18 @@ Pi `0.85.1` 扩展 API 未直接暴露获取当前 `AgentSession` 实例或拦�
 
 | 子模块 | 实现机制 |
 |---|---|
-| `adapter.ts` | 包装 `AgentSession.prototype.bindExtensions`，在实例绑定扩展时登记该会话，并包装其 `prompt`、`cycleModel` 与 `dispose` 方法；扩展重载时复用 `globalThis` 上的进程级登记 |
+| `adapter.ts` | 包装 `AgentSession.prototype.bindExtensions`，在实例绑定扩展时登记该会话，并包装其 `cycleModel` 与 `dispose` 方法；扩展重载时复用 `globalThis` 上的进程级登记 |
 | `model-catalog.ts` | 按工具包目录共享后台 `ModelRuntime`，与界面实例共用目录缓存和凭据；统一目录联网、任务合并、取消与变化订阅 |
 | `owner.ts` | 管理基于 Windows 命名管道（非 Windows 回退本机回环监听端口）的跨进程会话独占锁 |
-| `configuration.ts` | 在 TUI 打开模型菜单、范围菜单、触发模型循环快捷键（读取 `KeybindingsManager` 实时键位）及每次 `prompt` 前重读 `settings.json`、`models.json`、`models-store.json` 与 `auth.json` |
+| `index.ts`、`configuration.ts` | 模型菜单和循环前刷新共享配置与范围；Pi 分发扩展命令后的 `input` 事件只重读请求配置，不解析可用范围；配置错误按文件类别提示 |
 
 TUI 进入 Web 待机后，扩展通过终端原始输入拦截器消费全部按键，此时运行协调不再触发配置刷新或分发模型菜单。
 
 ## 明确模型选择
 
-`model-selection.ts` 统一新会话默认身份、目录缺失时的只读身份占位与凭据预检。Web 创建 SDK 会话时显式传入已保存的模型或默认模型；TUI 在首次绑定扩展时通过公开 `agent.state.model` 保留相同身份，显式 CLI 选择保持原值。
+`model-selection.ts` 统一新会话默认身份、目录缺失时的身份占位与 Web 凭据预检。Web 创建 SDK 会话时显式传入已保存的模型或默认模型；TUI 在首次绑定扩展时通过公开 `agent.state.model` 保留相同身份，显式 CLI 选择保持原值。
 
-缺少目录或凭据时阻止发送，不自动切换服务。身份占位仅用于显示历史，不能用于模型请求。
+模型身份保留，不自动切换服务。Web 在接受发送请求前检查目录与凭据；TUI 保留 Pi 原生 `prompt` 分发流程，由 Pi 处理实际模型调用的错误，本地扩展命令不触发配置刷新或凭据检查。
 
 ## 模型目录刷新
 

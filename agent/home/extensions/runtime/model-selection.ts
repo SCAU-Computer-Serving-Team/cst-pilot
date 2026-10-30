@@ -10,7 +10,7 @@ export function defaultModelReference(settings: SettingsManager) {
 	};
 }
 
-/** 保留选定身份；目录缺失时只供历史展示，发送前由 requireModelCredentials 拒绝。 */
+/** 目录缺失时保留选定身份；Web 发送前预检，TUI 沿用 Pi 原生请求错误。 */
 export function explicitModel(runtime: ModelRuntime, reference: { provider: string; modelId: string }): Model<Api> {
 	return (
 		runtime.getModel(reference.provider, reference.modelId) ?? {

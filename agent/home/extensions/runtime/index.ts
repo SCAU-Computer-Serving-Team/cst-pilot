@@ -43,6 +43,11 @@ export default function runtime(pi: ExtensionAPI): void {
 			return { consume: true };
 		});
 	});
+	// Pi 在扩展命令分发后触发 input；只重读请求配置，模型与凭据错误由 Pi 处理。
+	pi.on("input", async (_event, ctx) => {
+		const session = currentRuntime(ctx.sessionManager.getSessionId());
+		if (session) await refreshRuntime(session, { updateScope: false });
+	});
 	pi.on("session_before_switch", async (event, ctx) => {
 		if (!event.targetSessionFile) return;
 		const home = process.env.PI_CODING_AGENT_DIR;

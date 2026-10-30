@@ -119,7 +119,7 @@ test("默认模型缺少密钥时保持身份，拒绝输入；手动选择和�
 			await tui.bindExtensions({ mode: "tui" });
 			assert.equal(tui.model?.provider, "deepseek", "TUI 不沿用 SDK 自动选择的其他服务");
 			assert.equal(tui.model?.id, "deepseek-flash");
-			await assert.rejects(tui.prompt("不应发送"), /尚未配置.*凭据/);
+			await assert.rejects(tui.prompt("不应发送"), /No API key found for deepseek/);
 			await tui.prompt("/local-check");
 			assert.ok(
 				tui.sessionManager

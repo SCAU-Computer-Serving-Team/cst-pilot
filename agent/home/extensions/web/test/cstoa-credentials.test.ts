@@ -149,7 +149,13 @@ test("CSTOA APIKEY与扫码共用身份、积分和模型选择；自动目录�
 		assert.deepEqual(oauthModels.map((m: { id: string }) => m.id).sort(), [...options.models].sort());
 		assert.ok(oauthModels.every((m: { id: string; name: string }) => m.name === m.id));
 		const requestsBeforeSwitch = mock.requests.filter((r) => r.path.endsWith("/chat/completions")).length;
-		await assert.rejects(slot.session.prompt("模型已不属于当前凭据", { source: "rpc" }), /模型.*不可用.*重新选择/);
+		const staleModel = await post(`/api/sessions/${slot.id}/messages`, {
+			id: "stale-model",
+			text: "模型已不属于当前凭据",
+			delivery: "queue",
+		});
+		assert.equal(staleModel.status, 400);
+		assert.match((await staleModel.json()).error.message, /模型已不可用/);
 		assert.equal(
 			mock.requests.filter((r) => r.path.endsWith("/chat/completions")).length,
 			requestsBeforeSwitch,
@@ -179,7 +185,13 @@ test("CSTOA APIKEY与扫码共用身份、积分和模型选择；自动目录�
 		await modelRuntime.refresh({ providers: ["cstoa"], allowNetwork: true, force: true });
 		assert.equal(modelRuntime.getModels("cstoa").length, 0);
 		const requestsBeforeEmpty = mock.requests.filter((r) => r.path.endsWith("/chat/completions")).length;
-		await assert.rejects(slot.session.prompt("目录已清空", { source: "rpc" }), /模型.*不可用.*重新选择/);
+		const emptyCatalog = await post(`/api/sessions/${slot.id}/messages`, {
+			id: "empty-catalog",
+			text: "目录已清空",
+			delivery: "queue",
+		});
+		assert.equal(emptyCatalog.status, 400);
+		assert.match((await emptyCatalog.json()).error.message, /模型已不可用/);
 		assert.equal(
 			mock.requests.filter((r) => r.path.endsWith("/chat/completions")).length,
 			requestsBeforeEmpty,

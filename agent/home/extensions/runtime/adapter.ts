@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { AgentSession, resolveModelScopeWithDiagnostics } from "@earendil-works/pi-coding-agent";
 import { checkSharedConfiguration } from "./configuration.ts";
 import { getModelCatalog, type ModelCatalog } from "./model-catalog.ts";
-import { defaultModelReference, explicitModel, requireModelCredentials } from "./model-selection.ts";
+import { defaultModelReference, explicitModel } from "./model-selection.ts";
 import { ownSession } from "./owner.ts";
 
 interface RuntimeEntry {
@@ -46,7 +46,10 @@ export function registerRuntimeSession(
 	if (catalog) state.catalogs.set(session, catalog);
 	if (release) state.releases.set(session, release);
 }
-export async function refreshRuntime(session: AgentSession, checkCatalog = true): Promise<void> {
+export async function refreshRuntime(
+	session: AgentSession,
+	{ checkCatalog = true, updateScope = true }: { checkCatalog?: boolean; updateScope?: boolean } = {},
+): Promise<void> {
 	const entry = state.sessions.get(session);
 	if (!entry) return;
 	if (entry.refreshing) return entry.refreshing;
@@ -55,12 +58,11 @@ export async function refreshRuntime(session: AgentSession, checkCatalog = true)
 		await session.modelRuntime.refresh({ allowNetwork: false });
 		if (checkCatalog) entry.catalog.check();
 		checkSharedConfiguration(session.settingsManager, session.modelRuntime);
-		if (!process.argv.some((arg) => arg === "--models" || arg.startsWith("--models="))) {
+		if (updateScope && !process.argv.some((arg) => arg === "--models" || arg.startsWith("--models="))) {
 			const scope = await resolveModelScopeWithDiagnostics(
 				session.settingsManager.getEnabledModels() ?? [],
 				session.modelRuntime,
 			);
-			if (scope.diagnostics.length) throw new Error("启用的模型当前不可用，请检查登录状态与模型配置。");
 			session.setScopedModels(scope.scopedModels);
 		}
 		const selected = session.model;
@@ -124,16 +126,16 @@ export function installRuntimeAdapter(): void {
 			}
 			const detachCatalog = catalog.attach(this.modelRuntime);
 			const unsubscribeCatalog = catalog.subscribe(({ changed }) => {
-				if (changed) void refreshRuntime(this, false).catch(() => undefined);
+				if (changed) void refreshRuntime(this, { checkCatalog: false }).catch(() => undefined);
 			});
 			const unsubscribeSettled = this.subscribe((event) => {
-				if (event.type === "agent_settled") void refreshRuntime(this, false).catch(() => undefined);
+				if (event.type === "agent_settled")
+					void refreshRuntime(this, { checkCatalog: false }).catch(() => undefined);
 			});
 			state.entries.set(identity(home, id), entry);
 			state.sessions.set(this, entry);
 			const dispose = this.dispose.bind(this),
-				cycle = this.cycleModel.bind(this),
-				prompt = this.prompt.bind(this);
+				cycle = this.cycleModel.bind(this);
 			this.dispose = () => {
 				if (state.sessions.has(this)) {
 					release();
@@ -154,15 +156,6 @@ export function installRuntimeAdapter(): void {
 					return { model: only.model, thinkingLevel: this.thinkingLevel, isScoped: true };
 				}
 				return cycle(...args);
-			};
-			this.prompt = async (...args) => {
-				await refreshRuntime(this);
-				if (this.isIdle && this.model?.provider === "cstoa" && !this.modelRuntime.getModel("cstoa", this.model.id))
-					throw new Error("当前 CSTOA 模型已不可用，请重新选择模型。");
-				const command = /^\/([^\s]+)/.exec(args[0])?.[1];
-				if (!command || !this.extensionRunner?.getCommand(command))
-					await requireModelCredentials(this.modelRuntime, this.model);
-				return prompt(...args);
 			};
 		}
 		try {
