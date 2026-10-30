@@ -52,7 +52,7 @@ test('截图中的NVIDIA网址通过发行TUN规则，不再因假IP被拦截', 
 test('发行配置由真实网页扩展读取，只放行198.18/15，不信任环境代理', () => {
   fs.writeFileSync(path.join(root, 'web-search.json'), JSON.stringify(RELEASE_WEB_SEARCH));
   assert.deepEqual(loadSsrfConfig(), policy);
-  assert.deepEqual(RELEASE_WEB_SEARCH, { ssrf: { allowRanges: ['198.18.0.0/15'], trustEnvProxy: false } });
+  assert.deepEqual(RELEASE_WEB_SEARCH, { searchProvider: 'exa', ssrf: { allowRanges: ['198.18.0.0/15'], trustEnvProxy: false } });
 });
 
 test('假IP段两端放行，其他私网、localhost和混合DNS继续拦截', async () => {

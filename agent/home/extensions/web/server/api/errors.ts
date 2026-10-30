@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http";
 import { BitLockerExpiredError, BitLockerInputError } from "../../../diagnostics/bitlocker-web.ts";
+import { ModelCredentialsRequired } from "../../../runtime/model-selection.ts";
 import { SessionOwnerConflict } from "../../../runtime/owner.ts";
 import { InboxConflict } from "../session/inbox.ts";
 import { problem } from "./http.ts";
@@ -8,7 +9,8 @@ import { RunbookOpenError } from "./runbook.ts";
 export function sendError(response: ServerResponse, error: unknown): void {
 	const diskCode =
 		error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : undefined;
-	if (error instanceof RunbookOpenError) problem(response, error.status, error.code, error.message);
+	if (error instanceof ModelCredentialsRequired) problem(response, 409, error.code, error.message);
+	else if (error instanceof RunbookOpenError) problem(response, error.status, error.code, error.message);
 	else if (error instanceof BitLockerInputError) problem(response, 400, "invalid_bitlocker_input", error.message);
 	else if (error instanceof BitLockerExpiredError) problem(response, 409, "expired_request", error.message);
 	else if (diskCode === "ENOSPC") problem(response, 507, "storage_full", "工具包存储空间不足，输入未被接受");

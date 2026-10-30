@@ -29,6 +29,23 @@ test('pi.cmd 保持 ASCII，避免 cmd 解码差异', () => {
   assert.ok(entry.every(byte => byte < 128));
 });
 
+test('搜索服务不继承宿主密钥与端点', windows, () => {
+  const root = fixture();
+  try {
+    fs.writeFileSync(path.join(root, 'pi.cmd'), '@echo off\r\n');
+    const keys = ['EXA_API_KEY', 'TAVILY_API_KEY', 'BRAVE_API_KEY', 'SEARXNG_BASE_URL', 'GOOGLE_GEMINI_BASE_URL', 'PERPLEXITY_API_KEY', 'JINA_API_KEY'];
+    const result = powershell(`
+      . ${quote(launcher)}
+      $names = @(${keys.map(quote).join(',')})
+      foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, 'host-placeholder', 'Process') }
+      Initialize-PilotEnvironment -Root ${quote(root)}
+      ConvertTo-Json -InputObject @($names | Where-Object { [Environment]::GetEnvironmentVariable($_, 'Process') }) -Compress
+    `);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), []);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('未提权时只请求 RunAs，不初始化状态、不启动 Pi', windows, () => {
   const root = fixture();
   try {

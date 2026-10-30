@@ -19,7 +19,7 @@ flowchart TD
 
 1. **官方包与锁文件核验**：根据 `pack/official-windows-x64.json` 校验官方归档及全部 43 个运行文件的 SHA-256；核对 `agent/home/npm/package-lock.json` 与 `pack/extensions.package-lock.json` 完全一致，确保 `pi-fff`、`pi-web-access`、`pi-open-tui` 版本精确匹配。
 2. **第三方扩展预打包**：使用固定版本 `esbuild@0.25.10` 将 `pi-web-access` 和 `pi-fff` 打包为 ESM，将 `@earendil-works/*` 与 `@sinclair/typebox` 设为 external，使扩展共享官方二进制内置的 Pi SDK 实例并大幅减少小文件数量。`pi-fff` 所需的 5 个 Windows x64 原生包（`ffi-rs` 等）原样复制到 `packages/pi-fff/node_modules/`。
-3. **离线模型目录补全**：`pack/model-catalog.mjs` 的 `supplementGoFlash` 在复制 `agent/home/models-store.json` 时检查 `opencode-go` 目录，若缺少默认模型 `deepseek-v4.1-flash` 则补入完整元数据，已有上游条目时保持原时间戳与属性不变。
+3. **离线模型目录补全**：`pack/model-catalog.mjs` 的 `supplementDeepSeekFlash` 在复制 `agent/home/models-store.json` 时检查 `deepseek` 目录，若缺少官方默认模型 `deepseek-flash` 则补入完整元数据，已有上游条目时保持原时间戳与属性不变。
 4. **隔离冒烟验证**：`pack/smoke.mjs` 与 `pack/web-smoke.mjs` 将装配好的目录复制到 `_smoke`，禁用遥测并启动本地模拟模型服务，通过真实 `pi.cmd` 验证冷／热启动、工具注册清单，以及在 RPC 宿主中挂载 Web 服务、发起会话消息、执行真实 `read` 工具并调用 `/api/lifecycle/exit` 安全退出。
 
 ## 字体构建与分发

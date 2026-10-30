@@ -15,7 +15,7 @@ flowchart LR
 ```
 
 1. **权限与载荷传递**：未提权时 `launcher.ps1` 不创建 `.state` 目录，直接将原工作目录与参数 JSON 编码为 UTF-8 Base64，通过 `Start-Process -Verb RunAs` 重新调用随包 `pwsh/pwsh.exe`。
-2. **环境清洗**：`Initialize-PilotEnvironment` 将 `PI_CODING_AGENT_DIR` 固定为工具包 `agent/home`，设置 `PI_OFFLINE=1`，并将 `TEMP` / `TMP` 重定向至 `.state/tmp`，同时清除宿主环境变量中的开发端点覆盖与外部 API 密钥，防止宿主残留配置污染工具包。
+2. **环境清洗**：`Initialize-PilotEnvironment` 将 `PI_CODING_AGENT_DIR` 固定为工具包 `agent/home`，设置 `PI_OFFLINE=1`，并将 `TEMP` / `TMP` 重定向至 `.state/tmp`，同时清除宿主环境变量中的开发端点覆盖、模型与搜索服务 API 密钥和搜索端点，防止宿主残留配置污染工具包。
 3. **运行时入口**：发行包将官方 `pi.exe` 置于 `agent/.runtime/prx.bin`，强制所有启动经过 `pi.cmd` 与 `launcher.ps1` 的提权及环境隔离流程。
 
 ## Pi 进程内协调适配
@@ -30,6 +30,12 @@ Pi `0.85.1` 扩展 API 未直接暴露获取当前 `AgentSession` 实例或拦�
 | `configuration.ts` | 在 TUI 打开模型菜单、范围菜单、触发模型循环快捷键（读取 `KeybindingsManager` 实时键位）及每次 `prompt` 前重读 `settings.json`、`models.json`、`models-store.json` 与 `auth.json` |
 
 TUI 进入 Web 待机后，扩展通过终端原始输入拦截器消费全部按键，此时运行协调不再触发配置刷新或分发模型菜单。
+
+## 明确模型选择
+
+`model-selection.ts` 统一新会话默认身份、目录缺失时的只读身份占位与凭据预检。Web 创建 SDK 会话时显式传入已保存的模型或默认模型；TUI 在首次绑定扩展时通过公开 `agent.state.model` 保留相同身份，显式 CLI 选择保持原值。
+
+缺少目录或凭据时阻止发送，不自动切换服务。身份占位仅用于显示历史，不能用于模型请求。
 
 ## 模型目录刷新
 

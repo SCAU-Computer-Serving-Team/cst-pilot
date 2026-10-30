@@ -14,7 +14,7 @@
 | 第三方扩展 | `pi-web-access`（0.18.0）与 `@ff-labs/pi-fff`（0.10.6）经 esbuild 预打包至 `agent/home/packages/`，保留 `pi-fff` Windows x64 原生依赖链；`pi-open-tui`（0.2.10）原样复制 |
 | 项目扩展与技能 | `agent/home/extensions/`（排除所有 `test/` 目录）、`agent/home/skills/`、`agent/home/APPEND_SYSTEM.md` |
 | Web 静态资源 | 每次打包从源码重新构建至 `agent/home/extensions/web/static/`，包含三档 `CSTUISans-*.woff2` 子集字体、`subset.json` 与字体许可 |
-| 预置配置 | 生成标准 `settings.json`、双端 `telemetry.json`、仅放行 `198.18.0.0/15` 的 `web-search.json`，以及补齐默认模型 `opencode-go/deepseek-v4.1-flash` 的离线 `models-store.json` |
+| 预置配置 | 生成标准 `settings.json`、双端 `telemetry.json`、默认使用免费 Exa MCP 且仅放行 `198.18.0.0/15` 的 `web-search.json`，以及补齐默认模型 `deepseek/deepseek-flash` 的离线 `models-store.json` |
 | 元数据与校验 | 根目录生成 `VERSION`、`BUILD-INFO.json` 与覆盖全树文件的 `SHA256SUMS` |
 
 ## 干净发行树红线

@@ -17,6 +17,7 @@ export default function ProviderConfiguration() {
 					key={provider.id}
 					provider={provider}
 					requestedMethod={params.get("method")}
+					returnTo={params.get("from") === "model-key" ? params.get("returnTo") : null}
 					onRefresh={state.refresh}
 				/>
 			) : !state.loading && !state.error ? (

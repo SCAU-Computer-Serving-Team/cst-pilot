@@ -7,13 +7,13 @@ import { fileURLToPath } from "node:url";
 import { createWebApi } from "../server/api.ts";
 import { createWebServer, listenWebServer } from "../server/http.ts";
 import { WebSessionPool } from "../server/session/sessions.ts";
-import { testRoot } from "./support.ts";
+import { configureTestModel, testRoot } from "./support.ts";
 
 const rootDir = await testRoot();
 
 test("an unwritable inbox reports a storage error without sending to the model", async () => {
 	const home = await mkdtemp(join(rootDir, "cst-web-storage-"));
-	await writeFile(join(home, "settings.json"), JSON.stringify({ defaultTools: ["read", "ls"] }));
+	await configureTestModel(home);
 	const pool = new WebSessionPool({
 		cwd: home,
 		agentDir: home,

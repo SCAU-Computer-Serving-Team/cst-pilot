@@ -48,7 +48,11 @@ export function accountProvider(providers: ProviderStatus[]): ProviderStatus | u
 	return providers.find((provider) => provider.id === CSTOA_PROVIDER);
 }
 export function returnPath(value: string | null): string {
-	return value && ["/", "/account", "/settings", "/settings#accounts"].includes(value) ? value : "/";
+	return value &&
+		(["/", "/account", "/settings", "/settings#accounts", "/settings/models"].includes(value) ||
+			/^\/s\/[a-zA-Z0-9_-]{1,128}$/.test(value))
+		? value
+		: "/";
 }
 export function loginPath(providerId: string, method: LoginMethod, destination = "/settings#accounts"): string {
 	return `/login?${new URLSearchParams({ provider: providerId, method, returnTo: returnPath(destination) })}`;

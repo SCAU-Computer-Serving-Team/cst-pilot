@@ -2,7 +2,9 @@ import { Button, Checkbox, ListBox, Select } from "@heroui/react";
 import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { apiJson } from "../data/api";
+import type { ModelChoice, ModelSelectionPayload } from "../data/model-selection";
 import type { Model } from "../data/web-state";
+import { DefaultModelPicker } from "../settings/default-model-picker";
 import { modelListRows } from "../settings/model-list";
 import { moveModel, normalizeScope, toggleModel } from "../settings/model-scope";
 import { SettingsHeading, SettingsLoadState, SettingsSection, useSettingsFeedback } from "../settings/settings-frame";
@@ -10,7 +12,7 @@ import { SettingsSearch } from "../settings/settings-search";
 import { useAnimatedHeight } from "../settings/use-animated-height";
 import { useSettingsResource } from "../settings/use-settings-resource";
 
-type ModelsPayload = { models: Model[]; enabled: string[] | null; unavailableEnabled: string[] };
+type ModelsPayload = ModelSelectionPayload;
 const fullId = (model: Model) => `${model.provider}/${model.id}`;
 export default function ModelPreferences() {
 	const state = useSettingsResource<ModelsPayload>("/api/models");
@@ -56,6 +58,17 @@ export default function ModelPreferences() {
 		}, optimistic);
 		if (ok) feedback();
 	}
+	async function saveDefault(model: ModelChoice) {
+		const ok = await state.mutate(async (current) => {
+			await apiJson("/api/models/default", {
+				method: "POST",
+				body: { provider: model.provider, modelId: model.id },
+			});
+			return { ...current, defaultModel: model, selected: model };
+		});
+		if (ok) feedback("已保存默认模型");
+		return ok;
+	}
 	function drop(target: string) {
 		if (!dragId || !selection) return;
 		const next = moveModel(selection, dragId, target);
@@ -67,10 +80,16 @@ export default function ModelPreferences() {
 	}
 	return (
 		<>
-			<SettingsHeading title="模型偏好" description="控制聊天输入框中显示的模型。" />
+			<SettingsHeading title="模型偏好" description="设置新会话默认模型与输入框中的模型范围。" />
 			<SettingsLoadState {...state} onRetry={() => void state.refresh()} />
 			{state.data && (
 				<>
+					<DefaultModelPicker
+						model={state.data.defaultModel}
+						models={state.data.catalog}
+						busy={state.working}
+						onSelect={saveDefault}
+					/>
 					<div className="settings-model-filters">
 						<SettingsSearch label="搜索模型" value={query} onChange={setQuery} />
 						<Select

@@ -76,7 +76,7 @@ cst-pilot/
 
 1. 支持 Windows 10/11 x64。启动统一请求 Windows 管理员授权；取消授权或没有管理员凭据时不启动。传感器数据能否读取取决于硬件与驱动。
 2. 本仓库用于代码开发，不包含完整便携运行环境。开发准备见 [贡献规范](CONTRIBUTING.md)。
-3. 发行包不提供模型服务地址与密钥。如果你是 CST 队员且需要相关资源，请联系队内委员。
+3. 发行包默认使用 DeepSeek 官方 `deepseek-flash`，不包含密钥。队员也可连接 CSTOA 团队服务；所需资源请联系队内委员。联网检索默认使用无需密钥的 Exa MCP。
 4. 项目遥测默认启用，未登录时使用工具包安装签名上传，会话统计同时发送到 CSTOA 服务器和 Tim 的 `timserver_1`。CSTOA 登录仅提供经验证的上传账号。可在 `agent/home/telemetry.json` 中将 `enabled` 设为 `false`；收集范围见 [信息收集契约](doc/contract.md)。
 5. WizTree 仅个人使用免费，商业使用需授权。本项目采用 [MIT 许可证](LICENSE)，第三方条款见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
@@ -88,7 +88,7 @@ cst-pilot/
 
 交互界面优先在已安装的 Windows Terminal（`wt`）中打开；未安装或启动请求失败时使用系统控制台，不安装终端软件。
 
-1. 首次运行时执行 `/login`，选择模型服务并完成授权或填写 API key。
+1. 首次运行时执行 `/login`，为默认 DeepSeek 服务填写 API key，或手动选择其他已授权模型。Web 缺少密钥时会提示配置；新会话默认模型在“设置 → 模型偏好”中选择。
 2. 描述机主遇到的问题，让 Agent 调用工具协助排查。
 3. 想用浏览器操作时，执行 `/web`。原终端会进入待机，请保持窗口打开。
 4. Web 使用完毕后，在账号菜单中选择“退出 CST Pilot”。“退出 CSTOA”只退出账号。

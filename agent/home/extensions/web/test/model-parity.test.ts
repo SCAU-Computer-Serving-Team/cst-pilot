@@ -69,21 +69,24 @@ test("Web 模型清单与 TUI 共用可用口径、scoped 设置和下一次启�
 		assert.equal(refresh.status, 200);
 		assert.deepEqual(await refresh.json(), { aborted: false, failedProviders: [] });
 		const select = (input: unknown, key: string) =>
-			fetch(`${origin}/api/models/select`, {
-				method: "POST",
-				headers: {
-					Origin: origin,
-					"X-CST-Web-Request": "1",
-					"Content-Type": "application/json",
-					"Idempotency-Key": key,
+			fetch(
+				`${origin}${typeof input === "object" && input && "sessionId" in input ? "/api/models/select" : "/api/models/default"}`,
+				{
+					method: "POST",
+					headers: {
+						Origin: origin,
+						"X-CST-Web-Request": "1",
+						"Content-Type": "application/json",
+						"Idempotency-Key": key,
+					},
+					body: JSON.stringify(input),
 				},
-				body: JSON.stringify(input),
-			});
+			);
 		assert.equal((await select({ provider: "probe", modelId: "two" }, "home-selection")).status, 200);
 		assert.equal(
 			(await (await fetch(`${origin}/api/models`)).json()).selected.id,
 			"two",
-			"首页模型选择写入 TUI 共用默认模型",
+			"设置页默认模型写入 TUI 共用配置",
 		);
 		const slot = await pool.createWithKey("picker-session");
 		assert.equal(
@@ -92,8 +95,8 @@ test("Web 模型清单与 TUI 共用可用口径、scoped 设置和下一次启�
 		);
 		assert.equal(
 			(await (await fetch(`${origin}/api/models`)).json()).selected.id,
-			"one",
-			"工作台模型选择也更新默认模型",
+			"two",
+			"工作台选择保持默认模型不变",
 		);
 		const post = (path: string, input: unknown) =>
 			fetch(`${origin}${path}`, {

@@ -61,9 +61,10 @@ CSTOA 远端接口与字段映射见 [../auth/API.md](../auth/API.md)。本机 W
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| `GET` | `/api/models` | 可用模型清单、启用范围（`enabled=null` 表全启用）、未匹配的 `unavailableEnabled` 及可选 `sessionId` 当前选择 |
+| `GET` | `/api/models` | 可用模型 `models`、完整目录 `catalog`、`defaultModel`、启用范围与可选 `sessionId` 当前选择；模型描述包含 `credentialReady`、`catalogPresent` 与 `providerName` |
 | `POST` | `/api/models/refresh` | 正文 `{}`，强制刷新已配置供应商目录；返回 `{ aborted, failedProviders }`，部分失败仍返回 200，沿用同源校验与去重键 |
-| `POST` | `/api/models/select` | 保存跨端默认模型；传入 `sessionId` 时同步切换该会话模型 |
+| `POST` | `/api/models/select` | 手动选择模型；传入 `sessionId` 时仅切换该会话，无 `sessionId` 时返回所选描述，不保存默认值 |
+| `POST` | `/api/models/default` | 正文 `{ provider, modelId }`，保存与 TUI 共用的新会话默认模型，保留现有会话；允许保存尚未配置凭据的模型 |
 | `POST` | `/api/models/scoped` | 更新启用模型范围与顺序（全选可用模型时归一为 `null`） |
 | `POST` | `/api/models/thinking` | 按 `sessionId` 设置思考强度 |
 | `GET` | `/api/auth` | 所有 Provider 的配置状态、凭据类型、登录能力、`custom` 与 `requiresLogin` 标记 |
@@ -92,4 +93,5 @@ CSTOA 远端接口与字段映射见 [../auth/API.md](../auth/API.md)。本机 W
 1. **回环与同源防护**：服务仅绑定 `127.0.0.1` 并校验 `Host`；写请求须携带同源 `Origin` 与 `X-CST-Web-Request: 1`，带请求体的接口使用 `Content-Type: application/json`。跨站请求与 CORS 预检被拒绝。
 2. **幂等与版本并发控制**：一般写操作携带 `Idempotency-Key`，长度为 1–128 位，仅允许字母、数字、下划线和连字符。同一键用于不同操作、或重启后操作结果未确认时返回 `409`；消息提交按会话内消息 `id`、正文、图片、技能与投递方式去重。队列使用整数 `version`，自定义服务编辑使用 `revision`，过期返回 `409`。BitLocker 本地凭据提交使用一次性 `requestId`，不写入持久化幂等日志。
 3. **体积限制**：消息提交的原始图片合计不超过 `12 MiB`（仅限 PNG/JPEG/GIF/WebP），消息 JSON 请求体不超过 `17 MiB`；其他调用 JSON 正文的接口默认上限为 `128 KiB`。
-4. **统一错误结构**：所有接口错误返回 `{ "error": { "code": "...", "message": "..." } }`，不含敏感配置原文或凭据。
+4. **缺少凭据**：新建会话与提交消息在接受输入前校验所选模型凭据，缺失返回 `409 credentials_required`。前端保留草稿并打开配置提示，不自动换服务或重发消息。
+5. **统一错误结构**：所有接口错误返回 `{ "error": { "code": "...", "message": "..." } }`，不含敏感配置原文或凭据。

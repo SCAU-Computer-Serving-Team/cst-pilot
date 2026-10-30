@@ -5,6 +5,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import { BitLockerExpiredError, bitLockerWebInteractions } from "../../diagnostics/bitlocker-web.ts";
+import { defaultModelReference, explicitModel, requireModelCredentials } from "../../runtime/model-selection.ts";
 import { announceProcessClose, beginProcessClose, cancelProcessClose, hintTelemetry } from "../../telemetry/shared.ts";
 import { CstoaAccount } from "./api/account.ts";
 import { createAuthRoutes } from "./api/auth.ts";
@@ -353,12 +354,18 @@ export function createWebApi(
 					!(await pool.getServices()).modelRuntime.getModel(provider, modelId)
 				)
 					throw new Error("请求的模型不存在");
+				const services = await pool.refreshServices();
+				const target =
+					typeof provider === "string" && typeof modelId === "string"
+						? { provider, modelId }
+						: defaultModelReference(services.settingsManager);
+				await requireModelCredentials(services.modelRuntime, explicitModel(services.modelRuntime, target));
 				const result = await writeOnce(request, pathname, input, async () => {
 					const slot = await pool.createWithKey(key);
 					if (typeof provider === "string" && typeof modelId === "string") {
 						const model = slot.session.modelRuntime.getModel(provider, modelId);
 						if (!model) throw new Error("请求的模型不存在");
-						await serialize("model-default", () => slot.session.setModel(model, { persist: true }));
+						await serialize(`model-selection:${slot.id}`, () => slot.session.setModel(model));
 					}
 					if (typeof thinkingLevel === "string") {
 						const selected = slot.session.getAvailableThinkingLevels().find((level) => level === thinkingLevel);
@@ -651,6 +658,9 @@ export function createWebApi(
 				)
 					throw new Error("消息格式无效");
 				const item = await serialize(id, async () => {
+					await pool.refreshServices();
+					const slot = await pool.openSaved(id);
+					await requireModelCredentials(slot.session.modelRuntime, slot.session.model);
 					const box = await inbox(id);
 					const refs = await images.accept(id, input.images ?? []);
 					return box.accept(messageId, text, delivery, refs, skill);

@@ -16,6 +16,28 @@ test("界面画布的节点 ID 唯一，工作帧没有遗留占位标记", () =
   }
 });
 
+test("模型选择与协议菜单的浅深主题使用独立画布", () => {
+  const canvas = JSON.parse(readFileSync(new URL("../web/design/cst-pilot-web.pen", import.meta.url), "utf8"));
+  for (const prefix of ["默认模型选择 · 展开与未配置", "自定义协议菜单"]) {
+    const boards = canvas.children.filter(node => node.name?.startsWith(prefix));
+    assert.deepEqual(boards.map(node => node.name).sort(), [`${prefix} · 浅色`, `${prefix} · 深色`].sort());
+    assert.notEqual(boards[0].fill, boards[1].fill, "每张画布使用对应主题的表面色");
+  }
+  for (const page of canvas.children.filter(node => ["模型偏好 · light", "模型偏好 · dark"].includes(node.name))) {
+    function visit(node) {
+      if (node.name === "默认模型选择器") {
+        assert.equal(node.children.filter(child => child.type === "text").length, 1, "闭合控件只显示模型名");
+      }
+      if (node.name === "服务选择器") {
+        assert.equal(node.width, 74, "全部筛选保持紧凑宽度");
+        assert.equal(node.justifyContent, "space_between", "筛选文字和箭头两侧对齐");
+      }
+      for (const child of node.children ?? []) visit(child);
+    }
+    visit(page);
+  }
+});
+
 test("自定义服务浅深画布归属设置区，与下方分区不重叠", () => {
   const canvas = JSON.parse(readFileSync(new URL("../web/design/cst-pilot-web.pen", import.meta.url), "utf8"));
   const pages = canvas.children.filter(node => /^自定义服务 · (light|dark)$/.test(node.name ?? ""));

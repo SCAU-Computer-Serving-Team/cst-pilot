@@ -43,7 +43,20 @@ test("设置四分类按菜单次序左右滑动，下划线同步移动，支�
 			let data: unknown = {};
 			if (path === "/api/settings") data = { theme: "light" };
 			else if (path === "/api/auth") data = { providers: [] };
-			else if (path === "/api/models") data = { models: [], enabled: null, unavailableEnabled: [] };
+			else if (path === "/api/models")
+				data = {
+					models: [],
+					catalog: [],
+					defaultModel: {
+						provider: "deepseek",
+						id: "deepseek-flash",
+						name: "DeepSeek V4.1 Flash",
+						credentialReady: false,
+						catalogPresent: true,
+					},
+					enabled: null,
+					unavailableEnabled: [],
+				};
 			else if (path === "/api/sessions") data = { sessions: [] };
 			res.writeHead(200, { "Content-Type": "application/json", Connection: "close" });
 			res.end(JSON.stringify(data));

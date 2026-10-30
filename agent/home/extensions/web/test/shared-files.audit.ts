@@ -209,7 +209,7 @@ async function fixture(
 test("共享模型：Web保存默认后新Pi进程实际读取", { timeout: 30000 }, () =>
 	fixture(async ({ api, client }) => {
 		await api("/api/models");
-		assert.equal((await api("/api/models/select", "POST", { provider: "audit", modelId: "two" })).status, 200);
+		assert.equal((await api("/api/models/default", "POST", { provider: "audit", modelId: "two" })).status, 200);
 		const cli = await client();
 		assert.equal((await cli.getState()).model?.id, "two");
 	}),

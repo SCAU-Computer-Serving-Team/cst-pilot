@@ -3,7 +3,7 @@ import { ChevronRight, Eye, EyeOff, KeyRound, ScanLine } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { OAuthPanel } from "../auth/oauth-panel";
-import { initialLogin, type LoginMethod } from "../auth/providers";
+import { initialLogin, type LoginMethod, returnPath } from "../auth/providers";
 import type { ProviderStatus } from "../data/api";
 import { apiJson } from "../data/api";
 import { CredentialDialog } from "./credential-dialog";
@@ -17,10 +17,12 @@ const methods = [
 export function ProviderConfigurationForm({
 	provider,
 	requestedMethod,
+	returnTo,
 	onRefresh,
 }: {
 	provider: ProviderStatus;
 	requestedMethod: string | null;
+	returnTo?: string | null;
 	onRefresh: () => Promise<void>;
 }) {
 	const [method, setMethod] = useState<LoginMethod>(
@@ -85,7 +87,8 @@ export function ProviderConfigurationForm({
 		setError("");
 		feedback();
 		await onRefresh();
-		if (mounted.current && provider.id === "cstoa") void navigate("/account");
+		if (mounted.current && returnTo) void navigate(returnPath(returnTo));
+		else if (mounted.current && provider.id === "cstoa") void navigate("/account");
 	}
 	async function remove() {
 		if (lock.current) return;

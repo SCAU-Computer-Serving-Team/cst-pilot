@@ -12,6 +12,7 @@ import { BitLockerWebInteraction, bitLockerWebInteractions } from "../../../diag
 import { installRuntimeAdapter, registerRuntimeSession } from "../../../runtime/adapter.ts";
 import { checkSharedConfiguration } from "../../../runtime/configuration.ts";
 import { getModelCatalog, type ModelCatalog } from "../../../runtime/model-catalog.ts";
+import { defaultModelReference, explicitModel } from "../../../runtime/model-selection.ts";
 import { ownSession } from "../../../runtime/owner.ts";
 import { finalizeSession as finalizeTelemetrySession, processCloseBudget } from "../../../telemetry/shared.ts";
 import { replaceFile } from "./replace-file.ts";
@@ -147,8 +148,10 @@ export class WebSessionPool {
 		if (services.diagnostics.some((item) => item.type === "error")) {
 			throw new Error("Web 会话资源加载失败");
 		}
+		const reference = manager.buildSessionContext().model ?? defaultModelReference(services.settingsManager);
 		const { session, extensionsResult } = await createAgentSessionFromServices({
 			services,
+			model: explicitModel(services.modelRuntime, reference),
 			sessionManager: manager,
 			tools: WEB_TOOLS,
 			// 遥测按会话起因分类；缺省会是 startup，丢失 new/resume/fork 语义。

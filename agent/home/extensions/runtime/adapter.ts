@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { AgentSession, resolveModelScopeWithDiagnostics } from "@earendil-works/pi-coding-agent";
 import { checkSharedConfiguration } from "./configuration.ts";
 import { getModelCatalog, type ModelCatalog } from "./model-catalog.ts";
+import { defaultModelReference, explicitModel, requireModelCredentials } from "./model-selection.ts";
 import { ownSession } from "./owner.ts";
 
 interface RuntimeEntry {
@@ -95,6 +96,32 @@ export function installRuntimeAdapter(): void {
 				release = state.releases.get(this) ?? (await ownSession(home, id)),
 				catalog = state.catalogs.get(this) ?? getModelCatalog(home),
 				entry = { session: this, home, id, release, catalog };
+			try {
+				// CLI 的明确选择保持原值；TUI 启动与恢复保留指定身份，凭据缺失时等待手动配置。
+				if (
+					bindings.mode === "tui" &&
+					!process.argv.some((arg) => /^(--model|--provider|--models)(=|$)/.test(arg))
+				) {
+					const context = this.sessionManager.buildSessionContext();
+					const reference = context.messages.length
+						? (context.model ?? defaultModelReference(this.settingsManager))
+						: defaultModelReference(this.settingsManager);
+					const model = explicitModel(this.modelRuntime, reference);
+					if (this.model?.provider !== model.provider || this.model.id !== model.id) {
+						this.agent.state.model = model;
+						this.sessionManager.appendModelChange(model.provider, model.id);
+						const thinking = context.messages.length
+							? context.thinkingLevel
+							: (this.settingsManager.getModelThinkingLevel(model.provider, model.id) ??
+								this.settingsManager.getDefaultThinkingLevel() ??
+								this.thinkingLevel);
+						this.setThinkingLevel(this.getAvailableThinkingLevels().find((level) => level === thinking) ?? "off");
+					}
+				}
+			} catch (error) {
+				release();
+				throw error;
+			}
 			const detachCatalog = catalog.attach(this.modelRuntime);
 			const unsubscribeCatalog = catalog.subscribe(({ changed }) => {
 				if (changed) void refreshRuntime(this, false).catch(() => undefined);
@@ -132,6 +159,9 @@ export function installRuntimeAdapter(): void {
 				await refreshRuntime(this);
 				if (this.isIdle && this.model?.provider === "cstoa" && !this.modelRuntime.getModel("cstoa", this.model.id))
 					throw new Error("当前 CSTOA 模型已不可用，请重新选择模型。");
+				const command = /^\/([^\s]+)/.exec(args[0])?.[1];
+				if (!command || !this.extensionRunner?.getCommand(command))
+					await requireModelCredentials(this.modelRuntime, this.model);
 				return prompt(...args);
 			};
 		}

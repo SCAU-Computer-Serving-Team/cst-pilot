@@ -15,7 +15,13 @@ test("设置用户链路：分类导航、自动保存、失败回滚、凭据�
 	const home = await mkdtemp(join(root, "home-"));
 	await writeFile(
 		join(home, "settings.json"),
-		JSON.stringify({ enabledModels: ["probe/two", "probe/one"], theme: "light", defaultTools: ["read"] }),
+		JSON.stringify({
+			defaultProvider: "probe",
+			defaultModel: "one",
+			enabledModels: ["probe/two", "probe/one"],
+			theme: "light",
+			defaultTools: ["read"],
+		}),
 	);
 	await writeFile(
 		join(home, "models.json"),

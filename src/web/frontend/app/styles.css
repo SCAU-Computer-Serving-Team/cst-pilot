@@ -3,8 +3,6 @@
 @import "./cards/special-tool.css";
 @import "./images/image-preview.css";
 @import "@heroui/styles";
-@import "@fontsource/inter/latin-400.css";
-@import "@fontsource/inter/latin-600.css";
 @import "@fontsource/jetbrains-mono/latin-400.css";
 
 @font-face {
@@ -255,7 +253,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .sidebar-new, .sidebar-group, .sidebar-session-row { width: 100%; }
 .sidebar-brand, .sidebar-new, .sidebar-group, .sidebar-empty, .sidebar-error { position: relative; z-index: 1; }
 .sidebar-brand { display: flex; align-items: center; gap: var(--space-component); padding: 4px 8px 16px; }
-.product-name { flex: 1; min-width: 0; font: 600 20px Inter, sans-serif; color: var(--app-ink); }
+.product-name { flex: 1; min-width: 0; font: 600 20px "CST UI Sans", "Microsoft YaHei", sans-serif; color: var(--app-ink); }
 .sidebar-icon { width: var(--control-lg); height: var(--control-lg); min-width: var(--control-lg); padding: 0; color: var(--app-muted); transition: opacity var(--duration-quick) var(--ease-smooth-out); }
 .app-layout.sidebar-collapsed .sidebar-icon { opacity: 0; }
 .sidebar-new { display: flex; align-items: center; gap: var(--space-inline); height: var(--control-menu); padding: 0 var(--space-component); border-radius: var(--radius-row); font-size: 20px; color: var(--app-ink); }
@@ -338,7 +336,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .home-greeting { position: absolute; left: 20px; top: 0; width: calc(100% - 40px); height: 400px; }
 .brand-arcs { position: absolute; width: 400px; height: 400px; left: 173px; top: 0; }
 .home-greeting h1 { position: absolute; left: 0; right: 0; top: 182px; margin: 0; color: white; text-align: center; font-size: 56px; font-weight: 600; text-shadow: 0 2px 12px #1a202440; }
-.home-footnote { position: absolute; z-index: 1; left: 0; right: 0; bottom: 31px; font: 400 16px Inter, sans-serif; text-align: center; color: #5f676c; }
+.home-footnote { position: absolute; z-index: 1; left: 0; right: 0; bottom: 31px; font: 400 16px "CST UI Sans", "Microsoft YaHei", sans-serif; text-align: center; color: #5f676c; }
 :root[data-theme="dark"] .home-footnote { color: #060b0e; }
 @media (prefers-color-scheme: dark) { :root[data-theme="system"] .home-footnote { color: #060b0e; } }
 .composer { background: var(--app-composer); border-radius: var(--radius-composer); display: flex; flex-direction: column; }
@@ -396,7 +394,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .context-more:hover { color: var(--app-ink); }
 .context-more:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
 .context-more:disabled { opacity: .45; cursor: not-allowed; }
-.context-balance { color: var(--app-ink); font: 500 20px Inter, sans-serif; font-variant-numeric: tabular-nums; }
+.context-balance { color: var(--app-ink); font: 500 20px "CST UI Sans", "Microsoft YaHei", sans-serif; font-variant-numeric: tabular-nums; }
 .context-balance[data-unit="credit"] { font-family: inherit; }
 .context-quota-notice { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-inline); color: var(--app-muted); font-size: 14px; }
 .context-progress { height: 6px; border-radius: var(--radius-full); overflow: hidden; background: var(--app-track); }
@@ -406,7 +404,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 :root[data-theme="dark"] .context-ring[data-level="warning"] { --ring-color: #ed9f26; }
 :root[data-theme="dark"] .context-ring[data-level="danger"] { --ring-color: #f4232e; }
 @media (prefers-color-scheme: dark) { :root[data-theme="system"] .context-ring[data-level="warning"] { --ring-color: #ed9f26; } :root[data-theme="system"] .context-ring[data-level="danger"] { --ring-color: #f4232e; } }
-.composer--home .composer-model { font: 400 18px Inter, sans-serif; }
+.composer--home .composer-model { font: 400 18px "CST UI Sans", "Microsoft YaHei", sans-serif; }
 .composer-actions .composer-send { display: grid; place-items: center; width: 32px; height: 32px; min-width: 32px; padding: 0; border-radius: var(--radius-control); background: var(--app-send); color: var(--app-send-icon); opacity: 1; }
 .composer-actions .context-meter-wrap, .composer-actions .context-meter { height: var(--control); align-items: center; }
 .composer--home .composer-actions .context-meter-wrap, .composer--home .composer-actions .context-meter { height: var(--control-lg); }
@@ -492,7 +490,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .composer--chat .composer-actions { min-height: var(--control); }
 .composer--chat .composer-actions .composer-icon { width: var(--control); height: var(--control); min-width: var(--control); min-height: var(--control); padding: 0; }
 .composer--chat .composer-actions .composer-model, .composer--chat .composer-actions .composer-thinking { height: var(--control); min-height: var(--control); padding: 0 var(--space-inline); border-radius: var(--radius-control); font-size: var(--font-label); }
-.composer--chat .composer-actions .composer-model { gap: var(--space-inline); color: var(--chat-ink); font-family: Inter, "CST UI Sans", sans-serif; }
+.composer--chat .composer-actions .composer-model { gap: var(--space-inline); color: var(--chat-ink); font-family: "CST UI Sans", "Microsoft YaHei", sans-serif; }
 .composer--chat .composer-actions .composer-thinking { display: inline-flex; justify-content: center; align-items: center; gap: var(--space-tight); }
 .composer-thinking-label { display: inline-flex; align-items: center; line-height: 1; }
 /* React Aria 的空 template 是 DOM 占位，不参与操作栏间距。 */
@@ -512,7 +510,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .composer-popover [data-slot="list-box-item"]:is(:hover, [data-hovered="true"], :focus-within), .login-provider-popover [data-slot="list-box-item"]:is(:hover, [data-hovered="true"], :focus-within) { background-color: transparent; }
 /* 思考面板比模型面板窄：行内距与字号都收一档，名字 14 / 说明 12。 */
 .thinking-popover [data-slot="list-box-item"] { justify-content: space-between; height: var(--control-lg); min-height: var(--control-lg); line-height: 20px; padding: 0 var(--space-component); font-size: var(--font-body); }
-.model-popover [role="option"] { justify-content: space-between; font: 400 16px/18px Inter, sans-serif; }
+.model-popover [role="option"] { justify-content: space-between; font: 400 16px/18px "CST UI Sans", "Microsoft YaHei", sans-serif; }
 .model-popover [data-slot="list-box-item"] { height: var(--control-lg); min-height: var(--control-lg); }
 .model-popover [role="option"] > span { flex: 1; min-width: 0; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .model-option-check { flex: 0 0 16px; visibility: hidden; color: var(--app-send); }
@@ -909,10 +907,10 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .settings-badge { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: var(--radius-control); font-size: 12px; }
 .settings-badge-success { background: var(--settings-ok-bg); color: var(--settings-ok-tx); }
 .settings-badge-warning { background: var(--settings-warn-bg); color: var(--settings-warn-tx); }
-.settings-provider-name { font: 400 14px Inter, "Source Han Sans CN", sans-serif; color: var(--chat-ink); min-width: 0; overflow-wrap: anywhere; }
+.settings-provider-name { font: 400 14px "CST UI Sans", "Microsoft YaHei", sans-serif; color: var(--chat-ink); min-width: 0; overflow-wrap: anywhere; }
 .settings-provider { gap: var(--space-component); height: 56px; min-height: 56px; padding: 0 16px; }
 .provider-methods { display: inline-flex; align-items: center; gap: var(--space-tight); flex-shrink: 0; }
-.provider-method-tag { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: var(--radius-control); background: var(--app-hover); color: var(--chat-muted); font: 400 12px/1.5 Inter, "Source Han Sans CN", sans-serif; white-space: nowrap; }
+.provider-method-tag { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: var(--radius-control); background: var(--app-hover); color: var(--chat-muted); font: 400 12px/1.5 "CST UI Sans", "Microsoft YaHei", sans-serif; white-space: nowrap; }
 .provider-method-tag[data-active="true"] { background: var(--app-selected); color: var(--chat-ink); font-weight: 500; }
 .settings-provider-actions { display: flex; align-items: center; gap: var(--space-component); flex-shrink: 0; }
 .settings-status-icon { flex: 0 0 22px; width: 22px; padding: 0; justify-content: center; }
@@ -1074,7 +1072,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
   mask-composite: exclude;
 }
 .login-bottom-gradient { position: absolute; inset: 0; z-index: 0; background: linear-gradient(to bottom, transparent 70%, #ddecff 93%); pointer-events: none; }
-.login-brand { position: absolute; z-index: 1; left: calc(64 * var(--login-unit)); top: calc(44 * var(--login-unit)); color: #fff; font: 600 calc(20 * var(--login-unit)) Inter, sans-serif; }
+.login-brand { position: absolute; z-index: 1; left: calc(64 * var(--login-unit)); top: calc(44 * var(--login-unit)); color: #fff; font: 600 calc(20 * var(--login-unit)) "CST UI Sans", "Microsoft YaHei", sans-serif; }
 .login-heading { position: absolute; z-index: 1; left: 0; right: 0; top: calc(116 * var(--login-unit)); text-align: center; color: #fff; }
 .login-heading h1 { margin: 0; font-size: calc(56 * var(--login-unit)); font-weight: 600; }
 .login-heading p { margin: calc(14 * var(--login-unit)) 0 0; color: #ffffffcc; font-size: calc(16 * var(--login-unit)); }
@@ -1130,7 +1128,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .login-submit[data-disabled] { cursor: not-allowed; opacity: .45; }
 .login-api-form { display: flex; flex-direction: column; width: 100%; flex: 1; min-height: 0; }
 .login-fields--oauth { height: auto; flex: 1; min-height: 0; overflow-y: auto; gap: 16px; }
-.oauth-provider-name { margin: 0; color: var(--chat-ink); font: 500 calc(16 * var(--login-unit))/1.5 Inter, "Source Han Sans CN", sans-serif; }
+.oauth-provider-name { margin: 0; color: var(--chat-ink); font: 500 calc(16 * var(--login-unit))/1.5 "CST UI Sans", "Microsoft YaHei", sans-serif; }
 .oauth-authorization { display: flex; flex-direction: column; gap: 12px; width: 100%; }
 .oauth-manual { width: 100%; color: var(--chat-muted); font-size: calc(13 * var(--login-unit)); }
 .oauth-manual > summary { cursor: pointer; width: fit-content; }
@@ -1227,7 +1225,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .login-provider-option[data-selected] .login-provider-check { visibility: visible; }
 :root[data-theme="dark"] .login-provider-option[data-selected], :root[data-theme="dark"] .login-provider-option[data-focused] { background: #242c2f; }
 @media (prefers-color-scheme: dark) { :root[data-theme="system"] .login-provider-option[data-selected], :root[data-theme="system"] .login-provider-option[data-focused] { background: #242c2f; } }
-.login-footnote { position: absolute; z-index: 1; left: 0; right: 0; bottom: calc(60 * var(--login-unit)); color: #5f676c; text-align: center; font: 400 calc(16 * var(--login-unit)) Inter, sans-serif; }
+.login-footnote { position: absolute; z-index: 1; left: 0; right: 0; bottom: calc(60 * var(--login-unit)); color: #5f676c; text-align: center; font: 400 calc(16 * var(--login-unit)) "CST UI Sans", "Microsoft YaHei", sans-serif; }
 /* Interaction states stay in the canvas palette; HeroUI owns keyboard and overlay lifecycles. */
 /* 图标与文字按项目的内边距和 gap 对齐，取消按钮图标的额外水平外边距。 */
 .button svg { margin-inline: 0; }
@@ -1427,6 +1425,17 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .notice-action { flex:none; display:inline-flex; align-items:center; min-height:32px; padding:0 12px; border:0; border-radius:var(--radius-control); background:transparent; color:var(--chat-tool); text-decoration:none; cursor:pointer; }
 .exit-dialog { position:fixed; inset:0; margin:auto; width:min(520px, calc(100vw - 48px)); max-height:calc(100vh - 48px); overflow:auto; padding:24px; border:1px solid var(--chat-border); border-radius:var(--radius-composer); background:var(--notice-bg); color:var(--chat-ink); animation:exit-modal-in var(--duration-fast) var(--ease-smooth-out); }
 .exit-dialog::backdrop { background:#060b0e40; }
+.model-key-heading { display:flex; align-items:center; gap:12px; margin-bottom:24px; }
+.model-key-heading > svg { flex:none; color:var(--notice-warning); }
+.model-key-dialog .model-key-heading h2 { margin:0; flex:1; min-width:0; }
+.model-key-close { display:grid; place-items:center; flex:none; width:32px; height:32px; border:0; border-radius:var(--radius-control); background:transparent; color:var(--chat-muted); cursor:pointer; }
+.model-key-close:hover { background:var(--chat-bubble); color:var(--chat-ink); }
+.model-key-identity { display:flex; flex-direction:column; gap:4px; padding:16px 0; margin-bottom:16px; border-block:1px solid var(--chat-border); }
+.model-key-identity strong { font-weight:500; overflow-wrap:anywhere; }
+.model-key-identity span { color:var(--chat-muted); font-size:14px; overflow-wrap:anywhere; }
+.model-key-dialog .exit-actions button { min-height:32px; }
+.model-key-dialog .model-key-configure { background:var(--chat-ink); color:var(--chat-bg); }
+.model-key-dialog button:focus-visible { outline:none; box-shadow:var(--focus-shadow); }
 .exit-dialog h2 { margin:0 0 var(--space-section); font-size:20px; font-weight:400; }
 .exit-dialog > p { margin:0 0 var(--space-section); font-size:16px; line-height:1.5; }
 .exit-dialog .exit-description { color:var(--chat-muted); font-size:14px; }

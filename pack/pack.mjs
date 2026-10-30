@@ -19,7 +19,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { supplementGoFlash } from "./model-catalog.mjs";
+import { supplementDeepSeekFlash } from "./model-catalog.mjs";
 import { RELEASE_SETTINGS, RELEASE_TELEMETRY, RELEASE_WEB_SEARCH } from "./release-settings.mjs";
 import { checkReleaseContent, checkReleaseTree, sha256, verifyManifest } from "./release-checks.mjs";
 import { smokeRelease } from "./smoke.mjs";
@@ -301,9 +301,9 @@ for (const f of CONFIG.REPO_HOME_FILES) {
   fs.copyFileSync(src, path.join(out, "agent", "home", f));
 }
 const catalogPath = path.join(out, "agent", "home", "models-store.json");
-const catalog = supplementGoFlash(JSON.parse(fs.readFileSync(catalogPath, "utf8")));
+const catalog = supplementDeepSeekFlash(JSON.parse(fs.readFileSync(catalogPath, "utf8")));
 fs.writeFileSync(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`);
-console.log("  仓库侧: pi.cmd/文档/pwsh/wiztree/lhm/home 资源（含 Go Flash 离线模型）");
+console.log("  仓库侧: pi.cmd/文档/pwsh/wiztree/lhm/home 资源（含 DeepSeek 官方 Flash 离线模型）");
 fs.cpSync(path.join(scriptDir, "licenses"), path.join(out, "licenses"), { recursive: true });
 
 // ---------- [4] 发行 settings.json ----------

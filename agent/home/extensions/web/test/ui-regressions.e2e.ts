@@ -154,7 +154,7 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		browser = await BrowserProbe.launch(root);
 		await browser.navigate(`${origin}/`);
 		await browser.until(
-			"document.querySelector('.sidebar-session')?.textContent === '昨日会话' && document.querySelector('.model-label')?.textContent.includes('two')",
+			"document.querySelector('.sidebar-session')?.textContent === '昨日会话' && document.querySelector('.model-label')?.textContent.includes('one')",
 			"首页配置与昨日记录",
 		);
 		assert.equal(
@@ -167,7 +167,7 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		const models = await browser.evaluate<string[]>(
 			"[...document.querySelectorAll('.model-popover [role=option]')].map(e=>e.textContent.trim())",
 		);
-		assert.deepEqual(models, ["测试模型 two"]);
+		assert.deepEqual(models, ["测试模型 one", "测试模型 two"], "范围变化保留当前模型身份");
 		assert.equal(await browser.evaluate("document.querySelector('.model-popover input')===null"), true);
 		await browser.evaluate(
 			"Promise.all(document.querySelector('.composer-model .model-label svg').getAnimations().map(a=>a.finished))",
@@ -458,8 +458,8 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		await browser.screenshot(join(root, "tree-narrow-dark.png"));
 		await browser.navigate(`${origin}/`);
 		await browser.until(
-			"document.querySelector('.model-label')?.textContent.includes('two')",
-			"半屏 scoped 模型加载完成",
+			"document.querySelector('.model-label')?.textContent.includes('one')",
+			"半屏保留默认模型身份",
 		);
 		assert.equal(
 			await browser.evaluate("Math.max(document.documentElement.scrollWidth,document.body.scrollWidth)<=innerWidth"),

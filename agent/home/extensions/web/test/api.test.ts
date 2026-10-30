@@ -9,11 +9,11 @@ import { withProviderEndpoint } from "../server/api/provider-endpoint.ts";
 import { createWebApi } from "../server/api.ts";
 import { createWebServer, listenWebServer } from "../server/http.ts";
 import { WebSessionPool } from "../server/session/sessions.ts";
-import { testRoot } from "./support.ts";
+import { configureTestModel, testRoot } from "./support.ts";
 
 const base = await testRoot();
 const home = await mkdtemp(join(base, "cst-web-api-"));
-await writeFile(join(home, "settings.json"), JSON.stringify({ defaultTools: ["read", "ls"] }));
+await configureTestModel(home);
 const pool = new WebSessionPool({
 	cwd: home,
 	agentDir: home,

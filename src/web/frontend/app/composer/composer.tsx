@@ -14,7 +14,9 @@ import {
 } from "lucide-react";
 import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { apiJson } from "../data/api";
+import { ModelKeyDialog } from "../auth/model-key-dialog";
+import { ApiFailure, apiJson } from "../data/api";
+import { type ModelChoice, type ModelSelectionPayload, refreshManualSelection } from "../data/model-selection";
 import { type Model, useGlobalEvents } from "../data/web-state";
 import { PreviewableImage } from "../images/image-preview";
 import { ErrorNotice } from "../shell/error-notice";
@@ -33,7 +35,7 @@ import {
 import { draftKey as makeDraftKey } from "./drafts";
 import { scopedModels } from "./scoped-models";
 
-type Selection = { provider: string; id: string; thinkingLevel?: string } | null;
+type Selection = ModelChoice | null;
 // 档位与 pi 的 ThinkingLevel 一一对应（off/minimal/low/medium/high/xhigh/max），面板内用英文短名。
 const thinkingOptions = [
 	{ id: "off", label: "Off" },
@@ -127,6 +129,9 @@ export function Composer({
 	} | null>(null);
 	const [usageStats, setUsageStats] = useState<SessionUsage | null>(null);
 	const [selected, setSelected] = useState<Selection>(null);
+	const manualHomeModel = useRef(false);
+	const initialKeyPrompt = useRef(false);
+	const [missingKey, setMissingKey] = useState<{ model: ModelChoice; unsent: boolean } | null>(null);
 	const [thinking, setThinking] = useState("off");
 	const [thinkingLevels, setThinkingLevels] = useState<string[]>([]);
 	const [sending, setSending] = useState(false);
@@ -423,30 +428,33 @@ export function Composer({
 	useEffect(() => {
 		const controller = new AbortController();
 		let active = true;
-		apiJson<{
-			models: Model[];
-			enabled: string[] | null;
-			selected: Selection & { thinkingLevel?: string };
-			thinkingLevels?: string[];
-			contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
-			usage?: SessionUsage | null;
-		}>(`/api/models${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`, { signal: controller.signal })
+		apiJson<
+			ModelSelectionPayload & {
+				thinkingLevels?: string[];
+				contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
+				usage?: SessionUsage | null;
+			}
+		>(`/api/models${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`, { signal: controller.signal })
 			.then((data) => {
 				if (active) {
 					setModels(data.models);
 					setEnabled(data.enabled);
-					const choices = scopedModels(data.models, data.enabled);
-					const initial =
-						!sessionId &&
-						!choices.some((model) => model.provider === data.selected?.provider && model.id === data.selected?.id)
-							? (choices[0] ?? null)
-							: data.selected;
-					setSelected((current) =>
-						!sessionId &&
+					setSelected((current) => refreshManualSelection(current, data, !sessionId && manualHomeModel.current));
+					if (!initialKeyPrompt.current && onSend && data.selected) {
+						initialKeyPrompt.current = true;
+						if (!data.selected.credentialReady && data.selected.catalogPresent)
+							setMissingKey({ model: data.selected, unsent: false });
+					}
+					setMissingKey((current) =>
 						current &&
-						choices.some((model) => model.provider === current.provider && model.id === current.id)
-							? current
-							: initial,
+						data.catalog.some(
+							(model) =>
+								model.provider === current.model.provider &&
+								model.id === current.model.id &&
+								model.credentialReady,
+						)
+							? null
+							: current,
 					);
 					setThinking(data.selected?.thinkingLevel ?? "off");
 					setThinkingLevels(data.thinkingLevels ?? []);
@@ -466,26 +474,27 @@ export function Composer({
 
 	const usage = contextUsage ?? loadedContext;
 	const cacheHitRate = usageStats?.cacheHitRate ?? null;
-	const modelKey = selected ? `${selected.provider}/${selected.id}` : "auto";
+	const modelKey = selected ? `${selected.provider}/${selected.id}` : null;
 	const availableThinking = thinkingLevels.length
 		? thinkingOptions.filter((option) => thinkingLevels.includes(option.id))
 		: thinkingOptions;
 	const scoped = scopedModels(models, enabled);
+	const choices =
+		selected && !scoped.some((model) => model.provider === selected.provider && model.id === selected.id)
+			? [selected, ...scoped]
+			: scoped;
 	async function chooseModel(key: string) {
-		if (!sessionId && key === "auto" && enabled === null) {
-			setSelected(null);
-			return;
-		}
 		const choice = scoped.find((item) => `${item.provider}/${item.id}` === key);
 		if (!choice) return;
 		try {
-			const changed = await apiJson<{ thinkingLevel?: string; thinkingLevels?: string[] }>("/api/models/select", {
+			const changed = await apiJson<ModelChoice & { thinkingLevels?: string[] }>("/api/models/select", {
 				method: "POST",
 				body: { ...(sessionId ? { sessionId } : {}), provider: choice.provider, modelId: choice.id },
 			});
 			if (changed.thinkingLevel) setThinking(changed.thinkingLevel);
 			if (changed.thinkingLevels) setThinkingLevels(changed.thinkingLevels);
-			setSelected({ provider: choice.provider, id: choice.id });
+			manualHomeModel.current = !sessionId;
+			setSelected(changed);
 			setError("");
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : "无法切换模型");
@@ -500,6 +509,19 @@ export function Composer({
 			setError(cause instanceof Error ? cause.message : "无法调整思考强度");
 		}
 	}
+	async function ensureCredentials(): Promise<ModelChoice | null> {
+		const data = await apiJson<ModelSelectionPayload>(
+			`/api/models${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`,
+		);
+		const model = refreshManualSelection(selected, data, !sessionId && manualHomeModel.current);
+		setSelected(model);
+		if (!model?.catalogPresent) throw new Error("所选模型不在目录中，请手动选择模型。");
+		if (!model.credentialReady) {
+			setMissingKey({ model, unsent: true });
+			return null;
+		}
+		return model;
+	}
 	async function submit() {
 		if (sending || attaching || imagesLoading) return;
 		// 自定义总结提示词：回车不是发消息，而是带着这段提示词去发起导航与总结。
@@ -508,6 +530,7 @@ export function Composer({
 			setSending(true);
 			setError("");
 			try {
+				if (!(await ensureCredentials())) return;
 				await onSummary(text.trim());
 				renderEditor("");
 				setMessageId(crypto.randomUUID());
@@ -548,12 +571,15 @@ export function Composer({
 				onFork();
 			} else if (command === "/compact") {
 				if (!onCommand) throw new Error("请先进入会话，再使用此命令。");
+				if (!(await ensureCredentials())) return;
 				await onCommand("compact", body);
 			} else {
 				if (!onSend) throw new Error("当前无法提交消息");
+				const model = await ensureCredentials();
+				if (!model) return;
 				await onSend(body, {
-					provider: selected?.provider,
-					modelId: selected?.id,
+					provider: model.provider,
+					modelId: model.id,
 					thinkingLevel: home ? undefined : thinking,
 					messageId,
 					images: await encodeImages(images),
@@ -572,7 +598,9 @@ export function Composer({
 			sessionStorage.removeItem(draftKey);
 			sessionStorage.removeItem(`${draftKey}:id`);
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : "消息未被接受，请重试");
+			if (cause instanceof ApiFailure && cause.code === "credentials_required" && selected)
+				setMissingKey({ model: selected, unsent: true });
+			else setError(cause instanceof Error ? cause.message : "消息未被接受，请重试");
 		} finally {
 			setSending(false);
 		}
@@ -616,6 +644,9 @@ export function Composer({
 
 	return (
 		<div className={`composer-shell ${home ? "composer-shell--home" : "composer-shell--chat"}`}>
+			{missingKey && (
+				<ModelKeyDialog model={missingKey.model} unsent={missingKey.unsent} onClose={() => setMissingKey(null)} />
+			)}
 			{!!images.length && (
 				<ul className="composer-attachments" aria-label="待发送图片">
 					{images.map((image, index) => (
@@ -762,19 +793,13 @@ export function Composer({
 					>
 						<Select.Trigger className="composer-model">
 							<span className="model-label">
-								{models.find((item) => `${item.provider}/${item.id}` === modelKey)?.name ?? "自动选择"}
+								{selected?.name ?? "选择模型"}
 								<ChevronDown size={14} />
 							</span>
 						</Select.Trigger>
 						<Select.Popover className="composer-popover model-popover" placement="top end">
 							<ListBox>
-								{!sessionId && enabled === null && (
-									<ListBox.Item id="auto" textValue="自动选择">
-										<Check className="model-option-check" size={16} aria-hidden="true" />
-										<span>自动选择</span>
-									</ListBox.Item>
-								)}
-								{scoped.map((model) => (
+								{choices.map((model) => (
 									<ListBox.Item
 										key={`${model.provider}/${model.id}`}
 										id={`${model.provider}/${model.id}`}

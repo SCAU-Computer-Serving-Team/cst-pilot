@@ -58,6 +58,12 @@ src/web/frontend/app/
 
 聊天页同步读取命中项，并在后台重新获取快照与连接 SSE。列表与删除事务清除已删除项，版本标记阻止旧响应覆盖事件更新；被事件作废的在途响应不能代替下一次强制刷新。缓存不写入 `localStorage`、`sessionStorage` 或 `IndexedDB`。
 
+## 模型选择与凭据提示
+
+`server/api/models.ts` 分开提供会话选择与默认模型保存，模型清单同时返回目录、默认值和凭据就绪状态。服务端在创建会话与接受消息前预检凭据，拒绝时不写入收件箱或附件。
+
+前端 `data/model-selection.ts` 保留用户选择并只刷新其状态；`settings/default-model-picker.tsx` 提供可搜索的独立默认选择器；`auth/model-key-dialog.tsx` 使用原生对话框提醒配置。配置成功只返回受限的本机来源路由，草稿由原有存储恢复，不自动发送。
+
 ## 设置分类导航
 
 `routes/settings.tsx` 按四分类的菜单序号判定滑动方向，服务配置子页归入“模型服务”。路径变化时同步记录方向，分类内部的子页导航保留独立入退场，资源预载沿用 `SettingsLink`。

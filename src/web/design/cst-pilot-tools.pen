@@ -1097,7 +1097,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -1836,7 +1839,10 @@
                       "name": "调用语句",
                       "fill": "#1D2428",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -2575,7 +2581,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -2956,7 +2965,10 @@
                       "name": "调用语句",
                       "fill": "#1D2428",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -3337,7 +3349,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -3688,7 +3703,10 @@
                       "name": "调用语句",
                       "fill": "#1D2428",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -4268,7 +4286,10 @@
                               "name": "调用语句",
                               "fill": "#F0F0F0",
                               "cornerRadius": "$radius-control",
-                              "padding": [4, 8],
+                              "padding": [
+                                4,
+                                8
+                              ],
                               "children": [
                                 {
                                   "type": "text",
@@ -4582,7 +4603,10 @@
                               "name": "调用语句",
                               "fill": "#F0F0F0",
                               "cornerRadius": "$radius-control",
-                              "padding": [4, 8],
+                              "padding": [
+                                4,
+                                8
+                              ],
                               "children": [
                                 {
                                   "type": "text",
@@ -5197,7 +5221,7 @@
                   "name": "A 侧栏上",
                   "width": "fill_container",
                   "layout": "vertical",
-                  "gap": 8,
+                  "gap": 4,
                   "children": [
                     {
                       "type": "frame",
@@ -5228,7 +5252,10 @@
                         {
                           "type": "frame",
                           "id": "VM0o1",
+                          "x": 170,
+                          "y": 4,
                           "name": "搜索会话",
+                          "enabled": false,
                           "width": 28,
                           "height": 28,
                           "fill": "#00000000",
@@ -5265,21 +5292,42 @@
                       "id": "PnUrH",
                       "name": "新对话",
                       "width": "fill_container",
+                      "height": 40,
                       "fill": "#00000000",
                       "cornerRadius": "$radius-row",
                       "gap": 8,
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "icon",
-                          "id": "gA4CR",
-                          "name": "图标",
+                          "type": "frame",
+                          "id": "aHhkf",
+                          "name": "导航图标对齐",
                           "width": 18,
-                          "height": 18,
-                          "icon": "square-pen",
-                          "library": "lucide",
-                          "fill": "#202020"
+                          "height": 22,
+                          "padding": [
+                            2,
+                            0,
+                            0,
+                            0
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "gA4CR",
+                              "name": "图标",
+                              "width": 18,
+                              "height": 18,
+                              "icon": "square-pen",
+                              "library": "lucide",
+                              "fill": "#202020"
+                            }
+                          ]
                         },
                         {
                           "type": "text",
@@ -5288,7 +5336,7 @@
                           "fill": "#202020",
                           "content": "新对话",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 20,
+                          "fontSize": 16,
                           "fontWeight": "normal"
                         }
                       ]
@@ -5298,20 +5346,41 @@
                       "id": "lCosh",
                       "name": "仪表盘",
                       "width": "fill_container",
+                      "height": 40,
                       "cornerRadius": "$radius-row",
                       "gap": 8,
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "icon",
-                          "id": "JoOIH",
-                          "name": "图标",
+                          "type": "frame",
+                          "id": "i3FqAu",
+                          "name": "导航图标对齐",
                           "width": 18,
-                          "height": 18,
-                          "icon": "layout-dashboard",
-                          "library": "lucide",
-                          "fill": "#202020"
+                          "height": 22,
+                          "padding": [
+                            2,
+                            0,
+                            0,
+                            0
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "JoOIH",
+                              "name": "图标",
+                              "width": 18,
+                              "height": 18,
+                              "icon": "layout-dashboard",
+                              "library": "lucide",
+                              "fill": "#202020"
+                            }
+                          ]
                         },
                         {
                           "type": "text",
@@ -5320,32 +5389,50 @@
                           "fill": "#202020",
                           "content": "仪表盘",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 20,
+                          "fontSize": 16,
                           "fontWeight": "normal"
                         }
                       ]
                     },
                     {
                       "type": "frame",
+                      "id": "qbKIg",
+                      "name": "导航与最近会话间距",
+                      "width": "fill_container",
+                      "height": 54
+                    },
+                    {
+                      "type": "frame",
                       "id": "qNzAj",
                       "name": "A 最近分组标签",
                       "width": "fill_container",
+                      "height": 32,
                       "padding": [
-                        24,
-                        12,
-                        4,
-                        12
+                        0,
+                        8
                       ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
                           "id": "RWeLt",
                           "name": "文字",
                           "fill": "#646464",
-                          "content": "今天",
+                          "content": "最近",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "lQjYn",
+                          "name": "折叠最近会话",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "#646464"
                         }
                       ]
                     },
@@ -5354,9 +5441,13 @@
                       "id": "omxuI",
                       "name": "A 会话 C 盘快满了怎么清理",
                       "width": "fill_container",
+                      "height": 32,
                       "fill": "#EAEAEA",
                       "cornerRadius": "$radius-row",
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
@@ -5379,7 +5470,7 @@
                           "fill": "#202020",
                           "content": "C 盘空间与硬盘信息",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -5389,8 +5480,12 @@
                       "id": "kFFTK",
                       "name": "A 会话 风扇狂转还降频",
                       "width": "fill_container",
+                      "height": 32,
                       "cornerRadius": "$radius-row",
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
@@ -5413,31 +5508,7 @@
                           "fill": "#202020",
                           "content": "风扇狂转还降频",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "dINd6",
-                      "name": "昨天分组",
-                      "width": "fill_container",
-                      "padding": [
-                        16,
-                        12,
-                        4,
-                        12
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "GO0wz",
-                          "name": "昨天",
-                          "fill": "#646464",
-                          "content": "昨天",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -5447,8 +5518,12 @@
                       "id": "rW6Wv",
                       "name": "A 会话 开机要等三分钟",
                       "width": "fill_container",
+                      "height": 32,
                       "cornerRadius": "$radius-row",
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
@@ -5471,7 +5546,32 @@
                           "fill": "#202020",
                           "content": "开机要等三分钟",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "hoDBG",
+                      "name": "查看全部会话",
+                      "width": "fill_container",
+                      "height": 32,
+                      "cornerRadius": "$radius-row",
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "VoiDF",
+                          "name": "查看全部",
+                          "fill": "#646464",
+                          "content": "查看全部",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -5662,7 +5762,10 @@
                           "name": "用户气泡",
                           "fill": "#F0F0F0",
                           "cornerRadius": "$radius-menu",
-                          "padding": [12, 16],
+                          "padding": [
+                            12,
+                            16
+                          ],
                           "alignItems": "center",
                           "children": [
                             {
@@ -6318,7 +6421,10 @@
                           "name": "用户气泡",
                           "fill": "#F0F0F0",
                           "cornerRadius": "$radius-menu",
-                          "padding": [12, 16],
+                          "padding": [
+                            12,
+                            16
+                          ],
                           "alignItems": "center",
                           "children": [
                             {
@@ -6589,7 +6695,10 @@
                           "name": "HeroUI Select · 模型",
                           "cornerRadius": "$radius-control",
                           "gap": 8,
-                          "padding": [0, 8],
+                          "padding": [
+                            0,
+                            8
+                          ],
                           "alignItems": "center",
                           "children": [
                             {
@@ -6645,14 +6754,31 @@
                                   "fontWeight": "normal"
                                 },
                                 {
-                                  "type": "icon",
-                                  "id": "Whtij",
-                                  "name": "模型下拉",
+                                  "type": "frame",
+                                  "id": "DXL1G",
+                                  "name": "下拉箭头对齐",
                                   "width": 14,
-                                  "height": 14,
-                                  "icon": "chevron-down",
-                                  "library": "lucide",
-                                  "fill": "#646464"
+                                  "height": 18,
+                                  "padding": [
+                                    4,
+                                    0,
+                                    0,
+                                    0
+                                  ],
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "id": "Whtij",
+                                      "name": "模型下拉",
+                                      "width": 14,
+                                      "height": 14,
+                                      "icon": "chevron-down",
+                                      "library": "lucide",
+                                      "fill": "#646464"
+                                    }
+                                  ]
                                 }
                               ]
                             }
@@ -6664,7 +6790,10 @@
                           "name": "HeroUI Select · 思考强度",
                           "cornerRadius": "$radius-control",
                           "gap": 4,
-                          "padding": [0, 8],
+                          "padding": [
+                            0,
+                            8
+                          ],
                           "alignItems": "center",
                           "children": [
                             {
@@ -27506,7 +27635,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -27629,7 +27761,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -28173,7 +28308,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -28384,7 +28522,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -29081,7 +29222,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -29975,7 +30119,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -30631,7 +30778,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -30754,7 +30904,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -31465,7 +31618,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -31679,7 +31835,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -31802,7 +31961,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -32425,7 +32587,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -32654,7 +32819,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -32777,7 +32945,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -33698,7 +33869,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -33909,7 +34083,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -34307,7 +34484,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -34551,7 +34731,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -34674,7 +34857,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -35673,7 +35859,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -35887,7 +36076,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -36010,7 +36202,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -36601,7 +36796,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -36878,7 +37076,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -37001,7 +37202,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -37640,7 +37844,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -37869,7 +38076,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -37992,7 +38202,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -38344,7 +38557,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -38573,7 +38789,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -38696,7 +38915,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -39090,7 +39312,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -39319,7 +39544,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -39442,7 +39670,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -39719,7 +39950,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -40014,7 +40248,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -40137,7 +40374,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -40488,7 +40728,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -40857,7 +41100,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -40980,7 +41226,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -41220,7 +41469,10 @@
                       "name": "调用语句",
                       "fill": "#F0F0F0",
                       "cornerRadius": "$radius-control",
-                      "padding": [4, 8],
+                      "padding": [
+                        4,
+                        8
+                      ],
                       "children": [
                         {
                           "type": "text",
@@ -41484,7 +41736,7 @@
                   "name": "A 侧栏上",
                   "width": "fill_container",
                   "layout": "vertical",
-                  "gap": 8,
+                  "gap": 4,
                   "children": [
                     {
                       "type": "frame",
@@ -41515,7 +41767,10 @@
                         {
                           "type": "frame",
                           "id": "m4rHcy",
+                          "x": 170,
+                          "y": 4,
                           "name": "搜索会话",
+                          "enabled": false,
                           "width": 28,
                           "height": 28,
                           "fill": "#00000000",
@@ -41552,21 +41807,42 @@
                       "id": "W3ZyZw",
                       "name": "新对话",
                       "width": "fill_container",
+                      "height": 40,
                       "fill": "#00000000",
                       "cornerRadius": "$radius-row",
                       "gap": 8,
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "icon",
-                          "id": "UsG2e",
-                          "name": "图标",
+                          "type": "frame",
+                          "id": "Rlom1",
+                          "name": "导航图标对齐",
                           "width": 18,
-                          "height": 18,
-                          "icon": "square-pen",
-                          "library": "lucide",
-                          "fill": "$embedded-text"
+                          "height": 22,
+                          "padding": [
+                            2,
+                            0,
+                            0,
+                            0
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "UsG2e",
+                              "name": "图标",
+                              "width": 18,
+                              "height": 18,
+                              "icon": "square-pen",
+                              "library": "lucide",
+                              "fill": "$embedded-text"
+                            }
+                          ]
                         },
                         {
                           "type": "text",
@@ -41575,7 +41851,7 @@
                           "fill": "$embedded-text",
                           "content": "新对话",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 20,
+                          "fontSize": 16,
                           "fontWeight": "normal"
                         }
                       ]
@@ -41585,20 +41861,41 @@
                       "id": "zGhXV",
                       "name": "仪表盘",
                       "width": "fill_container",
+                      "height": 40,
                       "cornerRadius": "$radius-row",
                       "gap": 8,
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "icon",
-                          "id": "ufTbr",
-                          "name": "图标",
+                          "type": "frame",
+                          "id": "Bem95",
+                          "name": "导航图标对齐",
                           "width": 18,
-                          "height": 18,
-                          "icon": "layout-dashboard",
-                          "library": "lucide",
-                          "fill": "$embedded-text"
+                          "height": 22,
+                          "padding": [
+                            2,
+                            0,
+                            0,
+                            0
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "ufTbr",
+                              "name": "图标",
+                              "width": 18,
+                              "height": 18,
+                              "icon": "layout-dashboard",
+                              "library": "lucide",
+                              "fill": "$embedded-text"
+                            }
+                          ]
                         },
                         {
                           "type": "text",
@@ -41607,32 +41904,50 @@
                           "fill": "$embedded-text",
                           "content": "仪表盘",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 20,
+                          "fontSize": 16,
                           "fontWeight": "normal"
                         }
                       ]
                     },
                     {
                       "type": "frame",
+                      "id": "K0ZJl9",
+                      "name": "导航与最近会话间距",
+                      "width": "fill_container",
+                      "height": 54
+                    },
+                    {
+                      "type": "frame",
                       "id": "tKKf3",
                       "name": "A 最近分组标签",
                       "width": "fill_container",
+                      "height": 32,
                       "padding": [
-                        24,
-                        12,
-                        4,
-                        12
+                        0,
+                        8
                       ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
                           "id": "c3Tik",
                           "name": "文字",
                           "fill": "$embedded-muted",
-                          "content": "今天",
+                          "content": "最近",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "JIsXO",
+                          "name": "折叠最近会话",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "$embedded-muted"
                         }
                       ]
                     },
@@ -41641,9 +41956,13 @@
                       "id": "BJoIw",
                       "name": "A 会话 C 盘快满了怎么清理",
                       "width": "fill_container",
+                      "height": 32,
                       "fill": "$embedded-track",
                       "cornerRadius": "$radius-row",
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
@@ -41666,7 +41985,7 @@
                           "fill": "$embedded-text",
                           "content": "磁盘状态与解锁",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -41676,8 +41995,12 @@
                       "id": "C9HCI5",
                       "name": "A 会话 风扇狂转还降频",
                       "width": "fill_container",
+                      "height": 32,
                       "cornerRadius": "$radius-row",
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
@@ -41700,31 +42023,7 @@
                           "fill": "$embedded-text",
                           "content": "风扇狂转还降频",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "l9Chg",
-                      "name": "昨天分组",
-                      "width": "fill_container",
-                      "padding": [
-                        16,
-                        12,
-                        4,
-                        12
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "TTtC0",
-                          "name": "昨天",
-                          "fill": "$embedded-muted",
-                          "content": "昨天",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -41734,8 +42033,12 @@
                       "id": "W3jT9",
                       "name": "A 会话 开机要等三分钟",
                       "width": "fill_container",
+                      "height": 32,
                       "cornerRadius": "$radius-row",
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
@@ -41758,7 +42061,32 @@
                           "fill": "$embedded-text",
                           "content": "开机要等三分钟",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "N4yul",
+                      "name": "查看全部会话",
+                      "width": "fill_container",
+                      "height": 32,
+                      "cornerRadius": "$radius-row",
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "o2d3K",
+                          "name": "查看全部",
+                          "fill": "$embedded-muted",
+                          "content": "查看全部",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -41949,7 +42277,10 @@
                           "name": "用户消息气泡",
                           "fill": "$embedded-bubble",
                           "cornerRadius": "$radius-menu",
-                          "padding": [12, 16],
+                          "padding": [
+                            12,
+                            16
+                          ],
                           "alignItems": "center",
                           "children": [
                             {
@@ -42391,7 +42722,10 @@
                           "name": "HeroUI Select · 模型",
                           "cornerRadius": "$radius-control",
                           "gap": 8,
-                          "padding": [0, 8],
+                          "padding": [
+                            0,
+                            8
+                          ],
                           "alignItems": "center",
                           "children": [
                             {
@@ -42447,14 +42781,31 @@
                                   "fontWeight": "normal"
                                 },
                                 {
-                                  "type": "icon",
-                                  "id": "WYHLD",
-                                  "name": "模型下拉",
+                                  "type": "frame",
+                                  "id": "z2uZU",
+                                  "name": "下拉箭头对齐",
                                   "width": 14,
-                                  "height": 14,
-                                  "icon": "chevron-down",
-                                  "library": "lucide",
-                                  "fill": "$embedded-muted"
+                                  "height": 18,
+                                  "padding": [
+                                    4,
+                                    0,
+                                    0,
+                                    0
+                                  ],
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "id": "WYHLD",
+                                      "name": "模型下拉",
+                                      "width": 14,
+                                      "height": 14,
+                                      "icon": "chevron-down",
+                                      "library": "lucide",
+                                      "fill": "$embedded-muted"
+                                    }
+                                  ]
                                 }
                               ]
                             }
@@ -42466,7 +42817,10 @@
                           "name": "HeroUI Select · 思考强度",
                           "cornerRadius": "$radius-control",
                           "gap": 4,
-                          "padding": [0, 8],
+                          "padding": [
+                            0,
+                            8
+                          ],
                           "alignItems": "center",
                           "children": [
                             {
@@ -42596,7 +42950,7 @@
                   "name": "A 侧栏上",
                   "width": "fill_container",
                   "layout": "vertical",
-                  "gap": 8,
+                  "gap": 4,
                   "children": [
                     {
                       "type": "frame",
@@ -42627,7 +42981,10 @@
                         {
                           "type": "frame",
                           "id": "wrjMd",
+                          "x": 170,
+                          "y": 4,
                           "name": "搜索会话",
+                          "enabled": false,
                           "width": 28,
                           "height": 28,
                           "fill": "#00000000",
@@ -42664,21 +43021,42 @@
                       "id": "VL2Qr",
                       "name": "新对话",
                       "width": "fill_container",
+                      "height": 40,
                       "fill": "#00000000",
                       "cornerRadius": "$radius-row",
                       "gap": 8,
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "icon",
-                          "id": "iS3XB",
-                          "name": "图标",
+                          "type": "frame",
+                          "id": "R2twh",
+                          "name": "导航图标对齐",
                           "width": 18,
-                          "height": 18,
-                          "icon": "square-pen",
-                          "library": "lucide",
-                          "fill": "$embedded-text"
+                          "height": 22,
+                          "padding": [
+                            2,
+                            0,
+                            0,
+                            0
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "iS3XB",
+                              "name": "图标",
+                              "width": 18,
+                              "height": 18,
+                              "icon": "square-pen",
+                              "library": "lucide",
+                              "fill": "$embedded-text"
+                            }
+                          ]
                         },
                         {
                           "type": "text",
@@ -42687,7 +43065,7 @@
                           "fill": "$embedded-text",
                           "content": "新对话",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 20,
+                          "fontSize": 16,
                           "fontWeight": "normal"
                         }
                       ]
@@ -42697,20 +43075,41 @@
                       "id": "cu8tL",
                       "name": "仪表盘",
                       "width": "fill_container",
+                      "height": 40,
                       "cornerRadius": "$radius-row",
                       "gap": 8,
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "icon",
-                          "id": "OINEl",
-                          "name": "图标",
+                          "type": "frame",
+                          "id": "M8Q2v",
+                          "name": "导航图标对齐",
                           "width": 18,
-                          "height": 18,
-                          "icon": "layout-dashboard",
-                          "library": "lucide",
-                          "fill": "$embedded-text"
+                          "height": 22,
+                          "padding": [
+                            2,
+                            0,
+                            0,
+                            0
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "OINEl",
+                              "name": "图标",
+                              "width": 18,
+                              "height": 18,
+                              "icon": "layout-dashboard",
+                              "library": "lucide",
+                              "fill": "$embedded-text"
+                            }
+                          ]
                         },
                         {
                           "type": "text",
@@ -42719,32 +43118,50 @@
                           "fill": "$embedded-text",
                           "content": "仪表盘",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 20,
+                          "fontSize": 16,
                           "fontWeight": "normal"
                         }
                       ]
                     },
                     {
                       "type": "frame",
+                      "id": "yZGCj",
+                      "name": "导航与最近会话间距",
+                      "width": "fill_container",
+                      "height": 54
+                    },
+                    {
+                      "type": "frame",
                       "id": "XmcV5",
                       "name": "A 最近分组标签",
                       "width": "fill_container",
+                      "height": 32,
                       "padding": [
-                        24,
-                        12,
-                        4,
-                        12
+                        0,
+                        8
                       ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
                           "id": "eUuFH",
                           "name": "文字",
                           "fill": "$embedded-muted",
-                          "content": "今天",
+                          "content": "最近",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "l6bhr",
+                          "name": "折叠最近会话",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "$embedded-muted"
                         }
                       ]
                     },
@@ -42753,9 +43170,13 @@
                       "id": "zT7XC",
                       "name": "A 会话 C 盘快满了怎么清理",
                       "width": "fill_container",
+                      "height": 32,
                       "fill": "$embedded-track",
                       "cornerRadius": "$radius-row",
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
@@ -42778,7 +43199,7 @@
                           "fill": "$embedded-text",
                           "content": "磁盘状态与解锁",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -42788,8 +43209,12 @@
                       "id": "Mp3Gx",
                       "name": "A 会话 风扇狂转还降频",
                       "width": "fill_container",
+                      "height": 32,
                       "cornerRadius": "$radius-row",
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
@@ -42812,31 +43237,7 @@
                           "fill": "$embedded-text",
                           "content": "风扇狂转还降频",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "e9sWHi",
-                      "name": "昨天分组",
-                      "width": "fill_container",
-                      "padding": [
-                        16,
-                        12,
-                        4,
-                        12
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "X7ND2y",
-                          "name": "昨天",
-                          "fill": "$embedded-muted",
-                          "content": "昨天",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -42846,8 +43247,12 @@
                       "id": "Hlb3D",
                       "name": "A 会话 开机要等三分钟",
                       "width": "fill_container",
+                      "height": 32,
                       "cornerRadius": "$radius-row",
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
@@ -42870,7 +43275,32 @@
                           "fill": "$embedded-text",
                           "content": "开机要等三分钟",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Q8WNU3",
+                      "name": "查看全部会话",
+                      "width": "fill_container",
+                      "height": 32,
+                      "cornerRadius": "$radius-row",
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "VwCkb",
+                          "name": "查看全部",
+                          "fill": "$embedded-muted",
+                          "content": "查看全部",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -43061,7 +43491,10 @@
                           "name": "用户消息气泡",
                           "fill": "$embedded-bubble",
                           "cornerRadius": "$radius-menu",
-                          "padding": [12, 16],
+                          "padding": [
+                            12,
+                            16
+                          ],
                           "alignItems": "center",
                           "children": [
                             {
@@ -43503,7 +43936,10 @@
                           "name": "HeroUI Select · 模型",
                           "cornerRadius": "$radius-control",
                           "gap": 8,
-                          "padding": [0, 8],
+                          "padding": [
+                            0,
+                            8
+                          ],
                           "alignItems": "center",
                           "children": [
                             {
@@ -43559,14 +43995,31 @@
                                   "fontWeight": "normal"
                                 },
                                 {
-                                  "type": "icon",
-                                  "id": "mI545",
-                                  "name": "模型下拉",
+                                  "type": "frame",
+                                  "id": "WBTog",
+                                  "name": "下拉箭头对齐",
                                   "width": 14,
-                                  "height": 14,
-                                  "icon": "chevron-down",
-                                  "library": "lucide",
-                                  "fill": "$embedded-muted"
+                                  "height": 18,
+                                  "padding": [
+                                    4,
+                                    0,
+                                    0,
+                                    0
+                                  ],
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "id": "mI545",
+                                      "name": "模型下拉",
+                                      "width": 14,
+                                      "height": 14,
+                                      "icon": "chevron-down",
+                                      "library": "lucide",
+                                      "fill": "$embedded-muted"
+                                    }
+                                  ]
                                 }
                               ]
                             }
@@ -43578,7 +44031,10 @@
                           "name": "HeroUI Select · 思考强度",
                           "cornerRadius": "$radius-control",
                           "gap": 4,
-                          "padding": [0, 8],
+                          "padding": [
+                            0,
+                            8
+                          ],
                           "alignItems": "center",
                           "children": [
                             {
@@ -43708,7 +44164,7 @@
                   "name": "A 侧栏上",
                   "width": "fill_container",
                   "layout": "vertical",
-                  "gap": 8,
+                  "gap": 4,
                   "children": [
                     {
                       "type": "frame",
@@ -43739,7 +44195,10 @@
                         {
                           "type": "frame",
                           "id": "XCeFA",
+                          "x": 170,
+                          "y": 4,
                           "name": "搜索会话",
+                          "enabled": false,
                           "width": 28,
                           "height": 28,
                           "fill": "#00000000",
@@ -43776,21 +44235,42 @@
                       "id": "Q4wddp",
                       "name": "新对话",
                       "width": "fill_container",
+                      "height": 40,
                       "fill": "#00000000",
                       "cornerRadius": "$radius-row",
                       "gap": 8,
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "icon",
-                          "id": "MmFmR",
-                          "name": "图标",
+                          "type": "frame",
+                          "id": "q3JDK6",
+                          "name": "导航图标对齐",
                           "width": 18,
-                          "height": 18,
-                          "icon": "square-pen",
-                          "library": "lucide",
-                          "fill": "$embedded-text"
+                          "height": 22,
+                          "padding": [
+                            2,
+                            0,
+                            0,
+                            0
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "MmFmR",
+                              "name": "图标",
+                              "width": 18,
+                              "height": 18,
+                              "icon": "square-pen",
+                              "library": "lucide",
+                              "fill": "$embedded-text"
+                            }
+                          ]
                         },
                         {
                           "type": "text",
@@ -43799,7 +44279,7 @@
                           "fill": "$embedded-text",
                           "content": "新对话",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 20,
+                          "fontSize": 16,
                           "fontWeight": "normal"
                         }
                       ]
@@ -43809,20 +44289,41 @@
                       "id": "A3kFhP",
                       "name": "仪表盘",
                       "width": "fill_container",
+                      "height": 40,
                       "cornerRadius": "$radius-row",
                       "gap": 8,
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "icon",
-                          "id": "WplU0",
-                          "name": "图标",
+                          "type": "frame",
+                          "id": "n9dLPL",
+                          "name": "导航图标对齐",
                           "width": 18,
-                          "height": 18,
-                          "icon": "layout-dashboard",
-                          "library": "lucide",
-                          "fill": "$embedded-text"
+                          "height": 22,
+                          "padding": [
+                            2,
+                            0,
+                            0,
+                            0
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "WplU0",
+                              "name": "图标",
+                              "width": 18,
+                              "height": 18,
+                              "icon": "layout-dashboard",
+                              "library": "lucide",
+                              "fill": "$embedded-text"
+                            }
+                          ]
                         },
                         {
                           "type": "text",
@@ -43831,32 +44332,50 @@
                           "fill": "$embedded-text",
                           "content": "仪表盘",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 20,
+                          "fontSize": 16,
                           "fontWeight": "normal"
                         }
                       ]
                     },
                     {
                       "type": "frame",
+                      "id": "zCqmV",
+                      "name": "导航与最近会话间距",
+                      "width": "fill_container",
+                      "height": 54
+                    },
+                    {
+                      "type": "frame",
                       "id": "jDCPz",
                       "name": "A 最近分组标签",
                       "width": "fill_container",
+                      "height": 32,
                       "padding": [
-                        24,
-                        12,
-                        4,
-                        12
+                        0,
+                        8
                       ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
                           "id": "Def8p",
                           "name": "文字",
                           "fill": "$embedded-muted",
-                          "content": "今天",
+                          "content": "最近",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "i3uSQr",
+                          "name": "折叠最近会话",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "$embedded-muted"
                         }
                       ]
                     },
@@ -43865,9 +44384,13 @@
                       "id": "b8SEvx",
                       "name": "A 会话 C 盘快满了怎么清理",
                       "width": "fill_container",
+                      "height": 32,
                       "fill": "$embedded-track",
                       "cornerRadius": "$radius-row",
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
@@ -43890,7 +44413,7 @@
                           "fill": "$embedded-text",
                           "content": "磁盘状态与解锁",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -43900,8 +44423,12 @@
                       "id": "LQzr3",
                       "name": "A 会话 风扇狂转还降频",
                       "width": "fill_container",
+                      "height": 32,
                       "cornerRadius": "$radius-row",
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
@@ -43924,31 +44451,7 @@
                           "fill": "$embedded-text",
                           "content": "风扇狂转还降频",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "u3JJO",
-                      "name": "昨天分组",
-                      "width": "fill_container",
-                      "padding": [
-                        16,
-                        12,
-                        4,
-                        12
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "U317W",
-                          "name": "昨天",
-                          "fill": "$embedded-muted",
-                          "content": "昨天",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -43958,8 +44461,12 @@
                       "id": "cDABs",
                       "name": "A 会话 开机要等三分钟",
                       "width": "fill_container",
+                      "height": 32,
                       "cornerRadius": "$radius-row",
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
@@ -43982,7 +44489,32 @@
                           "fill": "$embedded-text",
                           "content": "开机要等三分钟",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "o3nqN",
+                      "name": "查看全部会话",
+                      "width": "fill_container",
+                      "height": 32,
+                      "cornerRadius": "$radius-row",
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "kbEo0",
+                          "name": "查看全部",
+                          "fill": "$embedded-muted",
+                          "content": "查看全部",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -44173,7 +44705,10 @@
                           "name": "用户消息气泡",
                           "fill": "$embedded-bubble",
                           "cornerRadius": "$radius-menu",
-                          "padding": [12, 16],
+                          "padding": [
+                            12,
+                            16
+                          ],
                           "alignItems": "center",
                           "children": [
                             {
@@ -45148,7 +45683,10 @@
                           "name": "HeroUI Select · 模型",
                           "cornerRadius": "$radius-control",
                           "gap": 8,
-                          "padding": [0, 8],
+                          "padding": [
+                            0,
+                            8
+                          ],
                           "alignItems": "center",
                           "children": [
                             {
@@ -45204,14 +45742,31 @@
                                   "fontWeight": "normal"
                                 },
                                 {
-                                  "type": "icon",
-                                  "id": "q2wYU",
-                                  "name": "模型下拉",
+                                  "type": "frame",
+                                  "id": "K0wavR",
+                                  "name": "下拉箭头对齐",
                                   "width": 14,
-                                  "height": 14,
-                                  "icon": "chevron-down",
-                                  "library": "lucide",
-                                  "fill": "$embedded-muted"
+                                  "height": 18,
+                                  "padding": [
+                                    4,
+                                    0,
+                                    0,
+                                    0
+                                  ],
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "id": "q2wYU",
+                                      "name": "模型下拉",
+                                      "width": 14,
+                                      "height": 14,
+                                      "icon": "chevron-down",
+                                      "library": "lucide",
+                                      "fill": "$embedded-muted"
+                                    }
+                                  ]
                                 }
                               ]
                             }
@@ -45223,7 +45778,10 @@
                           "name": "HeroUI Select · 思考强度",
                           "cornerRadius": "$radius-control",
                           "gap": 4,
-                          "padding": [0, 8],
+                          "padding": [
+                            0,
+                            8
+                          ],
                           "alignItems": "center",
                           "children": [
                             {
@@ -45353,7 +45911,7 @@
                   "name": "A 侧栏上",
                   "width": "fill_container",
                   "layout": "vertical",
-                  "gap": 8,
+                  "gap": 4,
                   "children": [
                     {
                       "type": "frame",
@@ -45384,7 +45942,10 @@
                         {
                           "type": "frame",
                           "id": "rjTjE",
+                          "x": 170,
+                          "y": 4,
                           "name": "搜索会话",
+                          "enabled": false,
                           "width": 28,
                           "height": 28,
                           "fill": "#00000000",
@@ -45421,21 +45982,42 @@
                       "id": "P7hyZ0",
                       "name": "新对话",
                       "width": "fill_container",
+                      "height": 40,
                       "fill": "#00000000",
                       "cornerRadius": "$radius-row",
                       "gap": 8,
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "icon",
-                          "id": "DBTUp",
-                          "name": "图标",
+                          "type": "frame",
+                          "id": "FWvFl",
+                          "name": "导航图标对齐",
                           "width": 18,
-                          "height": 18,
-                          "icon": "square-pen",
-                          "library": "lucide",
-                          "fill": "$embedded-text"
+                          "height": 22,
+                          "padding": [
+                            2,
+                            0,
+                            0,
+                            0
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "DBTUp",
+                              "name": "图标",
+                              "width": 18,
+                              "height": 18,
+                              "icon": "square-pen",
+                              "library": "lucide",
+                              "fill": "$embedded-text"
+                            }
+                          ]
                         },
                         {
                           "type": "text",
@@ -45444,7 +46026,7 @@
                           "fill": "$embedded-text",
                           "content": "新对话",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 20,
+                          "fontSize": 16,
                           "fontWeight": "normal"
                         }
                       ]
@@ -45454,20 +46036,41 @@
                       "id": "ADsAz",
                       "name": "仪表盘",
                       "width": "fill_container",
+                      "height": 40,
                       "cornerRadius": "$radius-row",
                       "gap": 8,
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
-                          "type": "icon",
-                          "id": "fSq3y",
-                          "name": "图标",
+                          "type": "frame",
+                          "id": "eYrkW",
+                          "name": "导航图标对齐",
                           "width": 18,
-                          "height": 18,
-                          "icon": "layout-dashboard",
-                          "library": "lucide",
-                          "fill": "$embedded-text"
+                          "height": 22,
+                          "padding": [
+                            2,
+                            0,
+                            0,
+                            0
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon",
+                              "id": "fSq3y",
+                              "name": "图标",
+                              "width": 18,
+                              "height": 18,
+                              "icon": "layout-dashboard",
+                              "library": "lucide",
+                              "fill": "$embedded-text"
+                            }
+                          ]
                         },
                         {
                           "type": "text",
@@ -45476,32 +46079,50 @@
                           "fill": "$embedded-text",
                           "content": "仪表盘",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 20,
+                          "fontSize": 16,
                           "fontWeight": "normal"
                         }
                       ]
                     },
                     {
                       "type": "frame",
+                      "id": "LaJmy",
+                      "name": "导航与最近会话间距",
+                      "width": "fill_container",
+                      "height": 54
+                    },
+                    {
+                      "type": "frame",
                       "id": "vLi76",
                       "name": "A 最近分组标签",
                       "width": "fill_container",
+                      "height": 32,
                       "padding": [
-                        24,
-                        12,
-                        4,
-                        12
+                        0,
+                        8
                       ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
                           "id": "YmTvS",
                           "name": "文字",
                           "fill": "$embedded-muted",
-                          "content": "今天",
+                          "content": "最近",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
                           "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "KsJmU",
+                          "name": "折叠最近会话",
+                          "width": 14,
+                          "height": 14,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "$embedded-muted"
                         }
                       ]
                     },
@@ -45510,9 +46131,13 @@
                       "id": "J95PG",
                       "name": "A 会话 C 盘快满了怎么清理",
                       "width": "fill_container",
+                      "height": 32,
                       "fill": "$embedded-track",
                       "cornerRadius": "$radius-row",
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
@@ -45535,7 +46160,7 @@
                           "fill": "$embedded-text",
                           "content": "磁盘状态与解锁",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -45545,8 +46170,12 @@
                       "id": "F55aeL",
                       "name": "A 会话 风扇狂转还降频",
                       "width": "fill_container",
+                      "height": 32,
                       "cornerRadius": "$radius-row",
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
@@ -45569,31 +46198,7 @@
                           "fill": "$embedded-text",
                           "content": "风扇狂转还降频",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "NcYp6",
-                      "name": "昨天分组",
-                      "width": "fill_container",
-                      "padding": [
-                        16,
-                        12,
-                        4,
-                        12
-                      ],
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "Y1I4zk",
-                          "name": "昨天",
-                          "fill": "$embedded-muted",
-                          "content": "昨天",
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -45603,8 +46208,12 @@
                       "id": "eJF1X",
                       "name": "A 会话 开机要等三分钟",
                       "width": "fill_container",
+                      "height": 32,
                       "cornerRadius": "$radius-row",
-                      "padding": 12,
+                      "padding": [
+                        0,
+                        8
+                      ],
                       "alignItems": "center",
                       "children": [
                         {
@@ -45627,7 +46236,32 @@
                           "fill": "$embedded-text",
                           "content": "开机要等三分钟",
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 16,
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "INWP9",
+                      "name": "查看全部会话",
+                      "width": "fill_container",
+                      "height": 32,
+                      "cornerRadius": "$radius-row",
+                      "padding": [
+                        0,
+                        8
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "NzpNO",
+                          "name": "查看全部",
+                          "fill": "$embedded-muted",
+                          "content": "查看全部",
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": 14,
                           "fontWeight": "normal"
                         }
                       ]
@@ -45818,7 +46452,10 @@
                           "name": "用户消息气泡",
                           "fill": "$embedded-bubble",
                           "cornerRadius": "$radius-menu",
-                          "padding": [12, 16],
+                          "padding": [
+                            12,
+                            16
+                          ],
                           "alignItems": "center",
                           "children": [
                             {
@@ -46793,7 +47430,10 @@
                           "name": "HeroUI Select · 模型",
                           "cornerRadius": "$radius-control",
                           "gap": 8,
-                          "padding": [0, 8],
+                          "padding": [
+                            0,
+                            8
+                          ],
                           "alignItems": "center",
                           "children": [
                             {
@@ -46849,14 +47489,31 @@
                                   "fontWeight": "normal"
                                 },
                                 {
-                                  "type": "icon",
-                                  "id": "uUleA",
-                                  "name": "模型下拉",
+                                  "type": "frame",
+                                  "id": "p4D3S",
+                                  "name": "下拉箭头对齐",
                                   "width": 14,
-                                  "height": 14,
-                                  "icon": "chevron-down",
-                                  "library": "lucide",
-                                  "fill": "$embedded-muted"
+                                  "height": 18,
+                                  "padding": [
+                                    4,
+                                    0,
+                                    0,
+                                    0
+                                  ],
+                                  "justifyContent": "center",
+                                  "alignItems": "center",
+                                  "children": [
+                                    {
+                                      "type": "icon",
+                                      "id": "uUleA",
+                                      "name": "模型下拉",
+                                      "width": 14,
+                                      "height": 14,
+                                      "icon": "chevron-down",
+                                      "library": "lucide",
+                                      "fill": "$embedded-muted"
+                                    }
+                                  ]
                                 }
                               ]
                             }
@@ -46868,7 +47525,10 @@
                           "name": "HeroUI Select · 思考强度",
                           "cornerRadius": "$radius-control",
                           "gap": 4,
-                          "padding": [0, 8],
+                          "padding": [
+                            0,
+                            8
+                          ],
                           "alignItems": "center",
                           "children": [
                             {
@@ -49782,6 +50442,7 @@
       "value": 4
     }
   },
+  "fileToken": "e184c29a-b5e2-4799-b5a9-2a032310090b",
   "fonts": [
     {
       "name": "Source Han Sans CN",

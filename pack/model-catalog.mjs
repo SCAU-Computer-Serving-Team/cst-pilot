@@ -1,14 +1,14 @@
 // Offline fallback for the release default, matching the pi.dev provider catalog.
 // Preserve upstream entries without changing auth.json or other providers.
-export const goFlash = {
-  id: "deepseek-v4.1-flash",
+export const deepseekFlash = {
+  id: "deepseek-flash",
   name: "DeepSeek V4.1 Flash",
   api: "openai-completions",
-  provider: "opencode-go",
-  baseUrl: "https://opencode.ai/zen/go/v1",
+  provider: "deepseek",
+  baseUrl: "https://api.deepseek.com",
   reasoning: true,
   input: ["text", "image"],
-  cost: { input: 0.15, output: 0.6, cacheRead: 0.003, cacheWrite: 0 },
+  cost: { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0 },
   compat: {
     supportsStore: false,
     supportsDeveloperRole: false,
@@ -26,20 +26,20 @@ export const goFlash = {
   type: "chat",
 };
 
-export function supplementGoFlash(catalog, generatedAt = Date.now()) {
-  const provider = catalog?.["opencode-go"];
+export function supplementDeepSeekFlash(catalog, generatedAt = Date.now()) {
+  const provider = catalog?.deepseek;
   if (!provider?.models || !Array.isArray(provider.models)) {
-    throw new Error("离线模型目录缺少 opencode-go，不能补全默认模型");
+    throw new Error("离线模型目录缺少 deepseek，不能补全默认模型");
   }
-  const present = provider.models.some((model) => model.id === goFlash.id);
+  const present = provider.models.some((model) => model.id === deepseekFlash.id);
   if (present) return catalog;
   return {
     ...catalog,
-    "opencode-go": {
+    deepseek: {
       ...provider,
       // Pi discards cached overlays older than its bundled catalog.
       lastModified: Math.max(provider.lastModified ?? 0, generatedAt),
-      models: [...provider.models, goFlash],
+      models: [...provider.models, deepseekFlash],
     },
   };
 }

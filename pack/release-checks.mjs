@@ -66,6 +66,7 @@ export const REQUIRED_RELEASE_FILES = [
   'agent/home/extensions/runtime/adapter.ts',
   'agent/home/extensions/runtime/owner.ts',
   'agent/home/extensions/runtime/configuration.ts',
+  'agent/home/extensions/runtime/model-selection.ts',
   'agent/home/extensions/runtime/package.json',
   'agent/home/extensions/web/server/session/web-settings.ts',
   'LICENSE',

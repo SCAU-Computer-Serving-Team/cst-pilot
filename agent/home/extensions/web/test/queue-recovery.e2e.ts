@@ -8,12 +8,13 @@ import { createWebApi } from "../server/api.ts";
 import { createWebServer, listenWebServer } from "../server/http.ts";
 import { WebSessionPool } from "../server/session/sessions.ts";
 import { BrowserProbe, freePort } from "./browser.ts";
-import { testRoot } from "./support.ts";
+import { configureTestModel, testRoot } from "./support.ts";
 
 test("失败队列保留重试、编辑、删除，重试不丢图片和技能且不重复投递", { timeout: 60_000 }, async () => {
 	const artifacts = join(await testRoot(), "queue-recovery");
 	await mkdir(artifacts, { recursive: true });
 	const home = await mkdtemp(join(artifacts, "home-"));
+	await configureTestModel(home);
 	await writeFile(join(home, "web-settings.json"), JSON.stringify({ theme: "dark" }));
 	const pool = new WebSessionPool({
 		cwd: home,

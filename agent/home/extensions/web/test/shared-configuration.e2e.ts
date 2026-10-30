@@ -140,6 +140,20 @@ test("跨端用户链路：网页保存范围和模型、原生扫码、服务�
 		);
 		await browser.click('.model-popover [role="option"][data-key="probe/one"]');
 		await browser.until("document.querySelector('.model-label')?.textContent.includes('one')", "主页选择 one");
+		assert.equal(
+			JSON.parse(await readFile(join(home, "settings.json"), "utf8")).defaultModel,
+			"two",
+			"输入框手动选择保持默认值",
+		);
+		await browser.navigate(`${origin}/settings/models`);
+		await browser.click(".settings-default-trigger");
+		await browser.fill(".settings-default-popover input", "测试模型 one");
+		await browser.until("document.querySelectorAll('.settings-default-option').length===1", "查找默认模型 one");
+		await browser.click(".settings-default-option");
+		await browser.until(
+			"document.querySelector('.settings-default-trigger')?.textContent.includes('one')",
+			"独立保存默认模型 one",
+		);
 		pi = piClient();
 		await pi.start();
 		const selected = await pi.getState();

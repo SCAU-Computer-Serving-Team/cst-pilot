@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolveModelScopeWithDiagnostics } from "@earendil-works/pi-coding-agent";
+import { defaultModelReference, explicitModel, requireModelCredentials } from "../../../runtime/model-selection.ts";
 import type { SessionEvents } from "../session/events.ts";
 import type { WebSessionPool } from "../session/sessions.ts";
 import type { WebSettings } from "../session/web-settings.ts";
@@ -36,17 +37,24 @@ export function createModelRoutes({ pool, webSettings, globalEvents, writeOnce, 
 			const sessionId = new URL(request.url ?? "/", "http://localhost").searchParams.get("sessionId");
 			const slot = sessionId ? await pool.openSaved(sessionId) : undefined;
 			const stats = slot?.session.getSessionStats();
-			// 未指定会话（首页）或会话未选模型时，回退到全局默认模型：新会话实际会使用它。
-			const fallbackProvider = settingsManager.getDefaultProvider();
-			const fallbackModel = settingsManager.getDefaultModel();
-			const selectedModel =
-				slot?.session.model ??
-				(fallbackProvider && fallbackModel && modelRuntime.getModel(fallbackProvider, fallbackModel)
-					? { provider: fallbackProvider, id: fallbackModel }
-					: undefined);
+			const defaultModel = explicitModel(modelRuntime, defaultModelReference(settingsManager));
+			const selectedModel = slot ? slot.session.model : defaultModel;
 			// 与 /scoped-models 同口径：清单只含可用模型；存储的启用模式展开为具体 id，未匹配的单独返回
 			// 模型可用性沿用 Pi，包含持久凭据、配置与环境变量；不增加 Web 专属过滤。
 			const available = await modelRuntime.getAvailable();
+			const ready = new Set(available.map((model) => model.provider));
+			const describe = (model: typeof defaultModel) => ({
+				id: model.id,
+				provider: model.provider,
+				name: model.name,
+				providerName: modelRuntime.getProvider(model.provider)?.name ?? model.provider,
+				credentialReady: ready.has(model.provider),
+				catalogPresent: !!modelRuntime.getModel(model.provider, model.id),
+				input: model.input,
+				reasoning: model.reasoning,
+				contextWindow: model.contextWindow,
+				maxTokens: model.maxTokens,
+			});
 			const patterns = settingsManager.getEnabledModels();
 			let enabled: string[] | null = null;
 			let unavailableEnabled: string[] = [];
@@ -64,15 +72,9 @@ export function createModelRoutes({ pool, webSettings, globalEvents, writeOnce, 
 					if (diagnostic.code === "no-match") unavailableEnabled.push(diagnostic.pattern);
 			}
 			send(response, 200, {
-				models: available.map((model) => ({
-					id: model.id,
-					provider: model.provider,
-					name: model.name,
-					input: model.input,
-					reasoning: model.reasoning,
-					contextWindow: model.contextWindow,
-					maxTokens: model.maxTokens,
-				})),
+				models: available.map(describe),
+				catalog: modelRuntime.getModels().map(describe),
+				defaultModel: describe(defaultModel),
 				enabled,
 				unavailableEnabled,
 				thinkingLevels: slot?.session.getAvailableThinkingLevels() ?? [],
@@ -88,56 +90,47 @@ export function createModelRoutes({ pool, webSettings, globalEvents, writeOnce, 
 					: null,
 				selected: selectedModel
 					? {
-							provider: selectedModel.provider,
-							id: selectedModel.id,
+							...describe(selectedModel),
 							thinkingLevel:
 								slot?.session.thinkingLevel ??
-								settingsManager.getModelThinkingLevel(selectedModel.provider, selectedModel.id) ??
-								undefined,
+								settingsManager.getModelThinkingLevel(selectedModel.provider, selectedModel.id),
 						}
 					: null,
 			});
 			return true;
 		}
-		if (pathname === "/api/models/select" && method === "POST") {
+		if ((pathname === "/api/models/select" || pathname === "/api/models/default") && method === "POST") {
 			const input = await body(request);
+			const saveDefault = pathname === "/api/models/default";
 			if (
+				Object.keys(input).some(
+					(key) => !["provider", "modelId", ...(saveDefault ? [] : ["sessionId"])].includes(key),
+				) ||
 				(input.sessionId !== undefined && typeof input.sessionId !== "string") ||
 				typeof input.provider !== "string" ||
 				typeof input.modelId !== "string"
 			)
 				throw new Error("请求的模型选择无效");
-			const { modelRuntime, settingsManager } = await pool.getServices();
-			const slot = typeof input.sessionId === "string" ? await pool.openSaved(input.sessionId) : undefined;
+			const { modelRuntime, settingsManager } = await pool.refreshServices();
 			const model = modelRuntime.getModel(input.provider, input.modelId);
 			if (!model) throw new Error("请求的模型不存在");
+			const sessionId = typeof input.sessionId === "string" ? input.sessionId : undefined;
 			const result = await writeOnce(request, pathname, input, () =>
-				serialize("model-default", async () => {
-					if (slot) await slot.session.setModel(model, { persist: true });
-					else {
-						if (!(await modelRuntime.checkAuth(model.provider))) throw new Error("请求的模型服务尚未配置凭据");
-						const patterns = settingsManager.getEnabledModels();
-						const scope = patterns?.length
-							? await resolveModelScopeWithDiagnostics(patterns, modelRuntime)
-							: undefined;
-						settingsManager.setDefaultModelAndProvider(model.provider, model.id);
-						await webSettings.saveEmptyModelScope(false);
-						if (
-							patterns?.length &&
-							scope &&
-							!scope.scopedModels.some(
-								(item) => item.model.provider === model.provider && item.model.id === model.id,
-							)
-						) {
-							settingsManager.setEnabledModels([...patterns, `${model.provider}/${model.id}`]);
-							await webSettings.saveEmptyModelScope(false);
-							pool.setScopedModels([...scope.scopedModels, { model }]);
-						}
+				serialize(saveDefault ? "model-default" : `model-selection:${sessionId ?? "home"}`, async () => {
+					const slot = sessionId ? await pool.openSaved(sessionId) : undefined;
+					if (saveDefault) settingsManager.setDefaultModelAndProvider(model.provider, model.id);
+					else if (slot) {
+						await requireModelCredentials(modelRuntime, model);
+						await slot.session.setModel(model);
 					}
-					globalEvents.publish("state", { type: "settings_changed" });
+					if (saveDefault) globalEvents.publish("state", { type: "settings_changed" });
 					return {
 						provider: model.provider,
 						id: model.id,
+						name: model.name,
+						providerName: modelRuntime.getProvider(model.provider)?.name ?? model.provider,
+						credentialReady: !!(await modelRuntime.checkAuth(model.provider)),
+						catalogPresent: true,
 						thinkingLevel:
 							slot?.session.thinkingLevel ?? settingsManager.getModelThinkingLevel(model.provider, model.id),
 						thinkingLevels: slot?.session.getAvailableThinkingLevels() ?? [],
