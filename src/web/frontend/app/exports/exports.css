@@ -1,13 +1,13 @@
 .export-workspace { flex: 1; min-width: 0; min-height: 0; height: 100%; overflow: auto; overscroll-behavior-y: contain; background: var(--chat-bg); color: var(--chat-ink); }
 .export-toolbar { display: flex; align-items: center; gap: var(--space-group); padding: var(--space-group) 32px; border-bottom: 1px solid var(--chat-border); }
 .app-layout.sidebar-collapsed .export-toolbar { padding-left: 64px; }
-.export-toolbar h1 { margin: 0; font-size: var(--font-title); font-weight: 600; }
-.export-back { display: inline-flex; align-items: center; gap: var(--space-inline); color: var(--chat-muted); font-size: var(--font-ui); }
+.export-toolbar h1 { margin: 0; font-size: var(--font-title); font-weight: 600; line-height: var(--line-title); }
+.export-back { display: inline-flex; align-items: center; gap: var(--space-inline); color: var(--chat-muted); font-size: var(--font-ui); line-height: var(--line-ui); }
 .export-layout { display: grid; grid-template-columns: 288px minmax(0, 1fr); gap: 32px; padding: 32px; align-items: start; }
 .export-controls { display: grid; gap: var(--space-group); min-width: 0; }
 .export-controls fieldset { display: grid; gap: var(--space-group); min-width: 0; border: 0; margin: 0; padding: 0; }
-.export-controls legend { margin-bottom: 20px; padding: 0; font-size: var(--font-body); font-weight: 600; }
-.export-controls label { font-size: var(--font-ui); }
+.export-controls legend { margin-bottom: 20px; padding: 0; font-size: var(--font-body); font-weight: 600; line-height: var(--line-body); }
+.export-controls label { font-size: var(--font-ui); line-height: var(--line-ui); }
 .export-select { display: grid; gap: var(--space-inline); width: 100%; }
 .export-select > label { color: var(--chat-ink); font-weight: 400; }
 .export-select .export-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: var(--space-component); width: 100%; height: var(--control-field); min-height: var(--control-field); padding: var(--space-inline) var(--space-component); border: 1px solid var(--chat-input-border); border-radius: var(--radius-control); color: var(--chat-ink); background: var(--app-control); box-shadow: none; font: 400 14px/20px "CST UI Sans", "Microsoft YaHei", sans-serif; transition: border-color var(--duration-quick) var(--ease-smooth-out); }
@@ -19,14 +19,14 @@
 .export-select[data-disabled="true"] { opacity: .5; }
 .export-select-popover { width: var(--trigger-width); max-width: calc(100vw - 32px); padding: var(--space-inline); border: 1px solid var(--app-sidebar-border); border-radius: var(--radius-menu); color: var(--app-ink); background: var(--login-card); box-shadow: var(--shadow-menu); }
 .export-select-popover [role="listbox"] { display: grid; gap: 0; padding: 0; outline: none; }
-.export-select-popover [role="option"] { display: flex; align-items: center; min-height: var(--control-lg); margin: 0; padding: 0 var(--space-component); outline: none; box-shadow: none; transform: none; border-radius: var(--radius-row); color: var(--app-ink); background: transparent; font-size: var(--font-ui); font-weight: 400; cursor: pointer; transition: background-color var(--duration-quick) var(--ease-smooth-out); }
+.export-select-popover [role="option"] { display: flex; align-items: center; min-height: var(--control-lg); margin: 0; padding: 0 var(--space-component); outline: none; box-shadow: none; transform: none; border-radius: var(--radius-row); color: var(--app-ink); background: transparent; font-size: var(--font-ui); font-weight: 400; cursor: pointer; transition: background-color var(--duration-quick) var(--ease-smooth-out); line-height: var(--line-ui); }
 .export-select-popover [role="option"]:is(:hover, [data-hovered="true"], [data-focus-visible="true"]):not([aria-selected="true"]) { background: var(--app-hover); }
 .export-select-popover [role="option"][aria-selected="true"] { background: var(--app-selected); }
 .export-select-popover [role="option"][data-focus-visible="true"] { outline: 1px solid var(--app-muted); outline-offset: -1px; }
 .export-controls label.export-check { display: flex; align-items: center; gap: var(--space-inline); }
 .export-controls input[type="checkbox"] { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--app-send); }
 .export-note, .export-preview-label { margin: 0; font-size: var(--font-ui); line-height: var(--line-ui); color: var(--chat-muted); overflow-wrap: anywhere; }
-.export-generate { justify-self: start; display: inline-flex; align-items: center; gap: var(--space-inline); min-height: var(--control-field); padding: 10px var(--space-section); border-radius: var(--radius-control); color: var(--app-send-icon); background: var(--app-send); font-size: var(--font-ui); font-weight: 600; }
+.export-generate { justify-self: start; display: inline-flex; align-items: center; gap: var(--space-inline); min-height: var(--control-field); padding: 10px var(--space-section); border-radius: var(--radius-control); color: var(--app-send-icon); background: var(--app-send); font-size: var(--font-ui); font-weight: 600; line-height: var(--line-ui); }
 .export-generate:is(:hover, [data-hovered="true"]):not(:disabled) { background: var(--app-send-hover); }
 .export-generate:is(:active, [data-pressed="true"]):not(:disabled) { background: var(--app-send-pressed); }
 .export-generate:is(:focus-visible, [data-focus-visible="true"]) { outline: none; box-shadow: var(--focus-shadow); }
@@ -38,7 +38,7 @@
 @media (prefers-color-scheme: dark) { :root[data-theme="system"] .export-preview-viewport { border-color: #77838A; } }
 .export-preview-viewport iframe { display: block; width: 1240px; max-width: none; border: 0; transform-origin: top left; }
 .export-result { display: grid; gap: var(--space-component); }
-.export-result h2 { margin: 0; font-size: var(--font-body); }
+.export-result h2 { margin: 0; font-size: var(--font-body); line-height: var(--line-body); }
 .export-open-directory { display: block; justify-self: start; min-width: 0; max-width: 100%; margin: 0; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--chat-tool); font: inherit; font-size: var(--font-ui); line-height: var(--line-ui); text-align: left; white-space: normal; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .export-open-directory:hover:not(:disabled) { text-decoration-thickness: 2px; }
 .export-open-directory:focus-visible { outline: 2px solid var(--chat-tool); outline-offset: 4px; box-shadow: none; }
@@ -46,9 +46,9 @@
 .export-page { height: auto; min-height: 100vh; margin: 0; overflow: visible; color: var(--chat-ink); background: var(--chat-bg); }
 .export-document { box-sizing: border-box; width: 100%; max-width: 1240px; margin: 0 auto; padding: 48px; color: var(--chat-ink); background: var(--chat-bg); }
 .export-heading { margin-bottom: 48px; padding-bottom: var(--space-group); border-bottom: 1px solid var(--chat-border); }
-.export-heading > span { font-size: var(--font-ui); font-weight: 600; }
-.export-heading h1 { margin: var(--space-section) 0 var(--space-inline); font-size: var(--font-title); font-weight: 600; overflow-wrap: anywhere; }
-.export-heading p { margin: 0; color: var(--chat-muted); font-size: var(--font-ui); }
+.export-heading > span { font-size: var(--font-ui); font-weight: 600; line-height: var(--line-ui); }
+.export-heading h1 { margin: var(--space-section) 0 var(--space-inline); font-size: var(--font-title); font-weight: 600; overflow-wrap: anywhere; line-height: var(--line-title); }
+.export-heading p { margin: 0; color: var(--chat-muted); font-size: var(--font-ui); line-height: var(--line-ui); }
 .export-document .export-transcript { width: 100%; max-width: none; margin: 0; padding: 0; }
 .export-message { margin-bottom: 32px; break-inside: avoid; }
 .export-document .user-line { margin-bottom: 32px; }
@@ -63,7 +63,7 @@
 .export-document .message-image { display: block; max-width: 100%; max-height: 720px; height: auto; width: auto; object-fit: contain; margin-top: var(--space-component); }
 .export-document :is(button, .code-copy-feedback, .special-tool-details, .special-tool-delivery) { display: none !important; }
 .export-document :is(.export-process, .export-tool) { margin: var(--space-section) 0; padding: var(--space-section); border: 1px solid var(--chat-border); border-radius: var(--radius-row); }
-.export-document summary { color: var(--chat-muted); cursor: pointer; font-size: var(--font-ui); margin-bottom: var(--space-component); }
+.export-document summary { color: var(--chat-muted); cursor: pointer; font-size: var(--font-ui); margin-bottom: var(--space-component); line-height: var(--line-ui); }
 .export-document *, .export-document *::before, .export-document *::after { animation: none !important; transition: none !important; }
 @media (max-width: 960px) { .export-layout { grid-template-columns: 1fr; padding: 20px; gap: var(--space-group); } .export-controls { max-width: none; } .export-toolbar { padding: 20px; gap: var(--space-section); } }
 @media (max-width: 600px) { .export-document { padding: var(--space-group) var(--space-section); } .export-heading { margin-bottom: 32px; } }
