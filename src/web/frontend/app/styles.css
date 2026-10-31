@@ -84,6 +84,7 @@
   --line-title: 28px;
   --line-display: 32px;
   --space-micro: 2px;
+  --space-detail: 6px;
   --space-tight: 4px;
   --space-inline: 8px;
   --space-component: 12px;
@@ -359,7 +360,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .composer-chip:active { background: var(--app-device); }
 .composer-chip > svg { flex: 0 0 var(--icon-body); color: var(--chat-tool); }
 .composer-chip.chip-latin .composer-chip-label { position: relative; top: -1.5px; }
-.composer-chip .chip-remove { position: absolute; top: 50%; right: 4px; translate: 0 -50%; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--chat-muted); font-size: var(--font-ui); line-height: 1; opacity: 0; }
+.composer-chip .chip-remove { position: absolute; top: 50%; right: 4px; translate: 0 -50%; display: inline-flex; align-items: center; justify-content: center; width: var(--icon-body); height: var(--icon-body); padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--chat-muted); font-size: var(--font-ui); line-height: 1; opacity: 0; }
 .composer-chip:hover .chip-remove, .composer-chip .chip-remove:focus-visible { opacity: 1; }
 .composer-chip .chip-remove:hover { background: var(--app-device); color: var(--chat-ink); }
 .composer-chip .chip-remove:focus-visible { box-shadow: 0 0 0 2px #c5ced2; outline: none; }
@@ -372,9 +373,9 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .composer-spacer { flex: 1; }
 .composer-actions > * { display: inline-flex; align-items: center; justify-content: center; }
 .composer-actions .composer-icon { width: var(--control-lg); height: var(--control-lg); min-width: var(--control-lg); min-height: var(--control-lg); padding: 0; color: var(--app-muted); opacity: 1; }
-.composer-actions .composer-model { align-items: center; gap: 6px; height: var(--control-lg); min-height: var(--control-lg); border: 0; border-radius: var(--radius-control); box-shadow: none; color: var(--app-muted); background: transparent; padding: 0; }
+.composer-actions .composer-model { align-items: center; gap: var(--space-detail); height: var(--control-lg); min-height: var(--control-lg); border: 0; border-radius: var(--radius-control); box-shadow: none; color: var(--app-muted); background: transparent; padding: 0; }
 .context-meter-wrap { position: relative; display: inline-flex; align-items: center; min-inline-size: 0; margin: 0; padding: 0; border: 0; }
-.context-meter { display: inline-flex; align-items: center; justify-content: center; width: 16px; padding: 0; border: 0; border-radius: var(--radius-control); background: none; color: var(--app-send); cursor: pointer; }
+.context-meter { display: inline-flex; align-items: center; justify-content: center; width: var(--icon-body); padding: 0; border: 0; border-radius: var(--radius-control); background: none; color: var(--app-send); cursor: pointer; }
 .context-meter > svg { position: relative; top: 2px; flex-shrink: 0; }
 .context-meter:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
 /* 上下文面板宽 360，内边距 24、间距 16、圆角 12。 */
@@ -485,10 +486,10 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .composer--chat .composer-actions { min-height: var(--control); }
 .composer--chat .composer-actions .composer-icon { width: var(--control); height: var(--control); min-width: var(--control); min-height: var(--control); padding: 0; }
 .composer--chat .composer-actions .composer-model { height: var(--control); min-height: var(--control); padding: 0; border-radius: var(--radius-control); font-size: var(--font-ui); }
-.composer--chat .composer-actions .composer-model { gap: 6px; color: var(--chat-ink); font-family: "CST UI Sans", "Microsoft YaHei", sans-serif; }
+.composer--chat .composer-actions .composer-model { gap: var(--space-detail); color: var(--chat-ink); font-family: "CST UI Sans", "Microsoft YaHei", sans-serif; }
 /* React Aria 的空 template 是 DOM 占位，不参与操作栏间距。 */
 .composer-actions > template, .composer-model-controls > template { display: none; }
-.composer--chat .composer-actions .composer-icon > svg { width: 16px; height: 16px; }
+.composer--chat .composer-actions .composer-icon > svg { width: var(--icon-body); height: var(--icon-body); }
 /* 操作栏图标用 flex 居中；状态行的光学位移遵循 DESIGN.md。 */
 .composer--chat .composer-actions .composer-send { width: var(--control); height: var(--control); min-width: var(--control); }
 .chat-main { display: flex; flex-direction: column; }
@@ -505,12 +506,12 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .markdown > p + :is(ul, ol):not(:first-child), .markdown blockquote > p + :is(ul, ol):not(:first-child) { margin-block-start: 8px; }
 .markdown a { color: var(--chat-tool); text-decoration: underline; }
 .tool-raw, .tool-commands pre { max-width: 100%; overflow-x: auto; padding: var(--space-component); border-radius: var(--radius-control); background: var(--chat-bubble); white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/16px "JetBrains Mono", monospace; }
-.markdown pre { max-width: 100%; overflow-x: auto; padding: var(--space-component); border-radius: var(--radius-row); background: var(--chat-bubble); white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/20px "JetBrains Mono", monospace; letter-spacing: 0; }
+.markdown pre { max-width: 100%; overflow-x: auto; padding: var(--space-component); border-radius: var(--radius-row); background: var(--chat-bubble); white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/20px "JetBrains Mono", monospace; }
 .thinking-line .tool-text { margin-top: var(--space-inline); }
 .thinking-line .tool-raw { max-height: none; overflow: visible; }
 .tool-text .tool-raw { margin: 0; padding: var(--space-component); border-radius: var(--radius-control); color: #757d82; font-family: inherit; font-size: var(--font-caption); line-height: var(--line-caption); }
-.markdown code { padding: 0 var(--space-tight); border-radius: var(--radius-control); background: var(--chat-bubble); font: 14px/20px "JetBrains Mono", monospace; letter-spacing: 0; }
-.markdown pre code { padding: 0; border-radius: 0; background: none; font: inherit; letter-spacing: 0; }
+.markdown code { padding: 0 var(--space-tight); border-radius: var(--radius-control); background: var(--chat-bubble); font: 14px/20px "JetBrains Mono", monospace; }
+.markdown pre code { padding: 0; border-radius: 0; background: none; font: inherit; }
 .markdown-table { width: 100%; max-width: 100%; overflow-x: auto; border: 1px solid var(--chat-border); border-radius: var(--radius-row); }
 .markdown-table:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
 .markdown table { width: 100%; border-collapse: separate; border-spacing: 0; overflow-wrap: normal; }
@@ -522,13 +523,13 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .markdown ul { list-style: square; }
 .markdown ol { list-style: decimal; }
 .markdown li::marker { color: var(--chat-muted); }
-.markdown li + li { margin-top: 6px; }
+.markdown li + li { margin-top: var(--space-detail); }
 .markdown li > p { margin: 0; }
 .markdown li > p + p { margin-block-start: var(--prose-block-space); }
 .markdown li > ul, .markdown li > ol { margin-block: var(--space-tight); }
-.markdown h1 { font-size: 24px; font-weight: 600; line-height: var(--line-display); letter-spacing: 0; }
-.markdown h2 { font-size: var(--font-title); font-weight: 600; line-height: var(--line-title); letter-spacing: 0; }
-.markdown h3, .markdown h4, .markdown h5, .markdown h6 { font-size: var(--font-body); font-weight: 600; line-height: var(--line-body); letter-spacing: 0; }
+.markdown h1 { font-size: 24px; font-weight: 600; line-height: var(--line-display); }
+.markdown h2 { font-size: var(--font-title); font-weight: 600; line-height: var(--line-title); }
+.markdown h3, .markdown h4, .markdown h5, .markdown h6 { font-size: var(--font-body); font-weight: 600; line-height: var(--line-body); }
 .markdown > h1:not(:first-child) { margin-block-start: 32px; }
 .markdown > h2:not(:first-child) { margin-block-start: 24px; }
 .markdown > h3:not(:first-child) { margin-block-start: 20px; }
@@ -641,7 +642,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .tool-group-heading small { font-size: inherit; }
 .tool-card-heading { min-height: var(--control); padding: 0; color: var(--chat-muted); font-size: var(--font-ui); }
 .tool-card-heading span { flex: 0 1 auto; min-width: 0; }
-.tool-card-heading .tool-status-icon { width: 16px; height: 16px; flex-basis: 16px; }
+.tool-card-heading .tool-status-icon { width: var(--icon-body); height: var(--icon-body); flex-basis: var(--icon-body); }
 .tool-card-heading .tool-status-icon--running { width: 14px; height: 14px; flex-basis: 14px; }
 .tool-card-heading .tool-elapsed { margin-left: auto; }
 .tool-elapsed { font: 12px/16px "JetBrains Mono", monospace; color: var(--chat-muted); }
@@ -713,7 +714,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .search-status--error { color: var(--tool-danger); }
 .search-query { display: block; overflow: hidden; padding: var(--space-inline) 0 0 var(--space-group); color: var(--chat-muted); font-size: var(--font-caption); text-overflow: ellipsis; white-space: nowrap; }
 .search-query--error { color: var(--tool-danger); }
-.tool-command-meta { display: block; margin: var(--space-tight) 0 6px; color: var(--chat-muted); font-size: var(--font-caption); }
+.tool-command-meta { display: block; margin: var(--space-tight) 0 var(--space-detail); color: var(--chat-muted); font-size: var(--font-caption); }
 .tool-command { display: flex; align-items: center; gap: var(--space-inline); padding: var(--space-component); border-radius: var(--radius-control); background: var(--tool-raw); }
 .tool-command pre { flex: 1; min-width: 0; margin: 0; padding: 0; background: none; border-radius: 0; font-size: var(--font-caption); line-height: var(--line-caption); }
 .queue-panel, .question-panel { max-height: 180px; overflow-y: auto; padding: var(--space-component) var(--space-section); margin-bottom: var(--space-inline); border: 1px solid var(--chat-border); border-radius: var(--radius-menu); background: var(--chat-row); font-size: var(--font-ui); }
@@ -1321,12 +1322,12 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .tree-line { position: absolute; left: 4px; top: 0; width: 2px; height: var(--control-field); background: var(--tree-line); }
 .tree-square { position: absolute; left: 0; top: 15px; width: 10px; height: 10px; border-radius: var(--radius-control); background: var(--chat-tool); }
 .tree-branch-offset { flex: 0 0 32px; }
-.tree-icon { flex: 0 0 16px; margin: 0 6px; }
+.tree-icon { flex: 0 0 16px; margin: 0 var(--space-detail); }
 .tree-icon-user { color: var(--chat-tool); }
 .tree-icon-assistant { color: var(--chat-success); }
 .tree-icon-tool, .tree-icon-info { color: var(--chat-muted); }
 .tree-icon-summary { color: var(--tree-summary); }
-.tree-role { flex: 0 0 auto; white-space: nowrap; margin-right: 6px; color: var(--chat-tool); }
+.tree-role { flex: 0 0 auto; white-space: nowrap; margin-right: var(--space-detail); color: var(--chat-tool); }
 .tree-row-assistant .tree-role { color: var(--chat-success); }
 .tree-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tree-text-muted { color: var(--chat-muted); font-size: var(--font-ui); }

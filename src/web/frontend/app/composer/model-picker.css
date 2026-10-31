@@ -54,7 +54,7 @@
   .t-resize { transition: none !important; }
 }
 .composer-actions .composer-model-controls { min-width: 0; gap: var(--space-inline); padding-inline: var(--space-inline); }
-.composer-actions .composer-model { flex-shrink: 1; min-width: 0; max-width: min(360px, calc(100vw - 144px)); gap: 6px; padding-inline: 0; font-weight: 400; line-height: var(--line-ui); }
+.composer-actions .composer-model { flex-shrink: 1; min-width: 0; max-width: min(360px, calc(100vw - 144px)); gap: var(--space-detail); padding-inline: 0; font-weight: 400; line-height: var(--line-ui); }
 .composer-actions .model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-actions .model-current-strength { flex-shrink: 0; color: var(--app-muted); }
 .composer-actions .context-meter-wrap { flex-shrink: 0; }

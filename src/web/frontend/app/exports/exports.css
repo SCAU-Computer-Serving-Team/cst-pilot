@@ -12,7 +12,7 @@
 .export-select > label { color: var(--chat-ink); font-weight: 400; }
 .export-select .export-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: var(--space-component); width: 100%; height: var(--control-field); min-height: var(--control-field); padding: var(--space-inline) var(--space-component); border: 1px solid var(--chat-input-border); border-radius: var(--radius-control); color: var(--chat-ink); background: var(--app-control); box-shadow: none; font: 400 14px/20px "CST UI Sans", "Microsoft YaHei", sans-serif; transition: border-color var(--duration-quick) var(--ease-smooth-out); }
 .export-select-trigger > .select__value { min-width: 0; text-align: left; }
-.export-select-trigger > svg { display: block; flex: 0 0 16px; width: 16px; height: 16px; margin: 0; color: var(--chat-muted); transition: transform var(--duration-fast) var(--ease-smooth-out); }
+.export-select-trigger > svg { display: block; flex: 0 0 var(--icon-body); width: var(--icon-body); height: var(--icon-body); margin: 0; color: var(--chat-muted); transition: transform var(--duration-fast) var(--ease-smooth-out); }
 .export-select-trigger[aria-expanded="true"] > svg { transform: rotate(180deg); }
 .export-select .export-select-trigger:is(:hover, [data-hovered="true"]):not(:disabled) { border-color: var(--app-muted); }
 .export-select .export-select-trigger:is(:focus-visible, [data-focus-visible="true"]) { outline: none; border-color: var(--app-muted); box-shadow: var(--focus-shadow); }
