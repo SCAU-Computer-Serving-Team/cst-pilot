@@ -640,7 +640,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .tool-group-heading { font-size: var(--font-body); line-height: var(--line-body); }
 .tool-group-heading .tool-status-icon, .tool-group-heading .success-icon { width: 18px; height: 18px; flex-basis: 18px; }
 .tool-group-heading .tool-group-state--running { color: var(--chat-ink); }
-.tool-group-heading small { font-size: inherit; }
+.tool-group-heading small { font-size: inherit; line-height: inherit; }
 .tool-card-heading { min-height: var(--control); padding: 0; color: var(--chat-muted); font-size: var(--font-ui); line-height: var(--line-ui); }
 .tool-card-heading span { flex: 0 1 auto; min-width: 0; }
 .tool-card-heading .tool-status-icon { width: var(--icon-body); height: var(--icon-body); flex-basis: var(--icon-body); }
