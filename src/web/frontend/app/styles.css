@@ -412,7 +412,6 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
   .tree-toolbar { flex-wrap: wrap; height: auto; min-height: 56px; flex-basis: auto; padding-block: 12px; row-gap: var(--space-inline); }
   .tree-search { width: min(280px, 60vw); }
   .settings-content { width: min(816px, calc(100% - 32px)); }
-  .home-greeting h1 { font-size: 40px; }
 }
 @keyframes sidebar-backdrop-in { from { opacity: 0; } }
 .chat-main { --chat-column-max-width: 1144px; --chat-column-gutter: 24px; position: relative; flex: 1; min-width: 0; height: 100vh; overflow: hidden; background: var(--chat-bg); color: var(--chat-ink); font-size: 16px; line-height: 1.5; }
