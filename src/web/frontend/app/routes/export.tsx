@@ -133,7 +133,7 @@ export default function ExportSession() {
 	return (
 		<main className="export-workspace">
 			<header className="export-toolbar">
-				<Link to={`/s/${sessionId}`} className="export-back">
+				<Link to={`/s/${sessionId}`} className="export-back" viewTransition>
 					<ArrowLeft size={18} />
 					返回对话
 				</Link>

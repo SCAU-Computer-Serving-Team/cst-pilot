@@ -310,7 +310,9 @@ export function Sidebar({
 									selected={management.selection?.has(session.id) ?? false}
 									disabled={management.busy}
 									preview={preview}
-									viewTransition={location.pathname.startsWith("/settings")}
+									viewTransition={
+										location.pathname.startsWith("/settings") || location.pathname.endsWith("/export")
+									}
 									onToggle={() => {
 										setMenu(null);
 										management.toggle(session.id);
@@ -407,6 +409,7 @@ export function Sidebar({
 								<Link
 									className="sidebar-account-item"
 									to={loginPath("cstoa", "oauth", "/account")}
+									viewTransition={location.pathname.endsWith("/export")}
 									onClick={closeAccountMenu}
 								>
 									<LogIn size={18} aria-hidden="true" />

@@ -45,6 +45,7 @@ export default function WorkspaceLayout() {
 	const homeTransition = useViewTransitionState("/");
 	const chatTransition = useViewTransitionState("/s/*");
 	const accountTransition = useViewTransitionState("/account");
+	const exportTransition = useViewTransitionState("/s/:sessionId/export");
 	const settingsBoundary = settings && (homeTransition || chatTransition || accountTransition);
 	const sessionTransition = chatTransition && !homeTransition && !settingsBoundary && !settings;
 	const routeTransition = useViewTransitionState(pathname);
@@ -83,6 +84,7 @@ export default function WorkspaceLayout() {
 						data-startup={(startup && home && !homeTransition && !collapsed) || undefined}
 						data-home-startup={(startup && home && !homeTransition) || undefined}
 						data-startup-origin={(startupRequested.current && home) || undefined}
+						data-export-transition={exportTransition || undefined}
 						data-home-transition={homeTransition || undefined}
 						data-settings-boundary={settingsBoundary || undefined}
 						data-session-transition={sessionTransition || undefined}

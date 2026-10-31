@@ -241,10 +241,11 @@ button, textarea { font: inherit; }
 a { color: inherit; text-decoration: none; }
 a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
 ::selection { background: #ddecff; color: #001f42; }
-.app-layout { display: flex; min-height: 100vh; width: 100%; position: relative; overflow: clip; }
-.workspace-content { position: relative; display: flex; flex: 1; min-width: 0; margin-left: 264px; }
+.app-layout { display: flex; height: 100vh; min-height: 0; width: 100%; position: relative; overflow: clip; }
+.workspace-content { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; height: 100%; margin-left: 264px; }
 .sidebar-collapsed > .workspace-content { margin-left: 0; }
-.sidebar { width: 264px; height: 100vh; position: absolute; top: 0; left: 0; display: flex; flex-direction: column; justify-content: space-between; gap: var(--space-inline); padding: 20px 12px 8px; background: var(--app-sidebar); border-right: 1px solid var(--app-sidebar-border); z-index: 2; transform: translate3d(0, 0, 0); transition: transform var(--duration-slow) var(--ease-smooth-out), visibility 0s; }
+.sidebar { width: 264px; height: 100vh; view-transition-name: workspace-sidebar; position: absolute; top: 0; left: 0; display: flex; flex-direction: column; justify-content: space-between; gap: var(--space-inline); padding: 20px 12px 8px; background: var(--app-sidebar); border-right: 1px solid var(--app-sidebar-border); z-index: 2; transform: translate3d(0, 0, 0); transition: transform var(--duration-slow) var(--ease-smooth-out), visibility 0s; }
+@supports (height: 100dvh) { .app-layout, .sidebar { height: 100dvh; } }
 .sidebar-top, .sidebar-footer { min-width: 0; }
 .app-layout.sidebar-collapsed > .sidebar { transform: translate3d(-100%, 0, 0); visibility: hidden; transition: transform var(--duration-medium) var(--ease-smooth-out), visibility 0s linear var(--duration-medium); }
 .sidebar-restore { position: absolute; z-index: 30; top: 20px; left: 12px; display: inline-flex; align-items: center; justify-content: center; width: var(--control-lg); height: var(--control-lg); padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--chat-muted); cursor: pointer; animation: sidebar-restore-in var(--duration-quick) var(--ease-smooth-out) backwards; transition: background-color var(--duration-quick) var(--ease-smooth-out), color var(--duration-quick) var(--ease-smooth-out); }
@@ -322,7 +323,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .device-icon { width: var(--control-lg); height: var(--control-lg); flex: 0 0 var(--control-lg); display: grid; place-items: center; border-radius: var(--radius-row); background: var(--app-device); }
 .device-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.5; font-size: 14px; }
 .device-copy small { font-size: 10px; color: var(--app-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.home-main { flex: 1; min-width: 0; min-height: 100vh; position: relative; background: var(--chat-bg); overflow: hidden; }
+.home-main { flex: 1; min-width: 0; min-height: 0; height: 100%; position: relative; background: var(--chat-bg); overflow: hidden; }
 .app-layout[data-sidebar-reveal] .home-main { overflow: visible; }
 .home-backdrop { position: absolute; inset: 0; pointer-events: none; background: var(--home-fallback); transform-origin: left top; }
 .home-main--external-background { background: transparent; }
@@ -414,7 +415,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
   .settings-content { width: min(816px, calc(100% - 32px)); }
 }
 @keyframes sidebar-backdrop-in { from { opacity: 0; } }
-.chat-main { --chat-column-max-width: 1144px; --chat-column-gutter: 24px; position: relative; flex: 1; min-width: 0; height: 100vh; overflow: hidden; background: var(--chat-bg); color: var(--chat-ink); font-size: 16px; line-height: 1.5; }
+.chat-main { --chat-column-max-width: 1144px; --chat-column-gutter: 24px; position: relative; flex: 1; min-width: 0; min-height: 0; height: 100%; overflow: hidden; background: var(--chat-bg); color: var(--chat-ink); font-size: 16px; line-height: 1.5; }
 .chat-header { display: flex; align-items: center; gap: var(--space-section); width: 100%; height: 76px; flex: 0 0 76px; padding: 0 36px; background: var(--chat-header); border-bottom: 1px solid var(--chat-border); color: var(--chat-muted); }
 .chat-header h1 { margin: 0; color: var(--chat-ink); font-size: 18px; font-weight: 500; overflow: hidden; min-width: 0; text-overflow: ellipsis; white-space: nowrap; }
 .settings-header h1 { font-size: var(--font-title); font-weight: 600; }
@@ -1441,6 +1442,10 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 @media (prefers-reduced-motion: reduce) {
   .app-layout[data-startup] > .sidebar, .app-layout[data-home-startup] :is(.brand-arcs, .home-greeting h1, .composer-shell--home, .home-footnote), .sidebar[data-startup-rows] :is(.sidebar-recent-heading, .sidebar-session-row) { animation: none; }
 }
+/* 侧栏作为独立快照保持静止，页面切换仅播放右侧内容。 */
+::view-transition-group(workspace-sidebar) { z-index: 20; animation: none; }
+::view-transition-old(workspace-sidebar) { display: none; }
+::view-transition-new(workspace-sidebar) { animation: none; mix-blend-mode: normal; }
 /* 双向总400ms；主页背景实色滑出，150ms开始工作区入场，重叠100ms避免白屏。 */
 /* 首页与工作台输入框各自入退场，避免共享快照将底部聊天框拉到中心。 */
 .app-layout[data-home-transition] .home-backdrop { view-transition-name: home-background; }
@@ -1465,6 +1470,17 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 ::view-transition-group(settings-surface) { z-index: 4; animation: none; }
 ::view-transition-old(settings-surface) { animation: text-surface-out var(--duration-micro) var(--ease-in-out) both; mix-blend-mode: normal; }
 ::view-transition-new(settings-surface) { animation: text-surface-in var(--duration-quick) var(--ease-in-out) var(--duration-micro) both; mix-blend-mode: normal; }
+/* 导出边界统一提取右侧整页，覆盖任意目标页，取消内部重复快照。 */
+.app-layout[data-export-transition] .workspace-content { view-transition-name: export-page; background: var(--chat-bg); }
+.app-layout[data-export-transition] .workspace-content * { view-transition-name: none !important; }
+::view-transition-group(export-page) { z-index: 10; animation: none; }
+::view-transition-old(export-page) { animation: text-surface-out var(--duration-micro) var(--ease-in-out) both; mix-blend-mode: normal; }
+::view-transition-new(export-page) { animation: text-surface-in var(--duration-quick) var(--ease-in-out) var(--duration-micro) both; mix-blend-mode: normal; }
+:root:has([data-export-transition]) { background: var(--chat-bg); }
+/* biome-ignore lint/correctness/noUnknownTypeSelector: root 是浏览器视图过渡的快照名。 */
+:root:has([data-export-transition])::view-transition-old(root) { display: none; }
+/* biome-ignore lint/correctness/noUnknownTypeSelector: root 是浏览器视图过渡的快照名。 */
+:root:has([data-export-transition])::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
 /* biome-ignore lint/correctness/noUnknownTypeSelector: root 是浏览器视图过渡的快照名。 */
 :root:has([data-home-transition])::view-transition-old(root) { animation: none; mix-blend-mode: normal; }
 /* biome-ignore lint/correctness/noUnknownTypeSelector: root 是浏览器视图过渡的快照名。 */
@@ -1506,6 +1522,8 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 @keyframes composer-in { from { transform: translateY(var(--distance-medium)); opacity: 0; } }
 @keyframes workspace-header-in { from { transform: translateY(calc(-1 * var(--distance-base))); opacity: 0; } }
 @keyframes workspace-header-out { to { transform: translateY(calc(-1 * var(--distance-base))); opacity: 0; } }
+/* 直达与无快照导航只播放一次导出入场，原生转场结束后不补播。 */
+.app-layout[data-route-entry] .export-workspace { animation: text-surface-in var(--duration-quick) var(--ease-in-out) both; }
 /* 不支持原生快照时保持导航即时可用，只对新页面局部入场。 */
 .app-layout[data-view-transitions="false"] .chat-header { animation: workspace-header-in calc(var(--duration-fast) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
 .app-layout[data-view-transitions="false"] .chat-composer-area { animation: composer-in calc(var(--duration-slow) * var(--page-transition-time-scale)) var(--ease-smooth-out) both; }
@@ -1513,6 +1531,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .app-layout[data-view-transitions="false"]:not([data-startup-origin]) .home-footnote { animation: composer-in var(--duration-fast) var(--ease-smooth-out) both; }
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation-duration: 0s !important; animation-delay: 0s !important; }
+  .app-layout[data-route-entry] .export-workspace,
   .app-layout[data-view-transitions="false"] :is(.chat-header, .chat-composer-area, .conversation, .composer-shell--home, .home-footnote) { animation: none; }
 }
 @media (max-width: 960px) {

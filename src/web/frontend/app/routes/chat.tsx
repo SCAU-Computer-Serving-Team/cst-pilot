@@ -169,6 +169,7 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 								<Link
 									className="sidebar-account-item"
 									to={`/s/${sessionId}/export`}
+									viewTransition
 									onClick={() => setMessageMenuOpen(false)}
 								>
 									<Download size={18} aria-hidden="true" />

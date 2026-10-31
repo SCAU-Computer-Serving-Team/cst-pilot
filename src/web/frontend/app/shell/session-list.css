@@ -15,7 +15,7 @@
 .session-native-check { position: absolute; width: 16px; height: 16px; inset-inline-start: var(--space-inline); margin: 0; opacity: 0; }
 .session-native-check:focus-visible { outline: none; box-shadow: none; }
 .sidebar-recent-list .sidebar-session { flex-shrink: 0; }
-.session-list-main { height: 100vh; min-width: 0; }
+.session-list-main { height: 100%; min-width: 0; }
 .session-list-main .chat-header { gap: var(--space-component); }
 .session-list-main .chat-header h1 { flex: 1; }
 .session-list-content { width: min(100%, 960px); min-height: 0; margin-inline: auto; padding: var(--space-group); overflow-y: auto; }
