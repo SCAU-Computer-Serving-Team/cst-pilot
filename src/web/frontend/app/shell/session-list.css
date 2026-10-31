@@ -1,14 +1,14 @@
 /* 侧栏与会话列表的局部尺寸，不覆盖全局菜单令牌。 */
-.sidebar-nav-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 18px; height: 22px; padding-top: 2px; }
+.sidebar-nav-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 18px; height: 22px; padding-top: var(--space-micro); }
 .sidebar-dashboard:disabled { color: var(--app-muted); cursor: not-allowed; }
 .sidebar-recent { margin-top: 54px; gap: 0; }
-.sidebar-recent-heading { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 32px; padding: 0 var(--space-inline); border: 0; border-radius: var(--radius-row); background: transparent; color: var(--app-muted); font-size: var(--font-body); font-weight: 400; cursor: pointer; }
+.sidebar-recent-heading { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: var(--control-lg); padding: 0 var(--space-inline); border: 0; border-radius: var(--radius-row); background: transparent; color: var(--app-muted); font-size: var(--font-body); font-weight: 400; cursor: pointer; }
 .sidebar-recent-heading .disclosure__indicator { width: 14px; height: 14px; rotate: none !important; transform: rotate(-90deg); transition: transform var(--duration-fast) var(--ease-smooth-out); }
 .sidebar-recent-heading .disclosure__indicator > * { rotate: none !important; transform: none !important; }
 .sidebar-recent-heading .disclosure__indicator[data-expanded="true"] { transform: rotate(0deg); }
 .sidebar-recent-list { display: flex; flex-direction: column; gap: var(--space-micro); }
 .sidebar-recent .disclosure__content { transition: height var(--duration-fast) var(--ease-smooth-out), opacity var(--duration-fast) var(--ease-smooth-out); }
-.sidebar-all { display: flex; align-items: center; flex: none; height: 32px; padding: 0 var(--space-inline); border-radius: var(--radius-row); color: var(--app-muted); font-size: var(--font-body); }
+.sidebar-all { display: flex; align-items: center; flex: none; height: var(--control-lg); padding: 0 var(--space-inline); border-radius: var(--radius-row); color: var(--app-muted); font-size: var(--font-body); }
 .sidebar-all.selected { background: var(--app-selected); }
 .sidebar-top[data-selection-ready="true"] .sidebar-all.selected { background: transparent; }
 .sidebar-all:hover, .sidebar-recent-heading:hover { background: var(--app-hover); color: var(--app-ink); }
@@ -20,7 +20,7 @@
 .session-list-main .chat-header h1 { flex: 1; }
 .session-list-content { width: min(100%, 960px); min-height: 0; margin-inline: auto; padding: var(--space-group); overflow-y: auto; }
 .session-list-group + .session-list-group { margin-top: var(--space-group); }
-.session-list-group h2 { margin: 0 0 var(--space-inline); padding-inline: var(--space-component); color: var(--app-muted); font-size: 14px; font-weight: 400; line-height: 20px; }
+.session-list-group h2 { margin: 0 0 var(--space-inline); padding-inline: var(--space-component); color: var(--app-muted); font-size: var(--font-ui); font-weight: 400; line-height: var(--line-ui); }
 .session-list { display: flex; flex-direction: column; gap: var(--space-micro); margin: 0; padding: 0; list-style: none; }
 .session-list-item { display: flex; align-items: center; gap: var(--space-inline); min-width: 0; border-radius: var(--radius-row); }
 .session-list-item .sidebar-session-row { flex: 1; min-width: 0; }
@@ -34,8 +34,8 @@
 .session-list-manage:hover, .session-list-more:hover, .session-list-delete:hover, .session-list-error button:hover { background: var(--app-hover); color: var(--app-ink); }
 .session-list-delete { color: var(--tool-danger); }
 .session-list-manage:disabled, .session-list-delete:disabled { opacity: .45; cursor: default; }
-.session-list-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-inline); margin-bottom: var(--space-section); color: var(--app-muted); font-size: 14px; }
-.session-list-toolbar .session-management-toolbar { position: static; height: 32px; margin-left: auto; opacity: 1; pointer-events: auto; }
+.session-list-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-inline); margin-bottom: var(--space-section); color: var(--app-muted); font-size: var(--font-ui); }
+.session-list-toolbar .session-management-toolbar { position: static; height: var(--control-lg); margin-left: auto; opacity: 1; pointer-events: auto; }
 .session-list-empty, .session-list-error { color: var(--app-muted); font-size: var(--font-body); }
 @media (max-width: 960px) { .session-list-content { padding: var(--space-section); } }
 @media (prefers-reduced-motion: reduce) { .sidebar-recent .disclosure__content, .sidebar-recent .disclosure__indicator, .session-list-main .sidebar-selection-text { transition: none; } }
