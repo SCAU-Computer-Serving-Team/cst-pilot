@@ -22,6 +22,7 @@
           "name": "导航标题",
           "fill": "#1A2024",
           "content": "CST Pilot Web · 画布导航",
+          "lineHeight": 1.2222,
           "fontFamily": "Source Han Sans CN",
           "fontSize": 36,
           "fontWeight": "600"
@@ -9086,6 +9087,7 @@
               "name": "主区名称",
               "fill": "#1A2024",
               "content": "01  对话",
+              "lineHeight": 1.2222,
               "fontFamily": "Source Han Sans CN",
               "fontSize": 36,
               "fontWeight": "600"
@@ -9124,6 +9126,7 @@
                   "name": "主题标题",
                   "fill": "#1A2024",
                   "content": "主页与工作台",
+                  "lineHeight": 1.2222,
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 36,
                   "fontWeight": "600"
@@ -9883,8 +9886,8 @@
                               "type": "icon",
                               "id": "a6MND9",
                               "name": "加号",
-                              "width": 20,
-                              "height": 20,
+                              "width": 18,
+                              "height": 18,
                               "icon": "plus",
                               "library": "lucide",
                               "fill": "#5f676c"
@@ -10764,8 +10767,8 @@
                               "type": "icon",
                               "id": "YHopq",
                               "name": "加号",
-                              "width": 20,
-                              "height": 20,
+                              "width": 18,
+                              "height": 18,
                               "icon": "plus",
                               "library": "lucide",
                               "fill": "#aab3b7"
@@ -11465,8 +11468,8 @@
                           "type": "icon",
                           "id": "t1R54",
                           "name": "会话图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "hard-drive",
                           "library": "lucide",
                           "fill": "#646464"
@@ -11526,7 +11529,7 @@
                       "width": 816,
                       "height": 870,
                       "layout": "vertical",
-                      "gap": 24,
+                      "gap": 20,
                       "children": [
                         {
                           "type": "frame",
@@ -11693,8 +11696,8 @@
                                               "type": "icon",
                                               "id": "mYhal",
                                               "name": "完成图标",
-                                              "width": 17,
-                                              "height": 17,
+                                              "width": 18,
+                                              "height": 18,
                                               "icon": "check-check",
                                               "library": "lucide",
                                               "fill": "#007B3A"
@@ -11760,8 +11763,8 @@
                                                   "type": "icon",
                                                   "id": "N2j1K",
                                                   "name": "成功图标",
-                                                  "width": 17,
-                                                  "height": 17,
+                                                  "width": 18,
+                                                  "height": 18,
                                                   "icon": "check",
                                                   "library": "lucide",
                                                   "fill": "#007B3A"
@@ -12024,8 +12027,8 @@
                                                   "type": "icon",
                                                   "id": "jBZke",
                                                   "name": "成功图标",
-                                                  "width": 17,
-                                                  "height": 17,
+                                                  "width": 18,
+                                                  "height": 18,
                                                   "icon": "check",
                                                   "library": "lucide",
                                                   "fill": "#007B3A"
@@ -12161,8 +12164,8 @@
                                       "type": "icon",
                                       "id": "iFRoh",
                                       "name": "复制回答",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "copy",
                                       "library": "lucide",
                                       "fill": "#646464"
@@ -12183,8 +12186,8 @@
                                       "type": "icon",
                                       "id": "UqCuC",
                                       "name": "分叉",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "git-fork",
                                       "library": "lucide",
                                       "fill": "#646464"
@@ -13292,8 +13295,8 @@
                           "type": "icon",
                           "id": "NCdBr",
                           "name": "会话图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "hard-drive",
                           "library": "lucide",
                           "fill": "#AAB3B7"
@@ -13353,7 +13356,7 @@
                       "width": 816,
                       "height": 870,
                       "layout": "vertical",
-                      "gap": 24,
+                      "gap": 20,
                       "children": [
                         {
                           "type": "frame",
@@ -13520,8 +13523,8 @@
                                               "type": "icon",
                                               "id": "N26JVz",
                                               "name": "完成图标",
-                                              "width": 17,
-                                              "height": 17,
+                                              "width": 18,
+                                              "height": 18,
                                               "icon": "check-check",
                                               "library": "lucide",
                                               "fill": "#67CA83"
@@ -13587,8 +13590,8 @@
                                                   "type": "icon",
                                                   "id": "vE1YD",
                                                   "name": "成功图标",
-                                                  "width": 17,
-                                                  "height": 17,
+                                                  "width": 18,
+                                                  "height": 18,
                                                   "icon": "check",
                                                   "library": "lucide",
                                                   "fill": "#67CA83"
@@ -13851,8 +13854,8 @@
                                                   "type": "icon",
                                                   "id": "zTtlS",
                                                   "name": "成功图标",
-                                                  "width": 17,
-                                                  "height": 17,
+                                                  "width": 18,
+                                                  "height": 18,
                                                   "icon": "check",
                                                   "library": "lucide",
                                                   "fill": "#67CA83"
@@ -13988,8 +13991,8 @@
                                       "type": "icon",
                                       "id": "drsdz",
                                       "name": "复制回答",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "copy",
                                       "library": "lucide",
                                       "fill": "#AAB3B7"
@@ -14010,8 +14013,8 @@
                                       "type": "icon",
                                       "id": "p680o",
                                       "name": "分叉",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "git-fork",
                                       "library": "lucide",
                                       "fill": "#AAB3B7"
@@ -14572,7 +14575,7 @@
           "y": 1752,
           "name": "输入与排队",
           "width": 8576,
-          "height": 1574,
+          "height": 1584,
           "layout": "none",
           "children": [
             {
@@ -14597,6 +14600,7 @@
                   "name": "主题标题",
                   "fill": "#1A2024",
                   "content": "输入与排队",
+                  "lineHeight": 1.2222,
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 36,
                   "fontWeight": "600"
@@ -18416,8 +18420,8 @@
                               "type": "icon",
                               "id": "Z8tezs",
                               "name": "删除图标",
-                              "width": 12,
-                              "height": 12,
+                              "width": 14,
+                              "height": 14,
                               "icon": "x",
                               "library": "lucide",
                               "fill": "#FFFFFF"
@@ -18755,8 +18759,8 @@
                               "type": "icon",
                               "id": "urQVt",
                               "name": "删除图标",
-                              "width": 12,
-                              "height": 12,
+                              "width": 14,
+                              "height": 14,
                               "icon": "x",
                               "library": "lucide",
                               "fill": "#0B1215"
@@ -23063,8 +23067,8 @@
         {
           "type": "frame",
           "id": "lwNtj",
-          "x": 0,
-          "y": 3646,
+          "x": 1085,
+          "y": 2607,
           "name": "分支与派生",
           "width": 8760,
           "height": 5362,
@@ -23092,6 +23096,7 @@
                   "name": "主题标题",
                   "fill": "#1A2024",
                   "content": "分支与派生",
+                  "lineHeight": 1.2222,
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 36,
                   "fontWeight": "600"
@@ -23696,8 +23701,8 @@
                           "type": "icon",
                           "id": "vW6LS",
                           "name": "会话图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "hard-drive",
                           "library": "lucide",
                           "fill": "#646464"
@@ -25777,8 +25782,8 @@
                           "type": "icon",
                           "id": "TstoP",
                           "name": "会话图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "hard-drive",
                           "library": "lucide",
                           "fill": "#AAB3B7"
@@ -27436,6 +27441,7 @@
                             0,
                             12
                           ],
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "text",
@@ -27463,6 +27469,7 @@
                             0,
                             12
                           ],
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "text",
@@ -27490,6 +27497,7 @@
                             0,
                             12
                           ],
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "text",
@@ -27517,6 +27525,7 @@
                             0,
                             12
                           ],
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "text",
@@ -27738,6 +27747,7 @@
                             0,
                             12
                           ],
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "text",
@@ -27765,6 +27775,7 @@
                             0,
                             12
                           ],
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "text",
@@ -27792,6 +27803,7 @@
                             0,
                             12
                           ],
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "text",
@@ -27819,6 +27831,7 @@
                             0,
                             12
                           ],
+                          "alignItems": "center",
                           "children": [
                             {
                               "type": "text",
@@ -28939,8 +28952,8 @@
                           "type": "icon",
                           "id": "r7eK7A",
                           "name": "会话图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "hard-drive",
                           "library": "lucide",
                           "fill": "#646464"
@@ -28998,7 +29011,7 @@
                       "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
                       "width": 816,
                       "layout": "vertical",
-                      "gap": 24,
+                      "gap": 20,
                       "children": [
                         {
                           "type": "frame",
@@ -29598,8 +29611,8 @@
                                       "type": "icon",
                                       "id": "Q9gpD",
                                       "name": "复制回答",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "copy",
                                       "library": "lucide",
                                       "fill": "#646464"
@@ -29620,8 +29633,8 @@
                                       "type": "icon",
                                       "id": "x0X8dG",
                                       "name": "分叉",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "git-fork",
                                       "library": "lucide",
                                       "fill": "#646464"
@@ -30685,8 +30698,8 @@
                           "type": "icon",
                           "id": "J1CGh",
                           "name": "会话图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "hard-drive",
                           "library": "lucide",
                           "fill": "#AAB3B7"
@@ -30744,7 +30757,7 @@
                       "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
                       "width": 816,
                       "layout": "vertical",
-                      "gap": 24,
+                      "gap": 20,
                       "children": [
                         {
                           "type": "frame",
@@ -31344,8 +31357,8 @@
                                       "type": "icon",
                                       "id": "OPmDY",
                                       "name": "复制回答",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "copy",
                                       "library": "lucide",
                                       "fill": "#AAB3B7"
@@ -31366,8 +31379,8 @@
                                       "type": "icon",
                                       "id": "wmwGQ",
                                       "name": "分叉",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "git-fork",
                                       "library": "lucide",
                                       "fill": "#AAB3B7"
@@ -32431,8 +32444,8 @@
                           "type": "icon",
                           "id": "S4KhH",
                           "name": "会话图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "hard-drive",
                           "library": "lucide",
                           "fill": "#646464"
@@ -32490,7 +32503,7 @@
                       "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
                       "width": 816,
                       "layout": "vertical",
-                      "gap": 24,
+                      "gap": 20,
                       "children": [
                         {
                           "type": "frame",
@@ -33090,8 +33103,8 @@
                                       "type": "icon",
                                       "id": "o5YPR",
                                       "name": "复制回答",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "copy",
                                       "library": "lucide",
                                       "fill": "#646464"
@@ -33112,8 +33125,8 @@
                                       "type": "icon",
                                       "id": "os4Or",
                                       "name": "分叉",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "git-fork",
                                       "library": "lucide",
                                       "fill": "#646464"
@@ -34190,8 +34203,8 @@
                           "type": "icon",
                           "id": "Ob8qW",
                           "name": "会话图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "hard-drive",
                           "library": "lucide",
                           "fill": "#AAB3B7"
@@ -34249,7 +34262,7 @@
                       "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
                       "width": 816,
                       "layout": "vertical",
-                      "gap": 24,
+                      "gap": 20,
                       "children": [
                         {
                           "type": "frame",
@@ -34849,8 +34862,8 @@
                                       "type": "icon",
                                       "id": "x4siN",
                                       "name": "复制回答",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "copy",
                                       "library": "lucide",
                                       "fill": "#AAB3B7"
@@ -34871,8 +34884,8 @@
                                       "type": "icon",
                                       "id": "W4c1r",
                                       "name": "分叉",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "git-fork",
                                       "library": "lucide",
                                       "fill": "#AAB3B7"
@@ -35949,8 +35962,8 @@
                           "type": "icon",
                           "id": "CL4FE",
                           "name": "会话图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "hard-drive",
                           "library": "lucide",
                           "fill": "#646464"
@@ -36008,7 +36021,7 @@
                       "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
                       "width": 816,
                       "layout": "vertical",
-                      "gap": 24,
+                      "gap": 20,
                       "children": [
                         {
                           "type": "frame",
@@ -36608,8 +36621,8 @@
                                       "type": "icon",
                                       "id": "QFhEg",
                                       "name": "复制回答",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "copy",
                                       "library": "lucide",
                                       "fill": "#646464"
@@ -36630,8 +36643,8 @@
                                       "type": "icon",
                                       "id": "B6x48",
                                       "name": "分叉",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "git-fork",
                                       "library": "lucide",
                                       "fill": "#646464"
@@ -37743,8 +37756,8 @@
                           "type": "icon",
                           "id": "A5SHt",
                           "name": "会话图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "hard-drive",
                           "library": "lucide",
                           "fill": "#AAB3B7"
@@ -37802,7 +37815,7 @@
                       "context": "对话流占满主区，两侧各留36px；窄窗口两侧各16px。卡片与表格沿用同一内容宽度。",
                       "width": 816,
                       "layout": "vertical",
-                      "gap": 24,
+                      "gap": 20,
                       "children": [
                         {
                           "type": "frame",
@@ -38402,8 +38415,8 @@
                                       "type": "icon",
                                       "id": "d3MXp7",
                                       "name": "复制回答",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "copy",
                                       "library": "lucide",
                                       "fill": "#AAB3B7"
@@ -38424,8 +38437,8 @@
                                       "type": "icon",
                                       "id": "g7Xy3",
                                       "name": "分叉",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "git-fork",
                                       "library": "lucide",
                                       "fill": "#AAB3B7"
@@ -40348,6 +40361,7 @@
               "name": "主区名称",
               "fill": "#1A2024",
               "content": "02  会话管理",
+              "lineHeight": 1.2222,
               "fontFamily": "Source Han Sans CN",
               "fontSize": 36,
               "fontWeight": "600"
@@ -40383,8 +40397,9 @@
                   "name": "分区标题",
                   "fill": "#1A2024",
                   "content": "全部会话",
+                  "lineHeight": 1.3333,
                   "fontFamily": "Source Han Sans CN",
-                  "fontSize": 28,
+                  "fontSize": 24,
                   "fontWeight": "600"
                 },
                 {
@@ -44992,6 +45007,7 @@
                   "name": "主题标题",
                   "fill": "#1A2024",
                   "content": "会话批量管理",
+                  "lineHeight": 1.2222,
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 36,
                   "fontWeight": "600"
@@ -46645,8 +46661,8 @@
                                       "type": "icon",
                                       "id": "yTr9C",
                                       "name": "勾选对勾",
-                                      "width": 12,
-                                      "height": 12,
+                                      "width": 14,
+                                      "height": 14,
                                       "icon": "check",
                                       "library": "lucide",
                                       "fill": "#FFFFFF"
@@ -48572,8 +48588,8 @@
                                       "type": "icon",
                                       "id": "sC5kL",
                                       "name": "勾选对勾",
-                                      "width": 12,
-                                      "height": 12,
+                                      "width": 14,
+                                      "height": 14,
                                       "icon": "check",
                                       "library": "lucide",
                                       "fill": "#FFFFFF"
@@ -49557,8 +49573,8 @@
                           "type": "icon",
                           "id": "jcHrg",
                           "name": "会话图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "hard-drive",
                           "library": "lucide",
                           "fill": "#646464"
@@ -49618,7 +49634,7 @@
                       "width": 816,
                       "height": 870,
                       "layout": "vertical",
-                      "gap": 24,
+                      "gap": 20,
                       "children": [
                         {
                           "type": "frame",
@@ -49785,8 +49801,8 @@
                                               "type": "icon",
                                               "id": "xtGCV",
                                               "name": "完成图标",
-                                              "width": 17,
-                                              "height": 17,
+                                              "width": 18,
+                                              "height": 18,
                                               "icon": "check-check",
                                               "library": "lucide",
                                               "fill": "#007B3A"
@@ -49852,8 +49868,8 @@
                                                   "type": "icon",
                                                   "id": "JGk7d",
                                                   "name": "成功图标",
-                                                  "width": 17,
-                                                  "height": 17,
+                                                  "width": 18,
+                                                  "height": 18,
                                                   "icon": "check",
                                                   "library": "lucide",
                                                   "fill": "#007B3A"
@@ -50116,8 +50132,8 @@
                                                   "type": "icon",
                                                   "id": "n95BM0",
                                                   "name": "成功图标",
-                                                  "width": 17,
-                                                  "height": 17,
+                                                  "width": 18,
+                                                  "height": 18,
                                                   "icon": "check",
                                                   "library": "lucide",
                                                   "fill": "#007B3A"
@@ -50253,8 +50269,8 @@
                                       "type": "icon",
                                       "id": "uskXV",
                                       "name": "复制回答",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "copy",
                                       "library": "lucide",
                                       "fill": "#646464"
@@ -50275,8 +50291,8 @@
                                       "type": "icon",
                                       "id": "r3IjVV",
                                       "name": "分叉",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "git-fork",
                                       "library": "lucide",
                                       "fill": "#646464"
@@ -51499,8 +51515,8 @@
                           "type": "icon",
                           "id": "y87r0c",
                           "name": "会话图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "hard-drive",
                           "library": "lucide",
                           "fill": "#AAB3B7"
@@ -51560,7 +51576,7 @@
                       "width": 816,
                       "height": 870,
                       "layout": "vertical",
-                      "gap": 24,
+                      "gap": 20,
                       "children": [
                         {
                           "type": "frame",
@@ -51727,8 +51743,8 @@
                                               "type": "icon",
                                               "id": "M0UkNN",
                                               "name": "完成图标",
-                                              "width": 17,
-                                              "height": 17,
+                                              "width": 18,
+                                              "height": 18,
                                               "icon": "check-check",
                                               "library": "lucide",
                                               "fill": "#67CA83"
@@ -51794,8 +51810,8 @@
                                                   "type": "icon",
                                                   "id": "w9K4c",
                                                   "name": "成功图标",
-                                                  "width": 17,
-                                                  "height": 17,
+                                                  "width": 18,
+                                                  "height": 18,
                                                   "icon": "check",
                                                   "library": "lucide",
                                                   "fill": "#67CA83"
@@ -52058,8 +52074,8 @@
                                                   "type": "icon",
                                                   "id": "wAoxN",
                                                   "name": "成功图标",
-                                                  "width": 17,
-                                                  "height": 17,
+                                                  "width": 18,
+                                                  "height": 18,
                                                   "icon": "check",
                                                   "library": "lucide",
                                                   "fill": "#67CA83"
@@ -52195,8 +52211,8 @@
                                       "type": "icon",
                                       "id": "jCjiQ",
                                       "name": "复制回答",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "copy",
                                       "library": "lucide",
                                       "fill": "#AAB3B7"
@@ -52217,8 +52233,8 @@
                                       "type": "icon",
                                       "id": "PXV78",
                                       "name": "分叉",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "git-fork",
                                       "library": "lucide",
                                       "fill": "#AAB3B7"
@@ -53257,8 +53273,8 @@
                           "type": "icon",
                           "id": "TchO9",
                           "name": "会话图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "hard-drive",
                           "library": "lucide",
                           "fill": "#646464"
@@ -53318,7 +53334,7 @@
                       "width": 816,
                       "height": 870,
                       "layout": "vertical",
-                      "gap": 24,
+                      "gap": 20,
                       "children": [
                         {
                           "type": "frame",
@@ -53485,8 +53501,8 @@
                                               "type": "icon",
                                               "id": "K5AsF",
                                               "name": "完成图标",
-                                              "width": 17,
-                                              "height": 17,
+                                              "width": 18,
+                                              "height": 18,
                                               "icon": "check-check",
                                               "library": "lucide",
                                               "fill": "#007B3A"
@@ -53552,8 +53568,8 @@
                                                   "type": "icon",
                                                   "id": "VzIKV",
                                                   "name": "成功图标",
-                                                  "width": 17,
-                                                  "height": 17,
+                                                  "width": 18,
+                                                  "height": 18,
                                                   "icon": "check",
                                                   "library": "lucide",
                                                   "fill": "#007B3A"
@@ -53816,8 +53832,8 @@
                                                   "type": "icon",
                                                   "id": "mqwDu",
                                                   "name": "成功图标",
-                                                  "width": 17,
-                                                  "height": 17,
+                                                  "width": 18,
+                                                  "height": 18,
                                                   "icon": "check",
                                                   "library": "lucide",
                                                   "fill": "#007B3A"
@@ -53953,8 +53969,8 @@
                                       "type": "icon",
                                       "id": "oVjPH",
                                       "name": "复制回答",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "copy",
                                       "library": "lucide",
                                       "fill": "#646464"
@@ -53975,8 +53991,8 @@
                                       "type": "icon",
                                       "id": "ud2nE",
                                       "name": "分叉",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "git-fork",
                                       "library": "lucide",
                                       "fill": "#646464"
@@ -55099,8 +55115,8 @@
                           "type": "icon",
                           "id": "o5Zqr6",
                           "name": "会话图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "hard-drive",
                           "library": "lucide",
                           "fill": "#AAB3B7"
@@ -55160,7 +55176,7 @@
                       "width": 816,
                       "height": 870,
                       "layout": "vertical",
-                      "gap": 24,
+                      "gap": 20,
                       "children": [
                         {
                           "type": "frame",
@@ -55327,8 +55343,8 @@
                                               "type": "icon",
                                               "id": "n91s52",
                                               "name": "完成图标",
-                                              "width": 17,
-                                              "height": 17,
+                                              "width": 18,
+                                              "height": 18,
                                               "icon": "check-check",
                                               "library": "lucide",
                                               "fill": "#67CA83"
@@ -55394,8 +55410,8 @@
                                                   "type": "icon",
                                                   "id": "IZb3u",
                                                   "name": "成功图标",
-                                                  "width": 17,
-                                                  "height": 17,
+                                                  "width": 18,
+                                                  "height": 18,
                                                   "icon": "check",
                                                   "library": "lucide",
                                                   "fill": "#67CA83"
@@ -55658,8 +55674,8 @@
                                                   "type": "icon",
                                                   "id": "z0UgU",
                                                   "name": "成功图标",
-                                                  "width": 17,
-                                                  "height": 17,
+                                                  "width": 18,
+                                                  "height": 18,
                                                   "icon": "check",
                                                   "library": "lucide",
                                                   "fill": "#67CA83"
@@ -55795,8 +55811,8 @@
                                       "type": "icon",
                                       "id": "t5aR4Q",
                                       "name": "复制回答",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "copy",
                                       "library": "lucide",
                                       "fill": "#AAB3B7"
@@ -55817,8 +55833,8 @@
                                       "type": "icon",
                                       "id": "qpn19",
                                       "name": "分叉",
-                                      "width": 15,
-                                      "height": 15,
+                                      "width": 16,
+                                      "height": 16,
                                       "icon": "git-fork",
                                       "library": "lucide",
                                       "fill": "#AAB3B7"
@@ -61654,8 +61670,9 @@
                   "name": "分区标题",
                   "fill": "#1A2024",
                   "content": "会话导出",
+                  "lineHeight": 1.3333,
                   "fontFamily": "Source Han Sans CN",
-                  "fontSize": 28,
+                  "fontSize": 24,
                   "fontWeight": "600"
                 },
                 {
@@ -62561,8 +62578,9 @@
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
                                   "content": "整机概览",
+                                  "lineHeight": 1.4,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": 26,
+                                  "fontSize": 20,
                                   "fontWeight": "600"
                                 },
                                 {
@@ -63035,8 +63053,8 @@
                                               "type": "icon",
                                               "id": "cdlvZ",
                                               "name": "系统详情图标",
-                                              "width": 12,
-                                              "height": 12,
+                                              "width": 14,
+                                              "height": 14,
                                               "icon": "chevron-right",
                                               "library": "lucide",
                                               "fill": "#646464"
@@ -63069,8 +63087,8 @@
                                               "type": "icon",
                                               "id": "dPm1N",
                                               "name": "原始数据图标",
-                                              "width": 12,
-                                              "height": 12,
+                                              "width": 14,
+                                              "height": 14,
                                               "icon": "chevron-right",
                                               "library": "lucide",
                                               "fill": "#646464"
@@ -63087,8 +63105,9 @@
                                   "name": "回复标题",
                                   "fill": "#202020",
                                   "content": "检查结论",
+                                  "lineHeight": 1.4,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": 22,
+                                  "fontSize": 20,
                                   "fontWeight": "600"
                                 },
                                 {
@@ -64004,8 +64023,9 @@
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
                                   "content": "整机概览",
+                                  "lineHeight": 1.4,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": 26,
+                                  "fontSize": 20,
                                   "fontWeight": "600"
                                 },
                                 {
@@ -64486,8 +64506,8 @@
                                                   "type": "icon",
                                                   "id": "N8FGp",
                                                   "name": "系统详情图标",
-                                                  "width": 12,
-                                                  "height": 12,
+                                                  "width": 14,
+                                                  "height": 14,
                                                   "icon": "chevron-right",
                                                   "library": "lucide",
                                                   "fill": "#AAB3B7"
@@ -64520,8 +64540,8 @@
                                                   "type": "icon",
                                                   "id": "Uanej",
                                                   "name": "原始数据图标",
-                                                  "width": 12,
-                                                  "height": 12,
+                                                  "width": 14,
+                                                  "height": 14,
                                                   "icon": "chevron-right",
                                                   "library": "lucide",
                                                   "fill": "#AAB3B7"
@@ -64540,8 +64560,9 @@
                                   "name": "回复标题",
                                   "fill": "#FFFFFF",
                                   "content": "检查结论",
+                                  "lineHeight": 1.4,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": 22,
+                                  "fontSize": 20,
                                   "fontWeight": "600"
                                 },
                                 {
@@ -65504,8 +65525,9 @@
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
                                   "content": "整机概览",
+                                  "lineHeight": 1.4,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": 26,
+                                  "fontSize": 20,
                                   "fontWeight": "600"
                                 },
                                 {
@@ -65978,8 +66000,8 @@
                                               "type": "icon",
                                               "id": "T2bgR",
                                               "name": "系统详情图标",
-                                              "width": 12,
-                                              "height": 12,
+                                              "width": 14,
+                                              "height": 14,
                                               "icon": "chevron-right",
                                               "library": "lucide",
                                               "fill": "#646464"
@@ -66012,8 +66034,8 @@
                                               "type": "icon",
                                               "id": "XsGQm",
                                               "name": "原始数据图标",
-                                              "width": 12,
-                                              "height": 12,
+                                              "width": 14,
+                                              "height": 14,
                                               "icon": "chevron-right",
                                               "library": "lucide",
                                               "fill": "#646464"
@@ -66030,8 +66052,9 @@
                                   "name": "回复标题",
                                   "fill": "#202020",
                                   "content": "检查结论",
+                                  "lineHeight": 1.4,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": 22,
+                                  "fontSize": 20,
                                   "fontWeight": "600"
                                 },
                                 {
@@ -66994,8 +67017,9 @@
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
                                   "content": "整机概览",
+                                  "lineHeight": 1.4,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": 26,
+                                  "fontSize": 20,
                                   "fontWeight": "600"
                                 },
                                 {
@@ -67476,8 +67500,8 @@
                                                   "type": "icon",
                                                   "id": "J9FDYe",
                                                   "name": "系统详情图标",
-                                                  "width": 12,
-                                                  "height": 12,
+                                                  "width": 14,
+                                                  "height": 14,
                                                   "icon": "chevron-right",
                                                   "library": "lucide",
                                                   "fill": "#AAB3B7"
@@ -67510,8 +67534,8 @@
                                                   "type": "icon",
                                                   "id": "u23D2",
                                                   "name": "原始数据图标",
-                                                  "width": 12,
-                                                  "height": 12,
+                                                  "width": 14,
+                                                  "height": 14,
                                                   "icon": "chevron-right",
                                                   "library": "lucide",
                                                   "fill": "#AAB3B7"
@@ -67530,8 +67554,9 @@
                                   "name": "回复标题",
                                   "fill": "#FFFFFF",
                                   "content": "检查结论",
+                                  "lineHeight": 1.4,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": 22,
+                                  "fontSize": 20,
                                   "fontWeight": "600"
                                 },
                                 {
@@ -67593,6 +67618,7 @@
               "name": "主区名称",
               "fill": "#1A2024",
               "content": "03  设置与模型",
+              "lineHeight": 1.2222,
               "fontFamily": "Source Han Sans CN",
               "fontSize": 36,
               "fontWeight": "600"
@@ -67631,6 +67657,7 @@
                   "name": "主题标题",
                   "fill": "#1A2024",
                   "content": "设置与模型服务",
+                  "lineHeight": 1.2222,
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 36,
                   "fontWeight": "600"
@@ -73869,12 +73896,12 @@
                                       "children": [
                                         {
                                           "type": "text",
-                                          "id": "XLHLX",
-                                          "name": "••••••••••••••••",
+                                          "id": "xHADu",
+                                          "name": "密钥掩码",
                                           "fill": "#202020",
                                           "textGrowth": "fixed-width",
                                           "width": "fill_container",
-                                          "content": "••••••••••••••••",
+                                          "content": "••••••••••••",
                                           "lineHeight": 1.5,
                                           "fontFamily": "Source Han Sans CN",
                                           "fontSize": 16,
@@ -75000,12 +75027,12 @@
                                       "children": [
                                         {
                                           "type": "text",
-                                          "id": "k0POEj",
-                                          "name": "••••••••••••••••",
+                                          "id": "XNfHW",
+                                          "name": "密钥掩码",
                                           "fill": "#E0EAEE",
                                           "textGrowth": "fixed-width",
                                           "width": "fill_container",
-                                          "content": "••••••••••••••••",
+                                          "content": "••••••••••••",
                                           "lineHeight": 1.5,
                                           "fontFamily": "Source Han Sans CN",
                                           "fontSize": 16,
@@ -76172,8 +76199,8 @@
                                           "type": "icon",
                                           "id": "d9GdBS",
                                           "name": "check 图标",
-                                          "width": 12,
-                                          "height": 12,
+                                          "width": 14,
+                                          "height": 14,
                                           "icon": "check",
                                           "library": "lucide",
                                           "fill": "#FFFFFF"
@@ -76256,8 +76283,8 @@
                                           "type": "icon",
                                           "id": "NarOn",
                                           "name": "check 图标",
-                                          "width": 12,
-                                          "height": 12,
+                                          "width": 14,
+                                          "height": 14,
                                           "icon": "check",
                                           "library": "lucide",
                                           "fill": "#FFFFFF"
@@ -77389,8 +77416,8 @@
                                           "type": "icon",
                                           "id": "Vo83h",
                                           "name": "check 图标",
-                                          "width": 12,
-                                          "height": 12,
+                                          "width": 14,
+                                          "height": 14,
                                           "icon": "check",
                                           "library": "lucide",
                                           "fill": "#001F42"
@@ -77473,8 +77500,8 @@
                                           "type": "icon",
                                           "id": "MOnjB",
                                           "name": "check 图标",
-                                          "width": 12,
-                                          "height": 12,
+                                          "width": 14,
+                                          "height": 14,
                                           "icon": "check",
                                           "library": "lucide",
                                           "fill": "#001F42"
@@ -85594,6 +85621,7 @@
               "name": "主区名称",
               "fill": "#1A2024",
               "content": "04  账号与登录",
+              "lineHeight": 1.2222,
               "fontFamily": "Source Han Sans CN",
               "fontSize": 36,
               "fontWeight": "600"
@@ -85632,6 +85660,7 @@
                   "name": "主题标题",
                   "fill": "#1A2024",
                   "content": "账号信息",
+                  "lineHeight": 1.2222,
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 36,
                   "fontWeight": "600"
@@ -86236,8 +86265,8 @@
                           "type": "icon",
                           "id": "ZNa3C",
                           "name": "账号信息图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "circle-user",
                           "library": "lucide",
                           "fill": "#646464"
@@ -87123,8 +87152,8 @@
                           "type": "icon",
                           "id": "PhOAY",
                           "name": "账号信息图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "circle-user",
                           "library": "lucide",
                           "fill": "#AAB3B7"
@@ -88010,8 +88039,8 @@
                           "type": "icon",
                           "id": "AK6wx",
                           "name": "账号信息图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "circle-user",
                           "library": "lucide",
                           "fill": "#646464"
@@ -88859,8 +88888,8 @@
                           "type": "icon",
                           "id": "zoZg5",
                           "name": "账号信息图标",
-                          "width": 20,
-                          "height": 20,
+                          "width": 18,
+                          "height": 18,
                           "icon": "circle-user",
                           "library": "lucide",
                           "fill": "#AAB3B7"
@@ -89187,6 +89216,7 @@
                   "name": "主题标题",
                   "fill": "#1A2024",
                   "content": "登录页面",
+                  "lineHeight": 1.2222,
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 36,
                   "fontWeight": "600"
@@ -89691,8 +89721,8 @@
                       "type": "icon",
                       "id": "QNdY0",
                       "name": "关闭图标",
-                      "width": 20,
-                      "height": 20,
+                      "width": 18,
+                      "height": 18,
                       "icon": "x",
                       "library": "lucide",
                       "fill": "#FFFFFF"
@@ -90155,8 +90185,8 @@
                       "type": "icon",
                       "id": "NAuaE",
                       "name": "关闭图标",
-                      "width": 20,
-                      "height": 20,
+                      "width": 18,
+                      "height": 18,
                       "icon": "x",
                       "library": "lucide",
                       "fill": "#FFFFFF"
@@ -90341,8 +90371,9 @@
                       "name": "产品名",
                       "fill": "#FFFFFF",
                       "content": "CST Pilot",
+                      "lineHeight": 1.4,
                       "fontFamily": "Source Han Sans CN",
-                      "fontSize": 18,
+                      "fontSize": 20,
                       "fontWeight": "600"
                     },
                     {
@@ -90760,8 +90791,9 @@
                       "name": "产品名",
                       "fill": "#FFFFFF",
                       "content": "CST Pilot",
+                      "lineHeight": 1.4,
                       "fontFamily": "Source Han Sans CN",
-                      "fontSize": 18,
+                      "fontSize": 20,
                       "fontWeight": "600"
                     },
                     {
@@ -91538,8 +91570,8 @@
                       "type": "icon",
                       "id": "aw8IX",
                       "name": "关闭图标",
-                      "width": 20,
-                      "height": 20,
+                      "width": 18,
+                      "height": 18,
                       "icon": "x",
                       "library": "lucide",
                       "fill": "#FFFFFF"
@@ -92085,8 +92117,8 @@
                       "type": "icon",
                       "id": "J1HfWx",
                       "name": "关闭图标",
-                      "width": 20,
-                      "height": 20,
+                      "width": 18,
+                      "height": 18,
                       "icon": "x",
                       "library": "lucide",
                       "fill": "#FFFFFF"
@@ -92500,8 +92532,8 @@
                                   "x": 2,
                                   "y": 2,
                                   "name": "已勾选",
-                                  "width": 12,
-                                  "height": 12,
+                                  "width": 14,
+                                  "height": 14,
                                   "icon": "check",
                                   "library": "lucide",
                                   "fill": "#FFFFFF"
@@ -92698,8 +92730,8 @@
                       "type": "icon",
                       "id": "zZTiJ",
                       "name": "关闭图标",
-                      "width": 20,
-                      "height": 20,
+                      "width": 18,
+                      "height": 18,
                       "icon": "x",
                       "library": "lucide",
                       "fill": "#FFFFFF"
@@ -93113,8 +93145,8 @@
                                   "x": 2,
                                   "y": 2,
                                   "name": "已勾选",
-                                  "width": 12,
-                                  "height": 12,
+                                  "width": 14,
+                                  "height": 14,
                                   "icon": "check",
                                   "library": "lucide",
                                   "fill": "#131A1D"
@@ -93311,8 +93343,8 @@
                       "type": "icon",
                       "id": "vQ5HC",
                       "name": "关闭图标",
-                      "width": 20,
-                      "height": 20,
+                      "width": 18,
+                      "height": 18,
                       "icon": "x",
                       "library": "lucide",
                       "fill": "#FFFFFF"
@@ -93838,8 +93870,8 @@
                       "type": "icon",
                       "id": "b2yiYE",
                       "name": "关闭图标",
-                      "width": 20,
-                      "height": 20,
+                      "width": 18,
+                      "height": 18,
                       "icon": "x",
                       "library": "lucide",
                       "fill": "#FFFFFF"
@@ -94365,8 +94397,8 @@
                       "type": "icon",
                       "id": "EWsa3",
                       "name": "关闭图标",
-                      "width": 20,
-                      "height": 20,
+                      "width": 18,
+                      "height": 18,
                       "icon": "x",
                       "library": "lucide",
                       "fill": "#FFFFFF"
@@ -94411,6 +94443,7 @@
               "name": "主区名称",
               "fill": "#1A2024",
               "content": "05  通用组件与反馈",
+              "lineHeight": 1.2222,
               "fontFamily": "Source Han Sans CN",
               "fontSize": 36,
               "fontWeight": "600"
@@ -94424,7 +94457,7 @@
           "y": 176,
           "name": "悬停与菜单",
           "width": 6128,
-          "height": 533,
+          "height": 544,
           "layout": "none",
           "children": [
             {
@@ -94449,6 +94482,7 @@
                   "name": "主题标题",
                   "fill": "#1A2024",
                   "content": "悬停与菜单",
+                  "lineHeight": 1.2222,
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 36,
                   "fontWeight": "600"
@@ -100635,9 +100669,9 @@
               "name": "画布标题",
               "fill": "#1A2024",
               "content": "模型与思考强度选择器",
-              "lineHeight": 1.5,
+              "lineHeight": 1.3333,
               "fontFamily": "Source Han Sans CN",
-              "fontSize": 28,
+              "fontSize": 24,
               "fontWeight": "600"
             },
             {
@@ -101278,9 +101312,9 @@
               "name": "画布标题",
               "fill": "#FFFFFF",
               "content": "模型与思考强度选择器",
-              "lineHeight": 1.5,
+              "lineHeight": 1.3333,
               "fontFamily": "Source Han Sans CN",
-              "fontSize": 28,
+              "fontSize": 24,
               "fontWeight": "600"
             },
             {
@@ -101936,6 +101970,7 @@
               "name": "主区名称",
               "fill": "#1A2024",
               "content": "06  仪表盘",
+              "lineHeight": 1.2222,
               "fontFamily": "Source Han Sans CN",
               "fontSize": 36,
               "fontWeight": "600"
@@ -101974,6 +102009,7 @@
                   "name": "主题标题",
                   "fill": "#1A2024",
                   "content": "仪表盘 · MVP 后",
+                  "lineHeight": 1.2222,
                   "fontFamily": "Source Han Sans CN",
                   "fontSize": 36,
                   "fontWeight": "600"
@@ -103003,6 +103039,7 @@
                               "name": "指标数值",
                               "fill": "$dash-ink",
                               "content": "1,284,600",
+                              "lineHeight": 1.2222,
                               "fontFamily": "Source Han Sans CN",
                               "fontSize": 36,
                               "fontWeight": "600",
@@ -103058,6 +103095,7 @@
                               "name": "指标数值",
                               "fill": "$dash-ink",
                               "content": "186",
+                              "lineHeight": 1.2222,
                               "fontFamily": "Source Han Sans CN",
                               "fontSize": 36,
                               "fontWeight": "600",
@@ -103113,6 +103151,7 @@
                               "name": "指标数值",
                               "fill": "$dash-ink",
                               "content": "$12.84",
+                              "lineHeight": 1.2222,
                               "fontFamily": "Source Han Sans CN",
                               "fontSize": 36,
                               "fontWeight": "600",
@@ -103168,6 +103207,7 @@
                               "name": "指标数值",
                               "fill": "$dash-ink",
                               "content": "67.8%",
+                              "lineHeight": 1.2222,
                               "fontFamily": "Source Han Sans CN",
                               "fontSize": 36,
                               "fontWeight": "600",
@@ -105240,8 +105280,8 @@
                                       "type": "icon",
                                       "id": "qxHcS",
                                       "name": "时间倒序",
-                                      "width": 12,
-                                      "height": 12,
+                                      "width": 14,
+                                      "height": 14,
                                       "icon": "arrow-down",
                                       "library": "lucide",
                                       "fill": "$dash-muted"
@@ -109901,6 +109941,7 @@
                               "name": "指标数值",
                               "fill": "#E0EAEE",
                               "content": "1,284,600",
+                              "lineHeight": 1.2222,
                               "fontFamily": "Source Han Sans CN",
                               "fontSize": 36,
                               "fontWeight": "600",
@@ -109956,6 +109997,7 @@
                               "name": "指标数值",
                               "fill": "#E0EAEE",
                               "content": "186",
+                              "lineHeight": 1.2222,
                               "fontFamily": "Source Han Sans CN",
                               "fontSize": 36,
                               "fontWeight": "600",
@@ -110011,6 +110053,7 @@
                               "name": "指标数值",
                               "fill": "#E0EAEE",
                               "content": "$12.84",
+                              "lineHeight": 1.2222,
                               "fontFamily": "Source Han Sans CN",
                               "fontSize": 36,
                               "fontWeight": "600",
@@ -110066,6 +110109,7 @@
                               "name": "指标数值",
                               "fill": "#E0EAEE",
                               "content": "67.8%",
+                              "lineHeight": 1.2222,
                               "fontFamily": "Source Han Sans CN",
                               "fontSize": 36,
                               "fontWeight": "600",
@@ -112138,8 +112182,8 @@
                                       "type": "icon",
                                       "id": "z5Yjw4",
                                       "name": "时间倒序",
-                                      "width": 12,
-                                      "height": 12,
+                                      "width": 14,
+                                      "height": 14,
                                       "icon": "arrow-down",
                                       "library": "lucide",
                                       "fill": "#AAB3B7"
