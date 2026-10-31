@@ -15,7 +15,8 @@
 .settings-page-heading h2 { margin: 0; color: var(--chat-ink); font-size: var(--font-title); font-weight: 600; line-height: var(--line-title); }
 .settings-page-heading p { margin: var(--space-tight) 0 0; color: var(--chat-muted); font-size: var(--font-ui); line-height: var(--line-ui); }
 .settings-page-heading > div { min-width: 0; }
-.settings-back { display: inline-flex; align-items: center; align-self: flex-start; gap: var(--space-inline); color: var(--chat-muted); font-size: var(--font-ui); text-decoration: none; line-height: var(--line-ui); }
+.settings-back { display: inline-flex; align-items: center; align-self: flex-start; gap: var(--space-inline); min-height: var(--control-inline); color: var(--chat-muted); font-size: var(--font-ui); text-decoration: none; line-height: var(--line-ui); }
+.settings-workspace a[href="/settings/add"] { display: inline-flex; align-items: center; min-height: var(--control-inline); }
 .settings-section { display: flex; flex-direction: column; gap: var(--space-inline); min-width: 0; }
 .settings-section > header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-section); }
 .settings-section h3, .settings-danger-zone h3 { margin: 0; font-size: var(--font-body); font-weight: 600; line-height: var(--line-body); }

@@ -2,7 +2,7 @@
 .export-toolbar { display: flex; align-items: center; gap: var(--space-group); padding: var(--space-group) 32px; border-bottom: 1px solid var(--chat-border); }
 .app-layout.sidebar-collapsed .export-toolbar { padding-left: 64px; }
 .export-toolbar h1 { margin: 0; font-size: var(--font-title); font-weight: 600; line-height: var(--line-title); }
-.export-back { display: inline-flex; align-items: center; gap: var(--space-inline); color: var(--chat-muted); font-size: var(--font-ui); line-height: var(--line-ui); }
+.export-back { display: inline-flex; align-items: center; gap: var(--space-inline); min-height: var(--control-inline); color: var(--chat-muted); font-size: var(--font-ui); line-height: var(--line-ui); }
 .export-layout { display: grid; grid-template-columns: 288px minmax(0, 1fr); gap: 32px; padding: 32px; align-items: start; }
 .export-controls { display: grid; gap: var(--space-group); min-width: 0; }
 .export-controls fieldset { display: grid; gap: var(--space-group); min-width: 0; border: 0; margin: 0; padding: 0; }
@@ -23,7 +23,7 @@
 .export-select-popover [role="option"]:is(:hover, [data-hovered="true"], [data-focus-visible="true"]):not([aria-selected="true"]) { background: var(--app-hover); }
 .export-select-popover [role="option"][aria-selected="true"] { background: var(--app-selected); }
 .export-select-popover [role="option"][data-focus-visible="true"] { outline: 1px solid var(--app-muted); outline-offset: -1px; }
-.export-controls label.export-check { display: flex; align-items: center; gap: var(--space-inline); }
+.export-controls label.export-check { display: flex; align-items: center; gap: var(--space-inline); min-height: var(--control-inline); }
 .export-controls input[type="checkbox"] { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--app-send); }
 .export-note, .export-preview-label { margin: 0; font-size: var(--font-ui); line-height: var(--line-ui); color: var(--chat-muted); overflow-wrap: anywhere; }
 .export-generate { justify-self: start; display: inline-flex; align-items: center; gap: var(--space-inline); min-height: var(--control-field); padding: 10px var(--space-section); border-radius: var(--radius-control); color: var(--app-send-icon); background: var(--app-send); font-size: var(--font-ui); font-weight: 600; line-height: var(--line-ui); }

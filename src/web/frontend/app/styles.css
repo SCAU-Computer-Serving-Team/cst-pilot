@@ -242,7 +242,8 @@
 *::-webkit-scrollbar { width: 0; height: 0; }
 html, body { min-width: 320px; min-height: 100%; margin: 0; }
 body { color: var(--app-ink); }
-button, textarea { font: inherit; }
+button, textarea, select { font: inherit; }
+select { height: var(--control); min-height: var(--control); padding-block: 0; font-size: var(--font-ui); line-height: var(--line-ui); }
 a { color: inherit; text-decoration: none; }
 a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
 ::selection { background: #ddecff; color: #001f42; }
@@ -375,7 +376,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .composer-actions .composer-icon { width: var(--control-lg); height: var(--control-lg); min-width: var(--control-lg); min-height: var(--control-lg); padding: 0; color: var(--app-muted); opacity: 1; }
 .composer-actions .composer-model { align-items: center; gap: var(--space-detail); height: var(--control-lg); min-height: var(--control-lg); border: 0; border-radius: var(--radius-control); box-shadow: none; color: var(--app-muted); background: transparent; padding: 0; }
 .context-meter-wrap { position: relative; display: inline-flex; align-items: center; min-inline-size: 0; margin: 0; padding: 0; border: 0; }
-.context-meter { display: inline-flex; align-items: center; justify-content: center; width: var(--icon-body); padding: 0; border: 0; border-radius: var(--radius-control); background: none; color: var(--app-send); cursor: pointer; }
+.context-meter { display: inline-flex; align-items: center; justify-content: center; min-width: var(--control-inline); width: var(--icon-body); height: var(--control-inline); padding: 0; border: 0; border-radius: var(--radius-control); background: none; color: var(--app-send); cursor: pointer; }
 .context-meter > svg { position: relative; top: 2px; flex-shrink: 0; }
 .context-meter:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
 /* 上下文面板宽 360，内边距 24、间距 16、圆角 12。 */
@@ -515,7 +516,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .markdown-table { width: 100%; max-width: 100%; overflow-x: auto; border: 1px solid var(--chat-border); border-radius: var(--radius-row); }
 .markdown-table:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
 .markdown table { width: 100%; border-collapse: separate; border-spacing: 0; overflow-wrap: normal; }
-.markdown th, .markdown td { padding: var(--space-inline) var(--space-component); border: 0; border-inline-end: 1px solid var(--chat-border); border-bottom: 1px solid var(--chat-border); line-height: var(--line-ui); }
+.markdown th, .markdown td { padding: var(--space-inline) var(--space-component); border: 0; border-inline-end: 1px solid var(--chat-border); border-bottom: 1px solid var(--chat-border); line-height: var(--line-body); }
 .markdown tr > :last-child { border-inline-end: 0; }
 .markdown tbody:last-child tr:last-child > *, .markdown thead:last-child tr:last-child > * { border-bottom: 0; }
 .markdown th { background: var(--chat-bubble); }
@@ -985,8 +986,8 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .settings-grip { display: inline-flex; padding: 0; border: 0; background: transparent; color: var(--chat-muted); cursor: grab; }
 /* 启用模型勾选：HeroUI Checkbox 重画为画布的 16px 方框，选中主色实心，对勾描边沿用 transitions.dev 25-checkbox-check。
    可点击的 input 在 Checkbox.Content（RAC CheckboxButton）里，缺它整条链路不响应 */
-.settings-check-box { --check-len: 1; display: inline-flex; }
-.settings-check-box [data-slot="checkbox-content"] { display: inline-flex; cursor: pointer; }
+.settings-check-box { --check-len: 1; display: inline-flex; min-width: var(--control-inline); min-height: var(--control-inline); align-items: center; justify-content: center; margin: calc(-1 * var(--space-tight)); }
+.settings-check-box [data-slot="checkbox-content"] { display: inline-flex; align-items: center; justify-content: center; width: var(--control-inline); height: var(--control-inline); cursor: pointer; }
 .settings-check-box [data-slot="checkbox-content"][data-disabled="true"] { cursor: default; }
 .settings-check-box .checkbox__control { width: 16px; height: 16px; padding: 0; border: 1px solid var(--chat-input-border); border-radius: var(--radius-control); background: var(--chat-row); box-shadow: none; transition: background var(--check-box) var(--check-ease), border-color var(--check-box) var(--check-ease); }
 .settings-check-box .checkbox__control::before { content: none; }
@@ -994,6 +995,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .settings-check-box[data-selected="true"] .checkbox__control { border-color: transparent; background: #1b85f2; }
 .settings-check-box[data-disabled="true"] { opacity: 0.45; }
 .settings-check-box [data-slot="checkbox-content"][data-focus-visible="true"] .checkbox__control { outline: none; box-shadow: var(--focus-shadow); }
+.settings-check-box input[type="checkbox"] { width: var(--control-inline); height: var(--control-inline); margin: 0; }
 .settings-check-box .checkbox__indicator svg { display: block; width: 12px; height: 12px; }
 .settings-check-box svg path { stroke-dasharray: var(--check-len); stroke-dashoffset: var(--check-len); transition: stroke-dashoffset var(--check-uncheck) var(--check-ease); }
 .settings-check-box[data-selected="true"] svg path { stroke-dashoffset: 0; transition: stroke-dashoffset var(--check-draw) var(--check-ease) var(--check-delay); }
@@ -1331,7 +1333,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .tree-text { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tree-text-muted { color: var(--chat-muted); font-size: var(--font-ui); line-height: var(--line-ui); }
 .tree-row-info .tree-text-muted, .tree-row-info .tree-text { font-size: var(--font-body); line-height: var(--line-body); }
-.tree-fold { display: inline-flex; align-items: center; gap: var(--space-inline); flex: 0 0 auto; margin-left: 6px; padding: var(--space-tight) var(--space-tight); border: 0; background: transparent; color: var(--chat-muted); font-size: var(--font-ui); line-height: 1; cursor: pointer; }
+.tree-fold { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-inline); flex: 0 0 auto; width: var(--control-inline); height: var(--control-inline); margin-left: 6px; padding: 0; border: 0; background: transparent; color: var(--chat-muted); font-size: var(--font-ui); line-height: var(--line-ui); cursor: pointer; }
 .tree-fold-count { color: var(--chat-muted); font-size: var(--font-caption); line-height: var(--line-caption); }
 .tree-current { flex: 0 0 auto; margin-left: var(--space-component); color: var(--chat-tool); font-size: var(--font-caption); line-height: var(--line-caption); }
 .chat-menu-trigger { margin-left: auto; color: var(--chat-muted); }
