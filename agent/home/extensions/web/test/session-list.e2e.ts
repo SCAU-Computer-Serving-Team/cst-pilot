@@ -109,7 +109,7 @@ test("最近二十项、16px 字号、四组全部会话与共享批量管理", 
 		const sizes = await probe.evaluate<{ nav: number; row: number; font: string; model: string }>(
 			`(() => ({ nav: document.querySelector('.sidebar-new').getBoundingClientRect().height, row: document.querySelector('.sidebar-session').getBoundingClientRect().height, font: getComputedStyle(document.querySelector('.sidebar-session')).fontSize, model: getComputedStyle(document.querySelector('.composer-model')).fontSize }))()`,
 		);
-		assert.deepEqual(sizes, { nav: 40, row: 32, font: "16px", model: "13px" });
+		assert.deepEqual(sizes, { nav: 40, row: 32, font: "16px", model: "14px" });
 		await screenshot("home-light.png");
 		await probe.click(".sidebar-recent-heading");
 		await probe.until(

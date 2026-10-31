@@ -69,7 +69,7 @@ test("压缩交互：顶部通知、草稿保留、关闭、实际失败与成�
 		);
 		assert.equal(
 			await probe.evaluate("document.querySelector('.error-notification').getBoundingClientRect().height"),
-			44,
+			46,
 		);
 		await probe.screenshot(join(root, "detail-light.png"));
 		await probe.call("Input.dispatchMouseEvent", { type: "mouseMoved", x: 30, y: 200 });

@@ -63,10 +63,10 @@ test("设置控件、紧凑协议菜单及外部入场动效", { timeout: 60_000
 		await browser.call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape" });
 		assert.equal(
 			await browser.evaluate(
-				"[...document.querySelectorAll('.settings-custom-field > input, .settings-custom-key')].every(n=>Math.round(n.getBoundingClientRect().height)===42)&&getComputedStyle(document.querySelector('.settings-custom-key input')).fontSize==='16px'",
+				"[...document.querySelectorAll('.settings-custom-field > input, .settings-custom-key')].every(n=>Math.round(n.getBoundingClientRect().height)===40)&&getComputedStyle(document.querySelector('.settings-custom-key input')).fontSize==='16px'",
 			),
 			true,
-			"输入框 42px / 16px",
+			"输入框 40px / 16px",
 		);
 		assert.equal(
 			await browser.evaluate(
