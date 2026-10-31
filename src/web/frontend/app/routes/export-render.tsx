@@ -1,47 +1,28 @@
 import { useEffect, useState } from "react";
 import type { ExportSnapshot } from "../../../../../agent/home/extensions/web/shared/exports";
 import { ExportDocument } from "../exports/export-document";
-import { offlineHtml } from "../exports/offline-html";
 
-/** 导出专用文档：浏览器渲染与页面预览共用，独立主题，不订阅会话或加载账号。 */
+/** 预览与 Puppeteer 共用的只读页面；快照经同源消息传入，不读取会话或账号接口。 */
 export default function ExportRender() {
 	const [snapshot, setSnapshot] = useState<ExportSnapshot>();
 	const [error, setError] = useState("");
 	useEffect(() => {
-		const controller = new AbortController();
-		const hash = location.hash.slice(1);
-		if (hash) {
-			const [id, token] = hash.split(":");
-			void fetch(`/api/exports/${encodeURIComponent(id)}/snapshot`, {
-				headers: { "X-CST-Export-Token": token ?? "" },
-				signal: controller.signal,
-			})
-				.then(async (response) => {
-					if (!response.ok) throw new Error("导出预览已失效");
-					setSnapshot((await response.json()) as ExportSnapshot);
-				})
-				.catch(() => {
-					if (!controller.signal.aborted) {
-						setError("无法读取导出快照");
-						document.documentElement.dataset.exportState = "failed";
-					}
-				});
-		}
 		const receive = (event: MessageEvent) => {
 			if (
-				hash ||
 				event.origin !== location.origin ||
 				event.source !== window.parent ||
 				event.data?.type !== "cst-export-preview"
 			)
 				return;
+			setError("");
 			setSnapshot(event.data.snapshot as ExportSnapshot);
 		};
 		window.addEventListener("message", receive);
-		if (!hash) parent.postMessage({ type: "cst-export-frame-ready" }, location.origin);
+		document.documentElement.dataset.exportReceiver = "ready";
+		parent.postMessage({ type: "cst-export-frame-ready" }, location.origin);
 		return () => {
-			controller.abort();
 			window.removeEventListener("message", receive);
+			delete document.documentElement.dataset.exportReceiver;
 		};
 	}, []);
 	useEffect(() => {
@@ -52,11 +33,11 @@ export default function ExportRender() {
 		document.body.classList.add("export-page");
 		void (async () => {
 			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			// 先触发布局，让本次正文使用的字体进入加载集合。
+			document.querySelector(".export-document")?.getBoundingClientRect();
 			await document.fonts.ready;
 			await Promise.all([...document.images].map((image) => image.decode()));
-			if (!active) return;
-			if (location.hash && snapshot.options.format === "html")
-				Reflect.set(globalThis, "cstExportHtml", await offlineHtml(snapshot.title, snapshot.options.theme));
+			if ([...document.fonts].some((font) => font.status === "error")) throw new Error("导出字体无法加载");
 			if (active) document.documentElement.dataset.exportState = "ready";
 		})().catch(() => {
 			if (active) {

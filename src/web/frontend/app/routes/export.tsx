@@ -8,6 +8,7 @@ import type {
 	SessionExport,
 } from "../../../../../agent/home/extensions/web/shared/exports";
 import { apiJson, sessionPath } from "../data/api";
+import { ExportResult } from "../exports/export-result";
 import { ExportSelect } from "../exports/export-select";
 import { ErrorNotice } from "../shell/error-notice";
 
@@ -197,17 +198,7 @@ export default function ExportSession() {
 					{result?.status === "failed" && (
 						<ErrorNotice message={result.error?.message ?? "导出未完成"} onRetry={() => void generate()} />
 					)}
-					{result?.status === "completed" && (
-						<section className="export-result" aria-label="导出结果">
-							<h2>已保存 {result.files.length} 个文件</h2>
-							<p>{result.directory}</p>
-							{result.files.map((file) => (
-								<a key={file.url} href={file.url} download>
-									{file.name}
-								</a>
-							))}
-						</section>
-					)}
+					{result?.status === "completed" && <ExportResult key={result.id} result={result} />}
 					{running && <output className="export-note">任务在本机后台生成，离开页面后会继续保存。</output>}
 				</section>
 				<section className="export-preview-panel" aria-label="导出预览">

@@ -85,7 +85,13 @@
 
 `npm run test:web:e2e --prefix agent` 覆盖以下完整浏览器链路：
 
-- **会话导出与产物**：`session-export.test.ts` 验证快照统一取时、跨天日期、当前分支、过程筛选、脱敏、目录越界、队列、失败回收、重启登记与文件修改检测；`export-controls.e2e.ts` 覆盖浅深窄屏、下拉箭头几何对齐、菜单逐帧动效与键盘、实时分支及离页任务；`session-export.e2e.ts` 通过真实 API 和页面生成浅深 PNG、长文分图与离线 HTML，断网打开 HTML 并核对字体、附图、代码和折叠，保存实际文件及预览截图。`export-performance.e2e.ts` 通过真实 API 测量短会话与 500 段含代码长会话的 PNG / HTML 从请求到保存完成，逐项断言小于 10 秒，并核对高清尺寸、内容和下载完整性；`export-render.e2e.ts` 对分图逐行核对色带像素，检查空白、重复、遗漏与尾页裁切。Runbook 契约覆盖指定日期、方案恢复和 `artifacts/<日期>/runbook/`。
+- **会话导出与产物**：
+  - `session-export.test.ts` 验证统一取时、当前分支、过程筛选、脱敏、路径边界、失败回收、重启登记与文件修改检测；`export-lifecycle.test.ts` 验证并发轮询状态单向、落盘后可见及创建中退出；`export-document.test.ts` 验证分页连续、资源并发与缓存、失败取消和外部 URL 拒绝。
+  - `export-browser.e2e.ts` 验证 Puppeteer 进程复用、任务存储隔离、并发崩溃恢复、取消、启动中退出和空闲回收；`export-render.e2e.ts` 对分图逐行核对色带像素，并验证快速编码降级、账号接口阻断及超过 2 MiB 的正文完整传输。兼容降级由协议错误模拟，旧浏览器与企业策略环境仍需实测。
+  - `export-filenames.test.ts` 验证时间与分页命名、整组碰撞回收、并发排他发布及 UUID 文件登记读取；`export-open.test.ts` 验证目录校验、同源去重、路径注入拒绝、越界和启动失败。
+  - `export-controls.e2e.ts` 覆盖浅深窄屏、箭头对齐、菜单动效与键盘、实时分支及离页任务，并验证仅显示数量与目录、打开防连点、独立重试和迟到响应；`session-export.e2e.ts` 通过真实 API 和页面生成浅深 PNG、长文分图与 HTML，断网核对字体、附图、代码和折叠。
+  - `export-performance.e2e.ts` 测量短会话与 500 段含代码长会话，两种格式各自覆盖冷启动和浏览器复用，共八项；从请求到保存完成逐项断言小于 10 秒，并核对高清尺寸、内容和下载完整性。性能测试单独串行运行，避免构建和并行负载干扰。
+  - `pack/test/runtime-dependencies.test.mjs` 验证发行副本可独立加载 Puppeteer、嵌套版本与许可证齐备、无额外 Pi SDK，版本漂移时拒绝装配。Runbook 契约覆盖指定日期、方案恢复和 `artifacts/<日期>/runbook/`。
 - **命令多轮与布局**：`runbook-roundtrip.e2e.ts` 使用实际方案存储生成两轮修订，覆盖重复调用 ID、结果缺少 `details`、复制、文件打开、压缩后刷新和服务重启恢复；在 1920、1366、960、390px 窗口覆盖正文与输入框边缘对齐、内容列宽度上限及浅深主题。
 - **预载与流式连续性**：`session-preload.e2e.ts` 验证七天内最新十项自动预载、点击前路由入口就绪、首次及重复切换无需补载 JS/CSS、延迟刷新下同步切页、无旧正文、浅深与窄屏扫光及减少动态；`session-navigation.e2e.ts` 验证同名会话连续滑动、单层按下反馈、尺寸变化不中断滑动、正文淡入、历史 Markdown 节点数量、取消点击、修饰键、键盘导航、快速切换、历史返回与读取失败恢复；`process-disclosure.e2e.ts` 验证历史过程首次展开才挂载、首次展开高度动画、收起再展开保留节点及分页状态；`streaming-after-tool.e2e.ts` 验证运行中过程立即挂载、完成后保留节点、逐段正文及逐词节点在定稿后保留，延迟快照下正文不闪空。
 - **代码块复制**：`code-copy.e2e.ts` 覆盖高亮、无语言和缩进代码块、工具原文、换行保留、独立反馈、键盘、失败重试及浅深窄屏；`markdown-rendering.e2e.ts` 验证流式与定稿复制，`notification-lifecycle.e2e.ts` 验证技术详情复制与 Esc 焦点恢复。剪贴板测试使用浏览器内替身，不改动用户剪贴板。

@@ -69,6 +69,8 @@ export const REQUIRED_RELEASE_FILES = [
   'agent/home/extensions/runtime/model-selection.ts',
   'agent/home/extensions/runtime/package.json',
   'agent/home/extensions/web/server/session/web-settings.ts',
+  'agent/node_modules/puppeteer-core/package.json',
+  'licenses/puppeteer-LICENSE.txt',
   'LICENSE',
   'CHANGELOG.md',
   'THIRD-PARTY-NOTICES.md',

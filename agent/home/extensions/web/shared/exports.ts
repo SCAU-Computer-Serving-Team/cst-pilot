@@ -13,6 +13,7 @@ export type ExportSnapshot = {
 	options: ExportOptions & { date: string };
 	entries: ConversationEntry[];
 };
+export type ExportDocumentSource = { body: string; styles: { css: string; base: string }[] };
 export type ExportFile = { name: string; bytes: number; url: string };
 export type SessionExport = {
 	id: string;

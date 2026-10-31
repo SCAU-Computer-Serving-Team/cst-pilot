@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:
 import { join } from "node:path";
 import { test } from "node:test";
 import { artifactDate, artifactName, ensureArtifactDirectory } from "../../diagnostics/artifact-paths.ts";
+import type { ExportRenderer } from "../server/exports/render.ts";
 import { exportOptions, exportSnapshot } from "../server/exports/snapshot.ts";
 import { SessionExportStore } from "../server/exports/store.ts";
 import type { ConversationEntry } from "../shared/conversation.ts";
@@ -112,28 +113,26 @@ test("作业文件登记可重启恢复，下载仅访问已登记文件并检�
 	const root = await mkdtemp(join(await testRoot(), "export-store-"));
 	const artifactRoot = join(root, "artifacts"),
 		metadata = join(root, "home", "session-exports");
-	const renderer = async (
-		_snapshot: ExportSnapshot,
-		_url: string,
-		emit: (extension: "html" | "png", bytes: Buffer) => Promise<void>,
-	) => {
-		await emit("html", Buffer.from("<!DOCTYPE html><p>fixture</p>"));
+	const renderer: ExportRenderer = {
+		async render(_snapshot, emit) {
+			await emit("html", Buffer.from("<!DOCTYPE html><p>fixture</p>"));
+		},
+		async close() {},
 	};
-	const store = new SessionExportStore(artifactRoot, metadata, "http://127.0.0.1:9999", renderer);
+	const store = new SessionExportStore(artifactRoot, metadata, renderer);
 	try {
 		const created = await store.create(snapshot());
 		const result = await completed(store, created.id);
 		assert.equal(result.status, "completed");
 		assert.equal(result.directory, join(artifactRoot, day, "sessions"));
 		assert.equal((await readdir(result.directory)).length, 1);
-		const restored = new SessionExportStore(artifactRoot, metadata, "http://127.0.0.1:9999", renderer);
+		const restored = new SessionExportStore(artifactRoot, metadata, renderer);
 		assert.deepEqual(await restored.get(created.id), result);
 		assert.equal((await restored.list("fixture")).length, 1);
 		assert.equal((await restored.file(created.id, 0)).data.toString(), "<!DOCTYPE html><p>fixture</p>");
 		await assert.rejects(restored.file(created.id, -1));
 		await assert.rejects(restored.file(created.id, 1));
 		await assert.rejects(restored.get("../outside"));
-		assert.throws(() => restored.snapshot(created.id, "invalid"));
 		await writeFile(join(result.directory, result.files[0].name), "changed");
 		await assert.rejects(restored.file(created.id, 0), /修改/);
 		await restored.close();
@@ -147,21 +146,16 @@ test("渲染失败与存储写入失败不留下半成品，任务队列按顺�
 	const root = await mkdtemp(join(await testRoot(), "export-failure-"));
 	const active: string[] = [];
 	let concurrent = 0;
-	const store: SessionExportStore = new SessionExportStore(
-		join(root, "artifacts"),
-		join(root, "metadata"),
-		"http://127.0.0.1:9999",
-		async (value, url, emit) => {
+	const store: SessionExportStore = new SessionExportStore(join(root, "artifacts"), join(root, "metadata"), {
+		async render(value, emit) {
 			assert.equal(concurrent++, 0);
-			const [id, token] = new URL(url).hash.slice(1).split(":");
-			assert.equal(store.snapshot(id, token).title, value.title);
-			assert.throws(() => store.snapshot(id, "wrong-token"));
 			await emit("html", Buffer.from("<!DOCTYPE html>fixture"));
 			concurrent--;
 			active.push(value.title);
 			if (value.title === "失败") throw new Error("fixture render failure");
 		},
-	);
+		async close() {},
+	});
 	try {
 		const first = await store.create({ ...snapshot(), title: "失败" });
 		const second = await store.create({ ...snapshot(), title: "成功" });
@@ -172,14 +166,12 @@ test("渲染失败与存储写入失败不留下半成品，任务队列按顺�
 		await store.close();
 		assert.deepEqual(await readdir(join(root, "metadata", "work")), []);
 		await writeFile(join(root, "readonly"), "not a directory");
-		const blocked = new SessionExportStore(
-			join(root, "readonly"),
-			join(root, "blocked-metadata"),
-			"http://127.0.0.1:9999",
-			async (_value, _url, emit) => {
+		const blocked = new SessionExportStore(join(root, "readonly"), join(root, "blocked-metadata"), {
+			async render(_value, emit) {
 				await emit("html", Buffer.from("<!DOCTYPE html>fixture"));
 			},
-		);
+			async close() {},
+		});
 		const failed = await blocked.create(snapshot());
 		assert.equal((await completed(blocked, failed.id)).status, "failed");
 		await blocked.close();

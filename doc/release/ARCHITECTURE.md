@@ -8,7 +8,7 @@
 flowchart TD
     A[1. 核验官方 Pi 0.85.1 与扩展锁文件] --> B[2. 构建 Web 前端并校验 WOFF2 字体子集]
     B --> C[3. esbuild 预打包第三方扩展并复制原生依赖]
-    C --> D[4. 白名单复制官方资源、随包组件与项目扩展]
+    C --> D[4. 白名单复制官方资源、运行依赖、随包组件与项目扩展]
     D --> E[5. 生成标准配置、BUILD-INFO、VERSION 与 SHA256SUMS]
     E --> F[6. 干净树与资源引用校验]
     F --> G[7. 独立 _smoke 副本执行 CLI 与 Web 真实工具冒烟]
@@ -19,8 +19,9 @@ flowchart TD
 
 1. **官方包与锁文件核验**：根据 `pack/official-windows-x64.json` 校验官方归档及全部 43 个运行文件的 SHA-256；核对 `agent/home/npm/package-lock.json` 与 `pack/extensions.package-lock.json` 完全一致，确保 `pi-fff`、`pi-web-access`、`pi-open-tui` 版本精确匹配。
 2. **第三方扩展预打包**：使用固定版本 `esbuild@0.25.10` 将 `pi-web-access` 和 `pi-fff` 打包为 ESM，将 `@earendil-works/*` 与 `@sinclair/typebox` 设为 external，使扩展共享官方二进制内置的 Pi SDK 实例并大幅减少小文件数量。`pi-fff` 所需的 5 个 Windows x64 原生包（`ffi-rs` 等）原样复制到 `packages/pi-fff/node_modules/`。
-3. **离线模型目录补全**：`pack/model-catalog.mjs` 的 `supplementDeepSeekFlash` 在复制 `agent/home/models-store.json` 时检查 `deepseek` 目录，若缺少官方默认模型 `deepseek-flash` 则补入完整元数据，已有上游条目时保持原时间戳与属性不变。
-4. **隔离冒烟验证**：`pack/smoke.mjs` 与 `pack/web-smoke.mjs` 将装配好的目录复制到 `_smoke`，禁用遥测并启动本地模拟模型服务，通过真实 `pi.cmd` 验证冷／热启动、工具注册清单，以及在 RPC 宿主中挂载 Web 服务、发起会话消息、执行真实 `read` 工具并调用 `/api/lifecycle/exit` 安全退出。
+3. **Web 导出运行依赖**：`pack/runtime-dependencies.mjs` 按 `agent/package-lock.json` 复制 `puppeteer-core` 及其依赖树至 `agent/node_modules/`，保留嵌套版本和各包许可证，排除上游测试目录，不复制 Pi SDK 或浏览器。依赖缺失、版本与锁文件不符、存在链接时拒绝装配；`BUILD-INFO.json` 登记运行依赖锁文件哈希、版本与完整性值，主许可证固定随 `licenses/` 分发。
+4. **离线模型目录补全**：`pack/model-catalog.mjs` 的 `supplementDeepSeekFlash` 在复制 `agent/home/models-store.json` 时检查 `deepseek` 目录，若缺少官方默认模型 `deepseek-flash` 则补入完整元数据，已有上游条目时保持原时间戳与属性不变。
+5. **隔离冒烟验证**：`pack/smoke.mjs` 与 `pack/web-smoke.mjs` 将装配好的目录复制到 `_smoke`，禁用遥测并启动本地模拟模型服务，通过真实 `pi.cmd` 验证冷／热启动、工具注册清单，以及在 RPC 宿主中挂载 Web 服务、发起会话消息、执行真实 `read` 工具并调用 `/api/lifecycle/exit` 安全退出。
 
 ## 字体构建与分发
 

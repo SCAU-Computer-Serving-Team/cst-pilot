@@ -58,12 +58,29 @@ test("导出选项：浅深窄屏、箭头对齐、菜单开合与键盘、实�
 	});
 	const port = await freePort();
 	const origin = `http://127.0.0.1:${port}`;
+	let openCalls = 0;
+	let failOpen = true;
+	let releaseOpen = () => {};
+	let openGate = new Promise<void>((resolve) => {
+		releaseOpen = resolve;
+	});
 	const api = createWebApi(pool, home, port, undefined, {
 		artifactsRoot: join(root, "artifacts"),
-		exportRenderer: async (snapshot, _url, emit) => {
-			captured.push(snapshot);
-			await gate;
-			await emit("html", Buffer.from("<!DOCTYPE html><p>fixture</p>"));
+		async openExportDirectory(directory) {
+			assert.ok(directory.startsWith(join(root, "artifacts")));
+			openCalls++;
+			const fail = failOpen;
+			await openGate;
+			if (fail) throw new Error("fixture launch failure");
+		},
+		exportRenderer: {
+			async render(snapshot, emit) {
+				captured.push(snapshot);
+				await gate;
+				await emit(snapshot.options.format, Buffer.from("<!DOCTYPE html><p>fixture</p>"));
+				if (snapshot.options.format === "png") await emit("png", Buffer.from("fixture page 2"));
+			},
+			async close() {},
 		},
 	});
 	const server = createWebServer(
@@ -290,8 +307,98 @@ test("导出选项：浅深窄屏、箭头对齐、菜单开合与键盘、实�
 			await new Promise((resolve) => setTimeout(resolve, 20));
 		}
 		assert.equal(result?.status, "completed", "离页任务继续保存");
+		await browser.navigate(`${origin}/s/${slot.id}/export`);
+		await browser.until("!document.querySelector('.export-generate')?.disabled", "再次准备预览");
+		await browser.click(".export-generate");
+		await browser.until("!!document.querySelector('.export-open-directory')", "生成后显示可点击目录");
+		assert.equal(
+			await browser.evaluate("document.querySelector('.export-result h2').textContent"),
+			"已保存 2 个文件",
+		);
+		assert.equal(await browser.evaluate("document.querySelectorAll('.export-result a').length"), 0);
+		assert.equal(
+			await browser.evaluate("/\\.(png|html)/.test(document.querySelector('.export-result').textContent)"),
+			false,
+			"前端不列出文件名",
+		);
+		assert.equal(captured.length, 2);
+		await browser.evaluate(
+			"document.querySelector('.export-open-directory').click();document.querySelector('.export-open-directory').click()",
+		);
+		await browser.until("document.querySelector('.export-open-directory').disabled", "打开请求期间禁用目录按钮");
+		for (let i = 0; i < 100 && openCalls === 0; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+		assert.equal(openCalls, 1, "连续点击只发送一次打开操作");
+		releaseOpen();
+		await browser.until(
+			"!!document.querySelector('.export-result [role=alert]') && !document.querySelector('.export-open-directory').disabled",
+			"启动失败允许重试",
+		);
+		failOpen = false;
+		await browser.click(".export-result .notice-action");
+		await browser.until(
+			"!document.querySelector('.export-result [role=alert]') && !document.querySelector('.export-open-directory').disabled",
+			"重试只重新打开目录",
+		);
+		assert.equal(openCalls, 2);
+		assert.equal(captured.length, 2, "打开失败的重试不重新导出");
+		await browser.call("Emulation.setEmulatedMedia", {
+			features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
+		});
+		for (const width of [1440, 390])
+			for (const theme of ["light", "dark"]) {
+				await browser.call("Emulation.setDeviceMetricsOverride", {
+					width,
+					height: 900,
+					deviceScaleFactor: 1,
+					mobile: false,
+				});
+				const collapsed = await browser.evaluate(
+					"document.querySelector('.app-layout').classList.contains('sidebar-collapsed')",
+				);
+				if (width === 1440 && collapsed) await browser.click('[aria-label="展开侧栏"]');
+				if (width === 390 && !collapsed) await browser.click('[aria-label="收起侧栏"]');
+				await browser.until(
+					"document.querySelector('.sidebar').getAnimations().length===0 && !document.querySelector('.sidebar-backdrop')",
+					"结果布局完成",
+				);
+				await browser.evaluate(
+					`document.documentElement.dataset.theme=${JSON.stringify(theme)};document.querySelector('.export-open-directory').focus()`,
+				);
+				assert.equal(await browser.evaluate("document.documentElement.scrollWidth<=innerWidth"), true);
+				await browser.screenshot(join(root, `result-${width}-${theme}.png`));
+			}
+		openGate = new Promise<void>((resolve) => {
+			releaseOpen = resolve;
+		});
+		failOpen = true;
+		await browser.evaluate("document.querySelector('.export-open-directory').focus()");
+		await browser.call("Input.dispatchKeyEvent", {
+			type: "keyDown",
+			key: "Enter",
+			code: "Enter",
+			windowsVirtualKeyCode: 13,
+			text: "\r",
+		});
+		await browser.call("Input.dispatchKeyEvent", {
+			type: "keyUp",
+			key: "Enter",
+			code: "Enter",
+			windowsVirtualKeyCode: 13,
+		});
+		await browser.until("document.querySelector('.export-open-directory').disabled", "键盘打开目录");
+		await browser.click(".export-back");
+		await browser.until("!!document.querySelector('.chat-composer-area')", "等待打开目录时离开页面");
+		releaseOpen();
+		await browser.navigate(`${origin}/s/${slot.id}/export`);
+		await browser.until("!document.querySelector('.export-generate')?.disabled", "重开导出页");
+		assert.equal(
+			await browser.evaluate("!!document.querySelector('.export-result, .export-controls [role=alert]')"),
+			false,
+			"忽略前一页面迟到的打开失败",
+		);
 	} finally {
 		release();
+		releaseOpen();
 		await browser?.close();
 		await api.close();
 		await pool.close();

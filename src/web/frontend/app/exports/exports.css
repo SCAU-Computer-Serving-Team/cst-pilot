@@ -39,8 +39,10 @@
 .export-preview-viewport iframe { display: block; width: 1240px; max-width: none; border: 0; transform-origin: top left; }
 .export-result { display: grid; gap: 12px; }
 .export-result h2 { margin: 0; font-size: 16px; }
-.export-result p, .export-result a { margin: 0; overflow-wrap: anywhere; font-size: 13px; }
-.export-result a { color: var(--chat-tool); text-decoration: underline; }
+.export-open-directory { display: block; justify-self: start; min-width: 0; max-width: 100%; margin: 0; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--chat-tool); font: inherit; font-size: 13px; line-height: 1.6; text-align: left; white-space: normal; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.export-open-directory:hover:not(:disabled) { text-decoration-thickness: 2px; }
+.export-open-directory:focus-visible { outline: 2px solid var(--chat-tool); outline-offset: 4px; box-shadow: none; }
+.export-open-directory:disabled { opacity: .55; cursor: progress; }
 .export-page { height: auto; min-height: 100vh; margin: 0; overflow: visible; color: var(--chat-ink); background: var(--chat-bg); }
 .export-document { box-sizing: border-box; width: 100%; max-width: 1240px; margin: 0 auto; padding: 48px; color: var(--chat-ink); background: var(--chat-bg); }
 .export-heading { margin-bottom: 48px; padding-bottom: 24px; border-bottom: 1px solid var(--chat-border); }

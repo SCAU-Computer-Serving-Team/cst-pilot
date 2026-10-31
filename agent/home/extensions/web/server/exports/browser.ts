@@ -1,210 +1,175 @@
-import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
+import puppeteer, { type Browser, type BrowserContext, type Page } from "puppeteer-core";
 import { ExportError } from "./snapshot.ts";
 
-type Pending = {
-	resolve: (value: unknown) => void;
-	reject: (error: Error) => void;
-	timer: ReturnType<typeof setTimeout>;
-};
+type BrowserLease = { browser: Browser; profile: string };
+type BrowserOptions = { workDir: string; executablePath?: string; idleMs?: number };
 
-/** 仅供产物渲染的隔离浏览器；不读取用户配置，不安装或下载运行时。 */
+function executablePath(explicit?: string): string {
+	const configured = explicit ?? process.env.CST_EXPORT_BROWSER ?? process.env.CHROME_PATH;
+	const candidates = configured
+		? [configured]
+		: [
+				"C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+				"C:/Program Files/Microsoft/Edge/Application/msedge.exe",
+				"C:/Program Files/Google/Chrome/Application/chrome.exe",
+				"C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+				join(process.env.LOCALAPPDATA ?? "", "Google/Chrome/Application/chrome.exe"),
+			];
+	const found = candidates.find((candidate) => existsSync(candidate));
+	if (!found)
+		throw new ExportError(
+			503,
+			"export_browser_missing",
+			"导出需要已安装的 Edge 或 Chrome，可用 CST_EXPORT_BROWSER 指定浏览器路径。",
+		);
+	return found;
+}
+
+/** 专用浏览器按需启动并复用；每次调用创建独立环境，关闭页面即清除任务数据。 */
 export class ExportBrowser {
-	private sequence = 0;
+	private readonly options: BrowserOptions;
+	private starting?: Promise<BrowserLease>;
+	private readonly retiring = new Set<Promise<void>>();
+	private idle?: ReturnType<typeof setTimeout>;
+	private operations = 0;
+	private stopped = false;
 	private closing?: Promise<void>;
-	private session = "";
-	private readonly pending = new Map<number, Pending>();
-	private readonly child: ChildProcess;
-	private readonly socket: WebSocket;
-	private readonly profile: string;
-	private constructor(child: ChildProcess, socket: WebSocket, profile: string) {
-		this.child = child;
-		this.socket = socket;
-		this.profile = profile;
-		socket.addEventListener("message", (event) => {
-			const message = JSON.parse(String(event.data)) as {
-				id?: number;
-				result?: unknown;
-				error?: { message: string };
-			};
-			if (!message.id) return;
-			const pending = this.pending.get(message.id);
-			if (!pending) return;
-			this.pending.delete(message.id);
-			clearTimeout(pending.timer);
-			if (message.error) pending.reject(new Error(message.error.message));
-			else pending.resolve(message.result);
-		});
-		socket.addEventListener("close", () => this.rejectPending());
-		socket.addEventListener("error", () => this.rejectPending());
+	constructor(options: BrowserOptions) {
+		this.options = options;
 	}
-	private rejectPending() {
-		for (const item of this.pending.values()) {
-			clearTimeout(item.timer);
-			item.reject(new Error("导出浏览器连接已关闭"));
-		}
-		this.pending.clear();
-	}
-	static async launch(root: string): Promise<ExportBrowser> {
-		const executable = [
-			process.env.CST_EXPORT_BROWSER,
-			"C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
-			"C:/Program Files/Microsoft/Edge/Application/msedge.exe",
-			"C:/Program Files/Google/Chrome/Application/chrome.exe",
-			"C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
-			join(process.env.LOCALAPPDATA ?? "", "Google/Chrome/Application/chrome.exe"),
-			process.env.CHROME_PATH,
-		].find((candidate) => candidate && existsSync(candidate));
-		if (!executable)
+	private async launch(): Promise<BrowserLease> {
+		const executable = executablePath(this.options.executablePath);
+		await mkdir(this.options.workDir, { recursive: true });
+		const profile = await mkdtemp(join(this.options.workDir, "browser-"));
+		let browser: Browser | undefined;
+		try {
+			browser = await puppeteer.launch({
+				executablePath: executable,
+				userDataDir: profile,
+				headless: true,
+				pipe: true,
+				timeout: 10_000,
+				protocolTimeout: 30_000,
+				handleSIGINT: false,
+				handleSIGTERM: false,
+				handleSIGHUP: false,
+				defaultViewport: { width: 1240, height: 3200, deviceScaleFactor: 2 },
+				args: [
+					"--disable-background-networking",
+					"--disable-extensions",
+					"--disable-sync",
+					"--disable-component-update",
+					"--hide-scrollbars",
+				],
+			});
+			const version = await browser.version();
+			const major = Number(/\/(\d+)\./.exec(version)?.[1]);
+			if (!Number.isFinite(major) || major < 111)
+				throw new ExportError(
+					503,
+					"export_browser_incompatible",
+					"导出需要 Chromium 111 或更新版本，请更新 Edge / Chrome 或设置 CST_EXPORT_BROWSER。",
+				);
+			return { browser, profile };
+		} catch (cause) {
+			if (browser) await this.dispose({ browser, profile });
+			else
+				await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
+			if (cause instanceof ExportError) throw cause;
 			throw new ExportError(
 				503,
-				"export_browser_missing",
-				"导出需要已安装的 Edge 或 Chrome，可用 CST_EXPORT_BROWSER 指定浏览器路径。",
+				"export_browser_launch_failed",
+				"导出浏览器无法启动，请检查浏览器版本、运行权限或 CST_EXPORT_BROWSER 路径。",
 			);
-		const profile = await mkdtemp(join(root, "browser-"));
-		const child = spawn(
-			executable,
-			[
-				"--headless=new",
-				"--remote-debugging-port=0",
-				"--remote-debugging-address=127.0.0.1",
-				`--user-data-dir=${profile}`,
-				"--no-first-run",
-				"--no-default-browser-check",
-				"--disable-background-networking",
-				"--disable-extensions",
-				"--disable-sync",
-				"--disable-component-update",
-				"--hide-scrollbars",
-				"--window-size=1240,900",
-				"about:blank",
-			],
-			{ stdio: "ignore", windowsHide: true },
-		);
-		let spawnError: Error | undefined;
-		child.on("error", (error) => {
-			spawnError = error;
-		});
-		let browser: ExportBrowser | undefined;
+		}
+	}
+	private async acquire(): Promise<BrowserLease> {
+		if (this.stopped) throw new ExportError(503, "export_stopping", "程序正在退出，请稍后导出");
+		if (!this.starting) {
+			const starting = this.launch().catch((cause) => {
+				if (this.starting === starting) this.starting = undefined;
+				throw cause;
+			});
+			this.starting = starting;
+		}
+		const starting = this.starting;
+		const lease = await starting;
+		if (this.stopped) throw new ExportError(503, "export_stopping", "程序正在退出，请稍后导出");
+		if (!lease.browser.connected) {
+			await this.retire(starting);
+			return this.acquire();
+		}
+		return lease;
+	}
+	async run<T>(signal: AbortSignal, action: (page: Page) => Promise<T>): Promise<T> {
+		signal.throwIfAborted();
+		if (this.stopped) throw new ExportError(503, "export_stopping", "程序正在退出，请稍后导出");
+		clearTimeout(this.idle);
+		this.operations++;
+		let context: BrowserContext | undefined;
+		const stop = () => {
+			void context?.close().catch(() => undefined);
+		};
 		try {
-			let endpoint: string | undefined;
-			for (let attempt = 0; attempt < 100; attempt++) {
-				if (spawnError || child.exitCode !== null) throw new Error("导出浏览器未能启动");
-				const active = await readFile(join(profile, "DevToolsActivePort"), "utf8").catch(() => "");
-				const [port, path] = active.trim().split(/\r?\n/);
-				if (/^\d+$/.test(port ?? "") && path?.startsWith("/devtools/browser/")) {
-					endpoint = `ws://127.0.0.1:${port}${path}`;
-					break;
-				}
-				await delay(100);
+			const { browser } = await this.acquire();
+			signal.throwIfAborted();
+			context = await browser.createBrowserContext();
+			signal.addEventListener("abort", stop, { once: true });
+			signal.throwIfAborted();
+			const page = await context.newPage();
+			page.setDefaultTimeout(15_000);
+			page.setDefaultNavigationTimeout(15_000);
+			await page.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]);
+			const result = await action(page);
+			signal.throwIfAborted();
+			return result;
+		} finally {
+			signal.removeEventListener("abort", stop);
+			await context?.close().catch(() => undefined);
+			this.operations--;
+			if (!this.operations && !this.stopped) {
+				this.idle = setTimeout(() => {
+					void this.retire();
+				}, this.options.idleMs ?? 30_000);
+				this.idle.unref();
 			}
-			if (!endpoint) throw new Error("导出浏览器启动超时");
-			const socket = new WebSocket(endpoint);
-			await new Promise<void>((resolve, reject) => {
-				const timer = setTimeout(() => {
-					socket.close();
-					reject(new Error("导出浏览器连接超时"));
-				}, 10_000);
-				socket.addEventListener(
-					"open",
-					() => {
-						clearTimeout(timer);
-						resolve();
-					},
-					{ once: true },
-				);
-				socket.addEventListener(
-					"error",
-					() => {
-						clearTimeout(timer);
-						reject(new Error("导出浏览器连接失败"));
-					},
-					{ once: true },
-				);
-			});
-			browser = new ExportBrowser(child, socket, profile);
-			const target = await browser.call<{ targetId: string }>("Target.createTarget", { url: "about:blank" });
-			const attached = await browser.call<{ sessionId: string }>("Target.attachToTarget", {
-				targetId: target.targetId,
-				flatten: true,
-			});
-			browser.session = attached.sessionId;
-			await browser.call("Page.enable");
-			await browser.call("Emulation.setDeviceMetricsOverride", {
-				width: 1240,
-				height: 900,
-				deviceScaleFactor: 2,
-				mobile: false,
-			});
-			await browser.call("Emulation.setEmulatedMedia", {
-				features: [{ name: "prefers-reduced-motion", value: "reduce" }],
-			});
-			return browser;
-		} catch (error) {
-			if (browser) await browser.close();
-			else {
-				child.kill();
-				await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
-			}
-			throw error;
 		}
 	}
-	async call<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
-		const id = ++this.sequence;
-		return new Promise<T>((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(new Error("导出浏览器操作超时"));
-			}, 30_000);
-			this.pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
-			try {
-				this.socket.send(
-					JSON.stringify({ id, method, params, ...(this.session ? { sessionId: this.session } : {}) }),
-				);
-			} catch (error) {
-				clearTimeout(timer);
-				this.pending.delete(id);
-				reject(error);
-			}
-		});
+	private async dispose(lease: BrowserLease): Promise<void> {
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		await Promise.race([
+			lease.browser.close().catch(() => undefined),
+			new Promise<void>((resolve) => {
+				timer = setTimeout(() => {
+					lease.browser.process()?.kill();
+					resolve();
+				}, 5000);
+			}),
+		]);
+		clearTimeout(timer);
+		await rm(lease.profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
 	}
-	async evaluate<T>(expression: string): Promise<T> {
-		const result = await this.call<{ result: { value: T }; exceptionDetails?: unknown }>("Runtime.evaluate", {
-			expression,
-			awaitPromise: true,
-			returnByValue: true,
-		});
-		if (result.exceptionDetails) throw new Error("导出页面渲染失败");
-		return result.result.value;
-	}
-	async ready(url: string): Promise<void> {
-		await this.call("Page.navigate", { url });
-		for (let attempt = 0; attempt < 600; attempt++) {
-			if (this.socket.readyState !== WebSocket.OPEN) throw new Error("导出浏览器已关闭");
-			const state = await this.evaluate<string>("document.documentElement.dataset.exportState || ''").catch(
-				() => "",
-			);
-			if (state === "ready") return;
-			if (state === "failed") throw new Error("导出内容未能加载");
-			await delay(100);
-		}
-		throw new Error("导出页面准备超时");
+	private retire(current = this.starting): Promise<void> {
+		if (!current || this.starting !== current) return Promise.resolve();
+		clearTimeout(this.idle);
+		this.starting = undefined;
+		const task = current.then(
+			(lease) => this.dispose(lease),
+			() => undefined,
+		);
+		this.retiring.add(task);
+		void task.finally(() => this.retiring.delete(task));
+		return task;
 	}
 	close(): Promise<void> {
-		this.closing ??= this.dispose();
+		this.stopped = true;
+		this.closing ??= (async () => {
+			await this.retire();
+			await Promise.all(this.retiring);
+		})();
 		return this.closing;
-	}
-	private async dispose(): Promise<void> {
-		this.rejectPending();
-		if (this.socket.readyState === WebSocket.OPEN) {
-			this.socket.send(JSON.stringify({ id: ++this.sequence, method: "Browser.close" }));
-			for (let attempt = 0; attempt < 50 && this.child.exitCode === null; attempt++) await delay(100);
-		}
-		if (this.child.exitCode === null) this.child.kill();
-		this.socket.close();
-		await rm(this.profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => undefined);
 	}
 }

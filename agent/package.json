@@ -23,7 +23,8 @@
     "node": ">=22.19.0"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.85.1"
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "puppeteer-core": "25.16.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.5",

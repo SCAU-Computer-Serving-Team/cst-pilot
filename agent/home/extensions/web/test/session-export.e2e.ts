@@ -29,19 +29,22 @@ test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、当前分支
 	const port = await freePort();
 	const origin = `http://127.0.0.1:${port}`;
 	const artifactsRoot = join(kit, "artifacts");
-	const render = createExportRenderer(join(home, "session-exports", "work"));
+	const render = createExportRenderer({ origin, workDir: join(home, "session-exports", "work", "browsers") });
 	const apiOptions = {
 		artifactsRoot,
-		exportRenderer: async (...args: Parameters<typeof render>) => {
-			try {
-				await render(...args);
-			} catch (cause) {
-				await writeFile(
-					join(root, "render-error.txt"),
-					cause instanceof Error ? (cause.stack ?? cause.message) : String(cause),
-				);
-				throw cause;
-			}
+		exportRenderer: {
+			async render(...args: Parameters<typeof render.render>) {
+				try {
+					await render.render(...args);
+				} catch (cause) {
+					await writeFile(
+						join(root, "render-error.txt"),
+						cause instanceof Error ? (cause.stack ?? cause.message) : String(cause),
+					);
+					throw cause;
+				}
+			},
+			close: () => render.close(),
 		},
 	};
 	let api = createWebApi(pool, home, port, undefined, apiOptions);
@@ -275,7 +278,7 @@ test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、当前分支
 		await browser.click('.export-select-popover [role="option"][data-key="html"]');
 		await browser.until("!document.querySelector('.export-generate').disabled", "切换格式后的预览");
 		await browser.click(".export-generate");
-		await browser.until("!!document.querySelector('.export-result a')", "网页点击生成并保存真实文件", 30_000);
+		await browser.until("!!document.querySelector('.export-open-directory')", "网页点击生成并保存真实文件", 30_000);
 		await browser.screenshot(join(root, "export-result-light.png"));
 		await browser.evaluate("document.documentElement.dataset.theme='dark'");
 		await browser.click(".export-select:nth-of-type(2) .export-select-trigger");

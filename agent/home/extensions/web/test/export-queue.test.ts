@@ -8,17 +8,15 @@ import { testRoot } from "./support.ts";
 
 test("导出队列有界，退出停止渲染并将等待任务标为失败", async () => {
 	const root = await mkdtemp(join(await testRoot(), "export-queue-"));
-	const store = new SessionExportStore(
-		join(root, "artifacts"),
-		join(root, "metadata"),
-		"http://127.0.0.1:9",
-		async (_snapshot, _url, _emit, signal) => {
+	const store = new SessionExportStore(join(root, "artifacts"), join(root, "metadata"), {
+		async render(_snapshot, _emit, signal) {
 			signal.throwIfAborted();
 			await new Promise<void>((_resolve, reject) =>
 				signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }),
 			);
 		},
-	);
+		async close() {},
+	});
 	try {
 		const snapshot = exportSnapshot(
 			"fixture",

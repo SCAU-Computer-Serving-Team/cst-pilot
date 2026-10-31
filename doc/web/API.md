@@ -69,8 +69,9 @@
 | `GET` | `/api/sessions/<id>/exports` | 最近 50 条导出记录，按快照时间倒序 |
 | `GET` | `/api/exports/<exportId>` | 状态、选项、保存目录、文件列表或错误 |
 | `GET` | `/api/exports/<exportId>/files/<index>` | 从 0 起读取已登记文件；被修改返回 409，移走返回 404 |
+| `POST` | `/api/exports/<exportId>/open` | 正文 `{}`；校验已完成任务的保存目录后启动本机文件管理器，返回 `{launched: true}`，须携带去重键 |
 
-POST 参数：
+创建任务与预览的 POST 参数：
 
 ```json
 {
@@ -88,9 +89,24 @@ POST 参数：
 
 任务字段为 `id`、`sessionId`、`title`、`capturedAt`、`options`、`status`、`directory`、`files: {name, bytes, url}[]`，失败时附 `error: {code, message}`。状态为 `queued`、`rendering`、`completed` 或 `failed`。先创建任务，再轮询记录，完成后读取文件；离开页面不会取消任务，程序退出会停止未完成任务。
 
-渲染使用已安装的 Edge 或 Chrome，以隔离配置启动；可通过 `CST_EXPORT_BROWSER` 指定路径，无浏览器时任务返回 `export_browser_missing`。同时最多接纳 8 个任务，单任务超时 120 秒；快照上限 32 MiB，产物合计上限 200 MiB。PNG 使用 1240 CSS 像素宽度与 2 倍像素密度，长文分图；超过 100000 CSS 像素高度时提示缩短当前分支或改用 HTML。
+文件名使用 `标题-YYYYMMDD-HHmmss-01.png` 或 `标题-YYYYMMDD-HHmmss.html`，日期与本机时间来自快照。标题按产物命名规则清理，最多 60 个字符；同秒重名时在时间后追加 `-2`、`-3` 等组号，PNG 各分页统一换组，不覆盖已有文件。任务 ID 与文件读取 URL 保持独立。
 
-`GET /api/exports/<id>/snapshot` 供隔离渲染器使用，需要任务专属 `X-CST-Export-Token`，任务结束后失效。分享读取已登记产物。
+打开目录接口不接收客户端路径，额外字段返回 400。目录由已完成登记中的归档日期和受控根目录推导，校验真实路径与符号链接边界；未完成返回 409，目录缺失返回 404，越界或无访问权限返回 403。启动失败返回 503 / `export_launch_failed`，可使用新去重键重试打开，无须重新导出。
+
+渲染由 `puppeteer-core` 控制已安装的 Edge 或 Chrome，使用专用配置与每任务独立环境。可通过 `CST_EXPORT_BROWSER` 指定路径；显式路径无效时直接报错。浏览器按需复用，空闲 30 秒后回收，现场不下载或安装浏览器。
+
+同时最多接纳 8 个任务，按序执行，单任务超时 120 秒；快照上限 32 MiB，产物合计上限 200 MiB、文件数上限 64。PNG 使用 1240 CSS 像素宽度与 2 倍像素密度，每张图高不超过 3200 CSS 像素；文档超过 100000 CSS 像素时提示缩短当前分支或改用 HTML。HTML 仅内嵌同源 `/fonts/`、`/assets/` 和已有数据资源，拒绝重定向；单资源上限 16 MiB，资源数量上限 128。
+
+| 任务失败码 | 含义 |
+|---|---|
+| `export_browser_missing` | 未找到浏览器或显式路径无效 |
+| `export_browser_launch_failed` | 浏览器启动失败，需检查版本、运行权限与路径 |
+| `export_browser_incompatible` | 启动检测拒绝旧版 Chromium；当前检测下限为 111 |
+| `export_document_failed`、`export_asset_unavailable` | 正文、字体或附图未能准备完成，或随包资源无法读取 |
+| `export_asset_forbidden` | 样式引用了允许范围之外的资源 |
+| `export_timeout`、`export_interrupted` | 任务超时或程序退出中断 |
+
+快照由后端直接注入只读页面。页面只接收同源消息，不提供渲染快照读取接口。已实测的浏览器为 Edge / Chrome 156；其他版本和受企业策略限制的环境需另行验收，快速编码参数不受支持时退回普通无损编码。
 
 ## 模型认证与账号接口
 

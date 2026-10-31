@@ -24,6 +24,8 @@ TUI 默认主题由 Pi 设置管理。Web 默认浅色，运行后保存到独�
 
 扩展依赖锁在 `extensions.package.json` 和 `extensions.package-lock.json`。新环境将它们分别复制到 `agent/home/npm/package.json`、`package-lock.json`，再运行 `npm ci --ignore-scripts --legacy-peer-deps --prefix agent/home/npm`。共享 Pi SDK 由官方运行时提供；安装采用锁文件生成时的 peer 依赖模式，防止 npm 另装最新 SDK。
 
+Web 导出另从 `agent/package-lock.json` 按依赖关系复制 `puppeteer-core` 及运行依赖至 `agent/node_modules/`。保留各包许可证，补入 `licenses/puppeteer-LICENSE.txt`，不附带浏览器；目标机需安装受支持的 Edge / Chrome。
+
 升级依赖时一起更新锁文件并重新验收。
 
 发布输出目录中的 ZIP、VERSION 和 SHA256SUMS。不要再次压缩运行过的目录。自动冒烟覆盖启动、工具注册与 Web API 实际工具链路，实际 TUI 待机/浏览器与跨机诊断仍需按 [测试规范](../doc/TESTING.md) 验收。

@@ -34,6 +34,7 @@ export function createWebApi(
 	shutdown?: () => void,
 	options: {
 		openRunbook?: (file: string) => Promise<void>;
+		openExportDirectory?: (directory: string) => Promise<void>;
 		artifactsRoot?: string;
 		exportRenderer?: ExportRenderer;
 	} = {},

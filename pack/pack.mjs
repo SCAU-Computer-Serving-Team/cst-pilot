@@ -23,6 +23,7 @@ import { supplementDeepSeekFlash } from "./model-catalog.mjs";
 import { RELEASE_SETTINGS, RELEASE_TELEMETRY, RELEASE_WEB_SEARCH } from "./release-settings.mjs";
 import { checkReleaseContent, checkReleaseTree, sha256, verifyManifest } from "./release-checks.mjs";
 import { smokeRelease } from "./smoke.mjs";
+import { copyRuntimeDependencies } from "./runtime-dependencies.mjs";
 
 // ---------- 构建配置（发行工程单一事实源） ----------
 
@@ -31,6 +32,7 @@ const CONFIG = {
   PI_VERSION: "0.85.1",
   PI_EXE_SHA256: "2d4d351da30bfe23a473032e66a571b238763565aa93754e74f4a939de13f195",
   ESBUILD_VERSION: "0.25.10",
+  RUNTIME_DEPENDENCIES: ["puppeteer-core"],
   // 扩展真实版本（pi-fff 曾错标 0.1.0，修正为上游真实版本）
   EXT_VERSIONS: { "pi-fff": "0.10.6", "pi-web-access": "0.18.0", "pi-open-tui": "0.2.10" },
 
@@ -283,6 +285,8 @@ for (const it of CONFIG.OFFICIAL_ITEMS) {
   it.f ? fs.copyFileSync(src, dst) : fs.cpSync(src, dst, { recursive: true });
 }
 console.log("  官方运行资源已复制");
+const runtimePackages = copyRuntimeDependencies(path.join(repoRoot, "agent"), path.join(out, "agent"), CONFIG.RUNTIME_DEPENDENCIES);
+console.log(`  Web 导出运行依赖: ${Object.keys(runtimePackages).length} 个包（不包含浏览器）`);
 
 for (const it of CONFIG.REPO_ROOT_ITEMS) {
   const src = path.join(repoRoot, it.p);
@@ -318,6 +322,7 @@ fs.writeFileSync(path.join(out, "BUILD-INFO.json"), `${JSON.stringify({
   sourceRevision: spawnSync("git",["rev-parse","HEAD"],{cwd:repoRoot,encoding:"utf8"}).stdout?.trim() ?? null,
   sourceDirty: Boolean(spawnSync("git",["status","--porcelain"],{cwd:repoRoot,encoding:"utf8"}).stdout?.trim()),
   esbuildVersion: CONFIG.ESBUILD_VERSION, extensionLockSha256: sha256(fs.readFileSync(sourceLockPath)), installedPackages,
+  runtimeLockSha256: sha256(fs.readFileSync(path.join(repoRoot, "agent/package-lock.json"))), runtimePackages,
 }, null, 2)}\n`);
 
 // ---------- [5] 检查干净发行树并生成清单 ----------
