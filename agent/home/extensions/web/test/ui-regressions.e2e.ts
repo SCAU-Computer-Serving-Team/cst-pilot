@@ -262,7 +262,9 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 			await browser.evaluate("getComputedStyle(document.querySelector('.chat-loaded')).animationName"),
 			"none",
 		);
-		await browser.call("Emulation.setEmulatedMedia", { features: [] });
+		await browser.call("Emulation.setEmulatedMedia", {
+			features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
+		});
 		await browser.navigate(`${origin}/s/${id}`);
 		await browser.until(
 			"document.querySelector('.conversation')?.textContent.includes('测试回答')",
@@ -369,7 +371,9 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		await browser.until("!!document.querySelector('.back-to-bottom')", "减少动态时上翻");
 		await browser.click(".back-to-bottom");
 		await browser.until("!document.querySelector('.back-to-bottom')", "减少动态时立即到达底部");
-		await browser.call("Emulation.setEmulatedMedia", { features: [] });
+		await browser.call("Emulation.setEmulatedMedia", {
+			features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
+		});
 		await browser.evaluate("document.querySelector('.sidebar-account-trigger').click()");
 		await browser.until("!!document.querySelector('.sidebar-account-menu button[aria-label^=主题]')", "账号菜单");
 		await browser.evaluate("document.querySelector('.sidebar-account-menu button[aria-label^=主题]').click()");
