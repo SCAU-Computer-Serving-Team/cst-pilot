@@ -71,25 +71,23 @@
   --radius-card: 24px;
   --radius-panel: 32px;
   --radius-full: 9999px;
-  /* 尺寸令牌。字号 6 档、间距 6 档、盒高 4 档、图标 4 档。
+  /* 尺寸令牌。字号 4 档、间距 6 档、盒高 4 档、图标 4 档。
      规范见 DESIGN.md「尺寸与间距」与画布「规范 · 全部令牌」。控件纵向内边距一律为 0，居中交给 flex。 */
-  --font-micro: 11px;
-  --font-small: 12px;
-  --font-label: 13px;
+  --font-caption: 12px;
+  --font-ui: 14px;
   --font-body: 16px;
   --font-title: 20px;
-  --font-display: 24px;
-  --space-micro: 4px;
+  --space-micro: 2px;
   --space-tight: 4px;
   --space-inline: 8px;
   --space-component: 12px;
   --space-section: 16px;
   --space-group: 24px;
-  --control-inline: 22px;
-  --control: 26px;
+  --control-inline: 24px;
+  --control: 28px;
   --control-lg: 32px;
-  --control-field: 42px;
-  --control-menu: 42px;
+  --control-field: 40px;
+  --control-menu: 40px;
   --icon-inline: 14px;
   --icon-body: 16px;
   --icon-menu: 18px;
@@ -280,7 +278,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .sidebar-account-item[aria-disabled="true"] { opacity: .45; }
 .sidebar-account-identity { display: flex; min-width: 0; padding: var(--space-inline) var(--space-component); }
 .sidebar-account-identity strong { color: var(--app-ink); font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-theme-value { margin-left: auto; color: var(--app-muted); font-size: var(--font-small); font-weight: 400; }
+.sidebar-theme-value { margin-left: auto; color: var(--app-muted); font-size: var(--font-caption); font-weight: 400; }
 .session-menu { --session-menu-hover: #e3ecf1; position: fixed; z-index: 50; display: flex; flex-direction: column; gap: 4px; width: 240px; padding: var(--space-component); border: 1px solid var(--app-sidebar-border); border-radius: var(--radius-menu); background: var(--login-card); box-shadow: var(--shadow-menu); }
 :root[data-theme="dark"] .session-menu { --session-menu-hover: #1d2428; }
 @media (prefers-color-scheme: dark) { :root[data-theme="system"] .session-menu { --session-menu-hover: #1d2428; } }
@@ -451,7 +449,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .chat-composer-area .composer { --app-muted: var(--chat-muted); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .sidebar-top { overflow-y: auto; }
-.sidebar-error, .composer-error, .message-error { color: var(--settings-danger-tx); font-size: var(--font-label); }
+.sidebar-error, .composer-error, .message-error { color: var(--settings-danger-tx); font-size: var(--font-ui); }
 .composer-error { margin: 0 0 4px; }
 /* 标记块照画布「补全选中标记」：高 26、圆角 4、底取中性 4、图标 16 与文字相隔 8。 */
 .composer-command { display: flex; align-items: center; align-self: flex-start; gap: var(--space-inline); height: var(--control); margin-bottom: 6px; padding: 0 8px; border-radius: var(--radius-control); color: var(--chat-ink); background: var(--app-hover); font-size: var(--font-body); line-height: 1; }
@@ -480,7 +478,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .composer--chat { height: auto; min-height: 105px; }
 .composer--chat .composer-actions { min-height: var(--control); }
 .composer--chat .composer-actions .composer-icon { width: var(--control); height: var(--control); min-width: var(--control); min-height: var(--control); padding: 0; }
-.composer--chat .composer-actions .composer-model { height: var(--control); min-height: var(--control); padding: 0; border-radius: var(--radius-control); font-size: var(--font-label); }
+.composer--chat .composer-actions .composer-model { height: var(--control); min-height: var(--control); padding: 0; border-radius: var(--radius-control); font-size: var(--font-ui); }
 .composer--chat .composer-actions .composer-model { gap: 6px; color: var(--chat-ink); font-family: "CST UI Sans", "Microsoft YaHei", sans-serif; }
 /* React Aria 的空 template 是 DOM 占位，不参与操作栏间距。 */
 .composer-actions > template, .composer-model-controls > template { display: none; }
@@ -634,7 +632,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .tool-group-heading .tool-status-icon, .tool-group-heading .success-icon { width: 18px; height: 18px; flex-basis: 18px; }
 .tool-group-heading .tool-group-state--running { color: var(--chat-ink); }
 .tool-group-heading small { font-size: inherit; }
-.tool-card-heading { min-height: var(--control); padding: 0; color: var(--chat-muted); font-size: var(--font-label); }
+.tool-card-heading { min-height: var(--control); padding: 0; color: var(--chat-muted); font-size: var(--font-ui); }
 .tool-card-heading span { flex: 0 1 auto; min-width: 0; }
 .tool-card-heading .tool-status-icon { width: 16px; height: 16px; flex-basis: 16px; }
 .tool-card-heading .tool-status-icon--running { width: 13px; height: 13px; flex-basis: 13px; }
@@ -714,10 +712,10 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .queue-panel, .question-panel { max-height: 180px; overflow-y: auto; padding: 12px 16px; margin-bottom: var(--space-inline); border: 1px solid var(--chat-border); border-radius: var(--radius-menu); background: var(--chat-row); font-size: 13px; }
 .queue-panel { margin-bottom: 0; border-bottom: 0; border-radius: var(--radius-composer) var(--radius-composer) 0 0; }
 .chat-composer-area:has(.queue-panel) .composer--chat { border-radius: 0 0 var(--radius-composer) var(--radius-composer); }
-.queue-panel > .queue-status { display: flex; align-items: center; justify-content: space-between; min-height: var(--control-inline); margin-bottom: var(--space-inline); color: var(--chat-muted); font-size: var(--font-small); font-weight: 400; }
+.queue-panel > .queue-status { display: flex; align-items: center; justify-content: space-between; min-height: var(--control-inline); margin-bottom: var(--space-inline); color: var(--chat-muted); font-size: var(--font-caption); font-weight: 400; }
 .queue-error-info { display: inline-flex; align-items: center; justify-content: center; width: var(--control); height: var(--control); min-width: var(--control); padding: 0; border-radius: var(--radius-control); background: transparent; color: var(--settings-danger-tx); cursor: help; }
 .queue-error-info:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
-.queue-error-tooltip { max-width: 424px; padding: var(--space-component); border: 1px solid var(--chat-input-border); border-radius: var(--radius-menu); background: var(--chat-row); color: var(--chat-ink); box-shadow: var(--shadow-menu); font-size: var(--font-label); }
+.queue-error-tooltip { max-width: 424px; padding: var(--space-component); border: 1px solid var(--chat-input-border); border-radius: var(--radius-menu); background: var(--chat-row); color: var(--chat-ink); box-shadow: var(--shadow-menu); font-size: var(--font-ui); }
 .queue-error-tooltip[data-entering] { animation: tooltip-enter var(--duration-quick) var(--ease-out) both; }
 .queue-error-tooltip[data-exiting] { animation: tooltip-exit var(--duration-quick) var(--ease-out) both; }
 @keyframes tooltip-enter { from { opacity: 0; transform: scale(var(--scale-small)); } to { opacity: 1; transform: scale(1); } }
@@ -727,9 +725,9 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .queue-item:last-of-type { border-bottom: 0; }
 .queue-grip { flex: 0 0 16px; color: var(--chat-muted); cursor: grab; }
 .queue-item span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
-.queue-item button, .question-panel button { flex: 0 0 auto; height: var(--control); min-height: var(--control); padding: 0 var(--space-inline); font-size: var(--font-small); }
+.queue-item button, .question-panel button { flex: 0 0 auto; height: var(--control); min-height: var(--control); padding: 0 var(--space-inline); font-size: var(--font-caption); }
 .queue-item button[aria-label] { width: var(--control); min-width: var(--control); height: var(--control); padding: 0; color: var(--chat-muted); }
-.queue-item .queue-steer { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-tight); height: var(--control); min-height: var(--control); padding: 0 var(--space-inline); border: 0; border-radius: var(--radius-control); background: var(--app-send); color: var(--app-send-icon); font-size: var(--font-small); line-height: 1.5; }
+.queue-item .queue-steer { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-tight); height: var(--control); min-height: var(--control); padding: 0 var(--space-inline); border: 0; border-radius: var(--radius-control); background: var(--app-send); color: var(--app-send-icon); font-size: var(--font-caption); line-height: 1.5; }
 .queue-edit, .question-field { flex: 1; min-width: 0; display: flex; }
 .queue-edit-input, .question-panel .question-input, .question-panel .question-textarea { flex: 1; min-width: 0; width: 100%; padding: var(--space-inline); border: 1px solid var(--chat-border); border-radius: var(--radius-control); background: var(--chat-bg); color: var(--chat-ink); font-size: 13px; line-height: 1.5; }
 .question-panel .question-textarea { display: block; min-height: 60px; }
@@ -738,9 +736,9 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .question-panel .question-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: var(--space-inline); width: 100%; padding: 8px 8px; border: 1px solid var(--chat-border); border-radius: var(--radius-control); background: var(--chat-bg); color: var(--chat-ink); font-size: 13px; }
 .question-panel .question-select-trigger:is(:focus-visible, [data-focus-visible="true"]) { border-color: var(--app-muted); outline: none; box-shadow: var(--focus-shadow); }
 /* 提交/跳过照排队行「立即」的控件语言：实心品牌色 + ghost，盒高 26、圆角 4、按钮文字 12 */
-.question-panel .question-apply { display: inline-flex; align-items: center; justify-content: center; height: var(--control); min-height: var(--control); padding: 0 var(--space-inline); border: 0; border-radius: var(--radius-control); --button-bg: var(--app-send); --button-bg-hover: var(--app-send-hover); --button-bg-pressed: var(--app-send-hover); --button-fg: var(--app-send-icon); background: var(--app-send); color: var(--app-send-icon); font-size: var(--font-small); }
+.question-panel .question-apply { display: inline-flex; align-items: center; justify-content: center; height: var(--control); min-height: var(--control); padding: 0 var(--space-inline); border: 0; border-radius: var(--radius-control); --button-bg: var(--app-send); --button-bg-hover: var(--app-send-hover); --button-bg-pressed: var(--app-send-hover); --button-fg: var(--app-send-icon); background: var(--app-send); color: var(--app-send-icon); font-size: var(--font-caption); }
 .question-panel .question-apply:is(:hover, [data-hovered="true"]):not(:disabled, [aria-disabled="true"]) { background: var(--app-send-hover); }
-.question-panel .question-skip { display: inline-flex; align-items: center; justify-content: center; height: var(--control); min-height: var(--control); padding: 0 var(--space-inline); border: 0; border-radius: var(--radius-control); --button-bg: transparent; --button-bg-hover: transparent; --button-bg-pressed: transparent; --button-fg: var(--chat-muted); background: transparent; color: var(--chat-muted); font-size: var(--font-small); }
+.question-panel .question-skip { display: inline-flex; align-items: center; justify-content: center; height: var(--control); min-height: var(--control); padding: 0 var(--space-inline); border: 0; border-radius: var(--radius-control); --button-bg: transparent; --button-bg-hover: transparent; --button-bg-pressed: transparent; --button-fg: var(--chat-muted); background: transparent; color: var(--chat-muted); font-size: var(--font-caption); }
 /* 回到底部贴近输入区，在浅深主题中使用反色以区分正文。 */
 .back-to-bottom { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 2; display: inline-flex; align-items: center; gap: var(--space-inline); height: var(--control-field); min-height: var(--control-field); padding: 0 16px; border: 0; border-radius: var(--radius-row); --button-bg: var(--chat-ink); --button-bg-hover: var(--chat-ink); --button-bg-pressed: var(--chat-ink); --button-fg: var(--app-composer); background: var(--chat-ink); color: var(--app-composer); font-size: 14px; box-shadow: var(--shadow-menu); transition: opacity var(--duration-quick) var(--ease-smooth-out); }
 .back-to-bottom:is(:hover, [data-hovered="true"]):not([data-hiding]) { opacity: .85; }
@@ -790,7 +788,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .summary-title { color: var(--chat-ink); font-size: var(--font-body); font-weight: 500; }
 .summary-block > .disclosure { width: 100%; }
 .summary-block .tool-text > .code-block { margin-top: var(--space-component); }
-.summary-time { margin-left: auto; color: var(--chat-muted); font-size: var(--font-label); }
+.summary-time { margin-left: auto; color: var(--chat-muted); font-size: var(--font-ui); }
 @media (prefers-reduced-motion: reduce) { .back-to-bottom { scroll-behavior: auto; } }
 .settings-content { width: min(816px, calc(100% - 72px)); margin: 30px auto; padding-bottom: 64px; overflow-y: auto; display: flex; flex-direction: column; gap: 64px; }
 .settings-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: auto; scrollbar-gutter: stable; }
@@ -891,7 +889,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .settings-spacer { flex: 1; }
 .settings-account { display: flex; flex-direction: column; gap: var(--space-tight); padding: var(--space-component) var(--space-section); padding-left: calc(2 * var(--space-section)); border-bottom: 1px solid var(--chat-border); }
 .settings-card > .settings-account:last-child { border-bottom: 0; }
-.settings-account-title { font-size: var(--font-small); color: var(--chat-muted); }
+.settings-account-title { font-size: var(--font-caption); color: var(--chat-muted); }
 .settings-account-line { display: flex; align-items: center; min-width: 0; gap: var(--space-section); }
 .settings-account-line .settings-provider-name { font-family: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-action { display: inline-flex; align-items: center; gap: var(--space-inline); height: 32px; padding: 0 12px; border: 1px solid var(--chat-input-border); border-radius: var(--radius-control); background: transparent; color: var(--chat-ink); font-size: 13px; text-decoration: none; cursor: pointer; }
@@ -1156,7 +1154,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .provider-config-form { align-items: stretch; }
 .provider-config-form .login-provider-picker { margin: 0; }
 .provider-config-form :is(.login-field, .provider-method-row, .provider-custom-row) { display: grid; grid-template-columns: 192px minmax(0, 1fr); gap: var(--space-group); align-items: center; min-height: 64px; padding: var(--space-section); border-bottom: 1px solid var(--chat-border); }
-.provider-config-form .provider-method-row .login-switch { width: 288px; height: var(--control-lg); padding: var(--space-micro); border-radius: var(--radius-row); font-size: var(--font-label); }
+.provider-config-form .provider-method-row .login-switch { width: 288px; height: var(--control-lg); padding: var(--space-micro); border-radius: var(--radius-row); font-size: var(--font-ui); }
 .provider-config-form .login-switch button { border-radius: var(--radius-control); }
 .provider-config-form .oauth-prompt .login-field [data-slot="label"] { text-align: left; }
 .provider-config-form .provider-field-label { font-size: 14px; }
@@ -1172,9 +1170,9 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .provider-config-form .login-custom-checkbox[data-selected="true"] [data-slot="checkbox-control"] { border-color: var(--primary); background: var(--primary); color: white; }
 .provider-form-actions { display: flex; width: 100%; margin-top: auto; }
 .provider-config-form .provider-form-actions { justify-content: flex-end; align-items: center; gap: var(--space-component); padding: var(--space-section); border-top: 0; }
-.provider-config-form .login-submit { width: auto; height: var(--control-lg); padding: 0 var(--space-section); margin: 0; border-radius: var(--radius-control); background: var(--chat-ink); color: var(--settings-surface); font-size: var(--font-label); }
+.provider-config-form .login-submit { width: auto; height: var(--control-lg); padding: 0 var(--space-section); margin: 0; border-radius: var(--radius-control); background: var(--chat-ink); color: var(--settings-surface); font-size: var(--font-ui); }
 .provider-config-form .login-submit:is(:hover, [data-hovered="true"]):not(:disabled, [data-disabled="true"]) { background: var(--chat-ink); color: var(--settings-surface); }
-.provider-config-form .provider-cancel { height: var(--control-lg); min-height: var(--control-lg); padding: 0 var(--space-component); border-radius: var(--radius-control); color: var(--chat-muted); font-size: var(--font-label); }
+.provider-config-form .provider-cancel { height: var(--control-lg); min-height: var(--control-lg); padding: 0 var(--space-component); border-radius: var(--radius-control); color: var(--chat-muted); font-size: var(--font-ui); }
 .provider-config-form .login-message { margin: 0; padding: var(--space-section); text-align: left; color: var(--chat-muted); }
 .provider-config-form .login-message--error { color: var(--settings-danger-tx); }
 .provider-config-form :is(.login-fields--oauth, .login-fields--qr) { padding: 0; gap: var(--space-section); align-items: stretch; }
