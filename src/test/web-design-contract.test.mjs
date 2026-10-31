@@ -57,7 +57,7 @@ test("聊天工作台和组件画布展示合并的模型与思考强度选择�
     assert.equal(panel.padding, 12);
     assert.deepEqual(panel.children.map(row => row.name), ["选择模型入口", "选择思考强度入口"]);
     assert.ok(panel.children.every(row => row.height === 32 && row.gap === 8 && row.justifyContent === "end"));
-    assert.ok(panel.children.every(row => row.children[0].fontSize === 14 && row.children[0].lineHeight === 1.5));
+    assert.ok(panel.children.every(row => row.children[0].fontSize === 14 && Math.abs(row.children[0].lineHeight * row.children[0].fontSize - 20) < 0.1));
     assert.equal(find(board, "选择思考强度入口").children[0].content, "Max");
     assert.deepEqual(find(board, "模型入口箭头图标位").padding, [4, 0, 0, 0]);
     const modelList = find(board, "模型列表 · 选择状态");
@@ -66,7 +66,7 @@ test("聊天工作台和组件画布展示合并的模型与思考强度选择�
     assert.equal(find(section, "模型列表 · 浅色"), undefined);
     assert.equal(find(section, "模型列表 · 深色"), undefined);
     assert.equal(modelList.width, panel.width);
-    assert.ok(modelList.children.every(row => row.children[0].fontSize === 14 && row.children[0].lineHeight === 1.5));
+    assert.ok(modelList.children.every(row => row.children[0].fontSize === 14 && Math.abs(row.children[0].lineHeight * row.children[0].fontSize - 20) < 0.1));
     assert.equal(modelList.y, panel.y);
     const example = find(board, "消息编辑器 · 收起示例");
     const source = find(chat, "HeroUI Textarea · 底部消息编辑器");
@@ -106,7 +106,7 @@ test("所有输入栏使用合并的模型与思考强度入口", () => {
       assert.deepEqual(node.padding, [0, 8]);
       assert.equal(node.children[1].gap, 6);
       assert.deepEqual(node.children[1].children.slice(0, 2).map(child => child.name), ["当前模型", "当前思考强度"]);
-      assert.ok(node.children[1].children.slice(0, 2).every(child => child.fontSize === 13 && child.lineHeight === 1.5));
+      assert.ok(node.children[1].children.slice(0, 2).every(child => child.fontSize === 14 && Math.abs(child.lineHeight * child.fontSize - 20) < 0.1));
     }
     for (const child of node.children ?? []) visit(child);
   }
@@ -177,7 +177,7 @@ test("自定义服务浅深画布归属设置区，与下方分区不重叠", ()
       if (node.name === "下拉指示") assert.equal(node.icon, "chevron-down");
       assert.ok(!node.name?.endsWith("· 胶囊"), "能力项为文字与独立按钮");
       if (node.type === "frame" && node.name?.endsWith("· 输入框")) {
-        assert.equal(node.height, node.name.startsWith("接口协议") ? 32 : 42);
+        assert.equal(node.height, node.name.startsWith("接口协议") ? 32 : 40);
         for (const child of node.children ?? []) if (child.type === "text") assert.equal(child.fontSize, node.name.startsWith("接口协议") ? 14 : 16);
       }
       if (node.name?.endsWith("· 启用按钮")) {
