@@ -95028,6 +95028,7 @@
                   "id": "gzqvc",
                   "name": "菜单项 · 账号信息",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95057,14 +95058,14 @@
                       "fontSize": 16,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 },
                 {
                   "type": "frame",
                   "id": "ntB7v",
                   "name": "菜单项 · 设置",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95094,14 +95095,14 @@
                       "fontSize": 16,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 },
                 {
                   "type": "frame",
                   "id": "dTA3f",
                   "name": "菜单项 · 主题",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95149,14 +95150,14 @@
                       "fontSize": 12,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 },
                 {
                   "type": "frame",
                   "id": "FScmL",
                   "name": "菜单项 · 反馈问题",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95186,8 +95187,7 @@
                       "fontSize": 16,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 },
                 {
                   "type": "frame",
@@ -95215,6 +95215,7 @@
                   "id": "dHBqP",
                   "name": "菜单项 · 退出 CST Pilot",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95244,8 +95245,7 @@
                       "fontSize": 16,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 }
               ]
             },
@@ -95325,6 +95325,7 @@
                   "id": "NQln8",
                   "name": "菜单项 · 账号信息",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95354,14 +95355,14 @@
                       "fontSize": 16,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 },
                 {
                   "type": "frame",
                   "id": "BfjR6",
                   "name": "菜单项 · 设置",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95391,14 +95392,14 @@
                       "fontSize": 16,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 },
                 {
                   "type": "frame",
                   "id": "e6WlU",
                   "name": "菜单项 · 主题",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95446,14 +95447,14 @@
                       "fontSize": 12,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 },
                 {
                   "type": "frame",
                   "id": "e17nz",
                   "name": "菜单项 · 反馈问题",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95483,8 +95484,7 @@
                       "fontSize": 16,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 },
                 {
                   "type": "frame",
@@ -95512,6 +95512,7 @@
                   "id": "WBOI3",
                   "name": "菜单项 · 退出 CST Pilot",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95541,8 +95542,7 @@
                       "fontSize": 16,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 }
               ]
             },
@@ -95577,6 +95577,7 @@
                   "id": "c476NX",
                   "name": "菜单项 · 账号信息",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95606,14 +95607,14 @@
                       "fontSize": 16,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 },
                 {
                   "type": "frame",
                   "id": "oxdxc",
                   "name": "菜单项 · 登录",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95643,14 +95644,14 @@
                       "fontSize": 16,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 },
                 {
                   "type": "frame",
                   "id": "CtlVA",
                   "name": "菜单项 · 设置",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95680,14 +95681,14 @@
                       "fontSize": 16,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 },
                 {
                   "type": "frame",
                   "id": "YIhwM",
                   "name": "菜单项 · 主题",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95735,14 +95736,14 @@
                       "fontSize": 12,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 },
                 {
                   "type": "frame",
                   "id": "b1dhHq",
                   "name": "菜单项 · 反馈问题",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95772,8 +95773,7 @@
                       "fontSize": 16,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 }
               ]
             },
@@ -95808,6 +95808,7 @@
                   "id": "yXmRu",
                   "name": "菜单项 · 账号信息",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95837,14 +95838,14 @@
                       "fontSize": 16,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 },
                 {
                   "type": "frame",
                   "id": "x6mUie",
                   "name": "菜单项 · 登录",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95874,14 +95875,14 @@
                       "fontSize": 16,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 },
                 {
                   "type": "frame",
                   "id": "n3Nv66",
                   "name": "菜单项 · 设置",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95911,14 +95912,14 @@
                       "fontSize": 16,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 },
                 {
                   "type": "frame",
                   "id": "s5oAQ",
                   "name": "菜单项 · 主题",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -95966,14 +95967,14 @@
                       "fontSize": 12,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 },
                 {
                   "type": "frame",
                   "id": "LGjQZ",
                   "name": "菜单项 · 反馈问题",
                   "width": "fill_container",
+                  "height": 40,
                   "cornerRadius": "$radius-row",
                   "gap": 12,
                   "padding": [
@@ -96003,8 +96004,7 @@
                       "fontSize": 16,
                       "fontWeight": "normal"
                     }
-                  ],
-                  "height": 40
+                  ]
                 }
               ]
             },
