@@ -22,7 +22,7 @@ test("压缩交互：顶部通知、草稿保留、关闭、实际失败与成�
 			await probe.click(".composer-send");
 		}
 		await probe.navigate(`${fixture.origin}/s/${empty.id}`);
-		await probe.until("document.querySelector('.model-label')?.textContent.includes('压缩验收模型')", "模型已加载");
+		await probe.until("document.querySelector('.model-name')?.textContent.includes('压缩验收模型')", "模型已加载");
 		await submit();
 		await probe.until(
 			"document.querySelector('.error-notification')?.textContent.includes('暂无可压缩内容')",
@@ -84,7 +84,7 @@ test("压缩交互：顶部通知、草稿保留、关闭、实际失败与成�
 		);
 		await probe.navigate(`${fixture.origin}/s/${slot.id}`);
 		await probe.until(
-			"document.querySelector('.model-label')?.textContent.includes('压缩验收模型')",
+			"document.querySelector('.model-name')?.textContent.includes('压缩验收模型')",
 			"会话模型已加载",
 		);
 		fixture.modelState.status = 401;

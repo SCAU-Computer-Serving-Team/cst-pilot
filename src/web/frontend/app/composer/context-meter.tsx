@@ -1,5 +1,5 @@
-import { ChevronRight, Info } from "lucide-react";
-import { type CSSProperties, useId, useLayoutEffect, useRef, useState } from "react";
+import { ChevronRight, Info, Menu } from "lucide-react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { usePanelDismiss } from "../shell/panel-dismiss";
 import { formatQuotaBalance, quotaProviders } from "./quota-format";
@@ -80,11 +80,7 @@ export function ContextMeter({
 				aria-controls={panelId}
 				aria-label={usage?.percent == null ? "上下文用量未知" : `上下文用量 ${Math.round(percent)}%`}
 			>
-				<span
-					className="context-ring"
-					style={{ "--context-progress": `${Math.max(0, Math.min(100, percent))}%` } as CSSProperties}
-					data-level={percent >= 90 ? "danger" : percent >= 75 ? "warning" : "normal"}
-				/>
+				<Menu size={16} aria-hidden="true" />
 			</button>
 			<section className="context-panel" ref={panel} id={panelId} aria-label="上下文信息">
 				<span className="context-row">

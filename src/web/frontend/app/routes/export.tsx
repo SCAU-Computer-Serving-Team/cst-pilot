@@ -8,11 +8,10 @@ import type {
 	SessionExport,
 } from "../../../../../agent/home/extensions/web/shared/exports";
 import { apiJson, sessionPath } from "../data/api";
-import type { SessionDetail } from "../data/web-state";
+import { ExportSelect } from "../exports/export-select";
 import { ErrorNotice } from "../shell/error-notice";
 
 function initialOptions(): ExportOptions {
-	const now = new Date();
 	const theme = document.documentElement.dataset.theme;
 	return {
 		format: "png",
@@ -20,7 +19,6 @@ function initialOptions(): ExportOptions {
 			theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
 				? "dark"
 				: "light",
-		date: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
 		includeThinking: false,
 		includeTools: false,
 	};
@@ -29,7 +27,6 @@ function initialOptions(): ExportOptions {
 export default function ExportSession() {
 	const { sessionId = "" } = useParams();
 	const [options, setOptions] = useState<ExportOptions>(initialOptions);
-	const [turns, setTurns] = useState<{ id: string; label: string }[]>([]);
 	const [snapshot, setSnapshot] = useState<ExportSnapshot>();
 	const [result, setResult] = useState<SessionExport>();
 	const [busy, setBusy] = useState(false);
@@ -42,38 +39,12 @@ export default function ExportSession() {
 	latest.current = snapshot;
 	const key = useRef<string | undefined>(undefined);
 	const active = useRef(true);
-	const usable = !options.turnIds || options.turnIds.length > 0;
 	useEffect(() => {
 		active.current = true;
 		return () => {
 			active.current = false;
 		};
 	}, []);
-	useEffect(() => {
-		const controller = new AbortController();
-		void apiJson<SessionDetail>(sessionPath(sessionId), { signal: controller.signal })
-			.then((detail) => {
-				setTurns(
-					detail.entries
-						.filter((entry) => entry.message.role === "user")
-						.map((entry) => ({
-							id: entry.id,
-							label:
-								(typeof entry.message.content === "string"
-									? entry.message.content
-									: entry.message.content
-											.filter((part) => part.type === "text")
-											.map((part) => part.text)
-											.join(" ")
-								).slice(0, 100) || "图片消息",
-						})),
-				);
-			})
-			.catch((cause) => {
-				if (!controller.signal.aborted) setPreviewError(cause instanceof Error ? cause.message : "轮次读取失败");
-			});
-		return () => controller.abort();
-	}, [sessionId]);
 	useEffect(() => {
 		const container = preview.current;
 		if (!container) return;
@@ -103,7 +74,6 @@ export default function ExportSession() {
 		setError("");
 		setPreviewError("");
 		setSnapshot(undefined);
-		if (!usable) return;
 		const controller = new AbortController();
 		void apiJson<ExportSnapshot>(sessionPath(sessionId, "/exports/preview"), {
 			method: "POST",
@@ -117,7 +87,7 @@ export default function ExportSession() {
 				if (!controller.signal.aborted) setPreviewError(cause instanceof Error ? cause.message : "预览未能加载");
 			});
 		return () => controller.abort();
-	}, [sessionId, options, usable]);
+	}, [sessionId, options]);
 	useEffect(() => {
 		if (snapshot)
 			frame.current?.contentWindow?.postMessage({ type: "cst-export-preview", snapshot }, location.origin);
@@ -139,7 +109,7 @@ export default function ExportSession() {
 	}, [result]);
 	const running = busy || result?.status === "queued" || result?.status === "rendering";
 	async function generate() {
-		if (running || !snapshot || !usable) return;
+		if (running || !snapshot) return;
 		setBusy(true);
 		setError("");
 		key.current ??= crypto.randomUUID();
@@ -172,73 +142,26 @@ export default function ExportSession() {
 				<section className="export-controls" aria-label="导出选项">
 					<fieldset disabled={running}>
 						<legend>导出选项</legend>
-						<label>
-							格式
-							<select
-								value={options.format}
-								onChange={(event) =>
-									setOptions({ ...options, format: event.target.value as ExportOptions["format"] })
-								}
-							>
-								<option value="png">PNG 图片</option>
-								<option value="html">离线 HTML</option>
-							</select>
-						</label>
-						<label>
-							主题
-							<select
-								value={options.theme}
-								onChange={(event) =>
-									setOptions({ ...options, theme: event.target.value as ExportOptions["theme"] })
-								}
-							>
-								<option value="light">日间</option>
-								<option value="dark">夜间</option>
-							</select>
-						</label>
-						<label>
-							归档日期
-							<input
-								type="date"
-								value={options.date}
-								onChange={(event) => setOptions({ ...options, date: event.target.value })}
-							/>
-						</label>
-						<label>
-							范围
-							<select
-								value={options.turnIds ? "selected" : "all"}
-								onChange={(event) =>
-									setOptions({ ...options, turnIds: event.target.value === "all" ? undefined : [] })
-								}
-							>
-								<option value="all">当前分支全部对话</option>
-								<option value="selected">选择轮次</option>
-							</select>
-						</label>
-						{options.turnIds && (
-							<section className="export-turns" aria-label="选择轮次">
-								{turns.map((turn, index) => (
-									<label key={turn.id}>
-										<input
-											type="checkbox"
-											checked={options.turnIds?.includes(turn.id)}
-											onChange={(event) =>
-												setOptions({
-													...options,
-													turnIds: event.target.checked
-														? [...(options.turnIds ?? []), turn.id]
-														: options.turnIds?.filter((id) => id !== turn.id),
-												})
-											}
-										/>
-										<span>
-											{index + 1}. {turn.label}
-										</span>
-									</label>
-								))}
-							</section>
-						)}
+						<ExportSelect
+							label="格式"
+							value={options.format}
+							items={[
+								{ id: "png", label: "PNG 图片" },
+								{ id: "html", label: "离线 HTML" },
+							]}
+							disabled={running}
+							onChange={(format) => setOptions({ ...options, format })}
+						/>
+						<ExportSelect
+							label="主题"
+							value={options.theme}
+							items={[
+								{ id: "light", label: "日间" },
+								{ id: "dark", label: "夜间" },
+							]}
+							disabled={running}
+							onChange={(theme) => setOptions({ ...options, theme })}
+						/>
 						<label className="export-check">
 							<input
 								type="checkbox"
@@ -256,14 +179,7 @@ export default function ExportSession() {
 							包含工具结果
 						</label>
 					</fieldset>
-					<p className="export-note">
-						保存到 artifacts/{options.date || "日期"}/sessions/。内容可能含机主信息，分享前请核对。
-					</p>
-					<Button
-						className="export-generate"
-						isDisabled={running || !snapshot || !usable}
-						onPress={() => void generate()}
-					>
+					<Button className="export-generate" isDisabled={running || !snapshot} onPress={() => void generate()}>
 						<Download size={16} />
 						{running ? "正在生成…" : "生成并保存"}
 					</Button>
@@ -292,19 +208,14 @@ export default function ExportSession() {
 							))}
 						</section>
 					)}
-					<output className="export-note">
-						{running
-							? "任务在本机后台生成，离开页面后会继续保存。"
-							: "PNG 长会话自动分图；HTML 可离线阅读和折叠过程。"}
-					</output>
+					{running && <output className="export-note">任务在本机后台生成，离开页面后会继续保存。</output>}
 				</section>
 				<section className="export-preview-panel" aria-label="导出预览">
 					<div className="export-preview-label">预览</div>
 					{previewError && (
 						<ErrorNotice message={previewError} onRetry={() => setOptions((value) => ({ ...value }))} />
 					)}
-					{!usable && <p>选择至少一轮对话。</p>}
-					{!snapshot && usable && !previewError && <output>正在准备预览…</output>}
+					{!snapshot && !previewError && <output>正在准备预览…</output>}
 					<div
 						ref={preview}
 						className="export-preview-viewport"

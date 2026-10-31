@@ -230,12 +230,14 @@ const customProbe = `(async () => {
 	await until(() => blocks() > onChat, "分支总结消息");
 	await new Promise((resolve) => setTimeout(resolve, 200));
 	document.querySelector(".composer-model").click();
-	await until(() => document.querySelector(".model-popover"), "模型面板");
+	await until(() => document.querySelector(".model-picker-model"), "强度面板");
+	document.querySelector(".model-picker-model").click();
+	await until(() => document.querySelector(".model-picker-list"), "模型面板");
 	await new Promise((resolve) => setTimeout(resolve, 50));
-	document.querySelector(".model-popover [data-slot='list-box']").dispatchEvent(new Event("scroll"));
-	const internalScrollPreserved = !!document.querySelector(".model-popover");
+	document.querySelector(".model-picker-list [data-slot='list-box']").dispatchEvent(new Event("scroll"));
+	const internalScrollPreserved = !!document.querySelector(".model-picker-list");
 	window.dispatchEvent(new Event("scroll"));
-	await until(() => !document.querySelector(".model-popover"), "页面滚动关闭模型面板");
+	await until(() => !document.querySelector(".model-picker-list"), "页面滚动关闭模型面板");
 	document.querySelector(".sidebar-account-trigger").click();
 	await until(() => document.querySelector(".sidebar-account-popover"), "账号面板");
 	await new Promise((resolve) => setTimeout(resolve, 50));

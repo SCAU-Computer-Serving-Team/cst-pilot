@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { copyFile, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import {
+	artifactDate,
 	artifactDirectory,
 	artifactName,
 	ensureArtifactDirectory,
@@ -122,7 +123,7 @@ export class SessionExportStore {
 						bytes > 200 * 1024 * 1024 ||
 						!data.length
 					)
-						throw new ExportError(413, "export_too_large", "产物超过大小限制，请减少轮次后重试");
+						throw new ExportError(413, "export_too_large", "产物超过大小限制，请缩短当前分支后重试");
 					const suffix = extension === "png" ? `-${String(files.length + 1).padStart(2, "0")}` : "";
 					const name = `${artifactName(result.title)}-${result.id}${suffix}.${extension}`;
 					const file = join(staging, name);
@@ -161,7 +162,7 @@ export class SessionExportStore {
 					: {
 							code: diskCode === "ENOSPC" ? "storage_full" : "export_failed",
 							message: this.controller.signal.aborted
-								? "导出超时或已取消，请重试或减少轮次"
+								? "导出超时或已取消，请重试或缩短当前分支"
 								: diskCode === "ENOSPC"
 									? "工具包存储空间不足，请清理后重试"
 									: "导出未完成，请检查浏览器和工具包写入权限后重试",
@@ -184,7 +185,9 @@ export class SessionExportStore {
 				!["queued", "rendering", "completed", "failed"].includes(record.result.status)
 			)
 				throw new Error("invalid metadata");
-			exportOptions(record.result.options);
+			const { format, theme, includeThinking, includeTools, date } = record.result.options;
+			exportOptions({ format, theme, includeThinking, includeTools });
+			artifactDate(date);
 			if (
 				(record.result.status === "queued" || record.result.status === "rendering") &&
 				this.active?.record.result.id !== id &&

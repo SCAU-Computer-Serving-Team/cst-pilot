@@ -27,7 +27,8 @@ const entries: ConversationEntry[] = [
 	{ id: "u2", message: { role: "user", content: "第二轮", timestamp: 5 } },
 	{ id: "a3", message: { role: "assistant", content: "第二轮回答", timestamp: 6 } },
 ];
-const options = exportOptions({ format: "html", date: "2026-10-29", theme: "dark" });
+const options = exportOptions({ format: "html", theme: "dark" });
+const day = artifactDate();
 const snapshot = (): ExportSnapshot => exportSnapshot("fixture", "测试标题", entries, options);
 async function completed(store: SessionExportStore, id: string): Promise<SessionExport> {
 	for (let attempt = 0; attempt < 200; attempt++) {
@@ -38,7 +39,22 @@ async function completed(store: SessionExportStore, id: string): Promise<Session
 	throw new Error("测试导出未完成");
 }
 
-test("导出选项、实际日期与文件名校验，选轮和过程包含规则不修改原消息", () => {
+test("导出时间由快照时刻决定，跨天重新生成使用新的本机日期", (context) => {
+	const before = new Date(2026, 9, 31, 23, 59, 59);
+	context.mock.timers.enable({ apis: ["Date"], now: before });
+	const preferences = exportOptions({ format: "html" });
+	assert.equal("date" in preferences, false);
+	const first = exportSnapshot("fixture", "跨天", entries, preferences);
+	assert.equal(first.options.date, "2026-10-31");
+	assert.equal(first.capturedAt, before.toISOString());
+	const after = new Date(2026, 10, 1, 0, 0, 1);
+	context.mock.timers.setTime(after.getTime());
+	const second = exportSnapshot("fixture", "跨天", entries, preferences);
+	assert.equal(second.options.date, "2026-11-01");
+	assert.equal(second.capturedAt, after.toISOString());
+});
+
+test("导出选项与文件名校验，当前分支和过程包含规则不修改原消息", () => {
 	assert.equal(artifactDate("2024-02-29"), "2024-02-29");
 	for (const day of ["2026-02-29", "2026-13-01", "2026-02-30", "../escape", "2026-1-1", "0000-01-01"])
 		assert.throws(() => artifactDate(day));
@@ -47,9 +63,8 @@ test("导出选项、实际日期与文件名校验，选轮和过程包含规�
 		{ format: "pdf" },
 		{ theme: "system" },
 		{ includeTools: "yes" },
-		{ turnIds: [] },
-		{ turnIds: ["u1", "u1"] },
-		{ turnIds: ["../x"] },
+		{ date: "2026-10-29" },
+		{ turnIds: ["u1"] },
 		{ extra: true },
 	])
 		assert.throws(() => exportOptions(input));
@@ -61,12 +76,10 @@ test("导出选项、实际日期与文件名校验，选轮和过程包含规�
 	);
 	assert.equal(JSON.stringify(result).includes("隐藏思考"), false);
 	assert.equal(JSON.stringify(result).includes("toolCall"), false);
-	const selected = exportSnapshot("fixture", "选轮", entries, { ...options, turnIds: ["u2"] });
 	assert.deepEqual(
-		selected.entries.map((entry) => entry.id),
-		["u2", "a3"],
+		result.entries.map((entry) => entry.id),
+		["u1", "a2", "u2", "a3"],
 	);
-	assert.throws(() => exportSnapshot("fixture", "选轮", entries, { ...options, turnIds: ["missing"] }));
 	const full = exportSnapshot("fixture", "全量", entries, { ...options, includeThinking: true, includeTools: true });
 	assert.equal(full.entries.length, entries.length);
 	assert.equal(JSON.stringify(entries), original);
@@ -86,13 +99,10 @@ test("产物目录拒绝符号链接跨界，日期始终为第二级", async ()
 		const artifacts = join(root, "artifacts"),
 			outside = join(root, "outside");
 		await mkdir(outside);
-		assert.equal(
-			await ensureArtifactDirectory(artifacts, options.date, "sessions"),
-			join(artifacts, options.date, "sessions"),
-		);
-		await rm(join(artifacts, options.date, "sessions"), { recursive: true });
-		await symlink(outside, join(artifacts, options.date, "sessions"), "junction");
-		await assert.rejects(ensureArtifactDirectory(artifacts, options.date, "sessions"));
+		assert.equal(await ensureArtifactDirectory(artifacts, day, "sessions"), join(artifacts, day, "sessions"));
+		await rm(join(artifacts, day, "sessions"), { recursive: true });
+		await symlink(outside, join(artifacts, day, "sessions"), "junction");
+		await assert.rejects(ensureArtifactDirectory(artifacts, day, "sessions"));
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -114,7 +124,7 @@ test("作业文件登记可重启恢复，下载仅访问已登记文件并检�
 		const created = await store.create(snapshot());
 		const result = await completed(store, created.id);
 		assert.equal(result.status, "completed");
-		assert.equal(result.directory, join(artifactRoot, options.date, "sessions"));
+		assert.equal(result.directory, join(artifactRoot, day, "sessions"));
 		assert.equal((await readdir(result.directory)).length, 1);
 		const restored = new SessionExportStore(artifactRoot, metadata, "http://127.0.0.1:9999", renderer);
 		assert.deepEqual(await restored.get(created.id), result);
@@ -158,7 +168,7 @@ test("渲染失败与存储写入失败不留下半成品，任务队列按顺�
 		assert.equal((await completed(store, first.id)).status, "failed");
 		assert.equal((await completed(store, second.id)).status, "completed");
 		assert.deepEqual(active, ["失败", "成功"]);
-		assert.equal((await readdir(join(root, "artifacts", options.date, "sessions"))).length, 1);
+		assert.equal((await readdir(join(root, "artifacts", day, "sessions"))).length, 1);
 		await store.close();
 		assert.deepEqual(await readdir(join(root, "metadata", "work")), []);
 		await writeFile(join(root, "readonly"), "not a directory");

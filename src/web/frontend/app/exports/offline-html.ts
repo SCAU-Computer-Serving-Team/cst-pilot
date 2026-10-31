@@ -26,19 +26,44 @@ export async function offlineHtml(title: string, theme: "light" | "dark"): Promi
 		}
 		return task;
 	}
-	const sheets: string[] = [];
-	for (const sheet of document.styleSheets) {
-		const css = [...sheet.cssRules].map((rule) => rule.cssText).join("\n");
-		const matches = [...css.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/g)];
-		let text = "",
-			cursor = 0;
-		for (const match of matches) {
-			text += css.slice(cursor, match.index);
-			text += `url("${await inlineAsset((match[1] ?? match[2] ?? match[3]).trim(), sheet.href ?? location.href)}")`;
-			cursor = match.index + match[0].length;
-		}
-		sheets.push(text + css.slice(cursor));
+	const family = (value: string) => value.replace(/["']/g, "").trim();
+	const loadedFonts = [...document.fonts].filter((font) => font.status === "loaded");
+	function serialize(rules: CSSRuleList): string {
+		return [...rules]
+			.map((rule) => {
+				if (
+					rule instanceof CSSFontFaceRule &&
+					!loadedFonts.some(
+						(font) =>
+							family(font.family) === family(rule.style.getPropertyValue("font-family")) &&
+							font.weight === (rule.style.getPropertyValue("font-weight") || "normal") &&
+							font.style === (rule.style.getPropertyValue("font-style") || "normal"),
+					)
+				)
+					return "";
+				if (rule instanceof CSSGroupingRule)
+					return `${rule.cssText.slice(0, rule.cssText.indexOf("{") + 1)}${serialize(rule.cssRules)}}`;
+				return rule.cssText;
+			})
+			.join("\n");
 	}
+	// 所有独立资源同时读取；相同 URL 共用一次请求，不内嵌未使用的字体。
+	const sheets = await Promise.all(
+		[...document.styleSheets].map(async (sheet) => {
+			const css = serialize(sheet.cssRules);
+			const matches = [...css.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*))\s*\)/g)];
+			const replacements = await Promise.all(
+				matches.map((match) => inlineAsset((match[1] ?? match[2] ?? match[3]).trim(), sheet.href ?? location.href)),
+			);
+			let text = "",
+				cursor = 0;
+			for (const [index, match] of matches.entries()) {
+				text += `${css.slice(cursor, match.index)}url("${replacements[index]}")`;
+				cursor = match.index + match[0].length;
+			}
+			return text + css.slice(cursor);
+		}),
+	);
 	const source = document.querySelector(".export-document");
 	if (!source) throw new Error("导出正文为空");
 	const clone = source.cloneNode(true) as HTMLElement;

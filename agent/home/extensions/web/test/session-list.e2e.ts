@@ -9,7 +9,7 @@ import { WebSessionPool } from "../server/session/sessions.ts";
 import { BrowserProbe, freePort } from "./browser.ts";
 import { configureTestModel, testRoot } from "./support.ts";
 
-test("最近十项、折叠、全部会话与共享批量管理", { timeout: 90000 }, async () => {
+test("最近二十项、16px 字号、四组全部会话与共享批量管理", { timeout: 90000 }, async (context) => {
 	const root = join(await testRoot(), "session-list");
 	await mkdir(root, { recursive: true });
 	const home = await mkdtemp(join(root, "home-"));
@@ -20,7 +20,12 @@ test("最近十项、折叠、全部会话与共享批量管理", { timeout: 900
 		sessionDir: join(home, "sessions"),
 		withLoader: (load) => load(),
 	});
-	for (let index = 0; index < 14; index++) {
+	const now = Date.now();
+	context.mock.timers.enable({ apis: ["Date"], now });
+	for (let index = 0; index < 24; index++) {
+		const date = new Date(now);
+		date.setDate(date.getDate() - (index === 23 ? 45 : index));
+		context.mock.timers.setTime(date.getTime());
 		const slot = await pool.create();
 		slot.session.sessionManager.appendMessage({
 			role: "user",
@@ -45,12 +50,12 @@ test("最近十项、折叠、全部会话与共享批量管理", { timeout: 900
 			timestamp: Date.now(),
 		});
 		slot.session.setSessionName(
-			index === 13 ? "用于验证长标题截断的会话名称，包含中文与 English 以及更多文字" : `会话 ${index}`,
+			index === 23 ? "用于验证长标题截断的会话名称，包含中文与 English 以及更多文字" : `会话 ${index}`,
 		);
 		assert.ok(slot.session.sessionFile);
-		const date = new Date(Date.now() - index * 86400000);
 		await utimes(slot.session.sessionFile, date, date);
 	}
+	context.mock.timers.reset();
 	const expected = (await pool.list()).sort((a, b) => Date.parse(b.updatedAt ?? "") - Date.parse(a.updatedAt ?? ""));
 	const port = await freePort();
 	const api = createWebApi(pool, home, port);
@@ -84,12 +89,12 @@ test("最近十项、折叠、全部会话与共享批量管理", { timeout: 900
 			mobile: false,
 		});
 		await probe.call("Page.navigate", { url: `${origin}/#cst-web-start` });
-		await probe.until("document.querySelectorAll('.sidebar a.sidebar-session').length === 10", "最近十项");
+		await probe.until("document.querySelectorAll('.sidebar a.sidebar-session').length === 20", "最近二十项");
 		assert.deepEqual(
 			await probe.evaluate(
 				"[...document.querySelectorAll('.sidebar a.sidebar-session')].map(e=>e.dataset.sessionId)",
 			),
-			expected.slice(0, 10).map((row) => row.id),
+			expected.slice(0, 20).map((row) => row.id),
 		);
 		assert.equal(
 			await probe.evaluate("document.querySelector('.sidebar-recent-heading').textContent.trim()"),
@@ -104,7 +109,7 @@ test("最近十项、折叠、全部会话与共享批量管理", { timeout: 900
 		const sizes = await probe.evaluate<{ nav: number; row: number; font: string; model: string }>(
 			`(() => ({ nav: document.querySelector('.sidebar-new').getBoundingClientRect().height, row: document.querySelector('.sidebar-session').getBoundingClientRect().height, font: getComputedStyle(document.querySelector('.sidebar-session')).fontSize, model: getComputedStyle(document.querySelector('.composer-model')).fontSize }))()`,
 		);
-		assert.deepEqual(sizes, { nav: 40, row: 32, font: "14px", model: "16px" });
+		assert.deepEqual(sizes, { nav: 40, row: 32, font: "16px", model: "13px" });
 		await screenshot("home-light.png");
 		await probe.click(".sidebar-recent-heading");
 		await probe.until(
@@ -114,14 +119,22 @@ test("最近十项、折叠、全部会话与共享批量管理", { timeout: 900
 		assert.equal(await probe.evaluate("document.querySelector('.sidebar-recent .disclosure__content').inert"), true);
 		await probe.click(".sidebar-all");
 		await probe.until(
-			"location.pathname === '/sessions' && document.querySelectorAll('.session-list-item').length === 14",
+			"location.pathname === '/sessions' && document.querySelectorAll('.session-list-item').length === 24",
 			"全部会话独立页面",
+		);
+		assert.deepEqual(
+			await probe.evaluate("[...document.querySelectorAll('.session-list-group h2')].map(e=>e.textContent)"),
+			["今天", "最近一周", "最近一个月", "更早"],
+		);
+		assert.equal(
+			await probe.evaluate("getComputedStyle(document.querySelector('.session-list .sidebar-session')).fontSize"),
+			"16px",
 		);
 		await probe.click(".session-list-manage");
 		await probe.click(".session-list-toolbar .session-management-toolbar button:first-of-type");
 		assert.equal(
 			await probe.evaluate("document.querySelectorAll('.session-list input:checked').length"),
-			14,
+			24,
 			"全选覆盖完整列表",
 		);
 		await probe.click(".session-list-toolbar .session-management-toolbar button:first-of-type");
@@ -132,7 +145,7 @@ test("最近十项、折叠、全部会话与共享批量管理", { timeout: 900
 		await probe.until("!!document.querySelector('.session-delete-dialog[open]')", "删除确认");
 		await probe.click(".session-delete-dialog .exit-confirm");
 		await probe.until(
-			"document.querySelectorAll('.session-list-item').length === 13 && !!document.querySelector('.session-delete-notice')",
+			"document.querySelectorAll('.session-list-item').length === 23 && !!document.querySelector('.session-delete-notice')",
 			"列表立即同步删除",
 		);
 		assert.ok((await pool.list()).every((row) => row.id !== target.id));
@@ -140,11 +153,11 @@ test("最近十项、折叠、全部会话与共享批量管理", { timeout: 900
 			await probe.evaluate(
 				"[...document.querySelectorAll('.sidebar a.sidebar-session')].map(e=>e.dataset.sessionId)",
 			),
-			expected.slice(1, 11).map((row) => row.id),
-			"全部会话删除最近项后，侧栏同步补齐十项",
+			expected.slice(1, 21).map((row) => row.id),
+			"全部会话删除最近项后，侧栏同步补齐二十项",
 		);
 		await probe.navigate(`${origin}/sessions`);
-		await probe.until("document.querySelectorAll('.session-list-item').length === 13", "刷新直达全部会话");
+		await probe.until("document.querySelectorAll('.session-list-item').length === 23", "刷新直达全部会话");
 		const selectionAligned = `(() => { const selection = document.querySelector('.sidebar-selection').getBoundingClientRect(); const link = document.querySelector('.sidebar-all').getBoundingClientRect(); return Math.abs(selection.top - link.top) < 1 && Math.abs(selection.height - link.height) < 1; })()`;
 		await settle();
 		await probe.until(selectionAligned, "展开后全部会话选中背景对齐");
@@ -201,7 +214,7 @@ test("最近十项、折叠、全部会话与共享批量管理", { timeout: 900
 				mobile: false,
 			});
 			await probe.navigate(`${origin}/sessions`);
-			await probe.until("document.querySelectorAll('.session-list-item').length === 13", "窄屏列表");
+			await probe.until("document.querySelectorAll('.session-list-item').length === 23", "窄屏列表");
 			if (await probe.evaluate("!!document.querySelector('.sidebar-restore')"))
 				await probe.click(".sidebar-restore");
 			await screenshot(`all-${width}.png`);
@@ -254,7 +267,7 @@ test("最近十项、折叠、全部会话与共享批量管理", { timeout: 900
 		assert.equal(await probe.evaluate("document.querySelector('.session-list-manage').disabled"), true);
 		await probe.call("Page.removeScriptToEvaluateOnNewDocument", { identifier: fixture.identifier });
 		await probe.navigate(`${origin}/sessions`);
-		await probe.until("document.querySelectorAll('.session-list-item').length === 13", "恢复真实列表");
+		await probe.until("document.querySelectorAll('.session-list-item').length === 23", "恢复真实列表");
 	} finally {
 		await browser?.close();
 		await api.close();

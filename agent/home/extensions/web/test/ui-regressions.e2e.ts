@@ -154,7 +154,7 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		browser = await BrowserProbe.launch(root);
 		await browser.navigate(`${origin}/`);
 		await browser.until(
-			"document.querySelector('.sidebar-session')?.textContent === '昨日会话' && document.querySelector('.model-label')?.textContent.includes('one')",
+			"document.querySelector('.sidebar-session')?.textContent === '昨日会话' && document.querySelector('.model-name')?.textContent.includes('one')",
 			"首页配置与昨日记录",
 		);
 		assert.equal(
@@ -164,13 +164,14 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 			true,
 		);
 		await browser.screenshot(join(root, "home-desktop-light.png"));
-		await browser.evaluate("document.querySelector('.composer-model').click()");
-		await browser.until("!!document.querySelector('.model-popover [role=option]')", "模型菜单");
+		await browser.click(".composer-model");
+		await browser.click(".model-picker-model");
+		await browser.until("!!document.querySelector('.model-picker-list [role=option]')", "模型菜单");
 		const models = await browser.evaluate<string[]>(
-			"[...document.querySelectorAll('.model-popover [role=option]')].map(e=>e.textContent.trim())",
+			"[...document.querySelectorAll('.model-picker-list [role=option]')].map(e=>e.textContent.trim())",
 		);
 		assert.deepEqual(models, ["测试模型 one", "测试模型 two"], "范围变化保留当前模型身份");
-		assert.equal(await browser.evaluate("document.querySelector('.model-popover input')===null"), true);
+		assert.equal(await browser.evaluate("document.querySelector('.model-picker-list input')===null"), true);
 		await browser.evaluate(
 			"Promise.all(document.querySelector('.composer-model .model-chevron').getAnimations().map(a=>a.finished))",
 		);
@@ -186,6 +187,9 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		}
 		await browser.evaluate("document.documentElement.dataset.theme='light'");
 		await browser.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
+		await browser.until("!!document.querySelector('.model-picker-model')", "Esc 返回主菜单");
+		await browser.evaluate("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
+		await browser.until("!document.querySelector('.model-picker-popover')", "Esc 关闭主菜单");
 		await browser.evaluate(
 			"window.__transitions=[]; if(document.startViewTransition){const start=document.startViewTransition.bind(document);document.startViewTransition=(...args)=>{const t=start(...args);window.__transitions.push(t);return t;};}",
 		);
@@ -459,10 +463,7 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 		);
 		await browser.screenshot(join(root, "tree-narrow-dark.png"));
 		await browser.navigate(`${origin}/`);
-		await browser.until(
-			"document.querySelector('.model-label')?.textContent.includes('one')",
-			"半屏保留默认模型身份",
-		);
+		await browser.until("document.querySelector('.model-name')?.textContent.includes('one')", "半屏保留默认模型身份");
 		assert.equal(
 			await browser.evaluate("Math.max(document.documentElement.scrollWidth,document.body.scrollWidth)<=innerWidth"),
 			true,

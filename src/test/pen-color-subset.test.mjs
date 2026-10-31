@@ -67,6 +67,9 @@ const EXCEPTIONS = {
   "3B484E": "DESIGN.md 特殊工具内嵌组件 · 深色边缘 0%",
   "2D373C": "DESIGN.md 特殊工具内嵌组件 · 深色边缘 48%",
   "242D32": "DESIGN.md 特殊工具内嵌组件 · 深色边缘 100%",
+  // DESIGN.md「会话导出」：预览文档与工作区的区域边界
+  "8A8A8A": "DESIGN.md 会话导出 · 浅色预览文档边框",
+  "77838A": "DESIGN.md 会话导出 · 深色预览文档边框",
   // DESIGN.md colors 记录的产品色，色阶画布未收录
   "465A9F": "DESIGN.md light-send · 发送/登录/进度弧强调色（Blue hour 深段）",
   "161C4A": "登录深色 AIR 底色（asset/blue-hour-air-dark-palette.png 色表）",

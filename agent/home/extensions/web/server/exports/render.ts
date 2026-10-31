@@ -23,8 +23,19 @@ export function createExportRenderer(workDir: string): ExportRenderer {
 			signal.throwIfAborted();
 			await browser.ready(url);
 			if (snapshot.options.format === "html") {
-				const html = await browser.evaluate<string>("globalThis.cstExportHtml");
-				if (typeof html !== "string" || !html.startsWith("<!DOCTYPE html>")) throw new Error("离线文件未生成");
+				// 内嵌字体会产生数 MiB 文本；分段读取，避免单条调试消息中断连接。
+				const length = await browser.evaluate<number>(
+					"typeof globalThis.cstExportHtml === 'string' ? globalThis.cstExportHtml.length : 0",
+				);
+				const chunks: string[] = [];
+				for (let start = 0; start < length; start += 128 * 1024) {
+					signal.throwIfAborted();
+					chunks.push(
+						await browser.evaluate<string>(`globalThis.cstExportHtml.slice(${start}, ${start + 128 * 1024})`),
+					);
+				}
+				const html = chunks.join("");
+				if (!html.startsWith("<!DOCTYPE html>")) throw new Error("离线文件未生成");
 				await emit("html", Buffer.from(html, "utf8"));
 				return;
 			}
@@ -40,18 +51,31 @@ export function createExportRenderer(workDir: string): ExportRenderer {
 				return { height, cuts: cuts.sort((a,b)=>a-b) };
 			})()`);
 			if (geometry.height > 100_000)
-				throw new ExportError(413, "export_too_tall", "图片超过导出高度限制，请减少轮次或改用 HTML。");
+				throw new ExportError(413, "export_too_tall", "图片超过导出高度限制，请缩短当前分支或改用 HTML。");
+			await browser.call("Emulation.setDeviceMetricsOverride", {
+				width: 1240,
+				height: 3200,
+				deviceScaleFactor: 2,
+				mobile: false,
+			});
 			let top = 0;
+			let cutIndex = 0;
 			while (top < geometry.height) {
 				signal.throwIfAborted();
 				const target = Math.min(top + 3200, geometry.height);
-				const cut =
-					target === geometry.height
-						? target
-						: (geometry.cuts.filter((value) => value >= top + 1600 && value <= target).at(-1) ?? target);
+				let cut = target;
+				if (target < geometry.height) {
+					while (cutIndex < geometry.cuts.length && geometry.cuts[cutIndex] <= target) {
+						if (geometry.cuts[cutIndex] >= top + 1600) cut = geometry.cuts[cutIndex];
+						cutIndex++;
+					}
+				}
+				// 固定视口并滚动，只绘制当前分图，避免跨视口截图扩展并重绘长页面。
+				await browser.evaluate(`scrollTo({ top: ${top}, behavior: 'instant' })`);
 				const page = await browser.call<{ data: string }>("Page.captureScreenshot", {
 					format: "png",
-					captureBeyondViewport: true,
+					optimizeForSpeed: true,
+					captureBeyondViewport: false,
 					clip: { x: 0, y: top, width: 1240, height: cut - top, scale: 1 },
 				});
 				await emit("png", Buffer.from(page.data, "base64"));

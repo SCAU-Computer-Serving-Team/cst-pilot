@@ -13,7 +13,7 @@ export type { ContentPart, Message } from "../../../../../agent/home/extensions/
 
 export type SessionRow = { id: string; title: string; updatedAt?: string; running: boolean };
 /** /api/models 返回的模型条目：reasoning 标记是否支持思考强度。 */
-export type Model = { id: string; provider: string; name: string; reasoning: boolean };
+export type Model = { id: string; provider: string; name: string; reasoning: boolean; thinkingLevels?: string[] };
 export type QueueItem = {
 	id: string;
 	text: string;

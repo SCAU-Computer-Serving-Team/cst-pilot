@@ -1,23 +1,41 @@
 .export-workspace { flex: 1; min-width: 0; height: 100%; overflow: auto; background: var(--chat-bg); color: var(--chat-ink); }
 .export-toolbar { display: flex; align-items: center; gap: 24px; padding: 24px 32px; border-bottom: 1px solid var(--chat-border); }
+.app-layout.sidebar-collapsed .export-toolbar { padding-left: 64px; }
 .export-toolbar h1 { margin: 0; font-size: 20px; font-weight: 600; }
 .export-back { display: inline-flex; align-items: center; gap: 8px; color: var(--chat-muted); font-size: 14px; }
 .export-layout { display: grid; grid-template-columns: 288px minmax(0, 1fr); gap: 32px; padding: 32px; align-items: start; }
 .export-controls { display: grid; gap: 20px; min-width: 0; }
-.export-controls fieldset { display: grid; gap: 18px; min-width: 0; border: 0; margin: 0; padding: 0; }
-.export-controls legend { margin-bottom: 24px; font-weight: 600; }
-.export-controls label { display: grid; gap: 8px; font-size: 14px; }
-.export-controls select, .export-controls input[type="date"] { width: 100%; min-height: 40px; padding: 8px 12px; border: 1px solid var(--chat-input-border); border-radius: var(--radius-control); color: var(--chat-ink); background: var(--app-control); font: inherit; color-scheme: inherit; }
-.export-controls label.export-check, .export-turns label { display: flex; align-items: flex-start; gap: 10px; }
-.export-controls input[type="checkbox"] { flex: none; width: 16px; height: 16px; margin-top: 2px; accent-color: var(--app-send); }
-.export-turns { display: grid; gap: 12px; max-height: 240px; overflow: auto; padding: 12px; border: 1px solid var(--chat-border); border-radius: var(--radius-row); }
-.export-turns span { overflow-wrap: anywhere; }
+.export-controls fieldset { display: grid; gap: 20px; min-width: 0; border: 0; margin: 0; padding: 0; }
+.export-controls legend { margin-bottom: 20px; padding: 0; font-size: 16px; font-weight: 600; }
+.export-controls label { font-size: 14px; }
+.export-select { display: grid; gap: 8px; width: 100%; }
+.export-select > label { color: var(--chat-ink); font-weight: 400; }
+.export-select .export-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; height: 40px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--chat-input-border); border-radius: var(--radius-control); color: var(--chat-ink); background: var(--app-control); box-shadow: none; font: 400 14px/1.5 "CST UI Sans", "Microsoft YaHei", sans-serif; transition: border-color var(--duration-quick) var(--ease-smooth-out); }
+.export-select-trigger > .select__value { min-width: 0; text-align: left; }
+.export-select-trigger > svg { display: block; flex: 0 0 16px; width: 16px; height: 16px; margin: 0; color: var(--chat-muted); transition: transform var(--duration-fast) var(--ease-smooth-out); }
+.export-select-trigger[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.export-select .export-select-trigger:is(:hover, [data-hovered="true"]):not(:disabled) { border-color: var(--app-muted); }
+.export-select .export-select-trigger:is(:focus-visible, [data-focus-visible="true"]) { outline: none; border-color: var(--app-muted); box-shadow: var(--focus-shadow); }
+.export-select[data-disabled="true"] { opacity: .5; }
+.export-select-popover { width: var(--trigger-width); max-width: calc(100vw - 32px); padding: 8px; border: 1px solid var(--app-sidebar-border); border-radius: var(--radius-menu); color: var(--app-ink); background: var(--login-card); box-shadow: var(--shadow-menu); }
+.export-select-popover [role="listbox"] { display: grid; gap: 0; padding: 0; outline: none; }
+.export-select-popover [role="option"] { display: flex; align-items: center; min-height: 32px; margin: 0; padding: 0 12px; outline: none; box-shadow: none; transform: none; border-radius: var(--radius-row); color: var(--app-ink); background: transparent; font-size: 14px; font-weight: 400; cursor: pointer; transition: background-color var(--duration-quick) var(--ease-smooth-out); }
+.export-select-popover [role="option"]:is(:hover, [data-hovered="true"], [data-focus-visible="true"]):not([aria-selected="true"]) { background: var(--app-hover); }
+.export-select-popover [role="option"][aria-selected="true"] { background: var(--app-selected); }
+.export-select-popover [role="option"][data-focus-visible="true"] { outline: 1px solid var(--app-muted); outline-offset: -1px; }
+.export-controls label.export-check { display: flex; align-items: center; gap: 10px; }
+.export-controls input[type="checkbox"] { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--app-send); }
 .export-note, .export-preview-label { margin: 0; font-size: 13px; line-height: 1.6; color: var(--chat-muted); overflow-wrap: anywhere; }
-.export-generate { color: var(--app-send-icon); background: var(--app-send); }
+.export-generate { justify-self: start; display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 10px 16px; border-radius: var(--radius-control); color: var(--app-send-icon); background: var(--app-send); font-size: 14px; font-weight: 600; }
+.export-generate:is(:hover, [data-hovered="true"]):not(:disabled) { background: var(--app-send-hover); }
+.export-generate:is(:active, [data-pressed="true"]):not(:disabled) { background: var(--app-send-pressed); }
+.export-generate:is(:focus-visible, [data-focus-visible="true"]) { outline: none; box-shadow: var(--focus-shadow); }
 .export-generate:disabled { opacity: .5; }
 .export-preview-panel { min-width: 0; }
 .export-preview-label { margin-bottom: 12px; }
-.export-preview-viewport { overflow: hidden; width: 100%; border: 1px solid var(--chat-border); border-radius: var(--radius-row); background: var(--chat-bg); }
+.export-preview-viewport { overflow: hidden; width: 100%; border: 1px solid #8A8A8A; border-radius: var(--radius-row); background: var(--chat-bg); }
+:root[data-theme="dark"] .export-preview-viewport { border-color: #77838A; }
+@media (prefers-color-scheme: dark) { :root[data-theme="system"] .export-preview-viewport { border-color: #77838A; } }
 .export-preview-viewport iframe { display: block; width: 1240px; max-width: none; border: 0; transform-origin: top left; }
 .export-result { display: grid; gap: 12px; }
 .export-result h2 { margin: 0; font-size: 16px; }

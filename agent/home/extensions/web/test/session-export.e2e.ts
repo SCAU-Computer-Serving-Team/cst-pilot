@@ -3,14 +3,16 @@ import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { artifactDate } from "../../diagnostics/artifact-paths.ts";
 import { createWebApi } from "../server/api.ts";
+import { createExportRenderer } from "../server/exports/render.ts";
 import { createWebServer, listenWebServer } from "../server/http.ts";
 import { WebSessionPool } from "../server/session/sessions.ts";
 import type { ExportSnapshot, SessionExport } from "../shared/exports.ts";
 import { BrowserProbe, freePort } from "./browser.ts";
 import { configureTestModel, testRoot } from "./support.ts";
 
-test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、选轮、分图和重启读取", { timeout: 180_000 }, async () => {
+test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、当前分支、分图和重启读取", { timeout: 180_000 }, async () => {
 	const root = join(await testRoot(), "session-export");
 	await mkdir(root, { recursive: true });
 	const kit = await mkdtemp(join(root, "kit-"));
@@ -27,7 +29,22 @@ test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、选轮、分
 	const port = await freePort();
 	const origin = `http://127.0.0.1:${port}`;
 	const artifactsRoot = join(kit, "artifacts");
-	let api = createWebApi(pool, home, port, undefined, { artifactsRoot });
+	const render = createExportRenderer(join(home, "session-exports", "work"));
+	const apiOptions = {
+		artifactsRoot,
+		exportRenderer: async (...args: Parameters<typeof render>) => {
+			try {
+				await render(...args);
+			} catch (cause) {
+				await writeFile(
+					join(root, "render-error.txt"),
+					cause instanceof Error ? (cause.stack ?? cause.message) : String(cause),
+				);
+				throw cause;
+			}
+		},
+	};
+	let api = createWebApi(pool, home, port, undefined, apiOptions);
 	const server = createWebServer(
 		fileURLToPath(new URL("../static/", import.meta.url)),
 		port,
@@ -71,7 +88,6 @@ test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、选轮、分
 			],
 			timestamp: now,
 		});
-		const firstTurn = slot.session.sessionManager.getLeafId()!;
 		const usage = {
 			input: 1,
 			output: 1,
@@ -118,6 +134,7 @@ test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、选轮、分
 			],
 			stopReason: "stop",
 		});
+		const firstBranch = slot.session.sessionManager.getLeafId()!;
 		slot.session.sessionManager.appendMessage({
 			role: "user",
 			content: "生成长会话用于分图验证。",
@@ -137,13 +154,20 @@ test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、选轮、分
 			],
 			stopReason: "stop",
 		});
-		const config = { date: "2026-10-29", theme: "light", format: "png", turnIds: [firstTurn] };
+		const longBranch = slot.session.sessionManager.getLeafId()!;
+		assert.equal((await post(`/api/sessions/${slot.id}/tree/navigate`, { entryId: firstBranch })).status, 200);
+		const config = { theme: "light", format: "png" };
 		const preview = (await (await post(`${base}/preview`, config)).json()) as ExportSnapshot;
 		assert.ok(preview.entries.some((entry) => entry.message.role === "user"));
 		assert.equal(
 			preview.entries.some((entry) => entry.message.role === "toolResult"),
 			false,
 		);
+		assert.equal(
+			preview.entries.some((entry) => JSON.stringify(entry).includes("生成长会话")),
+			false,
+		);
+		assert.equal(preview.options.date, artifactDate(undefined, new Date(preview.capturedAt)));
 		const jobs: SessionExport[] = [];
 		for (const format of ["png", "html"] as const)
 			for (const theme of ["light", "dark"] as const) {
@@ -166,7 +190,10 @@ test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、选轮、分
 				const result = await waitJob(created.id);
 				jobs.push(result);
 				assert.equal(result.files.length, 1);
-				assert.equal(result.directory, join(artifactsRoot, config.date, "sessions"));
+				assert.equal(
+					result.directory,
+					join(artifactsRoot, artifactDate(undefined, new Date(result.capturedAt)), "sessions"),
+				);
 				const file = result.files[0];
 				const download = await fetch(`${origin}${file.url}`);
 				assert.equal(download.status, 200);
@@ -176,6 +203,7 @@ test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、选轮、分
 					assert.equal(bytes.subarray(1, 4).toString(), "PNG");
 					await writeFile(join(root, `actual-${theme}.png`), bytes);
 				} else {
+					assert.ok(bytes.length > 1024 * 1024, "内嵌字体的大文档可完整读取");
 					const html = bytes.toString("utf8");
 					assert.equal(html.includes("<script"), false);
 					assert.equal(html.includes("data:font/woff2;base64,"), true);
@@ -222,9 +250,8 @@ test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、选轮、分
 			downloadThroughput: -1,
 			uploadThroughput: -1,
 		});
-		const long = (await (
-			await post(base, { format: "png", theme: "light", date: config.date })
-		).json()) as SessionExport;
+		assert.equal((await post(`/api/sessions/${slot.id}/tree/navigate`, { entryId: longBranch })).status, 200);
+		const long = (await (await post(base, { format: "png", theme: "light" })).json()) as SessionExport;
 		const split = await waitJob(long.id);
 		assert.ok(split.files.length > 1);
 		await writeFile(join(root, "actual-long-first.png"), await readFile(join(split.directory, split.files[0].name)));
@@ -244,18 +271,17 @@ test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、选轮、分
 			"网页导出预览就绪",
 		);
 		await browser.screenshot(join(root, "export-controls-light.png"));
-		await browser.evaluate(
-			"(()=>{const e=document.querySelector('.export-controls select');e.value='html';e.dispatchEvent(new Event('change',{bubbles:true}));})()",
-		);
+		await browser.click(".export-select-trigger");
+		await browser.click('.export-select-popover [role="option"][data-key="html"]');
 		await browser.until("!document.querySelector('.export-generate').disabled", "切换格式后的预览");
 		await browser.click(".export-generate");
 		await browser.until("!!document.querySelector('.export-result a')", "网页点击生成并保存真实文件", 30_000);
 		await browser.screenshot(join(root, "export-result-light.png"));
-		await browser.evaluate(
-			"document.documentElement.dataset.theme='dark';const e=document.querySelectorAll('.export-controls select')[1];e.value='dark';e.dispatchEvent(new Event('change',{bubbles:true}));",
-		);
+		await browser.evaluate("document.documentElement.dataset.theme='dark'");
+		await browser.click(".export-select:nth-of-type(2) .export-select-trigger");
+		await browser.click('.export-select-popover [role="option"][data-key="dark"]');
 		await browser.until(
-			"document.querySelector('iframe').contentDocument.documentElement.dataset.theme==='dark'",
+			"document.querySelector('iframe').contentDocument.documentElement.dataset.theme==='dark' && !document.querySelector('.export-select-popover')",
 			"夜间文档预览",
 		);
 		await browser.screenshot(join(root, "export-controls-dark.png"));
@@ -265,7 +291,11 @@ test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、选轮、分
 			deviceScaleFactor: 1,
 			mobile: false,
 		});
-		assert.equal(await browser.evaluate("document.documentElement.scrollWidth<=innerWidth"), true);
+		await browser.click('[aria-label="收起侧栏"]');
+		await browser.until(
+			"document.documentElement.scrollWidth<=innerWidth && !document.querySelector('.sidebar-backdrop')",
+			"窄屏布局就绪",
+		);
 		await browser.screenshot(join(root, "export-controls-narrow.png"));
 		assert.equal((await post(base, { ...config, date: "2026-02-30" })).status, 400);
 		assert.equal((await post(base, { ...config, turnIds: ["missing"] })).status, 400);
@@ -281,7 +311,7 @@ test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、选轮、分
 			403,
 		);
 		await api.close();
-		api = createWebApi(pool, home, port, undefined, { artifactsRoot });
+		api = createWebApi(pool, home, port, undefined, apiOptions);
 		assert.equal((await (await fetch(`${origin}/api/exports/${jobs[0].id}`)).json()).status, "completed");
 		assert.equal((await fetch(`${origin}${jobs[0].files[0].url}`)).status, 200);
 		assert.ok((await (await fetch(`${origin}${base}`)).json()).exports.length >= 5);

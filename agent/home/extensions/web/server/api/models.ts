@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { resolveModelScopeWithDiagnostics } from "@earendil-works/pi-coding-agent";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { resolveModelScopeWithDiagnostics, type SettingsManager } from "@earendil-works/pi-coding-agent";
 import { defaultModelReference, explicitModel, requireModelCredentials } from "../../../runtime/model-selection.ts";
 import type { SessionEvents } from "../session/events.ts";
 import type { WebSessionPool } from "../session/sessions.ts";
@@ -12,6 +13,26 @@ interface ModelRoutesOptions {
 	globalEvents: SessionEvents;
 	writeOnce<T>(request: IncomingMessage, pathname: string, input: unknown, action: () => Promise<T>): Promise<T>;
 	serialize<T>(id: string, action: () => Promise<T>): Promise<T>;
+}
+
+type ThinkingLevel = keyof NonNullable<Model<Api>["thinkingLevelMap"]>;
+const thinkingOrder: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** 首页尚无会话，按 Pi 的模型档位映射列出有效档；会话内直接使用 SDK 返回值。 */
+function getSupportedThinkingLevels(model: Model<Api> | undefined): ThinkingLevel[] {
+	if (!model?.reasoning) return ["off"];
+	return thinkingOrder.filter((level) => {
+		const mapped = model.thinkingLevelMap?.[level];
+		return mapped !== null && ((level !== "xhigh" && level !== "max") || mapped !== undefined);
+	});
+}
+
+function homeThinkingLevel(model: Model<Api>, settings: SettingsManager) {
+	const requested =
+		settings.getModelThinkingLevel(model.provider, model.id) ?? settings.getDefaultThinkingLevel() ?? "medium";
+	const levels = getSupportedThinkingLevels(model);
+	const index = thinkingOrder.indexOf(requested);
+	return levels.find((level) => thinkingOrder.indexOf(level) >= index) ?? levels.at(-1) ?? "off";
 }
 
 export function createModelRoutes({ pool, webSettings, globalEvents, writeOnce, serialize }: ModelRoutesOptions) {
@@ -52,6 +73,7 @@ export function createModelRoutes({ pool, webSettings, globalEvents, writeOnce, 
 				catalogPresent: !!modelRuntime.getModel(model.provider, model.id),
 				input: model.input,
 				reasoning: model.reasoning,
+				thinkingLevels: getSupportedThinkingLevels(model),
 				contextWindow: model.contextWindow,
 				maxTokens: model.maxTokens,
 			});
@@ -77,7 +99,7 @@ export function createModelRoutes({ pool, webSettings, globalEvents, writeOnce, 
 				defaultModel: describe(defaultModel),
 				enabled,
 				unavailableEnabled,
-				thinkingLevels: slot?.session.getAvailableThinkingLevels() ?? [],
+				thinkingLevels: slot?.session.getAvailableThinkingLevels() ?? getSupportedThinkingLevels(selectedModel),
 				contextUsage: stats?.contextUsage ?? null,
 				usage: stats
 					? {
@@ -91,9 +113,7 @@ export function createModelRoutes({ pool, webSettings, globalEvents, writeOnce, 
 				selected: selectedModel
 					? {
 							...describe(selectedModel),
-							thinkingLevel:
-								slot?.session.thinkingLevel ??
-								settingsManager.getModelThinkingLevel(selectedModel.provider, selectedModel.id),
+							thinkingLevel: slot?.session.thinkingLevel ?? homeThinkingLevel(selectedModel, settingsManager),
 						}
 					: null,
 			});
@@ -131,9 +151,9 @@ export function createModelRoutes({ pool, webSettings, globalEvents, writeOnce, 
 						providerName: modelRuntime.getProvider(model.provider)?.name ?? model.provider,
 						credentialReady: !!(await modelRuntime.checkAuth(model.provider)),
 						catalogPresent: true,
-						thinkingLevel:
-							slot?.session.thinkingLevel ?? settingsManager.getModelThinkingLevel(model.provider, model.id),
-						thinkingLevels: slot?.session.getAvailableThinkingLevels() ?? [],
+						thinkingLevel: slot?.session.thinkingLevel ?? homeThinkingLevel(model, settingsManager),
+						reasoning: model.reasoning,
+						thinkingLevels: slot?.session.getAvailableThinkingLevels() ?? getSupportedThinkingLevels(model),
 					};
 				}),
 			);

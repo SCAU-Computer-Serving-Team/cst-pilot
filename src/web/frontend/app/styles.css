@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./corners.css";
+@import "./composer/model-picker.css";
 @import "./cards/special-tool.css";
 @import "./images/image-preview.css";
 @import "./shell/session-list.css";
@@ -263,7 +264,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .sidebar-new:hover, .sidebar-session:hover { color: var(--app-ink); }
 .sidebar-new.selected, .sidebar-session.selected { background-color: var(--app-selected); }
 .sidebar-session-row { display: flex; align-items: center; min-width: 0; border-radius: var(--radius-row); }
-.sidebar-session { display: flex; align-items: center; gap: var(--space-inline); height: var(--control-lg); padding: 0 var(--space-inline); min-width: 0; flex: 1; border-radius: var(--radius-row); font-size: 14px; line-height: 1.5; background-color: transparent; }
+.sidebar-session { display: flex; align-items: center; gap: var(--space-inline); height: var(--control-lg); padding: 0 var(--space-inline); min-width: 0; flex: 1; border-radius: var(--radius-row); font-size: var(--font-body); line-height: 1.5; background-color: transparent; }
 .sidebar-session span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-empty { padding: var(--space-inline); margin: 0; color: var(--app-muted); font-size: 14px; }
 .sidebar-footer { height: 64px; flex: 0 0 64px; border-top: 1px solid var(--app-sidebar-border); display: flex; align-items: center; gap: var(--space-section); padding: 0 4px; }
@@ -366,13 +367,11 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .composer-spacer { flex: 1; }
 .composer-actions > * { display: inline-flex; align-items: center; justify-content: center; }
 .composer-actions .composer-icon { width: var(--control-lg); height: var(--control-lg); min-width: var(--control-lg); min-height: var(--control-lg); padding: 0; color: var(--app-muted); opacity: 1; }
-.composer-actions .composer-model, .composer-actions .composer-thinking { align-items: center; gap: var(--space-tight); height: var(--control-lg); min-height: var(--control-lg); border: 0; border-radius: var(--radius-control); box-shadow: none; color: var(--app-muted); background: transparent; padding: 0 var(--space-inline); }
+.composer-actions .composer-model { align-items: center; gap: 6px; height: var(--control-lg); min-height: var(--control-lg); border: 0; border-radius: var(--radius-control); box-shadow: none; color: var(--app-muted); background: transparent; padding: 0; }
 .context-meter-wrap { position: relative; display: inline-flex; align-items: center; min-inline-size: 0; margin: 0; padding: 0; border: 0; }
-.context-meter { position: relative; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
-.context-meter:is(:hover, :focus-visible) { outline: none; box-shadow: none; }
-/* Keep the hit area at toolbar height and draw a circular halo around the ring. */
-.context-meter:is(:hover, :focus-visible)::before { content: ""; position: absolute; width: var(--icon-inline); height: var(--icon-inline); border-radius: 50%; box-shadow: 0 0 0 3px var(--app-hover); pointer-events: none; }
-.context-ring { --ring-color: var(--app-send); display: inline-block; flex: 0 0 var(--icon-inline); width: var(--icon-inline); height: var(--icon-inline); border-radius: 50%; background: conic-gradient(var(--ring-color) var(--context-progress), var(--app-track) 0); mask: radial-gradient(farthest-side, transparent 55%, #000 60%); }
+.context-meter { display: inline-flex; align-items: center; justify-content: center; width: 16px; padding: 0; border: 0; border-radius: var(--radius-control); background: none; color: var(--app-send); cursor: pointer; }
+.context-meter > svg { position: relative; top: 2px; flex-shrink: 0; }
+.context-meter:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
 /* 上下文面板宽 360，内边距 24、间距 16、圆角 12。 */
 .context-panel { display: none; position: absolute; z-index: 10; bottom: calc(100% + 8px); right: calc(-8px - var(--context-shift, 0px)); width: 360px; max-width: calc(100vw - 32px); padding: var(--space-group); border: 1px solid var(--app-sidebar-border); border-radius: var(--radius-menu); background: var(--login-card); box-shadow: var(--shadow-menu); color: var(--app-ink); font-size: 14px; line-height: 1.5; text-align: left; cursor: default; }
 .context-meter-wrap[data-open="true"] .context-panel { display: flex; flex-direction: column; gap: var(--space-section); }
@@ -394,14 +393,9 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .context-quota-notice { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-inline); color: var(--app-muted); font-size: 14px; }
 .context-progress { height: 6px; border-radius: var(--radius-full); overflow: hidden; background: var(--app-track); }
 .context-progress > span { border-radius: inherit; display: block; height: 100%; background: var(--app-send); }
-.context-ring[data-level="warning"] { --ring-color: #8c5a00; }
-.context-ring[data-level="danger"] { --ring-color: #bf091b; }
-:root[data-theme="dark"] .context-ring[data-level="warning"] { --ring-color: #ed9f26; }
-:root[data-theme="dark"] .context-ring[data-level="danger"] { --ring-color: #f4232e; }
-@media (prefers-color-scheme: dark) { :root[data-theme="system"] .context-ring[data-level="warning"] { --ring-color: #ed9f26; } :root[data-theme="system"] .context-ring[data-level="danger"] { --ring-color: #f4232e; } }
-.composer--home .composer-model { font: 400 16px "CST UI Sans", "Microsoft YaHei", sans-serif; }
+.composer--home .composer-model { font: 400 13px/1.5 "CST UI Sans", "Microsoft YaHei", sans-serif; }
 .model-chevron { display: inline-flex; align-items: center; justify-content: center; }
-.composer--home .model-chevron { width: 14px; height: 18px; padding-top: 4px; }
+.model-chevron { flex-shrink: 0; width: 14px; height: 18px; padding-top: 4px; color: var(--app-muted); }
 .composer-actions .composer-send { display: grid; place-items: center; width: 32px; height: 32px; min-width: 32px; padding: 0; border-radius: var(--radius-control); background: var(--app-send); color: var(--app-send-icon); opacity: 1; }
 .composer-actions .context-meter-wrap, .composer-actions .context-meter { height: var(--control); align-items: center; }
 .composer--home .composer-actions .context-meter-wrap, .composer--home .composer-actions .context-meter { height: var(--control-lg); }
@@ -486,34 +480,13 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .composer--chat { height: auto; min-height: 105px; }
 .composer--chat .composer-actions { min-height: var(--control); }
 .composer--chat .composer-actions .composer-icon { width: var(--control); height: var(--control); min-width: var(--control); min-height: var(--control); padding: 0; }
-.composer--chat .composer-actions .composer-model, .composer--chat .composer-actions .composer-thinking { height: var(--control); min-height: var(--control); padding: 0 var(--space-inline); border-radius: var(--radius-control); font-size: var(--font-label); }
-.composer--chat .composer-actions .composer-model { gap: var(--space-inline); color: var(--chat-ink); font-family: "CST UI Sans", "Microsoft YaHei", sans-serif; }
-.composer--chat .composer-actions .composer-thinking { display: inline-flex; justify-content: center; align-items: center; gap: var(--space-tight); }
-.composer-thinking-label { display: inline-flex; align-items: center; line-height: 1; }
+.composer--chat .composer-actions .composer-model { height: var(--control); min-height: var(--control); padding: 0; border-radius: var(--radius-control); font-size: var(--font-label); }
+.composer--chat .composer-actions .composer-model { gap: 6px; color: var(--chat-ink); font-family: "CST UI Sans", "Microsoft YaHei", sans-serif; }
 /* React Aria 的空 template 是 DOM 占位，不参与操作栏间距。 */
-.composer-actions > template { display: none; }
+.composer-actions > template, .composer-model-controls > template { display: none; }
 .composer--chat .composer-actions .composer-icon > svg { width: 16px; height: 16px; }
-.model-label { display: inline-flex; align-items: center; gap: var(--space-inline); min-width: 0; }
 /* 操作栏图标用 flex 居中；状态行的光学位移遵循 DESIGN.md。 */
 .composer--chat .composer-actions .composer-send { width: var(--control); height: var(--control); min-width: var(--control); }
-.model-select, .thinking-select { min-width: 0; }
-/* React Aria sets an inline viewport limit; retain the compact canvas menu height. */
-.composer-popover { display: flex; flex-direction: column; gap: 4px; max-height: min(440px, 60vh) !important; overflow: hidden; padding: 16px; border: 1px solid var(--app-sidebar-border); border-radius: var(--radius-menu); background: var(--login-card); color: var(--chat-ink); box-shadow: var(--shadow-menu); }
-.model-popover { width: 240px; }
-.thinking-popover { width: 200px; }
-.composer-popover [data-slot="list-box"] { padding: 0; display: flex; flex: 1; flex-direction: column; gap: var(--space-tight); min-height: 0; overflow-y: auto; }
-.composer-popover [data-slot="list-box-item"] { gap: var(--space-inline); height: var(--control-lg); min-height: var(--control-lg); padding: 0 var(--space-component); cursor: pointer; color: var(--app-ink); font-size: 16px; font-weight: 400; }
-/* HeroUI 自己在 list-box-item 上带悬停底色，独立面板（思考档位、登录 Provider）需要单独盖掉。 */
-.composer-popover [data-slot="list-box-item"]:is(:hover, [data-hovered="true"], :focus-within), .login-provider-popover [data-slot="list-box-item"]:is(:hover, [data-hovered="true"], :focus-within) { background-color: transparent; }
-/* 思考面板比模型面板窄：行内距与字号都收一档，名字 14 / 说明 12。 */
-.thinking-popover [data-slot="list-box-item"] { justify-content: space-between; height: var(--control-lg); min-height: var(--control-lg); line-height: 20px; padding: 0 var(--space-component); font-size: var(--font-body); }
-.model-popover [role="option"] { justify-content: space-between; font: 400 16px/18px "CST UI Sans", "Microsoft YaHei", sans-serif; }
-.model-popover [data-slot="list-box-item"] { height: var(--control-lg); min-height: var(--control-lg); }
-.model-popover [role="option"] > span { flex: 1; min-width: 0; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
-.model-option-check { flex: 0 0 16px; visibility: hidden; color: var(--app-send); }
-[role="option"][aria-selected="true"] .model-option-check { visibility: visible; }
-.thinking-option-copy { display: flex; flex: 1; flex-direction: column; gap: var(--space-micro); }
-.thinking-option-copy small { color: var(--app-muted); font-size: 12px; line-height: 1.4; }
 .chat-main { display: flex; flex-direction: column; }
 .chat-message-surface { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
 .chat-loaded { display: flex; flex-direction: column; flex: 1; min-height: 0; animation: chat-content-reveal var(--duration-quick) var(--ease-in-out) backwards; }
@@ -1267,13 +1240,13 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 :is(.composer-popover, .login-provider-popover) [role="option"]:is(:hover, :focus-visible, [data-focus-visible="true"]) { background-color: transparent; color: var(--app-ink); }
 :is(.composer-popover, .login-provider-popover) [role="option"][aria-selected="true"] { color: var(--app-ink); }
 :is(.composer-popover, .login-provider-popover) [role="option"]:is(:focus-visible, [data-focus-visible="true"]) { outline: none; box-shadow: none; }
-:is(.composer-popover, .login-provider-popover, .sidebar-account-popover) { transform-origin: var(--trigger-anchor-point); }
-:is(.composer-popover, .login-provider-popover, .sidebar-account-popover)[data-entering="true"] { animation: menu-enter var(--duration-fast) var(--ease-smooth-out) both; }
-:is(.composer-popover, .login-provider-popover, .sidebar-account-popover)[data-exiting="true"] { animation: menu-exit var(--duration-quick) var(--ease-smooth-out) both; pointer-events: none; }
+:is(.composer-popover, .login-provider-popover, .sidebar-account-popover, .export-select-popover) { transform-origin: var(--trigger-anchor-point); }
+:is(.composer-popover, .login-provider-popover, .sidebar-account-popover, .export-select-popover)[data-entering="true"] { animation: menu-enter var(--duration-fast) var(--ease-smooth-out) both; }
+:is(.composer-popover, .login-provider-popover, .sidebar-account-popover, .export-select-popover)[data-exiting="true"] { animation: menu-exit var(--duration-quick) var(--ease-smooth-out) both; pointer-events: none; }
 @keyframes menu-enter { from { opacity: 0; transform: scale(var(--scale-medium)); } to { opacity: 1; transform: scale(1); } }
 @keyframes menu-exit { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(var(--scale-tiny)); } }
-.composer-actions .select__trigger > svg:last-child, .composer-model .model-label > .model-chevron, .login-provider .select__trigger > svg:last-child { transition: transform var(--duration-fast) var(--ease-smooth-out); }
-.composer-actions .select__trigger[aria-expanded="true"] > svg:last-child, .composer-model[aria-expanded="true"] .model-label > .model-chevron, .login-provider .select__trigger[aria-expanded="true"] > svg:last-child { transform: rotate(180deg); }
+.composer-model > .model-chevron, .login-provider .select__trigger > svg:last-child { transition: transform var(--duration-fast) var(--ease-smooth-out); }
+.composer-model[aria-expanded="true"] > .model-chevron, .login-provider .select__trigger[aria-expanded="true"] > svg:last-child { transform: rotate(180deg); }
 :is(.tool-group, .tool-card, .thinking-line, .search-tool, .turn-process, .summary-block) .disclosure__content { transition: height var(--duration-fast) var(--ease-smooth-out), opacity var(--duration-fast) var(--ease-smooth-out); will-change: auto; }
 /* 折叠朝右、展开朝下，方向只有一个来源：指示器自身旋转，内部再旋转一律清掉。 */
 :is(.tool-group, .tool-card, .thinking-line, .search-tool, .turn-process, .summary-block) .disclosure__indicator { margin-left: 0; transition: transform var(--duration-fast) var(--ease-smooth-out); rotate: none !important; transform: rotate(-90deg); }

@@ -91,7 +91,7 @@ test("输入标记：选择命令、继续输入、草稿恢复、移除和文�
 	try {
 		browser = await BrowserProbe.launch(root);
 		await browser.navigate(`${origin}/`);
-		await browser.until("document.querySelector('.model-label')?.textContent.includes('输入验收模型')", "输入框就绪");
+		await browser.until("document.querySelector('.model-name')?.textContent.includes('输入验收模型')", "输入框就绪");
 		async function key(key: string) {
 			const windowsVirtualKeyCode = key === "Backspace" ? 8 : key === "Enter" ? 13 : 0;
 			await browser!.call("Input.dispatchKeyEvent", { type: "keyDown", key, code: key, windowsVirtualKeyCode });
@@ -142,10 +142,10 @@ test("输入标记：选择命令、继续输入、草稿恢复、移除和文�
 		);
 		assert.equal(
 			await browser.evaluate(
-				"(()=>{const rect=s=>document.querySelector(s).getBoundingClientRect();const model=rect('.composer-model'),thinking=rect('.composer-thinking'),send=rect('.composer-send');return Math.abs((thinking.left-model.right)-(send.left-thinking.right))<1&&Math.abs(thinking.top+thinking.height/2-(send.top+send.height/2))<1})()",
+				"(()=>{const rect=s=>document.querySelector(s).getBoundingClientRect();const context=rect('.context-meter'),model=rect('.composer-model'),send=rect('.composer-send');return Math.abs(model.left-context.right-8)<1&&Math.abs(send.left-model.right-16)<1&&Math.abs(model.top+model.height/2-(send.top+send.height/2))<1})()",
 			),
 			true,
-			"思考档位在模型与发送之间等距居中",
+			"上下文距模型 8px，组合右侧留白与操作栏间距合计 16px，控件垂直居中",
 		);
 		assert.ok(
 			received.some((text) => text === `${token} 查看`),

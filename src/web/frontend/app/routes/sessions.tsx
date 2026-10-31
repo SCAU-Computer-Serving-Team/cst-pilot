@@ -1,10 +1,10 @@
 import { Ellipsis, ListChecks, MessagesSquare, Trash2 } from "lucide-react";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { sampleSessions } from "../shell/sample-sessions";
 import { SessionActionsOverlay, useSessionActions } from "../shell/session-actions";
 import { SessionEntry } from "../shell/session-entry";
-import { orderedSessions } from "../shell/session-list";
+import { groupSessions } from "../shell/session-list";
 import { SessionManagementToolbar } from "../shell/session-management";
 import { useWorkspaceSessions } from "../shell/sessions-context";
 
@@ -12,10 +12,18 @@ export default function Sessions() {
 	const state = useWorkspaceSessions();
 	const [params] = useSearchParams();
 	const preview = params.get("preview") === "1";
-	const sessions = useMemo(
-		() => orderedSessions(preview ? sampleSessions : state.sessions),
-		[preview, state.sessions],
+	const [today, setToday] = useState(() => new Date());
+	useEffect(() => {
+		const nextDay = new Date(today);
+		nextDay.setHours(24, 0, 0, 0);
+		const timer = setTimeout(() => setToday(new Date()), Math.max(0, nextDay.getTime() - Date.now()));
+		return () => clearTimeout(timer);
+	}, [today]);
+	const groups = useMemo(
+		() => groupSessions(preview ? sampleSessions : state.sessions, today),
+		[preview, state.sessions, today],
 	);
+	const sessions = useMemo(() => groups.flatMap((group) => group.sessions), [groups]);
 	const root = useRef<HTMLElement>(null);
 	const focusSession = useCallback((id?: string) => {
 		requestAnimationFrame(() => {
@@ -86,44 +94,49 @@ export default function Sessions() {
 						{state.stage || preview ? "暂无会话" : "正在读取会话…"}
 					</p>
 				)}
-				<ul className="session-list" aria-label="全部会话">
-					{sessions.map((session, index) => (
-						<li key={session.id} className="session-list-item">
-							<SessionEntry
-								session={session}
-								index={index}
-								active={false}
-								managing={management.managing}
-								selected={management.selection?.has(session.id) ?? false}
-								disabled={management.busy}
-								preview={preview}
-								onToggle={() => {
-									setMenu(null);
-									management.toggle(session.id);
-								}}
-								onContextMenu={(event) => {
-									event.preventDefault();
-									openSessionMenu(session, event.clientX, event.clientY);
-								}}
-							/>
-							{!management.managing && !preview && (
-								<button
-									type="button"
-									className="session-list-more"
-									aria-label={`会话操作：${session.title}`}
-									aria-haspopup="menu"
-									aria-expanded={actions.menu?.id === session.id}
-									onClick={(event) => {
-										const bounds = event.currentTarget.getBoundingClientRect();
-										openSessionMenu(session, bounds.left, bounds.bottom);
-									}}
-								>
-									<Ellipsis size={18} aria-hidden="true" />
-								</button>
-							)}
-						</li>
-					))}
-				</ul>
+				{groups.map((group) => (
+					<section className="session-list-group" key={group.id} aria-labelledby={`session-group-${group.id}`}>
+						<h2 id={`session-group-${group.id}`}>{group.label}</h2>
+						<ul className="session-list" aria-label={group.label}>
+							{group.sessions.map((session, index) => (
+								<li key={session.id} className="session-list-item">
+									<SessionEntry
+										session={session}
+										index={index}
+										active={false}
+										managing={management.managing}
+										selected={management.selection?.has(session.id) ?? false}
+										disabled={management.busy}
+										preview={preview}
+										onToggle={() => {
+											setMenu(null);
+											management.toggle(session.id);
+										}}
+										onContextMenu={(event) => {
+											event.preventDefault();
+											openSessionMenu(session, event.clientX, event.clientY);
+										}}
+									/>
+									{!management.managing && !preview && (
+										<button
+											type="button"
+											className="session-list-more"
+											aria-label={`会话操作：${session.title}`}
+											aria-haspopup="menu"
+											aria-expanded={actions.menu?.id === session.id}
+											onClick={(event) => {
+												const bounds = event.currentTarget.getBoundingClientRect();
+												openSessionMenu(session, bounds.left, bounds.bottom);
+											}}
+										>
+											<Ellipsis size={18} aria-hidden="true" />
+										</button>
+									)}
+								</li>
+							))}
+						</ul>
+					</section>
+				))}
 			</div>
 			<SessionActionsOverlay actions={actions} />
 		</main>

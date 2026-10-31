@@ -51,22 +51,26 @@ src/web/frontend/app/
 | 模块 | 职责 |
 |---|---|
 | `shared/conversation.ts`、`shared/exports.ts` | 前后端共用消息、导出选项、快照与任务契约；仅包含类型 |
-| `server/exports/snapshot.ts` | 当前分支投影、参数校验、按用户消息选轮、过程筛选与导出副本脱敏 |
+| `server/exports/snapshot.ts` | 当前分支投影、参数校验、统一快照时间与归档日期、过程筛选与导出副本脱敏 |
 | `server/exports/store.ts` | 有界串行队列、后台任务、文件原子登记、失败回收与完整性核验 |
 | `server/exports/browser.ts`、`render.ts` | 启动隔离 Edge / Chrome，通过浏览器调试协议取得 HTML 或逐页 PNG；结束后释放进程和配置 |
 | `server/api/exports.ts` | 同源 API，创建、预览、查询及文件读取；与入口写入去重共用 |
 | `app/routes/export.tsx`、`export-render.tsx` | 导出工作区与独立只读文档；预览主题不改变工作区主题 |
-| `app/exports/` | 共用文档呈现、离线 HTML 序列化与页面布局 |
+| `app/exports/` | 共用文档呈现、离线 HTML 序列化、HeroUI 导出下拉与页面布局 |
 
 创建任务先固定快照并写入内部登记，随后释放会话写锁，渲染过程不调用模型。临时页面通过任务令牌读取快照；令牌放在 URL 片段中，不进入访问日志，任务结束后失效。
 
 登记与渲染临时文件位于 `agent/home/session-exports/`，最终产物位于 `artifacts/<日期>/sessions/`。全部页面生成后才发布文件与完成状态；失败回收已发布文件。文件名携带导出 ID，读取时校验目录真实路径与 SHA-256，分享使用同一份已登记产物。
 
-离线文档复用 Markdown、代码、工具块、特殊工具与聊天主题。字体和附图内嵌，动作控件和脚本移除，内容安全策略关闭脚本、表单及外部资源加载。HTML 使用原生 `details` 保留折叠，不依赖现场服务。
+PNG 以固定的 1240 × 3200 CSS 像素视口逐段滚动截图，保留两倍像素密度并启用快速无损编码。分页切点排序后单次遍历，每张图生成后立即写入暂存目录，内存中只保留当前图。
+
+离线文档复用 Markdown、代码、工具块、特殊工具与聊天主题。仅内嵌文档已使用的字体，各资源并行读取并按 URL 去重；附图直接保留内嵌数据。动作控件和脚本移除，内容安全策略关闭脚本、表单及外部资源加载。
+
+HTML 使用原生 `details` 保留折叠，不依赖现场服务。内嵌字体后的 HTML 通过浏览器调试协议按 128 Ki 字符分段读取，避免大响应中断连接。
 
 ## 会话预载与缓存
 
-`WorkspaceLayout` 挂载唯一的 `SessionsProvider`，共用列表请求、全局事件订阅与乐观删除状态。侧栏显示排序后的前 10 项，`/sessions` 显示完整列表；`SessionEntry` 共用会话行，`useSessionActions` 与 `SessionActionsOverlay` 共用菜单、重命名、删除确认及失败恢复。管理模式使用原生复选框，焦点回到对应会话或管理入口。
+`WorkspaceLayout` 挂载唯一的 `SessionsProvider`，共用列表请求、全局事件订阅与乐观删除状态。侧栏显示排序后的前 20 项，`/sessions` 按本地自然日分四组显示完整列表；`session-list.ts` 共用排序与互斥分组逻辑，页面在本地下一个零点重新分组，缺失或无效时间归入“更早”；`SessionEntry` 共用会话行，`useSessionActions` 与 `SessionActionsOverlay` 共用菜单、重命名、删除确认及失败恢复。管理模式使用原生复选框，焦点回到对应会话或管理入口。
 
 侧栏取得会话列表后，用 React Router 的 `PrefetchPageLinks` 预载共用的聊天路由入口及其依赖，只为一个会话插入预载声明。特殊工具样式并入全局样式，首次进入聊天无需再请求样式文件。
 
@@ -81,6 +85,8 @@ src/web/frontend/app/
 ## 模型选择与凭据提示
 
 `server/api/models.ts` 分开提供会话选择与默认模型保存，模型清单同时返回目录、默认值和凭据就绪状态。服务端在创建会话与接受消息前预检凭据，拒绝时不写入收件箱或附件。
+
+前端 `composer/model-picker.tsx` 共用合并入口、双行主菜单、模型列表与思考强度列表。弹层固定宽 224px，按行数计算目标高度，以 transitions.dev 的 card resize 连续调整。主菜单与列表保留为两个页面，同时使用 page side-by-side 左右滑动与淡化过渡；隐藏页设为 inert 并移出辅助技术读取范围，保留上次列表内容供返回退场。列表超高时内部滚动，减少动态时立即切换。选择成功或列表内按 Esc 返回主菜单并恢复对应行焦点；点击外部直接关闭，主菜单内按 Esc 关闭。提交期间禁止重复写入，失败保留列表与已确认值，过期响应不改变当前视图。首页只保留本次模型和强度，创建时一并传入；会话内调用思考强度接口。后端会话档位取 Pi SDK，首页按模型档位映射与默认设置计算。
 
 前端 `data/model-selection.ts` 保留用户选择并只刷新其状态；`settings/default-model-picker.tsx` 提供可搜索的独立默认选择器；`auth/model-key-dialog.tsx` 使用原生对话框提醒配置。配置成功只返回受限的本机来源路由，草稿由原有存储恢复，不自动发送。
 

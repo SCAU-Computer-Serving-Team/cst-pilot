@@ -342,12 +342,13 @@ test("设置用户链路：分类导航、自动保存、失败回滚、凭据�
 		await browser.until("!!document.querySelector('.composer-model')", "首页模型选择器");
 		assert.equal((await send("/api/models/scoped", "POST", { patterns: ["probe/one"] })).status, 200);
 		await browser.click(".composer-model");
+		await browser.click(".model-picker-model");
 		await browser.until(
-			"document.querySelectorAll('.model-popover [role=option]').length===1",
+			"document.querySelectorAll('.model-picker-list [role=option]').length===1",
 			"后台范围变化实时更新选择器",
 		);
 		assert.equal(
-			await browser.evaluate("document.querySelector('.model-popover')?.textContent.includes('设置测试模型 1')"),
+			await browser.evaluate("document.querySelector('.model-picker-list')?.textContent.includes('设置测试模型 1')"),
 			true,
 		);
 		await browser.navigate(`${origin}/settings/models`);

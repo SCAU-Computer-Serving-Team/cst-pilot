@@ -4,8 +4,7 @@
 @supports (corner-shape: superellipse(1.25)) {
   :where(*) { corner-shape: superellipse(1.25); }
   ::before, ::after { corner-shape: inherit; }
-  :is(.context-meter, .context-ring, .context-progress, .context-progress > span, .draft-image-remove, .t-tabs, .t-tab, .t-tabs-pill, .rounded-full, [data-corner="round"]),
-  .context-meter:is(:hover, :focus-visible)::before,
+  :is(.context-progress, .context-progress > span, .draft-image-remove, .t-tabs, .t-tab, .t-tabs-pill, .rounded-full, [data-corner="round"]),
   .special-tool progress, .special-tool-meter-empty { corner-shape: round; }
   .special-tool progress::-webkit-progress-bar { corner-shape: round; }
   .special-tool progress::-webkit-progress-value { corner-shape: round; }

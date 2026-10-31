@@ -17,7 +17,7 @@ test("通知关闭清理、详情键盘操作、断线恢复与减少动态", { 
 		browser = await BrowserProbe.launch(root);
 		const probe = browser;
 		await probe.navigate(`${fixture.origin}/s/${empty.id}`);
-		await probe.until("document.querySelector('.model-label')?.textContent.includes('压缩验收模型')", "模型已加载");
+		await probe.until("document.querySelector('.model-name')?.textContent.includes('压缩验收模型')", "模型已加载");
 		async function submit() {
 			await probe.fill(".composer-input", "/compact");
 			await probe.click(".composer-send");

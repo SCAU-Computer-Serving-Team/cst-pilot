@@ -18,7 +18,7 @@
 | 跨端共享专项 | `npm run test:web:shared-audit --prefix agent` | 独立 Pi 进程与 Web 共用设置、模型目录、凭据、历史 `cwd`、单写权与独立主题 |
 | 前端单元测试 | `npm test --prefix src/web/frontend` | 工具卡片映射、分支树几何算法、会话预载缓存与结束事件合并、草稿图片与通知状态机 |
 | 前端构建与字体 | `npm run build --prefix src/web/frontend`、`npm run test:fonts --prefix src/web/frontend` | 静态资源构建、三档 WOFF2 子集覆盖、哈希与许可校验 |
-| Web 浏览器端到端 | `npm run test:web:e2e --prefix agent` | 构建后在隔离 Chrome 中验证完整用户链路、持久化与进程重启 |
+| Web 浏览器端到端 | `npm run test:web:e2e --prefix agent` | 构建后在隔离 Chrome 中验证完整用户链路、持久化与进程重启；模型选择专项覆盖三级菜单、双向左右滑动与同步高度、中途返回、逐级 Esc、外部关闭、保存失败与过期响应、首页传递、键盘、浅深与窄屏 |
 | 遥测单元与跨仓库 | `npm run test:telemetry --prefix agent`、`npm run test:telemetry:e2e --prefix agent` | 统计采集、草稿恢复、扣点查询、双端队列、心跳与真实 Go 接收端联调（后者需设置 `CST_TELEMETRY_RECEIVER`） |
 
 ## 测试取舍与隔离原则
@@ -85,7 +85,7 @@
 
 `npm run test:web:e2e --prefix agent` 覆盖以下完整浏览器链路：
 
-- **会话导出与产物**：`session-export.test.ts` 验证日期、选轮、过程筛选、脱敏、目录越界、队列、失败回收、重启登记与文件修改检测；`session-export.e2e.ts` 通过真实 API 和页面生成浅深 PNG、长文分图与离线 HTML，断网打开 HTML 并核对字体、附图、代码和折叠，保存实际文件及预览截图。Runbook 契约覆盖指定日期、方案恢复和 `artifacts/<日期>/runbook/`。
+- **会话导出与产物**：`session-export.test.ts` 验证快照统一取时、跨天日期、当前分支、过程筛选、脱敏、目录越界、队列、失败回收、重启登记与文件修改检测；`export-controls.e2e.ts` 覆盖浅深窄屏、下拉箭头几何对齐、菜单逐帧动效与键盘、实时分支及离页任务；`session-export.e2e.ts` 通过真实 API 和页面生成浅深 PNG、长文分图与离线 HTML，断网打开 HTML 并核对字体、附图、代码和折叠，保存实际文件及预览截图。`export-performance.e2e.ts` 通过真实 API 测量短会话与 500 段含代码长会话的 PNG / HTML 从请求到保存完成，逐项断言小于 10 秒，并核对高清尺寸、内容和下载完整性；`export-render.e2e.ts` 对分图逐行核对色带像素，检查空白、重复、遗漏与尾页裁切。Runbook 契约覆盖指定日期、方案恢复和 `artifacts/<日期>/runbook/`。
 - **命令多轮与布局**：`runbook-roundtrip.e2e.ts` 使用实际方案存储生成两轮修订，覆盖重复调用 ID、结果缺少 `details`、复制、文件打开、压缩后刷新和服务重启恢复；在 1920、1366、960、390px 窗口覆盖正文与输入框边缘对齐、内容列宽度上限及浅深主题。
 - **预载与流式连续性**：`session-preload.e2e.ts` 验证七天内最新十项自动预载、点击前路由入口就绪、首次及重复切换无需补载 JS/CSS、延迟刷新下同步切页、无旧正文、浅深与窄屏扫光及减少动态；`session-navigation.e2e.ts` 验证同名会话连续滑动、单层按下反馈、尺寸变化不中断滑动、正文淡入、历史 Markdown 节点数量、取消点击、修饰键、键盘导航、快速切换、历史返回与读取失败恢复；`process-disclosure.e2e.ts` 验证历史过程首次展开才挂载、首次展开高度动画、收起再展开保留节点及分页状态；`streaming-after-tool.e2e.ts` 验证运行中过程立即挂载、完成后保留节点、逐段正文及逐词节点在定稿后保留，延迟快照下正文不闪空。
 - **代码块复制**：`code-copy.e2e.ts` 覆盖高亮、无语言和缩进代码块、工具原文、换行保留、独立反馈、键盘、失败重试及浅深窄屏；`markdown-rendering.e2e.ts` 验证流式与定稿复制，`notification-lifecycle.e2e.ts` 验证技术详情复制与 Esc 焦点恢复。剪贴板测试使用浏览器内替身，不改动用户剪贴板。
@@ -94,7 +94,7 @@
 - **图片预览**：`image-preview.e2e.ts` 覆盖消息、工具与草稿的共用预览，原位缩放与中途关闭、键盘打开与 Esc 收回、焦点与滚动恢复、窗口变化、浅深主题、窄屏和减少动态。
 - **特殊工具过程计数**：`turn-segments.test.ts` 与 `tool-state.test.ts` 覆盖所有特殊工具分类、普通工具进度、图片和空段；`special-tool-process.e2e.ts` 验证特殊组件后思考／正文不出现零次计数，保留内容、流式手动收起与工作时长入口，并核对刷新和浅深／窄屏。
 - **消息、流式与工具**：首页发送、网络响应丢失后保留草稿并幂等重试、单工具独立计时与冻结、过程折叠、特殊工具组件（BitLocker、整机概览、runbook、联网检索）交互、Markdown 块间距与代码高亮。
-- **会话管理与分支**：侧栏最近十项、折叠、全部会话页、原生复选框与范围内全选、乐观删除与失败回滚、`/fork` 派生选择、`/tree` 五档过滤与几何对齐、分支总结三选项与生成中取消。
+- **会话管理与分支**：侧栏最近二十项与 16px 字号、折叠、全部会话页四组时间边界与浅深设计稿、原生复选框与范围内全选、乐观删除与失败回滚、`/fork` 派生选择、`/tree` 五档过滤与几何对齐、分支总结三选项与生成中取消。
 - **首次模型配置**：`manual-model-selection.test.ts` 与同名端到端测试验证无密钥时保留默认身份、其他服务不替代、切页与刷新不重复自动提示、主动发送仍弹窗、草稿保留、配置后返回、默认值与会话选择分离，以及浅深和窄屏状态。
 - **模型热更新**：`model-catalog.test.ts` 验证 `PI_OFFLINE=1` 下刷新、缓存、并发、取消、临时密钥不落盘与登录刷新去重；`model-catalog.e2e.ts` 验证手动按钮、请求去重、后台 SSE 自动同步、失败缓存及浅深／窄屏布局。
 - **CSTOA 扫码展示**：`cstoa-device-login.e2e.ts` 验证登录页与服务配置页不显示设备授权码，保留真实二维码、倒计时、刷新、取消和手机授权后回账号页；覆盖浅深与窄屏，并验证其他 OAuth 服务仍展示必要设备码。

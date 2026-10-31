@@ -22,7 +22,7 @@ type RadiusSnapshot = {
 	composer: string;
 	controls: string[];
 	bubble: string;
-	ring: string;
+	context: string;
 	supported: boolean;
 };
 
@@ -114,7 +114,7 @@ test("圆角层级、Markdown 表格裁切与滚动、全圆例外和渐进降�
 					return {supported,overflow:document.documentElement.scrollWidth>innerWidth,tables:[...document.querySelectorAll('.markdown-table')].map(el=>{
 						const s=style(el),first=style(el.querySelector('th')),last=style(el.querySelector('tbody tr:last-child td:last-child'));
 						return {radius:s.borderRadius,shape:s.getPropertyValue('corner-shape'),outer:[s.borderTopWidth,s.borderRightWidth,s.borderBottomWidth,s.borderLeftWidth],cell:[first.borderTopWidth,first.borderRightWidth,first.borderBottomWidth,first.borderLeftWidth],last:[last.borderRightWidth,last.borderBottomWidth],scroll:el.scrollWidth>el.clientWidth,keyboard:el.tabIndex===0};
-					}),composer:style(document.querySelector('.composer')).borderRadius,controls:[...document.querySelectorAll('.composer-send,.composer-model,.composer-thinking')].map(el=>style(el).borderRadius),bubble:style(document.querySelector('.user-bubble')).borderRadius,ring:style(document.querySelector('.context-ring')).getPropertyValue('corner-shape')};
+					}),composer:style(document.querySelector('.composer')).borderRadius,controls:[...document.querySelectorAll('.composer-send,.composer-model,.context-meter')].map(el=>style(el).borderRadius),bubble:style(document.querySelector('.user-bubble')).borderRadius,context:style(document.querySelector('.context-meter')).getPropertyValue('corner-shape')};
 				})()`);
 				assert.equal(result.overflow, false);
 				assert.equal(result.composer, "16px");
@@ -148,7 +148,7 @@ test("圆角层级、Markdown 表格裁切与滚动、全圆例外和渐进降�
 						"document.querySelectorAll('.markdown-table')[1].scrollLeft=0; document.activeElement.blur()",
 					);
 				}
-				if (result.supported) assert.ok(["round", "superellipse(1)"].includes(result.ring));
+				if (result.supported) assert.equal(result.context, "superellipse(1.25)");
 				evidence.push({ width, theme, result });
 				await browser.screenshot(join(root, `${width}-${theme}.png`));
 			}

@@ -212,9 +212,10 @@ test("首次使用：默认模型身份、缺密钥弹窗、草稿返回、独�
 			"首页使用保存的默认值",
 		);
 		await browser.click(".composer-model");
-		await browser.until("!!document.querySelector('.model-popover')", "手动模型列表");
+		await browser.click(".model-picker-model");
+		await browser.until("!!document.querySelector('.model-picker-list')", "手动模型列表");
 		assert.equal(
-			await browser.evaluate("document.querySelector('.model-popover').textContent.includes('自动选择')"),
+			await browser.evaluate("document.querySelector('.model-picker-list').textContent.includes('自动选择')"),
 			false,
 		);
 		await browser.click('[role="option"][data-key="probe/one"]');

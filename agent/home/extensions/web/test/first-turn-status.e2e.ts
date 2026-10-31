@@ -84,7 +84,7 @@ test("首轮工作时长：主页发送、纯正文回复完成、后续对话�
 		browser = await BrowserProbe.launch(root);
 		await browser.navigate(`${origin}/`);
 		await browser.until(
-			"document.querySelector('.model-label')?.textContent.includes('首轮验收模型')",
+			"document.querySelector('.model-name')?.textContent.includes('首轮验收模型')",
 			"首页模型就绪",
 		);
 		await browser.fill(".composer-input", "你好");

@@ -128,18 +128,19 @@ test("跨端用户链路：网页保存范围和模型、原生扫码、服务�
 			"网页自动保存模型范围",
 		);
 		await browser.navigate(`${origin}/`);
-		await browser.until("document.querySelector('.model-label')?.textContent.includes('two')", "默认模型 two");
+		await browser.until("document.querySelector('.model-name')?.textContent.includes('two')", "默认模型 two");
 		await browser.click(".composer-model");
-		await browser.until("document.querySelectorAll('.model-popover [role=option]').length===2", "网页可选范围");
-		assert.equal(await browser.evaluate("document.querySelector('.model-popover input')===null"), true);
+		await browser.click(".model-picker-model");
+		await browser.until("document.querySelectorAll('.model-picker-list [role=option]').length===2", "网页可选范围");
+		assert.equal(await browser.evaluate("document.querySelector('.model-picker-list input')===null"), true);
 		assert.deepEqual(
 			await browser.evaluate(
-				"[...document.querySelectorAll('.model-popover [role=option]')].map(e=>e.textContent.trim())",
+				"[...document.querySelectorAll('.model-picker-list [role=option]')].map(e=>e.textContent.trim())",
 			),
 			["测试模型 two", "测试模型 one"],
 		);
-		await browser.click('.model-popover [role="option"][data-key="probe/one"]');
-		await browser.until("document.querySelector('.model-label')?.textContent.includes('one')", "主页选择 one");
+		await browser.click('.model-picker-list [role="option"][data-key="probe/one"]');
+		await browser.until("document.querySelector('.model-name')?.textContent.includes('one')", "主页选择 one");
 		assert.equal(
 			JSON.parse(await readFile(join(home, "settings.json"), "utf8")).defaultModel,
 			"two",
@@ -228,7 +229,7 @@ test("跨端用户链路：网页保存范围和模型、原生扫码、服务�
 		await pi.stop();
 		pi = undefined;
 		await browser.navigate(`${origin}/`);
-		await browser.until("document.querySelector('.model-label')?.textContent.includes('one')", "Web 再进入恢复模型");
+		await browser.until("document.querySelector('.model-name')?.textContent.includes('one')", "Web 再进入恢复模型");
 		await browser.fill(".composer-input", "网页验证共享配置");
 		await browser.click('[aria-label="发送消息"]');
 		await browser.until(
@@ -308,15 +309,19 @@ test("跨端用户链路：网页保存范围和模型、原生扫码、服务�
 		pi = undefined;
 		await browser.navigate(`${origin}/`);
 		await browser.until(
-			"document.querySelector('.model-label')?.textContent.includes('改名后的可选模型')",
+			"document.querySelector('.model-name')?.textContent.includes('改名后的可选模型')",
 			"再次进入读取 Provider 与模型增删改",
 		);
 		await browser.click(".composer-model");
-		await browser.until("document.querySelectorAll('.model-popover [role=option]').length===1", "新的 scoped 清单");
-		assert.equal(await browser.evaluate("document.querySelector('.model-popover input')===null"), true);
+		await browser.click(".model-picker-model");
+		await browser.until(
+			"document.querySelectorAll('.model-picker-list [role=option]').length===1",
+			"新的 scoped 清单",
+		);
+		assert.equal(await browser.evaluate("document.querySelector('.model-picker-list input')===null"), true);
 		assert.deepEqual(
 			await browser.evaluate(
-				"[...document.querySelectorAll('.model-popover [role=option]')].map(e=>e.textContent.trim())",
+				"[...document.querySelectorAll('.model-picker-list [role=option]')].map(e=>e.textContent.trim())",
 			),
 			["改名后的可选模型"],
 		);

@@ -1,17 +1,5 @@
-import { Button, ListBox, Select } from "@heroui/react";
-import {
-	ArrowUp,
-	Brain,
-	Check,
-	ChevronDown,
-	Command,
-	FileText,
-	PencilLine,
-	Plus,
-	Sparkles,
-	Square,
-	X,
-} from "lucide-react";
+import { Button } from "@heroui/react";
+import { ArrowUp, Command, FileText, PencilLine, Plus, Sparkles, Square, X } from "lucide-react";
 import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ModelKeyDialog } from "../auth/model-key-dialog";
@@ -20,7 +8,6 @@ import { type ModelChoice, type ModelSelectionPayload, refreshManualSelection } 
 import { type Model, useGlobalEvents } from "../data/web-state";
 import { PreviewableImage } from "../images/image-preview";
 import { ErrorNotice } from "../shell/error-notice";
-import { usePanelDismiss } from "../shell/panel-dismiss";
 import { chipCaretSpace, editorHtml, extractPayload, fileReference, parseEditor } from "./composer-editor";
 import { ContextMeter } from "./context-meter";
 import { parseImageHashes } from "./draft-image-references";
@@ -33,20 +20,11 @@ import {
 	releaseImageHolds,
 } from "./draft-images";
 import { draftKey as makeDraftKey } from "./drafts";
+import { ModelPicker } from "./model-picker";
 import { scopedModels } from "./scoped-models";
 
 type Selection = ModelChoice | null;
 const initialKeyPromptStorageKey = "cst-model-key-prompt-shown";
-// 档位与 pi 的 ThinkingLevel 一一对应（off/minimal/low/medium/high/xhigh/max），面板内用英文短名。
-const thinkingOptions = [
-	{ id: "off", label: "Off" },
-	{ id: "minimal", label: "Minimal" },
-	{ id: "low", label: "Low" },
-	{ id: "medium", label: "Medium" },
-	{ id: "high", label: "High" },
-	{ id: "xhigh", label: "XHigh" },
-	{ id: "max", label: "Max" },
-];
 export type ComposerConfig = {
 	provider?: string;
 	modelId?: string;
@@ -117,12 +95,6 @@ export function Composer({
 	const fileInput = useRef<HTMLInputElement>(null);
 	const [models, setModels] = useState<Model[]>([]);
 	const [enabled, setEnabled] = useState<string[] | null>(null);
-	const [modelMenuOpen, setModelMenuOpen] = useState(false);
-	const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
-	usePanelDismiss(modelMenuOpen || thinkingMenuOpen, () => {
-		setModelMenuOpen(false);
-		setThinkingMenuOpen(false);
-	});
 	const [loadedContext, setLoadedContext] = useState<{
 		tokens: number | null;
 		contextWindow: number;
@@ -464,8 +436,15 @@ export function Composer({
 							? null
 							: current,
 					);
-					setThinking(data.selected?.thinkingLevel ?? "off");
-					setThinkingLevels(data.thinkingLevels ?? []);
+					if (sessionId || !manualHomeModel.current) {
+						const levels = data.thinkingLevels?.length ? data.thinkingLevels : ["off"];
+						setThinking(
+							levels.includes(data.selected?.thinkingLevel ?? "")
+								? (data.selected?.thinkingLevel ?? levels[0])
+								: levels[0],
+						);
+						setThinkingLevels(levels);
+					}
 					setLoadedContext(data.contextUsage ?? null);
 					setUsageStats(data.usage ?? null);
 				}
@@ -482,10 +461,7 @@ export function Composer({
 
 	const usage = contextUsage ?? loadedContext;
 	const cacheHitRate = usageStats?.cacheHitRate ?? null;
-	const modelKey = selected ? `${selected.provider}/${selected.id}` : null;
-	const availableThinking = thinkingLevels.length
-		? thinkingOptions.filter((option) => thinkingLevels.includes(option.id))
-		: thinkingOptions;
+	const availableThinking = thinkingLevels.length ? thinkingLevels : ["off"];
 	const scoped = scopedModels(models, enabled);
 	const choices =
 		selected && !scoped.some((model) => model.provider === selected.provider && model.id === selected.id)
@@ -493,28 +469,34 @@ export function Composer({
 			: scoped;
 	async function chooseModel(key: string) {
 		const choice = scoped.find((item) => `${item.provider}/${item.id}` === key);
-		if (!choice) return;
+		if (!choice) return false;
 		try {
 			const changed = await apiJson<ModelChoice & { thinkingLevels?: string[] }>("/api/models/select", {
 				method: "POST",
 				body: { ...(sessionId ? { sessionId } : {}), provider: choice.provider, modelId: choice.id },
 			});
-			if (changed.thinkingLevel) setThinking(changed.thinkingLevel);
-			if (changed.thinkingLevels) setThinkingLevels(changed.thinkingLevels);
+			const levels = changed.thinkingLevels?.length ? changed.thinkingLevels : ["off"];
+			setThinking(levels.includes(changed.thinkingLevel ?? "") ? (changed.thinkingLevel ?? levels[0]) : levels[0]);
+			setThinkingLevels(levels);
 			manualHomeModel.current = !sessionId;
 			setSelected(changed);
 			setError("");
+			return true;
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : "无法切换模型");
+			return false;
 		}
 	}
 	async function chooseThinking(level: string) {
 		try {
 			if (sessionId) await apiJson("/api/models/thinking", { method: "POST", body: { sessionId, level } });
 			setThinking(level);
+			if (!sessionId) manualHomeModel.current = true;
 			setError("");
+			return true;
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : "无法调整思考强度");
+			return false;
 		}
 	}
 	async function ensureCredentials(): Promise<ModelChoice | null> {
@@ -588,7 +570,7 @@ export function Composer({
 				await onSend(body, {
 					provider: model.provider,
 					modelId: model.id,
-					thinkingLevel: home ? undefined : thinking,
+					thinkingLevel: thinking,
 					messageId,
 					images: await encodeImages(images),
 					skill: command.startsWith("/skill:") ? command.slice(7) : undefined,
@@ -782,83 +764,18 @@ export function Composer({
 						<Plus size={20} />
 					</Button>
 					<span className="composer-spacer" />
-					{!home && <ContextMeter usage={usage} cacheHitRate={cacheHitRate} provider={selected?.provider ?? ""} />}
-					<Select
-						isOpen={modelMenuOpen}
-						onOpenChange={(open) => {
-							setModelMenuOpen(open);
-							if (open) {
-								setThinkingMenuOpen(false);
-								setModelRevision((value) => value + 1);
-							}
-						}}
-						aria-label="模型"
-						selectedKey={modelKey}
-						onSelectionChange={(key) => {
-							if (key != null) void chooseModel(String(key));
-						}}
-						className="model-select"
-					>
-						<Select.Trigger className="composer-model">
-							<span className="model-label">
-								{selected?.name ?? "选择模型"}
-								<span className="model-chevron">
-									<ChevronDown size={14} aria-hidden="true" />
-								</span>
-							</span>
-						</Select.Trigger>
-						<Select.Popover className="composer-popover model-popover" placement="top end">
-							<ListBox>
-								{choices.map((model) => (
-									<ListBox.Item
-										key={`${model.provider}/${model.id}`}
-										id={`${model.provider}/${model.id}`}
-										textValue={`${model.provider} ${model.name}`}
-									>
-										<Check className="model-option-check" size={16} aria-hidden="true" />
-										<span title={`${model.provider} · ${model.name}`}>{model.name}</span>
-									</ListBox.Item>
-								))}
-							</ListBox>
-						</Select.Popover>
-					</Select>
-					{!home && (
-						<Select
-							isOpen={thinkingMenuOpen}
-							onOpenChange={(open) => {
-								setThinkingMenuOpen(open);
-								if (open) setModelMenuOpen(false);
-							}}
-							aria-label="思考强度"
-							selectedKey={thinking}
-							onSelectionChange={(key) => {
-								if (key != null) void chooseThinking(String(key));
-							}}
-							className="thinking-select"
-						>
-							<Select.Trigger className="composer-thinking">
-								<Brain size={16} aria-hidden="true" />
-								<span className="composer-thinking-label">
-									{thinking === "off"
-										? "Off"
-										: (thinkingOptions.find((option) => option.id === thinking)?.label ?? thinking)}
-								</span>
-								<ChevronDown size={14} />
-							</Select.Trigger>
-							<Select.Popover className="composer-popover thinking-popover" placement="top end">
-								<ListBox>
-									{availableThinking.map((option) => (
-										<ListBox.Item id={option.id} key={option.id} textValue={option.label}>
-											<span className="thinking-option-copy">
-												<span>{option.label}</span>
-											</span>
-											<Check className="model-option-check" size={16} aria-hidden="true" />
-										</ListBox.Item>
-									))}
-								</ListBox>
-							</Select.Popover>
-						</Select>
-					)}
+					<div className="composer-model-controls">
+						<ContextMeter usage={usage} cacheHitRate={cacheHitRate} provider={selected?.provider ?? ""} />
+						<ModelPicker
+							selected={selected}
+							models={choices}
+							thinking={thinking}
+							levels={availableThinking}
+							onOpen={() => setModelRevision((value) => value + 1)}
+							onSelect={chooseModel}
+							onThinking={chooseThinking}
+						/>
+					</div>
 					<Button
 						isIconOnly
 						isDisabled={

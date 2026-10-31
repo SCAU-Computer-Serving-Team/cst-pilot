@@ -1,6 +1,7 @@
 import { type RefObject, useEffect, useRef } from "react";
 
-const overlays = ".composer-popover, .sidebar-account-popover, .login-provider-popover, .context-panel";
+const overlays =
+	".composer-popover, .sidebar-account-popover, .login-provider-popover, .export-select-popover, .context-panel";
 const dismissers = new Set<(event: Event) => void>();
 
 function pageScroll(event: Event) {

@@ -10,7 +10,7 @@
 | `/sessions` | 全部会话 | 按更新时间倒序的完整列表、重命名与批量删除 |
 | `/s/<sessionId>` | 聊天工作台 | 会话消息流、过程折叠、工具卡片、输入队列与编辑器 |
 | `/s/<sessionId>/tree` | 分支树 | 会话条目树、五档过滤、搜索、折叠与分支总结导航 |
-| `/s/<sessionId>/export` | 导出会话 | 日期、格式、主题、选轮、只读预览与文件保存 |
+| `/s/<sessionId>/export` | 导出会话 | 格式、文档主题、过程包含项、只读预览与文件保存 |
 | `/_export` | 只读文档 | 页面预览与后端渲染共用，独立主题，无模型或账号调用 |
 | `/dashboard` | 仪表盘 | 后续迭代：本地请求用量概览、趋势与日志 |
 | `/login` | 登录页 | 居中面板（`cstoa` 扫码 / Pi OAuth / APIKEY） |
@@ -76,21 +76,19 @@ POST 参数：
 {
   "format": "html",
   "theme": "dark",
-  "date": "2026-10-30",
   "includeThinking": false,
-  "includeTools": false,
-  "turnIds": ["用户消息条目ID"]
+  "includeTools": false
 }
 ```
 
 - `format` 为 `png`（默认）或 `html`；`theme` 为 `light`（默认）或 `dark`。
-- `date` 默认本机当天，须为有效的 `YYYY-MM-DD`；两项包含选项默认 `false`。
-- 省略 `turnIds` 导出当前分支全部对话。指定时须为非空、不重复的用户消息条目 ID 数组，每项包含该提问和随后的完整轮次；ID 从会话快照的 `entries` 取得。
-- 未知参数、失效轮次和非法日期返回 400。沿用本页同源请求头；重复去重键返回同一任务，参数变化返回 409。
+- 两项包含选项默认 `false`。快照时间与 `options.date` 由后端在读取快照时统一确定；日期使用本机日期，不接受日期或轮次参数。
+- 每次生成重新读取当前分支全部对话，包含 `/tree` 导航后的状态；预览不会固定后续生成的内容。
+- 未知参数和无效选项返回 400。沿用本页同源请求头；重复去重键返回同一任务，参数变化返回 409。
 
 任务字段为 `id`、`sessionId`、`title`、`capturedAt`、`options`、`status`、`directory`、`files: {name, bytes, url}[]`，失败时附 `error: {code, message}`。状态为 `queued`、`rendering`、`completed` 或 `failed`。先创建任务，再轮询记录，完成后读取文件；离开页面不会取消任务，程序退出会停止未完成任务。
 
-渲染使用已安装的 Edge 或 Chrome，以隔离配置启动；可通过 `CST_EXPORT_BROWSER` 指定路径，无浏览器时任务返回 `export_browser_missing`。同时最多接纳 8 个任务，单任务超时 120 秒；快照上限 32 MiB，产物合计上限 200 MiB。PNG 使用 1240 CSS 像素宽度与 2 倍像素密度，长文分图；超过 100000 CSS 像素高度时提示减少轮次或改用 HTML。
+渲染使用已安装的 Edge 或 Chrome，以隔离配置启动；可通过 `CST_EXPORT_BROWSER` 指定路径，无浏览器时任务返回 `export_browser_missing`。同时最多接纳 8 个任务，单任务超时 120 秒；快照上限 32 MiB，产物合计上限 200 MiB。PNG 使用 1240 CSS 像素宽度与 2 倍像素密度，长文分图；超过 100000 CSS 像素高度时提示缩短当前分支或改用 HTML。
 
 `GET /api/exports/<id>/snapshot` 供隔离渲染器使用，需要任务专属 `X-CST-Export-Token`，任务结束后失效。分享读取已登记产物。
 
@@ -100,9 +98,9 @@ CSTOA 远端接口与字段映射见 [../auth/API.md](../auth/API.md)。本机 W
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| `GET` | `/api/models` | 可用模型 `models`、完整目录 `catalog`、`defaultModel`、启用范围与可选 `sessionId` 当前选择；模型描述包含 `credentialReady`、`catalogPresent` 与 `providerName` |
+| `GET` | `/api/models` | 可用模型 `models`、完整目录 `catalog`、`defaultModel`、启用范围与可选 `sessionId` 当前选择；模型描述包含 `credentialReady`、`catalogPresent`、`providerName` 与支持档位 `thinkingLevels`；顶层 `thinkingLevels` 对应当前模型，`selected.thinkingLevel` 返回有效当前档位，未传 `sessionId` 时按默认设置和模型能力计算 |
 | `POST` | `/api/models/refresh` | 正文 `{}`，强制刷新已配置供应商目录；返回 `{ aborted, failedProviders }`，部分失败仍返回 200，沿用同源校验与去重键 |
-| `POST` | `/api/models/select` | 手动选择模型；传入 `sessionId` 时仅切换该会话，无 `sessionId` 时返回所选描述，不保存默认值 |
+| `POST` | `/api/models/select` | 手动选择模型；传入 `sessionId` 时仅切换该会话，无 `sessionId` 时返回所选描述，不保存默认值；返回 `thinkingLevel`、`thinkingLevels` 和 `reasoning` 供面板切换 |
 | `POST` | `/api/models/default` | 正文 `{ provider, modelId }`，保存与 TUI 共用的新会话默认模型，保留现有会话；允许保存尚未配置凭据的模型 |
 | `POST` | `/api/models/scoped` | 更新启用模型范围与顺序（全选可用模型时归一为 `null`） |
 | `POST` | `/api/models/thinking` | 按 `sessionId` 设置思考强度 |
