@@ -4,13 +4,13 @@
 .export-toolbar h1 { margin: 0; font-size: 20px; font-weight: 600; }
 .export-back { display: inline-flex; align-items: center; gap: 8px; color: var(--chat-muted); font-size: 14px; }
 .export-layout { display: grid; grid-template-columns: 288px minmax(0, 1fr); gap: 32px; padding: 32px; align-items: start; }
-.export-controls { display: grid; gap: 20px; min-width: 0; }
-.export-controls fieldset { display: grid; gap: 20px; min-width: 0; border: 0; margin: 0; padding: 0; }
+.export-controls { display: grid; gap: 24px; min-width: 0; }
+.export-controls fieldset { display: grid; gap: 24px; min-width: 0; border: 0; margin: 0; padding: 0; }
 .export-controls legend { margin-bottom: 20px; padding: 0; font-size: 16px; font-weight: 600; }
 .export-controls label { font-size: 14px; }
 .export-select { display: grid; gap: 8px; width: 100%; }
 .export-select > label { color: var(--chat-ink); font-weight: 400; }
-.export-select .export-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; height: 40px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--chat-input-border); border-radius: var(--radius-control); color: var(--chat-ink); background: var(--app-control); box-shadow: none; font: 400 14px/1.5 "CST UI Sans", "Microsoft YaHei", sans-serif; transition: border-color var(--duration-quick) var(--ease-smooth-out); }
+.export-select .export-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; height: 40px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--chat-input-border); border-radius: var(--radius-control); color: var(--chat-ink); background: var(--app-control); box-shadow: none; font: 400 14px/20px "CST UI Sans", "Microsoft YaHei", sans-serif; transition: border-color var(--duration-quick) var(--ease-smooth-out); }
 .export-select-trigger > .select__value { min-width: 0; text-align: left; }
 .export-select-trigger > svg { display: block; flex: 0 0 16px; width: 16px; height: 16px; margin: 0; color: var(--chat-muted); transition: transform var(--duration-fast) var(--ease-smooth-out); }
 .export-select-trigger[aria-expanded="true"] > svg { transform: rotate(180deg); }
@@ -23,9 +23,9 @@
 .export-select-popover [role="option"]:is(:hover, [data-hovered="true"], [data-focus-visible="true"]):not([aria-selected="true"]) { background: var(--app-hover); }
 .export-select-popover [role="option"][aria-selected="true"] { background: var(--app-selected); }
 .export-select-popover [role="option"][data-focus-visible="true"] { outline: 1px solid var(--app-muted); outline-offset: -1px; }
-.export-controls label.export-check { display: flex; align-items: center; gap: 10px; }
+.export-controls label.export-check { display: flex; align-items: center; gap: 8px; }
 .export-controls input[type="checkbox"] { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--app-send); }
-.export-note, .export-preview-label { margin: 0; font-size: 13px; line-height: 1.6; color: var(--chat-muted); overflow-wrap: anywhere; }
+.export-note, .export-preview-label { margin: 0; font-size: 14px; line-height: 20px; color: var(--chat-muted); overflow-wrap: anywhere; }
 .export-generate { justify-self: start; display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 10px 16px; border-radius: var(--radius-control); color: var(--app-send-icon); background: var(--app-send); font-size: 14px; font-weight: 600; }
 .export-generate:is(:hover, [data-hovered="true"]):not(:disabled) { background: var(--app-send-hover); }
 .export-generate:is(:active, [data-pressed="true"]):not(:disabled) { background: var(--app-send-pressed); }
@@ -39,7 +39,7 @@
 .export-preview-viewport iframe { display: block; width: 1240px; max-width: none; border: 0; transform-origin: top left; }
 .export-result { display: grid; gap: 12px; }
 .export-result h2 { margin: 0; font-size: 16px; }
-.export-open-directory { display: block; justify-self: start; min-width: 0; max-width: 100%; margin: 0; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--chat-tool); font: inherit; font-size: 13px; line-height: 1.6; text-align: left; white-space: normal; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.export-open-directory { display: block; justify-self: start; min-width: 0; max-width: 100%; margin: 0; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--chat-tool); font: inherit; font-size: 14px; line-height: 20px; text-align: left; white-space: normal; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .export-open-directory:hover:not(:disabled) { text-decoration-thickness: 2px; }
 .export-open-directory:focus-visible { outline: 2px solid var(--chat-tool); outline-offset: 4px; box-shadow: none; }
 .export-open-directory:disabled { opacity: .55; cursor: progress; }
@@ -47,8 +47,8 @@
 .export-document { box-sizing: border-box; width: 100%; max-width: 1240px; margin: 0 auto; padding: 48px; color: var(--chat-ink); background: var(--chat-bg); }
 .export-heading { margin-bottom: 48px; padding-bottom: 24px; border-bottom: 1px solid var(--chat-border); }
 .export-heading > span { font-size: 14px; font-weight: 600; }
-.export-heading h1 { margin: 16px 0 8px; font-size: 26px; font-weight: 600; overflow-wrap: anywhere; }
-.export-heading p { margin: 0; color: var(--chat-muted); font-size: 13px; }
+.export-heading h1 { margin: 16px 0 8px; font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
+.export-heading p { margin: 0; color: var(--chat-muted); font-size: 14px; }
 .export-document .export-transcript { width: 100%; max-width: none; margin: 0; padding: 0; }
 .export-message { margin-bottom: 32px; break-inside: avoid; }
 .export-document .user-line { margin-bottom: 32px; }

@@ -54,7 +54,7 @@
   .t-resize { transition: none !important; }
 }
 .composer-actions .composer-model-controls { min-width: 0; gap: var(--space-inline); padding-inline: var(--space-inline); }
-.composer-actions .composer-model { flex-shrink: 1; min-width: 0; max-width: min(360px, calc(100vw - 144px)); gap: 6px; padding-inline: 0; font-weight: 400; line-height: 1.5; }
+.composer-actions .composer-model { flex-shrink: 1; min-width: 0; max-width: min(360px, calc(100vw - 144px)); gap: 6px; padding-inline: 0; font-weight: 400; line-height: 20px; }
 .composer-actions .model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-actions .model-current-strength { flex-shrink: 0; color: var(--app-muted); }
 .composer-actions .context-meter-wrap { flex-shrink: 0; }
@@ -63,13 +63,13 @@
 .model-picker-popover::after { content: ""; position: absolute; inset: 0; border: 1px solid var(--app-sidebar-border); border-radius: inherit; pointer-events: none; }
 .model-picker-dialog { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; margin: 0; padding: 12px; overflow: hidden; outline: none; }
 .model-picker-main { display: flex; flex-direction: column; flex-shrink: 0; }
-.model-picker-main > button { display: flex; align-items: center; justify-content: flex-end; gap: 8px; width: 100%; min-width: 0; height: 32px; min-height: 32px; padding: 0; border-radius: var(--radius-row); background: transparent; color: var(--app-ink); font: 400 14px/1.5 "CST UI Sans", "Microsoft YaHei", sans-serif; text-align: right; }
+.model-picker-main > button { display: flex; align-items: center; justify-content: flex-end; gap: 8px; width: 100%; min-width: 0; height: 32px; min-height: 32px; padding: 0; border-radius: var(--radius-row); background: transparent; color: var(--app-ink); font: 400 14px/20px "CST UI Sans", "Microsoft YaHei", sans-serif; text-align: right; }
 .model-picker-main > button > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .model-picker-main > button > svg { position: relative; top: 2px; flex-shrink: 0; color: var(--app-muted); }
 .model-picker-main > button:is(:hover, [data-hovered="true"]) { background: var(--app-hover); }
 .model-picker-main > button:is(:focus-visible, [data-focus-visible="true"]) { outline: none; box-shadow: var(--focus-shadow); }
 .model-picker-options [data-slot="list-box"] { display: flex; flex-direction: column; gap: 0; min-height: 0; overflow-y: auto; padding: 0; }
-.model-picker-options [role="option"] { display: flex; justify-content: flex-end; flex-shrink: 0; height: 32px; min-height: 32px; margin: 0; padding: 0 12px; border-radius: var(--radius-row); color: var(--app-ink); font: 400 14px/1.5 "CST UI Sans", "Microsoft YaHei", sans-serif; cursor: pointer; }
+.model-picker-options [role="option"] { display: flex; justify-content: flex-end; flex-shrink: 0; height: 32px; min-height: 32px; margin: 0; padding: 0 12px; border-radius: var(--radius-row); color: var(--app-ink); font: 400 14px/20px "CST UI Sans", "Microsoft YaHei", sans-serif; cursor: pointer; }
 .model-picker-options [role="option"] > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: right; font-weight: 400; }
 .composer-popover .model-picker-options [role="option"]:is(:hover, [data-hovered="true"], [data-focus-visible="true"]):not([aria-selected="true"], [aria-disabled="true"]) { background: var(--app-hover); }
 .composer-popover .model-picker-options [role="option"][aria-selected="true"] { background: var(--app-selected); }

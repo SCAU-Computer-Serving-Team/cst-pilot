@@ -20,7 +20,7 @@
 .session-list-main .chat-header h1 { flex: 1; }
 .session-list-content { width: min(100%, 960px); min-height: 0; margin-inline: auto; padding: var(--space-group); overflow-y: auto; }
 .session-list-group + .session-list-group { margin-top: var(--space-group); }
-.session-list-group h2 { margin: 0 0 var(--space-inline); padding-inline: var(--space-component); color: var(--app-muted); font-size: 14px; font-weight: 400; line-height: 1.5; }
+.session-list-group h2 { margin: 0 0 var(--space-inline); padding-inline: var(--space-component); color: var(--app-muted); font-size: 14px; font-weight: 400; line-height: 20px; }
 .session-list { display: flex; flex-direction: column; gap: var(--space-micro); margin: 0; padding: 0; list-style: none; }
 .session-list-item { display: flex; align-items: center; gap: var(--space-inline); min-width: 0; border-radius: var(--radius-row); }
 .session-list-item .sidebar-session-row { flex: 1; min-width: 0; }
