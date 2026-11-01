@@ -141,7 +141,12 @@ export class BrowserProbe {
 			try {
 				if (await this.evaluate(expression)) return;
 			} catch (error) {
-				if (!(error instanceof Error) || !/Execution context was destroyed|Cannot find context/.test(error.message))
+				if (
+					!(error instanceof Error) ||
+					!/Execution context was destroyed|Cannot find context|Inspected target navigated or closed/.test(
+						error.message,
+					)
+				)
 					throw error;
 			}
 			await new Promise((resolve) => setTimeout(resolve, 40));
