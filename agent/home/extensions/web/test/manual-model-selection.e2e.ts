@@ -65,48 +65,21 @@ test("首次使用：默认模型身份、缺密钥弹窗、草稿返回、独�
 	try {
 		browser = await BrowserProbe.launch(root);
 		await browser.navigate(`${origin}/`);
-		await browser.until("!!document.querySelector('.model-key-dialog[open]')", "首次密钥提示");
-		assert.equal(
-			await browser.evaluate(
-				"document.querySelector('.composer-model').textContent.includes('DeepSeek V4.1 Flash')",
-			),
-			true,
+		await browser.until(
+			"document.querySelector('.composer-model')?.textContent.includes('DeepSeek V4.1 Flash')",
+			"加载默认模型",
 		);
 		assert.equal(
 			await browser.evaluate("document.querySelector('.composer-model').textContent.includes('自动选择')"),
 			false,
 		);
-		for (const theme of ["light", "dark"]) {
-			await browser.evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`);
-			await browser.evaluate(
-				"Promise.all(document.getAnimations().filter(a=>a.effect?.getComputedTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))",
-			);
-			await browser.screenshot(join(root, `missing-key-${theme}.png`));
-		}
-		await browser.call("Emulation.setDeviceMetricsOverride", {
-			width: 390,
-			height: 844,
-			deviceScaleFactor: 1,
-			mobile: false,
-		});
+		// probe 已带密钥：存在任何已配置服务时不自动弹窗。
 		assert.equal(
-			await browser.evaluate(
-				"(()=>{const r=document.querySelector('.model-key-dialog').getBoundingClientRect();return r.left>=23&&r.right<=innerWidth-23})()",
-			),
-			true,
+			await browser.evaluate("!!document.querySelector('.model-key-dialog[open]')"),
+			false,
+			"其他服务已配置时不自动弹窗",
 		);
-		await browser.evaluate(
-			"Promise.all(document.getAnimations().filter(a=>a.effect?.getComputedTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))",
-		);
-		await browser.screenshot(join(root, "missing-key-mobile.png"));
-		await browser.call("Emulation.setDeviceMetricsOverride", {
-			width: 1440,
-			height: 1000,
-			deviceScaleFactor: 1,
-			mobile: false,
-		});
 		await browser.evaluate("document.documentElement.dataset.theme='light'");
-		await browser.click(".model-key-close");
 		await browser.click(".sidebar-all");
 		await browser.until("location.pathname==='/sessions'", "离开首页");
 		await browser.click("a.sidebar-new");
@@ -127,7 +100,7 @@ test("首次使用：默认模型身份、缺密钥弹窗、草稿返回、独�
 		assert.equal(
 			await browser.evaluate("!!document.querySelector('.model-key-dialog[open]')"),
 			false,
-			"同一标签页刷新不重复自动提示",
+			"已配置其他服务，刷新也不自动提示",
 		);
 		await browser.fill(".composer-input", "检查电脑运行缓慢的原因");
 		await browser.click(".composer-send");

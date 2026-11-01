@@ -9045,7 +9045,7 @@
               "fill": "#5F676C",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "输入框手动切换当前模型；模型偏好单独保存新会话默认。\n未配置密钥保留默认模型身份；首次进入和发送前使用原生 dialog 提示配置。\n520px / 圆角16 / 内边距24 / 间距16；按钮高32 / 圆角4；窄屏左右24。\n配置成功返回来源页，保留草稿，不自动重发；关闭与 Esc 不更改模型。",
+              "content": "输入框手动切换当前模型；模型偏好单独保存新会话默认。\n未配置密钥保留默认模型身份；完全没有配置模型时 24 小时内最多自动提示一次，发送前再次检查。\n520px / 圆角16 / 内边距24 / 间距16；按钮高32 / 圆角4；窄屏左右24。\n配置成功返回来源页，保留草稿，不自动重发；关闭与 Esc 不更改模型。",
               "lineHeight": 1.5,
               "fontFamily": "Source Han Sans CN",
               "fontSize": 16,
@@ -99721,7 +99721,7 @@
               "x": 0,
               "y": 3063,
               "name": "缺少模型密钥 · 浅色",
-              "context": "首次进入 Web：选中默认服务未配置时每次打开页面提示一次。关闭与 Esc 仅关闭弹窗；发送前重新检查，草稿保持。配置密钥跳转现有服务配置，成功后回来源页，不自动重发。弹窗宽520，窄屏左右24，圆角16，padding24，按钮32/圆角4。",
+              "context": "完全没有配置模型时提示一次，24 小时内不再自动弹出。关闭与 Esc 仅关闭弹窗；发送前重新检查，草稿保持。登录 CSTOA 直接使用内置模型，填写 APIKEY 跳转当前服务配置；配置成功回来源页，不自动重发。弹窗宽520，窄屏左右24，圆角16，padding24，按钮32/圆角4。",
               "clip": true,
               "width": 1240,
               "fill": "#FFFFFF",
@@ -99785,7 +99785,7 @@
                               "fill": "#202020",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "配置 DeepSeek 密钥",
+                              "content": "尚未配置模型",
                               "lineHeight": 1.4,
                               "fontFamily": "Source Han Sans CN",
                               "fontSize": 20,
@@ -99804,45 +99804,13 @@
                           ]
                         },
                         {
-                          "type": "frame",
-                          "id": "U25Cz3",
-                          "name": "待配置模型",
-                          "width": "fill_container",
-                          "layout": "vertical",
-                          "gap": 4,
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "Eap23",
-                              "name": "待配置模型名称",
-                              "fill": "#202020",
-                              "content": "DeepSeek V4.1 Flash",
-                              "lineHeight": 1.5,
-                              "fontFamily": "Source Han Sans CN",
-                              "fontSize": 16,
-                              "fontWeight": "normal"
-                            },
-                            {
-                              "type": "text",
-                              "id": "fbor2",
-                              "name": "待配置官方服务",
-                              "fill": "#646464",
-                              "content": "DeepSeek 官方 · deepseek-flash",
-                              "lineHeight": 1.4286,
-                              "fontFamily": "Source Han Sans CN",
-                              "fontSize": 14,
-                              "fontWeight": "normal"
-                            }
-                          ]
-                        },
-                        {
                           "type": "text",
                           "id": "w7A3Jw",
                           "name": "缺密钥原因",
                           "fill": "#646464",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "尚未配置 API key，配置后即可开始对话。",
+                          "content": "登录 CSTOA 可直接使用内置模型；其他服务请在模型服务页填写 APIKEY。",
                           "lineHeight": 1.4286,
                           "fontFamily": "Source Han Sans CN",
                           "fontSize": 14,
@@ -99886,8 +99854,36 @@
                             },
                             {
                               "type": "frame",
+                              "id": "kOfyFi1",
+                              "name": "填写 APIKEY",
+                              "height": 32,
+                              "fill": "#FCFCFC",
+                              "cornerRadius": "$radius-control",
+                              "gap": 8,
+                              "padding": [
+                                0,
+                                12
+                              ],
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "kOfyFi2",
+                                  "name": "按钮文案",
+                                  "fill": "#202020",
+                                  "content": "填写 APIKEY",
+                                  "lineHeight": 1.4286,
+                                  "fontFamily": "Source Han Sans CN",
+                                  "fontSize": 14,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
                               "id": "wbd6L",
-                              "name": "配置密钥",
+                              "name": "登录 CSTOA",
                               "height": 32,
                               "fill": "#465A9F",
                               "cornerRadius": "$radius-control",
@@ -99904,7 +99900,7 @@
                                   "id": "cSWds",
                                   "name": "按钮文案",
                                   "fill": "#FFFFFF",
-                                  "content": "配置密钥",
+                                  "content": "登录 CSTOA",
                                   "lineHeight": 1.4286,
                                   "fontFamily": "Source Han Sans CN",
                                   "fontSize": 14,
@@ -100117,24 +100113,11 @@
                           "fill": "#202020",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "配置 DeepSeek 密钥",
+                          "content": "尚未配置模型",
                           "lineHeight": 1.4,
                           "fontFamily": "Source Han Sans CN",
                           "fontSize": 20,
                           "fontWeight": "500"
-                        },
-                        {
-                          "type": "text",
-                          "id": "SAI6s",
-                          "name": "窄屏模型身份",
-                          "fill": "#646464",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "DeepSeek V4.1 Flash\nDeepSeek 官方 · deepseek-flash",
-                          "lineHeight": 1.4286,
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
@@ -100143,7 +100126,7 @@
                           "fill": "#646464",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "尚未配置 API key，配置后即可开始对话。",
+                          "content": "登录 CSTOA 可直接使用内置模型；其他服务请在模型服务页填写 APIKEY。",
                           "lineHeight": 1.4286,
                           "fontFamily": "Source Han Sans CN",
                           "fontSize": 14,
@@ -100187,8 +100170,36 @@
                             },
                             {
                               "type": "frame",
+                              "id": "kf6x0P1",
+                              "name": "填写 APIKEY",
+                              "height": 32,
+                              "fill": "#FCFCFC",
+                              "cornerRadius": "$radius-control",
+                              "gap": 8,
+                              "padding": [
+                                0,
+                                12
+                              ],
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "kf6x0P2",
+                                  "name": "按钮文案",
+                                  "fill": "#202020",
+                                  "content": "填写 APIKEY",
+                                  "lineHeight": 1.4286,
+                                  "fontFamily": "Source Han Sans CN",
+                                  "fontSize": 14,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
                               "id": "KzTLs",
-                              "name": "配置密钥",
+                              "name": "登录 CSTOA",
                               "height": 32,
                               "fill": "#465A9F",
                               "cornerRadius": "$radius-control",
@@ -100205,7 +100216,7 @@
                                   "id": "tnEzm",
                                   "name": "按钮文案",
                                   "fill": "#FFFFFF",
-                                  "content": "配置密钥",
+                                  "content": "登录 CSTOA",
                                   "lineHeight": 1.4286,
                                   "fontFamily": "Source Han Sans CN",
                                   "fontSize": 14,
@@ -100227,7 +100238,7 @@
               "x": 1520,
               "y": 3063,
               "name": "缺少模型密钥 · 深色",
-              "context": "首次进入 Web：选中默认服务未配置时每次打开页面提示一次。关闭与 Esc 仅关闭弹窗；发送前重新检查，草稿保持。配置密钥跳转现有服务配置，成功后回来源页，不自动重发。弹窗宽520，窄屏左右24，圆角16，padding24，按钮32/圆角4。",
+              "context": "完全没有配置模型时提示一次，24 小时内不再自动弹出。关闭与 Esc 仅关闭弹窗；发送前重新检查，草稿保持。登录 CSTOA 直接使用内置模型，填写 APIKEY 跳转当前服务配置；配置成功回来源页，不自动重发。弹窗宽520，窄屏左右24，圆角16，padding24，按钮32/圆角4。",
               "clip": true,
               "width": 1240,
               "fill": "#0B1215",
@@ -100291,7 +100302,7 @@
                               "fill": "#E0EAEE",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "配置 DeepSeek 密钥",
+                              "content": "尚未配置模型",
                               "lineHeight": 1.4,
                               "fontFamily": "Source Han Sans CN",
                               "fontSize": 20,
@@ -100310,45 +100321,13 @@
                           ]
                         },
                         {
-                          "type": "frame",
-                          "id": "I1yIo",
-                          "name": "待配置模型",
-                          "width": "fill_container",
-                          "layout": "vertical",
-                          "gap": 4,
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "gC8gQ",
-                              "name": "待配置模型名称",
-                              "fill": "#E0EAEE",
-                              "content": "DeepSeek V4.1 Flash",
-                              "lineHeight": 1.5,
-                              "fontFamily": "Source Han Sans CN",
-                              "fontSize": 16,
-                              "fontWeight": "normal"
-                            },
-                            {
-                              "type": "text",
-                              "id": "lvtNU",
-                              "name": "待配置官方服务",
-                              "fill": "#AAB3B7",
-                              "content": "DeepSeek 官方 · deepseek-flash",
-                              "lineHeight": 1.4286,
-                              "fontFamily": "Source Han Sans CN",
-                              "fontSize": 14,
-                              "fontWeight": "normal"
-                            }
-                          ]
-                        },
-                        {
                           "type": "text",
                           "id": "B4a9H",
                           "name": "缺密钥原因",
                           "fill": "#AAB3B7",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "尚未配置 API key，配置后即可开始对话。",
+                          "content": "登录 CSTOA 可直接使用内置模型；其他服务请在模型服务页填写 APIKEY。",
                           "lineHeight": 1.4286,
                           "fontFamily": "Source Han Sans CN",
                           "fontSize": 14,
@@ -100392,8 +100371,36 @@
                             },
                             {
                               "type": "frame",
+                              "id": "kNKrdn1",
+                              "name": "填写 APIKEY",
+                              "height": 32,
+                              "fill": "#131A1D",
+                              "cornerRadius": "$radius-control",
+                              "gap": 8,
+                              "padding": [
+                                0,
+                                12
+                              ],
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "kNKrdn2",
+                                  "name": "按钮文案",
+                                  "fill": "#E0EAEE",
+                                  "content": "填写 APIKEY",
+                                  "lineHeight": 1.4286,
+                                  "fontFamily": "Source Han Sans CN",
+                                  "fontSize": 14,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
                               "id": "dDpgU",
-                              "name": "配置密钥",
+                              "name": "登录 CSTOA",
                               "height": 32,
                               "fill": "#7785DE",
                               "cornerRadius": "$radius-control",
@@ -100410,7 +100417,7 @@
                                   "id": "AMjux",
                                   "name": "按钮文案",
                                   "fill": "#001F42",
-                                  "content": "配置密钥",
+                                  "content": "登录 CSTOA",
                                   "lineHeight": 1.4286,
                                   "fontFamily": "Source Han Sans CN",
                                   "fontSize": 14,
@@ -100623,24 +100630,11 @@
                           "fill": "#E0EAEE",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "配置 DeepSeek 密钥",
+                          "content": "尚未配置模型",
                           "lineHeight": 1.4,
                           "fontFamily": "Source Han Sans CN",
                           "fontSize": 20,
                           "fontWeight": "500"
-                        },
-                        {
-                          "type": "text",
-                          "id": "XG4fd",
-                          "name": "窄屏模型身份",
-                          "fill": "#AAB3B7",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "DeepSeek V4.1 Flash\nDeepSeek 官方 · deepseek-flash",
-                          "lineHeight": 1.4286,
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
                         },
                         {
                           "type": "text",
@@ -100649,7 +100643,7 @@
                           "fill": "#AAB3B7",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "尚未配置 API key，配置后即可开始对话。",
+                          "content": "登录 CSTOA 可直接使用内置模型；其他服务请在模型服务页填写 APIKEY。",
                           "lineHeight": 1.4286,
                           "fontFamily": "Source Han Sans CN",
                           "fontSize": 14,
@@ -100693,8 +100687,36 @@
                             },
                             {
                               "type": "frame",
+                              "id": "kB3tZpt1",
+                              "name": "填写 APIKEY",
+                              "height": 32,
+                              "fill": "#131A1D",
+                              "cornerRadius": "$radius-control",
+                              "gap": 8,
+                              "padding": [
+                                0,
+                                12
+                              ],
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "kB3tZpt2",
+                                  "name": "按钮文案",
+                                  "fill": "#E0EAEE",
+                                  "content": "填写 APIKEY",
+                                  "lineHeight": 1.4286,
+                                  "fontFamily": "Source Han Sans CN",
+                                  "fontSize": 14,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
                               "id": "b6Vt0",
-                              "name": "配置密钥",
+                              "name": "登录 CSTOA",
                               "height": 32,
                               "fill": "#7785DE",
                               "cornerRadius": "$radius-control",
@@ -100711,7 +100733,7 @@
                                   "id": "kXBFU",
                                   "name": "按钮文案",
                                   "fill": "#001F42",
-                                  "content": "配置密钥",
+                                  "content": "登录 CSTOA",
                                   "lineHeight": 1.4286,
                                   "fontFamily": "Source Han Sans CN",
                                   "fontSize": 14,

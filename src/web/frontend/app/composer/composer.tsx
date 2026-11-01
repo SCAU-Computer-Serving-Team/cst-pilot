@@ -2,7 +2,8 @@ import { Button } from "@heroui/react";
 import { ArrowUp, Command, FileText, PencilLine, Plus, Sparkles, Square, X } from "lucide-react";
 import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { ModelKeyDialog } from "../auth/model-key-dialog";
+import { ModelKeyDialog, type ModelKeyDialogReason } from "../auth/model-key-dialog";
+import { readModelKeyPromptTime, shouldAutoPrompt, writeModelKeyPromptTime } from "../auth/model-key-prompt";
 import { ApiFailure, apiJson } from "../data/api";
 import { type ModelChoice, type ModelSelectionPayload, refreshManualSelection } from "../data/model-selection";
 import { type Model, useGlobalEvents } from "../data/web-state";
@@ -24,7 +25,6 @@ import { ModelPicker } from "./model-picker";
 import { scopedModels } from "./scoped-models";
 
 type Selection = ModelChoice | null;
-const initialKeyPromptStorageKey = "cst-model-key-prompt-shown";
 export type ComposerConfig = {
 	provider?: string;
 	modelId?: string;
@@ -104,7 +104,7 @@ export function Composer({
 	const [selected, setSelected] = useState<Selection>(null);
 	const manualHomeModel = useRef(false);
 	const initialKeyPrompt = useRef(false);
-	const [missingKey, setMissingKey] = useState<{ model: ModelChoice; unsent: boolean } | null>(null);
+	const [missingKey, setMissingKey] = useState<{ model: ModelChoice; reason: ModelKeyDialogReason } | null>(null);
 	const [thinking, setThinking] = useState("off");
 	const [thinkingLevels, setThinkingLevels] = useState<string[]>([]);
 	const [sending, setSending] = useState(false);
@@ -415,14 +415,18 @@ export function Composer({
 					setSelected((current) => refreshManualSelection(current, data, !sessionId && manualHomeModel.current));
 					if (!initialKeyPrompt.current && onSend && data.selected) {
 						initialKeyPrompt.current = true;
+						// 只在完全没有配置模型时自动提示，且 24 小时内只提示一次。
+						const now = Date.now();
 						if (
-							!data.selected.credentialReady &&
 							data.selected.catalogPresent &&
-							sessionStorage.getItem(initialKeyPromptStorageKey) !== "1"
+							shouldAutoPrompt({
+								catalog: data.catalog,
+								lastPromptAt: readModelKeyPromptTime(),
+								now,
+							})
 						) {
-							// 标签页内共用提示记录，切页重挂载和刷新均不重复自动弹窗。
-							sessionStorage.setItem(initialKeyPromptStorageKey, "1");
-							setMissingKey({ model: data.selected, unsent: false });
+							writeModelKeyPromptTime(undefined, now);
+							setMissingKey({ model: data.selected, reason: "initial" });
 						}
 					}
 					setMissingKey((current) =>
@@ -507,7 +511,7 @@ export function Composer({
 		setSelected(model);
 		if (!model?.catalogPresent) throw new Error("所选模型不在目录中，请手动选择模型。");
 		if (!model.credentialReady) {
-			setMissingKey({ model, unsent: true });
+			setMissingKey({ model, reason: "unsent" });
 			return null;
 		}
 		return model;
@@ -589,7 +593,7 @@ export function Composer({
 			sessionStorage.removeItem(`${draftKey}:id`);
 		} catch (cause) {
 			if (cause instanceof ApiFailure && cause.code === "credentials_required" && selected)
-				setMissingKey({ model: selected, unsent: true });
+				setMissingKey({ model: selected, reason: "unsent" });
 			else setError(cause instanceof Error ? cause.message : "消息未被接受，请重试");
 		} finally {
 			setSending(false);
@@ -635,7 +639,7 @@ export function Composer({
 	return (
 		<div className={`composer-shell ${home ? "composer-shell--home" : "composer-shell--chat"}`}>
 			{missingKey && (
-				<ModelKeyDialog model={missingKey.model} unsent={missingKey.unsent} onClose={() => setMissingKey(null)} />
+				<ModelKeyDialog model={missingKey.model} reason={missingKey.reason} onClose={() => setMissingKey(null)} />
 			)}
 			{!!images.length && (
 				<ul className="composer-attachments" aria-label="待发送图片">

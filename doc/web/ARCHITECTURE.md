@@ -100,7 +100,7 @@ PNG 以固定的 1240 × 3200 CSS 像素视口逐段滚动截图，保留两倍�
 
 前端 `composer/model-picker.tsx` 共用合并入口、双行主菜单、模型列表与思考强度列表。弹层固定宽 224px，按行数计算目标高度，以 transitions.dev 的 card resize 连续调整。主菜单与列表保留为两个页面，同时使用 page side-by-side 左右滑动与淡化过渡；隐藏页设为 inert 并移出辅助技术读取范围，保留上次列表内容供返回退场。列表超高时内部滚动，减少动态时立即切换。选择成功或列表内按 Esc 返回主菜单并恢复对应行焦点；点击外部直接关闭，主菜单内按 Esc 关闭。提交期间禁止重复写入，失败保留列表与已确认值，过期响应不改变当前视图。首页只保留本次模型和强度，创建时一并传入；会话内调用思考强度接口。后端会话档位取 Pi SDK，首页按模型档位映射与默认设置计算。
 
-前端 `data/model-selection.ts` 保留用户选择并只刷新其状态；`settings/default-model-picker.tsx` 提供可搜索的独立默认选择器；`auth/model-key-dialog.tsx` 使用原生对话框提醒配置。配置成功只返回受限的本机来源路由，草稿由原有存储恢复，不自动发送。
+前端 `data/model-selection.ts` 保留用户选择并只刷新其状态；`settings/default-model-picker.tsx` 提供可搜索的独立默认选择器；`auth/model-key-dialog.tsx` 使用原生对话框提醒配置，`auth/model-key-prompt.ts` 判定自动提示条件：完全没有凭据且距上次提示满 24 小时，记录写在 localStorage。配置成功只返回受限的本机来源路由，草稿由原有存储恢复，不自动发送。
 
 ## 设置分类导航
 
