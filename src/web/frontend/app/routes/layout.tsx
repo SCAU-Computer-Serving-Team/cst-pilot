@@ -2,6 +2,7 @@ import { PanelLeft } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useSearchParams, useViewTransitionState } from "react-router";
 import { AccountProvider } from "../account/use-account";
+import { MessageOutboxRecovery } from "../data/use-message-outbox";
 import { BlueHour } from "../shell/blue-hour";
 import { ConnectionStatus } from "../shell/connection-status";
 import { NotificationRegion } from "../shell/notification";
@@ -32,12 +33,15 @@ export default function WorkspaceLayout() {
 	const [params] = useSearchParams();
 	const preview = params.get("preview") === "1";
 	const home = pathname === "/";
-	const [startup, setStartup] = useState(() => home && window.location.hash === "#cst-web-start");
-	const startupRequested = useRef(startup);
-	if (!home) startupRequested.current = false;
+	const [startup, setStartup] = useState(true);
+	// 离开首屏路径后不恢复启动标记，站内返回只使用页面转场。
+	const startupPath = useRef<string | null>(pathname);
+	if (startupPath.current !== pathname) startupPath.current = null;
+	const initialPage = startupPath.current === pathname;
 	useEffect(() => {
 		if (!startup) return;
-		window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+		if (window.location.hash === "#cst-web-start")
+			window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
 		const timer = window.setTimeout(() => setStartup(false), 1200);
 		return () => window.clearTimeout(timer);
 	}, [startup]);
@@ -71,6 +75,7 @@ export default function WorkspaceLayout() {
 	const motion = useSidebarMotion(collapsed);
 	function changeCollapsed(value: boolean) {
 		motion.capture();
+		setStartup(false);
 		setCollapsed(value);
 	}
 	const overlayLayout = settings ? mobile : narrow;
@@ -81,9 +86,9 @@ export default function WorkspaceLayout() {
 				<NotificationRegion contentInset={collapsed || (settings && mobile) ? 0 : 264}>
 					<div
 						ref={motion.root}
-						data-startup={(startup && home && !homeTransition && !collapsed) || undefined}
-						data-home-startup={(startup && home && !homeTransition) || undefined}
-						data-startup-origin={(startupRequested.current && home) || undefined}
+						data-startup={(startup && initialPage && !homeTransition && !collapsed) || undefined}
+						data-home-startup={(startup && initialPage && home && !homeTransition) || undefined}
+						data-startup-origin={(initialPage && home) || undefined}
 						data-export-transition={exportTransition || undefined}
 						data-home-transition={homeTransition || undefined}
 						data-settings-boundary={settingsBoundary || undefined}
@@ -99,7 +104,7 @@ export default function WorkspaceLayout() {
 						)}
 						<Sidebar
 							preview={preview}
-							startup={startupRequested.current && home && !homeTransition && !collapsed}
+							startup={initialPage && !homeTransition && !collapsed}
 							collapsed={collapsed}
 							onCollapse={() => changeCollapsed(true)}
 							onNavigate={overlay ? () => changeCollapsed(true) : undefined}
@@ -121,6 +126,7 @@ export default function WorkspaceLayout() {
 								</div>
 							)}
 							<ConnectionStatus enabled={!preview} />
+							{!preview && <MessageOutboxRecovery />}
 							<Outlet />
 						</div>
 					</div>

@@ -89,13 +89,15 @@ export const REQUIRED_RELEASE_FILES = [
   'agent/home/packages/pi-web-access/LICENSE',
 ];
 
-// 入口页与样式表引用的本地资源都必须落在发行树内。只检查带扩展名的绝对路径，
-// 免得把路由地址当成文件。
+// 入口页的静态资源与 CSS url() 均须落在 Web 静态目录内。
 const localRefs = (text) =>
   new Set(
-    [...text.matchAll(/["'(](\/[A-Za-z0-9._/-]+\.(?:js|mjs|css|woff2?|otf|ttf|png|svg|jpg|webp|json))["')]/g)].map(
-      (match) => match[1],
-    ),
+    [
+      ...[...text.matchAll(/["'(](\/[A-Za-z0-9._/-]+\.(?:js|mjs|css|woff2?|otf|ttf|png|svg|jpg|webp|json))["')]/g)].map(match => match[1]),
+      ...[...text.matchAll(/\burl\(\s*["']?([^"')\s]+)["']?\s*\)/g)]
+        .map(match => match[1])
+        .filter(ref => !/^(?:data:|https?:|\/\/|#)/i.test(ref)),
+    ],
   );
 
 export function checkReleaseContent(root, files) {
@@ -106,7 +108,9 @@ export function checkReleaseContent(root, files) {
   const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
   const assertRefs = (rel, refs) => {
     for (const ref of refs) {
-      if (!present.has(`${WEB_STATIC}${ref}`)) throw new Error(`${rel} 引用的资源不在发行树中: ${ref}`);
+      const local = decodeURIComponent(ref.split(/[?#]/)[0]);
+      const target = path.posix.normalize(local.startsWith('/') ? `${WEB_STATIC}${local}` : path.posix.join(path.posix.dirname(rel), local));
+      if (!target.startsWith(`${WEB_STATIC}/`) || !present.has(target)) throw new Error(`${rel} 引用的资源不在发行树中: ${ref}`);
     }
   };
   const entry = `${WEB_STATIC}/index.html`;

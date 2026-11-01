@@ -1,19 +1,12 @@
 import type { SessionDetail, SessionRow } from "./web-state";
 
-/** 最近七天按更新时间选取十项；预载不改变列表顺序。 */
-export function recentSessionIds(rows: readonly SessionRow[], now = Date.now()): string[] {
-	const cutoff = now - 7 * 24 * 60 * 60 * 1000;
-	return [
-		...new Set(
-			rows
-				.filter((row) => {
-					const time = Date.parse(row.updatedAt ?? "");
-					return time >= cutoff && time <= now;
-				})
-				.sort((a, b) => Date.parse(b.updatedAt!) - Date.parse(a.updatedAt!))
-				.map((row) => row.id),
-		),
-	].slice(0, 10);
+/** 按更新时间选取最新十项；不限制日期跨度，不改变列表顺序。 */
+export function recentSessionIds(rows: readonly SessionRow[]): string[] {
+	const timestamp = (row: SessionRow) => {
+		const time = Date.parse(row.updatedAt ?? "");
+		return Number.isFinite(time) ? time : -Infinity;
+	};
+	return [...new Set([...rows].sort((a, b) => timestamp(b) - timestamp(a)).map((row) => row.id))].slice(0, 10);
 }
 
 /** 标签页内存缓存；预载与点击共享请求，旧响应不得覆盖更新或复活已删除会话。 */
@@ -82,19 +75,14 @@ export class SessionDetailCache {
 	}
 
 	async preload(ids: readonly string[]): Promise<void> {
-		let next = 0;
-		const worker = async () => {
-			while (next < ids.length) {
-				const id = ids[next++]!;
-				if (this.validIds && !this.validIds.has(id)) continue;
-				try {
-					await this.load(id);
-				} catch {
-					/* 打开页面时保留正常的重试入口。 */
-				}
-			}
-		};
-		await Promise.all([worker(), worker()]);
+		for (let start = 0; start < ids.length; start += 5) {
+			await Promise.allSettled(
+				ids
+					.slice(start, start + 5)
+					.filter((id) => !this.validIds || this.validIds.has(id))
+					.map((id) => this.load(id)),
+			);
+		}
 	}
 
 	reconcile(rows: readonly SessionRow[]): void {

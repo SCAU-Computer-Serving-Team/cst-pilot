@@ -11,6 +11,7 @@ export function QueuePanel({ id, queue, refresh }: { id: string; queue: InboxSna
 	const [text, setText] = useState("");
 	const pending = visibleQueueItems(queue.items);
 	const failed = pending.find((item) => item.status === "failed");
+	const uncertain = pending.some((item) => item.uncertain);
 	const queuedIds = pending
 		.filter((item) => item.status === "pending" && item.delivery === "queue")
 		.map((item) => item.id);
@@ -40,6 +41,8 @@ export function QueuePanel({ id, queue, refresh }: { id: string; queue: InboxSna
 						</Tooltip.Content>
 					</Tooltip>
 				</output>
+			) : uncertain ? (
+				<output className="queue-status">上次投递结果待核对 · 请核对对话后再补充消息，不会自动重发</output>
 			) : queue.paused ? (
 				<strong className="queue-status">排队已暂停 · 发送新消息后继续</strong>
 			) : null}
@@ -79,7 +82,7 @@ export function QueuePanel({ id, queue, refresh }: { id: string; queue: InboxSna
 							</>
 						) : (
 							<>
-								<GripVertical size={16} aria-hidden="true" className="queue-grip" />
+								{!item.uncertain && <GripVertical size={16} aria-hidden="true" className="queue-grip" />}
 								<span>{item.text || "图片消息"}</span>
 								{(item.status === "pending" || item.status === "failed") && (
 									<>

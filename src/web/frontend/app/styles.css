@@ -6,6 +6,7 @@
 @import "./shell/session-list.css";
 @import "./exports/exports.css";
 @import "./conversation/markdown.css";
+@import "./conversation/outgoing-message.css";
 @import "@heroui/styles";
 @import "@fontsource/jetbrains-mono/latin-400.css";
 
@@ -250,7 +251,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .app-layout { display: flex; height: 100vh; min-height: 0; width: 100%; position: relative; overflow: clip; }
 .workspace-content { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; height: 100%; margin-left: 264px; }
 .sidebar-collapsed > .workspace-content { margin-left: 0; }
-.sidebar { width: 264px; height: 100vh; view-transition-name: workspace-sidebar; position: absolute; top: 0; left: 0; display: flex; flex-direction: column; justify-content: space-between; gap: var(--space-inline); padding: 20px var(--space-component) var(--space-inline); background: var(--app-sidebar); border-right: 1px solid var(--app-sidebar-border); z-index: 2; transform: translate3d(0, 0, 0); transition: transform var(--duration-slow) var(--ease-smooth-out), visibility 0s; }
+.sidebar { --sidebar-row-gap: 4px; --sidebar-list-gap: 12px; width: 264px; height: 100vh; view-transition-name: workspace-sidebar; position: absolute; top: 0; left: 0; display: flex; flex-direction: column; justify-content: space-between; gap: var(--space-inline); padding: 20px var(--space-component) var(--space-inline); background: var(--app-sidebar); border-right: 1px solid var(--app-sidebar-border); z-index: 2; transform: translate3d(0, 0, 0); transition: transform var(--duration-slow) var(--ease-smooth-out), visibility 0s; }
 @supports (height: 100dvh) { .app-layout, .sidebar { height: 100dvh; } }
 .sidebar-top, .sidebar-footer { min-width: 0; }
 .app-layout.sidebar-collapsed > .sidebar { transform: translate3d(-100%, 0, 0); visibility: hidden; transition: transform var(--duration-medium) var(--ease-smooth-out), visibility 0s linear var(--duration-medium); }
@@ -258,7 +259,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 @keyframes sidebar-restore-in { from { opacity: 0; transform: translateX(calc(var(--distance-micro) * -1)); } }
 .sidebar-restore:is(:hover, :focus-visible) { background: var(--app-selected); color: var(--chat-ink); outline: none; }
 .app-layout.sidebar-collapsed .chat-header, .app-layout.sidebar-collapsed .tree-toolbar { padding-left: 64px; }
-.sidebar-top { position: relative; display: flex; flex-direction: column; gap: var(--space-micro); min-height: 0; overflow-y: auto; }
+.sidebar-top { position: relative; display: flex; flex-direction: column; gap: var(--sidebar-row-gap); min-height: 0; overflow-y: auto; }
 .sidebar-selection { position: absolute; top: 0; left: 0; z-index: 0; width: 100%; height: var(--control-menu); visibility: hidden; pointer-events: none; border-radius: var(--radius-row); background-color: var(--app-selected); transition: transform var(--duration-fast) var(--ease-smooth-out), height var(--duration-fast) var(--ease-smooth-out); }
 .sidebar-top > *:not(.sidebar-selection) { flex-shrink: 0; }
 .sidebar-new, .sidebar-recent, .sidebar-session-row { width: 100%; }
@@ -591,7 +592,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 }
 /* 动效：发送滑入、逐词显现、部件淡入、等待流光。取值一律用 transitions.dev 令牌刻度。 */
 .user-line[data-fresh="true"] .user-bubble { animation: message-rise var(--duration-fast) var(--ease-smooth-out) backwards; }
-@keyframes message-rise { from { opacity: 0; transform: translateY(var(--distance-medium)); } to { opacity: 1; transform: translateY(0); } }
+@keyframes message-rise { from { opacity: 0; transform: translateY(var(--distance-base)); } to { opacity: 1; transform: translateY(0); } }
 .assistant-turn[data-live="true"] .turn-process { animation: part-in var(--duration-fast) var(--ease-smooth-out) backwards; }
 .assistant-turn[data-live="true"] .turn-process-body > * { animation: part-in var(--duration-fast) var(--ease-smooth-out) backwards; }
 @keyframes part-in { from { opacity: 0; transform: translateY(var(--distance-micro)); } to { opacity: 1; transform: translateY(0); } }
@@ -1437,17 +1438,18 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .exit-actions button:disabled { opacity:.45; cursor:default; }
 @keyframes exit-modal-in { from { opacity:0; transform:translateY(var(--distance-base)); } }
 @media (prefers-reduced-motion:reduce) { .exit-dialog { animation:none; } }
-/* TUI 启动首页：背景保持静止，内容依次滑入。 */
-.app-layout[data-startup] > .sidebar { animation: startup-left var(--duration-slow) var(--ease-smooth-out) backwards; }
+/* 整页加载与刷新：底面固定，侧栏列表就绪后整组入场。 */
+.sidebar[data-startup-pending] > :is(.sidebar-top, .sidebar-footer) { opacity: 0; visibility: hidden; }
+.sidebar[data-startup-rows] > :is(.sidebar-top, .sidebar-footer) { animation: startup-left var(--duration-slow) var(--ease-smooth-out) backwards; }
 .app-layout[data-home-startup] .brand-arcs { animation: startup-top var(--duration-very-slow) var(--ease-smooth-out) var(--duration-micro) backwards; }
 .app-layout[data-home-startup] .home-greeting h1 { animation: startup-top var(--duration-very-slow) var(--ease-smooth-out) calc(var(--duration-micro) * 2) backwards; }
 .app-layout[data-home-startup] :is(.composer-shell--home, .home-footnote) { animation: startup-bottom var(--duration-very-slow) var(--ease-smooth-out) calc(var(--duration-micro) * 3) backwards; }
-.sidebar[data-startup-rows] :is(.sidebar-recent-heading, .sidebar-session-row) { animation: startup-bottom var(--duration-very-slow) var(--ease-smooth-out) calc(var(--duration-micro) * 2 + var(--duration-stagger) * var(--startup-row)) backwards; }
+.sidebar[data-startup-rows] :is(.sidebar-recent-heading, .sidebar-session-row .sidebar-selection-text) { animation: startup-bottom var(--duration-very-slow) var(--ease-smooth-out) calc(var(--duration-micro) * 2 + var(--duration-stagger) * var(--startup-row)) backwards; }
 @keyframes startup-left { from { opacity: 0; transform: translateX(calc(-1 * var(--distance-medium))); } }
 @keyframes startup-top { from { opacity: 0; transform: translateY(calc(-1 * var(--distance-medium))); } }
 @keyframes startup-bottom { from { opacity: 0; transform: translateY(var(--distance-medium)); } }
 @media (prefers-reduced-motion: reduce) {
-  .app-layout[data-startup] > .sidebar, .app-layout[data-home-startup] :is(.brand-arcs, .home-greeting h1, .composer-shell--home, .home-footnote), .sidebar[data-startup-rows] :is(.sidebar-recent-heading, .sidebar-session-row) { animation: none; }
+  .sidebar[data-startup-rows] > :is(.sidebar-top, .sidebar-footer), .app-layout[data-home-startup] :is(.brand-arcs, .home-greeting h1, .composer-shell--home, .home-footnote), .sidebar[data-startup-rows] :is(.sidebar-recent-heading, .sidebar-session-row .sidebar-selection-text) { animation: none; }
 }
 /* 侧栏作为独立快照保持静止，页面切换仅播放右侧内容。 */
 ::view-transition-group(workspace-sidebar) { z-index: 20; animation: none; }

@@ -12,13 +12,15 @@ import {
 	SunMoon,
 } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Link, PrefetchPageLinks, useLocation, useNavigate, useNavigation } from "react-router";
+import { Link, PrefetchPageLinks, useLocation, useNavigation } from "react-router";
 import { describeAccount } from "../account/format";
 import { useAccount } from "../account/use-account";
 import { accountProvider, loginPath } from "../auth/providers";
 import { Composer, type ComposerConfig } from "../composer/composer";
+import { UserMessage } from "../conversation/user-message";
 import { apiJson, type ProviderStatus } from "../data/api";
 import { attachTelemetryHints } from "../data/telemetry-hints";
+import { outgoingFor, useMessageOutbox } from "../data/use-message-outbox";
 import { useGlobalEvents } from "../data/web-state";
 import { BlueHour } from "./blue-hour";
 import { ExitDialog } from "./exit-dialog";
@@ -75,6 +77,8 @@ export function Sidebar({
 	const navigation = useNavigation();
 	const selectionPath = navigation.location?.pathname ?? location.pathname;
 	const state = useWorkspaceSessions();
+	const ready = preview || !!state.stage || !!state.error;
+	const startupPendingList = startup && !ready;
 	const [recentOpen, setRecentOpen] = useState(true);
 	const startupPending = useRef(startup);
 	const [startupRows, setStartupRows] = useState(false);
@@ -84,12 +88,12 @@ export function Sidebar({
 			setStartupRows(false);
 			return;
 		}
-		if (!startupPending.current || !state.stage) return;
+		if (!startupPending.current || !ready) return;
 		startupPending.current = false;
 		setStartupRows(true);
 		const timer = window.setTimeout(() => setStartupRows(false), 1100);
 		return () => window.clearTimeout(timer);
-	}, [startup, state.stage]);
+	}, [startup, ready]);
 	const sessions = useMemo(
 		() => orderedSessions(preview ? sampleSessions : state.sessions).slice(0, RECENT_SESSION_LIMIT),
 		[preview, state.sessions],
@@ -232,8 +236,9 @@ export function Sidebar({
 			aria-label="会话导航"
 			data-managing={management.managing || undefined}
 			data-startup-rows={startupRows || undefined}
-			inert={collapsed}
-			aria-hidden={collapsed}
+			data-startup-pending={startupPendingList || undefined}
+			inert={collapsed || startupPendingList}
+			aria-hidden={collapsed || startupPendingList}
 		>
 			{/* 所有会话共用聊天路由，只插入一份预载声明。 */}
 			{sessions[0] && <PrefetchPageLinks page={`/s/${sessions[0].id}${preview ? "?preview=1" : ""}`} />}
@@ -492,27 +497,11 @@ export function HomeSurface({
 	paused?: boolean;
 	externalBackground?: boolean;
 }) {
-	const navigate = useNavigate();
+	const { outbox, records } = useMessageOutbox();
+	const outgoing = preview ? [] : outgoingFor(records);
 	async function send(text: string, config: ComposerConfig) {
-		const session = await apiJson<{ id: string }>("/api/sessions", {
-			method: "POST",
-			body: config.provider
-				? { provider: config.provider, modelId: config.modelId, thinkingLevel: config.thinkingLevel }
-				: {},
-			idempotencyKey: config.messageId,
-		});
-		await apiJson(`/api/sessions/${encodeURIComponent(session.id)}/messages`, {
-			method: "POST",
-			idempotencyKey: config.messageId,
-			body: {
-				id: config.messageId,
-				text,
-				delivery: "queue",
-				images: config.images,
-				...(config.skill ? { skill: config.skill } : {}),
-			},
-		});
-		navigate(`/s/${session.id}`, { viewTransition: true });
+		const { messageId, ...payload } = config;
+		outbox.enqueue({ ...payload, id: messageId, text });
 	}
 	return (
 		<main className={`home-main ${externalBackground ? "home-main--external-background" : ""}`}>
@@ -526,6 +515,22 @@ export function HomeSurface({
 					<BrandArcs />
 					<h1>我该如何协助您？</h1>
 				</div>
+				{!!outgoing.length && (
+					<section className="home-outgoing" aria-label="待发送消息">
+						{outgoing.map((item) => (
+							<UserMessage
+								key={item.id}
+								outgoing={item}
+								message={{
+									role: "user",
+									content: item.text,
+									timestamp: item.createdAt,
+									clientMessageId: item.id,
+								}}
+							/>
+						))}
+					</section>
+				)}
 				<Composer home onSend={preview || paused ? undefined : send} />
 			</div>
 			<span className="home-footnote">@cst-pilot-web</span>

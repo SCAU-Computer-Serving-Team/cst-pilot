@@ -123,7 +123,9 @@ export function createWebApi(
 		const slot = await pool.openSaved(id);
 		let instance = inboxes.get(id);
 		if (!streams.has(id)) {
-			const stream = new SessionEvents(slot.session);
+			const stream = new SessionEvents(slot.session, undefined, (event) =>
+				"message" in event ? { ...event, message: slot.inputs.decorate(event.message) } : event,
+			);
 			streams.set(id, stream);
 			slot.ui.onChange((questions) => stream.publish("session", { type: "ui_requests", questions }));
 			const bitlocker = bitLockerWebInteractions.get(id);
@@ -151,17 +153,20 @@ export function createWebApi(
 				id,
 				{
 					isBusy: () => !slot.session.isIdle,
-					prompt: async (text, refs, skill) => {
+					prompt: async (text, refs, skill, messageId) => {
 						const selected = slot.session.model;
 						const latest = selected && slot.session.modelRuntime.getModel(selected.provider, selected.id);
 						if (latest && (latest.baseUrl !== selected.baseUrl || latest.api !== selected.api))
 							await slot.session.setModel(latest);
 						const message = skill ? `/skill:${skill}${text ? ` ${text}` : ""}` : text;
-						await slot.session.prompt(message, {
-							source: "rpc",
-							expandPromptTemplates: !!skill,
-							images: await imageContent(id, refs),
-						});
+						const content = await imageContent(id, refs);
+						await slot.inputs.track(messageId, () =>
+							slot.session.prompt(message, {
+								source: "rpc",
+								expandPromptTemplates: !!skill,
+								images: content,
+							}),
+						);
 						const last = slot.session.messages.at(-1);
 						if (last?.role === "assistant" && last.stopReason === "error") {
 							if (
@@ -177,15 +182,23 @@ export function createWebApi(
 							// prompt 已接收用户消息。模型失败由助手消息呈现，不应标为投递失败。
 						}
 					},
-					steer: async (text, refs, skill) =>
-						skill
-							? slot.session.prompt(`/skill:${skill}${text ? ` ${text}` : ""}`, {
-									source: "rpc",
-									expandPromptTemplates: true,
-									streamingBehavior: "steer",
-									images: await imageContent(id, refs),
-								})
-							: slot.session.steer(text, await imageContent(id, refs)),
+					steer: async (text, refs, skill, messageId) => {
+						const content = await imageContent(id, refs);
+						await slot.inputs.track(
+							messageId,
+							() =>
+								skill
+									? slot.session.prompt(`/skill:${skill}${text ? ` ${text}` : ""}`, {
+											source: "rpc",
+											expandPromptTemplates: true,
+											streamingBehavior: "steer",
+											images: content,
+										})
+									: slot.session.steer(text, content),
+							true,
+						);
+					},
+					wasAccepted: (messageId) => slot.inputs.has(messageId),
 				},
 				(snapshot) => streams.get(id)?.publish("queue", snapshot),
 			);
@@ -345,6 +358,15 @@ export function createWebApi(
 				send(response, 200, { sessions: await pool.list() });
 				return true;
 			}
+			const creationKey = /^\/api\/sessions\/creation\/([\w-]{1,128})$/.exec(pathname);
+			if (creationKey && method === "GET") {
+				const receipt = await receipts.lookup<{ id: string }>(creationKey[1]);
+				send(response, 200, {
+					status: receipt?.status ?? "missing",
+					...(receipt?.status === "done" && receipt.result ? { sessionId: receipt.result.id } : {}),
+				});
+				return true;
+			}
 			if (pathname === "/api/sessions" && method === "POST") {
 				const key = request.headers["idempotency-key"];
 				if (typeof key !== "string" || !/^[\w-]{1,128}$/.test(key)) throw new Error("缺少有效的去重键");
@@ -474,7 +496,9 @@ export function createWebApi(
 							revision: bitLockerWebInteractions.get(id)?.revision ?? 0,
 							epoch: bitLockerWebInteractions.get(id)?.epoch,
 						},
-						messages: slot.session.messages.map((message) => slot.execution.decorate(message)),
+						messages: slot.session.messages.map((message) =>
+							slot.inputs.decorate(slot.execution.decorate(message)),
+						),
 						entries: slot.session.sessionManager
 							.getBranch()
 							// 分支总结条目的 type 是 branch_summary，得单独转成前端认识的消息，否则正文里看不到它。
@@ -494,7 +518,7 @@ export function createWebApi(
 									: {
 											id: entry.id,
 											parentId: entry.parentId,
-											message: slot.execution.decorate(entry.message),
+											message: slot.inputs.decorate(slot.execution.decorate(entry.message)),
 										},
 							),
 						running: slot.session.isStreaming,
@@ -652,6 +676,17 @@ export function createWebApi(
 				// SSE connections unregister on socket close. A page leaving never disposes a running writer.
 				const result = await writeOnce(request, pathname, null, async () => ({ closed: true }));
 				send(response, 200, result);
+				return true;
+			}
+			const messageReceipt = /^messages\/([\w-]{1,128})$/.exec(suffix);
+			if (messageReceipt && method === "GET") {
+				const snapshot = await (await inbox(id)).snapshot();
+				send(
+					response,
+					200,
+					{ item: snapshot.items.find((item) => item.id === messageReceipt[1]) ?? null },
+					browserJson,
+				);
 				return true;
 			}
 			if (suffix === "messages" && method === "POST") {

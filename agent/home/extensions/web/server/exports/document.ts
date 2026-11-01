@@ -62,7 +62,7 @@ export function captureExportDocument(): ExportDocumentSource {
 	}));
 	const clone = source.cloneNode(true) as HTMLElement;
 	for (const element of clone.querySelectorAll(
-		"script, button, input, select, textarea, .code-copy-feedback, .special-tool-details, .special-tool-delivery",
+		"script, button, input, select, textarea, .code-copy-feedback, .special-tool-delivery",
 	))
 		element.remove();
 	for (const element of [clone, ...clone.querySelectorAll("*")]) {

@@ -19,35 +19,32 @@ const deferred = <T>() => {
 	return { promise, resolve };
 };
 
-test("预载按更新时间取七天内最新十项，排除未来、无效日期和重复 ID", () => {
+test("预载按更新时间取最新十项，跨月记录仍参与，去重且不改变列表顺序", () => {
 	const now = Date.UTC(2026, 9, 27, 12);
 	const rows: SessionRow[] = Array.from({ length: 14 }, (_, i) => ({
 		id: String(i),
 		title: String(i),
 		running: false,
-		updatedAt: new Date(now - i * 3600000).toISOString(),
+		updatedAt: new Date(now - (31 + i) * 86400000).toISOString(),
 	})).reverse();
 	rows.push(
-		{ id: "old", title: "", running: false, updatedAt: new Date(now - 8 * 86400000).toISOString() },
-		{ id: "future", title: "", running: false, updatedAt: new Date(now + 1).toISOString() },
 		{ id: "invalid", title: "", running: false, updatedAt: "bad" },
-		rows[0],
+		{ id: "missing", title: "", running: false },
+		rows[13],
 	);
+	const original = [...rows];
 	assert.deepEqual(
-		recentSessionIds(rows, now),
+		recentSessionIds(rows),
 		Array.from({ length: 10 }, (_, i) => String(i)),
 	);
-	assert.deepEqual(
-		recentSessionIds(
-			[{ id: "edge", title: "", running: false, updatedAt: new Date(now - 7 * 86400000).toISOString() }],
-			now,
-		),
-		["edge"],
-	);
+	assert.deepEqual(rows, original);
+	assert.deepEqual(recentSessionIds(rows.slice(14, 16)), ["invalid", "missing"]);
+	assert.deepEqual(recentSessionIds([]), []);
 });
 
-test("预载最多两个请求并行，切页复用在途请求与内存结果，单项失败不阻断其他项", async () => {
+test("预载分两批各五路并发，切页复用在途请求与内存结果，单项失败不阻断第二批", async () => {
 	const requests = new Map<string, ReturnType<typeof deferred<SessionDetail>>>();
+	const secondStarted = deferred<void>();
 	let active = 0,
 		peak = 0;
 	const cache = new SessionDetailCache(async (id) => {
@@ -55,32 +52,34 @@ test("预载最多两个请求并行，切页复用在途请求与内存结果�
 		peak = Math.max(peak, active);
 		const task = deferred<SessionDetail>();
 		requests.set(id, task);
+		if (requests.size === 10) secondStarted.resolve();
 		try {
 			return await task.promise;
 		} finally {
 			active--;
 		}
 	});
-	const work = cache.preload(["a", "b", "c"]);
-	assert.equal(requests.size, 2);
-	const foreground = cache.load("a");
-	assert.equal(requests.size, 2);
-	requests.get("a")!.resolve(detail("a"));
-	assert.equal((await foreground).id, "a");
-	await Promise.resolve();
-	requests.get("b")!.resolve(detail("b"));
-	await Promise.resolve();
-	await Promise.resolve();
-	requests.get("c")!.resolve(detail("c"));
+	const ids = Array.from({ length: 10 }, (_, i) => `s${i}`);
+	const work = cache.preload(ids);
+	assert.equal(requests.size, 5, "首次响应返回前已发起第一批五项");
+	const foreground = cache.load("s0");
+	assert.equal(requests.size, 5);
+	requests.get("s0")!.resolve(detail("s0"));
+	assert.equal((await foreground).id, "s0");
+	assert.equal(requests.size, 5, "第一批尚未全部结束，不启动第二批");
+	for (const id of ids.slice(1, 5)) requests.get(id)!.resolve(detail(id));
+	await secondStarted.promise;
+	assert.equal(requests.size, 10);
+	for (const id of ids.slice(5)) requests.get(id)!.resolve(detail(id));
 	await work;
-	assert.equal(peak, 2);
-	assert.equal(cache.peek("a")?.id, "a");
-	assert.equal(await cache.load("a"), cache.peek("a"));
+	assert.equal(peak, 5);
+	assert.equal(cache.peek("s0")?.id, "s0");
+	assert.equal(await cache.load("s0"), cache.peek("s0"));
 	const failing = new SessionDetailCache(async (id) => {
 		if (id === "bad") throw new Error("broken");
 		return detail(id);
 	});
-	await failing.preload(["bad", "ok"]);
+	await failing.preload(["bad", "one", "two", "three", "four", "ok"]);
 	assert.equal(failing.peek("ok")?.id, "ok");
 });
 

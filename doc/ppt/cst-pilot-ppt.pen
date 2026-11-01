@@ -1,27 +1,5 @@
 {
   "version": "2.21",
-  "variables": {
-    "accent": {
-      "type": "color",
-      "value": "#002FA7"
-    },
-    "paper": {
-      "type": "color",
-      "value": "#FAFAF8"
-    },
-    "ink": {
-      "type": "color",
-      "value": "#0A0E1A"
-    },
-    "helper": {
-      "type": "color",
-      "value": "#6B6B66"
-    },
-    "rule": {
-      "type": "color",
-      "value": "#D5D5CE"
-    }
-  },
   "children": [
     {
       "type": "frame",
@@ -1847,7 +1825,7 @@
           "fill": "#FFFFFF",
           "textGrowth": "fixed-width",
           "width": 1680,
-          "content": "现场最常用的六条命令",
+          "content": "常见的六条命令",
           "lineHeight": 1,
           "fontFamily": "Noto Sans SC",
           "fontSize": 92,
@@ -3086,7 +3064,7 @@
               "fill": "#FFFFFF",
               "textGrowth": "fixed-width",
               "width": 480,
-              "content": "只在本机",
+              "content": "导出会话",
               "fontFamily": "Noto Sans SC",
               "fontSize": 30,
               "fontWeight": "200"
@@ -3100,7 +3078,7 @@
               "fill": "#FFFFFFC2",
               "textGrowth": "fixed-width",
               "width": 484,
-              "content": "服务监听 127.0.0.1，不对外开放端口。",
+              "content": "导出HTML和PNG\n便于发送到技术交流群",
               "lineHeight": 1.55,
               "fontFamily": "Noto Sans SC",
               "fontSize": 22,
@@ -3259,7 +3237,7 @@
               "fill": "#FFFFFF",
               "textGrowth": "fixed-width",
               "width": 820,
-              "content": "能力来自工具，\n信任来自边界。",
+              "content": "CST-Pilot\n计维专属AGENT",
               "lineHeight": 1.06,
               "fontFamily": "Noto Sans SC",
               "fontSize": 76,
@@ -3275,7 +3253,7 @@
               "fill": "#FFFFFFD1",
               "textGrowth": "fixed-width",
               "width": 700,
-              "content": "Pilot 的重点不在模型多强，而在每一步都能核对。",
+              "content": "有望极大改善日常软件维护流程",
               "fontFamily": "Noto Sans SC",
               "fontSize": 23,
               "fontWeight": "normal"
@@ -3389,7 +3367,7 @@
               "fill": "$ink",
               "textGrowth": "fixed-width",
               "width": 700,
-              "content": "先定权限，再谈能力",
+              "content": "Github仓库",
               "fontFamily": "Noto Sans SC",
               "fontSize": 32,
               "fontWeight": "200"
@@ -3403,7 +3381,7 @@
               "fill": "$helper",
               "textGrowth": "fixed-width",
               "width": 700,
-              "content": "诊断只读，修复命令交给人执行。权限边界先写进设计。",
+              "content": "https://github.com/SCAU-Computer-Serving-Team/cst-pilot",
               "lineHeight": 1.5,
               "fontFamily": "Noto Sans SC",
               "fontSize": 21,
@@ -3432,7 +3410,7 @@
               "fill": "$ink",
               "textGrowth": "fixed-width",
               "width": 700,
-              "content": "让输出可以核对",
+              "content": "遥测审计",
               "fontFamily": "Noto Sans SC",
               "fontSize": 32,
               "fontWeight": "200"
@@ -3446,7 +3424,7 @@
               "fill": "$helper",
               "textGrowth": "fixed-width",
               "width": 700,
-              "content": "数据、口径、错误分开说明。查不到就说查不到。",
+              "content": "脱敏收集数据，服务端与收集项目也公开",
               "lineHeight": 1.5,
               "fontFamily": "Noto Sans SC",
               "fontSize": 21,
@@ -3475,7 +3453,7 @@
               "fill": "$ink",
               "textGrowth": "fixed-width",
               "width": 700,
-              "content": "从一个小场景开始",
+              "content": "现在安装",
               "fontFamily": "Noto Sans SC",
               "fontSize": 32,
               "fontWeight": "200"
@@ -3489,7 +3467,7 @@
               "fill": "$helper",
               "textGrowth": "fixed-width",
               "width": 700,
-              "content": "先解决一个具体毛病，再扩工具。想做，来 CST 一起写。",
+              "content": "欢迎在技术交流群和Issue区反馈",
               "lineHeight": 1.5,
               "fontFamily": "Noto Sans SC",
               "fontSize": 21,
@@ -3515,5 +3493,28 @@
         }
       ]
     }
-  ]
+  ],
+  "variables": {
+    "accent": {
+      "type": "color",
+      "value": "#002FA7"
+    },
+    "paper": {
+      "type": "color",
+      "value": "#FAFAF8"
+    },
+    "ink": {
+      "type": "color",
+      "value": "#0A0E1A"
+    },
+    "helper": {
+      "type": "color",
+      "value": "#6B6B66"
+    },
+    "rule": {
+      "type": "color",
+      "value": "#D5D5CE"
+    }
+  },
+  "fileToken": "aaf98c59-b885-4af4-8987-f7f1f2369301"
 }

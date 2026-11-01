@@ -14,9 +14,5 @@
     "npm:pi-open-tui@0.2.10",
     "npm:pi-web-access@0.18.0"
   ],
-  "theme": "light/dark",
-  "enabledModels": [
-    "cstoa/deepseek-flash",
-    "opencode-go/deepseek-v4.1-flash"
-  ]
+  "theme": "light/dark"
 }

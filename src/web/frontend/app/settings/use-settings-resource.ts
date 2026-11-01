@@ -4,6 +4,7 @@ import {
 	cacheSetting,
 	invalidateSetting,
 	loadSetting,
+	settingGeneration,
 	subscribeSetting,
 } from "./settings-resource-cache";
 
@@ -68,6 +69,7 @@ export function useSettingsResource<T>(path: string) {
 		locked.current = true;
 		sequence.current++;
 		const previous = data;
+		const generation = settingGeneration(path);
 		let confirmed: T | undefined;
 		setWorking(true);
 		setError("");
@@ -84,7 +86,7 @@ export function useSettingsResource<T>(path: string) {
 			return false;
 		} finally {
 			locked.current = false;
-			if (confirmed !== undefined) cacheSetting(path, confirmed);
+			if (confirmed !== undefined && !cacheSetting(path, confirmed, generation)) stale.current = true;
 			if (mounted.current) {
 				setWorking(false);
 				if (stale.current) {

@@ -1,3 +1,6 @@
+import { OUTBOX_KEY, parseOutbox } from "../data/message-outbox.ts";
+import { readSavedDrafts } from "./drafts.ts";
+
 export const REFERENCE_PREFIX = "cst-draft-images:";
 export const RELOAD_GRACE_MS = 60_000;
 export type ImageReferences = { hashes: string[]; updatedAt: number };
@@ -10,11 +13,14 @@ export function parseImageHashes(value: string | null): string[] {
 }
 
 export function readDraftImageHashes(storage: Storage): string[] {
-	const hashes = new Set<string>();
+	const hashes = new Set(parseOutbox(storage.getItem(OUTBOX_KEY)).flatMap((item) => item.images));
 	for (let index = 0; index < storage.length; index++) {
 		const key = storage.key(index);
 		if (key?.startsWith("cst-draft:") && key.endsWith(":images"))
 			for (const hash of parseImageHashes(storage.getItem(key))) hashes.add(hash);
+		if (key?.startsWith("cst-draft:") && key.endsWith(":saved"))
+			for (const draft of readSavedDrafts(storage, key.slice(0, -6)))
+				for (const hash of draft.images) hashes.add(hash);
 	}
 	return [...hashes];
 }

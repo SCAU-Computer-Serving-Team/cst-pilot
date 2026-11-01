@@ -21,6 +21,7 @@ export type QueueItem = {
 	delivery: "direct" | "queue" | "steer";
 	images: { id: string; mimeType: string }[];
 	sequence: number;
+	uncertain?: boolean;
 	error?: string;
 };
 export type InboxSnapshot = { version: number; paused: boolean; items: QueueItem[] };

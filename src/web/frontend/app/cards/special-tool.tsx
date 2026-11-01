@@ -1,6 +1,4 @@
-import { Disclosure } from "@heroui/react";
 import {
-	ChevronRight,
 	CircleAlert,
 	CircleCheck,
 	CircleX,
@@ -17,6 +15,7 @@ import {
 } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { RunningCorner } from "../conversation/running-light";
+import { TranscriptDisclosure, type TranscriptFormat } from "../conversation/transcript-disclosure";
 import { ApiFailure, apiJson, sessionPath } from "../data/api";
 import { type PendingBitLocker, requestForCall } from "../data/bitlocker-state";
 import type { Message } from "../data/web-state";
@@ -80,56 +79,57 @@ function ToolDetails({
 	view,
 	call,
 	request,
+	format,
 }: {
 	view: SpecialToolView;
 	call: SpecialToolCall;
 	request?: PendingBitLocker;
+	format?: TranscriptFormat;
 }) {
+	const [open, setOpen] = useState(false);
 	const args = Object.entries(call.arguments)
 		.filter(([key]) => key !== "recoveryPassword" && key !== "items")
 		.map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
 		.join(", ");
 	return (
-		<Disclosure className="special-tool-details">
-			<Disclosure.Heading>
-				<Disclosure.Trigger className="special-tool-detail-trigger">
-					详情{" "}
-					<Disclosure.Indicator>
-						<ChevronRight size={12} aria-hidden="true" />
-					</Disclosure.Indicator>
-				</Disclosure.Trigger>
-			</Disclosure.Heading>
-			<Disclosure.Content>
-				<div className="special-tool-detail-body">
-					<code className="special-tool-invocation">
-						{call.name}({args})
-					</code>
-					<dl>
-						{view.fields.map((f, index) => (
-							<div className="special-tool-field" key={`${f.label}-${index}`}>
-								<dt>{f.label}</dt>
-								<dd>{f.value}</dd>
-							</div>
-						))}
-						{request?.targets.map((target) => (
-							<div className="special-tool-field" key={target.volumeId}>
-								<dt>固定目标</dt>
-								<dd>
-									{target.drive ?? "无盘符"} · {target.volumeId}
-								</dd>
-							</div>
-						))}
-					</dl>
-					{view.errors.map((error, index) => (
-						<p className="special-tool-detail-error" key={`${index}-${error}`}>
-							<CircleAlert size={12} aria-hidden="true" />
-							{error}
-						</p>
+		<TranscriptDisclosure
+			format={format}
+			className="special-tool-details"
+			triggerClassName="special-tool-detail-trigger"
+			heading="详情"
+			indicatorSize={12}
+			isExpanded={open}
+			onExpandedChange={setOpen}
+		>
+			<div className="special-tool-detail-body">
+				<code className="special-tool-invocation">
+					{call.name}({args})
+				</code>
+				<dl>
+					{view.fields.map((f, index) => (
+						<div className="special-tool-field" key={`${f.label}-${index}`}>
+							<dt>{f.label}</dt>
+							<dd>{f.value}</dd>
+						</div>
 					))}
-					{view.raw && <CodeBlock className="special-tool-raw">{view.raw}</CodeBlock>}
-				</div>
-			</Disclosure.Content>
-		</Disclosure>
+					{request?.targets.map((target) => (
+						<div className="special-tool-field" key={target.volumeId}>
+							<dt>固定目标</dt>
+							<dd>
+								{target.drive ?? "无盘符"} · {target.volumeId}
+							</dd>
+						</div>
+					))}
+				</dl>
+				{view.errors.map((error, index) => (
+					<p className="special-tool-detail-error" key={`${index}-${error}`}>
+						<CircleAlert size={12} aria-hidden="true" />
+						{error}
+					</p>
+				))}
+				{view.raw && <CodeBlock className="special-tool-raw">{view.raw}</CodeBlock>}
+			</div>
+		</TranscriptDisclosure>
 	);
 }
 function Overview({ view }: { view: Extract<SpecialToolView, { kind: "sys-overview" }> }) {
@@ -282,6 +282,7 @@ export const SpecialTool = memo(function SpecialTool({
 	sessionId,
 	entryId,
 	requests = [],
+	format,
 }: {
 	call: SpecialToolCall;
 	result?: Message;
@@ -289,7 +290,9 @@ export const SpecialTool = memo(function SpecialTool({
 	sessionId?: string;
 	entryId?: string;
 	requests?: PendingBitLocker[];
+	format?: TranscriptFormat;
 }) {
+	const [searchOpen, setSearchOpen] = useState(false);
 	const request = requestForCall(requests, call.id, entryId);
 	const [finishedRequest, setFinishedRequest] = useState<string>();
 	const pending = request && finishedRequest !== request.requestId ? request : undefined;
@@ -311,34 +314,36 @@ export const SpecialTool = memo(function SpecialTool({
 		return (
 			<section className="special-tool special-tool--web-search" data-state={status} data-tool-call-id={call.id}>
 				<RunningCorner active={status === "running" || status === "pending"} />
-				<Disclosure className="special-tool-search">
-					<Disclosure.Heading>
-						<Disclosure.Trigger className="special-tool-search-trigger">
+				<TranscriptDisclosure
+					format={format}
+					className="special-tool-search"
+					triggerClassName="special-tool-search-trigger"
+					heading={
+						<>
 							<Globe size={18} aria-hidden="true" />
 							<span>{summary}</span>
 							<StateIcon status={status} />
-							<Disclosure.Indicator>
-								<ChevronRight className="special-tool-chevron" size={12} aria-hidden="true" />
-							</Disclosure.Indicator>
-							<small>{view.queries.length} 个关键词</small>
-						</Disclosure.Trigger>
-					</Disclosure.Heading>
-					<Disclosure.Content>
-						<div>
-							{view.queries.map((query, index) => (
-								<p key={`${index}-${query}`}>{query}</p>
-							))}
-							{view.unstructured && !view.errors.length && view.raw && (
-								<CodeBlock className="special-tool-raw">{view.raw}</CodeBlock>
-							)}
-							{view.errors.map((error, index) => (
-								<p key={`${index}-${error}`} className="special-tool-detail-error">
-									{error}
-								</p>
-							))}
-						</div>
-					</Disclosure.Content>
-				</Disclosure>
+						</>
+					}
+					suffix={<small>{view.queries.length} 个关键词</small>}
+					indicatorSize={12}
+					isExpanded={searchOpen}
+					onExpandedChange={setSearchOpen}
+				>
+					<div>
+						{view.queries.map((query, index) => (
+							<p key={`${index}-${query}`}>{query}</p>
+						))}
+						{view.unstructured && !view.errors.length && view.raw && (
+							<CodeBlock className="special-tool-raw">{view.raw}</CodeBlock>
+						)}
+						{view.errors.map((error, index) => (
+							<p key={`${index}-${error}`} className="special-tool-detail-error">
+								{error}
+							</p>
+						))}
+					</div>
+				</TranscriptDisclosure>
 			</section>
 		);
 	return (
@@ -396,7 +401,7 @@ export const SpecialTool = memo(function SpecialTool({
 						已运行 {view.uptime}
 					</small>
 				)}
-				<ToolDetails view={view} call={call} request={pending} />
+				<ToolDetails view={view} call={call} request={pending} format={format} />
 			</footer>
 		</section>
 	);

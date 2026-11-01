@@ -194,18 +194,17 @@ test("用户链路：响应丢失重试、真实工具执行、刷新恢复、�
 			"window.__transitions=[]; if(document.startViewTransition){const start=document.startViewTransition.bind(document);document.startViewTransition=(...args)=>{const t=start(...args);window.__transitions.push(t);return t;};}",
 		);
 		await browser.fill(".composer-input", "新会话实时记录");
-		// 只在 HTTP 传输边界丢掉已接受消息的响应，验证用户重试整条链路。
+		// 丢掉已接受消息的 HTTP 响应，验证乐观展示与只读回执核对。
 		await browser.evaluate(
 			"window.__fetchBeforeFault=window.fetch;window.__lostResponse=false;window.fetch=async(...args)=>{const response=await window.__fetchBeforeFault(...args);if(!window.__lostResponse&&String(args[0]).endsWith('/messages')&&args[1]?.method==='POST'){window.__lostResponse=true;await response.text();throw new TypeError('测试：响应丢失');}return response;};",
 		);
 		await browser.until("!document.querySelector('[aria-label=发送消息]').disabled", "发送按钮可用");
 		await browser.click('[aria-label="发送消息"]');
 		await browser.until(
-			"document.querySelector('.error-notification .notification-message')?.textContent.includes('提交待确认') && document.querySelector('.composer-input')?.textContent==='新会话实时记录'",
-			"响应丢失后保留草稿",
+			"window.__lostResponse && document.querySelector('.composer-input')?.textContent==='' && document.querySelector('.user-bubble')?.textContent.includes('新会话实时记录')",
+			"响应丢失后由发送记录和后端回执承接消息",
 		);
 		await browser.evaluate("window.fetch=window.__fetchBeforeFault");
-		await browser.click('[aria-label="发送消息"]');
 		await browser.until(
 			"location.pathname.startsWith('/s/') && [...document.querySelectorAll('.sidebar-recent-heading')].some(e=>e.textContent.trim()==='最近') && [...document.querySelectorAll('.sidebar-session')].some(e=>e.textContent.includes('新会话实时记录'))",
 			"新会话在最近列表中实时出现",

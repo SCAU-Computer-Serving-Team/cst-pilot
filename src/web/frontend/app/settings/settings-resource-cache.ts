@@ -38,13 +38,18 @@ export function invalidateSetting(path: string): void {
 	current.fresh = false;
 	current.pending = undefined;
 }
-export function cacheSetting<T>(path: string, value: T): void {
+export function settingGeneration(path: string): number {
+	return entry(path).generation;
+}
+export function cacheSetting<T>(path: string, value: T, expectedGeneration?: number): boolean {
 	const current = entry(path);
+	if (expectedGeneration !== undefined && current.generation !== expectedGeneration) return false;
 	current.generation++;
 	current.pending = undefined;
 	current.value = value;
 	current.fresh = true;
 	for (const listener of current.listeners) listener(value);
+	return true;
 }
 export function loadSetting<T>(path: string): Promise<T> {
 	const current = entry(path);

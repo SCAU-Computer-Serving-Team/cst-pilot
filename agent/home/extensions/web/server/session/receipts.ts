@@ -44,6 +44,11 @@ export class MutationReceipts {
 		}
 	}
 
+	async lookup<T>(key: string): Promise<Receipt<T> | undefined> {
+		if (!/^[a-zA-Z0-9_-]{1,128}$/.test(key)) throw new Error("去重键无效");
+		return this.read<T>(join(this.root, `${createHash("sha256").update(key).digest("hex")}.json`));
+	}
+
 	private async read<T>(file: string): Promise<Receipt<T> | undefined> {
 		try {
 			const data: unknown = JSON.parse(await readFile(file, "utf8"));

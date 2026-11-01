@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { IDBFactory } from "fake-indexeddb";
+import { OUTBOX_KEY } from "../data/message-outbox.ts";
 import { parseImageHashes, REFERENCE_PREFIX, RELOAD_GRACE_MS, readDraftImageHashes } from "./draft-image-references.ts";
 import { addImage, collectDraftImages, loadImages, releaseImageHolds } from "./draft-images.ts";
 
@@ -73,6 +74,37 @@ test("启动扫描包含本标签页所有会话，重复 hash 合并，损坏�
 	assert.throws(() => parseImageHashes("[1]"));
 	session.setItem("cst-draft:s2:images", "{");
 	assert.throws(() => readDraftImageHashes(session));
+});
+
+test("乐观发送备份和保留草稿持有图片；回执承接并移除全部引用后才回收", async () => {
+	resetReferences();
+	const image = await addImage(file("outgoing"), 0);
+	session.setItem(
+		OUTBOX_KEY,
+		JSON.stringify([
+			{
+				id: "outgoing",
+				sessionId: "s1",
+				fromHome: false,
+				createdAt: Date.now(),
+				text: "图片",
+				serialized: "图片",
+				images: [image.hash],
+				state: "unknown",
+				attempted: true,
+			},
+		]),
+	);
+	await releaseImageHolds([image]);
+	assert.equal(await has(image.hash), true);
+	session.setItem("cst-draft:s1:saved", JSON.stringify([{ text: "先前草稿", images: [image.hash] }]));
+	session.removeItem(OUTBOX_KEY);
+	await collectDraftImages();
+	assert.equal(await has(image.hash), true);
+	session.removeItem("cst-draft:s1:saved");
+	await collectDraftImages();
+	assert.equal(await has(image.hash), false);
+	URL.revokeObjectURL(image.url);
 });
 
 test("异步写入期间保留图片；提交草稿后保留；删除引用后回收字节", async () => {

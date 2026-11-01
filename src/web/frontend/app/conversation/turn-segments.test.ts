@@ -37,6 +37,22 @@ test("特殊工具两侧过程分开，正文归属保持规格", () => {
 	);
 });
 
+test("助手附图在过程外呈现，并保留两侧工具的分段", () => {
+	const segments = turnSegments(
+		partsOf([
+			{ type: "toolCall", name: "read", id: "before-image", arguments: {} },
+			{ type: "image", mimeType: "image/png", data: "fixture" },
+			{ type: "toolCall", name: "read", id: "after-image", arguments: {} },
+			{ type: "text", text: "最终正文" },
+		]),
+	);
+	assert.deepEqual(
+		segments.map((segment) => segment.kind),
+		["process", "visible", "process"],
+	);
+	assert.equal(segments[1]?.parts[0]?.part.kind, "image");
+});
+
 test("过程计数只统计本段普通工具，失败调用计入已结束次数，图片不计入", () => {
 	const segments = turnSegments(splitTurn([entry]).process);
 	const results = new Map([

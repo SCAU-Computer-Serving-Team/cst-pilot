@@ -127,6 +127,9 @@ test("Web 模型清单与 TUI 共用可用口径、scoped 设置和下一次启�
 		}
 		assert.equal((await post("/api/models/scoped", { patterns: [], empty: true })).status, 200);
 		assert.deepEqual((await (await fetch(`${origin}/api/models`)).json()).enabled, []);
+		const defaultScope = await post("/api/models/scoped", { patterns: [] });
+		assert.equal(defaultScope.status, 200);
+		assert.deepEqual(await defaultScope.json(), { enabled: null }, "默认范围的保存响应与读取结果一致");
 		assert.equal((await fetch(`${origin}/api/models/select`, { method: "POST", body: "{}" })).status, 403);
 		const saved = await fetch(`${origin}/api/models/scoped`, {
 			method: "POST",

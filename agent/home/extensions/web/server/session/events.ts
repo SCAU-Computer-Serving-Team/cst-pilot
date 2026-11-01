@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { browserJson } from "./browser-json.ts";
 
 /** Process-local, bounded replay of a single session's SDK events. */
@@ -12,9 +12,10 @@ export class SessionEvents {
 	private readonly unsubscribe: () => void;
 
 	private readonly heartbeatMs: number;
-	constructor(session?: AgentSession, heartbeatMs = 20_000) {
+	constructor(session?: AgentSession, heartbeatMs = 20_000, project?: (event: AgentSessionEvent) => unknown) {
 		this.heartbeatMs = heartbeatMs;
-		this.unsubscribe = session?.subscribe((event) => this.publish("session", event)) ?? (() => {});
+		this.unsubscribe =
+			session?.subscribe((event) => this.publish("session", project ? project(event) : event)) ?? (() => {});
 	}
 
 	publish(name: "session" | "queue" | "state", value: unknown): void {

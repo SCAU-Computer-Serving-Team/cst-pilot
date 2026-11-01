@@ -55,7 +55,8 @@ const EXCEPTIONS = {
   "EAEAEA": "DESIGN.md 聊天页浅色例外 · 悬停/选中底色",
   "D5D5D5": "登录卡片输入框描边（聊天页例外灰体系内）",
   "F5F6F8": "主页侧栏底色 light-sidebar（DESIGN.md colors）",
-  // DESIGN.md「特殊工具内嵌组件」：基板面色与边缘渐变
+  // DESIGN.md「特殊工具内嵌组件」：基板面色、描边与投影
+  "0F1517": "DESIGN.md 特殊工具内嵌组件 · 深色纯色面色",
   "FAFAFA": "DESIGN.md 特殊工具内嵌组件 · 浅色面色 0%",
   "F9F9F9": "DESIGN.md 特殊工具内嵌组件 · 浅色面色 8%",
   "F7F7F7": "DESIGN.md 特殊工具内嵌组件 · 浅色面色 50%",

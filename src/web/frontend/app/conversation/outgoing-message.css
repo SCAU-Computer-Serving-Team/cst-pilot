@@ -1,0 +1,12 @@
+.user-message-content { display: flex; flex-direction: column; align-items: flex-end; min-width: 0; max-width: 100%; gap: var(--space-tight); }
+.user-message-content .user-bubble { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.outgoing-status { max-width: 100%; color: var(--chat-muted); font-size: var(--font-caption); line-height: var(--line-caption); }
+.outgoing-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-inline); min-height: var(--control); }
+.outgoing-actions > output { display: inline-flex; align-items: center; gap: var(--space-tight); }
+.outgoing-actions .button { height: var(--control); min-height: var(--control); padding-inline: var(--space-tight); font-size: var(--font-caption); color: var(--chat-muted); }
+.outgoing-actions a { color: var(--chat-tool); text-decoration: underline; text-underline-offset: var(--space-micro); }
+.outgoing-actions .button:hover { color: var(--chat-ink); }
+.outgoing-status p { margin: var(--space-tight) 0 0; max-width: 65ch; white-space: pre-wrap; overflow-wrap: anywhere; }
+.outgoing-status[data-state="failed"] > .outgoing-actions > output { color: var(--settings-danger-tx); }
+.home-outgoing { display: flex; flex-direction: column; gap: var(--space-component); width: 100%; max-height: 32vh; overflow-y: auto; margin-bottom: var(--space-component); }
+.composer-saved-draft { align-self: flex-start; color: var(--chat-muted); font-size: var(--font-caption); }

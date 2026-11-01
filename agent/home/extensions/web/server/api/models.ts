@@ -195,7 +195,7 @@ export function createModelRoutes({ pool, webSettings, globalEvents, writeOnce, 
 					patterns.length > 0 &&
 					patterns.length === availableIds.length &&
 					availableIds.every((id) => patterns.includes(id));
-				settingsManager.setEnabledModels(coversAll ? undefined : patterns);
+				settingsManager.setEnabledModels(coversAll || patterns.length === 0 ? undefined : patterns);
 				pool.setScopedModels(coversAll ? [] : scope.scopedModels);
 				await webSettings.saveEmptyModelScope(empty === true);
 				globalEvents.publish("state", { type: "settings_changed" });

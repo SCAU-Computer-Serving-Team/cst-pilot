@@ -8,22 +8,24 @@ import { createWebServer, listenWebServer } from "../server/http.ts";
 import { BrowserProbe, freePort } from "./browser.ts";
 import { testRoot } from "./support.ts";
 
-test("启动预载近七天最新十项，慢请求下缓存秒切，运行状态扫光及减少动态", { timeout: 45000 }, async () => {
+test("启动分两批五路预载最新十项，跨月记录缓存秒切，运行状态扫光及减少动态", { timeout: 45000 }, async () => {
 	const root = await mkdtemp(join(await testRoot(), "session-preload-"));
 	const now = Date.now();
 	const rows = Array.from({ length: 13 }, (_, i) => ({
 		id: `s${i}`,
 		title: `会话 ${i}`,
-		updatedAt: new Date(now - i * 3600000).toISOString(),
+		updatedAt: new Date(now - (31 + i) * 86400000).toISOString(),
 		running: i === 0,
 	}));
-	rows.push({ id: "old", title: "七天之外", updatedAt: new Date(now - 8 * 86400000).toISOString(), running: false });
+	rows.push({ id: "old", title: "更早会话", updatedAt: new Date(now - 90 * 86400000).toISOString(), running: false });
 	const loaded = new Set<string>();
 	const reads: string[] = [];
 	const assets: string[] = [];
 	const clients = new Set<ServerResponse>();
 	let slow = false,
-		completed = false;
+		completed = false,
+		active = 0,
+		peak = 0;
 	const json = (res: ServerResponse, value: unknown) => {
 		res.writeHead(200, { "Content-Type": "application/json", Connection: "close" });
 		res.end(JSON.stringify(value));
@@ -92,10 +94,21 @@ test("启动预载近七天最新十项，慢请求下缓存秒切，运行状�
 			const match = /^\/api\/sessions\/([^/]+)$/.exec(path);
 			if (match) {
 				const id = match[1];
+				if (!slow && Number(id.slice(1)) >= 5)
+					assert.ok(
+						Array.from({ length: 5 }, (_, i) => `s${i}`).every((item) => loaded.has(item)),
+						"第一批全部结束后才启动第二批",
+					);
 				reads.push(id);
-				await new Promise((r) => setTimeout(r, slow ? 1800 : 80));
-				json(res, detail(id));
-				loaded.add(id);
+				active++;
+				peak = Math.max(peak, active);
+				try {
+					await new Promise((r) => setTimeout(r, slow ? 1800 : 80));
+					json(res, detail(id));
+					loaded.add(id);
+				} finally {
+					active--;
+				}
 				return true;
 			}
 			if (path === "/api/sessions") json(res, { sessions: rows });
@@ -122,8 +135,10 @@ test("启动预载近七天最新十项，慢请求下缓存秒切，运行状�
 		assert.deepEqual(
 			[...loaded].sort(),
 			Array.from({ length: 10 }, (_, i) => `s${i}`).sort(),
-			"自动预载严格限定十个近期会话",
+			"启动时预载最新十个会话，不受日期跨度限制",
 		);
+		assert.deepEqual([...reads].sort(), [...loaded].sort(), "列表刷新不重复预载");
+		assert.equal(peak, 5, "每批五路并发读取");
 		await browser.until("!!document.querySelector('.workspace-content')", "预载后页面保持可用");
 		await browser.until(
 			`(() => {
@@ -241,7 +256,7 @@ test("启动预载近七天最新十项，慢请求下缓存秒切，运行状�
 		);
 		await writeFile(
 			join(root, "evidence.json"),
-			JSON.stringify({ loaded: [...loaded], reads, assets, switchTimings, motion }, null, 2),
+			JSON.stringify({ loaded: [...loaded], reads, peak, assets, switchTimings, motion }, null, 2),
 		);
 		console.log("PRELOAD_EVIDENCE", root);
 	} finally {

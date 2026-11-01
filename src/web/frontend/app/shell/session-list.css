@@ -1,4 +1,5 @@
-/* 侧栏与会话列表的局部尺寸，不覆盖全局菜单令牌。 */
+/* 侧栏与会话列表的局部尺寸，不覆盖全局菜单令牌。
+   侧栏行距自成一套：行间 4px、标题与列表 12px，取自 --sidebar-row-gap / --sidebar-list-gap，不引用正文字间距。 */
 .sidebar-nav-icon { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 18px; height: 22px; padding-top: var(--space-micro); }
 .sidebar-dashboard:disabled { color: var(--app-muted); cursor: not-allowed; }
 .sidebar-recent { margin-top: 54px; gap: 0; }
@@ -6,7 +7,7 @@
 .sidebar-recent-heading .disclosure__indicator { width: 14px; height: 14px; rotate: none !important; transform: rotate(-90deg); transition: transform var(--duration-fast) var(--ease-smooth-out); }
 .sidebar-recent-heading .disclosure__indicator > * { rotate: none !important; transform: none !important; }
 .sidebar-recent-heading .disclosure__indicator[data-expanded="true"] { transform: rotate(0deg); }
-.sidebar-recent-list { display: flex; flex-direction: column; gap: var(--space-micro); }
+.sidebar-recent-list { display: flex; flex-direction: column; gap: var(--sidebar-row-gap); padding-top: var(--sidebar-list-gap); }
 .sidebar-recent .disclosure__content { transition: height var(--duration-fast) var(--ease-smooth-out), opacity var(--duration-fast) var(--ease-smooth-out); }
 .sidebar-all { display: flex; align-items: center; flex: none; height: var(--control-lg); padding: 0 var(--space-inline); border-radius: var(--radius-row); color: var(--app-muted); font-size: var(--font-body); line-height: var(--line-body); }
 .sidebar-all.selected { background: var(--app-selected); }

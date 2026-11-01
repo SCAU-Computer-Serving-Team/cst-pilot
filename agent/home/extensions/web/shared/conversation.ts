@@ -13,6 +13,7 @@ export type Message = {
 	role: "user" | "assistant" | "toolResult" | "branchSummary";
 	content: string | ContentPart[];
 	timestamp: number;
+	clientMessageId?: string;
 	work?: { startedAt: number; endedAt: number };
 	summary?: string;
 	fromId?: string;

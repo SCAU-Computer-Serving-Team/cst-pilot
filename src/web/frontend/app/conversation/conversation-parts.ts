@@ -16,14 +16,16 @@ export type ConversationPart =
 	| { kind: "thinking"; part: Thinking }
 	| { kind: "text"; text: string }
 	| { kind: "tools"; calls: Call[] }
-	| { kind: "special"; call: Call };
+	| { kind: "special"; call: Call }
+	| { kind: "image"; part: Extract<ContentPart, { type: "image" }> };
 
 /** The model can put prose before and after a tool call in the same assistant message. */
 export function orderedParts(content: ContentPart[]): ConversationPart[] {
 	const parts: ConversationPart[] = [];
 	for (const part of content) {
 		const last = parts.at(-1);
-		if (part.type === "thinking") parts.push({ kind: "thinking", part });
+		if (part.type === "image") parts.push({ kind: "image", part });
+		else if (part.type === "thinking") parts.push({ kind: "thinking", part });
 		else if (part.type === "toolCall") {
 			if (specialToolKind(part)) parts.push({ kind: "special", call: part });
 			else if (last?.kind === "tools") last.calls.push(part);
@@ -38,7 +40,12 @@ export function orderedParts(content: ContentPart[]): ConversationPart[] {
 
 /** The server classifies each accepted input; never infer queue membership from timing. */
 export function visibleQueueItems(items: QueueItem[]): QueueItem[] {
-	return items.filter((item) => item.status === "failed" || (item.status === "pending" && item.delivery !== "direct"));
+	return items.filter(
+		(item) =>
+			item.status === "failed" ||
+			(item.status === "delivering" && item.uncertain) ||
+			(item.status === "pending" && item.delivery !== "direct"),
+	);
 }
 
 export type TurnEntry = { id?: string; message: Message };
