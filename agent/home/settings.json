@@ -14,6 +14,5 @@
     "npm:pi-open-tui@0.2.10",
     "npm:pi-web-access@0.18.0"
   ],
-  "theme": "light/dark",
-  "enabledModels": []
+  "theme": "light/dark"
 }
