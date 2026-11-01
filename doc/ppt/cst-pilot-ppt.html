@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CST Pilot · 现场诊断助手</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@200;300;400;500;700&family=Noto+Sans+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --ink:#0A0E1A; --paper:#FAFAF8; --accent:#002FA7; --helper:#6B6B66; --rule:#D5D5CE;
+  --sans:'Noto Sans SC','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
+  --mono:'Noto Sans Mono','JetBrains Mono',ui-monospace,'Courier New',monospace;
+  --ease:cubic-bezier(.16,1,.3,1);
+  --stage-w:1920px; --stage-h:1080px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#05070C;overflow:hidden;font-family:var(--sans);-webkit-font-smoothing:antialiased}
+.deck{position:fixed;inset:0}
+
+.slide{
+  position:absolute;inset:0;display:grid;place-items:center;
+  opacity:0;transform:translate3d(5%,0,0) scale(.985);
+  pointer-events:none;
+  transition:opacity .55s var(--ease),transform .85s var(--ease);
+  will-change:opacity,transform;
+}
+.slide.is-prev{transform:translate3d(-5%,0,0) scale(.985)}
+.slide.is-active{opacity:1;transform:none;pointer-events:auto;z-index:2}
+
+.fit{position:relative;width:min(100vw,calc(100vh * 1920 / 1080));height:min(100vh,calc(100vw * 1080 / 1920));overflow:hidden}
+.canvas{position:absolute;top:0;left:0;width:1920px;height:1080px;transform:scale(var(--s,1));transform-origin:0 0;overflow:hidden}
+
+/* 页内元素入场 */
+.fx{opacity:0;transform:translate3d(0,26px,0);
+  transition:opacity .7s var(--ease),transform .8s var(--ease);
+  transition-delay:0ms}
+.fx-block{opacity:0;transform:scale(.975);
+  transition:opacity .6s var(--ease),transform .8s var(--ease);
+  transition-delay:0ms}
+.fx-dot{opacity:0;transform:scale(.4)}
+.fx-rule{opacity:0;transform:scaleX(0);transform-origin:left center;
+  transition:opacity .4s var(--ease),transform .8s var(--ease)}
+.slide.is-active .fx,
+.slide.is-active .fx-block,
+.slide.is-active .fx-dot,
+.slide.is-active .fx-rule{opacity:1;transform:none;transition-delay:calc(var(--d,0ms) + 140ms)}
+
+/* HUD */
+.hud{position:fixed;inset:0;pointer-events:none;z-index:10;font-family:var(--mono)}
+.bar{position:absolute;left:0;right:0;bottom:0;height:2px;background:#FFFFFF14}
+.bar > i{display:block;height:100%;width:0;background:var(--accent);transition:width .6s var(--ease)}
+.hint{position:absolute;bottom:18px;right:22px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:#FFFFFF66;transition:opacity .5s;white-space:nowrap}
+.hint b{font-weight:500;color:#FFFFFFAA}
+.deck-name{position:absolute;bottom:18px;left:22px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#FFFFFF;mix-blend-mode:difference;opacity:.75}
+.slide[style*="#FAFAF8"] ~ .hud .deck-name,.on-light .deck-name{opacity:.55}
+.idle .hint{opacity:0}
+
+/* 总览 */
+.overview{position:fixed;inset:0;z-index:20;background:#05070C;
+  display:none;grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:auto;align-content:start;gap:22px;padding:52px 46px;overflow:auto}
+.overview.open{display:grid}
+.thumb{position:relative;cursor:pointer;border:1px solid #FFFFFF1A;background:#0A0E1A;overflow:hidden;aspect-ratio:16/9;
+  transition:border-color .3s,transform .3s var(--ease)}
+.thumb:hover{transform:translateY(-3px);border-color:var(--accent)}
+.thumb .canvas{position:absolute;left:0;top:0;width:1920px;height:1080px}
+.thumb .fx,.thumb .fx-block,.thumb .fx-dot,.thumb .fx-rule{opacity:1;transform:none;transition:none}
+.thumb > span{position:absolute;left:10px;top:8px;font:500 11px/1 var(--mono);letter-spacing:.1em;color:#FFFFFF70}
+.thumb.is-active{border-color:var(--accent)}
+
+@media (prefers-reduced-motion:reduce){
+  .slide,.fx,.fx-block,.fx-dot,.fx-rule{transition-duration:.01ms !important;transition-delay:0ms !important}
+}
+</style>
+</head>
+<body>
+<div class="deck">
+  <section class="slide" data-title="01 · 封面" style="background:#0A0E1A">
+    <div class="fit">
+      <div class="canvas">
+      <div class="fx" style="position:absolute;left:1420px;top:88px;--d:0ms;width:380px;color:#FFFFFF80;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:right;white-space:pre-wrap">01 / 10</div>
+      <div class="fx fx-rule" style="position:absolute;left:120px;top:360px;--d:120ms;width:1680px;height:1px;background:#FFFFFF26;overflow:visible"></div>
+      <div class="fx" style="position:absolute;left:120px;top:400px;--d:180ms;width:900px;color:#7FA8FF;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:4px;white-space:pre-wrap">FIELD DIAGNOSIS · AI AGENT</div>
+      <div class="fx" style="position:absolute;left:118px;top:440px;--d:180ms;width:1680px;color:#FFFFFF;font-size:150px;font-weight:200;font-family:var(--sans);letter-spacing:-6px;line-height:1;white-space:pre-wrap">让 AI
+动手查电脑</div>
+      <div class="fx" style="position:absolute;left:120px;top:800px;--d:240ms;width:1300px;color:#FFFFFFD1;font-size:32px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">维护队的现场诊断助手。插 U 盘即用，不装环境。</div>
+      <div class="fx fx-rule" style="position:absolute;left:120px;top:900px;--d:300ms;width:1680px;height:6px;background:#4D7BFF;overflow:visible"></div>
+      <div class="fx" style="position:absolute;left:120px;top:936px;--d:360ms;width:700px;color:#FFFFFF80;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">Tim2354 · 华南农业大学 · 计算机维护队</div>
+      <div class="fx" style="position:absolute;left:1420px;top:936px;--d:360ms;width:380px;color:#FFFFFF80;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:2px;text-align:right;white-space:pre-wrap">26.10.28</div>
+      <div class="fx fx-block" style="position:absolute;left:77px;top:136px;--d:60ms;width:900px;height:201px;background-image:url('../../assets/logo.png');background-size:contain;background-repeat:no-repeat;background-position:center;overflow:visible"></div>
+      </div>
+    </div>
+  </section>
+  <section class="slide" data-title="02 · 豆包 vs Agent" style="background:#FAFAF8">
+    <div class="fit">
+      <div class="canvas">
+      <div class="fx" style="position:absolute;left:120px;top:52px;--d:0ms;width:1000px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;white-space:pre-wrap">01 · 差别在哪 / WHAT CHANGES</div>
+      <div class="fx" style="position:absolute;left:1420px;top:52px;--d:0ms;width:380px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:right;white-space:pre-wrap">02 / 10</div>
+      <div class="fx" style="position:absolute;left:120px;top:168px;--d:60ms;width:900px;color:#002FA7;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:4px;white-space:pre-wrap">CHATBOT VS AGENT</div>
+      <div class="fx" style="position:absolute;left:118px;top:204px;--d:60ms;width:1680px;color:#0A0E1A;font-size:92px;font-weight:200;font-family:var(--sans);letter-spacing:-3px;line-height:1;white-space:pre-wrap">豆包回答 vs. Agent 动手</div>
+      <div class="fx" style="position:absolute;left:120px;top:452px;--d:180ms;width:700px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;white-space:pre-wrap">01   CHATBOT</div>
+      <div class="fx" style="position:absolute;left:120px;top:492px;--d:180ms;width:760px;color:#0A0E1A;font-size:46px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">只会说话</div>
+      <div class="fx" style="position:absolute;left:120px;top:580px;--d:240ms;width:770px;color:#3C3C38;font-size:24px;font-weight:400;font-family:var(--sans);line-height:1.7;white-space:pre-wrap">你问 C 盘为什么满，它给一份通用建议。
+它看不到你的电脑。</div>
+      <div class="fx" style="position:absolute;left:120px;top:706px;--d:300ms;width:770px;color:#0A0E1A;font-size:24px;font-weight:400;font-family:var(--sans);line-height:2.1;white-space:pre-wrap">—  输出文字
+—  依赖训练时学到的知识
+—  没有你机器的数据</div>
+      <div class="fx fx-block" style="position:absolute;left:1000px;top:452px;--d:180ms;width:1px;height:430px;background:#D5D5CE;overflow:visible"></div>
+      <div class="fx fx-block" style="position:absolute;left:1058px;top:430px;--d:120ms;width:742px;height:486px;background:#002FA7;overflow:hidden"><div class="" style="position:absolute;left:44px;top:38px;width:640px;color:#FFFFFFB3;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;white-space:pre-wrap">02   AGENT</div><div class="" style="position:absolute;left:44px;top:78px;width:640px;color:#FFFFFF;font-size:46px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">会调用工具</div><div class="" style="position:absolute;left:44px;top:166px;width:660px;color:#FFFFFFD9;font-size:24px;font-weight:400;font-family:var(--sans);line-height:1.7;white-space:pre-wrap">它先扫描 C 盘，拿到目录大小，再根据结果回答。</div><div class="" style="position:absolute;left:44px;top:262px;width:660px;color:#FFFFFF;font-size:24px;font-weight:400;font-family:var(--sans);line-height:2.1;white-space:pre-wrap">—  调用 10 个诊断工具
+—  读取本机的真实数据
+—  分多轮追查原因</div></div>
+      </div>
+    </div>
+  </section>
+  <section class="slide" data-title="03 · 六步流程" style="background:#FAFAF8">
+    <div class="fit">
+      <div class="canvas">
+      <div class="fx" style="position:absolute;left:120px;top:52px;--d:0ms;width:1000px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;white-space:pre-wrap">02 · 一次现场维修 / FIELD FLOW</div>
+      <div class="fx" style="position:absolute;left:1420px;top:52px;--d:0ms;width:380px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:right;white-space:pre-wrap">03 / 10</div>
+      <div class="fx" style="position:absolute;left:120px;top:168px;--d:60ms;width:900px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:4px;white-space:pre-wrap">SIX STEPS</div>
+      <div class="fx" style="position:absolute;left:118px;top:204px;--d:60ms;width:1680px;color:#0A0E1A;font-size:92px;font-weight:200;font-family:var(--sans);letter-spacing:-3px;line-height:1;white-space:pre-wrap">从插上 U 盘到修好</div>
+      <div class="fx fx-rule" style="position:absolute;left:120px;top:590px;--d:240ms;width:1680px;height:1px;background:#D5D5CE;overflow:visible"></div>
+      <div class="fx" style="position:absolute;left:120px;top:428px;--d:120ms;width:280px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:center;white-space:pre-wrap">01</div>
+      <div class="fx" style="position:absolute;left:120px;top:462px;--d:180ms;width:280px;color:#0A0E1A;font-size:30px;font-weight:400;font-family:var(--sans);line-height:1.45;text-align:center;white-space:pre-wrap">插 U 盘
+双击启动</div>
+      <div class="fx fx-dot" style="position:absolute;left:249px;top:579px;--d:240ms;width:22px;height:22px;border-radius:50%;background:#FAFAF8;border:1.5px solid #0A0E1A"></div>
+      <div class="fx" style="position:absolute;left:400px;top:620px;--d:240ms;width:280px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:center;white-space:pre-wrap">02</div>
+      <div class="fx" style="position:absolute;left:400px;top:654px;--d:300ms;width:280px;color:#0A0E1A;font-size:30px;font-weight:400;font-family:var(--sans);line-height:1.45;text-align:center;white-space:pre-wrap">管理员授权
+UAC 弹窗</div>
+      <div class="fx fx-dot" style="position:absolute;left:529px;top:579px;--d:240ms;width:22px;height:22px;border-radius:50%;background:#FAFAF8;border:1.5px solid #0A0E1A"></div>
+      <div class="fx" style="position:absolute;left:680px;top:428px;--d:120ms;width:280px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:center;white-space:pre-wrap">03</div>
+      <div class="fx" style="position:absolute;left:680px;top:462px;--d:180ms;width:280px;color:#0A0E1A;font-size:30px;font-weight:400;font-family:var(--sans);line-height:1.45;text-align:center;white-space:pre-wrap">描述症状
+机主口述</div>
+      <div class="fx fx-dot" style="position:absolute;left:809px;top:579px;--d:240ms;width:22px;height:22px;border-radius:50%;background:#FAFAF8;border:1.5px solid #0A0E1A"></div>
+      <div class="fx" style="position:absolute;left:960px;top:620px;--d:240ms;width:280px;color:#002FA7;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:center;white-space:pre-wrap">04</div>
+      <div class="fx" style="position:absolute;left:960px;top:654px;--d:300ms;width:280px;color:#002FA7;font-size:30px;font-weight:400;font-family:var(--sans);line-height:1.45;text-align:center;white-space:pre-wrap">调用工具
+只读查询</div>
+      <div class="fx fx-dot" style="position:absolute;left:1089px;top:579px;--d:240ms;width:22px;height:22px;border-radius:50%;background:#002FA7;border:1.5px solid #002FA7"></div>
+      <div class="fx" style="position:absolute;left:1240px;top:428px;--d:120ms;width:280px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:center;white-space:pre-wrap">05</div>
+      <div class="fx" style="position:absolute;left:1240px;top:462px;--d:180ms;width:280px;color:#0A0E1A;font-size:30px;font-weight:400;font-family:var(--sans);line-height:1.45;text-align:center;white-space:pre-wrap">核对清单
+按风险分档</div>
+      <div class="fx fx-dot" style="position:absolute;left:1369px;top:579px;--d:240ms;width:22px;height:22px;border-radius:50%;background:#FAFAF8;border:1.5px solid #0A0E1A"></div>
+      <div class="fx" style="position:absolute;left:1520px;top:620px;--d:240ms;width:280px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:center;white-space:pre-wrap">06</div>
+      <div class="fx" style="position:absolute;left:1520px;top:654px;--d:300ms;width:280px;color:#0A0E1A;font-size:30px;font-weight:400;font-family:var(--sans);line-height:1.45;text-align:center;white-space:pre-wrap">手动执行
+队员动手</div>
+      <div class="fx fx-dot" style="position:absolute;left:1649px;top:579px;--d:240ms;width:22px;height:22px;border-radius:50%;background:#FAFAF8;border:1.5px solid #0A0E1A"></div>
+      <div class="fx" style="position:absolute;left:120px;top:986px;--d:360ms;width:1680px;color:#6B6B66;font-size:17px;font-weight:400;font-family:var(--mono);letter-spacing:1px;white-space:pre-wrap">第 04 步是本项目的核心：Agent 把查询做完，人只做判断。</div>
+      </div>
+    </div>
+  </section>
+  <section class="slide" data-title="04 · 十个工具" style="background:#0A0E1A">
+    <div class="fit">
+      <div class="canvas">
+      <div class="fx" style="position:absolute;left:120px;top:52px;--d:0ms;width:1000px;color:#FFFFFF80;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;white-space:pre-wrap">03 · 工具清单 / TOOLSET</div>
+      <div class="fx" style="position:absolute;left:1420px;top:52px;--d:0ms;width:380px;color:#FFFFFF80;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:right;white-space:pre-wrap">04 / 10</div>
+      <div class="fx" style="position:absolute;left:120px;top:168px;--d:60ms;width:900px;color:#7FA8FF;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:4px;white-space:pre-wrap">10 TOOLS</div>
+      <div class="fx" style="position:absolute;left:118px;top:204px;--d:60ms;width:1680px;color:#FFFFFF;font-size:92px;font-weight:200;font-family:var(--sans);letter-spacing:-3px;line-height:1;white-space:pre-wrap">十个工具，查清常见故障</div>
+      <div class="fx fx-block" style="position:absolute;left:120px;top:400px;--d:120ms;width:316px;height:152px;background:#17171B;overflow:hidden"><div class="" style="position:absolute;left:18px;top:14px;width:200px;color:#FFFFFF80;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">01</div><div class="" style="position:absolute;left:18px;top:42px;width:280px;color:#FFFFFF;font-size:26px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">进程与 GPU</div><div class="" style="position:absolute;left:18px;top:92px;width:284px;color:#FFFFFFB0;font-size:19px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">CPU、内存、显存排行</div></div>
+      <div class="fx fx-block" style="position:absolute;left:460px;top:400px;--d:120ms;width:316px;height:152px;background:#17171B;overflow:hidden"><div class="" style="position:absolute;left:18px;top:14px;width:200px;color:#FFFFFF80;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">02</div><div class="" style="position:absolute;left:18px;top:42px;width:280px;color:#FFFFFF;font-size:26px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">温度与传感器</div><div class="" style="position:absolute;left:18px;top:92px;width:284px;color:#FFFFFFB0;font-size:19px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">风扇、电压、降频线索</div></div>
+      <div class="fx fx-block" style="position:absolute;left:800px;top:400px;--d:120ms;width:316px;height:152px;background:#17171B;overflow:hidden"><div class="" style="position:absolute;left:18px;top:14px;width:200px;color:#FFFFFF80;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">03</div><div class="" style="position:absolute;left:18px;top:42px;width:280px;color:#FFFFFF;font-size:26px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">整机负载</div><div class="" style="position:absolute;left:18px;top:92px;width:284px;color:#FFFFFFB0;font-size:19px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">内存、页面文件、开机时长</div></div>
+      <div class="fx fx-block" style="position:absolute;left:1140px;top:400px;--d:120ms;width:316px;height:152px;background:#17171B;overflow:hidden"><div class="" style="position:absolute;left:18px;top:14px;width:200px;color:#FFFFFF80;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">04</div><div class="" style="position:absolute;left:18px;top:42px;width:280px;color:#FFFFFF;font-size:26px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">开机自启</div><div class="" style="position:absolute;left:18px;top:92px;width:284px;color:#FFFFFFB0;font-size:19px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">注册表、启动文件夹、服务</div></div>
+      <div class="fx fx-block" style="position:absolute;left:1480px;top:400px;--d:120ms;width:316px;height:152px;background:#17171B;overflow:hidden"><div class="" style="position:absolute;left:18px;top:14px;width:200px;color:#FFFFFF80;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">05</div><div class="" style="position:absolute;left:18px;top:42px;width:280px;color:#FFFFFF;font-size:26px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">事件日志</div><div class="" style="position:absolute;left:18px;top:92px;width:284px;color:#FFFFFFB0;font-size:19px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">蓝屏、崩溃、服务故障</div></div>
+      <div class="fx fx-block" style="position:absolute;left:120px;top:576px;--d:180ms;width:316px;height:152px;background:#17171B;overflow:hidden"><div class="" style="position:absolute;left:18px;top:14px;width:200px;color:#FFFFFF80;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">06</div><div class="" style="position:absolute;left:18px;top:42px;width:280px;color:#FFFFFF;font-size:26px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">设备驱动</div><div class="" style="position:absolute;left:18px;top:92px;width:284px;color:#FFFFFFB0;font-size:19px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">异常设备与外设</div></div>
+      <div class="fx fx-block" style="position:absolute;left:460px;top:576px;--d:180ms;width:316px;height:152px;background:#17171B;overflow:hidden"><div class="" style="position:absolute;left:18px;top:14px;width:200px;color:#FFFFFF80;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">07</div><div class="" style="position:absolute;left:18px;top:42px;width:280px;color:#FFFFFF;font-size:26px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">目录占用</div><div class="" style="position:absolute;left:18px;top:92px;width:284px;color:#FFFFFFB0;font-size:19px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">逐层下钻找大目录</div></div>
+      <div class="fx fx-block" style="position:absolute;left:800px;top:576px;--d:180ms;width:316px;height:152px;background:#17171B;overflow:hidden"><div class="" style="position:absolute;left:18px;top:14px;width:200px;color:#FFFFFF80;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">08</div><div class="" style="position:absolute;left:18px;top:42px;width:280px;color:#FFFFFF;font-size:26px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">磁盘健康</div><div class="" style="position:absolute;left:18px;top:92px;width:284px;color:#FFFFFFB0;font-size:19px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">容量、SMART、大文件</div></div>
+      <div class="fx fx-block" style="position:absolute;left:1140px;top:576px;--d:180ms;width:316px;height:152px;background:#17171B;overflow:hidden"><div class="" style="position:absolute;left:18px;top:14px;width:200px;color:#FFFFFF80;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">09</div><div class="" style="position:absolute;left:18px;top:42px;width:280px;color:#FFFFFF;font-size:26px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">命令清单</div><div class="" style="position:absolute;left:18px;top:92px;width:284px;color:#FFFFFFB0;font-size:19px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">导出 txt，按风险分档</div></div>
+      <div class="fx fx-block" style="position:absolute;left:1480px;top:576px;--d:180ms;width:316px;height:152px;background:#17171B;overflow:hidden"><div class="" style="position:absolute;left:18px;top:14px;width:200px;color:#FFFFFF80;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">10</div><div class="" style="position:absolute;left:18px;top:42px;width:280px;color:#FFFFFF;font-size:26px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">卷解密</div><div class="" style="position:absolute;left:18px;top:92px;width:284px;color:#FFFFFFB0;font-size:19px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">BitLocker 状态与解密</div></div>
+      <div class="fx fx-rule" style="position:absolute;left:120px;top:800px;--d:240ms;width:1680px;height:1px;background:#FFFFFF33;overflow:visible"></div>
+      <div class="fx" style="position:absolute;left:120px;top:820px;--d:300ms;width:600px;color:#FFFFFF80;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:4px;white-space:pre-wrap">REGISTERED TOOLS</div>
+      <div class="fx" style="position:absolute;left:116px;top:848px;--d:300ms;width:400px;color:#FFFFFF;font-size:132px;font-weight:200;font-family:var(--sans);line-height:1;white-space:pre-wrap">10</div>
+      <div class="fx" style="position:absolute;left:400px;top:952px;--d:360ms;width:1200px;color:#FFFFFFBF;font-size:22px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">6 个只读查询 · 3 个命令方案 · 1 个卷操作</div>
+      </div>
+    </div>
+  </section>
+  <section class="slide" data-title="05 · 命令基础" style="background:#FAFAF8">
+    <div class="fit">
+      <div class="canvas">
+      <div class="fx" style="position:absolute;left:120px;top:52px;--d:0ms;width:1000px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;white-space:pre-wrap">04 · 命令长什么样 / PWSH BASICS</div>
+      <div class="fx" style="position:absolute;left:1420px;top:52px;--d:0ms;width:380px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:right;white-space:pre-wrap">05 / 10</div>
+      <div class="fx" style="position:absolute;left:120px;top:168px;--d:60ms;width:900px;color:#002FA7;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:4px;white-space:pre-wrap">VERB · NOUN</div>
+      <div class="fx" style="position:absolute;left:118px;top:204px;--d:60ms;width:1680px;color:#0A0E1A;font-size:92px;font-weight:200;font-family:var(--sans);letter-spacing:-3px;line-height:1;white-space:pre-wrap">命令分两段：动词和名词</div>
+      <div class="fx fx-block" style="position:absolute;left:120px;top:380px;--d:120ms;width:180px;height:100px;background:#002FA7;overflow:hidden"></div>
+      <div class="fx fx-block" style="position:absolute;left:350px;top:380px;--d:120ms;width:520px;height:100px;background:#0A0E1A;overflow:hidden"></div>
+      <div class="fx" style="position:absolute;left:140px;top:400px;--d:180ms;width:150px;color:#FFFFFF;font-size:46px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">Get</div>
+      <div class="fx" style="position:absolute;left:306px;top:400px;--d:180ms;width:50px;color:#0A0E1A;font-size:46px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">-</div>
+      <div class="fx" style="position:absolute;left:374px;top:404px;--d:180ms;width:480px;color:#FFFFFF;font-size:40px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">PhysicalDisk</div>
+      <div class="fx" style="position:absolute;left:120px;top:520px;--d:240ms;width:1400px;color:#3C3C38;font-size:22px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">动词说明做什么：Get 读、Set 改、Start 启动、Stop 停止、Remove 删除。</div>
+      <div class="fx" style="position:absolute;left:120px;top:568px;--d:240ms;width:1600px;color:#3C3C38;font-size:22px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">名词说明查什么：PhysicalDisk、Process、Service、Win32_LogicalDisk、Win32_Service。</div>
+      <div class="fx" style="position:absolute;left:120px;top:700px;--d:300ms;width:500px;color:#6B6B66;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:4px;white-space:pre-wrap">PIPE</div>
+      <div class="fx fx-block" style="position:absolute;left:120px;top:740px;--d:300ms;width:240px;height:64px;background:#F0F0EC;overflow:hidden"></div>
+      <div class="fx" style="position:absolute;left:142px;top:756px;--d:360ms;width:200px;color:#0A0E1A;font-size:22px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">Get-Process</div>
+      <div class="fx fx-block" style="position:absolute;left:400px;top:740px;--d:300ms;width:430px;height:64px;background:#F0F0EC;overflow:hidden"></div>
+      <div class="fx" style="position:absolute;left:422px;top:756px;--d:360ms;width:400px;color:#0A0E1A;font-size:22px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">Sort-Object CPU -Descending</div>
+      <div class="fx fx-block" style="position:absolute;left:870px;top:740px;--d:300ms;width:400px;height:64px;background:#F0F0EC;overflow:hidden"></div>
+      <div class="fx" style="position:absolute;left:892px;top:756px;--d:360ms;width:370px;color:#0A0E1A;font-size:22px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">Select-Object -First 5</div>
+      <div class="fx" style="position:absolute;left:368px;top:740px;--d:300ms;width:40px;color:#6B6B66;font-size:30px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">|</div>
+      <div class="fx" style="position:absolute;left:838px;top:740px;--d:300ms;width:40px;color:#6B6B66;font-size:30px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">|</div>
+      <div class="fx" style="position:absolute;left:120px;top:826px;--d:420ms;width:300px;color:#6B6B66;font-size:20px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">取出全部进程</div>
+      <div class="fx" style="position:absolute;left:400px;top:826px;--d:420ms;width:400px;color:#6B6B66;font-size:20px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">按 CPU 从高到低排</div>
+      <div class="fx" style="position:absolute;left:870px;top:826px;--d:420ms;width:400px;color:#6B6B66;font-size:20px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">只留前五条</div>
+      <div class="fx" style="position:absolute;left:120px;top:986px;--d:480ms;width:1680px;color:#6B6B66;font-size:17px;font-weight:400;font-family:var(--mono);letter-spacing:1px;white-space:pre-wrap">记不住参数就问：Get-Help Get-Process -Examples</div>
+      </div>
+    </div>
+  </section>
+  <section class="slide" data-title="06 · 现场速查" style="background:#0A0E1A">
+    <div class="fit">
+      <div class="canvas">
+      <div class="fx" style="position:absolute;left:120px;top:52px;--d:0ms;width:1000px;color:#FFFFFF80;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;white-space:pre-wrap">05 · 现场速查 / CHEATSHEET</div>
+      <div class="fx" style="position:absolute;left:1420px;top:52px;--d:0ms;width:380px;color:#FFFFFF80;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:right;white-space:pre-wrap">06 / 10</div>
+      <div class="fx" style="position:absolute;left:120px;top:168px;--d:60ms;width:900px;color:#7FA8FF;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:4px;white-space:pre-wrap">SIX COMMANDS</div>
+      <div class="fx" style="position:absolute;left:118px;top:204px;--d:60ms;width:1680px;color:#FFFFFF;font-size:92px;font-weight:200;font-family:var(--sans);letter-spacing:-3px;line-height:1;white-space:pre-wrap">常见的六条命令</div>
+      <div class="fx" style="position:absolute;left:120px;top:372px;--d:120ms;width:280px;color:#FFFFFF66;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:3px;white-space:pre-wrap">场景</div>
+      <div class="fx" style="position:absolute;left:440px;top:372px;--d:120ms;width:600px;color:#FFFFFF66;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:3px;white-space:pre-wrap">命令</div>
+      <div class="fx" style="position:absolute;left:120px;top:420px;--d:180ms;width:290px;color:#FFFFFFB3;font-size:22px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">磁盘空间</div>
+      <div class="fx" style="position:absolute;left:440px;top:420px;--d:180ms;width:1360px;color:#FFFFFF;font-size:22px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">Get-CimInstance Win32_LogicalDisk | Select-Object DeviceID,Size,FreeSpace</div>
+      <div class="fx fx-rule" style="position:absolute;left:120px;top:492px;--d:240ms;width:1680px;height:1px;background:#FFFFFF1A;overflow:visible"></div>
+      <div class="fx" style="position:absolute;left:120px;top:498px;--d:240ms;width:290px;color:#FFFFFFB3;font-size:22px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">物理盘健康</div>
+      <div class="fx" style="position:absolute;left:440px;top:498px;--d:240ms;width:1360px;color:#FFFFFF;font-size:22px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">Get-PhysicalDisk | Select-Object FriendlyName,MediaType,HealthStatus</div>
+      <div class="fx fx-rule" style="position:absolute;left:120px;top:570px;--d:300ms;width:1680px;height:1px;background:#FFFFFF1A;overflow:visible"></div>
+      <div class="fx" style="position:absolute;left:120px;top:576px;--d:300ms;width:290px;color:#FFFFFFB3;font-size:22px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">进程占用</div>
+      <div class="fx" style="position:absolute;left:440px;top:576px;--d:300ms;width:1360px;color:#FFFFFF;font-size:22px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">Get-Process | Sort-Object CPU -Descending | Select-Object -First 10 Name,CPU</div>
+      <div class="fx fx-rule" style="position:absolute;left:120px;top:648px;--d:360ms;width:1680px;height:1px;background:#FFFFFF1A;overflow:visible"></div>
+      <div class="fx" style="position:absolute;left:120px;top:654px;--d:360ms;width:290px;color:#FFFFFFB3;font-size:22px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">服务异常</div>
+      <div class="fx" style="position:absolute;left:440px;top:654px;--d:360ms;width:1360px;color:#FFFFFF;font-size:22px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">Get-Service | Where-Object Status -eq 'Stopped'</div>
+      <div class="fx fx-rule" style="position:absolute;left:120px;top:726px;--d:420ms;width:1680px;height:1px;background:#FFFFFF1A;overflow:visible"></div>
+      <div class="fx" style="position:absolute;left:120px;top:732px;--d:420ms;width:290px;color:#FFFFFFB3;font-size:22px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">设备异常</div>
+      <div class="fx" style="position:absolute;left:440px;top:732px;--d:420ms;width:1360px;color:#FFFFFF;font-size:22px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">Get-PnpDevice -Status Error</div>
+      <div class="fx fx-rule" style="position:absolute;left:120px;top:804px;--d:480ms;width:1680px;height:1px;background:#FFFFFF1A;overflow:visible"></div>
+      <div class="fx" style="position:absolute;left:120px;top:810px;--d:540ms;width:290px;color:#FFFFFFB3;font-size:22px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">最近日志</div>
+      <div class="fx" style="position:absolute;left:440px;top:810px;--d:540ms;width:1360px;color:#FFFFFF;font-size:22px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">Get-WinEvent -LogName System -MaxEvents 20</div>
+      <div class="fx fx-rule" style="position:absolute;left:120px;top:882px;--d:600ms;width:1680px;height:1px;background:#FFFFFF1A;overflow:visible"></div>
+      <div class="fx" style="position:absolute;left:120px;top:986px;--d:660ms;width:1680px;color:#FFFFFF80;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:1px;white-space:pre-wrap">参数要点：-Filter 交给系统筛（快） · -MaxEvents 限条数 · -First 取前几 · -ErrorAction SilentlyContinue 忽略报错</div>
+      </div>
+    </div>
+  </section>
+  <section class="slide" data-title="07 · 安全边界" style="background:#FAFAF8">
+    <div class="fit">
+      <div class="canvas">
+      <div class="fx" style="position:absolute;left:120px;top:52px;--d:0ms;width:1000px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;white-space:pre-wrap">06 · 安全边界 / GUARDRAILS</div>
+      <div class="fx" style="position:absolute;left:1420px;top:52px;--d:0ms;width:380px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:right;white-space:pre-wrap">07 / 10</div>
+      <div class="fx fx-rule" style="position:absolute;left:120px;top:196px;--d:60ms;width:100px;height:4px;background:#002FA7;overflow:visible"></div>
+      <div class="fx" style="position:absolute;left:118px;top:232px;--d:120ms;width:1680px;color:#0A0E1A;font-size:92px;font-weight:200;font-family:var(--sans);letter-spacing:-3px;line-height:1;white-space:pre-wrap">AI 有权限，就要有边界</div>
+      <div class="fx fx-rule" style="position:absolute;left:120px;top:480px;--d:180ms;width:533px;height:1px;background:#D5D5CE;overflow:visible"></div>
+      <div class="fx" style="position:absolute;left:120px;top:498px;--d:180ms;width:533px;color:#6B6B66;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">01 · 只读</div>
+      <div class="fx" style="position:absolute;left:120px;top:532px;--d:240ms;width:533px;color:#0A0E1A;font-size:34px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">诊断只看不改</div>
+      <div class="fx" style="position:absolute;left:120px;top:604px;--d:300ms;width:533px;color:#3C3C38;font-size:24px;font-weight:400;font-family:var(--sans);line-height:1.6;white-space:pre-wrap">查询工具不改注册表、不改服务、
+不动文件。</div>
+      <div class="fx" style="position:absolute;left:120px;top:730px;--d:360ms;width:533px;color:#6B6B66;font-size:21px;font-weight:400;font-family:var(--sans);line-height:1.6;white-space:pre-wrap">6 个查询工具只调用系统接口</div>
+      <div class="fx fx-rule" style="position:absolute;left:693px;top:480px;--d:180ms;width:533px;height:1px;background:#D5D5CE;overflow:visible"></div>
+      <div class="fx" style="position:absolute;left:693px;top:498px;--d:180ms;width:533px;color:#6B6B66;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">02 · 维修清单</div>
+      <div class="fx" style="position:absolute;left:693px;top:532px;--d:240ms;width:533px;color:#0A0E1A;font-size:34px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">只给 txt，不给脚本</div>
+      <div class="fx" style="position:absolute;left:693px;top:604px;--d:300ms;width:533px;color:#3C3C38;font-size:24px;font-weight:400;font-family:var(--sans);line-height:1.6;white-space:pre-wrap">修复命令导出成纯文本。
+无命令工具。</div>
+      <div class="fx" style="position:absolute;left:693px;top:730px;--d:360ms;width:533px;color:#6B6B66;font-size:21px;font-weight:400;font-family:var(--sans);line-height:1.6;white-space:pre-wrap">队员来承担命令运行的责任</div>
+      <div class="fx fx-rule" style="position:absolute;left:1266px;top:480px;--d:180ms;width:533px;height:1px;background:#D5D5CE;overflow:visible"></div>
+      <div class="fx" style="position:absolute;left:1266px;top:498px;--d:180ms;width:533px;color:#6B6B66;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">03 · 风险</div>
+      <div class="fx" style="position:absolute;left:1266px;top:532px;--d:240ms;width:533px;color:#0A0E1A;font-size:34px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">命令分三档</div>
+      <div class="fx" style="position:absolute;left:1266px;top:604px;--d:300ms;width:533px;color:#3C3C38;font-size:24px;font-weight:400;font-family:var(--sans);line-height:1.6;white-space:pre-wrap">安全、较安全、需确认。
+看后果定档。</div>
+      <div class="fx" style="position:absolute;left:1266px;top:730px;--d:360ms;width:533px;color:#6B6B66;font-size:21px;font-weight:400;font-family:var(--sans);line-height:1.6;white-space:pre-wrap">不可逆操作不写进清单，
+只在对话里说明。</div>
+      </div>
+    </div>
+  </section>
+  <section class="slide" data-title="08 · 双通道" style="background:#FAFAF8">
+    <div class="fit">
+      <div class="canvas">
+      <div class="fx" style="position:absolute;left:120px;top:52px;--d:0ms;width:1000px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;white-space:pre-wrap">07 · 双通道 / TWO ENTRY POINTS</div>
+      <div class="fx" style="position:absolute;left:1420px;top:52px;--d:0ms;width:380px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:right;white-space:pre-wrap">08 / 10</div>
+      <div class="fx" style="position:absolute;left:120px;top:168px;--d:60ms;width:900px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:4px;white-space:pre-wrap">TUI &amp; WEB</div>
+      <div class="fx" style="position:absolute;left:118px;top:204px;--d:60ms;width:1680px;color:#0A0E1A;font-size:92px;font-weight:200;font-family:var(--sans);letter-spacing:-3px;line-height:1;white-space:pre-wrap">两个界面，一套内核</div>
+      <div class="fx fx-block" style="position:absolute;left:120px;top:400px;--d:120ms;width:520px;height:380px;background:#F0F0EC;overflow:hidden"><div class="" style="position:absolute;left:44px;top:40px;width:430px;color:#6B6B66;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:4px;white-space:pre-wrap">TUI · 终端</div><div class="" style="position:absolute;left:44px;top:84px;width:430px;color:#0A0E1A;font-size:44px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">TUI</div><div class="" style="position:absolute;left:44px;top:180px;width:432px;color:#3C3C38;font-size:24px;font-weight:400;font-family:var(--sans);line-height:1.6;white-space:pre-wrap">Pi 官方原生终端界面</div><div class="" style="position:absolute;left:44px;top:228px;width:432px;color:#3C3C38;font-size:24px;font-weight:400;font-family:var(--sans);line-height:1.6;white-space:pre-wrap">适合开发背景的人快速上手</div><div class="" style="position:absolute;left:44px;top:330px;width:430px;color:#6B6B66;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">pi.cmd · 终端界面</div></div>
+      <div class="fx fx-block" style="position:absolute;left:680px;top:400px;--d:120ms;width:1120px;height:380px;background:#002FA7;overflow:hidden"><div class="" style="position:absolute;left:44px;top:40px;width:900px;color:#FFFFFF9E;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:4px;white-space:pre-wrap">WEB · 浏览器</div><div class="" style="position:absolute;left:44px;top:84px;width:900px;color:#FFFFFF;font-size:44px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">Web</div><div class="" style="position:absolute;left:44px;top:180px;width:1000px;color:#FFFFFFE0;font-size:24px;font-weight:400;font-family:var(--sans);line-height:1.6;white-space:pre-wrap">高度可视化的界面，包括 AI 分析的结果</div><div class="" style="position:absolute;left:44px;top:252px;width:1000px;color:#FFFFFFC7;font-size:18px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">卡片呈现  ·  兼容功能  ·  更符合计维队员</div><div class="" style="position:absolute;left:44px;top:330px;width:900px;color:#FFFFFF9E;font-size:15px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">127.0.0.1 · 本机浏览器直接打开</div></div>
+      <div class="fx fx-rule" style="position:absolute;left:120px;top:830px;--d:180ms;width:1680px;height:1px;background:#D5D5CE;overflow:visible"></div>
+      <div class="fx" style="position:absolute;left:120px;top:852px;--d:180ms;width:500px;color:#0A0E1A;font-size:26px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">共享文件</div>
+      <div class="fx" style="position:absolute;left:120px;top:902px;--d:240ms;width:520px;color:#3C3C38;font-size:21px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">终端与浏览器配置同步</div>
+      <div class="fx" style="position:absolute;left:680px;top:852px;--d:180ms;width:500px;color:#0A0E1A;font-size:26px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">同一张工具表</div>
+      <div class="fx" style="position:absolute;left:680px;top:902px;--d:240ms;width:520px;color:#3C3C38;font-size:21px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">十个诊断工具，两个界面都能调。</div>
+      <div class="fx" style="position:absolute;left:1240px;top:852px;--d:180ms;width:500px;color:#0A0E1A;font-size:26px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">未来引入更多功能</div>
+      <div class="fx" style="position:absolute;left:1240px;top:902px;--d:240ms;width:520px;color:#3C3C38;font-size:21px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">仪表盘和更多用户体验优化在计划中</div>
+      <div class="fx" style="position:absolute;left:120px;top:986px;--d:300ms;width:1680px;color:#6B6B66;font-size:17px;font-weight:400;font-family:var(--mono);letter-spacing:1px;white-space:pre-wrap">浏览器页面随包发布，并且起的是本地服务</div>
+      </div>
+    </div>
+  </section>
+  <section class="slide" data-title="09 · 浏览器界面" style="background:#0A0E1A">
+    <div class="fit">
+      <div class="canvas">
+      <div class="fx" style="position:absolute;left:120px;top:52px;--d:0ms;width:1000px;color:#FFFFFF80;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;white-space:pre-wrap">08 · 浏览器界面 / WEB UI</div>
+      <div class="fx" style="position:absolute;left:1420px;top:52px;--d:0ms;width:380px;color:#FFFFFF80;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:right;white-space:pre-wrap">09 / 10</div>
+      <div class="fx" style="position:absolute;left:120px;top:168px;--d:60ms;width:900px;color:#7FA8FF;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:4px;white-space:pre-wrap">LOCAL WEB</div>
+      <div class="fx" style="position:absolute;left:118px;top:204px;--d:60ms;width:1680px;color:#FFFFFF;font-size:92px;font-weight:200;font-family:var(--sans);letter-spacing:-3px;line-height:1;white-space:pre-wrap">浏览器拥有更多功能</div>
+      <div class="fx fx-block" style="position:absolute;left:120px;top:410px;--d:120ms;width:536px;height:232px;background:#17171B;overflow:hidden"><div class="" style="position:absolute;left:28px;top:24px;width:480px;color:#FFFFFF;font-size:30px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">会话分组</div><div class="" style="position:absolute;left:28px;top:80px;width:484px;color:#FFFFFFC2;font-size:22px;font-weight:400;font-family:var(--sans);line-height:1.55;white-space:pre-wrap">今天、昨天、一周内归组，右键批量管理。</div><div class="" style="position:absolute;left:28px;top:170px;width:484px;color:#FFFFFF8C;font-size:20px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">按最后一条消息时间排序</div></div>
+      <div class="fx fx-block" style="position:absolute;left:692px;top:410px;--d:120ms;width:536px;height:232px;background:#17171B;overflow:hidden"><div class="" style="position:absolute;left:28px;top:24px;width:480px;color:#FFFFFF;font-size:30px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">排队与插话</div><div class="" style="position:absolute;left:28px;top:80px;width:484px;color:#FFFFFFC2;font-size:22px;font-weight:400;font-family:var(--sans);line-height:1.55;white-space:pre-wrap">回答中也能继续发，排队或插下一轮。</div><div class="" style="position:absolute;left:28px;top:170px;width:484px;color:#FFFFFF8C;font-size:20px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">队列可拖拽重排与编辑</div></div>
+      <div class="fx fx-block" style="position:absolute;left:1264px;top:410px;--d:120ms;width:536px;height:232px;background:#17171B;overflow:hidden"><div class="" style="position:absolute;left:28px;top:24px;width:480px;color:#FFFFFF;font-size:30px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">流式输出</div><div class="" style="position:absolute;left:28px;top:80px;width:484px;color:#FFFFFFC2;font-size:22px;font-weight:400;font-family:var(--sans);line-height:1.55;white-space:pre-wrap">回答边生成边显示，断线自动重连。</div><div class="" style="position:absolute;left:28px;top:170px;width:484px;color:#FFFFFF8C;font-size:20px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">接近主流AI软件体验</div></div>
+      <div class="fx fx-block" style="position:absolute;left:120px;top:686px;--d:180ms;width:536px;height:232px;background:#17171B;overflow:hidden"><div class="" style="position:absolute;left:28px;top:24px;width:480px;color:#FFFFFF;font-size:30px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">完整轨迹</div><div class="" style="position:absolute;left:28px;top:80px;width:484px;color:#FFFFFFC2;font-size:22px;font-weight:400;font-family:var(--sans);line-height:1.55;white-space:pre-wrap">模型思考的过程、工具调用、详情，
+全部可见</div><div class="" style="position:absolute;left:28px;top:170px;width:484px;color:#FFFFFF8C;font-size:20px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">便于理解AI的排查过程</div></div>
+      <div class="fx fx-block" style="position:absolute;left:692px;top:686px;--d:180ms;width:536px;height:232px;background:#17171B;overflow:hidden"><div class="" style="position:absolute;left:28px;top:24px;width:480px;color:#FFFFFF;font-size:30px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">导出会话</div><div class="" style="position:absolute;left:28px;top:80px;width:484px;color:#FFFFFFC2;font-size:22px;font-weight:400;font-family:var(--sans);line-height:1.55;white-space:pre-wrap">导出HTML和PNG
+便于发送到技术交流群</div><div class="" style="position:absolute;left:28px;top:170px;width:484px;color:#FFFFFF8C;font-size:20px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">静态资源随包预置</div></div>
+      <div class="fx fx-block" style="position:absolute;left:1264px;top:686px;--d:180ms;width:536px;height:232px;background:#17171B;overflow:hidden"><div class="" style="position:absolute;left:28px;top:24px;width:480px;color:#FFFFFF;font-size:30px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">兼容计划</div><div class="" style="position:absolute;left:28px;top:80px;width:484px;color:#FFFFFFC2;font-size:22px;font-weight:400;font-family:var(--sans);line-height:1.55;white-space:pre-wrap">计划引入二进制桌面端，
+解决旧浏览器不兼容问题。</div><div class="" style="position:absolute;left:28px;top:170px;width:484px;color:#FFFFFF8C;font-size:20px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">Rust + GPUI</div></div>
+      </div>
+    </div>
+  </section>
+  <section class="slide" data-title="10 · 收尾" style="background:#FAFAF8">
+    <div class="fit">
+      <div class="canvas">
+      <div class="fx fx-block" style="position:absolute;left:0px;top:0px;--d:0ms;width:960px;height:1080px;background:#002FA7;overflow:hidden"><div class="" style="position:absolute;left:80px;top:56px;width:300px;color:#FFFFFF9E;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;white-space:pre-wrap">10 / 10</div><div class="" style="position:absolute;left:600px;top:56px;width:280px;color:#FFFFFF9E;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:right;white-space:pre-wrap">CLOSING</div><div class="" style="position:absolute;left:80px;top:300px;width:600px;color:#FFFFFFC7;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:5px;white-space:pre-wrap">MANIFESTO</div><div class="" style="position:absolute;left:78px;top:344px;width:820px;color:#FFFFFF;font-size:76px;font-weight:200;font-family:var(--sans);letter-spacing:-2px;line-height:1.06;white-space:pre-wrap">CST-Pilot
+计维专属AGENT</div><div class="" style="position:absolute;left:80px;top:720px;width:700px;color:#FFFFFFD1;font-size:23px;font-weight:400;font-family:var(--sans);white-space:pre-wrap">有望极大改善日常软件维护流程</div><div class="" style="position:absolute;left:80px;top:900px;width:800px;height:1px;background:#FFFFFF38;overflow:visible"></div><div class="" style="position:absolute;left:80px;top:920px;width:500px;color:#FFFFFF99;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:2px;white-space:pre-wrap">CST · 华南农业大学</div><div class="" style="position:absolute;left:600px;top:920px;width:280px;color:#FFFFFF99;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:2px;text-align:right;white-space:pre-wrap">26.10.28</div></div>
+      <div class="fx fx-block" style="position:absolute;left:960px;top:0px;--d:0ms;width:960px;height:1080px;background:#FAFAF8;overflow:hidden"><div class="" style="position:absolute;left:80px;top:56px;width:400px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;white-space:pre-wrap">TAKEAWAYS</div><div class="" style="position:absolute;left:600px;top:56px;width:280px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:3px;text-align:right;white-space:pre-wrap">03 POINTS</div><div class="" style="position:absolute;left:80px;top:360px;width:60px;color:#6B6B66;font-size:26px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">01</div><div class="" style="position:absolute;left:160px;top:356px;width:700px;color:#0A0E1A;font-size:32px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">Github仓库</div><div class="" style="position:absolute;left:160px;top:410px;width:700px;color:#6B6B66;font-size:21px;font-weight:400;font-family:var(--sans);line-height:1.5;white-space:pre-wrap">https://github.com/SCAU-Computer-Serving-Team/cst-pilot</div><div class="" style="position:absolute;left:80px;top:510px;width:60px;color:#6B6B66;font-size:26px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">02</div><div class="" style="position:absolute;left:160px;top:506px;width:700px;color:#0A0E1A;font-size:32px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">遥测审计</div><div class="" style="position:absolute;left:160px;top:560px;width:700px;color:#6B6B66;font-size:21px;font-weight:400;font-family:var(--sans);line-height:1.5;white-space:pre-wrap">脱敏收集数据，服务端与收集项目也公开</div><div class="" style="position:absolute;left:80px;top:660px;width:60px;color:#002FA7;font-size:26px;font-weight:400;font-family:var(--mono);white-space:pre-wrap">03</div><div class="" style="position:absolute;left:160px;top:656px;width:700px;color:#0A0E1A;font-size:32px;font-weight:200;font-family:var(--sans);white-space:pre-wrap">现在安装</div><div class="" style="position:absolute;left:160px;top:710px;width:700px;color:#6B6B66;font-size:21px;font-weight:400;font-family:var(--sans);line-height:1.5;white-space:pre-wrap">欢迎在技术交流群和Issue区反馈</div><div class="" style="position:absolute;left:80px;top:950px;width:800px;color:#6B6B66;font-size:16px;font-weight:400;font-family:var(--mono);letter-spacing:2px;text-align:right;white-space:pre-wrap">→ 完 · END OF FIELD NOTE</div></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="hud">
+  <div class="deck-name">CST Pilot · Field Diagnosis Deck</div>
+  <div class="bar"><i></i></div>
+  <div class="hint"><b>← →</b> 翻页 · <b>ESC</b> 总览 · <b>F</b> 全屏</div>
+</div>
+
+<div class="overview" id="overview"></div>
+
+<script>
+(() => {
+  const slides = [...document.querySelectorAll('.slide')];
+  const bar = document.querySelector('.bar > i');
+  const hud = document.querySelector('.hud');
+  const overview = document.getElementById('overview');
+  const startAt = parseInt((location.hash || '').replace('#', ''), 10);
+  let cur = Number.isFinite(startAt) && startAt > 0 ? Math.min(startAt - 1, slides.length - 1) : 0;
+  let idleTimer = null, overviewBuilt = false;
+
+  function fitAll() {
+    document.querySelectorAll('.fit').forEach((fit) => {
+      const c = fit.querySelector('.canvas');
+      const s = fit.clientWidth / 1920;
+      c.style.setProperty('--s', s);
+    });
+  }
+
+  function paint(dir) {
+    slides.forEach((s, i) => {
+      s.classList.toggle('is-active', i === cur);
+      s.classList.toggle('is-prev', i < cur);
+    });
+    bar.style.width = ((cur + 1) / slides.length) * 100 + '%';
+    const light = slides[cur].style.background.includes('250, 250, 248') || slides[cur].style.background.includes('#FAFAF8');
+    hud.classList.toggle('on-light', light);
+    if (overviewBuilt) {
+      [...overview.children].forEach((t, i) => t.classList.toggle('is-active', i === cur));
+    }
+  }
+
+  function go(n, dir) {
+    n = Math.max(0, Math.min(slides.length - 1, n));
+    if (n === cur) return;
+    cur = n;
+    fitAll();
+    paint();
+  }
+
+  function buildOverview() {
+    if (overviewBuilt) return;
+    slides.forEach((s, i) => {
+      const t = document.createElement('div');
+      t.className = 'thumb';
+      t.style.background = s.style.background;
+      const canvas = s.querySelector('.canvas').cloneNode(true);
+      t.appendChild(canvas);
+      const badge = document.createElement('span');
+      badge.textContent = String(i + 1).padStart(2, '0');
+      t.appendChild(badge);
+      t.addEventListener('click', () => { toggleOverview(false); go(i); });
+      overview.appendChild(t);
+    });
+    overviewBuilt = true;
+    scaleThumbs();
+    paint();
+  }
+
+  function scaleThumbs() {
+    overview.querySelectorAll('.thumb').forEach((t) => {
+      t.querySelector('.canvas').style.setProperty('--s', t.clientWidth / 1920);
+    });
+  }
+
+  function toggleOverview(force) {
+    const open = force ?? !overview.classList.contains('open');
+    if (open) buildOverview();
+    overview.classList.toggle('open', open);
+  }
+
+  function idle() {
+    hud.classList.remove('idle');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => hud.classList.add('idle'), 2600);
+  }
+
+  document.addEventListener('keydown', (e) => {
+    const k = e.key;
+    if (['ArrowRight','ArrowDown','PageDown',' ','Enter'].includes(k)) { e.preventDefault(); go(cur + 1); idle(); }
+    else if (['ArrowLeft','ArrowUp','PageUp','Backspace'].includes(k)) { e.preventDefault(); go(cur - 1); idle(); }
+    else if (k === 'Home') go(0);
+    else if (k === 'End') go(slides.length - 1);
+    else if (k === 'Escape') toggleOverview();
+    else if (k === 'f' || k === 'F') {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen?.();
+    }
+  });
+
+  let wheelAcc = 0, wheelLock = false;
+  window.addEventListener('wheel', (e) => {
+    if (overview.classList.contains('open')) return;
+    if (wheelLock) return;
+    wheelAcc += Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    if (Math.abs(wheelAcc) < 40) return;
+    go(cur + (wheelAcc > 0 ? 1 : -1));
+    wheelAcc = 0;
+    wheelLock = true;
+    setTimeout(() => { wheelLock = false; }, 620);
+    idle();
+  }, { passive: true });
+
+  let tx = 0, ty = 0;
+  window.addEventListener('touchstart', (e) => {
+    tx = e.touches[0].clientX; ty = e.touches[0].clientY;
+  }, { passive: true });
+  window.addEventListener('touchend', (e) => {
+    const dx = e.changedTouches[0].clientX - tx;
+    const dy = e.changedTouches[0].clientY - ty;
+    if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy)) go(cur + (dx < 0 ? 1 : -1));
+  }, { passive: true });
+
+  window.addEventListener('resize', () => {
+    fitAll();
+    if (overviewBuilt) scaleThumbs();
+  });
+
+  fitAll();
+  paint();
+  idle();
+})();
+</script>
+</body>
+</html>

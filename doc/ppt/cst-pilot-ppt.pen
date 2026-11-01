@@ -3253,7 +3253,7 @@
               "fill": "#FFFFFFD1",
               "textGrowth": "fixed-width",
               "width": 700,
-              "content": "有望极大改善软件维护流程",
+              "content": "有望极大改善日常软件维护流程",
               "fontFamily": "Noto Sans SC",
               "fontSize": 23,
               "fontWeight": "normal"
@@ -3467,7 +3467,7 @@
               "fill": "$helper",
               "textGrowth": "fixed-width",
               "width": 700,
-              "content": "先解决一个具体毛病，再扩工具。想做，来 CST 一起写。",
+              "content": "欢迎在技术交流群和Issue区反馈",
               "lineHeight": 1.5,
               "fontFamily": "Noto Sans SC",
               "fontSize": 21,
