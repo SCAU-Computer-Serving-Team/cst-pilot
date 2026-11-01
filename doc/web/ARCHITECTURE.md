@@ -58,7 +58,16 @@ src/web/frontend/app/
 | `server/exports/html.ts` | 后端离线 HTML 组装、资源并行读取、有界缓存与内容安全策略 |
 | `server/api/exports.ts`、`server/exports/open.ts` | 同源创建、预览、查询、文件读取与打开已校验目录；启动系统文件管理器，与入口写入去重共用 |
 | `app/routes/export.tsx`、`export-render.tsx` | 导出工作区与独立只读文档；预览主题不改变工作区主题 |
-| `app/exports/` | 共用文档呈现、HeroUI 导出下拉与页面布局 |
+| `app/exports/` | 共用文档呈现、后台预览交接、HeroUI 导出下拉与页面布局 |
+| `app/conversation/assistant-content.tsx`、`process-segment.tsx` | 聊天与导出共用的整轮回答和过程分段，保留相同的间距、缩进与引导线结构 |
+| `app/conversation/user-message.tsx`、`message-image.tsx`、`summary-entry.tsx` | 共用提问、附图和分支总结；导出移除动作并设置初始折叠状态 |
+| `app/conversation/transcript-disclosure.tsx` | 共用折叠入口；聊天使用 HeroUI，导出使用原生 `details` 保留离线交互 |
+
+预览保留已呈现的 iframe，新快照在隐藏 iframe 内准备。只读页完成字体和附图加载后发送同源就绪消息，新文档沿用原滚动位置并覆盖淡入；动画完成后移除旧文档。新选项取消未完成请求并移除待加载文档，失败保留完成态与重试入口；减少动态时直接交接。
+
+导出与聊天共用 `groupTurns`、`splitTurn`、`turnSegments` 和 `AssistantContent`，同一轮的助手消息合并呈现。文档样式只调整页面宽度、分页和动作可见性，内部间距与引导线沿用聊天样式。HTML 全部折叠，PNG 展开过程、思考与工具列表。
+
+HTML 就绪前加载折叠正文使用的字体，完整挂载详情与列表。原生 `details` 通过 `::details-content` 和 `interpolate-size` 实现 250ms 高度与透明度过渡，箭头沿用聊天样式；缺少支持时保留原生折叠，减少动态时直接切换。预览使用 `/_export?preview=1`，PNG 与 HTML 预览均保留折叠动效。生成 PNG 使用 `/_export`，截图时关闭动效；离线 HTML 保留折叠动效。
 
 创建任务先固定快照并写入内部登记，随后释放会话写锁，渲染过程不调用模型。Puppeteer 打开只读页并通过页面消息直接注入脱敏快照；页面仅允许同源静态资源 GET 和内嵌数据，不访问会话、账号或外部接口。
 

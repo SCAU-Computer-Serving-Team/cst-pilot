@@ -44,7 +44,7 @@ export function processSegmentLabel(
 export function turnSegments(process: TurnPart[]): TurnSegment[] {
 	const segments: TurnSegment[] = [];
 	for (const item of process) {
-		const kind = item.part.kind === "special" ? "visible" : "process";
+		const kind = item.part.kind === "special" || item.part.kind === "image" ? "visible" : "process";
 		const previous = segments.at(-1);
 		if (previous?.kind === kind) previous.parts.push(item);
 		else

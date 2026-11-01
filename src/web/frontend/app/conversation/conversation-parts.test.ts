@@ -29,6 +29,16 @@ test("assistant prose stays before and after the corresponding tool calls", () =
 	assert.equal(parts[4].kind === "tools" && parts[4].calls.length, 2);
 });
 
+test("助手附图保留顺序，并分隔相邻的工具分组", () => {
+	const image: ContentPart = { type: "image", mimeType: "image/png", data: "fixture" };
+	const parts = orderedParts([call("before"), image, call("after"), { type: "text", text: "最后正文" }]);
+	assert.deepEqual(
+		parts.map((part) => part.kind),
+		["tools", "image", "tools", "text"],
+	);
+	assert.deepEqual(parts[1], { kind: "image", part: image });
+});
+
 test("a direct submission is never rendered as a queued follow-up", () => {
 	const make = (status: "pending" | "failed", id: string, delivery: "direct" | "queue") => ({
 		id,

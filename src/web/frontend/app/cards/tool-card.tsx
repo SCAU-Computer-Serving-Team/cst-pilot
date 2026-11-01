@@ -1,8 +1,7 @@
-import { Button, Card, Disclosure } from "@heroui/react";
+import { Button, Card } from "@heroui/react";
 import {
 	Braces,
 	CheckCheck,
-	ChevronDown,
 	CircleCheck,
 	CirclePause,
 	CircleX,
@@ -15,6 +14,7 @@ import {
 } from "lucide-react";
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { RunningLight } from "../conversation/running-light";
+import { TranscriptDisclosure, type TranscriptFormat } from "../conversation/transcript-disclosure";
 import type { ContentPart, Message } from "../data/web-state";
 import { PreviewableImage } from "../images/image-preview";
 import { CodeBlock } from "../shell/code-block";
@@ -111,11 +111,15 @@ function renderBlock(block: Block, all = false) {
 		);
 	if (block.kind === "image")
 		return ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(block.mimeType) ? (
-			<PreviewableImage
-				className="tool-image"
-				src={`data:${block.mimeType};base64,${block.data}`}
-				alt="工具返回的图片"
-			/>
+			all ? (
+				<img className="tool-image" src={`data:${block.mimeType};base64,${block.data}`} alt="工具返回的图片" />
+			) : (
+				<PreviewableImage
+					className="tool-image"
+					src={`data:${block.mimeType};base64,${block.data}`}
+					alt="工具返回的图片"
+				/>
+			)
 		) : (
 			<p>图片格式不支持显示</p>
 		);
@@ -157,12 +161,15 @@ function SearchRow({
 	result,
 	state,
 	failed,
+	format,
 }: {
 	call: Call;
 	result?: Message;
 	state: ToolState;
 	failed: boolean;
+	format?: TranscriptFormat;
 }) {
+	const [open, setOpen] = useState(false);
 	const details = result && "details" in result ? (result as Message & { details?: unknown }).details : undefined;
 	const data = details && typeof details === "object" ? (details as Record<string, unknown>) : {};
 	const status = failed ? "error" : state;
@@ -179,9 +186,14 @@ function SearchRow({
 							? "部分检索结果"
 							: "已联网检索";
 	return (
-		<Disclosure className="search-tool">
-			<Disclosure.Heading>
-				<Disclosure.Trigger className="search-trigger">
+		<TranscriptDisclosure
+			format={format}
+			className="search-tool"
+			triggerClassName="search-trigger"
+			isExpanded={open}
+			onExpandedChange={setOpen}
+			heading={
+				<>
 					<Globe className="search-tool-icon" size={18} aria-hidden="true" />
 					<span className={`search-status search-status--${status}`}>{label}</span>
 					{status === "running" ? (
@@ -189,16 +201,14 @@ function SearchRow({
 					) : (
 						status !== "interrupted" && <StatusIcon state={status} />
 					)}
-					<Disclosure.Indicator />
-				</Disclosure.Trigger>
-			</Disclosure.Heading>
-			<Disclosure.Content>
-				<small className={failed ? "search-query search-query--error" : "search-query"}>
-					{summary(call.arguments.query ?? call.arguments.queries)}
-					{failed && ` · ${String(data.error ?? "请检查网络或检索配置")}`}
-				</small>
-			</Disclosure.Content>
-		</Disclosure>
+				</>
+			}
+		>
+			<small className={failed ? "search-query search-query--error" : "search-query"}>
+				{summary(call.arguments.query ?? call.arguments.queries)}
+				{failed && ` · ${String(data.error ?? "请检查网络或检索配置")}`}
+			</small>
+		</TranscriptDisclosure>
 	);
 }
 
@@ -206,10 +216,12 @@ export const ToolCard = memo(function ToolCard({
 	call,
 	result,
 	live,
+	format,
 }: {
 	call: Call;
 	result?: Message;
 	live?: boolean;
+	format?: TranscriptFormat;
 }) {
 	const startedAt = call.execution?.startedAt;
 	const endedAt = call.execution?.endedAt;
@@ -259,7 +271,7 @@ export const ToolCard = memo(function ToolCard({
 		const failed =
 			!!result &&
 			(view?.status === "error" || (typeof data.successfulQueries === "number" && data.successfulQueries === 0));
-		return <SearchRow call={call} result={result} state={state} failed={failed} />;
+		return <SearchRow call={call} result={result} state={state} failed={failed} format={format} />;
 	}
 	const status = stateLabels[state];
 	const scope = typeof call.arguments.scope === "string" ? call.arguments.scope : undefined;
@@ -296,29 +308,30 @@ export const ToolCard = memo(function ToolCard({
 							<p>无返回结果</p>
 						)
 					) : (
-						<ToolBlocks blocks={view.blocks} />
+						<ToolBlocks blocks={view.blocks} all={!!format} />
 					)}
 				</div>
 			</Card.Content>
 			{result && (
-				<Disclosure isExpanded={raw} onExpandedChange={setRaw}>
-					<Disclosure.Heading>
-						<Disclosure.Trigger className="tool-raw-toggle">
+				<TranscriptDisclosure
+					format={format}
+					isExpanded={raw}
+					onExpandedChange={setRaw}
+					triggerClassName="tool-raw-toggle"
+					indicatorSize={12}
+					heading={
+						<>
 							<Braces size={12} aria-hidden="true" />
 							<span>原始数据</span>
 							<span className="tool-raw-spacer" />
-							<Disclosure.Indicator>
-								<ChevronDown size={12} />
-							</Disclosure.Indicator>
-						</Disclosure.Trigger>
-					</Disclosure.Heading>
-					<Disclosure.Content>
-						<CodeBlock className="tool-raw">
-							{(view?.raw || JSON.stringify(details) || "无原始结果").slice(0, 100000)}
-							{(view?.raw.length ?? 0) > 100000 && "\n……显示已截断"}
-						</CodeBlock>
-					</Disclosure.Content>
-				</Disclosure>
+						</>
+					}
+				>
+					<CodeBlock className="tool-raw">
+						{(view?.raw || JSON.stringify(details) || "无原始结果").slice(0, 100000)}
+						{(view?.raw.length ?? 0) > 100000 && "\n……显示已截断"}
+					</CodeBlock>
+				</TranscriptDisclosure>
 			)}
 		</div>
 	);
@@ -335,23 +348,18 @@ export const ToolCard = memo(function ToolCard({
 					{content}
 				</>
 			) : (
-				<Disclosure
+				<TranscriptDisclosure
+					format={format}
 					isExpanded={open}
 					onExpandedChange={(value) => {
 						setTouched(true);
 						setOpen(value);
 					}}
+					triggerClassName="tool-card-heading"
+					heading={heading}
 				>
-					<Card.Header>
-						<Disclosure.Heading>
-							<Disclosure.Trigger className="tool-card-heading">
-								{heading}
-								<Disclosure.Indicator />
-							</Disclosure.Trigger>
-						</Disclosure.Heading>
-					</Card.Header>
-					<Disclosure.Content>{content}</Disclosure.Content>
-				</Disclosure>
+					{content}
+				</TranscriptDisclosure>
 			)}
 		</Card>
 	);
@@ -361,12 +369,14 @@ function CollapsedToolGroup({
 	calls,
 	results,
 	live,
+	format,
 }: {
 	calls: Call[];
 	results: Map<string, Message>;
 	live?: boolean;
+	format?: TranscriptFormat;
 }) {
-	const [open, setOpen] = useState(false);
+	const [open, setOpen] = useState(format === "png");
 	const states = calls.map((call) => {
 		const result = results.get(call.id);
 		return result ? mapTool(call, result).status : undefined;
@@ -375,9 +385,14 @@ function CollapsedToolGroup({
 	const degraded = states.includes("degraded");
 	const finished = states.every((state) => state != null);
 	return (
-		<Disclosure className="tool-group" isExpanded={open} onExpandedChange={setOpen}>
-			<Disclosure.Heading>
-				<Disclosure.Trigger className="conversation-status tool-group-heading">
+		<TranscriptDisclosure
+			format={format}
+			className="tool-group"
+			isExpanded={open}
+			onExpandedChange={setOpen}
+			triggerClassName="conversation-status tool-group-heading"
+			heading={
+				<>
 					{!finished ? (
 						<StatusIcon state={live ? "running" : "interrupted"} size={18} />
 					) : failed ? (
@@ -399,21 +414,29 @@ function CollapsedToolGroup({
 									: "已完成检查"}
 					</RunningLight>
 					<small>{calls.length} 次工具调用</small>
-					<Disclosure.Indicator />
-				</Disclosure.Trigger>
-			</Disclosure.Heading>
-			<Disclosure.Content>
-				{calls.map((call) => (
-					<ToolCard key={call.id} call={call} result={results.get(call.id)} live={live} />
-				))}
-			</Disclosure.Content>
-		</Disclosure>
+				</>
+			}
+		>
+			{calls.map((call) => (
+				<ToolCard key={call.id} call={call} result={results.get(call.id)} live={live} format={format} />
+			))}
+		</TranscriptDisclosure>
 	);
 }
 
 // 调用数组含单次执行时间，逐项引用和结果表不变时跳过重绘。
 export const ToolGroup = memo(
-	function ToolGroup({ calls, results, live }: { calls: Call[]; results: Map<string, Message>; live?: boolean }) {
+	function ToolGroup({
+		calls,
+		results,
+		live,
+		format,
+	}: {
+		calls: Call[];
+		results: Map<string, Message>;
+		live?: boolean;
+		format?: TranscriptFormat;
+	}) {
 		return (
 			<>
 				{splitToolCalls(calls, results).map((segment, index) =>
@@ -423,6 +446,7 @@ export const ToolGroup = memo(
 							call={segment.calls[0]}
 							result={results.get(segment.calls[0].id)}
 							live={live}
+							format={format}
 						/>
 					) : (
 						<CollapsedToolGroup
@@ -430,6 +454,7 @@ export const ToolGroup = memo(
 							calls={segment.calls}
 							results={results}
 							live={live}
+							format={format}
 						/>
 					),
 				)}
@@ -439,6 +464,7 @@ export const ToolGroup = memo(
 	(prev, next) =>
 		prev.results === next.results &&
 		prev.live === next.live &&
+		prev.format === next.format &&
 		prev.calls.length === next.calls.length &&
 		prev.calls.every((call, index) => call === next.calls[index]),
 );

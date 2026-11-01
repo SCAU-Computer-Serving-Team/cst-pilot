@@ -8,6 +8,7 @@ import type {
 	SessionExport,
 } from "../../../../../agent/home/extensions/web/shared/exports";
 import { apiJson, sessionPath } from "../data/api";
+import { ExportPreview } from "../exports/export-preview";
 import { ExportResult } from "../exports/export-result";
 import { ExportSelect } from "../exports/export-select";
 import { ErrorNotice } from "../shell/error-notice";
@@ -27,17 +28,17 @@ function initialOptions(): ExportOptions {
 
 export default function ExportSession() {
 	const { sessionId = "" } = useParams();
+	return <ExportSessionContent key={sessionId} sessionId={sessionId} />;
+}
+
+function ExportSessionContent({ sessionId }: { sessionId: string }) {
 	const [options, setOptions] = useState<ExportOptions>(initialOptions);
 	const [snapshot, setSnapshot] = useState<ExportSnapshot>();
 	const [result, setResult] = useState<SessionExport>();
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
 	const [previewError, setPreviewError] = useState("");
-	const [scale, setScale] = useState(1);
-	const frame = useRef<HTMLIFrameElement>(null);
-	const preview = useRef<HTMLDivElement>(null);
-	const latest = useRef(snapshot);
-	latest.current = snapshot;
+	const [previewPending, setPreviewPending] = useState(true);
 	const key = useRef<string | undefined>(undefined);
 	const active = useRef(true);
 	useEffect(() => {
@@ -47,34 +48,11 @@ export default function ExportSession() {
 		};
 	}, []);
 	useEffect(() => {
-		const container = preview.current;
-		if (!container) return;
-		const observer = new ResizeObserver(() => setScale(Math.min(1, container.clientWidth / 1240)));
-		observer.observe(container);
-		return () => observer.disconnect();
-	}, []);
-	useEffect(() => {
-		const receive = (event: MessageEvent) => {
-			if (
-				event.origin === location.origin &&
-				event.source === frame.current?.contentWindow &&
-				event.data?.type === "cst-export-frame-ready" &&
-				latest.current
-			)
-				frame.current.contentWindow?.postMessage(
-					{ type: "cst-export-preview", snapshot: latest.current },
-					location.origin,
-				);
-		};
-		window.addEventListener("message", receive);
-		return () => window.removeEventListener("message", receive);
-	}, []);
-	useEffect(() => {
 		key.current = undefined;
 		setResult(undefined);
 		setError("");
 		setPreviewError("");
-		setSnapshot(undefined);
+		setPreviewPending(true);
 		const controller = new AbortController();
 		void apiJson<ExportSnapshot>(sessionPath(sessionId, "/exports/preview"), {
 			method: "POST",
@@ -82,17 +60,16 @@ export default function ExportSession() {
 			signal: controller.signal,
 		})
 			.then((value) => {
-				if (!controller.signal.aborted) setSnapshot(value);
+				if (!controller.signal.aborted) {
+					setSnapshot(value);
+					setPreviewPending(false);
+				}
 			})
 			.catch((cause) => {
 				if (!controller.signal.aborted) setPreviewError(cause instanceof Error ? cause.message : "预览未能加载");
 			});
 		return () => controller.abort();
 	}, [sessionId, options]);
-	useEffect(() => {
-		if (snapshot)
-			frame.current?.contentWindow?.postMessage({ type: "cst-export-preview", snapshot }, location.origin);
-	}, [snapshot]);
 	useEffect(() => {
 		if (!result || result.status === "completed" || result.status === "failed") return;
 		const controller = new AbortController();
@@ -110,7 +87,7 @@ export default function ExportSession() {
 	}, [result]);
 	const running = busy || result?.status === "queued" || result?.status === "rendering";
 	async function generate() {
-		if (running || !snapshot) return;
+		if (running || !snapshot || previewPending) return;
 		setBusy(true);
 		setError("");
 		key.current ??= crypto.randomUUID();
@@ -177,10 +154,14 @@ export default function ExportSession() {
 								checked={options.includeTools}
 								onChange={(event) => setOptions({ ...options, includeTools: event.target.checked })}
 							/>
-							包含工具结果
+							包含工具调用结果
 						</label>
 					</fieldset>
-					<Button className="export-generate" isDisabled={running || !snapshot} onPress={() => void generate()}>
+					<Button
+						className="export-generate"
+						isDisabled={running || !snapshot || previewPending}
+						onPress={() => void generate()}
+					>
 						<Download size={16} />
 						{running ? "正在生成…" : "生成并保存"}
 					</Button>
@@ -207,20 +188,11 @@ export default function ExportSession() {
 						<ErrorNotice message={previewError} onRetry={() => setOptions((value) => ({ ...value }))} />
 					)}
 					{!snapshot && !previewError && <output>正在准备预览…</output>}
-					<div
-						ref={preview}
-						className="export-preview-viewport"
-						style={{ height: 900 * scale, visibility: snapshot ? "visible" : "hidden" }}
-					>
-						<iframe
-							ref={frame}
-							src="/_export"
-							title="会话导出预览"
-							width="1240"
-							height="900"
-							style={{ transform: `scale(${scale})` }}
-						/>
-					</div>
+					<ExportPreview
+						snapshot={snapshot}
+						pending={previewPending}
+						onError={() => setPreviewError("导出内容或字体未能加载，请重试")}
+					/>
 				</section>
 			</div>
 		</main>

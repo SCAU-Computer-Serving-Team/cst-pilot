@@ -1,25 +1,13 @@
-import { Button, Disclosure, Tooltip } from "@heroui/react";
-import { ArrowDown, ChevronDown, Copy, GitBranch, GitFork, X } from "lucide-react";
+import { Button, Tooltip } from "@heroui/react";
+import { ArrowDown, Copy, GitBranch, GitFork, X } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { matchToolResults } from "../cards/match-results";
-import { SpecialTool } from "../cards/special-tool";
 import type { PendingBitLocker } from "../data/bitlocker-state";
 import type { Message } from "../data/web-state";
-import { PreviewableImage } from "../images/image-preview";
-import { CodeBlock } from "../shell/code-block";
-import { ErrorNotice } from "../shell/error-notice";
-import {
-	activeTurnIndex,
-	formatDuration,
-	groupTurns,
-	splitTurn,
-	type Turn,
-	type TurnEntry,
-	textOf,
-} from "./conversation-parts";
-import { Markdown } from "./markdown";
-import { ProcessSegment } from "./process-segment";
-import { processSegmentLabel, turnSegments } from "./turn-segments";
+import { AssistantContent } from "./assistant-content";
+import { activeTurnIndex, formatDuration, groupTurns, type Turn, textOf } from "./conversation-parts";
+import { SummaryEntry } from "./summary-entry";
+import { UserMessage } from "./user-message";
 
 function AssistantTurnImpl({
 	id,
@@ -38,7 +26,6 @@ function AssistantTurnImpl({
 	onFork: () => void;
 	onError: (text: string) => void;
 }) {
-	const { process, finalText } = splitTurn(turn.assistants);
 	const last = turn.assistants.at(-1);
 	// 完成时间由服务端随会话保存，刷新和切换页面沿用同一工作区间。
 	const [now, setNow] = useState(() => Date.now());
@@ -53,50 +40,14 @@ function AssistantTurnImpl({
 	const endedAt = work.length ? Math.max(...work.map((value) => value.endedAt)) : undefined;
 	const elapsed = formatDuration(Math.max((live ? now : (endedAt ?? startedAt)) - startedAt, live ? 1000 : 0));
 	return (
-		<article className="assistant-block assistant-turn" data-live={live || undefined}>
-			{turnSegments(process).map((segment, index) => {
-				if (segment.kind === "visible")
-					return (
-						<div className="turn-visible" key={segment.key}>
-							{segment.parts.map(({ entry, final, part }) =>
-								part.kind === "special" ? (
-									<SpecialTool
-										key={`${entry.message.timestamp}-${part.call.id}`}
-										call={part.call}
-										sessionId={id}
-										entryId={entry.id}
-										requests={requests}
-										result={resultsByTurn
-											.get(entry.id ?? `stamp:${entry.message.timestamp}`)
-											?.get(part.call.id)}
-										live={live && final}
-									/>
-								) : null,
-							)}
-						</div>
-					);
-				const label =
-					index === 0
-						? !live && endedAt === undefined
-							? "已完成"
-							: `${live ? "工作中" : "已工作"} ${elapsed}`
-						: processSegmentLabel(segment.parts, resultsByTurn, live);
-				return label ? (
-					<ProcessSegment
-						key={segment.key}
-						parts={segment.parts}
-						live={live}
-						label={label}
-						waiting={live && !process.length && !finalText}
-						results={resultsByTurn}
-					/>
-				) : null;
-			})}
-			{finalText && <Markdown text={finalText} live={live} />}
-			{last?.message.stopReason === "error" && (
-				<ErrorNotice model message={last.message.errorMessage || "模型调用失败，请检查登录状态和模型设置。"} />
-			)}
-			{last?.message.stopReason === "aborted" && <p className="message-warning">已停止生成</p>}
+		<AssistantContent
+			id={id}
+			turn={turn}
+			live={live}
+			resultsByTurn={resultsByTurn}
+			requests={requests}
+			firstProcessLabel={!live && endedAt === undefined ? "已完成" : `${live ? "工作中" : "已工作"} ${elapsed}`}
+		>
 			{last?.id && last.message.stopReason != null && last.message.stopReason !== "toolUse" && (
 				<div className="answer-actions">
 					<Tooltip delay={80} closeDelay={0}>
@@ -125,7 +76,7 @@ function AssistantTurnImpl({
 					</span>
 				</div>
 			)}
-		</article>
+		</AssistantContent>
 	);
 }
 // 轮次按条目引用比较：流式刷新只替换正在生成的条目，历史轮次整体跳过重渲染（含 Markdown 重解析）。
@@ -142,37 +93,6 @@ const AssistantTurn = memo(
 		prev.turn.assistants.length === next.turn.assistants.length &&
 		prev.turn.assistants.every((entry, index) => entry === next.turn.assistants[index]),
 );
-
-/** 分支总结消息：标题行是折叠触发器（分支图标 + 标题 + 时间 + 展开箭头，箭头在最右端），展开后正文收进灰底原文块，与工具调用原文块同一规范；总结输出按原文呈现，不在聊天流里直接渲染。 */
-const SummaryEntry = memo(function SummaryEntry({ entry }: { entry: TurnEntry }) {
-	const [open, setOpen] = useState(false);
-	return (
-		<article className="assistant-block summary-block">
-			<Disclosure isExpanded={open} onExpandedChange={setOpen}>
-				<Disclosure.Heading>
-					<Disclosure.Trigger className="summary-head">
-						<GitBranch size={18} aria-hidden="true" />
-						<span className="summary-title">分支已总结</span>
-						<Disclosure.Indicator>
-							<ChevronDown size={16} aria-hidden="true" />
-						</Disclosure.Indicator>
-						<span className="summary-time">
-							{new Date(entry.message.timestamp).toLocaleTimeString("zh-CN", {
-								hour: "2-digit",
-								minute: "2-digit",
-							})}
-						</span>
-					</Disclosure.Trigger>
-				</Disclosure.Heading>
-				<Disclosure.Content>
-					<section className="tool-text">
-						<CodeBlock className="tool-raw">{entry.message.summary ?? ""}</CodeBlock>
-					</section>
-				</Disclosure.Content>
-			</Disclosure>
-		</article>
-	);
-});
 
 export function Conversation({
 	id,
@@ -330,25 +250,10 @@ export function Conversation({
 					return (
 						<div className="turn" key={turnKey}>
 							{turn.user && (
-								<div
-									className="user-line"
-									data-fresh={turn.user.message.timestamp >= mountedAt - 2000 || undefined}
-								>
-									<div className="user-bubble">
-										{textOf(turn.user.message)}
-										{Array.isArray(turn.user.message.content) &&
-											turn.user.message.content
-												.filter((part) => part.type === "image")
-												.map((part, imageIndex) => (
-													<PreviewableImage
-														key={`${imageIndex}-${part.mimeType}`}
-														className="message-image"
-														alt={`附图 ${imageIndex + 1}`}
-														src={`data:${part.mimeType};base64,${part.data}`}
-													/>
-												))}
-									</div>
-								</div>
+								<UserMessage
+									message={turn.user.message}
+									fresh={turn.user.message.timestamp >= mountedAt - 2000}
+								/>
 							)}
 							{(turn.assistants.length > 0 || live) && (
 								<AssistantTurn

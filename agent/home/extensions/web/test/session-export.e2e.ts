@@ -243,8 +243,23 @@ test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、当前分支
 					await browser.screenshot(join(root, `html-${theme}.png`));
 					await browser.evaluate("scrollTo(0,document.documentElement.scrollHeight)");
 					await browser.screenshot(join(root, `html-${theme}-bottom.png`));
-					await browser.evaluate("document.querySelector('details').open=false");
-					assert.equal(await browser.evaluate("document.querySelector('details').open"), false);
+					assert.equal(await browser.evaluate("document.querySelectorAll('details[open]').length"), 0);
+					await browser.click(".turn-process > summary");
+					await browser.click(".thinking-line > summary");
+					assert.equal(await browser.evaluate("document.querySelector('.thinking-line').open"), true);
+					await browser.click(".tool-group > summary");
+					await browser.until(
+						"document.querySelector('.tool-group .tool-card-heading').checkVisibility()",
+						"工具列表展开呈现",
+					);
+					assert.equal(
+						await browser.evaluate("document.querySelector('.tool-group .tool-card-heading').checkVisibility()"),
+						true,
+					);
+					assert.equal(
+						await browser.evaluate("document.querySelector('.tool-invocation').checkVisibility()"),
+						false,
+					);
 				}
 			}
 		await browser.call("Network.emulateNetworkConditions", {
