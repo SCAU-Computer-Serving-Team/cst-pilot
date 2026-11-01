@@ -251,7 +251,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .app-layout { display: flex; height: 100vh; min-height: 0; width: 100%; position: relative; overflow: clip; }
 .workspace-content { position: relative; display: flex; flex: 1; min-width: 0; min-height: 0; height: 100%; margin-left: 264px; }
 .sidebar-collapsed > .workspace-content { margin-left: 0; }
-.sidebar { width: 264px; height: 100vh; view-transition-name: workspace-sidebar; position: absolute; top: 0; left: 0; display: flex; flex-direction: column; justify-content: space-between; gap: var(--space-inline); padding: 20px var(--space-component) var(--space-inline); background: var(--app-sidebar); border-right: 1px solid var(--app-sidebar-border); z-index: 2; transform: translate3d(0, 0, 0); transition: transform var(--duration-slow) var(--ease-smooth-out), visibility 0s; }
+.sidebar { --sidebar-row-gap: 4px; --sidebar-list-gap: 12px; width: 264px; height: 100vh; view-transition-name: workspace-sidebar; position: absolute; top: 0; left: 0; display: flex; flex-direction: column; justify-content: space-between; gap: var(--space-inline); padding: 20px var(--space-component) var(--space-inline); background: var(--app-sidebar); border-right: 1px solid var(--app-sidebar-border); z-index: 2; transform: translate3d(0, 0, 0); transition: transform var(--duration-slow) var(--ease-smooth-out), visibility 0s; }
 @supports (height: 100dvh) { .app-layout, .sidebar { height: 100dvh; } }
 .sidebar-top, .sidebar-footer { min-width: 0; }
 .app-layout.sidebar-collapsed > .sidebar { transform: translate3d(-100%, 0, 0); visibility: hidden; transition: transform var(--duration-medium) var(--ease-smooth-out), visibility 0s linear var(--duration-medium); }
@@ -259,7 +259,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 @keyframes sidebar-restore-in { from { opacity: 0; transform: translateX(calc(var(--distance-micro) * -1)); } }
 .sidebar-restore:is(:hover, :focus-visible) { background: var(--app-selected); color: var(--chat-ink); outline: none; }
 .app-layout.sidebar-collapsed .chat-header, .app-layout.sidebar-collapsed .tree-toolbar { padding-left: 64px; }
-.sidebar-top { position: relative; display: flex; flex-direction: column; gap: var(--space-micro); min-height: 0; overflow-y: auto; }
+.sidebar-top { position: relative; display: flex; flex-direction: column; gap: var(--sidebar-row-gap); min-height: 0; overflow-y: auto; }
 .sidebar-selection { position: absolute; top: 0; left: 0; z-index: 0; width: 100%; height: var(--control-menu); visibility: hidden; pointer-events: none; border-radius: var(--radius-row); background-color: var(--app-selected); transition: transform var(--duration-fast) var(--ease-smooth-out), height var(--duration-fast) var(--ease-smooth-out); }
 .sidebar-top > *:not(.sidebar-selection) { flex-shrink: 0; }
 .sidebar-new, .sidebar-recent, .sidebar-session-row { width: 100%; }

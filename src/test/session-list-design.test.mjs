@@ -7,6 +7,27 @@ function descendants(node) {
   return [node, ...(node.children ?? []).flatMap(descendants)];
 }
 
+test("侧栏最近列表独立成形：标题下留 12px，会话行之间 4px", () => {
+  let lists = 0;
+  function visit(node) {
+    const children = node.children ?? [];
+    const heading = children.findIndex(child => child.name === "A 最近分组标签");
+    if (heading >= 0) {
+      const list = children[heading + 1];
+      assert.equal(list.name, "最近会话列表", "会话行统一包在列表里");
+      assert.deepEqual(list.padding, [8, 0], "标题与列表相隔 12px（父级 4 + 内缩 8）");
+      assert.equal(list.gap, 4, "会话行间距 4px");
+      assert.ok(list.children.every(child => child.name.startsWith("A 会话 ")));
+      assert.ok(list.children.every(child => child.height === 32));
+      assert.equal(children[heading + 2].name, "查看全部会话");
+      lists++;
+    }
+    for (const child of children) visit(child);
+  }
+  for (const root of canvas.children) visit(root);
+  assert.equal(lists, 56, "每张侧栏都使用同一套行距");
+});
+
 test("全部会话页有独立浅深画布、四个时间分组与16px会话标题", () => {
   const section = canvas.children.find(node => node.name === "02 · 会话管理").children.find(node => node.name === "全部会话");
   assert.ok(section);
