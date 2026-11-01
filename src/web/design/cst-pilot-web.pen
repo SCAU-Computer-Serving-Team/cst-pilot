@@ -63100,10 +63100,9 @@
                                 },
                                 {
                                   "type": "frame",
-                                  "id": "vCwBd",
+                                  "id": "y3sxo",
                                   "name": "内嵌组件 · sys overview · 整机概览 · 浅色",
                                   "context": "来源：cst-pilot-tools.pen；正式 sys overview 整机概览组件，保持原有结构、样式和字段。",
-                                  "reusable": true,
                                   "width": "fill_container",
                                   "fill": "#FCFCFC",
                                   "cornerRadius": 12,
@@ -63176,7 +63175,7 @@
                                   "children": [
                                     {
                                       "type": "frame",
-                                      "id": "t9kvQB",
+                                      "id": "jdqmG",
                                       "name": "标题与状态",
                                       "width": "fill_container",
                                       "gap": 8,
@@ -63184,7 +63183,7 @@
                                       "children": [
                                         {
                                           "type": "icon",
-                                          "id": "IkwqB",
+                                          "id": "Js2Uc",
                                           "name": "工具图标",
                                           "width": 18,
                                           "height": 18,
@@ -63194,7 +63193,7 @@
                                         },
                                         {
                                           "type": "text",
-                                          "id": "CROKH",
+                                          "id": "gtLxF",
                                           "name": "组件标题",
                                           "fill": "#202020",
                                           "textGrowth": "fixed-width",
@@ -63207,7 +63206,7 @@
                                         },
                                         {
                                           "type": "icon",
-                                          "id": "s6ffl",
+                                          "id": "hJ8TV",
                                           "name": "状态图标",
                                           "context": "本次调用状态。查询成功不表示设备健康；执行请求接受不表示解密完成。前端提供可读状态名称。",
                                           "width": 14,
@@ -63218,7 +63217,7 @@
                                         },
                                         {
                                           "type": "text",
-                                          "id": "W9UDjg",
+                                          "id": "iHe0G",
                                           "x": 639,
                                           "y": 3,
                                           "name": "状态文案",
@@ -63234,7 +63233,7 @@
                                     },
                                     {
                                       "type": "text",
-                                      "id": "fFB9O",
+                                      "id": "KHV10",
                                       "name": "机型摘要",
                                       "fill": "#646464",
                                       "textGrowth": "fixed-width",
@@ -63247,7 +63246,7 @@
                                     },
                                     {
                                       "type": "frame",
-                                      "id": "E676TN",
+                                      "id": "DLbf6",
                                       "name": "CPU 与内存",
                                       "width": "fill_container",
                                       "gap": 24,
@@ -63255,7 +63254,7 @@
                                       "children": [
                                         {
                                           "type": "frame",
-                                          "id": "yVfGh",
+                                          "id": "KHM79",
                                           "name": "CPU 用量",
                                           "width": "fill_container",
                                           "layout": "vertical",
@@ -63263,7 +63262,7 @@
                                           "children": [
                                             {
                                               "type": "frame",
-                                              "id": "LgGgt",
+                                              "id": "vgMpR",
                                               "name": "CPU 数值",
                                               "width": "fill_container",
                                               "gap": 8,
@@ -63271,7 +63270,7 @@
                                               "children": [
                                                 {
                                                   "type": "text",
-                                                  "id": "F1uShf",
+                                                  "id": "P32ZVq",
                                                   "name": "CPU标签",
                                                   "fill": "#646464",
                                                   "content": "CPU",
@@ -63282,14 +63281,14 @@
                                                 },
                                                 {
                                                   "type": "frame",
-                                                  "id": "jPlGP",
+                                                  "id": "kpq2J",
                                                   "name": "弹性间距",
                                                   "width": "fill_container",
                                                   "height": 1
                                                 },
                                                 {
                                                   "type": "text",
-                                                  "id": "bY7ZH",
+                                                  "id": "nek6M",
                                                   "name": "CPU百分比",
                                                   "fill": "#202020",
                                                   "content": "19%",
@@ -63302,7 +63301,7 @@
                                             },
                                             {
                                               "type": "frame",
-                                              "id": "xb31I",
+                                              "id": "H0KfxE",
                                               "name": "CPU比例轨道",
                                               "width": "fill_container",
                                               "height": 6,
@@ -63312,7 +63311,7 @@
                                                 {
                                                   "type": "rectangle",
                                                   "cornerRadius": 9999,
-                                                  "id": "QUcax",
+                                                  "id": "iVXOt",
                                                   "name": "CPU比例",
                                                   "fill": "#646464",
                                                   "width": 63,
@@ -63322,7 +63321,7 @@
                                             },
                                             {
                                               "type": "text",
-                                              "id": "slUGi",
+                                              "id": "kWbNO",
                                               "name": "CPU补充",
                                               "fill": "#646464",
                                               "textGrowth": "fixed-width",
@@ -63337,7 +63336,7 @@
                                         },
                                         {
                                           "type": "frame",
-                                          "id": "V8ENZ",
+                                          "id": "ZNIGp",
                                           "name": "内存 用量",
                                           "width": "fill_container",
                                           "layout": "vertical",
@@ -63345,7 +63344,7 @@
                                           "children": [
                                             {
                                               "type": "frame",
-                                              "id": "DypFb",
+                                              "id": "LFaRH",
                                               "name": "内存 数值",
                                               "width": "fill_container",
                                               "gap": 8,
@@ -63353,7 +63352,7 @@
                                               "children": [
                                                 {
                                                   "type": "text",
-                                                  "id": "R2728c",
+                                                  "id": "J8FBC",
                                                   "name": "内存标签",
                                                   "fill": "#646464",
                                                   "content": "内存",
@@ -63364,14 +63363,14 @@
                                                 },
                                                 {
                                                   "type": "frame",
-                                                  "id": "tthfy",
+                                                  "id": "y6HZL",
                                                   "name": "弹性间距",
                                                   "width": "fill_container",
                                                   "height": 1
                                                 },
                                                 {
                                                   "type": "text",
-                                                  "id": "N116qX",
+                                                  "id": "LXncv",
                                                   "name": "内存百分比",
                                                   "fill": "#202020",
                                                   "content": "83.6%",
@@ -63384,7 +63383,7 @@
                                             },
                                             {
                                               "type": "frame",
-                                              "id": "lC4bm",
+                                              "id": "i7HQM",
                                               "name": "内存比例轨道",
                                               "width": "fill_container",
                                               "height": 6,
@@ -63394,7 +63393,7 @@
                                                 {
                                                   "type": "rectangle",
                                                   "cornerRadius": 9999,
-                                                  "id": "QSaVG",
+                                                  "id": "qHlvB",
                                                   "name": "内存比例",
                                                   "fill": "#646464",
                                                   "width": 278,
@@ -63404,7 +63403,7 @@
                                             },
                                             {
                                               "type": "text",
-                                              "id": "YnFxX",
+                                              "id": "w6xJ9",
                                               "name": "内存补充",
                                               "fill": "#646464",
                                               "textGrowth": "fixed-width",
@@ -63421,7 +63420,7 @@
                                     },
                                     {
                                       "type": "rectangle",
-                                      "id": "u4TwP0",
+                                      "id": "EvCNa",
                                       "name": "内容分隔线",
                                       "fill": "#E0E0E0",
                                       "width": "fill_container",
@@ -63429,7 +63428,7 @@
                                     },
                                     {
                                       "type": "frame",
-                                      "id": "h5NQWG",
+                                      "id": "SJBCO",
                                       "name": "运行时长与详情",
                                       "width": "fill_container",
                                       "gap": 16,
@@ -63437,7 +63436,7 @@
                                       "children": [
                                         {
                                           "type": "icon",
-                                          "id": "B4YsP",
+                                          "id": "pGYF0",
                                           "name": "运行时长图标",
                                           "width": 14,
                                           "height": 14,
@@ -63447,7 +63446,7 @@
                                         },
                                         {
                                           "type": "text",
-                                          "id": "m3of2G",
+                                          "id": "z2E8Nc",
                                           "name": "运行时长",
                                           "fill": "#646464",
                                           "content": "已运行 3 天 8 小时",
@@ -63458,14 +63457,14 @@
                                         },
                                         {
                                           "type": "frame",
-                                          "id": "cgOWG",
+                                          "id": "l2XxwL",
                                           "name": "弹性间距",
                                           "width": "fill_container",
                                           "height": 1
                                         },
                                         {
                                           "type": "frame",
-                                          "id": "qUCeX",
+                                          "id": "Yk4SM",
                                           "name": "系统详情 · 次级入口",
                                           "height": 28,
                                           "gap": 8,
@@ -63473,7 +63472,7 @@
                                           "children": [
                                             {
                                               "type": "text",
-                                              "id": "YefXm",
+                                              "id": "Eqp7f",
                                               "name": "系统详情",
                                               "fill": "#646464",
                                               "content": "详情",
@@ -63484,7 +63483,7 @@
                                             },
                                             {
                                               "type": "icon",
-                                              "id": "cdlvZ",
+                                              "id": "eTb4I",
                                               "name": "系统详情图标",
                                               "width": 14,
                                               "height": 14,
@@ -63496,7 +63495,7 @@
                                         },
                                         {
                                           "type": "frame",
-                                          "id": "wfTYx",
+                                          "id": "VhmQC",
                                           "x": 619,
                                           "y": 0,
                                           "name": "原始数据 · 次级入口",
@@ -63507,7 +63506,7 @@
                                           "children": [
                                             {
                                               "type": "text",
-                                              "id": "V77Sth",
+                                              "id": "JqxLf",
                                               "name": "原始数据",
                                               "fill": "#646464",
                                               "content": "详情",
@@ -63518,7 +63517,7 @@
                                             },
                                             {
                                               "type": "icon",
-                                              "id": "dPm1N",
+                                              "id": "Exk8H",
                                               "name": "原始数据图标",
                                               "width": 14,
                                               "height": 14,
@@ -64530,7 +64529,7 @@
                                 },
                                 {
                                   "type": "frame",
-                                  "id": "JQZpy",
+                                  "id": "ojzR4",
                                   "name": "内嵌组件 · sys overview · 整机概览 · 深色",
                                   "context": "来源：cst-pilot-tools.pen；正式 sys overview 整机概览组件，保持原有结构、样式和字段。",
                                   "width": "fill_container",
@@ -64539,7 +64538,7 @@
                                   "children": [
                                     {
                                       "type": "frame",
-                                      "id": "roPeN",
+                                      "id": "WJ9mE",
                                       "name": "深色组件本体",
                                       "context": "B 基板：低反差顶部亮面，1px 边缘与贴近表面的轻阴影。检索条阴影减半；内容布局保持不变。",
                                       "width": "fill_container",
@@ -64614,7 +64613,7 @@
                                       "children": [
                                         {
                                           "type": "frame",
-                                          "id": "N4wBwP",
+                                          "id": "rKs14",
                                           "name": "标题与状态",
                                           "width": "fill_container",
                                           "gap": 8,
@@ -64622,7 +64621,7 @@
                                           "children": [
                                             {
                                               "type": "icon",
-                                              "id": "fjs9R",
+                                              "id": "A1yAP",
                                               "name": "工具图标",
                                               "width": 18,
                                               "height": 18,
@@ -64632,7 +64631,7 @@
                                             },
                                             {
                                               "type": "text",
-                                              "id": "GdHsV",
+                                              "id": "p26rD",
                                               "name": "组件标题",
                                               "fill": "#E0EAEE",
                                               "textGrowth": "fixed-width",
@@ -64645,7 +64644,7 @@
                                             },
                                             {
                                               "type": "icon",
-                                              "id": "OovyR",
+                                              "id": "lT029",
                                               "name": "状态图标",
                                               "context": "本次调用状态。查询成功不表示设备健康；执行请求接受不表示解密完成。前端提供可读状态名称。",
                                               "width": 14,
@@ -64656,7 +64655,7 @@
                                             },
                                             {
                                               "type": "text",
-                                              "id": "DAT7K",
+                                              "id": "gHjbV",
                                               "x": 639,
                                               "y": 3,
                                               "name": "状态文案",
@@ -64672,7 +64671,7 @@
                                         },
                                         {
                                           "type": "text",
-                                          "id": "lgyPx",
+                                          "id": "vAmyi",
                                           "name": "机型摘要",
                                           "fill": "#AAB3B7",
                                           "textGrowth": "fixed-width",
@@ -64685,7 +64684,7 @@
                                         },
                                         {
                                           "type": "frame",
-                                          "id": "H2P810",
+                                          "id": "mFH5s",
                                           "name": "CPU 与内存",
                                           "width": "fill_container",
                                           "gap": 24,
@@ -64693,7 +64692,7 @@
                                           "children": [
                                             {
                                               "type": "frame",
-                                              "id": "SDvhZ",
+                                              "id": "QTL7q",
                                               "name": "CPU 用量",
                                               "width": "fill_container",
                                               "layout": "vertical",
@@ -64701,7 +64700,7 @@
                                               "children": [
                                                 {
                                                   "type": "frame",
-                                                  "id": "K8hUK",
+                                                  "id": "pIdYF",
                                                   "name": "CPU 数值",
                                                   "width": "fill_container",
                                                   "gap": 8,
@@ -64709,7 +64708,7 @@
                                                   "children": [
                                                     {
                                                       "type": "text",
-                                                      "id": "shehz",
+                                                      "id": "jDD8z",
                                                       "name": "CPU标签",
                                                       "fill": "#AAB3B7",
                                                       "content": "CPU",
@@ -64720,14 +64719,14 @@
                                                     },
                                                     {
                                                       "type": "frame",
-                                                      "id": "pBvgn",
+                                                      "id": "Mv4x7",
                                                       "name": "弹性间距",
                                                       "width": "fill_container",
                                                       "height": 1
                                                     },
                                                     {
                                                       "type": "text",
-                                                      "id": "txsWZ",
+                                                      "id": "Eo8KY",
                                                       "name": "CPU百分比",
                                                       "fill": "#E0EAEE",
                                                       "content": "19%",
@@ -64740,7 +64739,7 @@
                                                 },
                                                 {
                                                   "type": "frame",
-                                                  "id": "L67C2",
+                                                  "id": "P60TY",
                                                   "name": "CPU比例轨道",
                                                   "width": "fill_container",
                                                   "height": 6,
@@ -64750,7 +64749,7 @@
                                                     {
                                                       "type": "rectangle",
                                                       "cornerRadius": 9999,
-                                                      "id": "AeLJl",
+                                                      "id": "l829A",
                                                       "name": "CPU比例",
                                                       "fill": "#AAB3B7",
                                                       "width": 63,
@@ -64760,7 +64759,7 @@
                                                 },
                                                 {
                                                   "type": "text",
-                                                  "id": "Odw1R",
+                                                  "id": "J7jqz",
                                                   "name": "CPU补充",
                                                   "fill": "#AAB3B7",
                                                   "textGrowth": "fixed-width",
@@ -64775,7 +64774,7 @@
                                             },
                                             {
                                               "type": "frame",
-                                              "id": "qCEMY",
+                                              "id": "b1ZG9z",
                                               "name": "内存 用量",
                                               "width": "fill_container",
                                               "layout": "vertical",
@@ -64783,7 +64782,7 @@
                                               "children": [
                                                 {
                                                   "type": "frame",
-                                                  "id": "LldZ1",
+                                                  "id": "S41N5J",
                                                   "name": "内存 数值",
                                                   "width": "fill_container",
                                                   "gap": 8,
@@ -64791,7 +64790,7 @@
                                                   "children": [
                                                     {
                                                       "type": "text",
-                                                      "id": "z6A30R",
+                                                      "id": "dJ5oy",
                                                       "name": "内存标签",
                                                       "fill": "#AAB3B7",
                                                       "content": "内存",
@@ -64802,14 +64801,14 @@
                                                     },
                                                     {
                                                       "type": "frame",
-                                                      "id": "xVSk3",
+                                                      "id": "wdGT3",
                                                       "name": "弹性间距",
                                                       "width": "fill_container",
                                                       "height": 1
                                                     },
                                                     {
                                                       "type": "text",
-                                                      "id": "rZeDr",
+                                                      "id": "CUlxt",
                                                       "name": "内存百分比",
                                                       "fill": "#E0EAEE",
                                                       "content": "83.6%",
@@ -64822,7 +64821,7 @@
                                                 },
                                                 {
                                                   "type": "frame",
-                                                  "id": "ebsWo",
+                                                  "id": "Sg1e1",
                                                   "name": "内存比例轨道",
                                                   "width": "fill_container",
                                                   "height": 6,
@@ -64832,7 +64831,7 @@
                                                     {
                                                       "type": "rectangle",
                                                       "cornerRadius": 9999,
-                                                      "id": "E4bRF0",
+                                                      "id": "K6sACe",
                                                       "name": "内存比例",
                                                       "fill": "#AAB3B7",
                                                       "width": 278,
@@ -64842,7 +64841,7 @@
                                                 },
                                                 {
                                                   "type": "text",
-                                                  "id": "nv4Se",
+                                                  "id": "n0HXT",
                                                   "name": "内存补充",
                                                   "fill": "#AAB3B7",
                                                   "textGrowth": "fixed-width",
@@ -64859,7 +64858,7 @@
                                         },
                                         {
                                           "type": "rectangle",
-                                          "id": "T5ogac",
+                                          "id": "rqBqp",
                                           "name": "内容分隔线",
                                           "fill": "#2D3438",
                                           "width": "fill_container",
@@ -64867,7 +64866,7 @@
                                         },
                                         {
                                           "type": "frame",
-                                          "id": "iJQ2S",
+                                          "id": "r6czU",
                                           "name": "运行时长与详情",
                                           "width": "fill_container",
                                           "gap": 16,
@@ -64875,7 +64874,7 @@
                                           "children": [
                                             {
                                               "type": "icon",
-                                              "id": "w5mNQ",
+                                              "id": "uooxv",
                                               "name": "运行时长图标",
                                               "width": 14,
                                               "height": 14,
@@ -64885,7 +64884,7 @@
                                             },
                                             {
                                               "type": "text",
-                                              "id": "zuoyC",
+                                              "id": "x89nXH",
                                               "name": "运行时长",
                                               "fill": "#AAB3B7",
                                               "content": "已运行 3 天 8 小时",
@@ -64896,14 +64895,14 @@
                                             },
                                             {
                                               "type": "frame",
-                                              "id": "U31vW",
+                                              "id": "O2IczR",
                                               "name": "弹性间距",
                                               "width": "fill_container",
                                               "height": 1
                                             },
                                             {
                                               "type": "frame",
-                                              "id": "r4VHZ8",
+                                              "id": "iISay",
                                               "name": "系统详情 · 次级入口",
                                               "height": 28,
                                               "gap": 8,
@@ -64911,7 +64910,7 @@
                                               "children": [
                                                 {
                                                   "type": "text",
-                                                  "id": "fD4tP",
+                                                  "id": "Ku3ed",
                                                   "name": "系统详情",
                                                   "fill": "#AAB3B7",
                                                   "content": "详情",
@@ -64922,7 +64921,7 @@
                                                 },
                                                 {
                                                   "type": "icon",
-                                                  "id": "N8FGp",
+                                                  "id": "hS6rP",
                                                   "name": "系统详情图标",
                                                   "width": 14,
                                                   "height": 14,
@@ -64934,7 +64933,7 @@
                                             },
                                             {
                                               "type": "frame",
-                                              "id": "qhJCj",
+                                              "id": "sgvsj",
                                               "x": 619,
                                               "y": 0,
                                               "name": "原始数据 · 次级入口",
@@ -64945,7 +64944,7 @@
                                               "children": [
                                                 {
                                                   "type": "text",
-                                                  "id": "NqqhF",
+                                                  "id": "hX6dW",
                                                   "name": "原始数据",
                                                   "fill": "#AAB3B7",
                                                   "content": "详情",
@@ -64956,7 +64955,7 @@
                                                 },
                                                 {
                                                   "type": "icon",
-                                                  "id": "Uanej",
+                                                  "id": "UzVqR",
                                                   "name": "原始数据图标",
                                                   "width": 14,
                                                   "height": 14,
@@ -66017,10 +66016,9 @@
                                 },
                                 {
                                   "type": "frame",
-                                  "id": "OcNaP",
+                                  "id": "c7Hv6l",
                                   "name": "内嵌组件 · sys overview · 整机概览 · 浅色",
                                   "context": "来源：cst-pilot-tools.pen；正式 sys overview 整机概览组件，保持原有结构、样式和字段。",
-                                  "reusable": true,
                                   "width": "fill_container",
                                   "fill": "#FCFCFC",
                                   "cornerRadius": 12,
@@ -66093,7 +66091,7 @@
                                   "children": [
                                     {
                                       "type": "frame",
-                                      "id": "taQgu",
+                                      "id": "Q84vc",
                                       "name": "标题与状态",
                                       "width": "fill_container",
                                       "gap": 8,
@@ -66101,7 +66099,7 @@
                                       "children": [
                                         {
                                           "type": "icon",
-                                          "id": "DZUVy",
+                                          "id": "G035aB",
                                           "name": "工具图标",
                                           "width": 18,
                                           "height": 18,
@@ -66111,7 +66109,7 @@
                                         },
                                         {
                                           "type": "text",
-                                          "id": "UhDs2",
+                                          "id": "uW3FJ",
                                           "name": "组件标题",
                                           "fill": "#202020",
                                           "textGrowth": "fixed-width",
@@ -66124,7 +66122,7 @@
                                         },
                                         {
                                           "type": "icon",
-                                          "id": "eA9DL",
+                                          "id": "j7PCvf",
                                           "name": "状态图标",
                                           "context": "本次调用状态。查询成功不表示设备健康；执行请求接受不表示解密完成。前端提供可读状态名称。",
                                           "width": 14,
@@ -66135,7 +66133,7 @@
                                         },
                                         {
                                           "type": "text",
-                                          "id": "pu4yd",
+                                          "id": "l3SOhF",
                                           "x": 639,
                                           "y": 3,
                                           "name": "状态文案",
@@ -66151,7 +66149,7 @@
                                     },
                                     {
                                       "type": "text",
-                                      "id": "f5eNJ",
+                                      "id": "AbXr3",
                                       "name": "机型摘要",
                                       "fill": "#646464",
                                       "textGrowth": "fixed-width",
@@ -66164,7 +66162,7 @@
                                     },
                                     {
                                       "type": "frame",
-                                      "id": "JJJuy",
+                                      "id": "gnhVC",
                                       "name": "CPU 与内存",
                                       "width": "fill_container",
                                       "gap": 24,
@@ -66172,7 +66170,7 @@
                                       "children": [
                                         {
                                           "type": "frame",
-                                          "id": "NkoIq",
+                                          "id": "vgise",
                                           "name": "CPU 用量",
                                           "width": "fill_container",
                                           "layout": "vertical",
@@ -66180,7 +66178,7 @@
                                           "children": [
                                             {
                                               "type": "frame",
-                                              "id": "n3CTz",
+                                              "id": "h2zMJr",
                                               "name": "CPU 数值",
                                               "width": "fill_container",
                                               "gap": 8,
@@ -66188,7 +66186,7 @@
                                               "children": [
                                                 {
                                                   "type": "text",
-                                                  "id": "P0HMFo",
+                                                  "id": "QeJT7",
                                                   "name": "CPU标签",
                                                   "fill": "#646464",
                                                   "content": "CPU",
@@ -66199,14 +66197,14 @@
                                                 },
                                                 {
                                                   "type": "frame",
-                                                  "id": "Q9XhA",
+                                                  "id": "NiDW9",
                                                   "name": "弹性间距",
                                                   "width": "fill_container",
                                                   "height": 1
                                                 },
                                                 {
                                                   "type": "text",
-                                                  "id": "SpxFO",
+                                                  "id": "qZKMn",
                                                   "name": "CPU百分比",
                                                   "fill": "#202020",
                                                   "content": "19%",
@@ -66219,7 +66217,7 @@
                                             },
                                             {
                                               "type": "frame",
-                                              "id": "spOaf",
+                                              "id": "AoD3K",
                                               "name": "CPU比例轨道",
                                               "width": "fill_container",
                                               "height": 6,
@@ -66229,7 +66227,7 @@
                                                 {
                                                   "type": "rectangle",
                                                   "cornerRadius": 9999,
-                                                  "id": "M7F8u",
+                                                  "id": "A6IG5p",
                                                   "name": "CPU比例",
                                                   "fill": "#646464",
                                                   "width": 63,
@@ -66239,7 +66237,7 @@
                                             },
                                             {
                                               "type": "text",
-                                              "id": "BW51u",
+                                              "id": "l92NC",
                                               "name": "CPU补充",
                                               "fill": "#646464",
                                               "textGrowth": "fixed-width",
@@ -66254,7 +66252,7 @@
                                         },
                                         {
                                           "type": "frame",
-                                          "id": "g93qv",
+                                          "id": "avk1f",
                                           "name": "内存 用量",
                                           "width": "fill_container",
                                           "layout": "vertical",
@@ -66262,7 +66260,7 @@
                                           "children": [
                                             {
                                               "type": "frame",
-                                              "id": "AtZMl",
+                                              "id": "Gb42m",
                                               "name": "内存 数值",
                                               "width": "fill_container",
                                               "gap": 8,
@@ -66270,7 +66268,7 @@
                                               "children": [
                                                 {
                                                   "type": "text",
-                                                  "id": "Xj5dd",
+                                                  "id": "G2cZF",
                                                   "name": "内存标签",
                                                   "fill": "#646464",
                                                   "content": "内存",
@@ -66281,14 +66279,14 @@
                                                 },
                                                 {
                                                   "type": "frame",
-                                                  "id": "eWRSx",
+                                                  "id": "ESuSC",
                                                   "name": "弹性间距",
                                                   "width": "fill_container",
                                                   "height": 1
                                                 },
                                                 {
                                                   "type": "text",
-                                                  "id": "TPqWz",
+                                                  "id": "mTX9P",
                                                   "name": "内存百分比",
                                                   "fill": "#202020",
                                                   "content": "83.6%",
@@ -66301,7 +66299,7 @@
                                             },
                                             {
                                               "type": "frame",
-                                              "id": "qod4k",
+                                              "id": "EcTaF",
                                               "name": "内存比例轨道",
                                               "width": "fill_container",
                                               "height": 6,
@@ -66311,7 +66309,7 @@
                                                 {
                                                   "type": "rectangle",
                                                   "cornerRadius": 9999,
-                                                  "id": "QtXGy",
+                                                  "id": "q9kH07",
                                                   "name": "内存比例",
                                                   "fill": "#646464",
                                                   "width": 278,
@@ -66321,7 +66319,7 @@
                                             },
                                             {
                                               "type": "text",
-                                              "id": "ICCkJ",
+                                              "id": "xmCWQ",
                                               "name": "内存补充",
                                               "fill": "#646464",
                                               "textGrowth": "fixed-width",
@@ -66338,7 +66336,7 @@
                                     },
                                     {
                                       "type": "rectangle",
-                                      "id": "t3arT0",
+                                      "id": "qEL49",
                                       "name": "内容分隔线",
                                       "fill": "#E0E0E0",
                                       "width": "fill_container",
@@ -66346,7 +66344,7 @@
                                     },
                                     {
                                       "type": "frame",
-                                      "id": "u24z9Q",
+                                      "id": "n4dCMY",
                                       "name": "运行时长与详情",
                                       "width": "fill_container",
                                       "gap": 16,
@@ -66354,7 +66352,7 @@
                                       "children": [
                                         {
                                           "type": "icon",
-                                          "id": "c9UEAd",
+                                          "id": "dFBs7",
                                           "name": "运行时长图标",
                                           "width": 14,
                                           "height": 14,
@@ -66364,7 +66362,7 @@
                                         },
                                         {
                                           "type": "text",
-                                          "id": "Xo0d1",
+                                          "id": "j3MBMJ",
                                           "name": "运行时长",
                                           "fill": "#646464",
                                           "content": "已运行 3 天 8 小时",
@@ -66375,14 +66373,14 @@
                                         },
                                         {
                                           "type": "frame",
-                                          "id": "LbyqS",
+                                          "id": "V6Drnp",
                                           "name": "弹性间距",
                                           "width": "fill_container",
                                           "height": 1
                                         },
                                         {
                                           "type": "frame",
-                                          "id": "k4sAk",
+                                          "id": "rFQzh",
                                           "name": "系统详情 · 次级入口",
                                           "height": 28,
                                           "gap": 8,
@@ -66390,7 +66388,7 @@
                                           "children": [
                                             {
                                               "type": "text",
-                                              "id": "ZKSI9",
+                                              "id": "qUa2t",
                                               "name": "系统详情",
                                               "fill": "#646464",
                                               "content": "详情",
@@ -66401,7 +66399,7 @@
                                             },
                                             {
                                               "type": "icon",
-                                              "id": "T2bgR",
+                                              "id": "niHMx",
                                               "name": "系统详情图标",
                                               "width": 14,
                                               "height": 14,
@@ -66413,7 +66411,7 @@
                                         },
                                         {
                                           "type": "frame",
-                                          "id": "d3qStl",
+                                          "id": "c0Og7",
                                           "x": 619,
                                           "y": 0,
                                           "name": "原始数据 · 次级入口",
@@ -66424,7 +66422,7 @@
                                           "children": [
                                             {
                                               "type": "text",
-                                              "id": "l64gt",
+                                              "id": "pPruz",
                                               "name": "原始数据",
                                               "fill": "#646464",
                                               "content": "详情",
@@ -66435,7 +66433,7 @@
                                             },
                                             {
                                               "type": "icon",
-                                              "id": "XsGQm",
+                                              "id": "BGX4S",
                                               "name": "原始数据图标",
                                               "width": 14,
                                               "height": 14,
@@ -67494,7 +67492,7 @@
                                 },
                                 {
                                   "type": "frame",
-                                  "id": "wpWDd",
+                                  "id": "HBZCD",
                                   "name": "内嵌组件 · sys overview · 整机概览 · 深色",
                                   "context": "来源：cst-pilot-tools.pen；正式 sys overview 整机概览组件，保持原有结构、样式和字段。",
                                   "width": "fill_container",
@@ -67503,7 +67501,7 @@
                                   "children": [
                                     {
                                       "type": "frame",
-                                      "id": "HrdZD",
+                                      "id": "N8CP1",
                                       "name": "深色组件本体",
                                       "context": "B 基板：低反差顶部亮面，1px 边缘与贴近表面的轻阴影。检索条阴影减半；内容布局保持不变。",
                                       "width": "fill_container",
@@ -67578,7 +67576,7 @@
                                       "children": [
                                         {
                                           "type": "frame",
-                                          "id": "Xe1ZO",
+                                          "id": "hev9e",
                                           "name": "标题与状态",
                                           "width": "fill_container",
                                           "gap": 8,
@@ -67586,7 +67584,7 @@
                                           "children": [
                                             {
                                               "type": "icon",
-                                              "id": "m8O6fB",
+                                              "id": "f9Vwu",
                                               "name": "工具图标",
                                               "width": 18,
                                               "height": 18,
@@ -67596,7 +67594,7 @@
                                             },
                                             {
                                               "type": "text",
-                                              "id": "Vc6P6",
+                                              "id": "ZZfGh",
                                               "name": "组件标题",
                                               "fill": "#E0EAEE",
                                               "textGrowth": "fixed-width",
@@ -67609,7 +67607,7 @@
                                             },
                                             {
                                               "type": "icon",
-                                              "id": "VZGGi",
+                                              "id": "xwrla",
                                               "name": "状态图标",
                                               "context": "本次调用状态。查询成功不表示设备健康；执行请求接受不表示解密完成。前端提供可读状态名称。",
                                               "width": 14,
@@ -67620,7 +67618,7 @@
                                             },
                                             {
                                               "type": "text",
-                                              "id": "nx6BM",
+                                              "id": "oFHwl",
                                               "x": 639,
                                               "y": 3,
                                               "name": "状态文案",
@@ -67636,7 +67634,7 @@
                                         },
                                         {
                                           "type": "text",
-                                          "id": "lgyEJ",
+                                          "id": "DIVkM",
                                           "name": "机型摘要",
                                           "fill": "#AAB3B7",
                                           "textGrowth": "fixed-width",
@@ -67649,7 +67647,7 @@
                                         },
                                         {
                                           "type": "frame",
-                                          "id": "krryf",
+                                          "id": "f2C8Xu",
                                           "name": "CPU 与内存",
                                           "width": "fill_container",
                                           "gap": 24,
@@ -67657,7 +67655,7 @@
                                           "children": [
                                             {
                                               "type": "frame",
-                                              "id": "LKolP",
+                                              "id": "D7EJ23",
                                               "name": "CPU 用量",
                                               "width": "fill_container",
                                               "layout": "vertical",
@@ -67665,7 +67663,7 @@
                                               "children": [
                                                 {
                                                   "type": "frame",
-                                                  "id": "a7K7a2",
+                                                  "id": "YmHw1",
                                                   "name": "CPU 数值",
                                                   "width": "fill_container",
                                                   "gap": 8,
@@ -67673,7 +67671,7 @@
                                                   "children": [
                                                     {
                                                       "type": "text",
-                                                      "id": "eqDFh",
+                                                      "id": "zDkui",
                                                       "name": "CPU标签",
                                                       "fill": "#AAB3B7",
                                                       "content": "CPU",
@@ -67684,14 +67682,14 @@
                                                     },
                                                     {
                                                       "type": "frame",
-                                                      "id": "cAA1f",
+                                                      "id": "u8zsq9",
                                                       "name": "弹性间距",
                                                       "width": "fill_container",
                                                       "height": 1
                                                     },
                                                     {
                                                       "type": "text",
-                                                      "id": "q7Q56S",
+                                                      "id": "a5FAa",
                                                       "name": "CPU百分比",
                                                       "fill": "#E0EAEE",
                                                       "content": "19%",
@@ -67704,7 +67702,7 @@
                                                 },
                                                 {
                                                   "type": "frame",
-                                                  "id": "DzxOr",
+                                                  "id": "aAvDN",
                                                   "name": "CPU比例轨道",
                                                   "width": "fill_container",
                                                   "height": 6,
@@ -67714,7 +67712,7 @@
                                                     {
                                                       "type": "rectangle",
                                                       "cornerRadius": 9999,
-                                                      "id": "ki9ar",
+                                                      "id": "leKVN",
                                                       "name": "CPU比例",
                                                       "fill": "#AAB3B7",
                                                       "width": 63,
@@ -67724,7 +67722,7 @@
                                                 },
                                                 {
                                                   "type": "text",
-                                                  "id": "ioi7S",
+                                                  "id": "qWDoZ",
                                                   "name": "CPU补充",
                                                   "fill": "#AAB3B7",
                                                   "textGrowth": "fixed-width",
@@ -67739,7 +67737,7 @@
                                             },
                                             {
                                               "type": "frame",
-                                              "id": "r7h9W",
+                                              "id": "StBCp",
                                               "name": "内存 用量",
                                               "width": "fill_container",
                                               "layout": "vertical",
@@ -67747,7 +67745,7 @@
                                               "children": [
                                                 {
                                                   "type": "frame",
-                                                  "id": "FUHlo",
+                                                  "id": "x3L21",
                                                   "name": "内存 数值",
                                                   "width": "fill_container",
                                                   "gap": 8,
@@ -67755,7 +67753,7 @@
                                                   "children": [
                                                     {
                                                       "type": "text",
-                                                      "id": "S6fQZ",
+                                                      "id": "Bojwl",
                                                       "name": "内存标签",
                                                       "fill": "#AAB3B7",
                                                       "content": "内存",
@@ -67766,14 +67764,14 @@
                                                     },
                                                     {
                                                       "type": "frame",
-                                                      "id": "RN7ib",
+                                                      "id": "tr23U",
                                                       "name": "弹性间距",
                                                       "width": "fill_container",
                                                       "height": 1
                                                     },
                                                     {
                                                       "type": "text",
-                                                      "id": "zPpBy",
+                                                      "id": "dqTA7",
                                                       "name": "内存百分比",
                                                       "fill": "#E0EAEE",
                                                       "content": "83.6%",
@@ -67786,7 +67784,7 @@
                                                 },
                                                 {
                                                   "type": "frame",
-                                                  "id": "jepop",
+                                                  "id": "Nq16h",
                                                   "name": "内存比例轨道",
                                                   "width": "fill_container",
                                                   "height": 6,
@@ -67796,7 +67794,7 @@
                                                     {
                                                       "type": "rectangle",
                                                       "cornerRadius": 9999,
-                                                      "id": "zKhgV",
+                                                      "id": "xVtkV",
                                                       "name": "内存比例",
                                                       "fill": "#AAB3B7",
                                                       "width": 278,
@@ -67806,7 +67804,7 @@
                                                 },
                                                 {
                                                   "type": "text",
-                                                  "id": "jKq4B",
+                                                  "id": "hpmle",
                                                   "name": "内存补充",
                                                   "fill": "#AAB3B7",
                                                   "textGrowth": "fixed-width",
@@ -67823,7 +67821,7 @@
                                         },
                                         {
                                           "type": "rectangle",
-                                          "id": "kTnbw",
+                                          "id": "fG6Ey",
                                           "name": "内容分隔线",
                                           "fill": "#2D3438",
                                           "width": "fill_container",
@@ -67831,7 +67829,7 @@
                                         },
                                         {
                                           "type": "frame",
-                                          "id": "LLXWz",
+                                          "id": "fmBld",
                                           "name": "运行时长与详情",
                                           "width": "fill_container",
                                           "gap": 16,
@@ -67839,7 +67837,7 @@
                                           "children": [
                                             {
                                               "type": "icon",
-                                              "id": "O7roKP",
+                                              "id": "R2L8U",
                                               "name": "运行时长图标",
                                               "width": 14,
                                               "height": 14,
@@ -67849,7 +67847,7 @@
                                             },
                                             {
                                               "type": "text",
-                                              "id": "zGJcJ",
+                                              "id": "bQgug",
                                               "name": "运行时长",
                                               "fill": "#AAB3B7",
                                               "content": "已运行 3 天 8 小时",
@@ -67860,14 +67858,14 @@
                                             },
                                             {
                                               "type": "frame",
-                                              "id": "WtiIK",
+                                              "id": "QXvVP",
                                               "name": "弹性间距",
                                               "width": "fill_container",
                                               "height": 1
                                             },
                                             {
                                               "type": "frame",
-                                              "id": "A8eGju",
+                                              "id": "RdEkE",
                                               "name": "系统详情 · 次级入口",
                                               "height": 28,
                                               "gap": 8,
@@ -67875,7 +67873,7 @@
                                               "children": [
                                                 {
                                                   "type": "text",
-                                                  "id": "iSyBM",
+                                                  "id": "CGBtY",
                                                   "name": "系统详情",
                                                   "fill": "#AAB3B7",
                                                   "content": "详情",
@@ -67886,7 +67884,7 @@
                                                 },
                                                 {
                                                   "type": "icon",
-                                                  "id": "J9FDYe",
+                                                  "id": "ef1Uw",
                                                   "name": "系统详情图标",
                                                   "width": 14,
                                                   "height": 14,
@@ -67898,7 +67896,7 @@
                                             },
                                             {
                                               "type": "frame",
-                                              "id": "ay0jj",
+                                              "id": "MD5jq",
                                               "x": 619,
                                               "y": 0,
                                               "name": "原始数据 · 次级入口",
@@ -67909,7 +67907,7 @@
                                               "children": [
                                                 {
                                                   "type": "text",
-                                                  "id": "y0hrLD",
+                                                  "id": "oMlwa",
                                                   "name": "原始数据",
                                                   "fill": "#AAB3B7",
                                                   "content": "详情",
@@ -67920,7 +67918,7 @@
                                                 },
                                                 {
                                                   "type": "icon",
-                                                  "id": "u23D2",
+                                                  "id": "b5noz",
                                                   "name": "原始数据图标",
                                                   "width": 14,
                                                   "height": 14,
