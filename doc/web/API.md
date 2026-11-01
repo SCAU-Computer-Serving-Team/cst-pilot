@@ -122,7 +122,7 @@ CSTOA 远端接口与字段映射见 [../auth/API.md](../auth/API.md)。本机 W
 | `POST` | `/api/models/refresh` | 正文 `{}`，强制刷新已配置供应商目录；返回 `{ aborted, failedProviders }`，部分失败仍返回 200，沿用同源校验与去重键 |
 | `POST` | `/api/models/select` | 手动选择模型；传入 `sessionId` 时仅切换该会话，无 `sessionId` 时返回所选描述，不保存默认值；返回 `thinkingLevel`、`thinkingLevels` 和 `reasoning` 供面板切换 |
 | `POST` | `/api/models/default` | 正文 `{ provider, modelId }`，保存与 TUI 共用的新会话默认模型，保留现有会话；允许保存尚未配置凭据的模型 |
-| `POST` | `/api/models/scoped` | 更新启用模型范围与顺序（全选可用模型时归一为 `null`） |
+| `POST` | `/api/models/scoped` | 正文 `{ patterns: string[], empty?: boolean }`；返回 `{ enabled }`。全选或 `patterns: []` 使用默认全启用，返回 `null`；`patterns: [], empty: true` 明确清空，返回 `[]` |
 | `POST` | `/api/models/thinking` | 按 `sessionId` 设置思考强度 |
 | `GET` | `/api/auth` | 所有 Provider 的配置状态、凭据类型、登录能力、`custom` 与 `requiresLogin` 标记 |
 | `GET` / `POST` / `DELETE` | `/api/auth/custom/<provider>`、`/api/auth/custom` | 读取（仅返回 `apiKeySet` 与 `revision`）、新建／编辑、删除 `models.json` 中的自定义服务 |

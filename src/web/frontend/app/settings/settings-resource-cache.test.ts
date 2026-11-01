@@ -5,8 +5,32 @@ import {
 	cacheSetting,
 	invalidateSetting,
 	loadSetting,
+	settingGeneration,
 	settingReady,
 } from "./settings-resource-cache.ts";
+
+test("保存期间目录失效后，局部保存结果不能覆盖新目录读取", async () => {
+	const previous = globalThis.fetch;
+	let finish!: (response: Response) => void;
+	globalThis.fetch = () =>
+		new Promise<Response>((resolve) => {
+			finish = resolve;
+		});
+	const path = "/cache-test/save-race";
+	try {
+		cacheSetting(path, { models: ["old"], enabled: [] });
+		const generation = settingGeneration(path);
+		invalidateSetting(path);
+		const pending = loadSetting(path);
+		assert.equal(cacheSetting(path, { models: ["old"], enabled: ["old"] }, generation), false);
+		assert.equal(settingReady(path), false);
+		finish(json({ models: ["new"], enabled: ["old"] }));
+		assert.deepEqual(await pending, { models: ["new"], enabled: ["old"] });
+		assert.deepEqual(cachedSetting(path), { models: ["new"], enabled: ["old"] });
+	} finally {
+		globalThis.fetch = previous;
+	}
+});
 
 const json = (value: unknown) =>
 	new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } });

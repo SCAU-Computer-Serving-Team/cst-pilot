@@ -334,10 +334,7 @@ test("设置用户链路：分类导航、自动保存、失败回滚、凭据�
 			"取消启用的模型留在展开列表",
 		);
 		await browser.click(".settings-model-bulk button:nth-child(3)");
-		await browser.until(
-			"document.querySelector('.settings-section header span')?.textContent!=='0 个已启用'",
-			"恢复默认模型范围",
-		);
+		assert.deepEqual((await (await fetch(`${origin}/api/models`)).json()).enabled, [], "刷新保留空范围");
 		await browser.navigate(`${origin}/`);
 		await browser.until("!!document.querySelector('.composer-model')", "首页模型选择器");
 		assert.equal((await send("/api/models/scoped", "POST", { patterns: ["probe/one"] })).status, 200);

@@ -131,7 +131,6 @@ test("首次密钥提示：无凭据才自动弹窗，24 小时内不再出现",
 			"deepseek",
 			"APIKEY 入口指向当前模型服务",
 		);
-		await browser.navigate(`${origin}/`);
 		await browser.evaluate("localStorage.removeItem('cst-model-key-prompt-at')");
 		await browser.navigate(`${origin}/`);
 		await browser.until(dialogOpen, "清空记录后重新提示");

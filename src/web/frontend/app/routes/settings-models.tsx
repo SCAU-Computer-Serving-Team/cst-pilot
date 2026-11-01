@@ -26,6 +26,7 @@ export default function ModelPreferences() {
 	const allIds = models.map(fullId);
 	const byId = useMemo(() => new Map(models.map((model) => [fullId(model), model])), [models]);
 	const providers = [...new Set(models.map((model) => model.provider))];
+	if (state.data && provider !== "all" && !providers.includes(provider)) setProvider("all");
 	// 勾选变化不重新排列可见行；取消勾选的模型留在原位。
 	const displayOrder = useRef<string[]>([]);
 	if (displayOrder.current.length !== allIds.length || displayOrder.current.some((id) => !byId.has(id))) {
@@ -150,10 +151,10 @@ export default function ModelPreferences() {
 							<Button
 								size="sm"
 								variant="ghost"
-								isDisabled={state.working || (selection === null && !unavailable.length)}
-								onPress={() => void save(null)}
+								isDisabled={state.working || state.loading}
+								onPress={() => void state.refresh()}
 							>
-								恢复默认
+								刷新
 							</Button>
 							{state.working && <output>正在保存…</output>}
 						</div>
