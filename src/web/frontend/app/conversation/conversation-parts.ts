@@ -40,7 +40,12 @@ export function orderedParts(content: ContentPart[]): ConversationPart[] {
 
 /** The server classifies each accepted input; never infer queue membership from timing. */
 export function visibleQueueItems(items: QueueItem[]): QueueItem[] {
-	return items.filter((item) => item.status === "failed" || (item.status === "pending" && item.delivery !== "direct"));
+	return items.filter(
+		(item) =>
+			item.status === "failed" ||
+			(item.status === "delivering" && item.uncertain) ||
+			(item.status === "pending" && item.delivery !== "direct"),
+	);
 }
 
 export type TurnEntry = { id?: string; message: Message };

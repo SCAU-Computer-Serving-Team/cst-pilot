@@ -178,6 +178,7 @@ test("an in-flight input is visible but never resent after a simulated process r
 	});
 	const uncertain = await restarted.snapshot();
 	assert.equal(uncertain.items[0].status, "delivering");
+	assert.equal(uncertain.items[0].uncertain, true);
 	for (const edit of [{ retry: true }, { text: "changed" }, { remove: true }])
 		await assert.rejects(restarted.change("request", uncertain.version, edit), InboxConflict);
 	restarted.wake();
@@ -188,6 +189,30 @@ test("an in-flight input is visible but never resent after a simulated process r
 	await restarted.close();
 });
 
+test("模型调用已返回但投递状态保存失败时保留待核对，不提供重试入口", async () => {
+	const inbox = new SessionInbox(root, "accepted-save-failure", {
+		isBusy: () => false,
+		prompt: async () => {},
+		steer: async () => {},
+	});
+	const internal = inbox as unknown as {
+		save: (next: unknown) => Promise<void>;
+	};
+	const originalSave = internal.save.bind(inbox);
+	let saves = 0;
+	internal.save = async (next) => {
+		saves++;
+		if (saves === 3) throw new Error("状态保存失败");
+		return originalSave(next);
+	};
+	await inbox.accept("a", "accepted", "queue");
+	await waitFor(async () => (await inbox.snapshot()).items[0]?.uncertain === true);
+	const state = await inbox.snapshot();
+	assert.equal(state.items[0]?.status, "delivering");
+	assert.equal(state.items[0]?.uncertain, true);
+	await assert.rejects(inbox.change("a", state.version, { retry: true }), InboxConflict);
+	await inbox.close();
+});
 test("failed delivery is not replayed after restart", async () => {
 	const inbox = new SessionInbox(root, "three", {
 		isBusy: () => false,

@@ -29,10 +29,12 @@
 |---|---|---|
 | `GET` | `/api/sessions` | 会话列表（ID、标题、创建时间、更新时间、占用方、运行状态） |
 | `POST` | `/api/sessions` | 新建会话，可选指定初始模型与思考强度 |
+| `GET` | `/api/sessions/creation/<requestKey>` | 只读核对创建回执，返回 `status: "missing" \| "started" \| "done"`；完成时附 `sessionId` |
 | `GET` | `/api/sessions/<id>` | 会话完整快照（消息、工作时长、运行状态、队列版本与条目、待答 UI 请求、BitLocker 待处理请求） |
 | `PATCH` / `DELETE` | `/api/sessions/<id>` | 重命名会话 / 删除空闲会话及其图片附件目录 |
 | `POST` | `/api/sessions/<id>/open`、`/close` | 打开会话（由 TUI 持有时返回 409）/ 取消当前页面订阅 |
-| `POST` | `/api/sessions/<id>/messages` | 提交消息文本、技能标记与 Base64 图片（`delivery: "queue" \| "steer"`） |
+| `POST` | `/api/sessions/<id>/messages` | 提交消息文本、技能标记与 Base64 图片（`delivery: "queue" \| "steer"`），持久化后返回 `202 { item }` |
+| `GET` | `/api/sessions/<id>/messages/<messageId>` | 只读核对收件箱回执，返回 `{ item }`；未找到时为 `{ item: null }`，不自动投递消息 |
 | `POST` | `/api/sessions/<id>/abort` | 停止当前轮次模型与工具执行，并暂停输入队列 |
 | `PATCH` / `DELETE` | `/api/sessions/<id>/queue/<itemId>` | 编辑或删除待投递／失败的排队项（校验队列 `version`） |
 | `PUT` | `/api/sessions/<id>/queue/order` | 按条目 ID 数组重排待投递队列（校验 `version`） |
@@ -47,6 +49,8 @@
 | `POST` | `/api/sessions/<id>/ui/<requestId>/response` | 回答扩展发起的选择、确认或输入请求 |
 | `POST` | `/api/sessions/<id>/compact` | 执行手动上下文压缩 |
 | `GET` | `/api/sessions/<id>/events` | 单会话 SSE 增量事件流（支持 `Last-Event-ID` 续传） |
+
+消息快照与单会话 SSE 的用户消息可附 `clientMessageId`，值为原消息提交 `id`，用于承接乐观气泡。回执的 `pending`、`delivering`、`delivered`、`failed`、`cancelled` 表示后端收件箱状态；HTTP `202` 只确认持久化接受，不保证模型回答成功。宿主重启后遗留的 `delivering` 条目附 `uncertain: true`，供前端展示待核对状态。查询未找到条目不能证明尚在处理的写请求已取消。
 
 ### 清单打开请求
 
@@ -146,5 +150,5 @@ CSTOA 远端接口与字段映射见 [../auth/API.md](../auth/API.md)。本机 W
 1. **回环与同源防护**：服务仅绑定 `127.0.0.1` 并校验 `Host`；写请求须携带同源 `Origin` 与 `X-CST-Web-Request: 1`，带请求体的接口使用 `Content-Type: application/json`。跨站请求与 CORS 预检被拒绝。
 2. **幂等与版本并发控制**：一般写操作携带 `Idempotency-Key`，长度为 1–128 位，仅允许字母、数字、下划线和连字符。同一键用于不同操作、或重启后操作结果未确认时返回 `409`；消息提交按会话内消息 `id`、正文、图片、技能与投递方式去重。队列使用整数 `version`，自定义服务编辑使用 `revision`，过期返回 `409`。BitLocker 本地凭据提交使用一次性 `requestId`，不写入持久化幂等日志。
 3. **体积限制**：消息提交的原始图片合计不超过 `12 MiB`（仅限 PNG/JPEG/GIF/WebP），消息 JSON 请求体不超过 `17 MiB`；其他调用 JSON 正文的接口默认上限为 `128 KiB`。
-4. **缺少凭据**：新建会话与提交消息在接受输入前校验所选模型凭据，缺失返回 `409 credentials_required`。前端保留草稿并打开配置提示，不自动换服务或重发消息。
+4. **缺少凭据**：新建会话与提交消息在接受输入前校验所选模型凭据，缺失返回 `409 credentials_required`。提交前已知缺少凭据时保留草稿并打开配置提示；乐观提交被拒绝时保留发送记录并提供配置与重试入口，不自动换服务或重发消息。
 5. **统一错误结构**：所有接口错误返回 `{ "error": { "code": "...", "message": "..." } }`，不含敏感配置原文或凭据。

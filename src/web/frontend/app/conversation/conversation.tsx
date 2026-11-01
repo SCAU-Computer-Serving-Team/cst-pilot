@@ -3,11 +3,14 @@ import { ArrowDown, Copy, GitBranch, GitFork, X } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { matchToolResults } from "../cards/match-results";
 import type { PendingBitLocker } from "../data/bitlocker-state";
+import type { OutgoingMessage } from "../data/message-outbox";
 import type { Message } from "../data/web-state";
 import { AssistantContent } from "./assistant-content";
 import { activeTurnIndex, formatDuration, groupTurns, type Turn, textOf } from "./conversation-parts";
 import { SummaryEntry } from "./summary-entry";
 import { UserMessage } from "./user-message";
+
+const NO_OUTGOING: readonly OutgoingMessage[] = [];
 
 function AssistantTurnImpl({
 	id,
@@ -104,8 +107,10 @@ export function Conversation({
 	refresh,
 	onCancelSummary,
 	onFork,
+	outgoing = NO_OUTGOING,
 }: {
 	id: string;
+	outgoing?: readonly OutgoingMessage[];
 	entries: { id?: string; message: Message }[];
 	streaming?: Message;
 	requests: PendingBitLocker[];
@@ -139,6 +144,17 @@ export function Conversation({
 	}, [history, visibleCount, streaming]);
 	const turns = useMemo(() => groupTurns(display), [display]);
 	const active = activeTurnIndex(turns, running);
+	const pendingTurns = outgoing.filter((item) => !history.some(({ message }) => message.clientMessageId === item.id));
+	const outgoingById = new Map(pendingTurns.map((item) => [item.id, item]));
+	const shownTurns: Turn[] = [
+		...turns,
+		...pendingTurns.map((item) => ({
+			user: {
+				message: { role: "user" as const, content: item.text, timestamp: item.createdAt, clientMessageId: item.id },
+			},
+			assistants: [],
+		})),
+	];
 	const cancelScroll = useCallback(() => {
 		if (scrollAnimation.current === null) return;
 		cancelAnimationFrame(scrollAnimation.current);
@@ -219,7 +235,7 @@ export function Conversation({
 	// biome-ignore lint/correctness/useExhaustiveDependencies: entries 与 streaming 只作为滚动触发信号，不在 effect 体内读取
 	useLayoutEffect(() => {
 		if (following) scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
-	}, [entries, streaming, following]);
+	}, [entries, streaming, following, outgoing]);
 	return (
 		<>
 			<div
@@ -243,8 +259,8 @@ export function Conversation({
 						显示更早的消息（剩余 {history.length - visibleCount} 条）
 					</Button>
 				)}
-				{turns.map((turn, turnIndex) => {
-					const turnKey = `turn-${turn.user?.message.timestamp ?? turn.summary?.message.timestamp ?? turn.assistants[0]?.message.timestamp ?? turnIndex}`;
+				{shownTurns.map((turn, turnIndex) => {
+					const turnKey = `turn-${turn.user?.message.clientMessageId ?? turn.user?.message.timestamp ?? turn.summary?.message.timestamp ?? turn.assistants[0]?.message.timestamp ?? turnIndex}`;
 					if (turn.summary) return <SummaryEntry key={turnKey} entry={turn.summary} />;
 					const live = turnIndex === active;
 					return (
@@ -252,6 +268,7 @@ export function Conversation({
 							{turn.user && (
 								<UserMessage
 									message={turn.user.message}
+									outgoing={outgoingById.get(turn.user.message.clientMessageId ?? "")}
 									fresh={turn.user.message.timestamp >= mountedAt - 2000}
 								/>
 							)}

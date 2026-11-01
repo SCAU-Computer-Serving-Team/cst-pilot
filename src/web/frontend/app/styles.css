@@ -6,6 +6,7 @@
 @import "./shell/session-list.css";
 @import "./exports/exports.css";
 @import "./conversation/markdown.css";
+@import "./conversation/outgoing-message.css";
 @import "@heroui/styles";
 @import "@fontsource/jetbrains-mono/latin-400.css";
 
@@ -591,7 +592,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 }
 /* 动效：发送滑入、逐词显现、部件淡入、等待流光。取值一律用 transitions.dev 令牌刻度。 */
 .user-line[data-fresh="true"] .user-bubble { animation: message-rise var(--duration-fast) var(--ease-smooth-out) backwards; }
-@keyframes message-rise { from { opacity: 0; transform: translateY(var(--distance-medium)); } to { opacity: 1; transform: translateY(0); } }
+@keyframes message-rise { from { opacity: 0; transform: translateY(var(--distance-base)); } to { opacity: 1; transform: translateY(0); } }
 .assistant-turn[data-live="true"] .turn-process { animation: part-in var(--duration-fast) var(--ease-smooth-out) backwards; }
 .assistant-turn[data-live="true"] .turn-process-body > * { animation: part-in var(--duration-fast) var(--ease-smooth-out) backwards; }
 @keyframes part-in { from { opacity: 0; transform: translateY(var(--distance-micro)); } to { opacity: 1; transform: translateY(0); } }

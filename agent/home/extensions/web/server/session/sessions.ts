@@ -15,6 +15,7 @@ import { getModelCatalog, type ModelCatalog } from "../../../runtime/model-catal
 import { defaultModelReference, explicitModel } from "../../../runtime/model-selection.ts";
 import { ownSession } from "../../../runtime/owner.ts";
 import { finalizeSession as finalizeTelemetrySession, processCloseBudget } from "../../../telemetry/shared.ts";
+import { InputMessages } from "./input-messages.ts";
 import { replaceFile } from "./replace-file.ts";
 import { ToolExecutions } from "./tool-executions.ts";
 import { WebUiBridge } from "./ui.ts";
@@ -44,6 +45,7 @@ export interface WebSessionSlot {
 	readonly session: AgentSession;
 	readonly ui: WebUiBridge;
 	readonly execution: ToolExecutions;
+	readonly inputs: InputMessages;
 	readonly id: string;
 	readonly file?: string;
 }
@@ -161,9 +163,11 @@ export class WebSessionPool {
 		const ui = new WebUiBridge();
 		const bitlocker = new BitLockerWebInteraction();
 		bitLockerWebInteractions.set(session.sessionId, bitlocker);
+		const inputs = new InputMessages(session);
 		const dispose = session.dispose.bind(session);
 		session.dispose = () => {
 			bitlocker.close();
+			inputs.close();
 			bitLockerWebInteractions.delete(session.sessionId);
 			dispose();
 		};
@@ -175,6 +179,7 @@ export class WebSessionPool {
 				session,
 				ui,
 				execution: new ToolExecutions(session),
+				inputs,
 				id: session.sessionId,
 				file: session.sessionFile,
 			};

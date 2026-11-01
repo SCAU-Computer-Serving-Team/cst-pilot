@@ -2,6 +2,7 @@ import { PanelLeft } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useSearchParams, useViewTransitionState } from "react-router";
 import { AccountProvider } from "../account/use-account";
+import { MessageOutboxRecovery } from "../data/use-message-outbox";
 import { BlueHour } from "../shell/blue-hour";
 import { ConnectionStatus } from "../shell/connection-status";
 import { NotificationRegion } from "../shell/notification";
@@ -121,6 +122,7 @@ export default function WorkspaceLayout() {
 								</div>
 							)}
 							<ConnectionStatus enabled={!preview} />
+							{!preview && <MessageOutboxRecovery />}
 							<Outlet />
 						</div>
 					</div>

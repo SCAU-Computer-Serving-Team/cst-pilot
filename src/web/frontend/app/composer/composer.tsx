@@ -4,23 +4,18 @@ import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState } 
 import { useNavigate } from "react-router";
 import { ModelKeyDialog, type ModelKeyDialogReason } from "../auth/model-key-dialog";
 import { readModelKeyPromptTime, shouldAutoPrompt, writeModelKeyPromptTime } from "../auth/model-key-prompt";
+import { EDIT_OUTGOING_EVENT } from "../conversation/outgoing-message";
 import { ApiFailure, apiJson } from "../data/api";
 import { type ModelChoice, type ModelSelectionPayload, refreshManualSelection } from "../data/model-selection";
+import { messageOutbox } from "../data/use-message-outbox";
 import { type Model, useGlobalEvents } from "../data/web-state";
 import { PreviewableImage } from "../images/image-preview";
 import { ErrorNotice } from "../shell/error-notice";
 import { chipCaretSpace, editorHtml, extractPayload, fileReference, parseEditor } from "./composer-editor";
 import { ContextMeter } from "./context-meter";
 import { parseImageHashes } from "./draft-image-references";
-import {
-	addImage,
-	collectDraftImages,
-	type DraftImage,
-	encodeImages,
-	loadImages,
-	releaseImageHolds,
-} from "./draft-images";
-import { draftKey as makeDraftKey } from "./drafts";
+import { addImage, collectDraftImages, type DraftImage, loadImages, releaseImageHolds } from "./draft-images";
+import { draftKey as makeDraftKey, readSavedDrafts, type SavedDraft } from "./drafts";
 import { ModelPicker } from "./model-picker";
 import { scopedModels } from "./scoped-models";
 
@@ -30,7 +25,8 @@ export type ComposerConfig = {
 	modelId?: string;
 	thinkingLevel?: string;
 	messageId: string;
-	images: { mimeType: string; data: string }[];
+	images: string[];
+	serialized: string;
 	skill?: string;
 };
 const commandLabels: Record<string, string> = {
@@ -108,6 +104,16 @@ export function Composer({
 	const [thinking, setThinking] = useState("off");
 	const [thinkingLevels, setThinkingLevels] = useState<string[]>([]);
 	const [sending, setSending] = useState(false);
+	const submitLock = useRef(false);
+	const editorRevision = useRef(0);
+	const restoring = useRef(false);
+	const [savedCount, setSavedCount] = useState(() => {
+		try {
+			return readSavedDrafts(sessionStorage, draftKey).length;
+		} catch {
+			return 0;
+		}
+	});
 	const [commands, setCommands] = useState<string[]>([]);
 	const [commandIndex, setCommandIndex] = useState(0);
 	const [suggestionsVisible, setSuggestionsVisible] = useState(true);
@@ -154,6 +160,7 @@ export function Composer({
 	}
 	// 编辑器 DOM 是事实源：同步纯文本状态、草稿和空态。
 	function syncFromEditor() {
+		editorRevision.current++;
 		const root = editorRef.current;
 		if (!root) return;
 		const chips = root.querySelectorAll(".composer-chip").length;
@@ -304,7 +311,7 @@ export function Composer({
 		};
 	}, [draftKey]);
 	async function attach(files: File[]) {
-		if (attachmentBusy.current || imagesLoading || sending) return;
+		if (attachmentBusy.current || imagesLoading || sending || restoring.current) return;
 		attachmentBusy.current = true;
 		setAttaching(true);
 		const generation = imageGeneration.current;
@@ -340,7 +347,7 @@ export function Composer({
 		}
 	}
 	function removeImage(index: number) {
-		if (sending || attaching) return;
+		if (sending || attaching || restoring.current) return;
 		const removed = imagesRef.current[index];
 		if (!removed) return;
 		URL.revokeObjectURL(removed.url);
@@ -517,7 +524,7 @@ export function Composer({
 		return model;
 	}
 	async function submit() {
-		if (sending || attaching || imagesLoading) return;
+		if (submitLock.current || sending || attaching || imagesLoading || restoring.current) return;
 		// 自定义总结提示词：回车不是发消息，而是带着这段提示词去发起导航与总结。
 		if (summaryTag) {
 			if (!text.trim() || !onSummary) return;
@@ -554,6 +561,9 @@ export function Composer({
 			return;
 		}
 		if ((!body.trim() && !images.length && !command) || (!onSend && !onCommand)) return;
+		submitLock.current = true;
+		const revision = editorRevision.current;
+		const submittedImages = [...images];
 		setSending(true);
 		setError("");
 		try {
@@ -569,18 +579,23 @@ export function Composer({
 				await onCommand("compact", body);
 			} else {
 				if (!onSend) throw new Error("当前无法提交消息");
-				const model = await ensureCredentials();
+				const model = selected?.catalogPresent && selected.credentialReady ? selected : await ensureCredentials();
 				if (!model) return;
+				if (editorRevision.current !== revision) return;
+				if (body.length > 100_000) throw new Error("消息不能超过 100000 个字符");
 				await onSend(body, {
 					provider: model.provider,
 					modelId: model.id,
 					thinkingLevel: thinking,
 					messageId,
-					images: await encodeImages(images),
+					images: submittedImages.map((image) => image.hash),
+					serialized,
 					skill: command.startsWith("/skill:") ? command.slice(7) : undefined,
 				});
 			}
-			images.forEach((image) => {
+			// 等待配置或本地保存期间的新输入归下一条草稿，不能被迟到完成清空。
+			if (editorRevision.current !== revision) return;
+			submittedImages.forEach((image) => {
 				URL.revokeObjectURL(image.url);
 			});
 			imagesRef.current = [];
@@ -596,9 +611,68 @@ export function Composer({
 				setMissingKey({ model: selected, reason: "unsent" });
 			else setError(cause instanceof Error ? cause.message : "消息未被接受，请重试");
 		} finally {
+			submitLock.current = false;
 			setSending(false);
 		}
 	}
+	async function replaceDraft(draft: SavedDraft, saveCurrent: boolean) {
+		if (restoring.current || submitLock.current || imagesLoading || attaching) throw new Error("请等待当前操作完成");
+		restoring.current = true;
+		const revision = editorRevision.current;
+		const generation = imageGeneration.current;
+		let loaded: DraftImage[] = [];
+		try {
+			loaded = await loadImages(draft.images);
+			if (loaded.length !== draft.images.length) throw new Error("图片不完整，请保留发送记录并重新添加图片。");
+			if (revision !== editorRevision.current || generation !== imageGeneration.current)
+				throw new Error("草稿已更新，请重新点击编辑。");
+			const saved = readSavedDrafts(sessionStorage, draftKey);
+			if (!saveCurrent) saved.pop();
+			const current = { text: readEditor(true), images: imagesRef.current.map((image) => image.hash) };
+			if (current.text || current.images.length) saved.push(current);
+			sessionStorage.setItem(`${draftKey}:saved`, JSON.stringify(saved));
+			sessionStorage.setItem(draftKey, draft.text);
+			sessionStorage.setItem(`${draftKey}:images`, JSON.stringify(draft.images));
+			for (const image of imagesRef.current) URL.revokeObjectURL(image.url);
+			imagesRef.current = loaded;
+			setImages(loaded);
+			loaded = [];
+			renderEditor(draft.text);
+			setSavedCount(saved.length);
+			setError("");
+			void collectDraftImages().catch(() => {});
+		} finally {
+			restoring.current = false;
+			for (const image of loaded) URL.revokeObjectURL(image.url);
+		}
+	}
+	// biome-ignore lint/correctness/useExhaustiveDependencies: 事件读写当前会话 DOM 和 refs，不随输入内容重新订阅。
+	useEffect(() => {
+		const edit = (event: Event) => {
+			if (!(event instanceof CustomEvent) || typeof event.detail !== "string") return;
+			const outbox = messageOutbox();
+			const item = outbox.getSnapshot().find((item) => item.id === event.detail);
+			if (!item || (sessionId ? item.sessionId !== sessionId : !item.fromHome)) return;
+			if (item.state !== "failed" && !(item.state === "waiting" && !item.attempted)) return;
+			if (
+				(readEditor(true) || imagesRef.current.length) &&
+				!window.confirm("当前草稿将保留，可通过「恢复保留草稿」取回。继续编辑这条消息？")
+			)
+				return;
+			try {
+				outbox.beginEdit(item.id);
+			} catch (cause) {
+				setError(cause instanceof Error ? cause.message : "消息状态已变化");
+				return;
+			}
+			void replaceDraft({ text: item.serialized, images: item.images }, true)
+				.then(() => outbox.completeEdit(item.id))
+				.catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "无法恢复消息"))
+				.finally(() => outbox.endEdit(item.id));
+		};
+		window.addEventListener(EDIT_OUTGOING_EVENT, edit);
+		return () => window.removeEventListener(EDIT_OUTGOING_EVENT, edit);
+	}, [draftKey, sessionId, imagesLoading, attaching]);
 	function keyDown(event: KeyboardEvent<HTMLDivElement>) {
 		if (event.nativeEvent.isComposing || event.keyCode === 229) return;
 		if (event.key === "Enter" && event.target instanceof HTMLElement && event.target.closest(".chip-remove")) return;
@@ -640,6 +714,22 @@ export function Composer({
 		<div className={`composer-shell ${home ? "composer-shell--home" : "composer-shell--chat"}`}>
 			{missingKey && (
 				<ModelKeyDialog model={missingKey.model} reason={missingKey.reason} onClose={() => setMissingKey(null)} />
+			)}
+			{savedCount > 0 && (
+				<Button
+					variant="ghost"
+					className="composer-saved-draft"
+					onPress={() => {
+						void Promise.resolve()
+							.then(() => {
+								const saved = readSavedDrafts(sessionStorage, draftKey).at(-1);
+								if (saved) return replaceDraft(saved, false);
+							})
+							.catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "草稿恢复失败"));
+					}}
+				>
+					恢复保留草稿（{savedCount}）
+				</Button>
 			)}
 			{!!images.length && (
 				<ul className="composer-attachments" aria-label="待发送图片">

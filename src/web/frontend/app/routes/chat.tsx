@@ -2,7 +2,7 @@ import { Button, Popover } from "@heroui/react";
 import { Download, EllipsisVertical, HardDrive, ListTree, Share2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams, useViewTransitionState } from "react-router";
-import { Composer } from "../composer/composer";
+import { Composer, type ComposerConfig } from "../composer/composer";
 import { Conversation } from "../conversation/conversation";
 import { visibleQueueItems } from "../conversation/conversation-parts";
 import { QuestionPanel } from "../conversation/question-panel";
@@ -10,7 +10,8 @@ import { QueuePanel } from "../conversation/queue-panel";
 import { apiJson, sessionPath } from "../data/api";
 import type { PendingBitLocker } from "../data/bitlocker-state";
 import { presentError } from "../data/error-presenter";
-import { useSessionDetail, useSessionTitle } from "../data/web-state";
+import { outgoingFor, useMessageOutbox } from "../data/use-message-outbox";
+import { type SessionDetail, useSessionDetail, useSessionTitle } from "../data/web-state";
 import { ErrorNotice } from "../shell/error-notice";
 import { usePanelDismiss } from "../shell/panel-dismiss";
 import { sampleSessions } from "../shell/sample-sessions";
@@ -29,7 +30,36 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 	const [params] = useSearchParams();
 	const example =
 		params.get("preview") === "1" ? sampleSessions.find((session) => session.id === sessionId) : undefined;
-	const { detail, streaming, error, refresh } = useSessionDetail(example ? undefined : sessionId);
+	const { detail: loadedDetail, streaming, error, refresh } = useSessionDetail(example ? undefined : sessionId);
+	const { outbox, records } = useMessageOutbox();
+	const outgoing = useMemo(() => (example ? [] : outgoingFor(records, sessionId)), [records, sessionId, example]);
+	const pendingDetail = useMemo<SessionDetail | undefined>(
+		() =>
+			sessionId
+				? {
+						id: sessionId,
+						entries: [],
+						messages: [],
+						running: false,
+						queue: { version: 0, paused: false, items: [] },
+						ui: [],
+					}
+				: undefined,
+		[sessionId],
+	);
+	const detail = loadedDetail ?? (outgoing.length ? pendingDetail : undefined);
+	useEffect(() => {
+		if (!detail || example) return;
+		try {
+			outbox.observe(
+				detail.id,
+				detail.queue.items,
+				detail.entries.flatMap(({ message }) => (message.clientMessageId ? [message.clientMessageId] : [])),
+			);
+		} catch {
+			/* 本地清理失败时保留备份，下一次同步重试。 */
+		}
+	}, [detail, example, outbox]);
 	const [forkOpen, setForkOpen] = useState(false);
 	const [messageMenuOpen, setMessageMenuOpen] = useState(false);
 	usePanelDismiss(messageMenuOpen, () => setMessageMenuOpen(false));
@@ -117,26 +147,11 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 		[detail],
 	);
 	const queued = !!detail && visibleQueueItems(detail.queue.items).some((item) => item.status === "pending");
-	async function send(
-		text: string,
-		config: { messageId: string; images: { mimeType: string; data: string }[]; skill?: string },
-	) {
-		if (!sessionId) return;
+	async function send(text: string, config: ComposerConfig) {
+		if (!sessionId) throw new Error("会话尚未就绪");
+		const { messageId, ...payload } = config;
+		outbox.enqueue({ ...payload, id: messageId, sessionId, text });
 		setForkSource("");
-		// 提交成功即返回（立即清空输入框、复位发送按钮）；队列与气泡由 SSE 事件驱动的刷新补齐，
-		// 避免落盘窗口内 GET 偶发变慢时按钮长时间置灰。
-		await apiJson(sessionPath(sessionId, "/messages"), {
-			method: "POST",
-			idempotencyKey: config.messageId,
-			body: {
-				id: config.messageId,
-				text,
-				delivery: "queue",
-				images: config.images,
-				...(config.skill ? { skill: config.skill } : {}),
-			},
-		});
-		void refresh();
 	}
 	async function stop() {
 		if (!sessionId) return;
@@ -214,6 +229,7 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 						<Conversation
 							id={detail.id}
 							entries={entries}
+							outgoing={outgoing}
 							requests={detail.bitlocker?.requests ?? EMPTY_REQUESTS}
 							streaming={streaming}
 							running={!!detail.running || !!streaming}

@@ -17,6 +17,7 @@ export interface InboxItem {
 	images: ImageRef[];
 	skill?: string;
 	status: ItemStatus;
+	uncertain?: boolean;
 	error?: string;
 	acceptedAt: number;
 }
@@ -30,8 +31,9 @@ export class InboxConflict extends Error {}
 
 export interface InboxExecutor {
 	isBusy(): boolean;
-	prompt(text: string, images: ImageRef[], skill?: string): Promise<void>;
-	steer(text: string, images: ImageRef[], skill?: string): Promise<void>;
+	prompt(text: string, images: ImageRef[], skill: string | undefined, messageId: string): Promise<void>;
+	steer(text: string, images: ImageRef[], skill: string | undefined, messageId: string): Promise<void>;
+	wasAccepted?: (id: string) => boolean;
 }
 
 /** One inbox per session; only the owning server process may write its file. */
@@ -62,7 +64,10 @@ export class SessionInbox {
 			if (!validSnapshot(parsed)) throw new Error("输入收件箱损坏");
 			// A crashed process may already have sent this input to the model.
 			// Keep it visible, but never automatically replay it.
-			this.data = parsed;
+			this.data = {
+				...parsed,
+				items: parsed.items.map((item) => (item.status === "delivering" ? { ...item, uncertain: true } : item)),
+			};
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 			this.data = { version: 0, nextSequence: 1, paused: false, items: [] };
@@ -299,10 +304,12 @@ export class SessionInbox {
 					return { item, busy };
 				});
 				if (!next) return;
+				let completed = false;
 				try {
 					if (next.busy && next.item.delivery === "steer")
-						await this.executor.steer(next.item.text, next.item.images ?? [], next.item.skill);
-					else await this.executor.prompt(next.item.text, next.item.images ?? [], next.item.skill);
+						await this.executor.steer(next.item.text, next.item.images ?? [], next.item.skill, next.item.id);
+					else await this.executor.prompt(next.item.text, next.item.images ?? [], next.item.skill, next.item.id);
+					completed = true;
 					await this.transact(async (current) => {
 						await this.save({
 							...current,
@@ -313,17 +320,37 @@ export class SessionInbox {
 						});
 					});
 				} catch (cause) {
+					const accepted = completed || (this.executor.wasAccepted?.(next.item.id) ?? false);
 					const error = cause instanceof Error ? cause.message.slice(0, 500) : "消息未能投递，请检查模型服务。";
 					await this.transact(async (current) => {
-						await this.save({
+						const updated: InboxSnapshot = {
 							...current,
 							version: current.version + 1,
 							items: current.items.map((entry) =>
-								entry.id === next.item.id ? { ...entry, status: "failed", error } : entry,
+								entry.id === next.item.id
+									? {
+											...entry,
+											status: accepted ? ("delivering" as const) : ("failed" as const),
+											uncertain: accepted || undefined,
+											error,
+										}
+									: entry,
 							),
-						});
+						};
+						try {
+							await this.save(updated);
+						} catch (saveError) {
+							if (!accepted) throw saveError;
+							// 磁盘保留 delivering；当前进程立即显示待核对，禁止再次投递。
+							this.data = updated;
+							try {
+								this.onChange?.(structuredClone(updated));
+							} catch {
+								/* 下一次快照承接。 */
+							}
+						}
 					});
-					return; // Never skip a failed item.
+					return; // Never skip a failed or uncertain item.
 				}
 			}
 		} catch {
@@ -347,6 +374,7 @@ function validSnapshot(value: unknown): value is InboxSnapshot {
 				typeof item.acceptedText === "string" &&
 				(item.acceptedDelivery === "queue" || item.acceptedDelivery === "steer") &&
 				(item.skill === undefined || typeof item.skill === "string") &&
+				(item.uncertain === undefined || typeof item.uncertain === "boolean") &&
 				(item.error === undefined || typeof item.error === "string") &&
 				(item.images === undefined ||
 					(Array.isArray(item.images) &&
