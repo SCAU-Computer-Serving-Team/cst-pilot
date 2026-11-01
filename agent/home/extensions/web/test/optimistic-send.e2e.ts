@@ -217,6 +217,11 @@ test(
 				"后端尚未回应时清空输入并立即展示",
 			);
 			assert.equal(sessions.get("s1")?.messages.length, 0);
+			assert.equal(
+				await browser.evaluate("!!document.querySelector('.outgoing-status[data-state=sending]')"),
+				false,
+				"正常发送保留气泡，不展示发送中提示",
+			);
 			await browser.evaluate(
 				"window.__bubble=document.querySelector('.user-bubble');window.__animationStarts=0;document.addEventListener('animationstart',e=>{if(e.animationName==='message-rise')window.__animationStarts++});",
 			);
@@ -323,6 +328,11 @@ test(
 			await browser.until(
 				"!!document.querySelector('.home-outgoing .user-bubble') && document.querySelector('.composer-input')?.textContent===''",
 				"首页创建期间乐观展示",
+			);
+			assert.equal(
+				await browser.evaluate("!!document.querySelector('.home-outgoing .outgoing-status')"),
+				false,
+				"首页后台创建时不展示发送中或打开会话提示",
 			);
 			holdCreation = false;
 			releaseCreation?.();

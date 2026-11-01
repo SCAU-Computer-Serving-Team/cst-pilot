@@ -1438,17 +1438,18 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .exit-actions button:disabled { opacity:.45; cursor:default; }
 @keyframes exit-modal-in { from { opacity:0; transform:translateY(var(--distance-base)); } }
 @media (prefers-reduced-motion:reduce) { .exit-dialog { animation:none; } }
-/* TUI 启动首页：背景保持静止，内容依次滑入。 */
-.app-layout[data-startup] > .sidebar { animation: startup-left var(--duration-slow) var(--ease-smooth-out) backwards; }
+/* 整页加载与刷新：底面固定，侧栏列表就绪后整组入场。 */
+.sidebar[data-startup-pending] > :is(.sidebar-top, .sidebar-footer) { opacity: 0; visibility: hidden; }
+.sidebar[data-startup-rows] > :is(.sidebar-top, .sidebar-footer) { animation: startup-left var(--duration-slow) var(--ease-smooth-out) backwards; }
 .app-layout[data-home-startup] .brand-arcs { animation: startup-top var(--duration-very-slow) var(--ease-smooth-out) var(--duration-micro) backwards; }
 .app-layout[data-home-startup] .home-greeting h1 { animation: startup-top var(--duration-very-slow) var(--ease-smooth-out) calc(var(--duration-micro) * 2) backwards; }
 .app-layout[data-home-startup] :is(.composer-shell--home, .home-footnote) { animation: startup-bottom var(--duration-very-slow) var(--ease-smooth-out) calc(var(--duration-micro) * 3) backwards; }
-.sidebar[data-startup-rows] :is(.sidebar-recent-heading, .sidebar-session-row) { animation: startup-bottom var(--duration-very-slow) var(--ease-smooth-out) calc(var(--duration-micro) * 2 + var(--duration-stagger) * var(--startup-row)) backwards; }
+.sidebar[data-startup-rows] :is(.sidebar-recent-heading, .sidebar-session-row .sidebar-selection-text) { animation: startup-bottom var(--duration-very-slow) var(--ease-smooth-out) calc(var(--duration-micro) * 2 + var(--duration-stagger) * var(--startup-row)) backwards; }
 @keyframes startup-left { from { opacity: 0; transform: translateX(calc(-1 * var(--distance-medium))); } }
 @keyframes startup-top { from { opacity: 0; transform: translateY(calc(-1 * var(--distance-medium))); } }
 @keyframes startup-bottom { from { opacity: 0; transform: translateY(var(--distance-medium)); } }
 @media (prefers-reduced-motion: reduce) {
-  .app-layout[data-startup] > .sidebar, .app-layout[data-home-startup] :is(.brand-arcs, .home-greeting h1, .composer-shell--home, .home-footnote), .sidebar[data-startup-rows] :is(.sidebar-recent-heading, .sidebar-session-row) { animation: none; }
+  .sidebar[data-startup-rows] > :is(.sidebar-top, .sidebar-footer), .app-layout[data-home-startup] :is(.brand-arcs, .home-greeting h1, .composer-shell--home, .home-footnote), .sidebar[data-startup-rows] :is(.sidebar-recent-heading, .sidebar-session-row .sidebar-selection-text) { animation: none; }
 }
 /* 侧栏作为独立快照保持静止，页面切换仅播放右侧内容。 */
 ::view-transition-group(workspace-sidebar) { z-index: 20; animation: none; }

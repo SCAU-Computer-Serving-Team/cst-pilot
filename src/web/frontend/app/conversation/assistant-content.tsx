@@ -50,6 +50,7 @@ export function AssistantContent({
 											.get(entry.id ?? `stamp:${entry.message.timestamp}`)
 											?.get(part.call.id)}
 										live={live && final}
+										format={format}
 									/>
 								) : part.kind === "image" ? (
 									<MessageImage key={`${entry.id}-image-${partIndex}`} part={part.part} format={format} />

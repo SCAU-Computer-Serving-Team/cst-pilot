@@ -77,6 +77,8 @@ export function Sidebar({
 	const navigation = useNavigation();
 	const selectionPath = navigation.location?.pathname ?? location.pathname;
 	const state = useWorkspaceSessions();
+	const ready = preview || !!state.stage || !!state.error;
+	const startupPendingList = startup && !ready;
 	const [recentOpen, setRecentOpen] = useState(true);
 	const startupPending = useRef(startup);
 	const [startupRows, setStartupRows] = useState(false);
@@ -86,12 +88,12 @@ export function Sidebar({
 			setStartupRows(false);
 			return;
 		}
-		if (!startupPending.current || !state.stage) return;
+		if (!startupPending.current || !ready) return;
 		startupPending.current = false;
 		setStartupRows(true);
 		const timer = window.setTimeout(() => setStartupRows(false), 1100);
 		return () => window.clearTimeout(timer);
-	}, [startup, state.stage]);
+	}, [startup, ready]);
 	const sessions = useMemo(
 		() => orderedSessions(preview ? sampleSessions : state.sessions).slice(0, RECENT_SESSION_LIMIT),
 		[preview, state.sessions],
@@ -234,8 +236,9 @@ export function Sidebar({
 			aria-label="会话导航"
 			data-managing={management.managing || undefined}
 			data-startup-rows={startupRows || undefined}
-			inert={collapsed}
-			aria-hidden={collapsed}
+			data-startup-pending={startupPendingList || undefined}
+			inert={collapsed || startupPendingList}
+			aria-hidden={collapsed || startupPendingList}
 		>
 			{/* 所有会话共用聊天路由，只插入一份预载声明。 */}
 			{sessions[0] && <PrefetchPageLinks page={`/s/${sessions[0].id}${preview ? "?preview=1" : ""}`} />}

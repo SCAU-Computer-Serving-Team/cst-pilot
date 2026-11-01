@@ -52,6 +52,7 @@ export function OutgoingStatus({ item }: { item: OutgoingMessage }) {
 			setBusy(false);
 		}
 	}
+	if (item.state === "sending" || item.state === "accepted") return null;
 	const editable = item.state === "failed" || (item.state === "waiting" && !item.attempted);
 	const uncertain = item.state === "unknown";
 	return (

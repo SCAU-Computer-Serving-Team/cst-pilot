@@ -177,6 +177,38 @@ test("查询失败或未找到回执都保留未知态；重连只查询，手�
 	assert.deepEqual(writes[0], writes[1]);
 });
 
+for (const recovery of ["check", "checkAll", "retry"] as const) {
+	test(`${recovery} 确认前条已接受后继续发送等待项，不重发未知请求`, async () => {
+		const sent: string[] = [];
+		let recovered = false;
+		const { outbox } = setup({
+			send: async (item) => {
+				sent.push(item.id);
+				if (item.id === "a") throw new Error("响应丢失");
+				return receipt(item.id);
+			},
+			lookup: async (item) => ({ item: recovered && item.id === "a" ? receipt(item.id) : null }),
+		});
+		outbox.enqueue(input("a"));
+		outbox.enqueue(input("b"));
+		outbox.enqueue(input("c"));
+		await tick();
+		assert.deepEqual(sent, ["a"]);
+		await outbox.checkAll();
+		await tick();
+		assert.deepEqual(sent, ["a"], "结果仍未知时不推进或重放");
+		recovered = true;
+		if (recovery === "checkAll") await outbox.checkAll();
+		else await outbox[recovery]("a");
+		await tick();
+		assert.deepEqual(sent, ["a", "b", "c"]);
+		assert.ok(outbox.getSnapshot().every((item) => item.state === "accepted"));
+		await outbox.checkAll();
+		await tick();
+		assert.deepEqual(sent, ["a", "b", "c"], "重复核对不重复提交");
+	});
+}
+
 test("实时回执先到，迟到的 HTTP 拒绝不能降级或重建气泡", async () => {
 	const pending = deferred<MessageReceipt>();
 	const { outbox } = setup({ send: () => pending.promise });

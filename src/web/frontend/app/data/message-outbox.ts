@@ -244,6 +244,7 @@ export class MessageOutbox {
 		if (running) return running;
 		const task = this.lookup(id).finally(() => {
 			this.checks.delete(id);
+			this.pump();
 		});
 		this.checks.set(id, task);
 		return task;
