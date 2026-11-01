@@ -27,7 +27,7 @@
 3. **禁止完整字体、裸入口与链接**：Web 静态目录不得包含完整 `.otf` 字体文件；发行根不得存在未改名的 `pi.exe`；发行树不得包含符号链接或目录联接。
 4. **禁止任何凭据或密钥**：全树文件扫描拒绝疑似 API 密钥、GitHub 令牌、AWS 密钥、JWT 或私钥块；所有 `.json` 文件递归检查禁止出现非空的 `apiKey`、`accessToken`、`refreshToken`、`token`、`secret`、`password`、`authorization` 字段。
 5. **配置严格匹配**：`agent/home/web-search.json` 与 `agent/home/telemetry.json` 必须与 `pack/release-settings.mjs` 定义的常量完全一致，禁止复制构建机本地配置。
-6. **静态引用与许可完整**：`REQUIRED_RELEASE_FILES` 中的核心代码、证书（`timserver_1.crt`）、三方许可证（`licenses/`、`pwsh/LICENSE.txt`、`wiztree/license.txt`、字体许可）及 `index.html` / CSS 引用的所有静态资源必须全部存在于发行树中。
+6. **静态引用与许可完整**：`REQUIRED_RELEASE_FILES` 中的核心代码、证书（`timserver_1.crt`）、三方许可证（`licenses/`、`pwsh/LICENSE.txt`、`wiztree/license.txt`、字体许可）及 `index.html` / CSS 引用的所有静态资源必须全部存在于发行树中。CSS 相对引用按样式表位置解析，禁止越出 Web 静态目录或引用构建机文件。
 
 ## 验收与发布条件
 

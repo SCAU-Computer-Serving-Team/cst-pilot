@@ -122,6 +122,21 @@ test('a missing license file is rejected', () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('样式相对资源必须存在且不能越出 Web 静态目录', () => {
+  const root = makeTree();
+  const stylesheet = path.join(root, 'agent/home/extensions/web/static/assets/styles-abc.css');
+  try {
+    fs.writeFileSync(stylesheet, '@font-face{src:url("../fonts/CSTUISans-Regular.woff2?v=1#face")}');
+    assert.doesNotThrow(() => checkReleaseContent(root, filesOf(root)));
+    for (const reference of ['missing.woff2', '../../../../../../E:/build/node_modules/font.woff2', 'file:///E:/build/font.woff2', 'E:/build/font.woff2']) {
+      fs.writeFileSync(stylesheet, `@font-face{src:url(${reference})}`);
+      assert.throws(() => checkReleaseContent(root, filesOf(root)), /引用的资源不在发行树中/);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a referenced asset missing from the tree is rejected', () => {
   const root = makeTree();
   fs.rmSync(path.join(root, 'agent/home/extensions/web/static/assets/extra.js'));
