@@ -25,6 +25,12 @@
 | [telemetry](telemetry/SPEC.md) | `agent/home/extensions/telemetry/`、`cst-pilot-server` | [SPEC](telemetry/SPEC.md) · [ARCHITECTURE](telemetry/ARCHITECTURE.md) · [API](telemetry/API.md) · [OPERATIONS](telemetry/OPERATIONS.md) |
 | [release](release/SPEC.md) | `pack/`、`src/web/frontend/scripts/`、`pwsh/`、`wiztree/`、`lhm/` | [SPEC](release/SPEC.md) · [ARCHITECTURE](release/ARCHITECTURE.md) |
 
+## Rust 重写评估
+
+| 文档 | 职责 |
+|---|---|
+| [rust/prototype.md](rust/prototype.md) | Rust 三端重写的推荐技术栈、选择理由与采用条件；尚未成为实施规格 |
+
 ## 同名文件职责
 
 | 文件名 | 职责边界 |
