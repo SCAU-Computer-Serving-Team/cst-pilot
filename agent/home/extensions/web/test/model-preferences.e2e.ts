@@ -3,22 +3,43 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { ModelCatalog } from "../../runtime/model-catalog.ts";
 import { createWebApi } from "../server/api.ts";
 import { createWebServer, listenWebServer } from "../server/http.ts";
 import { WebSessionPool } from "../server/session/sessions.ts";
 import { BrowserProbe, freePort } from "./browser.ts";
 import { configureTestModel, testRoot } from "./support.ts";
 
-test("模型偏好：勾选自动保存、失败回滚、只读刷新与保存期间更换提供商", { timeout: 60_000 }, async () => {
+test("模型偏好：勾选自动保存、失败回滚、只读刷新与保存期间更换提供商", { timeout: 60_000 }, async (t) => {
 	const root = join(await testRoot(), "model-preferences");
 	await mkdir(root, { recursive: true });
 	const home = await mkdtemp(join(root, "home-"));
 	await configureTestModel(home);
+	await writeFile(
+		join(home, "models.json"),
+		JSON.stringify({
+			providers: Object.fromEntries(
+				["test-probe", "scope-baseline"].map((provider) => [
+					provider,
+					{
+						api: "openai-completions",
+						baseUrl: "http://127.0.0.1:9/v1",
+						apiKey: "test-only",
+						models: [{ id: "mock", reasoning: false, input: ["text"], contextWindow: 10000, maxTokens: 100 }],
+					},
+				]),
+			),
+		}),
+	);
 	await writeFile(join(home, "web-settings.json"), JSON.stringify({ theme: "light" }));
+	// 本用例只核对范围保存与本地服务变更，目录联网更新由 model-catalog.e2e.ts 验证。
+	const catalog = new ModelCatalog(home, { automatic: false });
+	t.mock.method(catalog, "refresh", async () => ({ aborted: false, errors: new Map() }));
 	const pool = new WebSessionPool({
 		cwd: home,
 		agentDir: home,
 		sessionDir: join(home, "sessions"),
+		catalog,
 		withLoader: (load) => load(),
 	});
 	const port = await freePort();
@@ -54,6 +75,7 @@ test("模型偏好：勾选自动保存、失败回滚、只读刷新与保存�
 		await browser.until("!!document.querySelector('.settings-check-box')", "模型列表");
 		await browser.fill(".settings-search input", "test-probe");
 		await browser.until("document.querySelectorAll('.settings-model').length===1", "最后一个待启用模型");
+		assert.equal(await browser.evaluate("document.querySelector('.settings-check-box input')?.checked"), false);
 		// 只在 HTTP 边界延迟读取与写入响应，复选框、缓存、SSE 和持久化均走产品实现。
 		await browser.evaluate(`
 			window.__posts=[]; window.__reads=0; window.__readWaiters=[]; window.__holdReads=true;

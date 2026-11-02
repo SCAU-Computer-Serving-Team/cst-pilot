@@ -164,7 +164,7 @@ const COMPOSER_PROBE = `(async () => {
 		}
 		throw new Error("等待超时：" + label);
 	};
-	await until(() => document.querySelector(".composer-input"), "消息编辑器");
+	await until(() => document.querySelector(".chat-loaded") && document.querySelector(".composer-input"), "会话与消息编辑器就绪");
 	const area = document.querySelector(".composer-input");
 	area.textContent = "/tree";
 	area.dispatchEvent(new InputEvent("input", { bubbles: true }));
@@ -237,16 +237,18 @@ async function readPage(pageUrl: string, probe: string, shotPath?: string) {
 			if (!ready) await new Promise((resolve) => setTimeout(resolve, 100));
 		}
 		assert.ok(ready, "页面导航未完成，不在即将销毁的 about:blank 上执行探针");
-		const evaluated = await cdp.send(
-			"Runtime.evaluate",
-			{ expression: probe, awaitPromise: true, returnByValue: true },
-			session,
-		);
+		const evaluated = await cdp.send<{
+			result: { value?: unknown; description?: string };
+			exceptionDetails?: unknown;
+		}>("Runtime.evaluate", { expression: probe, awaitPromise: true, returnByValue: true }, session);
 		if (shotPath) {
 			const shot = await cdp.send<{ data: string }>("Page.captureScreenshot", { format: "png" }, session);
 			await writeFile(shotPath, Buffer.from(shot.data as string, "base64"));
 		}
-		return (evaluated as { result: { value: string } }).result.value;
+		if (evaluated.exceptionDetails)
+			throw new Error(evaluated.result.description ?? JSON.stringify(evaluated.exceptionDetails));
+		assert.ok(typeof evaluated.result.value === "string", "页面探针须返回 JSON 字符串");
+		return evaluated.result.value;
 	} finally {
 		child.kill();
 	}

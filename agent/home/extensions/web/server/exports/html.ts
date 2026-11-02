@@ -42,11 +42,26 @@ export class OfflineHtml {
 		}
 		const chunks: Uint8Array[] = [];
 		let bytes = 0;
-		for await (const chunk of response.body) {
+		const reader = response.body.getReader();
+		// 显式取消读取，避免 fetch 已收到取消但响应流仍挂起。
+		const cancel = () => {
+			void reader.cancel(signal.reason).catch(() => {});
+		};
+		signal.addEventListener("abort", cancel, { once: true });
+		try {
 			signal.throwIfAborted();
-			bytes += chunk.byteLength;
-			if (bytes > MAX_ASSET) throw new ExportError(413, "export_too_large", "导出资源超过大小限制");
-			chunks.push(chunk);
+			while (true) {
+				const { done, value } = await reader.read();
+				signal.throwIfAborted();
+				if (done) break;
+				bytes += value.byteLength;
+				if (bytes > MAX_ASSET) throw new ExportError(413, "export_too_large", "导出资源超过大小限制");
+				chunks.push(value);
+			}
+		} finally {
+			signal.removeEventListener("abort", cancel);
+			await reader.cancel().catch(() => {});
+			reader.releaseLock();
 		}
 		signal.throwIfAborted();
 		const mime = response.headers.get("content-type")?.split(";")[0] ?? "application/octet-stream";

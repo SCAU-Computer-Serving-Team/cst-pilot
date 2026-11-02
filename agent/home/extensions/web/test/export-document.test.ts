@@ -150,6 +150,63 @@ test("资源失败时取消同批读取并回收响应，失败资源不进入�
 	}
 });
 
+test("取消导出时显式取消挂起的响应流，不依赖 fetch 转发取消信号", { timeout: 5000 }, async (t) => {
+	let started!: () => void;
+	const reading = new Promise<void>((resolve) => {
+		started = resolve;
+	});
+	let finish!: () => void;
+	let cancelled = false;
+	const stream = new ReadableStream<Uint8Array>({
+		start(controller) {
+			finish = () => controller.close();
+		},
+		pull() {
+			started();
+		},
+		cancel() {
+			cancelled = true;
+		},
+	});
+	t.mock.method(globalThis, "fetch", async () => new Response(stream));
+	const pack = new OfflineHtml("http://127.0.0.1");
+	const controller = new AbortController();
+	const snapshot = exportSnapshot(
+		"fixture",
+		"取消资源读取",
+		[{ id: "u", message: { role: "user", content: "fixture", timestamp: 1 } }],
+		exportOptions({ format: "html" }),
+	);
+	const rendering = pack.render(
+		snapshot,
+		{
+			body: "<main>fixture</main>",
+			styles: [{ base: "http://127.0.0.1", css: 'a{src:url("/fonts/pending.woff2")}' }],
+		},
+		controller.signal,
+	);
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		await reading;
+		controller.abort(new Error("取消导出"));
+		await assert.rejects(
+			Promise.race([
+				rendering,
+				new Promise<never>((_, reject) => {
+					timer = setTimeout(() => reject(new Error("未取消资源读取")), 1000);
+				}),
+			]),
+			{ message: "取消导出" },
+		);
+		assert.equal(cancelled, true);
+	} finally {
+		clearTimeout(timer);
+		if (!cancelled) finish();
+		await rendering.catch(() => {});
+		pack.clear();
+	}
+});
+
 test("HTML 资源展开超过总预算时立即拒绝并取消未完成读取", { timeout: 10_000 }, async () => {
 	const bytes = Buffer.alloc(16 * 1024 * 1024 - 8, 65);
 	const server = createServer((request, response) => {
