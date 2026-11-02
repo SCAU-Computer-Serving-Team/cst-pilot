@@ -79,4 +79,4 @@ flowchart TB
 
 - 启动器设置 `PI_OFFLINE=1` 并配置 `enableInstallTelemetry: false`，关闭 Pi 默认的版本检查、包更新与官方遥测。模型目录由项目协调器显式传入 `allowNetwork: true` 后台更新，环境变量保持不变。
 - `PI_OFFLINE=1` 不拦截扩展发起的请求：模型推理、联网检索工具、CSTOA 认证与动态目录、项目双端遥测按各自配置访问网络。
-- 发行包生成最小 `agent/home/web-search.json`，仅配置 `ssrf.allowRanges: ["198.18.0.0/15"]` 与 `trustEnvProxy: false`，使 `pi-web-access` 在机主开启 TUN 假 IP 代理时可抓取公开网页，同时继续拦截回环地址、其他私网网段与私网重定向。
+- 发行包生成 `agent/home/web-search.json`，设置 `searchProvider: "exa"` 与 `workflow: "none"`，默认直接返回检索结果，不打开浏览器审核窗口。网络策略配置 `ssrf.allowRanges: ["198.18.0.0/15"]` 与 `trustEnvProxy: false`，支持 TUN 假 IP 代理，同时继续拦截回环地址、其他私网网段与私网重定向。

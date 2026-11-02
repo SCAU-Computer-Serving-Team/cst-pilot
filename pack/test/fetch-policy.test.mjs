@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { discoverAndLoadExtensions } from '../../agent/node_modules/@earendil-works/pi-coding-agent/dist/index.js';
 import { RELEASE_WEB_SEARCH } from '../release-settings.mjs';
 
 // Node不直接剥离node_modules中的TS；原样复制固定版本模块到隔离目录后执行。
@@ -52,7 +53,48 @@ test('截图中的NVIDIA网址通过发行TUN规则，不再因假IP被拦截', 
 test('发行配置由真实网页扩展读取，只放行198.18/15，不信任环境代理', () => {
   fs.writeFileSync(path.join(root, 'web-search.json'), JSON.stringify(RELEASE_WEB_SEARCH));
   assert.deepEqual(loadSsrfConfig(), policy);
-  assert.deepEqual(RELEASE_WEB_SEARCH, { searchProvider: 'exa', ssrf: { allowRanges: ['198.18.0.0/15'], trustEnvProxy: false } });
+  assert.deepEqual(RELEASE_WEB_SEARCH, { searchProvider: 'exa', workflow: 'none', ssrf: { allowRanges: ['198.18.0.0/15'], trustEnvProxy: false } });
+});
+
+test('真实检索扩展按发行默认配置直接返回结果，无需弹窗或浏览器审核', async () => {
+  fs.writeFileSync(path.join(root, 'web-search.json'), JSON.stringify(RELEASE_WEB_SEARCH));
+  const loaded = await discoverAndLoadExtensions([path.join(source, 'index.ts')], root, root);
+  assert.deepEqual(loaded.errors, []);
+  loaded.runtime.appendEntry = () => {};
+  const tool = loaded.extensions.flatMap(extension => [...extension.tools.values()])
+    .find(tool => tool.definition.name === 'web_search')?.definition;
+  assert.ok(tool);
+  const originalFetch = globalThis.fetch;
+  const previousExa = process.env.EXA_API_KEY;
+  delete process.env.EXA_API_KEY;
+  let requests = 0;
+  const phases = [];
+  globalThis.fetch = async (url) => {
+    assert.equal(new URL(url).hostname, 'mcp.exa.ai');
+    requests++;
+    return Response.json({ result: { content: [{ type: 'text', text: 'Title: Test source\nURL: https://example.com/result\nText: Mock search evidence.' }] } });
+  };
+  try {
+    const result = await tool.execute('silent-search', { query: 'test query' }, AbortSignal.timeout(5000),
+      update => phases.push(update.details?.phase), {
+        hasUI: true,
+        cwd: root,
+        get modelRegistry() { throw new Error('默认检索不应进入审核模型选择'); },
+        ui: {
+          confirm: () => { throw new Error('默认检索不应请求确认'); },
+          select: () => { throw new Error('默认检索不应请求选择'); },
+          setWidget: () => {},
+        },
+      });
+    assert.equal(requests, 1);
+    assert.equal(result.isError, undefined);
+    assert.ok(result.content.some(part => part.type === 'text' && part.text.includes('Mock search evidence.')));
+    assert.ok(!phases.includes('curating') && !phases.includes('waiting-for-approval'));
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousExa === undefined) delete process.env.EXA_API_KEY;
+    else process.env.EXA_API_KEY = previousExa;
+  }
 });
 
 test('假IP段两端放行，其他私网、localhost和混合DNS继续拦截', async () => {

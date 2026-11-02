@@ -80,6 +80,151 @@ test("idle first message goes directly to the session; only follow-ups are queue
 	}
 });
 
+for (const convert of [false, true]) {
+	test(`运行中的首条输入不阻塞${convert ? "排队转插话" : "立即插话"}，排队项逐轮投递`, async () => {
+		let busy = false;
+		let release!: () => void;
+		const finish = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const sent: string[] = [];
+		const inbox = new SessionInbox(root, `live-steer-${convert}`, {
+			isBusy: () => busy,
+			prompt: async (text) => {
+				busy = true;
+				sent.push(`prompt:${text}`);
+				if (text === "first") await finish;
+				busy = false;
+			},
+			steer: async (text, images, skill, id) => {
+				assert.equal(busy, true, "插话须在原轮次结束前投递");
+				assert.deepEqual(images, [{ id: "image", mimeType: "image/png", bytes: 12 }]);
+				assert.equal(skill, "sys");
+				assert.equal(id, "steer");
+				sent.push(`steer:${text}`);
+			},
+		});
+		try {
+			await inbox.accept("first", "first", "queue");
+			await waitFor(async () => busy);
+			await inbox.accept("queued", "later", "queue");
+			await inbox.accept(
+				"steer",
+				"now",
+				convert ? "queue" : "steer",
+				[{ id: "image", mimeType: "image/png", bytes: 12 }],
+				"sys",
+			);
+			if (convert) await inbox.change("steer", (await inbox.snapshot()).version, { delivery: "steer" });
+			await waitFor(
+				async () => (await inbox.snapshot()).items.find((item) => item.id === "steer")?.status === "delivered",
+			);
+			assert.deepEqual(sent, ["prompt:first", "steer:now"]);
+			assert.equal((await inbox.snapshot()).items.find((item) => item.id === "queued")?.status, "pending");
+			release();
+			await waitFor(async () => (await inbox.snapshot()).items.every((item) => item.status === "delivered"));
+			assert.deepEqual(sent, ["prompt:first", "steer:now", "prompt:later"]);
+		} finally {
+			release();
+			await inbox.close();
+		}
+	});
+}
+
+test("首条输入准备期间保留插话，进入执行后唤醒投递，关闭等待在途输入", async () => {
+	let busy = false;
+	let start!: () => void;
+	let release!: () => void;
+	let preparing!: () => void;
+	const prepared = new Promise<void>((resolve) => {
+		start = resolve;
+	});
+	const finish = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const started = new Promise<void>((resolve) => {
+		preparing = resolve;
+	});
+	const sent: string[] = [];
+	const inbox = new SessionInbox(root, "prepare-steer", {
+		isBusy: () => busy,
+		prompt: async () => {
+			preparing();
+			await prepared;
+			sent.push("prompt");
+			busy = true;
+			inbox.wake();
+			await finish;
+			busy = false;
+		},
+		steer: async () => {
+			sent.push("steer");
+		},
+	});
+	try {
+		await inbox.accept("first", "first", "queue");
+		await started;
+		await inbox.accept("steer", "now", "steer");
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		assert.deepEqual(sent, []);
+		assert.equal((await inbox.snapshot()).items[1].status, "pending");
+		start();
+		await waitFor(async () => (await inbox.snapshot()).items[1].status === "delivered");
+		assert.deepEqual(sent, ["prompt", "steer"]);
+		let closed = false;
+		const closing = inbox.close().then(() => {
+			closed = true;
+		});
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		assert.equal(closed, false);
+		release();
+		await closing;
+		assert.equal((await inbox.snapshot()).items[0].status, "delivered");
+	} finally {
+		start();
+		release();
+		await inbox.close();
+	}
+});
+
+test("运行中暂停队列保留普通输入与插话，发送新消息后继续", async () => {
+	let busy = false;
+	let release!: () => void;
+	const finish = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const sent: string[] = [];
+	const inbox = new SessionInbox(root, "pause-live", {
+		isBusy: () => busy,
+		prompt: async (text) => {
+			busy = true;
+			sent.push(text);
+			if (text === "first") await finish;
+			busy = false;
+		},
+		steer: async (text) => {
+			sent.push(`steer:${text}`);
+		},
+	});
+	try {
+		await inbox.accept("first", "first", "queue");
+		await waitFor(async () => busy);
+		await inbox.accept("next", "next", "queue");
+		await inbox.pause();
+		await inbox.change("next", (await inbox.snapshot()).version, { delivery: "steer" });
+		release();
+		await waitFor(async () => (await inbox.snapshot()).items[0].status === "delivered");
+		assert.deepEqual(sent, ["first"]);
+		assert.equal((await inbox.snapshot()).items[1].status, "pending");
+		await inbox.accept("resume", "resume", "queue");
+		await waitFor(async () => (await inbox.snapshot()).items.every((item) => item.status === "delivered"));
+		assert.deepEqual(sent, ["first", "next", "resume"]);
+	} finally {
+		release();
+		await inbox.close();
+	}
+});
+
 test("a direct input that loses the idle race becomes a visible follow-up", async () => {
 	let busy = false;
 	const sent: string[] = [];

@@ -17,6 +17,7 @@ export const RELEASE_SETTINGS = {
 // 只允许TUN/fake-IP保留段；不含代理地址、服务密钥或本机网页工具配置。
 export const RELEASE_WEB_SEARCH = {
   searchProvider: "exa",
+  workflow: "none",
   ssrf: { allowRanges: ["198.18.0.0/15"], trustEnvProxy: false },
 };
 

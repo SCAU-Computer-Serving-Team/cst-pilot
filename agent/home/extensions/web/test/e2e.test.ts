@@ -25,6 +25,10 @@ test("HTTP 端到端冒烟：并发会话与队列、幂等重放、模型范围
 	let modelCalls = 0;
 	const modelRequests: string[] = [];
 	const modelPaths: string[] = [];
+	let releaseSteeringResponse!: () => void;
+	const steeringResponse = new Promise<void>((resolve) => {
+		releaseSteeringResponse = resolve;
+	});
 	let releaseInitialResponses!: () => void;
 	const initialResponses = new Promise<void>((resolve) => {
 		releaseInitialResponses = resolve;
@@ -43,9 +47,8 @@ test("HTTP 端到端冒烟：并发会话与队列、幂等重放、模型范围
 			response.end(JSON.stringify({ error: { message: authError ? "Unauthorized" : "Insufficient Balance" } }));
 			return;
 		}
-		await new Promise((resolve) =>
-			setTimeout(resolve, payload.includes("running task") && !payload.includes("interrupt insert") ? 1200 : 180),
-		);
+		if (payload.includes("running task") && !payload.includes("interrupt insert")) await steeringResponse;
+		await new Promise((resolve) => setTimeout(resolve, 180));
 		response.writeHead(200, { "Content-Type": "text/event-stream" });
 		response.write(
 			`data: ${JSON.stringify({ id: "mock", object: "chat.completion.chunk", choices: [{ index: 0, delta: { role: "assistant", content: "OK" }, finish_reason: null }] })}\n\n`,
@@ -440,15 +443,38 @@ test("HTTP 端到端冒烟：并发会话与队列、幂等重放、模型范围
 			await new Promise((resolve) => setTimeout(resolve, 10));
 		}
 		assert.equal((await send(`${sessionPath}/close`, {})).status, 200);
+		await send(`${sessionPath}/messages`, { id: "after-steer", text: "post-steer queue", delivery: "queue" });
 		await send(`${sessionPath}/messages`, { id: "steer-item", text: "interrupt insert", delivery: "queue" });
 		const queue = (await (await fetch(`${origin}${sessionPath}`)).json()).queue;
 		const steering = await send(`${sessionPath}/queue/steer-item/steer`, { version: queue.version });
 		assert.equal(steering.status, 200);
+		for (let i = 0; i < 60; i++) {
+			if (pool.get(one.id)?.session.getSteeringMessages().includes("interrupt insert")) break;
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+		assert.deepEqual(pool.get(one.id)?.session.getSteeringMessages(), ["interrupt insert"]);
+		const waiting = (await (await fetch(`${origin}${sessionPath}`)).json()).queue;
+		assert.equal(waiting.items.find((item: { id: string }) => item.id === "after-steer").status, "pending");
+		releaseSteeringResponse();
 		for (let i = 0; i < 120; i++) {
 			if (modelRequests.some((text) => text.includes("interrupt insert"))) break;
 			await new Promise((resolve) => setTimeout(resolve, 50));
 		}
-		assert.ok(modelRequests.some((text) => text.includes("interrupt insert")));
+		assert.ok(modelRequests.some((text) => text.includes("interrupt insert") && !text.includes("post-steer queue")));
+		for (let i = 0; i < 120; i++) {
+			const state = await (await fetch(`${origin}${sessionPath}`)).json();
+			if (state.queue.items.every((item: { status: string }) => item.status === "delivered")) break;
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		const afterSteering = await (await fetch(`${origin}${sessionPath}`)).json();
+		assert.ok(afterSteering.queue.items.every((item: { status: string }) => item.status === "delivered"));
+		assert.deepEqual(
+			afterSteering.messages
+				.filter((message: { role: string }) => message.role === "user")
+				.slice(-3)
+				.map((message: { clientMessageId: string }) => message.clientMessageId),
+			["steer-anchor", "steer-item", "after-steer"],
+		);
 		const authCalls = modelCalls;
 		assert.equal(
 			(await send(`${sessionPath}/messages`, { id: "expired-key", text: "force-auth-error", delivery: "queue" }))
@@ -511,6 +537,7 @@ test("HTTP 端到端冒烟：并发会话与队列、幂等重放、模型范围
 			),
 		);
 	} finally {
+		releaseSteeringResponse();
 		server.closeAllConnections();
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 		await pool.close();

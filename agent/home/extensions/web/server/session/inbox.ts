@@ -44,6 +44,8 @@ export class SessionInbox {
 	private wakeRequested = false;
 	private closed = false;
 	private active?: Promise<void>;
+	private prompting = false;
+	private readonly deliveries = new Set<Promise<boolean>>();
 	private readonly file: string;
 	readonly sessionId: string;
 	private readonly executor: InboxExecutor;
@@ -143,6 +145,7 @@ export class SessionInbox {
 			const direct =
 				delivery === "queue" &&
 				!current.paused &&
+				!this.prompting &&
 				!this.executor.isBusy() &&
 				!current.items.some((entry) => ["pending", "delivering"].includes(entry.status));
 			const added: InboxItem = {
@@ -246,6 +249,7 @@ export class SessionInbox {
 	async close(): Promise<void> {
 		this.closed = true;
 		await this.active;
+		await Promise.all(this.deliveries);
 		await this.serial;
 	}
 
@@ -272,11 +276,14 @@ export class SessionInbox {
 
 	private async drain(): Promise<void> {
 		try {
-			while (true) {
+			while (!this.closed) {
 				const next = await this.transact(async (current) => {
 					if (current.paused) return undefined;
 					const failed = current.items.some((item) => item.status === "failed");
-					const busy = this.executor.isBusy();
+					const sessionBusy = this.executor.isBusy();
+					// 等待首条消息完成附件读取等准备，避免插话先进入 SDK。
+					if (this.prompting && !sessionBusy) return undefined;
+					const busy = this.prompting || sessionBusy;
 					if (busy && current.items.some((item) => item.status === "pending" && item.delivery === "direct")) {
 						await this.save({
 							...current,
@@ -287,6 +294,7 @@ export class SessionInbox {
 									: item,
 							),
 						});
+						this.wakeRequested = true;
 						return undefined;
 					}
 					const pending = current.items.find(
@@ -304,57 +312,69 @@ export class SessionInbox {
 					return { item, busy };
 				});
 				if (!next) return;
-				let completed = false;
-				try {
-					if (next.busy && next.item.delivery === "steer")
-						await this.executor.steer(next.item.text, next.item.images ?? [], next.item.skill, next.item.id);
-					else await this.executor.prompt(next.item.text, next.item.images ?? [], next.item.skill, next.item.id);
-					completed = true;
-					await this.transact(async (current) => {
-						await this.save({
-							...current,
-							version: current.version + 1,
-							items: current.items.map((entry) =>
-								entry.id === next.item.id ? { ...entry, status: "delivered" } : entry,
-							),
-						});
-					});
-				} catch (cause) {
-					const accepted = completed || (this.executor.wasAccepted?.(next.item.id) ?? false);
-					const error = cause instanceof Error ? cause.message.slice(0, 500) : "消息未能投递，请检查模型服务。";
-					await this.transact(async (current) => {
-						const updated: InboxSnapshot = {
-							...current,
-							version: current.version + 1,
-							items: current.items.map((entry) =>
-								entry.id === next.item.id
-									? {
-											...entry,
-											status: accepted ? ("delivering" as const) : ("failed" as const),
-											uncertain: accepted || undefined,
-											error,
-										}
-									: entry,
-							),
-						};
-						try {
-							await this.save(updated);
-						} catch (saveError) {
-							if (!accepted) throw saveError;
-							// 磁盘保留 delivering；当前进程立即显示待核对，禁止再次投递。
-							this.data = updated;
-							try {
-								this.onChange?.(structuredClone(updated));
-							} catch {
-								/* 下一次快照承接。 */
-							}
-						}
-					});
-					return; // Never skip a failed or uncertain item.
-				}
+				const steering = next.busy && next.item.delivery === "steer";
+				if (!steering) this.prompting = true;
+				// prompt 等待整轮结束；独立保存其结果，让调度器继续处理插话。
+				const task = this.deliver(next.item, steering).catch(() => false);
+				this.deliveries.add(task);
+				void task.then((delivered) => {
+					this.deliveries.delete(task);
+					if (!steering) this.prompting = false;
+					if (delivered) this.schedule();
+				});
+				if (steering && !(await task)) return;
 			}
 		} catch {
 			// Persistence failed; leave the last durable state untouched and do not submit anything else.
+		}
+	}
+
+	private async deliver(item: InboxItem, steering: boolean): Promise<boolean> {
+		let completed = false;
+		try {
+			if (steering) await this.executor.steer(item.text, item.images ?? [], item.skill, item.id);
+			else await this.executor.prompt(item.text, item.images ?? [], item.skill, item.id);
+			completed = true;
+			await this.transact(async (current) => {
+				await this.save({
+					...current,
+					version: current.version + 1,
+					items: current.items.map((entry) => (entry.id === item.id ? { ...entry, status: "delivered" } : entry)),
+				});
+			});
+			return true;
+		} catch (cause) {
+			const accepted = completed || (this.executor.wasAccepted?.(item.id) ?? false);
+			const error = cause instanceof Error ? cause.message.slice(0, 500) : "消息未能投递，请检查模型服务。";
+			await this.transact(async (current) => {
+				const updated: InboxSnapshot = {
+					...current,
+					version: current.version + 1,
+					items: current.items.map((entry) =>
+						entry.id === item.id
+							? {
+									...entry,
+									status: accepted ? ("delivering" as const) : ("failed" as const),
+									uncertain: accepted || undefined,
+									error,
+								}
+							: entry,
+					),
+				};
+				try {
+					await this.save(updated);
+				} catch (saveError) {
+					if (!accepted) throw saveError;
+					// 磁盘保留 delivering；当前进程立即显示待核对，禁止再次投递。
+					this.data = updated;
+					try {
+						this.onChange?.(structuredClone(updated));
+					} catch {
+						/* 下一次快照承接。 */
+					}
+				}
+			});
+			return false; // Never skip a failed or uncertain item.
 		}
 	}
 }

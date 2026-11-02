@@ -204,7 +204,7 @@ export function createWebApi(
 			);
 			inboxes.set(id, instance);
 			slot.session.subscribe((event) => {
-				if (event.type === "agent_settled") setTimeout(() => instance?.wake(), 0);
+				if (event.type === "agent_start" || event.type === "agent_settled") setTimeout(() => instance?.wake(), 0);
 			});
 		}
 		return instance;

@@ -18,7 +18,7 @@ TUI 默认主题由 Pi 设置管理。Web 默认浅色，运行后保存到独�
 
 默认构建版本为 `v0.6`，VERSION、ZIP 和 BUILD-INFO 同步。`--version <版本>` 可显式指定其他版本。
 
-发行树生成 `agent/home/web-search.json`，通过 `searchProvider: "exa"` 使用无需密钥的 Exa MCP，并配置 `ssrf.allowRanges: ["198.18.0.0/15"]` 支持 TUN 假 IP 代理。启动器清理宿主搜索密钥与服务端点。`trustEnvProxy` 保持 false，本机地址、其他私网及重定向检查保留；发行检查拒绝额外字段、密钥或扩大放行范围，不复制构建机同名配置。
+发行树生成 `agent/home/web-search.json`，通过 `searchProvider: "exa"` 使用无需密钥的 Exa MCP，以 `workflow: "none"` 默认直接返回结果、关闭浏览器审核，并配置 `ssrf.allowRanges: ["198.18.0.0/15"]` 支持 TUN 假 IP 代理。启动器清理宿主搜索密钥与服务端点。`trustEnvProxy` 保持 false，本机地址、其他私网及重定向检查保留；发行检查拒绝额外字段、密钥或扩大放行范围，不复制构建机同名配置。
 
 `--esbuild <本地esbuild入口>` 可复用已安装的 0.25.10。未指定时使用固定版本的 npx。`--skip-smoke` 仅用于检查装配目录，不能同时生成 ZIP。
 
