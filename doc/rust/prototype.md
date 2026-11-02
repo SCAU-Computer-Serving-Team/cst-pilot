@@ -1,8 +1,8 @@
 # Rust 重写推荐技术栈
 
-推荐一个 Rust 核心服务，供 TUI、GPUI 桌面端和 Web 共用。选型目标是减少协议、存储和基础控件的维护，把开发集中在诊断能力与交互上。
+推荐以 Rust 重写 Pi 核心，由 CST Pilot 装配为 TUI、GPUI 桌面端和 Web 共用的本机服务。选型优先保证核心的扩展能力和独立复用，并复用协议、存储及界面组件。
 
-本文记录推荐方案，尚待原型验证。产品行为与安全边界沿用[项目规格](../SPEC.md)。
+本文记录推荐技术栈与采用条件，选型尚待原型验证。开发顺序见 [PLAN.md](PLAN.md)，产品行为与安全边界沿用[项目规格](../SPEC.md)。
 
 ## 一、核心结构
 
@@ -27,13 +27,13 @@ flowchart LR
 | 本机系统操作与便携交付 | Rust | 可直接调用 Windows 接口、管理子进程并编译为原生程序；类型与所有权检查约束跨模块数据和资源生命周期 |
 | 网络请求、后台任务与停止 | Tokio + tokio-util | 模型输出、遥测和工具任务需要并发，停止请求需要及时处理；统一网络、定时器和取消信号，减少执行环境适配 |
 | 三端共用服务 | Axum + Tower + tower-http | 三端需要同一套命令与事件接口；复用 HTTP 路由、SSE、访问检查和静态资源服务 |
-| 模型接入 | [Rig](https://github.com/0xPlaygrounds/rig) 协议层 + 项目自有精简调度 | 模型协议持续变化，复用请求编码、流解析和工具续答；会话顺序、恢复与工具权限由项目控制。响应头钩子可读取 CSTOA 账单请求 ID |
+| 模型接入 | Rust Pi 模型接口 + [Rig](https://github.com/0xPlaygrounds/rig) 协议适配（待验证） | 由核心定义消息、Provider 和事件接口，评估复用请求编码与流解析；验证思考签名、用量及响应头读取能力 |
 | 便携状态与一致性 | SQLite + [SQLx](https://github.com/launchbadge/sqlx) | 会话、输入回执和任务状态需要一起提交；SQLite 提供嵌入式存储与事务，SQLx 内置数据库后台线程，避免阻塞网络任务 |
 | 三端数据与工具参数 | serde + schemars + ts-rs | 请求、事件、工具参数和前端类型需要保持一致；复用序列化、JSON Schema 与 TypeScript 类型生成，服务端继续校验实际输入 |
 | 认证、检索与遥测请求 | reqwest | 这些请求独立于模型协议；共用 HTTP 客户端能力，集中设置代理、证书、超时和重定向规则 |
 | 故障定位 | tracing + thiserror + anyhow | 需要区分业务失败与系统错误，并关联跨模块任务；复用结构化日志和错误传递，敏感值排除记录 |
 
-Rig 负责 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 和 Gemini 的协议适配。项目只实现诊断需要的会话、工具循环、分支、压缩与恢复，不引入通用扩展宿主。
+模型层覆盖 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 和 Gemini，Rig 的采用范围由协议测试确定。Rust Pi 核心提供通用执行、会话、扩展和 SDK；CST Pilot 通过公开接口注册诊断、认证等业务扩展。
 
 ## 三、三端界面
 
