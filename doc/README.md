@@ -29,7 +29,8 @@
 
 | 文档 | 职责 |
 |---|---|
-| [rust/PLAN.md](rust/PLAN.md) | Rust Pi 核心重写、CST Pilot 迁移与三端适配的阶段顺序、交付内容和完成条件 |
+| [rust/plan/0.PLAN.md](rust/plan/0.PLAN.md) | Rust Pi 核心重写、CST Pilot 迁移与三端适配的阶段顺序、交付内容和完成条件 |
+| [rust/plan/1.model-core.md](rust/plan/1.model-core.md) | 阶段 1 模型核心（`pi-ai`）的架构取舍、目录结构、核心接口与云厂商裁剪清单 |
 | [rust/prototype.md](rust/prototype.md) | Rust 重写的推荐技术栈、选择理由与采用条件；尚待原型验证 |
 
 ## 同名文件职责
