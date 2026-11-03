@@ -38,7 +38,13 @@ export async function withFileLock<T>(target: string, operation: () => Promise<T
 			}
 			break;
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code !== "EEXIST") {
+				// Windows 删除中的目录可能短暂返回 EPERM；持续失败仍保留原错误。
+				if (process.platform !== "win32" || code !== "EPERM" || attempt >= 100) throw error;
+				await setTimeout(20 + Math.random() * 30);
+				continue;
+			}
 			if (await abandonedLock(lock)) {
 				// 仅一个进程清理失效锁，取得清理权后重新核对 owner。
 				const recovery = `${lock}.recovery`;
