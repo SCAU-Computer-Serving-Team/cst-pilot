@@ -55,13 +55,20 @@
 
 具体用法与权限、硬件限制见 [诊断工具规格](doc/diagnostics/SPEC.md) 与 [工具接口](doc/diagnostics/API.md)。
 
+## 未来计划
+
+1. 根据用户反馈不断迭代
+2. 使用**Rust**重写本项目并提供Web,TUI,Desktop三端支持（已有文档）
+3. 实验性质`Pi-Durable`Rust版支持
+
 ## 目录结构
 
 ### 开发版（本仓库）
 
 ```text
 cst-pilot/
-|-- pi.cmd                     启动入口
+|-- pi.cmd                     TUI 启动入口
+|-- pi-web.cmd                 启动 TUI 宿主并打开 Web
 |-- launcher.ps1               管理员授权与便携运行环境
 |-- assets/                    品牌资源
 |-- agent/home/
@@ -79,6 +86,7 @@ cst-pilot/
 ```text
 cst-pilot/
 |-- pi.cmd
+|-- pi-web.cmd
 |-- launcher.ps1
 |-- agent/
 |   |-- .runtime/              Pi 运行时，由 pi.cmd 调用
@@ -103,13 +111,13 @@ cst-pilot/
 
 ## 使用方式
 
-从 [Releases](https://github.com/SCAU-Computer-Serving-Team/cst-pilot/releases/latest) 下载发行版 ZIP，完整解压到电脑或 U 盘，然后双击 `pi.cmd`。在 Windows 用户账户控制（UAC）窗口中确认授权；普通账户需要输入管理员凭据。
+从 [Releases](https://github.com/SCAU-Computer-Serving-Team/cst-pilot/releases/latest) 下载发行版 ZIP，完整解压到电脑或 U 盘，然后双击 `pi.cmd` 启动终端界面，或双击 `pi-web.cmd` 启动终端宿主并自动打开 Web。在 Windows 用户账户控制（UAC）窗口中确认授权；普通账户需要输入管理员凭据。
 
 交互界面优先在已安装的 Windows Terminal（`wt`）中打开；未安装或启动请求失败时使用系统控制台，不安装终端软件。
 
 1. 首次运行时执行 `/login`，为默认 DeepSeek 服务填写 API key，或登录CSTOA使用社团统一提供的模型。Web 缺少密钥时会提示配置；新会话默认模型在“设置 → 模型偏好”中选择。
 2. 描述机主遇到的问题，让 Agent 调用工具协助排查。
-3. 想用浏览器操作时，执行 `/web`。原终端会进入待机，请保持终端窗口打开。
+3. 使用 `pi.cmd` 启动后，执行 `/web` 可切换到浏览器；也可以双击`pi-web.cmd` 自动完成此步骤。终端会进入待机，请保持终端窗口打开。
 
 
 ## 致谢

@@ -9,7 +9,7 @@
 | 组成部分 | 发行规格 |
 |---|---|
 | Pi 运行时 | 锁定官方 Windows x64 `0.85.1` 二进制及配套资源，逐文件核验 SHA-256；`pi.exe` 装配为 `agent/.runtime/prx.bin` |
-| 启动与品牌 | 根目录包含 `pi.cmd`、`launcher.ps1`、`assets/logo.png`、`README.md`、`CHANGELOG.md`、`LICENSE`、`THIRD-PARTY-NOTICES.md` |
+| 启动与品牌 | 根目录包含 `pi.cmd`、`pi-web.cmd`、`launcher.ps1`、`assets/logo.png`、`README.md`、`CHANGELOG.md`、`LICENSE`、`THIRD-PARTY-NOTICES.md` |
 | 随包诊断组件 | `pwsh/`（排除 Schemas、preview 与远程安装脚本）、`wiztree/`（排除运行期 ini 与 tmp）、`lhm/`（0.9.6 `.NET 10` 运行时 DLL） |
 | 第三方扩展 | `pi-web-access`（0.18.0）与 `@ff-labs/pi-fff`（0.10.6）经 esbuild 预打包至 `agent/home/packages/`，保留 `pi-fff` Windows x64 原生依赖链；`pi-open-tui`（0.2.10）原样复制 |
 | 项目扩展与技能 | `agent/home/extensions/`（排除所有 `test/` 目录）、`agent/home/skills/`、`agent/home/APPEND_SYSTEM.md` |

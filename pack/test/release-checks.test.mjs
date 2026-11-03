@@ -115,6 +115,14 @@ test('发行包缺少 Puppeteer 或其许可证时拒绝打包', () => {
   }
 });
 
+test('发行包缺少 Web 启动入口时拒绝打包', () => {
+  const root = makeTree();
+  try {
+    fs.rmSync(path.join(root, 'pi-web.cmd'));
+    assert.throws(() => checkReleaseContent(root, filesOf(root)), /缺少必需文件.*pi-web/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test('a missing license file is rejected', () => {
   const root = makeTree();
   fs.rmSync(path.join(root, 'licenses/MPL-2.0.txt'));

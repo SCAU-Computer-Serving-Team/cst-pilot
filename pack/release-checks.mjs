@@ -52,6 +52,7 @@ export function checkReleaseTree(root, files) {
 const WEB_STATIC = 'agent/home/extensions/web/static';
 export const REQUIRED_RELEASE_FILES = [
   'pi.cmd',
+  'pi-web.cmd',
   'launcher.ps1',
   'agent/home/APPEND_SYSTEM.md',
   'agent/home/web-search.json',

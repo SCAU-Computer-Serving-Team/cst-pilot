@@ -24,9 +24,10 @@ function fixture() {
 }
 const windows = { skip: process.platform !== 'win32' || !pwsh };
 
-test('pi.cmd 保持 ASCII，避免 cmd 解码差异', () => {
-  const entry = fs.readFileSync(path.join(repo, 'pi.cmd'));
-  assert.ok(entry.every(byte => byte < 128));
+test('启动入口保持 ASCII，避免 cmd 解码差异', () => {
+  for (const entry of ['pi.cmd', 'pi-web.cmd']) {
+    assert.ok(fs.readFileSync(path.join(repo, entry)).every(byte => byte < 128), entry);
+  }
 });
 
 test('搜索服务不继承宿主密钥与端点', windows, () => {
@@ -223,35 +224,39 @@ test('Pi 子进程继承标准输入输出，RPC 响应与非零退出码可透�
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
-test('真实 cmd 入口支持特殊路径、中文参数、空参数和尾部反斜线', windows, () => {
-  const base = fixture();
-  const root = path.join(base, "kit 中文 ' & % ! [literal]");
-  try {
-    fs.mkdirSync(root);
-    fs.copyFileSync(path.join(repo, 'pi.cmd'), path.join(root, 'pi.cmd'));
-    fs.symlinkSync(path.dirname(pwsh), path.join(root, 'pwsh'), 'junction');
-    const probe = path.join(root, 'argv.cjs');
-    fs.writeFileSync(probe, "console.log(JSON.stringify({args:process.argv.slice(2),cwd:process.cwd()}));process.exit(17);");
-    const mock = `
-function Test-PilotAdministrator { $true }
-function Start-PilotWindowProcess { throw 'unexpected UAC' }
-function Get-PilotRuntime { param($Root) @{file=${quote(process.execPath)};arguments=@(${quote(probe)})} }
-`;
-    const source = fs.readFileSync(launcher, 'utf8').replace("if ($MyInvocation.InvocationName -ne '.') {", `${mock}\nif ($MyInvocation.InvocationName -ne '.') {`);
-    fs.writeFileSync(path.join(root, 'launcher.ps1'), source);
-    const args = ['--model', '中文/model space', '--print', "safe & | < > ^ ! % text ' words", '', 'C:\\trailing\\'];
-    const windowsQuote = value => `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1')}"`;
-    const command = `""${path.join(root, 'pi.cmd')}" ${args.map(windowsQuote).join(' ')}"`;
-    const result = spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', command], {
-      cwd: base, encoding: 'utf8', timeout: 30_000, windowsHide: true, windowsVerbatimArguments: true,
-    });
-    assert.equal(result.status, 17, result.stderr);
-    const value = JSON.parse(result.stdout.trim());
-    assert.deepEqual(value.args, args);
-    assert.equal(value.cwd, base);
-    assert.ok(fs.statSync(path.join(root, '.state/tmp')).isDirectory());
-  } finally { fs.rmSync(base, { recursive: true, force: true }); }
-});
+for (const entry of ['pi.cmd', 'pi-web.cmd']) {
+  test(`真实 ${entry} 入口支持特殊路径、中文参数、空参数和尾部反斜线`, windows, () => {
+    const base = fixture();
+    const root = path.join(base, "kit 中文 ' & % ! [literal]");
+    try {
+      fs.mkdirSync(root);
+      for (const file of ['pi.cmd', 'pi-web.cmd']) fs.copyFileSync(path.join(repo, file), path.join(root, file));
+      fs.symlinkSync(path.dirname(pwsh), path.join(root, 'pwsh'), 'junction');
+      const probe = path.join(root, 'argv.cjs');
+      fs.writeFileSync(probe, "console.log(JSON.stringify({args:process.argv.slice(2),cwd:process.cwd()}));process.exit(17);");
+      const mock = `
+  function Test-PilotAdministrator { $true }
+  function Start-PilotWindowProcess { throw 'unexpected UAC' }
+  function Get-PilotRuntime { param($Root) @{file=${quote(process.execPath)};arguments=@(${quote(probe)})} }
+  `;
+      const source = fs.readFileSync(launcher, 'utf8').replace("if ($MyInvocation.InvocationName -ne '.') {", `${mock}\nif ($MyInvocation.InvocationName -ne '.') {`);
+      fs.writeFileSync(path.join(root, 'launcher.ps1'), source);
+      const args = ['--model', '中文/model space', '--print', "safe & | < > ^ ! % text ' words", '', 'C:\\trailing\\'];
+      const windowsQuote = value => `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1')}"`;
+      for (const forwarded of [[], args]) {
+        const command = `""${path.join(root, entry)}" ${forwarded.map(windowsQuote).join(' ')}"`;
+        const result = spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', command], {
+          cwd: base, encoding: 'utf8', timeout: 30_000, windowsHide: true, windowsVerbatimArguments: true,
+        });
+        assert.equal(result.status, 17, result.stderr);
+        const value = JSON.parse(result.stdout.trim());
+        assert.deepEqual(value.args, entry === 'pi-web.cmd' ? ['/web', ...forwarded] : forwarded);
+        assert.equal(value.cwd, base);
+      }
+      assert.ok(fs.statSync(path.join(root, '.state/tmp')).isDirectory());
+    } finally { fs.rmSync(base, { recursive: true, force: true }); }
+  });
+}
 
 test('开发运行时实际启动 Pi，版本参数与退出码正确', {
   skip: windows.skip || !fs.existsSync(path.join(repo, 'agent/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js')),
