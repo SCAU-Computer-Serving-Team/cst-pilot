@@ -2,15 +2,62 @@ name: CI
 
 on:
   pull_request:
+    branches: [main]
   push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      full:
+        description: 运行完整验收（浏览器、字体与跨端测试）
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
+  rust:
+    name: Rust 核心
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CARGO_TERM_COLOR: always
+      PI_OFFLINE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: 准备 Rust 隔离环境
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'cst-rust'
+          New-Item -ItemType Directory -Force "$root/agent" | Out-Null
+          "CARGO_TARGET_DIR=$root/target" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "PI_CODING_AGENT_DIR=$root/agent" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.1'
+          components: rustfmt, clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ runner.temp }}/cst-rust/target
+          key: rust-${{ runner.os }}-1.99.1-${{ hashFiles('Cargo.lock') }}
+      - name: 格式检查
+        run: cargo fmt --all --check
+      - name: Clippy 检查
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: 隔离回归测试
+        run: cargo test --workspace --locked
+
   agent:
     name: Agent 与发行包
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,25 +82,35 @@ jobs:
         env:
           CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
       - run: npm run test:web --prefix agent
+        if: inputs.full
         env:
           CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
       - run: npm run test:web:shared-audit --prefix agent
+        if: inputs.full
         env:
           CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
       - name: 安装固定网页扩展以验证实际SSRF规则
+        if: inputs.full
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force agent/home/npm | Out-Null
           Copy-Item pack/extensions.package.json agent/home/npm/package.json
           Copy-Item pack/extensions.package-lock.json agent/home/npm/package-lock.json
           npm ci --ignore-scripts --legacy-peer-deps --prefix agent/home/npm
+      - name: 启动器与发行树回归
+        if: ${{ !inputs.full }}
+        run: node --test pack/test/launcher.test.mjs pack/test/release-checks.test.mjs
+        env:
+          CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
       - run: node --test pack/test/*.test.mjs
+        if: inputs.full
         env:
           CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
 
   web:
     name: Web 前端
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -67,9 +124,11 @@ jobs:
       - run: npm ci --prefix agent --ignore-scripts
       - run: npm ci --prefix src/web/frontend --ignore-scripts
       - uses: actions/setup-python@v5
+        if: inputs.full
         with:
           python-version: '3.11'
       - run: python -m pip install -r src/web/frontend/scripts/font-requirements.txt
+        if: inputs.full
       - run: npm run lint --prefix src/web/frontend
       - run: npm run typecheck --prefix src/web/frontend
       - run: npm run test --prefix src/web/frontend
@@ -77,13 +136,16 @@ jobs:
         env:
           CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
       - run: npm run build --prefix src/web/frontend
+        if: inputs.full
       - run: npm run test:fonts --prefix src/web/frontend
+        if: inputs.full
       - name: 浏览器与跨端用户链路 E2E
+        if: inputs.full
         run: npm run test:web:e2e --prefix agent
         env:
           CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
       - name: 保存 E2E 验证证据
-        if: always()
+        if: ${{ always() && inputs.full }}
         uses: actions/upload-artifact@v4
         with:
           name: web-e2e-evidence

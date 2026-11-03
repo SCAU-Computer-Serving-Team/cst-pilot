@@ -4,7 +4,7 @@
 
 ## 环境
 
-Windows 上开发，命令用 PowerShell 执行。需要 Node 22.19.0 以上，仓库自带 `node/`（不入库）时可以改用它。字体生成使用 Python 3.11，与 CI 保持一致。
+Windows 上开发，命令用 PowerShell 执行。需要 Node 22.19.0 以上，仓库自带 `node/`（不入库）时可以改用它。字体生成使用 Python 3.11，与完整验收 CI 保持一致。Rust 模型核心使用 Rust 1.99.1。
 
 首次准备依赖：
 
@@ -31,10 +31,11 @@ python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 
 | 范围 | 命令 | 说明 |
 |---|---|---|
+| Rust 模型核心 | `cargo fmt --all --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、`cargo test --workspace --locked` | 格式、静态检查与隔离协议回归，真实模型测试默认忽略 |
 | 脚本、配置与 CSS | `npm run check:engineering --prefix agent` | Biome 静态规则与 PowerShell 语法 / PSScriptAnalyzer 1.24.0；覆盖已跟踪和新增文件 |
 | 后端格式与类型 | `npm run check --prefix agent` | biome 检查加 `tsc` |
 | 后端测试 | `npm run test:web --prefix agent` | Web 扩展的接口、会话与事件测试 |
-| 跨端共享验收 | `npm run test:web:shared-audit --prefix agent` | 独立 Pi 进程、真实工具、写权、上下文、配置与独立主题；CI 必跑 |
+| 跨端共享验收 | `npm run test:web:shared-audit --prefix agent` | 独立 Pi 进程、真实工具、写权、上下文、配置与独立主题；完整验收必跑 |
 | OAuth 测试 | `npm run test:oauth --prefix agent` | 模拟 OA 与真实 Pi 认证链路 |
 | 遥测测试 | `npm run test:telemetry --prefix agent` | 双端队列、独立确认与 TLS 故障；TLS 测试需要 OpenSSL |
 | 发行脚本测试 | `node --test pack/test/*.test.mjs` | 启动器、发行树、模型目录与遥测配置 |
@@ -52,7 +53,9 @@ python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 
 `pi.cmd` 交互启动请求管理员授权，优先使用已安装的 Windows Terminal。管道调用与发行冒烟需由已提权终端发起；启动器测试使用隔离副本和授权替身，不自动弹出 UAC。
 
-提交前运行与改动相关的检查。修改后端运行后端检查与测试；修改前端或画布运行前端格式、类型、测试、设计约束和构建。CI 覆盖上表，见 [.github/workflows/ci.yml](.github/workflows/ci.yml)。
+提交前运行与改动相关的检查。修改后端运行后端检查与测试；修改前端或画布运行前端格式、类型、测试、设计约束和构建。
+
+日常 CI 保留静态检查与轻量回归。浏览器 E2E、字体构建、Web 后端和跨端完整验收通过 `gh workflow run ci.yml -f full=true` 手动运行，范围见[测试规范](doc/TESTING.md#ci-执行范围)与[工作流](.github/workflows/ci.yml)。
 
 ## 提交
 
@@ -64,7 +67,7 @@ python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 
 ## 提交到上游
 
-直接向 `main` 提交，或开 PR 由 CI 验证后合并。CI 覆盖后端检查、后端测试、发行脚本测试，以及前端的 lint、类型、测试与构建；任一项失败都不合并。
+直接向 `main` 提交，或开 PR 由 CI 验证后合并。日常 CI 覆盖 Rust、前后端静态检查及轻量测试；发布前手动运行完整验收。要求运行的检查有失败项时不合并或发布。
 
 ## 报告问题
 

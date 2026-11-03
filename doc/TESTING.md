@@ -8,6 +8,9 @@
 
 | 范围 | 命令 | 验证职责 |
 |---|---|---|
+| Rust 格式与编译 | `cargo fmt --all --check`、`cargo check --workspace --all-targets --locked` | Cargo 工作区格式与全部编译目标 |
+| Rust 静态检查 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | 全部 Rust 编译目标零警告 |
+| Rust 模型核心 | `cargo test --workspace --locked` | 四种对话协议、分类器、凭据与目录、消息清洗及工具结果回填；默认仅请求本机模拟服务 |
 | 工程静态检查 | `npm run check:engineering --prefix agent` | MJS、JSON、CSS 的 Biome 规则与 PowerShell 语法／PSScriptAnalyzer 1.24.0 |
 | 后端格式与类型 | `npm run check --prefix agent` | `agent/home/extensions/` 全部扩展的 Biome 检查与严格 TypeScript 类型检查 |
 | 前端格式与类型 | `npm run lint --prefix src/web/frontend`、`npm run typecheck --prefix src/web/frontend` | React 规则检查、路由类型生成与 TypeScript 检查 |
@@ -20,6 +23,23 @@
 | 前端构建与字体 | `npm run build --prefix src/web/frontend`、`npm run test:fonts --prefix src/web/frontend` | 静态资源构建、三档 WOFF2 子集覆盖、哈希与许可校验 |
 | Web 浏览器端到端 | `npm run test:web:e2e --prefix agent` | 构建后在隔离 Chrome 中验证完整用户链路、持久化与进程重启；模型选择专项覆盖三级菜单、双向左右滑动与同步高度、中途返回、逐级 Esc、外部关闭、保存失败与过期响应、首页传递、键盘、浅深与窄屏 |
 | 遥测单元与跨仓库 | `npm run test:telemetry --prefix agent`、`npm run test:telemetry:e2e --prefix agent` | 统计采集、草稿恢复、扣点查询、双端队列、心跳与真实 Go 接收端联调（后者需设置 `CST_TELEMETRY_RECEIVER`） |
+
+### CI 执行范围
+
+日常 CI 在 `main` 推送和面向 `main` 的 PR 上运行。同分支的新任务会取消尚未完成的旧任务。
+
+| 模式 | 检查范围 |
+|---|---|
+| 日常 | Rust 格式、Clippy 与测试；工程静态检查、后端类型、OAuth 与遥测测试、启动器与发行树回归；前端格式、类型、单元测试及工具与文档契约 |
+| 完整验收 | 在日常范围上增加 Web 后端、跨端共享、全量发行脚本、前端构建、字体与浏览器 E2E；手动执行 `gh workflow run ci.yml -f full=true` |
+
+### Rust 测试环境
+
+Rust CI 使用 `1.99.1`，在 Linux 上运行。本地同时验证 Windows；Clippy 覆盖全部编译目标，CI 省略重复的 `cargo check`。`CARGO_TARGET_DIR` 指向 runner 临时目录，`PI_CODING_AGENT_DIR` 使用隔离目录，并设置 `PI_OFFLINE=1`。本地验证时，将编译产物和日志写入仓库外当天临时目录。
+
+`crates/pi-ai/tests/protocol_contracts.rs` 通过公开 `Models` 接口验证四种协议的多工具续答、图片输入、签名回放、事件顺序、正文超时与取消，并覆盖历史序列化和费用边界。
+
+真实 DeepSeek 联调独立执行：仅从 `PI_AI_LIVE_DEEPSEEK_KEY` 接收显式提供的测试凭据，默认忽略，CI 不运行。命令为 `cargo test -p pi-ai live_deepseek_responses_roundtrip_with_tools --locked -- --ignored --exact`。该测试通过 `Models` 完成工具调用、结果回填和最终续答，并检查思考签名与用量。
 
 ## 测试取舍与隔离原则
 
