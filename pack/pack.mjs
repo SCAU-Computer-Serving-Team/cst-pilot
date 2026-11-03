@@ -28,7 +28,7 @@ import { copyRuntimeDependencies } from "./runtime-dependencies.mjs";
 // ---------- 构建配置（发行工程单一事实源） ----------
 
 const CONFIG = {
-  VERSION: "v0.6",
+  VERSION: "v0.6.1",
   PI_VERSION: "0.85.1",
   PI_EXE_SHA256: "2d4d351da30bfe23a473032e66a571b238763565aa93754e74f4a939de13f195",
   ESBUILD_VERSION: "0.25.10",
