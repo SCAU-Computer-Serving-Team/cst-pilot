@@ -6,8 +6,8 @@ use serde_json::{Map, Value, json};
 use crate::api::{
     SseEvent, SseParser, build_base_options, build_header_map, calculate_cost,
     clamp_openai_prompt_cache_key, clamp_thinking_level, inject_copilot_dynamic_headers,
-    require_client_api_key, resolve_cache_retention, resolve_sampling_params, send_with_retry,
-    short_hash,
+    invoke_on_payload, invoke_on_provider_stream_event, invoke_on_response, require_client_api_key,
+    resolve_cache_retention, resolve_sampling_params, send_with_retry, short_hash,
 };
 use crate::streaming_json::ToolCallArgumentsStream;
 use crate::transform_messages::{
@@ -909,11 +909,13 @@ impl CompletionsStreamProcessor {
                             if let Some(arg_delta) = args_part
                                 && !arg_delta.is_empty()
                             {
-                                let partial_args = slot.args_stream.append(arg_delta);
-                                if let Some(ContentBlock::ToolCall(tc)) =
-                                    output.content.get_mut(c_idx)
+                                let (refreshed, partial_args) =
+                                    slot.args_stream.append_with_change(arg_delta);
+                                if refreshed
+                                    && let Some(ContentBlock::ToolCall(tc)) =
+                                        output.content.get_mut(c_idx)
                                 {
-                                    tc.arguments = partial_args;
+                                    tc.arguments = partial_args.clone();
                                 }
                                 stream.push(AssistantMessageEvent::ToolCallDelta {
                                     content_index: c_idx,
@@ -1143,7 +1145,10 @@ pub fn stream(
                 Some(&opt_headers),
             );
 
-            let payload = build_completions_params(&model, &context, options.as_ref());
+            let headers = super::invoke_on_headers(options.as_ref(), headers, &model).await?;
+
+            let raw_payload = build_completions_params(&model, &context, options.as_ref());
+            let payload = invoke_on_payload(options.as_ref(), raw_payload, &model).await?;
             let base = model.base_url.trim_end_matches('/');
             let url = format!("{base}/chat/completions");
             let client = reqwest::Client::new();
@@ -1159,6 +1164,8 @@ pub fn stream(
                 cancel_token.as_ref(),
             )
             .await?;
+
+            invoke_on_response(options.as_ref(), &resp, &model).await?;
 
             writer.push(AssistantMessageEvent::Start {
                 partial: output.clone(),
@@ -1183,11 +1190,13 @@ pub fn stream(
                 };
                 let bytes = chunk_res.map_err(|e| format!("Stream read error: {e}"))?;
                 for sse in sse_parser.feed_bytes(&bytes) {
+                    invoke_on_provider_stream_event(options.as_ref(), &sse, &model).await?;
                     processor.handle_sse(&sse, &mut output, &writer, &model)?;
                 }
             }
 
             for sse in sse_parser.finish() {
+                invoke_on_provider_stream_event(options.as_ref(), &sse, &model).await?;
                 processor.handle_sse(&sse, &mut output, &writer, &model)?;
             }
             processor.finish(&mut output, &writer, &model)?;

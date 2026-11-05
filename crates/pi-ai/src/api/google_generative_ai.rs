@@ -3,7 +3,8 @@ use serde_json::{Map, Value, json};
 
 use crate::api::{
     SseEvent, SseParser, build_base_options, build_header_map, calculate_cost,
-    clamp_thinking_level, require_client_api_key, send_with_retry, thinking_budget_for_level,
+    clamp_thinking_level, invoke_on_payload, invoke_on_provider_stream_event, invoke_on_response,
+    require_client_api_key, send_with_retry, thinking_budget_for_level,
 };
 use crate::transform_messages::{
     collapse_system_messages, get_current_tools, get_initial_system_message,
@@ -834,7 +835,10 @@ pub fn stream(
                 options.as_ref().and_then(|o| o.headers.as_ref()),
             );
 
-            let payload = build_google_params(&model, &context, options.as_ref());
+            let headers = super::invoke_on_headers(options.as_ref(), headers, &model).await?;
+
+            let raw_payload = build_google_params(&model, &context, options.as_ref());
+            let payload = invoke_on_payload(options.as_ref(), raw_payload, &model).await?;
             let base = model.base_url.trim_end_matches('/');
             let url = format!("{base}/models/{}:streamGenerateContent?alt=sse", model.id);
             let client = reqwest::Client::new();
@@ -850,6 +854,8 @@ pub fn stream(
                 cancel_token.as_ref(),
             )
             .await?;
+
+            invoke_on_response(options.as_ref(), &resp, &model).await?;
 
             writer.push(AssistantMessageEvent::Start {
                 partial: output.clone(),
@@ -874,11 +880,13 @@ pub fn stream(
                 };
                 let bytes = chunk_res.map_err(|e| format!("Stream read error: {e}"))?;
                 for sse in sse_parser.feed_bytes(&bytes) {
+                    invoke_on_provider_stream_event(options.as_ref(), &sse, &model).await?;
                     processor.handle_sse(&sse, &mut output, &writer, &model)?;
                 }
             }
 
             for sse in sse_parser.finish() {
+                invoke_on_provider_stream_event(options.as_ref(), &sse, &model).await?;
                 processor.handle_sse(&sse, &mut output, &writer, &model)?;
             }
             processor.finish(&mut output, &writer)?;

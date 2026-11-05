@@ -1247,6 +1247,37 @@ pub enum Transport {
     Auto,
 }
 
+/// 客户端身份归属元数据（对照 `utils/identity.ts` 的 `ClientAttribution`）。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientAttribution {
+    pub name: String,
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub categories: Option<Vec<String>>,
+}
+
+pub const PI_ATTRIBUTION_NAME: &str = "pi";
+pub const PI_ATTRIBUTION_URL: &str = "https://pi.dev";
+pub const PI_ATTRIBUTION_CATEGORY: &str = "cli-agent";
+
+/// 返回 Pi 默认客户端身份归属配置（`{ name: "pi", url: "https://pi.dev", categories: ["cli-agent"] }`）。
+pub fn pi_attribution() -> ClientAttribution {
+    ClientAttribution {
+        name: PI_ATTRIBUTION_NAME.to_owned(),
+        url: PI_ATTRIBUTION_URL.to_owned(),
+        categories: Some(vec![PI_ATTRIBUTION_CATEGORY.to_owned()]),
+    }
+}
+
+fn deserialize_double_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientIdentity {
@@ -1258,6 +1289,57 @@ pub struct ClientIdentity {
     pub app_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
+    /// 客户端归属信息：
+    /// - `None`：未设置（合并时跳过）；
+    /// - `Some(None)`：显式设为 `null`（关闭已设置的归属头）；
+    /// - `Some(Some(attr))`：启用指定归属头。
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_double_option"
+    )]
+    pub attribution: Option<Option<ClientAttribution>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+}
+
+impl ClientIdentity {
+    /// 返回包含 `pi_attribution()` 的默认身份标识。
+    pub fn with_pi_attribution() -> Self {
+        Self {
+            attribution: Some(Some(pi_attribution())),
+            ..Self::default()
+        }
+    }
+}
+
+/// 按字段顺序合并多个 `ClientIdentity`（后出现的非 `None` 字段覆盖前者，`attribution: Some(None)` 可显式清除归属）。
+pub fn merge_client_identity<'a>(
+    sources: impl IntoIterator<Item = Option<&'a ClientIdentity>>,
+) -> Option<ClientIdentity> {
+    let mut merged: Option<ClientIdentity> = None;
+    for source in sources.into_iter().flatten() {
+        let target = merged.get_or_insert_with(ClientIdentity::default);
+        if source.app_name.is_some() {
+            target.app_name = source.app_name.clone();
+        }
+        if source.app_version.is_some() {
+            target.app_version = source.app_version.clone();
+        }
+        if source.app_url.is_some() {
+            target.app_url = source.app_url.clone();
+        }
+        if source.user_agent.is_some() {
+            target.user_agent = source.user_agent.clone();
+        }
+        if source.attribution.is_some() {
+            target.attribution = source.attribution.clone();
+        }
+        if source.version.is_some() {
+            target.version = source.version.clone();
+        }
+    }
+    merged
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1265,6 +1347,33 @@ pub struct ProviderResponse {
     pub status: u16,
     pub headers: BTreeMap<String, String>,
 }
+
+/// Receives the fully assembled request headers, including provider authentication.
+/// Return the final headers; `None` values remove headers case-insensitively.
+pub type OnHeadersFn = Arc<
+    dyn Fn(
+            ProviderHeaders,
+            Model,
+        ) -> Pin<Box<dyn std::future::Future<Output = ProviderHeaders> + Send>>
+        + Send
+        + Sync,
+>;
+
+pub type OnPayloadFn = Arc<
+    dyn Fn(JsonValue, Model) -> Pin<Box<dyn std::future::Future<Output = Option<JsonValue>> + Send>>
+        + Send
+        + Sync,
+>;
+
+pub type OnResponseFn = Arc<
+    dyn Fn(ProviderResponse, Model) -> Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send
+        + Sync,
+>;
+
+pub type OnProviderStreamEventFn = Arc<
+    dyn Fn(JsonValue, Model) -> Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync,
+>;
 
 #[derive(Clone, Default)]
 pub struct StreamOptions {
@@ -1291,6 +1400,10 @@ pub struct StreamOptions {
     pub service_tier: Option<String>,
     pub tool_choice: Option<ToolChoice>,
     pub thinking_budgets: Option<ThinkingBudgets>,
+    pub on_headers: Option<OnHeadersFn>,
+    pub on_payload: Option<OnPayloadFn>,
+    pub on_response: Option<OnResponseFn>,
+    pub on_provider_stream_event: Option<OnProviderStreamEventFn>,
 }
 
 impl std::fmt::Debug for StreamOptions {
@@ -1352,7 +1465,6 @@ impl std::fmt::Debug for ClassifierOptions {
 
 struct EventStreamState {
     queue: VecDeque<AssistantMessageEvent>,
-    polled: bool,
     discard_events: bool,
     done: bool,
     final_result: Option<AssistantMessage>,
@@ -1389,7 +1501,6 @@ impl AssistantMessageEventStream {
                 started_instant: Instant::now(),
                 state: Mutex::new(EventStreamState {
                     queue: VecDeque::new(),
-                    polled: false,
                     discard_events: false,
                     done: false,
                     final_result: None,
@@ -1475,12 +1586,7 @@ impl AssistantMessageEventStream {
         loop {
             let notified = self.inner.result_notify.notified();
             {
-                let mut guard = self.inner.state.lock().expect("event stream lock poisoned");
-                if !guard.polled && !guard.discard_events {
-                    guard.discard_events = true;
-                    guard.queue.clear();
-                    guard.queue.shrink_to_fit();
-                }
+                let guard = self.inner.state.lock().expect("event stream lock poisoned");
                 if let Some(res) = &guard.final_result {
                     return res.clone();
                 }
@@ -1495,7 +1601,6 @@ impl Stream for AssistantMessageEventStream {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Option<Self::Item>> {
         let mut guard = self.inner.state.lock().expect("event stream lock poisoned");
-        guard.polled = true;
         if let Some(event) = guard.queue.pop_front() {
             return Poll::Ready(Some(event));
         }
@@ -1516,4 +1621,9 @@ pub fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// 生成符合 RFC 9562 的时间有序 UUID v7 字符串（对照上游 `uuidv7()`）。
+pub fn uuid_v7() -> String {
+    uuid::Uuid::now_v7().to_string()
 }

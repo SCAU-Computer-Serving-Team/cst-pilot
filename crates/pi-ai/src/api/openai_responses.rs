@@ -6,8 +6,8 @@ use serde_json::{Map, Value, json};
 use crate::api::{
     SseEvent, SseParser, build_base_options, build_header_map, calculate_cost,
     clamp_openai_prompt_cache_key, clamp_thinking_level, inject_copilot_dynamic_headers,
-    require_client_api_key, resolve_cache_retention, resolve_sampling_params, send_with_retry,
-    short_hash,
+    invoke_on_payload, invoke_on_provider_stream_event, invoke_on_response, require_client_api_key,
+    resolve_cache_retention, resolve_sampling_params, send_with_retry, short_hash,
 };
 use crate::streaming_json::ToolCallArgumentsStream;
 use crate::transform_messages::{
@@ -597,6 +597,7 @@ pub fn build_responses_params(
 // Responses Stream Processing
 // =============================================================================
 
+#[allow(clippy::large_enum_variant)]
 enum SlotState {
     Thinking {
         content_index: usize,
@@ -769,9 +770,11 @@ impl ResponsesStreamProcessor {
                 }) = self.slots.get_mut(&output_index)
                 {
                     let idx = *content_index;
-                    let partial_args = args_stream.append(delta);
-                    if let Some(ContentBlock::ToolCall(tc)) = output.content.get_mut(idx) {
-                        tc.arguments = partial_args;
+                    let (refreshed, partial_args) = args_stream.append_with_change(delta);
+                    if refreshed
+                        && let Some(ContentBlock::ToolCall(tc)) = output.content.get_mut(idx)
+                    {
+                        tc.arguments = partial_args.clone();
                     }
                     stream.push(AssistantMessageEvent::ToolCallDelta {
                         content_index: idx,
@@ -1311,7 +1314,10 @@ pub fn stream(
                 Some(&opt_headers),
             );
 
-            let payload = build_responses_params(&model, &context, options.as_ref());
+            let headers = super::invoke_on_headers(options.as_ref(), headers, &model).await?;
+
+            let raw_payload = build_responses_params(&model, &context, options.as_ref());
+            let payload = invoke_on_payload(options.as_ref(), raw_payload, &model).await?;
             let url = resolve_responses_endpoint_url(&model);
             let client = reqwest::Client::new();
 
@@ -1326,6 +1332,8 @@ pub fn stream(
                 cancel_token.as_ref(),
             )
             .await?;
+
+            invoke_on_response(options.as_ref(), &resp, &model).await?;
 
             writer.push(AssistantMessageEvent::Start {
                 partial: output.clone(),
@@ -1350,6 +1358,7 @@ pub fn stream(
                 };
                 let bytes = chunk_res.map_err(|e| format!("Stream read error: {e}"))?;
                 for sse in sse_parser.feed_bytes(&bytes) {
+                    invoke_on_provider_stream_event(options.as_ref(), &sse, &model).await?;
                     processor.handle_sse(&sse, &mut output, &writer, &model)?;
                     if processor.saw_terminal {
                         break 'read_stream;
@@ -1359,6 +1368,7 @@ pub fn stream(
 
             if !processor.saw_terminal {
                 for sse in sse_parser.finish() {
+                    invoke_on_provider_stream_event(options.as_ref(), &sse, &model).await?;
                     processor.handle_sse(&sse, &mut output, &writer, &model)?;
                     if processor.saw_terminal {
                         break;

@@ -445,6 +445,8 @@ async fn provider_endpoint_headers_and_classifier_auth_headers_are_applied() {
     let header_only_auth = ProviderAuth::api_key(ApiKeyAuth {
         name: "header-only".to_owned(),
         login_fn: None,
+        resolve_async: None,
+        configured_without_credentials: true,
         resolve: Arc::new(|_, _| {
             Ok(Some(AuthResult {
                 auth: ModelAuth {

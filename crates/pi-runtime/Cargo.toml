@@ -1,0 +1,46 @@
+[package]
+name = "pi-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "pi"
+path = "src/bin/pi.rs"
+
+[features]
+test-support = ["pi-session/test-support"]
+
+[dependencies]
+pi-ai = { path = "../pi-ai" }
+pi-agent = { path = "../pi-agent" }
+pi-session = { path = "../pi-session" }
+async-stream.workspace = true
+base64.workspace = true
+bytes.workspace = true
+futures-core.workspace = true
+futures-util.workspace = true
+image.workspace = true
+rquickjs.workspace = true
+unicode-segmentation.workspace = true
+regex.workspace = true
+regex-automata = "0.4"
+ignore = "0.4"
+globset = "0.4"
+similar = "2.7"
+icu_normalizer = { version = "2.4", default-features = false, features = ["compiled_data"] }
+regress.workspace = true
+reqwest.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

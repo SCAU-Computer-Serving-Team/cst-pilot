@@ -31,6 +31,8 @@ flowchart LR
 | 本地数据存储 | SQLite + [SQLx](https://github.com/launchbadge/sqlx) | 会话历史、输入回执和任务状态需要放在同一个数据库事务中保存，防止进程强杀或断电导致数据只写了一半。`SQLite` 单文件易于随 U 盘携带，`SQLx` 是异步 SQL 访问库，自带后台数据库线程，读写磁盘时不会阻塞网络请求。 |
 | 数据序列化与前后端类型 | serde + schemars + ts-rs | `serde` 负责 Rust 数据结构与 JSON 互转；`schemars` 根据代码结构自动生成工具参数的 JSON Schema；`ts-rs` 直接从 Rust 类型导出前端的 TypeScript 类型定义，保证三端接口字段一致。 |
 | 外部 HTTP 请求 | reqwest | Rust 常用的 HTTP 客户端库。用于发送 CSTOA 登录认证、联网检索和遥测上报请求，方便集中配置代理规则、TLS 证书、超时时间和重定向限制。 |
+| 工具编排沙箱与检索 | rquickjs + unicode-segmentation | `rquickjs` 提供轻量 QuickJS 虚拟机，复用官方 `PRELUDE_SOURCE` 引导脚本运行 `codemode` 异步工具编排，支持内存上限与中断轮询预算，确定性模式通过本地 `rquickjs-sys` 线程级时区补丁固定为 UTC；`unicode-segmentation` 提供 Unicode 词边界切分，支撑 `tool_search` 与 `searchTools()` 的 BM25 排序，中文分词粒度与上游 `Intl.Segmenter` 有差异。 |
+| 图片缩放与多模态剪贴板 | image + 原生剪贴板接口 | 使用 `image` 在后台线程完成 EXIF 方向修正、非标格式转 PNG 及 2000×2000 / 4.5 MiB 自适应压缩；配合系统剪贴板接口支持截图粘贴、文件路径读取与远程 `OSC 52` 复制。 |
 | 日志与错误处理 | tracing + thiserror + anyhow | `tracing` 记录带任务上下文的结构化日志，方便排查跨模块问题；`thiserror` 定义需要程序分支处理的业务错误码；`anyhow` 包装和向上传递意外的系统错误。敏感凭据在日志层统一过滤。 |
 
 模型接入层支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 和 Gemini 四种对话协议，以及 `typesafe-system-one` 分类器协议，具体设计见 [plan/1.model-core.md](plan/1.model-core.md)。Rust Pi 核心自身保持通用，提供会话、模型调用、工具调度和 SDK；CST Pilot 通过公开扩展接口接入诊断、认证和遥测业务。

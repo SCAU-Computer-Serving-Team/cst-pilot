@@ -5,8 +5,9 @@ use serde_json::{Map, Value, json};
 
 use crate::api::{
     SseEvent, SseParser, adjust_max_tokens_for_thinking, build_base_options, build_header_map,
-    calculate_cost, clamp_thinking_level, inject_copilot_dynamic_headers, require_client_api_key,
-    resolve_cache_retention, send_with_retry,
+    calculate_cost, clamp_max_tokens_to_context, clamp_thinking_level,
+    inject_copilot_dynamic_headers, invoke_on_payload, invoke_on_provider_stream_event,
+    invoke_on_response, require_client_api_key, resolve_cache_retention, send_with_retry,
 };
 use crate::streaming_json::ToolCallArgumentsStream;
 use crate::transform_messages::{
@@ -395,7 +396,7 @@ pub fn build_anthropic_params(
                     level,
                     options.and_then(|o| o.thinking_budgets.as_ref()),
                 );
-                max_tokens = adj_max;
+                max_tokens = clamp_max_tokens_to_context(model, context, adj_max);
                 let clamped_budget = budget.min(max_tokens.saturating_sub(1024));
                 if clamped_budget >= 1024 {
                     thinking_param = Some(json!({
@@ -500,6 +501,7 @@ pub fn build_anthropic_params(
 // Anthropic Stream Processing
 // =============================================================================
 
+#[allow(clippy::large_enum_variant)]
 enum AnthropicSlot {
     Text {
         content_index: usize,
@@ -723,10 +725,13 @@ impl AnthropicStreamProcessor {
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
                             let c_idx = *content_index;
-                            let partial_args = args_stream.append(json_piece);
-                            if let Some(ContentBlock::ToolCall(tc)) = output.content.get_mut(c_idx)
+                            let (refreshed, partial_args) =
+                                args_stream.append_with_change(json_piece);
+                            if refreshed
+                                && let Some(ContentBlock::ToolCall(tc)) =
+                                    output.content.get_mut(c_idx)
                             {
-                                tc.arguments = partial_args;
+                                tc.arguments = partial_args.clone();
                             }
                             stream.push(AssistantMessageEvent::ToolCallDelta {
                                 content_index: c_idx,
@@ -966,11 +971,14 @@ pub fn stream(
                 Some(&opt_headers),
             );
 
+            let headers = super::invoke_on_headers(options.as_ref(), headers, &model).await?;
+
             let mut effective_options = options.unwrap_or_default();
             if effective_options.api_key.is_none() {
                 effective_options.api_key = Some(api_key);
             }
-            let payload = build_anthropic_params(&model, &context, Some(&effective_options));
+            let raw_payload = build_anthropic_params(&model, &context, Some(&effective_options));
+            let payload = invoke_on_payload(Some(&effective_options), raw_payload, &model).await?;
             let url = anthropic_endpoint_url(&model.base_url);
             let client = reqwest::Client::new();
 
@@ -985,6 +993,8 @@ pub fn stream(
                 cancel_token.as_ref(),
             )
             .await?;
+
+            invoke_on_response(Some(&effective_options), &resp, &model).await?;
 
             writer.push(AssistantMessageEvent::Start {
                 partial: output.clone(),
@@ -1011,11 +1021,13 @@ pub fn stream(
                 };
                 let bytes = chunk_res.map_err(|e| format!("Stream read error: {e}"))?;
                 for sse in sse_parser.feed_bytes(&bytes) {
+                    invoke_on_provider_stream_event(Some(&effective_options), &sse, &model).await?;
                     processor.handle_sse(&sse, &mut output, &writer, &model)?;
                 }
             }
 
             for sse in sse_parser.finish() {
+                invoke_on_provider_stream_event(Some(&effective_options), &sse, &model).await?;
                 processor.handle_sse(&sse, &mut output, &writer, &model)?;
             }
 

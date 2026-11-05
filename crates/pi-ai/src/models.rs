@@ -12,7 +12,7 @@ use crate::api::{
 use crate::auth::{
     ApiKeyCredential, AuthCheck, AuthInteraction, AuthResolutionOverrides, AuthResult, AuthType,
     BoxFuture, Credential, CredentialStore, InMemoryCredentialStore, LoginOptions, ModelsError,
-    ModelsErrorCode, ProviderAuth, refresh_stored_oauth_credential,
+    ModelsErrorCode, ProviderAuth, refresh_stored_oauth_credential_cancellable,
     resolve_provider_auth_cancellable,
 };
 use crate::models_store::{InMemoryModelsStore, ModelsStore, ModelsStoreEntry};
@@ -22,7 +22,7 @@ use crate::types::{
     ClassifierContext, ClassifierModel, ClassifierOptions, ClassifierResult, ClassifierStopReason,
     ClientIdentity, Context, Model, ModelType, ProviderHeaders, SimpleStreamOptions, StopReason,
     StreamOptions, TranscriptContext, create_assistant_message_event_stream, known_api,
-    known_classifier_api, now_ms,
+    known_classifier_api, merge_client_identity, now_ms,
 };
 
 pub type StreamFn = Arc<
@@ -77,6 +77,27 @@ pub fn google_generative_ai_api() -> ProviderStreams {
         Arc::new(google_generative_ai::stream),
         Arc::new(google_generative_ai::stream_simple),
     )
+}
+
+pub fn standard_chat_api_config() -> ProviderApiConfig {
+    let mut map = BTreeMap::new();
+    map.insert(
+        known_api::OPENAI_COMPLETIONS.to_owned(),
+        openai_completions_api(),
+    );
+    map.insert(
+        known_api::OPENAI_RESPONSES.to_owned(),
+        openai_responses_api(),
+    );
+    map.insert(
+        known_api::ANTHROPIC_MESSAGES.to_owned(),
+        anthropic_messages_api(),
+    );
+    map.insert(
+        known_api::GOOGLE_GENERATIVE_AI.to_owned(),
+        google_generative_ai_api(),
+    );
+    ProviderApiConfig::ByApi(map)
 }
 
 pub type ClassifyFn = Arc<
@@ -138,6 +159,8 @@ pub struct RefreshModelsInput {
     pub allow_network: bool,
     pub force: bool,
     pub base_url: Option<String>,
+    /// Cancelled when this refresh completes or is superseded.
+    pub cancel_token: CancellationToken,
 }
 
 pub type FetchModelsFn = Arc<
@@ -167,7 +190,8 @@ struct ProviderInner {
     headers: Option<ProviderHeaders>,
     auth: ProviderAuth,
     baseline_models: Vec<AnyModel>,
-    dynamic_models: RwLock<Vec<AnyModel>>,
+    dynamic_models: Arc<RwLock<Vec<AnyModel>>>,
+    chat_model_overlay: Vec<Model>,
     fetch_models: Option<FetchModelsFn>,
     filter_models: Option<FilterModelsFn>,
     api: Option<ProviderApiConfig>,
@@ -200,13 +224,34 @@ impl Provider {
         &self.inner.auth
     }
 
+    pub fn to_create_options(&self) -> CreateProviderOptions {
+        CreateProviderOptions {
+            id: self.inner.id.clone(),
+            name: Some(self.inner.name.clone()),
+            base_url: self.inner.base_url.clone(),
+            headers: self.inner.headers.clone(),
+            auth: self.inner.auth.clone(),
+            models: self.get_all_models(),
+            fetch_models: self.inner.fetch_models.clone(),
+            filter_models: self.inner.filter_models.clone(),
+            api: self.inner.api.clone(),
+            classifiers: (!self.inner.classifiers.is_empty())
+                .then(|| self.inner.classifiers.clone()),
+        }
+    }
+
     pub fn has_dynamic_refresh(&self) -> bool {
         self.inner.fetch_models.is_some()
     }
 
     pub fn get_all_models(&self) -> Vec<AnyModel> {
         let mut merged = self.inner.baseline_models.clone();
-        if let Ok(dyn_models) = self.inner.dynamic_models.read() {
+        {
+            let dyn_models = self
+                .inner
+                .dynamic_models
+                .read()
+                .expect("dynamic models lock poisoned");
             for dm in dyn_models.iter() {
                 if let Some(pos) = merged.iter().position(|entry| {
                     entry.model_type() == dm.model_type() && entry.id() == dm.id()
@@ -217,7 +262,45 @@ impl Provider {
                 }
             }
         }
+        for model in &self.inner.chat_model_overlay {
+            merged.retain(|entry| !matches!(entry, AnyModel::Chat(chat) if chat.id == model.id));
+            merged.push(AnyModel::Chat(model.clone()));
+        }
         merged
+    }
+
+    /// Overlay chat catalog entries while retaining native classifiers, refresh
+    /// state and auth. Overlay entries bypass the native availability filter.
+    /// The supplied API implementation must delegate native chat requests.
+    pub fn with_chat_model_overlay(&self, models: Vec<Model>, api: ProviderApiConfig) -> Self {
+        let base = self.clone();
+        let ids: BTreeSet<_> = models.iter().map(|model| model.id.clone()).collect();
+        let filter = Arc::new(move |input: &[Model], credential: Option<&Credential>| {
+            let native: Vec<_> = input
+                .iter()
+                .filter(|m| !ids.contains(&m.id))
+                .cloned()
+                .collect();
+            let mut filtered = base.filter_chat_models(&native, credential);
+            filtered.extend(input.iter().filter(|m| ids.contains(&m.id)).cloned());
+            filtered
+        });
+        Self {
+            inner: Arc::new(ProviderInner {
+                id: self.inner.id.clone(),
+                name: self.inner.name.clone(),
+                base_url: self.inner.base_url.clone(),
+                headers: self.inner.headers.clone(),
+                auth: self.inner.auth.clone(),
+                baseline_models: self.inner.baseline_models.clone(),
+                dynamic_models: self.inner.dynamic_models.clone(),
+                chat_model_overlay: models,
+                fetch_models: self.inner.fetch_models.clone(),
+                filter_models: Some(filter),
+                api: Some(api),
+                classifiers: self.inner.classifiers.clone(),
+            }),
+        }
     }
 
     pub fn get_models(&self) -> Vec<Model> {
@@ -249,9 +332,11 @@ impl Provider {
     }
 
     pub(crate) fn set_dynamic_models(&self, models: Vec<AnyModel>) {
-        if let Ok(mut guard) = self.inner.dynamic_models.write() {
-            *guard = models;
-        }
+        *self
+            .inner
+            .dynamic_models
+            .write()
+            .expect("dynamic models lock poisoned") = models;
     }
 
     pub(crate) fn fetch_models_fn(&self) -> Option<FetchModelsFn> {
@@ -337,7 +422,8 @@ pub fn create_provider(input: CreateProviderOptions) -> Result<Provider, String>
             headers: input.headers,
             auth: input.auth,
             baseline_models: input.models,
-            dynamic_models: RwLock::new(Vec::new()),
+            dynamic_models: Arc::new(RwLock::new(Vec::new())),
+            chat_model_overlay: Vec::new(),
             fetch_models: input.fetch_models,
             filter_models: input.filter_models,
             api: input.api,
@@ -417,12 +503,18 @@ pub struct ModelsRefreshResult {
     pub errors: BTreeMap<String, ModelsError>,
 }
 
+#[derive(Clone)]
+struct ProviderRefresh {
+    generation: u64,
+    cancel_token: CancellationToken,
+}
+
 struct ModelsInner {
     providers: RwLock<BTreeMap<String, Provider>>,
     credentials: Arc<dyn CredentialStore>,
     models_store: Arc<dyn ModelsStore>,
     identity: Option<ClientIdentity>,
-    refresh_generations: RwLock<BTreeMap<String, u64>>,
+    refresh_generations: RwLock<BTreeMap<String, ProviderRefresh>>,
     publication_locks: std::sync::Mutex<BTreeMap<String, Arc<AsyncMutex<()>>>>,
 }
 
@@ -457,15 +549,22 @@ impl Models {
         }
     }
 
-    fn next_refresh_generation(&self, provider_id: &str) -> u64 {
+    fn next_refresh_generation(&self, provider_id: &str) -> ProviderRefresh {
         let mut guard = self
             .inner
             .refresh_generations
             .write()
             .expect("refresh_generations lock poisoned");
-        let next = guard.get(provider_id).copied().unwrap_or(0) + 1;
-        guard.insert(provider_id.to_owned(), next);
-        next
+        let generation = guard.get(provider_id).map_or(1, |previous| {
+            previous.cancel_token.cancel();
+            previous.generation + 1
+        });
+        let refresh = ProviderRefresh {
+            generation,
+            cancel_token: CancellationToken::new(),
+        };
+        guard.insert(provider_id.to_owned(), refresh.clone());
+        refresh
     }
 
     fn is_current_generation(&self, provider_id: &str, generation: u64) -> bool {
@@ -474,7 +573,7 @@ impl Models {
             .read()
             .expect("refresh_generations lock poisoned")
             .get(provider_id)
-            .copied()
+            .map(|refresh| refresh.generation)
             == Some(generation)
     }
 
@@ -490,42 +589,54 @@ impl Models {
     }
 
     pub fn set_provider(&self, provider: Provider) {
-        if let Ok(mut guard) = self.inner.providers.write() {
-            self.next_refresh_generation(provider.id());
-            guard.insert(provider.id().to_owned(), provider);
-        }
+        let mut guard = self
+            .inner
+            .providers
+            .write()
+            .expect("providers lock poisoned");
+        self.next_refresh_generation(provider.id());
+        guard.insert(provider.id().to_owned(), provider);
     }
 
     pub fn delete_provider(&self, id: &str) {
-        if let Ok(mut guard) = self.inner.providers.write() {
-            self.next_refresh_generation(id);
-            guard.remove(id);
-        }
+        let mut guard = self
+            .inner
+            .providers
+            .write()
+            .expect("providers lock poisoned");
+        self.next_refresh_generation(id);
+        guard.remove(id);
     }
 
     pub fn clear_providers(&self) {
-        if let Ok(mut guard) = self.inner.providers.write() {
-            for id in guard.keys() {
-                self.next_refresh_generation(id);
-            }
-            guard.clear();
+        let mut guard = self
+            .inner
+            .providers
+            .write()
+            .expect("providers lock poisoned");
+        for id in guard.keys() {
+            self.next_refresh_generation(id);
         }
+        guard.clear();
     }
 
     pub fn get_providers(&self) -> Vec<Provider> {
         self.inner
             .providers
             .read()
-            .map(|g| g.values().cloned().collect())
-            .unwrap_or_default()
+            .expect("providers lock poisoned")
+            .values()
+            .cloned()
+            .collect()
     }
 
     pub fn get_provider(&self, id: &str) -> Option<Provider> {
         self.inner
             .providers
             .read()
-            .ok()
-            .and_then(|g| g.get(id).cloned())
+            .expect("providers lock poisoned")
+            .get(id)
+            .cloned()
     }
 
     pub fn get_models(&self, provider: Option<&str>) -> Vec<Model> {
@@ -784,7 +895,7 @@ impl Models {
             let models_self = self.clone();
             async move {
                 let pid = provider.id().to_owned();
-                let generation = {
+                let refresh = {
                     let providers = models_self
                         .inner
                         .providers
@@ -798,15 +909,21 @@ impl Models {
                     }
                     models_self.next_refresh_generation(&pid)
                 };
+                let generation = refresh.generation;
+                let cancel_token = refresh.cancel_token;
+                let _cancel_on_drop = cancel_token.clone().drop_guard();
                 let pub_lock = models_self.publication_lock(&pid);
                 let mut provider_err: Option<ModelsError> = None;
 
                 // 1. 先恢复本地 ModelsStore 缓存，任何读取错误均记入 errors
-                let cache_guard = pub_lock.lock().await;
+                let cache_guard = cancel_token.run_until_cancelled(pub_lock.lock()).await?;
                 if !models_self.is_current_generation(&pid, generation) {
                     return None;
                 }
-                let stored_entry = match models_self.inner.models_store.read(&pid).await {
+                let stored_entry = match cancel_token
+                    .run_until_cancelled(models_self.inner.models_store.read(&pid))
+                    .await?
+                {
                     Ok(Some(stored)) => {
                         let restored: Vec<AnyModel> = stored
                             .models
@@ -828,16 +945,25 @@ impl Models {
                 };
 
                 drop(cache_guard);
-                if !allow_network || !models_self.is_current_generation(&pid, generation) {
+                if !models_self.is_current_generation(&pid, generation) {
+                    return None;
+                }
+                if !allow_network {
                     return provider_err.map(|e| (pid, e));
                 }
 
                 // 2. 解析当前有效凭据（若无凭据则跳过网络刷新）
-                let cred_res = models_self.resolve_refresh_credential(&provider).await;
+                let cred_res = cancel_token
+                    .run_until_cancelled(
+                        models_self.resolve_refresh_credential(&provider, &cancel_token),
+                    )
+                    .await?;
                 let credential = match cred_res {
                     Ok(Some(c)) => c,
                     Ok(None) => return provider_err.map(|e| (pid, e)),
-                    Err(err) => return Some((pid, err)),
+                    Err(err) => {
+                        return (!cancel_token.is_cancelled()).then_some((pid, err));
+                    }
                 };
 
                 if let Some(fetch_fn) = provider.fetch_models_fn() {
@@ -847,10 +973,14 @@ impl Models {
                         allow_network: true,
                         force,
                         base_url: provider.base_url().map(|s| s.to_owned()),
+                        cancel_token: cancel_token.clone(),
                     };
-                    match fetch_fn(input).await {
+                    let fetched = cancel_token
+                        .run_until_cancelled(async { fetch_fn(input).await })
+                        .await?;
+                    match fetched {
                         Ok(fetched) => {
-                            let _guard = pub_lock.lock().await;
+                            let _guard = cancel_token.run_until_cancelled(pub_lock.lock()).await?;
                             if models_self.is_current_generation(&pid, generation) {
                                 provider.set_dynamic_models(fetched.clone());
                                 if let Err(write_err) = models_self
@@ -890,7 +1020,11 @@ impl Models {
                     }
                 }
 
-                provider_err.map(|e| (pid, e))
+                if cancel_token.is_cancelled() {
+                    None
+                } else {
+                    provider_err.map(|e| (pid, e))
+                }
             }
         });
 
@@ -906,6 +1040,7 @@ impl Models {
     async fn resolve_refresh_credential(
         &self,
         provider: &Provider,
+        cancel_token: &CancellationToken,
     ) -> Result<Option<Credential>, ModelsError> {
         let stored = self
             .inner
@@ -921,11 +1056,12 @@ impl Models {
             if now_ms() < oauth_cred.expires {
                 return Ok(Some(Credential::OAuth(oauth_cred)));
             }
-            let refreshed = refresh_stored_oauth_credential(
+            let refreshed = refresh_stored_oauth_credential_cancellable(
                 self.inner.credentials.clone(),
                 provider.id(),
                 oauth_auth,
                 0,
+                Some(cancel_token),
             )
             .await?;
             return Ok(refreshed.map(Credential::OAuth));
@@ -938,7 +1074,9 @@ impl Models {
             Some(Credential::ApiKey(c)) => Some(c),
             _ => None,
         };
-        let resolved = (api_key_auth.resolve)(api_cred, None)
+        let resolved = api_key_auth
+            .resolve_for_request(api_cred, None, None)
+            .await
             .map_err(|e| ModelsError::new(ModelsErrorCode::Auth, e))?;
         Ok(resolved.map(|r| {
             Credential::ApiKey(ApiKeyCredential {
@@ -997,9 +1135,8 @@ impl Models {
             }
             req_options.env = Some(merged);
         }
-        if req_options.identity.is_none() {
-            req_options.identity = self.inner.identity.clone();
-        }
+        req_options.identity =
+            merge_client_identity([self.inner.identity.as_ref(), req_options.identity.as_ref()]);
 
         Ok((provider, req_model, req_options))
     }
@@ -1010,7 +1147,15 @@ impl Models {
         context: &Context,
         options: Option<&StreamOptions>,
     ) -> AssistantMessageEventStream {
-        let transcript = normalize_context(context);
+        self.stream_transcript(model, normalize_context(context), options)
+    }
+
+    pub fn stream_transcript(
+        &self,
+        model: &Model,
+        transcript: TranscriptContext,
+        options: Option<&StreamOptions>,
+    ) -> AssistantMessageEventStream {
         let outer = create_assistant_message_event_stream();
         let writer = outer.clone();
         let models_self = self.clone();
@@ -1072,7 +1217,15 @@ impl Models {
         context: &Context,
         options: Option<&SimpleStreamOptions>,
     ) -> AssistantMessageEventStream {
-        let transcript = normalize_context(context);
+        self.stream_simple_transcript(model, normalize_context(context), options)
+    }
+
+    pub fn stream_simple_transcript(
+        &self,
+        model: &Model,
+        transcript: TranscriptContext,
+        options: Option<&SimpleStreamOptions>,
+    ) -> AssistantMessageEventStream {
         let outer = create_assistant_message_event_stream();
         let writer = outer.clone();
         let models_self = self.clone();
@@ -1231,9 +1384,8 @@ impl Models {
             }
             req_options.env = Some(merged);
         }
-        if req_options.identity.is_none() {
-            req_options.identity = self.inner.identity.clone();
-        }
+        req_options.identity =
+            merge_client_identity([self.inner.identity.as_ref(), req_options.identity.as_ref()]);
 
         provider
             .classify(&req_model, context, Some(&req_options))

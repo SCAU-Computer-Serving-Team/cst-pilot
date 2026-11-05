@@ -188,6 +188,26 @@ pub fn parse_streaming_json(partial_json: Option<&str>) -> JsonObject {
 // StreamingJsonParser & ToolCallArgumentsStream (对照 utils/streaming-json.ts)
 // =============================================================================
 
+/// 每次调用 `append` 固定赋予的基础拷贝信用额度。
+pub const CREDIT_PER_APPEND: usize = 256;
+/// 每追加 1 字节输入文本赋予的拷贝信用额度。
+pub const CREDIT_PER_BYTE: usize = 8;
+
+/// 计算克隆单个已闭合 `serde_json::Value` 所需的字节与节点权重。
+pub fn value_clone_weight(val: &Value) -> usize {
+    match val {
+        Value::Null | Value::Bool(_) | Value::Number(_) => 1,
+        Value::String(s) => 1 + s.len(),
+        Value::Array(items) => 1 + items.iter().map(value_clone_weight).sum::<usize>(),
+        Value::Object(map) => {
+            1 + map
+                .iter()
+                .map(|(k, v)| 1 + k.len() + value_clone_weight(v))
+                .sum::<usize>()
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FramePhase {
     Key,
@@ -229,6 +249,8 @@ struct OpenString {
 ///
 /// 按字符单次扫描流式片段，支持未闭合字符串、未闭合转义序列、未闭合对象/数组、
 /// 半截布尔/空值/数字字面量及尾随逗号或缺失冒号。
+/// 内置全子树字节感知的拷贝信用额度（`CREDIT_PER_APPEND` + `CREDIT_PER_BYTE`），
+/// 保证在流式小分片场景下生成增量快照的累计复制字节数严格呈线性上界。
 #[derive(Debug, Clone, Default)]
 pub struct StreamingJsonParser {
     root: Option<Value>,
@@ -237,6 +259,12 @@ pub struct StreamingJsonParser {
     scalar: String,
     scalar_target: Option<StringTarget>,
     done: bool,
+    open_containers_weight: usize,
+    credit: usize,
+    dirty: bool,
+    cached_snapshot: Option<Value>,
+    total_snapshot_bytes_copied: usize,
+    snapshot_refresh_count: usize,
 }
 
 impl StreamingJsonParser {
@@ -245,6 +273,9 @@ impl StreamingJsonParser {
     }
 
     pub fn append(&mut self, piece: &str) {
+        self.credit = self.credit.saturating_add(
+            CREDIT_PER_APPEND.saturating_add(CREDIT_PER_BYTE.saturating_mul(piece.len())),
+        );
         for ch in piece.chars() {
             if self.done {
                 break;
@@ -253,7 +284,80 @@ impl StreamingJsonParser {
         }
     }
 
-    pub fn snapshot(&self) -> Option<Value> {
+    /// 当前若立即构建完整快照所需深拷贝的字节与节点总权重（含栈上开放容器内已挂载的所有闭合子树、所有开放帧上的 `current_key` 及当前打开字符串）。
+    pub fn snapshot_clone_cost(&self) -> usize {
+        if self.done {
+            return 0;
+        }
+        let open_str_cost = match &self.open_string {
+            Some(open) => match open.target {
+                StringTarget::Key => 0,
+                StringTarget::ObjectValue | StringTarget::Root | StringTarget::ArrayElement => {
+                    1 + open.text.len()
+                }
+            },
+            None => 0,
+        };
+
+        let pending_scalar_cost = if self.open_string.is_none()
+            && self.scalar_target.is_some()
+            && parse_pending_scalar(&self.scalar).is_some()
+        {
+            1
+        } else {
+            0
+        };
+
+        self.open_containers_weight + open_str_cost + pending_scalar_cost
+    }
+
+    /// 累计在 `snapshot_ref` / `snapshot` 刷新开放路径时消耗的克隆权重总和（用于确定性线性复杂度断言）。
+    pub fn total_snapshot_bytes_copied(&self) -> usize {
+        self.total_snapshot_bytes_copied
+    }
+
+    /// 累计实际刷新快照的次数。
+    pub fn snapshot_refresh_count(&self) -> usize {
+        self.snapshot_refresh_count
+    }
+
+    /// 直接借用上次缓存的快照而不触发刷新或克隆。
+    pub fn cached_snapshot(&self) -> Option<&Value> {
+        self.cached_snapshot.as_ref()
+    }
+
+    /// 受信用额度约束的快照借用读取：
+    /// - 返回 `(false, self.cached_snapshot.as_ref())` 表示自上次快照后无有效变更或信用额度尚不足以覆盖完整克隆成本（零克隆）；
+    /// - 返回 `(true, self.cached_snapshot.as_ref())` 表示已扣除信用并生成最新快照（若根值已闭合则零拷贝移入缓存）。
+    pub fn snapshot_ref(&mut self) -> (bool, Option<&Value>) {
+        if !self.dirty {
+            return (false, self.cached_snapshot.as_ref());
+        }
+        if self.done {
+            if let Some(finished_root) = self.root.take() {
+                self.cached_snapshot = Some(finished_root);
+            }
+            self.dirty = false;
+            self.snapshot_refresh_count += 1;
+            return (true, self.cached_snapshot.as_ref());
+        }
+        let cost = self.snapshot_clone_cost();
+        if cost > self.credit {
+            return (false, self.cached_snapshot.as_ref());
+        }
+        self.credit = self.credit.saturating_sub(cost);
+        self.dirty = false;
+        self.total_snapshot_bytes_copied = self.total_snapshot_bytes_copied.saturating_add(cost);
+        self.snapshot_refresh_count += 1;
+        self.cached_snapshot = self.build_snapshot();
+        (true, self.cached_snapshot.as_ref())
+    }
+
+    pub fn snapshot(&mut self) -> Option<Value> {
+        self.snapshot_ref().1.cloned()
+    }
+
+    fn build_snapshot(&self) -> Option<Value> {
         let mut stack_clone = self.stack.clone();
         let mut root_clone = self.root.clone();
 
@@ -267,7 +371,7 @@ impl StreamingJsonParser {
                     if let Some(ContainerState::Object {
                         map, current_key, ..
                     }) = stack_clone.last_mut()
-                        && let Some(k) = current_key.clone()
+                        && let Some(k) = current_key.take()
                     {
                         map.insert(k, Value::String(open.text.clone()));
                     }
@@ -331,6 +435,7 @@ impl StreamingJsonParser {
                 }
             } else {
                 self.scalar.push(ch);
+                self.dirty = true;
                 return;
             }
         }
@@ -383,6 +488,7 @@ impl StreamingJsonParser {
                         escape: String::new(),
                         high_surrogate: None,
                     });
+                    self.dirty = true;
                 }
             }
             '{' => {
@@ -392,6 +498,8 @@ impl StreamingJsonParser {
                         current_key: None,
                         phase: FramePhase::Key,
                     });
+                    self.open_containers_weight += 1;
+                    self.dirty = true;
                 }
             }
             '[' => {
@@ -400,6 +508,8 @@ impl StreamingJsonParser {
                         items: Vec::new(),
                         phase: FramePhase::Value,
                     });
+                    self.open_containers_weight += 1;
+                    self.dirty = true;
                 }
             }
             '}' | ']' => {
@@ -410,6 +520,7 @@ impl StreamingJsonParser {
                     self.scalar.clear();
                     self.scalar.push(ch);
                     self.scalar_target = Some(target);
+                    self.dirty = true;
                 }
             }
         }
@@ -448,14 +559,24 @@ impl StreamingJsonParser {
         let Some(frame) = self.stack.pop() else {
             return;
         };
+        self.dirty = true;
         let value = match frame {
-            ContainerState::Object { map, .. } => Value::Object(map),
+            ContainerState::Object {
+                map, current_key, ..
+            } => {
+                if let Some(dangling_k) = current_key {
+                    self.open_containers_weight = self
+                        .open_containers_weight
+                        .saturating_sub(1 + dangling_k.len());
+                }
+                Value::Object(map)
+            }
             ContainerState::Array { items, .. } => Value::Array(items),
         };
-        self.commit_value(value);
+        self.commit_closed_container_value(value);
     }
 
-    fn commit_value(&mut self, value: Value) {
+    fn commit_closed_container_value(&mut self, value: Value) {
         if let Some(parent) = self.stack.last_mut() {
             match parent {
                 ContainerState::Object {
@@ -464,8 +585,17 @@ impl StreamingJsonParser {
                     phase,
                 } => {
                     if let Some(k) = current_key.take() {
-                        map.insert(k, value);
+                        let key_len = k.len();
+                        if let Some(prev) = map.insert(k, value) {
+                            let prev_weight = 1 + key_len + value_clone_weight(&prev);
+                            self.open_containers_weight =
+                                self.open_containers_weight.saturating_sub(prev_weight);
+                        }
                         *phase = FramePhase::Comma;
+                    } else {
+                        let dropped_weight = value_clone_weight(&value);
+                        self.open_containers_weight =
+                            self.open_containers_weight.saturating_sub(dropped_weight);
                     }
                 }
                 ContainerState::Array { items, phase } => {
@@ -476,6 +606,45 @@ impl StreamingJsonParser {
         } else {
             self.root = Some(value);
             self.done = true;
+            self.open_containers_weight = 0;
+        }
+    }
+
+    fn place_closed_leaf(&mut self, target: StringTarget, value: Value) {
+        self.dirty = true;
+        let val_weight = value_clone_weight(&value);
+        match target {
+            StringTarget::Root => {
+                self.root = Some(value);
+                self.done = true;
+                self.open_containers_weight = 0;
+            }
+            StringTarget::ObjectValue => {
+                if let Some(ContainerState::Object {
+                    map,
+                    current_key,
+                    phase,
+                }) = self.stack.last_mut()
+                    && let Some(k) = current_key.take()
+                {
+                    let key_len = k.len();
+                    if let Some(prev) = map.insert(k, value) {
+                        let prev_weight = 1 + key_len + value_clone_weight(&prev);
+                        self.open_containers_weight =
+                            self.open_containers_weight.saturating_sub(prev_weight);
+                    }
+                    self.open_containers_weight += val_weight;
+                    *phase = FramePhase::Comma;
+                }
+            }
+            StringTarget::ArrayElement => {
+                if let Some(ContainerState::Array { items, phase }) = self.stack.last_mut() {
+                    self.open_containers_weight += val_weight;
+                    items.push(value);
+                    *phase = FramePhase::Comma;
+                }
+            }
+            StringTarget::Key => {}
         }
     }
 
@@ -485,15 +654,18 @@ impl StreamingJsonParser {
             return;
         };
         if let Some(val) = parse_complete_scalar(&token) {
-            place_into(&mut self.root, &mut self.stack, target, val);
+            self.place_closed_leaf(target, val);
             if self.stack.is_empty() && self.root.is_some() {
                 self.done = true;
             }
+        } else {
+            self.dirty = true;
         }
     }
 
     fn feed_string_char(&mut self, ch: char) {
         let mut open = self.open_string.take().expect("open_string exists");
+        let is_value_str = open.target != StringTarget::Key;
 
         if !open.escape.is_empty() {
             if open.escape == "\\" {
@@ -524,6 +696,9 @@ impl StreamingJsonParser {
                     open.text.push('\\');
                     open.text.push(ch);
                 }
+                if is_value_str {
+                    self.dirty = true;
+                }
                 self.open_string = Some(open);
                 return;
             }
@@ -539,6 +714,9 @@ impl StreamingJsonParser {
                         if let Some(prev_hi) = open.high_surrogate.replace(code) {
                             open.text
                                 .push(char::from_u32(prev_hi as u32).unwrap_or('\u{FFFD}'));
+                            if is_value_str {
+                                self.dirty = true;
+                            }
                         }
                     } else if (0xDC00..=0xDFFF).contains(&code) {
                         if let Some(hi) = open.high_surrogate.take() {
@@ -549,6 +727,9 @@ impl StreamingJsonParser {
                         } else {
                             open.text.push('\u{FFFD}');
                         }
+                        if is_value_str {
+                            self.dirty = true;
+                        }
                     } else {
                         if let Some(hi) = open.high_surrogate.take() {
                             open.text
@@ -556,6 +737,9 @@ impl StreamingJsonParser {
                         }
                         open.text
                             .push(char::from_u32(code as u32).unwrap_or('\u{FFFD}'));
+                        if is_value_str {
+                            self.dirty = true;
+                        }
                     }
                 }
                 self.open_string = Some(open);
@@ -568,6 +752,9 @@ impl StreamingJsonParser {
                 }
                 let literal = std::mem::take(&mut open.escape);
                 open.text.push_str(&literal);
+                if is_value_str {
+                    self.dirty = true;
+                }
             }
         }
 
@@ -580,6 +767,9 @@ impl StreamingJsonParser {
         if let Some(hi) = open.high_surrogate.take() {
             open.text
                 .push(char::from_u32(hi as u32).unwrap_or('\u{FFFD}'));
+            if is_value_str {
+                self.dirty = true;
+            }
         }
 
         if ch == '"' {
@@ -589,26 +779,26 @@ impl StreamingJsonParser {
                         current_key, phase, ..
                     }) = self.stack.last_mut()
                     {
-                        *current_key = Some(open.text);
+                        let new_key_weight = 1 + open.text.len();
+                        if let Some(old_k) = current_key.replace(open.text) {
+                            self.open_containers_weight =
+                                self.open_containers_weight.saturating_sub(1 + old_k.len());
+                        }
+                        self.open_containers_weight += new_key_weight;
                         *phase = FramePhase::Colon;
                     }
                 }
                 other => {
-                    place_into(
-                        &mut self.root,
-                        &mut self.stack,
-                        other,
-                        Value::String(open.text),
-                    );
-                    if self.stack.is_empty() && self.root.is_some() {
-                        self.done = true;
-                    }
+                    self.place_closed_leaf(other, Value::String(open.text));
                 }
             }
             return;
         }
 
         open.text.push(ch);
+        if is_value_str {
+            self.dirty = true;
+        }
         self.open_string = Some(open);
     }
 }
@@ -708,7 +898,7 @@ fn parse_json_number(token: &str) -> Option<Value> {
 pub struct ToolCallArgumentsStream {
     text: String,
     parser: StreamingJsonParser,
-    arguments: JsonObject,
+    empty_arguments: JsonObject,
 }
 
 impl ToolCallArgumentsStream {
@@ -720,17 +910,44 @@ impl ToolCallArgumentsStream {
         &self.text
     }
 
-    pub fn append(&mut self, delta: &str) -> JsonObject {
+    pub fn parser(&self) -> &StreamingJsonParser {
+        &self.parser
+    }
+
+    /// 追加增量文本并返回 `(是否实际刷新了快照, 当前参数对象的不可变借用)`。
+    ///
+    /// 当信用额度不足以覆盖完整克隆成本时，直接借用上次缓存的对象引用，不发生堆内存克隆。
+    pub fn append_with_change(&mut self, delta: &str) -> (bool, &JsonObject) {
         self.text.push_str(delta);
         self.parser.append(delta);
-        self.partial()
+        self.partial_ref()
+    }
+
+    pub fn partial_ref(&mut self) -> (bool, &JsonObject) {
+        let (refreshed, snap) = self.parser.snapshot_ref();
+        match snap {
+            Some(Value::Object(obj)) => (refreshed, obj),
+            _ => (refreshed, &self.empty_arguments),
+        }
+    }
+
+    pub fn current_arguments(&self) -> &JsonObject {
+        match self.parser.cached_snapshot() {
+            Some(Value::Object(obj)) => obj,
+            _ => &self.empty_arguments,
+        }
+    }
+
+    pub fn append(&mut self, delta: &str) -> JsonObject {
+        let (_, obj) = self.append_with_change(delta);
+        obj.clone()
     }
 
     pub fn replace(&mut self, text: &str) -> ReplaceArgumentsResult {
         if let Some(delta) = text.strip_prefix(&self.text) {
             let delta_owned = delta.to_owned();
             let arguments = if delta_owned.is_empty() {
-                self.partial()
+                self.partial_ref().1.clone()
             } else {
                 self.append(&delta_owned)
             };
@@ -754,18 +971,5 @@ impl ToolCallArgumentsStream {
 
     pub fn finish(&self) -> ParsedToolCallArguments {
         parse_tool_call_arguments(Some(&self.text))
-    }
-
-    fn partial(&mut self) -> JsonObject {
-        match self.parser.snapshot() {
-            Some(Value::Object(obj)) => {
-                self.arguments = obj.clone();
-                obj
-            }
-            _ => {
-                self.arguments.clear();
-                Map::new()
-            }
-        }
     }
 }

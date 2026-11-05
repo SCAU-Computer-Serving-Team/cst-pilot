@@ -53,6 +53,10 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: 隔离回归测试
         run: cargo test --workspace --locked
+      - name: 故障注入静态检查
+        run: cargo clippy --workspace --all-targets --locked --features test-support -- -D warnings
+      - name: 故障恢复回归测试
+        run: cargo test --workspace --locked --features test-support
 
   agent:
     name: Agent 与发行包

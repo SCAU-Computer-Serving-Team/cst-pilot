@@ -1,16 +1,18 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use crate::api::calculate_cost;
+use serde_json::json;
+
+use crate::api::{calculate_cost, invoke_on_payload};
 use crate::auth::{ApiKeyAuth, ProviderAuth};
 use crate::models::{
     CreateProviderOptions, Models, Provider, ProviderApiConfig, ProviderStreams, create_provider,
 };
 use crate::types::{
     AnyModel, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, ContentBlock,
-    JsonObject, Message, Model, ModelCost, ModelInputModality, SimpleStreamOptions, StopReason,
-    StreamOptions, TextContent, ThinkingContent, ToolCall, TranscriptContext, Usage, UsageCost,
-    create_assistant_message_event_stream, now_ms,
+    JsonObject, Message, Model, ModelCost, ModelInputModality, ProviderResponse,
+    SimpleStreamOptions, StopReason, StreamOptions, TextContent, ThinkingContent, ToolCall,
+    TranscriptContext, Usage, UsageCost, create_assistant_message_event_stream, now_ms,
 };
 
 pub const DEFAULT_FAUX_API: &str = "faux";
@@ -179,15 +181,68 @@ pub fn create_faux_provider() -> FauxProviderHandle {
     let state_for_stream = state.clone();
     let run_stream = move |m: &Model,
                            ctx: &TranscriptContext,
-                           _opts: Option<&StreamOptions>|
+                           opts: Option<&StreamOptions>|
           -> AssistantMessageEventStream {
         let stream = create_assistant_message_event_stream();
         let writer = stream.clone();
         let m = m.clone();
         let ctx = ctx.clone();
+        let opts = opts.cloned();
         let st = state_for_stream.clone();
 
         tokio::spawn(async move {
+            let cancel_token = opts.as_ref().and_then(|o| o.cancel_token.clone());
+            if cancel_token.as_ref().is_some_and(|t| t.is_cancelled()) {
+                let mut err_msg = AssistantMessage::new_pending(&m);
+                err_msg.stop_reason = StopReason::Aborted;
+                err_msg.error_message = Some("Request was aborted".to_owned());
+                writer.push(AssistantMessageEvent::Error {
+                    reason: StopReason::Aborted,
+                    error: err_msg,
+                });
+                writer.end(None);
+                return;
+            }
+
+            let hooks: Result<(), String> = async {
+                invoke_on_payload(
+                    opts.as_ref(),
+                    json!({
+                        "model": m.id,
+                        "messages": ctx.messages(),
+                    }),
+                    &m,
+                )
+                .await?;
+
+                if let Some(on_response) = opts.as_ref().and_then(|o| o.on_response.as_ref()) {
+                    crate::api::run_provider_callback("on_response", async {
+                        on_response(
+                            ProviderResponse {
+                                status: 200,
+                                headers: BTreeMap::new(),
+                            },
+                            m.clone(),
+                        )
+                        .await
+                    })
+                    .await?;
+                }
+                Ok(())
+            }
+            .await;
+            if let Err(error) = hooks {
+                let mut message = AssistantMessage::new_pending(&m);
+                message.stop_reason = StopReason::Error;
+                message.error_message = Some(error);
+                writer.push(AssistantMessageEvent::Error {
+                    reason: StopReason::Error,
+                    error: message,
+                });
+                writer.end(None);
+                return;
+            }
+
             let step_opt = {
                 let mut guard = st.lock().expect("faux lock");
                 guard.call_count += 1;
@@ -328,19 +383,28 @@ pub fn create_faux_provider() -> FauxProviderHandle {
                 partial.stop_reason = StopReason::ToolUse;
             }
 
-            let in_tok = estimate_tokens(estimate_context_chars(&ctx));
-            let out_tok = estimate_tokens(output_chars);
-            partial.usage = Usage {
-                input: in_tok,
-                output: out_tok,
-                cache_read: 0,
-                cache_write: 0,
-                cache_write_1h: None,
-                reasoning: None,
-                total_tokens: in_tok + out_tok,
-                cost: UsageCost::default(),
-            };
-            calculate_cost(&m.cost, &mut partial.usage);
+            let has_explicit_usage = scripted.usage.total_tokens > 0
+                || scripted.usage.input > 0
+                || scripted.usage.output > 0
+                || scripted.usage.cache_read > 0
+                || scripted.usage.cache_write > 0;
+            if has_explicit_usage {
+                partial.usage = scripted.usage;
+            } else {
+                let in_tok = estimate_tokens(estimate_context_chars(&ctx));
+                let out_tok = estimate_tokens(output_chars);
+                partial.usage = Usage {
+                    input: in_tok,
+                    output: out_tok,
+                    cache_read: 0,
+                    cache_write: 0,
+                    cache_write_1h: None,
+                    reasoning: None,
+                    total_tokens: in_tok + out_tok,
+                    cost: UsageCost::default(),
+                };
+                calculate_cost(&m.cost, &mut partial.usage);
+            }
 
             writer.push(AssistantMessageEvent::Done {
                 reason: partial.stop_reason,

@@ -48,7 +48,23 @@ pub fn get_system_message_text(message: &SystemMessage) -> String {
         parts.push(main);
     }
     if let Some(sections) = &message.sections {
-        for text in sections.values().flatten() {
+        // Keep stable instructions before volatile project/skill/cwd sections.
+        const ORDER: &[&str] = &[
+            "preamble",
+            "tools",
+            "rules",
+            "docs",
+            "addendum",
+            "project_context",
+            "skills",
+            "cwd",
+        ];
+        let ordered = ORDER.iter().filter_map(|key| sections.get(*key));
+        let custom = sections
+            .iter()
+            .filter(|(key, _)| !ORDER.contains(&key.as_str()))
+            .map(|(_, value)| value);
+        for text in ordered.chain(custom).flatten() {
             if !text.is_empty() {
                 parts.push(text.clone());
             }

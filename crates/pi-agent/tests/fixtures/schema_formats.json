@@ -1,0 +1,298 @@
+[
+  {
+    "format": "date",
+    "tests": [
+      {
+        "data": "2024-02-29",
+        "expected": true
+      },
+      {
+        "data": "2023-02-29",
+        "expected": false
+      },
+      {
+        "data": "2000-02-29",
+        "expected": true
+      },
+      {
+        "data": "1900-02-29",
+        "expected": false
+      },
+      {
+        "data": "2026-04-31",
+        "expected": false
+      },
+      {
+        "data": "2026-04-30",
+        "expected": true
+      },
+      {
+        "data": "0000-02-29",
+        "expected": true
+      },
+      {
+        "data": "2026-00-01",
+        "expected": false
+      },
+      {
+        "data": "2026-01-00",
+        "expected": false
+      },
+      {
+        "data": "2026-13-01",
+        "expected": false
+      },
+      {
+        "data": "2026-01-32",
+        "expected": false
+      },
+      {
+        "data": "2026-1-01",
+        "expected": false
+      },
+      {
+        "data": "2026-01-01\n",
+        "expected": false
+      },
+      {
+        "data": "٢٠٢٦-01-01",
+        "expected": false
+      },
+      {
+        "data": "xxxx-01-01",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "format": "time",
+    "tests": [
+      {
+        "data": "23:59:59Z",
+        "expected": true
+      },
+      {
+        "data": "00:00:00z",
+        "expected": true
+      },
+      {
+        "data": "23:59:60Z",
+        "expected": true
+      },
+      {
+        "data": "23:58:60Z",
+        "expected": false
+      },
+      {
+        "data": "07:59:60+08:00",
+        "expected": true
+      },
+      {
+        "data": "00:59:60+01:00",
+        "expected": true
+      },
+      {
+        "data": "22:59:60-01:00",
+        "expected": true
+      },
+      {
+        "data": "12:00:00.123Z",
+        "expected": true
+      },
+      {
+        "data": "12:00:00.Z",
+        "expected": false
+      },
+      {
+        "data": "12:00:00",
+        "expected": false
+      },
+      {
+        "data": "12:00Z",
+        "expected": false
+      },
+      {
+        "data": "24:00:00Z",
+        "expected": false
+      },
+      {
+        "data": "23:60:00Z",
+        "expected": false
+      },
+      {
+        "data": "23:59:61Z",
+        "expected": false
+      },
+      {
+        "data": "12:00:00+23:59",
+        "expected": true
+      },
+      {
+        "data": "12:00:00+24:00",
+        "expected": false
+      },
+      {
+        "data": "12:00:00+08:60",
+        "expected": false
+      },
+      {
+        "data": "12:00:00+0800",
+        "expected": false
+      },
+      {
+        "data": "12:00:00Z\n",
+        "expected": false
+      },
+      {
+        "data": "not a time",
+        "expected": false
+      },
+      {
+        "data": ":",
+        "expected": false
+      },
+      {
+        "data": "12:00:00T00:00:00Z",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "format": "date-time",
+    "tests": [
+      {
+        "data": "2024-02-29T23:59:60Z",
+        "expected": true
+      },
+      {
+        "data": "2023-02-29T12:00:00Z",
+        "expected": false
+      },
+      {
+        "data": "2026-04-31T12:00:00Z",
+        "expected": false
+      },
+      {
+        "data": "2026-04-30t12:34:56.7+08:00",
+        "expected": true
+      },
+      {
+        "data": "2026-04-30T:",
+        "expected": false
+      },
+      {
+        "data": "2026-04-30T12:00:00",
+        "expected": false
+      },
+      {
+        "data": "2026-04-30T24:00:00Z",
+        "expected": false
+      },
+      {
+        "data": "2026-04-30 12:00:00Z",
+        "expected": false
+      },
+      {
+        "data": "2026-04-30T12:00:00Z\n",
+        "expected": false
+      },
+      {
+        "data": "2026-04-30T12:00:00ZT",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "format": "email",
+    "tests": [
+      {
+        "data": "a@example.com",
+        "expected": true
+      },
+      {
+        "data": "a@localhost",
+        "expected": true
+      },
+      {
+        "data": "a+b@example.com",
+        "expected": true
+      },
+      {
+        "data": "first.last@example.com",
+        "expected": true
+      },
+      {
+        "data": ".a@example.com",
+        "expected": false
+      },
+      {
+        "data": "a.@example.com",
+        "expected": false
+      },
+      {
+        "data": "a..b@example.com",
+        "expected": false
+      },
+      {
+        "data": "a@@example.com",
+        "expected": false
+      },
+      {
+        "data": "a@-example.com",
+        "expected": false
+      },
+      {
+        "data": "a@example-.com",
+        "expected": false
+      },
+      {
+        "data": "a@example..com",
+        "expected": false
+      },
+      {
+        "data": "a@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com",
+        "expected": false
+      },
+      {
+        "data": "\"a b\"@example.com",
+        "expected": true
+      },
+      {
+        "data": "\"\"@example.com",
+        "expected": true
+      },
+      {
+        "data": "\"a\\\"b\"@example.com",
+        "expected": true
+      },
+      {
+        "data": "a@[127.0.0.1]",
+        "expected": true
+      },
+      {
+        "data": "a@[256.0.0.1]",
+        "expected": false
+      },
+      {
+        "data": "a@[IPv6:fe80::1]",
+        "expected": true
+      },
+      {
+        "data": "a@例子.com",
+        "expected": false
+      },
+      {
+        "data": "ſ@example.com",
+        "expected": false
+      },
+      {
+        "data": "a@K.com",
+        "expected": false
+      },
+      {
+        "data": "a@example.com\n",
+        "expected": false
+      }
+    ]
+  }
+]

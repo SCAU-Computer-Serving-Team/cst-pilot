@@ -12,6 +12,31 @@ use tokio_util::sync::CancellationToken;
 
 type Requests = Arc<Mutex<Vec<String>>>;
 
+#[test]
+fn simple_options_reserve_context_space_before_requesting_output() {
+    let fake = faux::create_faux_provider();
+    let mut model = fake.model;
+    model.context_window = 8_192;
+    model.max_tokens = 16_384;
+    let context = normalize_context(&Context {
+        messages: vec![Message::User(UserMessage::new("x".repeat(4_096)))],
+        ..Default::default()
+    });
+
+    let options = api::build_base_options(&model, &context, None);
+    assert_eq!(options.max_tokens, Some(2_925));
+
+    let requested = SimpleStreamOptions {
+        base: StreamOptions {
+            max_tokens: Some(2_000),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let options = api::build_base_options(&model, &context, Some(&requested));
+    assert_eq!(options.max_tokens, Some(2_000));
+}
+
 async fn mock_json(responses: Vec<(u16, Value)>) -> (String, Requests) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());

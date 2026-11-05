@@ -1,0 +1,811 @@
+[
+  {
+    "pattern": "^a.b$",
+    "tests": [
+      {
+        "data": "axb",
+        "expected": true
+      },
+      {
+        "data": "a\nb",
+        "expected": false
+      },
+      {
+        "data": "a\rb",
+        "expected": false
+      },
+      {
+        "data": "a b",
+        "expected": false
+      },
+      {
+        "data": "a b",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "\\Badmin\\B",
+    "tests": [
+      {
+        "data": "xadminx",
+        "expected": true
+      },
+      {
+        "data": "éadminé",
+        "expected": false
+      },
+      {
+        "data": " admin ",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "\\badmin\\b",
+    "tests": [
+      {
+        "data": "xadminx",
+        "expected": false
+      },
+      {
+        "data": "éadminé",
+        "expected": true
+      },
+      {
+        "data": " admin ",
+        "expected": true
+      }
+    ]
+  },
+  {
+    "pattern": "^[\\S]$",
+    "tests": [
+      {
+        "data": "a",
+        "expected": true
+      },
+      {
+        "data": " ",
+        "expected": false
+      },
+      {
+        "data": "﻿",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^[a&&b]$",
+    "tests": [
+      {
+        "data": "a",
+        "expected": true
+      },
+      {
+        "data": "b",
+        "expected": true
+      },
+      {
+        "data": "&",
+        "expected": true
+      },
+      {
+        "data": "c",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^[a~~b]$",
+    "tests": [
+      {
+        "data": "a",
+        "expected": true
+      },
+      {
+        "data": "b",
+        "expected": true
+      },
+      {
+        "data": "~",
+        "expected": true
+      },
+      {
+        "data": "c",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^(a)?\\1$",
+    "tests": [
+      {
+        "data": "",
+        "expected": true
+      },
+      {
+        "data": "a",
+        "expected": false
+      },
+      {
+        "data": "aa",
+        "expected": true
+      },
+      {
+        "data": "aaa",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^(a|(b))\\2c$",
+    "tests": [
+      {
+        "data": "ac",
+        "expected": true
+      },
+      {
+        "data": "bbc",
+        "expected": true
+      },
+      {
+        "data": "abc",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^(?!(a))\\1b$",
+    "tests": [
+      {
+        "data": "b",
+        "expected": true
+      },
+      {
+        "data": "ab",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\1(a)$",
+    "tests": [
+      {
+        "data": "a",
+        "expected": true
+      },
+      {
+        "data": "aa",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\a$",
+    "tests": [
+      {
+        "data": "a",
+        "expected": true
+      },
+      {
+        "data": "\u0007",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\h$",
+    "tests": [
+      {
+        "data": "h",
+        "expected": true
+      },
+      {
+        "data": " ",
+        "expected": false
+      },
+      {
+        "data": "0",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\q$",
+    "tests": [
+      {
+        "data": "q",
+        "expected": true
+      },
+      {
+        "data": "a",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\p{digit}$",
+    "tests": [
+      {
+        "data": "5",
+        "expected": true
+      },
+      {
+        "data": "p{digit}",
+        "expected": false
+      },
+      {
+        "data": "١",
+        "expected": true
+      }
+    ]
+  },
+  {
+    "pattern": "^\\x{61}$",
+    "tests": [
+      {
+        "data": "a",
+        "expected": false
+      },
+      {
+        "data": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "expected": true
+      }
+    ]
+  },
+  {
+    "pattern": "^\\u0061$",
+    "tests": [
+      {
+        "data": "a",
+        "expected": true
+      },
+      {
+        "data": "u0061",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\u{61}$",
+    "tests": [
+      {
+        "data": "a",
+        "expected": true
+      },
+      {
+        "data": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\k<name>(?<name>a)$",
+    "tests": [
+      {
+        "data": "a",
+        "expected": true
+      },
+      {
+        "data": "aa",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^([ab]+)\\1$",
+    "tests": [
+      {
+        "data": "abab",
+        "expected": true
+      },
+      {
+        "data": "aaaa",
+        "expected": true
+      },
+      {
+        "data": "ab",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^[\\b]$",
+    "tests": [
+      {
+        "data": "\b",
+        "expected": true
+      },
+      {
+        "data": "b",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\u{61}\\a$",
+    "tests": [
+      {
+        "data": "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuua",
+        "expected": true
+      },
+      {
+        "data": "aa",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\uD83D\\u0061$",
+    "tests": [
+      {
+        "data": "😀",
+        "expected": false
+      },
+      {
+        "data": "aa",
+        "expected": false
+      },
+      {
+        "data": "a",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\uD83D\\u0061\\a$",
+    "tests": [
+      {
+        "data": "😀a",
+        "expected": false
+      },
+      {
+        "data": "aaa",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^[\\uD83D\\uDE00]\\a$",
+    "tests": [
+      {
+        "data": "😀a",
+        "expected": false
+      },
+      {
+        "data": "aa",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^[😀]\\a$",
+    "tests": [
+      {
+        "data": "😀a",
+        "expected": false
+      },
+      {
+        "data": "aa",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^(?<\\u{61}>a)\\k<a>\\a$",
+    "tests": [
+      {
+        "data": "aaa",
+        "expected": true
+      },
+      {
+        "data": "aa",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^(a(b)?)+\\2$",
+    "tests": [
+      {
+        "data": "aba",
+        "expected": true
+      },
+      {
+        "data": "abab",
+        "expected": false
+      },
+      {
+        "data": "aa",
+        "expected": true
+      },
+      {
+        "data": "abb",
+        "expected": true
+      }
+    ]
+  },
+  {
+    "pattern": "^.\\a$",
+    "tests": [
+      {
+        "data": "aa",
+        "expected": true
+      },
+      {
+        "data": "😀a",
+        "expected": false
+      },
+      {
+        "data": "a",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^..\\a$",
+    "tests": [
+      {
+        "data": "aa",
+        "expected": false
+      },
+      {
+        "data": "😀a",
+        "expected": true
+      },
+      {
+        "data": "aaa",
+        "expected": true
+      }
+    ]
+  },
+  {
+    "pattern": "^😀+\\a$",
+    "tests": [
+      {
+        "data": "😀a",
+        "expected": true
+      },
+      {
+        "data": "😀😀a",
+        "expected": false
+      },
+      {
+        "data": "😀aa",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^😀+a$",
+    "tests": [
+      {
+        "data": "😀a",
+        "expected": true
+      },
+      {
+        "data": "😀😀a",
+        "expected": true
+      },
+      {
+        "data": "😀aa",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^.$",
+    "tests": [
+      {
+        "data": "😀",
+        "expected": true
+      },
+      {
+        "data": "a",
+        "expected": true
+      },
+      {
+        "data": "\n",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^..$",
+    "tests": [
+      {
+        "data": "😀",
+        "expected": false
+      },
+      {
+        "data": "aa",
+        "expected": true
+      },
+      {
+        "data": "a",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\uD83D\\uDE00$",
+    "tests": [
+      {
+        "data": "😀",
+        "expected": true
+      },
+      {
+        "data": "aa",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\uD83D\\uDE00\\a$",
+    "tests": [
+      {
+        "data": "😀a",
+        "expected": true
+      },
+      {
+        "data": "aa",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^((a)|(b))+\\2$",
+    "tests": [
+      {
+        "data": "ab",
+        "expected": true
+      },
+      {
+        "data": "aba",
+        "expected": false
+      },
+      {
+        "data": "baa",
+        "expected": true
+      },
+      {
+        "data": "ba",
+        "expected": false
+      },
+      {
+        "data": "abb",
+        "expected": true
+      }
+    ]
+  },
+  {
+    "pattern": "^(?:(a)|b)+\\1$",
+    "tests": [
+      {
+        "data": "ab",
+        "expected": true
+      },
+      {
+        "data": "aba",
+        "expected": false
+      },
+      {
+        "data": "aa",
+        "expected": true
+      },
+      {
+        "data": "bb",
+        "expected": true
+      }
+    ]
+  },
+  {
+    "pattern": "^(?=(a+))a*b\\1$",
+    "tests": [
+      {
+        "data": "aaba",
+        "expected": false
+      },
+      {
+        "data": "aaabaa",
+        "expected": false
+      },
+      {
+        "data": "aaabaaa",
+        "expected": true
+      }
+    ]
+  },
+  {
+    "pattern": "(?<=(a|ab))c\\1",
+    "tests": [
+      {
+        "data": "acab",
+        "expected": true
+      },
+      {
+        "data": "abcab",
+        "expected": true
+      },
+      {
+        "data": "acaa",
+        "expected": true
+      },
+      {
+        "data": "abcaa",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\cA$",
+    "tests": [
+      {
+        "data": "\u0001",
+        "expected": true
+      },
+      {
+        "data": "cA",
+        "expected": false
+      },
+      {
+        "data": "a",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\0$",
+    "tests": [
+      {
+        "data": "\u0000",
+        "expected": true
+      },
+      {
+        "data": "0",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\8$",
+    "tests": [
+      {
+        "data": "8",
+        "expected": true
+      },
+      {
+        "data": "\b",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\141$",
+    "tests": [
+      {
+        "data": "a",
+        "expected": true
+      },
+      {
+        "data": "141",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^[\\s]$",
+    "tests": [
+      {
+        "data": "﻿",
+        "expected": true
+      },
+      {
+        "data": "",
+        "expected": false
+      },
+      {
+        "data": " ",
+        "expected": true
+      },
+      {
+        "data": " ",
+        "expected": true
+      }
+    ]
+  },
+  {
+    "pattern": "^[\\S]$",
+    "tests": [
+      {
+        "data": "﻿",
+        "expected": false
+      },
+      {
+        "data": "",
+        "expected": true
+      },
+      {
+        "data": " ",
+        "expected": false
+      },
+      {
+        "data": "x",
+        "expected": true
+      }
+    ]
+  },
+  {
+    "pattern": "^[]$",
+    "tests": [
+      {
+        "data": "",
+        "expected": false
+      },
+      {
+        "data": "]",
+        "expected": false
+      },
+      {
+        "data": "a",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^[^]$",
+    "tests": [
+      {
+        "data": "😀",
+        "expected": true
+      },
+      {
+        "data": "\n",
+        "expected": true
+      },
+      {
+        "data": "a",
+        "expected": true
+      }
+    ]
+  },
+  {
+    "pattern": "^a$",
+    "tests": [
+      {
+        "data": "a",
+        "expected": true
+      },
+      {
+        "data": "a\n",
+        "expected": false
+      },
+      {
+        "data": "a\r",
+        "expected": false
+      },
+      {
+        "data": "a ",
+        "expected": false
+      }
+    ]
+  },
+  {
+    "pattern": "^\\p{Script=Greek}+$",
+    "tests": [
+      {
+        "data": "αβ",
+        "expected": true
+      },
+      {
+        "data": "ab",
+        "expected": false
+      },
+      {
+        "data": "😀",
+        "expected": false
+      }
+    ]
+  }
+]

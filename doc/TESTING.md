@@ -10,7 +10,8 @@
 |---|---|---|
 | Rust 格式与编译 | `cargo fmt --all --check`、`cargo check --workspace --all-targets --locked` | Cargo 工作区格式与全部编译目标 |
 | Rust 静态检查 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | 全部 Rust 编译目标零警告 |
-| Rust 模型核心 | `cargo test --workspace --locked` | 四种对话协议、分类器、凭据与目录、消息清洗及工具结果回填；默认仅请求本机模拟服务 |
+| Rust 核心回归 | `cargo test --workspace --locked` | 模型协议、Agent 循环、会话存储与运行时；默认仅请求本机模拟服务 |
+| Rust 故障恢复 | `cargo test --workspace --locked --features test-support`、`cargo clippy --workspace --all-targets --locked --features test-support -- -D warnings` | 启用存储故障注入，覆盖部分写入、同步与恢复失败；保留默认构建的独立检查 |
 | 工程静态检查 | `npm run check:engineering --prefix agent` | MJS、JSON、CSS 的 Biome 规则与 PowerShell 语法／PSScriptAnalyzer 1.24.0 |
 | 后端格式与类型 | `npm run check --prefix agent` | `agent/home/extensions/` 全部扩展的 Biome 检查与严格 TypeScript 类型检查 |
 | 前端格式与类型 | `npm run lint --prefix src/web/frontend`、`npm run typecheck --prefix src/web/frontend` | React 规则检查、路由类型生成与 TypeScript 检查 |
@@ -36,6 +37,8 @@
 ### Rust 测试环境
 
 Rust CI 使用 `1.99.1`，在 Linux 上运行。本地同时验证 Windows；Clippy 覆盖全部编译目标，CI 省略重复的 `cargo check`。`CARGO_TARGET_DIR` 指向 runner 临时目录，`PI_CODING_AGENT_DIR` 使用隔离目录，并设置 `PI_OFFLINE=1`。本地验证时，将编译产物和日志写入仓库外当天临时目录。
+
+`pi-session` 的 `test-support` 功能默认关闭，`pi-runtime` 提供同名转发功能。仅启用时编译故障配置、注入接口与故障分支；CI 同时运行默认构建和启用后的测试与 Clippy。
 
 `crates/pi-ai/tests/protocol_contracts.rs` 通过公开 `Models` 接口验证四种协议的多工具续答、图片输入、签名回放、事件顺序、正文超时与取消，并覆盖历史序列化和费用边界。
 
