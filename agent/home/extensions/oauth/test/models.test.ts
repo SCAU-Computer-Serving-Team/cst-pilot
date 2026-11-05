@@ -144,6 +144,59 @@ test("CSTOA 展示与请求均保留网关原始 ID，元数据别名不改名�
 	);
 });
 
+test("CSTOA 两个常用模型按官方规格取上下文与输出上限，不携带其他适配器参数", async () => {
+	const ids = ["deepseek-flash", "MiniMax-M3.1-Flash"];
+	const catalog = new CstoaModels(
+		[
+			{
+				id: "deepseek-v4-flash",
+				name: "DeepSeek V4 Flash",
+				api: "openai-completions",
+				provider: "deepseek",
+				baseUrl: "https://api.deepseek.com",
+				input: ["text"],
+				reasoning: true,
+				contextWindow: 128_000,
+				maxTokens: 8_192,
+				compat: { maxTokensField: "max_tokens" },
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			},
+			{
+				id: "MiniMax-M3.1-Flash",
+				name: "MiniMax-M3.1-Flash",
+				api: "anthropic-messages",
+				provider: "minimax",
+				baseUrl: "https://api.minimax.io/anthropic",
+				input: ["text", "image"],
+				reasoning: true,
+				contextWindow: 1_000_000,
+				maxTokens: 512_000,
+				thinkingLevelMap: { low: "low" },
+				compat: { forceAdaptiveThinking: true },
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			},
+		],
+		async () => Response.json({ data: ids.map((id) => ({ id })) }),
+	);
+	const entry = await catalog.fetch({ type: "api_key", key: "test-key" }, new AbortController().signal);
+	const [deepseek, minimax] = entry.models;
+	assert.deepEqual(
+		entry.models.map((model) => [model.contextWindow, model.maxTokens]),
+		[
+			[1_000_000, 384_000],
+			[1_000_000, 524_288],
+		],
+		"官方规格覆盖目录口径",
+	);
+	assert.deepEqual(minimax?.compat, { maxTokensField: "max_tokens", supportsReasoningEffort: false });
+	assert.equal(minimax?.thinkingLevelMap, undefined, "不借用 Anthropic 请求参数");
+	assert.deepEqual(minimax?.input, ["text", "image"], "官方能力字段优先于目录缺口");
+	assert.equal(minimax?.reasoning, true);
+	assert.deepEqual(deepseek?.input, ["text", "image"]);
+	assert.equal(deepseek?.reasoning, true);
+	assert.deepEqual(deepseek?.compat, { maxTokensField: "max_tokens" });
+});
+
 test("模型清单只接收 ID，不接受上游提供的请求地址或密钥", async () => {
 	const catalog = new CstoaModels([], async () =>
 		Response.json({

@@ -7,6 +7,25 @@ export const PROVIDER_NAME = "CSTOA API";
 const TTL_MS = 5 * 60_000;
 const RETRY_MS = 30_000;
 
+/** 网关 ID 与 Pi 目录 ID 不一致时的对应关系。 */
+const CATALOG_ALIAS: Readonly<Record<string, string>> = {
+	"deepseek-flash": "deepseek-v4-flash",
+	"deepseek-v4.1-flash": "deepseek-v4-flash",
+};
+
+/** 官方规格：目录缺少条目或口径不同时以此为准，覆盖能力字段，不涉及请求参数与价目表。 */
+const OFFICIAL_SPEC: Readonly<
+	Record<string, { contextWindow: number; maxTokens: number; input: ("text" | "image")[]; reasoning: boolean }>
+> = {
+	"deepseek-flash": { contextWindow: 1_000_000, maxTokens: 384_000, input: ["text", "image"], reasoning: true },
+	"MiniMax-M3.1-Flash": {
+		contextWindow: 1_000_000,
+		maxTokens: 524_288,
+		input: ["text", "image"],
+		reasoning: true,
+	},
+};
+
 /** 凭据只发给固定 OA 地址。模型列表里的 URL、headers 和其他字段不作为连接配置。 */
 export function modelBaseUrl(type: Credential["type"]): string {
 	return `${oaHost()}${type === "oauth" ? "/api/agent/llm/v1" : "/v1"}`;
@@ -53,6 +72,11 @@ export class CstoaModels {
 		this.now = now;
 	}
 
+	/** 优先取 Completions 口径的条目，其余适配器下的同名模型只提供能力字段。 */
+	private known(metadataId: string): Model<Api> | undefined {
+		const matches = this.metadata.filter((model) => model.id === metadataId);
+		return matches.find((model) => model.api === "openai-completions") ?? matches[0];
+	}
 	getModels(): readonly Model<Api>[] {
 		return this.entry?.models ?? [];
 	}
@@ -89,20 +113,25 @@ export class CstoaModels {
 			throw new Error("CSTOA 模型清单格式无效，请稍后重试。");
 		}
 		const models = ids.map((id): Model<Api> => {
-			const metadataId = ["deepseek-flash", "deepseek-v4.1-flash"].includes(id) ? "deepseek-v4-flash" : id;
-			const known = this.metadata.find((model) => model.id === metadataId && model.api === "openai-completions");
+			const known = this.known(CATALOG_ALIAS[id] ?? id);
+			// 别名命中其他适配器的条目时只借能力字段，请求参数仍按 Completions 口径。
+			const sameApi = known?.api === "openai-completions";
+			const official = OFFICIAL_SPEC[id];
 			return {
 				id,
 				name: id,
 				api: "openai-completions",
 				provider: PROVIDER_ID,
 				baseUrl,
-				input: known?.input ?? ["text"],
-				reasoning: known?.reasoning ?? false,
-				thinkingLevelMap: known?.thinkingLevelMap,
-				contextWindow: known?.contextWindow ?? 32_768,
-				maxTokens: known?.maxTokens ?? 4096,
-				compat: known?.compat ?? { maxTokensField: "max_tokens", supportsReasoningEffort: false },
+				input: official?.input ?? known?.input ?? ["text"],
+				reasoning: official?.reasoning ?? known?.reasoning ?? false,
+				thinkingLevelMap: sameApi ? known.thinkingLevelMap : undefined,
+				contextWindow: official?.contextWindow ?? known?.contextWindow ?? 32_768,
+				maxTokens: official?.maxTokens ?? known?.maxTokens ?? 4096,
+				compat: (sameApi ? known.compat : undefined) ?? {
+					maxTokensField: "max_tokens",
+					supportsReasoningEffort: false,
+				},
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			};
 		});
