@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 fn root() -> std::path::PathBuf {
-    let p = std::path::PathBuf::from("E:/tmp/2026-11-04/argon-phase4-development/tests")
+    let p = std::env::temp_dir()
+        .join("cst-pilot")
         .join(format!("resource-contracts-{}", pi_ai::uuid_v7()));
     std::fs::create_dir_all(&p).unwrap();
     p

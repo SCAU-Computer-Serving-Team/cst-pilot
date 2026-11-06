@@ -13,7 +13,8 @@ use pi_runtime::{DefaultResourceLoader, DefaultResourceLoaderOptions, ResourceLo
 use pi_session::{ExtensionFactory, ExtensionInitError, InlineExtension};
 
 fn root() -> PathBuf {
-    let root = PathBuf::from("E:/tmp/2026-11-04/argon-phase4-development/tests")
+    let root = std::env::temp_dir()
+        .join("cst-pilot")
         .join(format!("resources-{}", pi_ai::uuid_v7()));
     std::fs::create_dir_all(&root).unwrap();
     root

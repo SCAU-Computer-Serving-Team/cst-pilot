@@ -2,7 +2,8 @@ use pi_runtime::*;
 use std::path::{Path, PathBuf};
 
 fn root() -> PathBuf {
-    let p = PathBuf::from("E:/tmp/2026-11-04/argon-phase4-development/tests")
+    let p = std::env::temp_dir()
+        .join("cst-pilot")
         .join(format!("resource-algorithms-{}", pi_ai::uuid_v7()));
     std::fs::create_dir_all(&p).unwrap();
     p
