@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.6.2 - 2026-11-06
+
+### 修复
+
+- 校正 CSTOA 的 `deepseek-flash` 与 `MiniMax-M3.1-Flash` 能力信息，按官方规格设置上下文窗口、输出上限、图片输入与思考能力。
+- CSTOA 可从不同协议的 Pi 模型目录复用能力信息，保留网关原始模型 ID；请求继续使用 Chat Completions，不携带其他协议的专用参数。
+- TUI 登录 CSTOA 时仅显示手机授权说明与完整链接，移除 `Enter code` 提示。
+
 ## v0.6.1 - 2026-11-03
 
 ### 修复
