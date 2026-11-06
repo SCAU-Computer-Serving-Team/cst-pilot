@@ -55,11 +55,7 @@ pub trait FindOperations: Send + Sync {
 pub fn relativize_find_result_path(result_path: &str, search_path: &Path) -> String {
     let had_trailing = result_path.ends_with('/') || result_path.ends_with('\\');
     let p = Path::new(result_path);
-    let rel = if p.is_absolute() {
-        p.strip_prefix(search_path).unwrap_or(p)
-    } else {
-        p
-    };
+    let rel = p.strip_prefix(search_path).unwrap_or(p);
     let posix = to_posix_path(rel);
     let mut posix = posix.strip_prefix("./").unwrap_or(&posix).to_owned();
     if had_trailing && !posix.ends_with('/') {

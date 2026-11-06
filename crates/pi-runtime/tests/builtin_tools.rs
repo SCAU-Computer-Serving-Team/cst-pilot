@@ -11,7 +11,8 @@ use pi_runtime::tools::*;
 use serde_json::{Value, json};
 
 fn fixture() -> PathBuf {
-    let p = PathBuf::from("E:/tmp/2026-11-04/argon-phase4-development")
+    let p = std::env::temp_dir()
+        .join("cst-pilot")
         .join(format!("tools-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&p).unwrap();
     p
