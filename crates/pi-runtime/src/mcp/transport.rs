@@ -191,9 +191,11 @@ impl McpTransport for StdioTransport {
                 use std::os::unix::process::CommandExt;
                 command.process_group(0);
             }
-            let mut child = command
+            let child = command
                 .spawn()
                 .map_err(|e| format!("Failed to spawn MCP server: {e}"))?;
+            #[cfg(windows)]
+            let mut child = child;
             #[cfg(windows)]
             if !job.assign_and_resume(&mut child) {
                 let _ = child.kill();
