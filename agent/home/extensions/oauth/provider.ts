@@ -5,7 +5,7 @@ import { login, oaHost, refresh } from "./oa.ts";
 import { requestFetch } from "./request-observer.ts";
 
 /** 双登录方式共享同一 Provider；Pi 负责凭据保存、刷新互斥和模型持久化。 */
-export function cstoaProvider(agentDir: string): Provider {
+export function cstoaProvider(agentDir: string, options: { isTui?: () => boolean } = {}): Provider {
 	const providers = builtinProviders();
 	const completions = providers.find((provider) => provider.id === "deepseek");
 	if (!completions) throw new Error("Pi 缺少 OpenAI Chat Completions 适配器。");
@@ -42,7 +42,18 @@ export function cstoaProvider(agentDir: string): Provider {
 						type: "oauth" as const,
 						...(await login(agentDir, {
 							signal: interaction.signal,
-							onDeviceCode: (info) => interaction.notify({ type: "device_code", ...info }),
+							onDeviceCode: (info) => {
+								if (options.isTui?.()) {
+									interaction.notify({
+										type: "info",
+										message:
+											"请在手机上打开授权链接，完成 OA 登录与动态验证码验证。等待授权中，按 Esc 取消。",
+										links: [{ url: info.verificationUri, label: "授权链接" }],
+									});
+								} else {
+									interaction.notify({ type: "device_code", ...info });
+								}
+							},
 						})),
 					};
 					await prepare(credential, interaction.signal, (message) =>

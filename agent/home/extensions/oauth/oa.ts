@@ -11,10 +11,8 @@
  * 4. 成功返回 { access, refresh, expires }；默认模式 refresh 为空串。
  * 5. refresh(credentials, signal) 用 refresh_token 换轮换后的凭据，响应调用方给出的超时信号。
  *
- * verificationUri 约定：与 pi 内核内置的 Kimi provider 一致，把
- * verification_uri_complete（带 user_code 的完整链接）填进 verificationUri，
- * TUI 原生对话框点击打开即预填数字码；Web 端直接编码该链接渲染二维码，
- * 这样两端都不需要另建字段传输通道。
+ * verificationUri 使用 verification_uri_complete（带 user_code 的完整链接）。
+ * provider 在 TUI 中通过 info 通知展示链接；Web 使用 device_code 通知渲染二维码。
  */
 
 import { readFile } from "node:fs/promises";
@@ -256,7 +254,7 @@ export async function login(agentDir: string, callbacks: DeviceCodeCallbacks): P
 	const authorization = await startDeviceAuthorization(agentDir, signal);
 	callbacks.onDeviceCode({
 		userCode: authorization.userCode,
-		// 与内核 Kimi provider 相同：传完整链接，TUI 点击即预填、Web 直接生成二维码。
+		// 传完整授权链接，TUI 展示链接，Web 直接生成二维码。
 		verificationUri: authorization.verificationUriComplete,
 		intervalSeconds: authorization.intervalSeconds,
 		expiresInSeconds: authorization.expiresInSeconds,

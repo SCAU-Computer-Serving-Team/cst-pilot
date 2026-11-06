@@ -15,6 +15,8 @@
 | `agent/home/extensions/web/server/api/account.ts` | CSTOA 资料与多服务额度查询、60 秒内存缓存与凭据二次复核 |
 | `src/web/frontend/app/auth/`、`settings/`、`account/` | 登录面板、无 `opener` 授权弹窗管理、设置资源缓存与账号展示组件 |
 
+CSTOA 根据 `session_start` 的通道类型选择登录通知：TUI 使用 `info` 与链接展示授权说明，Web 保留 `device_code` 事件供二维码和倒计时使用。两端复用完整授权链接、设备授权轮询与凭据保存。
+
 ## CSTOA 动态目录与离线共存
 
 启动器保留 `PI_OFFLINE=1`。项目目录协调器显式允许目录联网，普通内置供应商复用 Pi 的目录协议；`oauth` 提供独立 CSTOA Provider 工厂供后台运行时使用。CSTOA 按以下规则同步：

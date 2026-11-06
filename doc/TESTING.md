@@ -17,7 +17,7 @@
 | 前端格式与类型 | `npm run lint --prefix src/web/frontend`、`npm run typecheck --prefix src/web/frontend` | React 规则检查、路由类型生成与 TypeScript 检查 |
 | 工具与文档契约 | `node --test src/test/*.test.mjs` | 诊断工具行为、BitLocker 替身与跨进程卷锁、命令方案版本与交付恢复、runbook 原子写入、画布结构与颜色子集、Markdown 本地链接与锚点 |
 | 发行脚本与策略 | `node --test pack/test/*.test.mjs` | 启动器权限与参数、TUN 放行策略、离线模型目录、发行树白名单与资源完整性 |
-| OAuth 扩展 | `npm run test:oauth --prefix agent` | CSTOA 设备码、轮询、续期、动态模型目录与凭据隔离 |
+| OAuth 扩展 | `npm run test:oauth --prefix agent` | CSTOA 设备码、轮询、续期、TUI 授权链接展示、Web 设备码事件、动态模型目录与凭据隔离 |
 | Web 后端 | `npm run test:web --prefix agent` | HTTP/SSE 接口、会话池、收件箱队列、鉴权、附件与故障恢复 |
 | 跨端共享专项 | `npm run test:web:shared-audit --prefix agent` | 独立 Pi 进程与 Web 共用设置、模型目录、凭据、历史 `cwd`、单写权与独立主题 |
 | 前端单元测试 | `npm test --prefix src/web/frontend` | 工具卡片映射、分支树几何算法、会话预载缓存与结束事件合并、草稿图片与通知状态机 |
