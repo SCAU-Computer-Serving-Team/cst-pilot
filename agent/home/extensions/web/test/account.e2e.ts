@@ -55,20 +55,22 @@ test("CSTOA：身份展示、上下文额度、零值、重试、模型隔离与
 		api,
 	);
 	await listenWebServer(server, port);
-	const browser = await BrowserProbe.launch(root);
+	let launched: BrowserProbe | undefined;
 	let observer: BrowserProbe | undefined;
-	const openContext = async () => {
-		await browser.until("!!document.querySelector('.context-meter')", "上下文入口");
-		await browser.evaluate("document.querySelector('.context-meter').focus()");
-		await browser.until("document.querySelector('.context-meter-wrap')?.dataset.open==='true'", "键盘打开上下文");
-	};
-	const hideSidebar = async () => {
-		if (await browser.evaluate("document.querySelector('.sidebar')?.getAttribute('aria-hidden')==='false'")) {
-			await browser.click('button[aria-label="收起侧栏"]');
-			await browser.until("document.querySelector('.sidebar').getBoundingClientRect().right<=0", "侧栏收起");
-		}
-	};
 	try {
+		const browser = await BrowserProbe.launch(root);
+		launched = browser;
+		const openContext = async () => {
+			await browser.until("!!document.querySelector('.context-meter')", "上下文入口");
+			await browser.evaluate("document.querySelector('.context-meter').focus()");
+			await browser.until("document.querySelector('.context-meter-wrap')?.dataset.open==='true'", "键盘打开上下文");
+		};
+		const hideSidebar = async () => {
+			if (await browser.evaluate("document.querySelector('.sidebar')?.getAttribute('aria-hidden')==='false'")) {
+				await browser.click('button[aria-label="收起侧栏"]');
+				await browser.until("document.querySelector('.sidebar').getBoundingClientRect().right<=0", "侧栏收起");
+			}
+		};
 		for (const [theme, width, height] of [
 			["light", 1440, 1000],
 			["dark", 480, 900],
@@ -225,7 +227,7 @@ test("CSTOA：身份展示、上下文额度、零值、重试、模型隔离与
 		assert.equal(await browser.evaluate("!!document.querySelector('.context-balance')"), false);
 	} finally {
 		await observer?.close();
-		await browser.close();
+		await launched?.close();
 		server.closeAllConnections();
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 		await api.close();

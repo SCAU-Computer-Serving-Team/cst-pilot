@@ -1,5 +1,4 @@
-import assert from "node:assert/strict";
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -14,6 +13,31 @@ export async function freePort(): Promise<number> {
 	return address.port;
 }
 
+async function waitForExit(child: ChildProcess, timeout: number): Promise<void> {
+	if (child.exitCode !== null || child.signalCode !== null) return;
+	await new Promise<void>((resolve) => {
+		const done = () => {
+			clearTimeout(timer);
+			child.removeListener("exit", done);
+			resolve();
+		};
+		const timer = setTimeout(done, timeout);
+		child.once("exit", done);
+	});
+}
+
+async function terminateBrowser(child: ChildProcess): Promise<void> {
+	if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
+	if (process.platform === "win32") {
+		await new Promise<void>((resolve) => {
+			execFile("taskkill", ["/pid", String(child.pid), "/t", "/f"], { windowsHide: true, timeout: 5000 }, () =>
+				resolve(),
+			);
+		});
+	} else child.kill("SIGKILL");
+	await waitForExit(child, 1000);
+}
+
 /** 隔离 Chrome 配置，浏览器验证不接触用户的标签页、账号或 Cookie。 */
 export class BrowserProbe {
 	private sequence = 0;
@@ -23,10 +47,17 @@ export class BrowserProbe {
 	private readonly socket: WebSocket;
 	private readonly child: ChildProcess;
 	private readonly root: string;
+	private closing: Promise<void> | undefined;
+	private rejectPending(error: Error): void {
+		for (const request of this.pending.values()) request.reject(error);
+		this.pending.clear();
+	}
 	private constructor(socket: WebSocket, child: ChildProcess, root: string) {
 		this.root = root;
 		this.socket = socket;
 		this.child = child;
+		socket.addEventListener("close", () => this.rejectPending(new Error("Chrome 调试连接已关闭")));
+		socket.addEventListener("error", () => this.rejectPending(new Error("Chrome 调试连接失败")));
 		socket.addEventListener("message", (event) => {
 			const message = JSON.parse(String((event as MessageEvent).data)) as {
 				method?: string;
@@ -68,21 +99,46 @@ export class BrowserProbe {
 				"--window-size=1600,1000",
 				"about:blank",
 			],
-			{ stdio: "ignore" },
+			{ stdio: ["ignore", "ignore", "pipe"], windowsHide: true },
 		);
+		let stderr = "";
+		let spawnError: Error | undefined;
+		child.stderr?.on("data", (data: Buffer) => {
+			stderr = (stderr + data.toString()).slice(-16_384);
+		});
+		child.on("error", (error) => {
+			spawnError = error;
+		});
+		let socket: WebSocket | undefined;
 		try {
+			const deadline = Date.now() + 15_000;
 			let version: { webSocketDebuggerUrl: string } | undefined;
-			for (let attempt = 0; attempt < 100 && !version; attempt++) {
-				version = await fetch(`http://127.0.0.1:${port}/json/version`)
+			while (Date.now() < deadline && !version) {
+				if (spawnError) throw spawnError;
+				if (child.exitCode !== null || child.signalCode !== null) throw new Error("Chrome 启动后退出");
+				version = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(500) })
 					.then((response) => response.json())
 					.catch(() => undefined);
 				if (!version) await new Promise((resolve) => setTimeout(resolve, 100));
 			}
-			assert.ok(version, "Chrome 未启动");
-			const socket = new WebSocket(version.webSocketDebuggerUrl);
+			if (!version?.webSocketDebuggerUrl) throw new Error("Chrome 调试端口未就绪");
+			socket = new WebSocket(version.webSocketDebuggerUrl);
+			const connection = socket;
 			await new Promise<void>((resolve, reject) => {
-				socket.addEventListener("open", () => resolve());
-				socket.addEventListener("error", () => reject(new Error("Chrome 调试连接失败")));
+				const finish = (error?: Error) => {
+					clearTimeout(timer);
+					connection.removeEventListener("open", opened);
+					connection.removeEventListener("error", failed);
+					connection.removeEventListener("close", failed);
+					if (error) reject(error);
+					else resolve();
+				};
+				const opened = () => finish();
+				const failed = () => finish(new Error("Chrome 调试连接失败"));
+				const timer = setTimeout(() => finish(new Error("Chrome 调试连接超时")), 5000);
+				connection.addEventListener("open", opened);
+				connection.addEventListener("error", failed);
+				connection.addEventListener("close", failed);
 			});
 			const browser = new BrowserProbe(socket, child, root);
 			const target = await browser.call<{ targetId: string }>("Target.createTarget", { url: "about:blank" });
@@ -105,8 +161,21 @@ export class BrowserProbe {
 			);
 			return browser;
 		} catch (error) {
-			child.kill();
-			throw error;
+			socket?.close();
+			await terminateBrowser(child);
+			const message = error instanceof Error ? error.message : String(error);
+			const diagnostic = {
+				executable: chrome,
+				pid: child.pid,
+				exitCode: child.exitCode,
+				signalCode: child.signalCode,
+				error: message,
+				stderr,
+			};
+			await writeFile(join(root, "browser-startup.json"), JSON.stringify(diagnostic, null, 2));
+			throw new Error(`${message} (exit=${child.exitCode}, signal=${child.signalCode})\n${stderr}`, {
+				cause: error,
+			});
 		}
 	}
 	onEvent(method: string, listener: (params: unknown) => void): () => void {
@@ -119,11 +188,33 @@ export class BrowserProbe {
 		};
 	}
 	async call<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+		if (this.socket.readyState !== WebSocket.OPEN) throw new Error("Chrome 调试连接已关闭");
 		const id = ++this.sequence;
 		const result = new Promise<unknown>((resolve, reject) => {
-			this.pending.set(id, { resolve, reject });
+			const timer = setTimeout(() => {
+				this.pending.delete(id);
+				reject(new Error(`Chrome 调试请求超时：${method}`));
+			}, 30_000);
+			this.pending.set(id, {
+				resolve: (value) => {
+					clearTimeout(timer);
+					resolve(value);
+				},
+				reject: (error) => {
+					clearTimeout(timer);
+					reject(error);
+				},
+			});
+			try {
+				this.socket.send(
+					JSON.stringify({ id, method, params, ...(this.session ? { sessionId: this.session } : {}) }),
+				);
+			} catch (error) {
+				clearTimeout(timer);
+				this.pending.delete(id);
+				reject(error);
+			}
 		});
-		this.socket.send(JSON.stringify({ id, method, params, ...(this.session ? { sessionId: this.session } : {}) }));
 		return (await result) as T;
 	}
 	async evaluate<T = unknown>(expression: string): Promise<T> {
@@ -228,23 +319,18 @@ export class BrowserProbe {
 		const result = await this.call<{ data: string }>("Page.captureScreenshot", { format: "png" });
 		await writeFile(path, Buffer.from(result.data, "base64"));
 	}
-	async close(): Promise<void> {
-		const exited = new Promise<void>((resolve) => {
-			if (this.child.exitCode !== null) resolve();
-			else this.child.once("exit", () => resolve());
-		});
-		// Browser.close 关闭整个隔离实例；单独终止主进程可能残留 renderer/GPU 子进程。
-		const id = ++this.sequence;
-		this.socket.send(JSON.stringify({ id, method: "Browser.close" }));
-		let timer: ReturnType<typeof setTimeout> | undefined;
-		await Promise.race([
-			exited,
-			new Promise<void>((resolve) => {
-				timer = setTimeout(resolve, 5000);
-			}),
-		]);
-		clearTimeout(timer);
-		if (this.child.exitCode === null) this.child.kill();
+	close(): Promise<void> {
+		this.closing ??= this.closeBrowser();
+		return this.closing;
+	}
+	private async closeBrowser(): Promise<void> {
+		// 正常关闭整个隔离实例；异常时仅回收本实例的进程树。
+		if (this.socket.readyState === WebSocket.OPEN) {
+			this.socket.send(JSON.stringify({ id: ++this.sequence, method: "Browser.close" }));
+			await waitForExit(this.child, 5000);
+		}
+		await terminateBrowser(this.child);
+		this.rejectPending(new Error("Chrome 调试连接已关闭"));
 		this.socket.close();
 	}
 }

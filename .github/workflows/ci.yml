@@ -143,6 +143,14 @@ jobs:
         if: inputs.full
       - run: npm run test:fonts --prefix src/web/frontend
         if: inputs.full
+      - name: 验证浏览器启动与退出
+        if: inputs.full
+        shell: pwsh
+        run: |
+          node --input-type=module -e "import { BrowserProbe } from './agent/home/extensions/web/test/browser.ts'; import { testRoot } from './agent/home/extensions/web/test/support.ts'; const browser = await BrowserProbe.launch(await testRoot()); await browser.close();"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        env:
+          CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
       - name: 浏览器与跨端用户链路 E2E
         if: inputs.full
         run: npm run test:web:e2e --prefix agent
@@ -155,6 +163,7 @@ jobs:
           name: web-e2e-evidence
           path: |
             ${{ runner.temp }}/**/browser-environment.json
+            ${{ runner.temp }}/**/browser-startup.json
             ${{ runner.temp }}/**/failure-state.json
             ${{ runner.temp }}/**/ui-regressions/*.png
             ${{ runner.temp }}/**/ui-regressions/report.json
