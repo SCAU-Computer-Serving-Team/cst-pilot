@@ -34,6 +34,8 @@
 | 日常 | Rust 格式、Clippy 与测试；工程静态检查、后端类型、OAuth 与遥测测试、启动器与发行树回归；前端格式、类型、单元测试及工具与文档契约 |
 | 完整验收 | 在日常范围上增加 Web 后端、跨端共享、全量发行脚本、前端构建、字体与浏览器 E2E；手动执行 `gh workflow run ci.yml -f full=true` |
 
+完整验收先单独验证隔离 Chrome 的启动与退出，再执行浏览器 E2E。启动失败时保存 `browser-startup.json`，包含退出码与标准错误输出；调试请求有时间上限，失败后回收测试进程和服务。`browser-lifecycle.test.ts` 覆盖启动失败诊断与账号测试退出，`page-entrance.e2e.ts` 使用延迟列表响应验证首页与侧栏各自的入场时序。
+
 ### Rust 测试环境
 
 Rust CI 使用 `1.99.1`，在 Linux 上运行。本地同时验证 Windows；Clippy 覆盖全部编译目标，CI 省略重复的 `cargo check`。`CARGO_TARGET_DIR` 指向 runner 临时目录，`PI_CODING_AGENT_DIR` 使用隔离目录，并设置 `PI_OFFLINE=1`。本地验证时，将编译产物和日志写入仓库外当天临时目录。

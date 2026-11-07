@@ -28,7 +28,7 @@ test("刷新重播入场，保留地址与侧栏偏好，站内切页不补播�
 		running: false,
 	}));
 	let theme = "light";
-	let stateDelay = 0;
+	let stateDelay = 600;
 	let emptyList = false;
 	let failState = false;
 	const port = await freePort();
@@ -114,7 +114,6 @@ test("刷新重播入场，保留地址与侧栏偏好，站内切页不补播�
 				"window.__entrances.some(e=>e.name==='startup-bottom' && e.target.includes('composer-shell--home'))",
 				`${label} 输入框入场`,
 			);
-			const entries = await probe.evaluate<Entrance[]>("window.__entrances");
 			for (const target of ["brand-arcs", "home-greeting", "composer-shell--home", "home-footnote"]) {
 				const selector = target === "home-greeting" ? ".home-greeting h1" : `.${target}`;
 				assert.match(
@@ -123,6 +122,10 @@ test("刷新重播入场，保留地址与侧栏偏好，站内切页不补播�
 					`${label} ${target} 使用分层入场`,
 				);
 			}
+			if (sidebar) {
+				await probe.until("window.__entrances.some(e=>e.name==='startup-left')", `${label} 列表就绪后侧栏入场`);
+			}
+			const entries = await probe.evaluate<Entrance[]>("window.__entrances");
 			assert.equal(
 				entries.some((entry) => entry.name === "startup-left"),
 				sidebar,
