@@ -34,6 +34,7 @@
 | [rust/plan/2.agent-core.md](rust/plan/2.agent-core.md) | 阶段 2 Agent 核心（`pi-agent`）的循环、工具执行与状态管理 |
 | [rust/plan/3.session-and-extensions.md](rust/plan/3.session-and-extensions.md) | 阶段 3 会话与扩展（`pi-session`）的存储、恢复与扩展接口 |
 | [rust/plan/4.runtime-and-sdk.md](rust/plan/4.runtime-and-sdk.md) | 阶段 4 运行时与 SDK（`pi-runtime`）的配置、资源、工具与无头入口 |
+| [rust/plan/6.cst-pilot.md](rust/plan/6.cst-pilot.md) | 阶段 6 CST Pilot 业务迁移（`cst-pilot`）的诊断工具、认证、遥测与安全边界 |
 | [rust/prototype.md](rust/prototype.md) | Rust 重写的推荐技术栈、选择理由与采用条件；尚待原型验证 |
 
 ## 同名文件职责
