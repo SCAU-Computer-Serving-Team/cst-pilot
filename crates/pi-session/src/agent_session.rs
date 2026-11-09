@@ -549,6 +549,7 @@ pub struct AgentSessionOptions {
     /// Initial log override; replacements use the factory or the target's default log.
     pub execution_log: Option<ExecutionLogController>,
     pub execution_log_factory: Option<ExecutionLogFactory>,
+    pub data_policy: Option<Arc<dyn crate::SessionDataPolicy>>,
     pub base_tools: Vec<ToolDefinition>,
     pub custom_tools: Vec<ToolDefinition>,
     pub extensions: Vec<Box<dyn Extension>>,
@@ -592,6 +593,7 @@ impl AgentSessionOptions {
             session_manager,
             execution_log: None,
             execution_log_factory: None,
+            data_policy: None,
             base_tools: Vec::new(),
             custom_tools: Vec::new(),
             extensions: Vec::new(),
@@ -702,6 +704,7 @@ struct AgentSessionInner {
     session_manager: Mutex<SessionManager>,
     execution_log: Mutex<ExecutionLogController>,
     execution_log_factory: Option<ExecutionLogFactory>,
+    data_policy: Option<Arc<dyn crate::SessionDataPolicy>>,
     extension_runner: RwLock<ExtensionRunner>,
     base_tools: RwLock<BTreeMap<String, ToolDefinition>>,
     custom_tools: RwLock<Vec<ToolDefinition>>,
@@ -1152,6 +1155,7 @@ impl AgentSession {
             session_manager: Mutex::new(options.session_manager),
             execution_log: Mutex::new(exec_log),
             execution_log_factory: options.execution_log_factory,
+            data_policy: options.data_policy,
             extension_runner: RwLock::new(runner),
             base_tools: RwLock::new(base_map),
             custom_tools: RwLock::new(options.custom_tools),
@@ -1946,7 +1950,27 @@ impl AgentSession {
         })
     }
 
+    fn project_event(&self, event: AgentSessionEvent) -> Option<AgentSessionEvent> {
+        let Some(policy) = &self.inner.data_policy else {
+            return Some(event);
+        };
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| policy.project_event(event)))
+        {
+            Ok(Ok(event)) => Some(event),
+            _ => {
+                self.set_fatal_runtime_error("Session event projection failed");
+                None
+            }
+        }
+    }
+
     fn emit(&self, event: AgentSessionEvent) {
+        if let Some(event) = self.project_event(event) {
+            self.emit_projected(event);
+        }
+    }
+
+    fn emit_projected(&self, event: AgentSessionEvent) {
         let listeners: Vec<AgentSessionListener> = self
             .inner
             .listeners
@@ -1961,7 +1985,10 @@ impl AgentSession {
     }
 
     async fn emit_async(&self, event: AgentSessionEvent) {
-        self.emit(event.clone());
+        let Some(event) = self.project_event(event) else {
+            return;
+        };
+        self.emit_projected(event.clone());
         let async_listeners: Vec<AsyncAgentSessionListener> = self
             .inner
             .async_listeners
@@ -3595,6 +3622,24 @@ impl AgentSession {
             }
         }
 
+        if let Some(policy) = &self.inner.data_policy {
+            let role = message.role().to_owned();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                policy.persisted_message(message)
+            }));
+            message = match result {
+                Ok(Ok(projected)) if projected.role() == role => projected,
+                _ => {
+                    let error = "Session message projection failed".to_owned();
+                    if let Some(cb) = &admission_cb {
+                        cb(Err(error.clone()));
+                    }
+                    self.set_fatal_runtime_error(error.clone());
+                    return Err(error);
+                }
+            };
+        }
+
         let queue_item_id = input_correlation.as_ref().and_then(|(client_id, _)| {
             self.with_execution_log(|log| {
                 log.get_input(client_id)
@@ -4318,14 +4363,46 @@ impl AgentSession {
             return Err(err);
         }
 
+        let _input_lease = match &self.inner.data_policy {
+            Some(policy) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                policy.admit_input(&text, opts.expand_prompt_templates.unwrap_or(true))
+            })) {
+                Ok(Ok(lease)) => lease,
+                _ => {
+                    let error = "Session input admission declined".to_owned();
+                    if let Some(cb) = &opts.on_admitted {
+                        cb(Err(error.clone()));
+                    }
+                    return Err(error);
+                }
+            },
+            None => None,
+        };
+
         // 幂等 client_message_id 预检与去重
         if let Some(client_id) = opts.client_message_id.as_deref() {
+            let persisted_text = match &self.inner.data_policy {
+                Some(policy) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    policy.persisted_input(&text)
+                })) {
+                    Ok(Ok(text)) => text,
+                    _ => {
+                        let error = "Session input projection failed".to_owned();
+                        if let Some(cb) = &opts.on_admitted {
+                            cb(Err(error.clone()));
+                        }
+                        self.set_fatal_runtime_error(error.clone());
+                        return Err(error);
+                    }
+                },
+                None => text.clone(),
+            };
             let (record, is_dup) = self
                 .with_execution_log_mut(|log| {
                     log.begin_input_delivery(
                         client_id,
                         opts.queue_item_id.as_deref(),
-                        &text,
+                        &persisted_text,
                         opts.images.clone().unwrap_or_default(),
                     )
                 })

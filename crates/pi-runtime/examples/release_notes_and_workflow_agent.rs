@@ -139,6 +139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     session_manager: options.session_manager,
                     execution_log: None,
                     execution_log_factory: None,
+                    data_policy: None,
                     session_start_event: options.session_start_event,
                     model: Some(model),
                     thinking_level: Some(ModelThinkingLevel::Off),

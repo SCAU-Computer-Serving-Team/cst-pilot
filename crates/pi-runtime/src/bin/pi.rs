@@ -520,6 +520,7 @@ async fn run_cli(raw_args: Vec<String>) -> i32 {
                         session_manager: rt_opts.session_manager,
                         execution_log: None,
                         execution_log_factory: None,
+                        data_policy: None,
                         session_start_event: rt_opts.session_start_event,
                         model: explicit_model,
                         thinking_level: explicit_thinking,
