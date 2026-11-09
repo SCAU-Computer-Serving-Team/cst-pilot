@@ -88,12 +88,12 @@ environmentId = HMAC-SHA256(identityKey, message)
 |---|---|---|
 | `os.platform` | 操作系统平台 | `"win32"` |
 | `os.name` | 系统版本名称 | `"Windows 11 Pro"` 或 `null` |
-| `os.version` | 系统内核版本（`os.release()`） | `"10.0.26100"` |
+| `os.version` | 系统内核版本；TypeScript 使用 `os.release()`，Rust 读取原生系统版本字段 | `"10.0.26100"` |
 | `os.displayVersion` | Windows 功能版本 | `"24H2"` 或 `null` |
 | `os.arch` | 独立探测的操作系统原生架构 | `"x64"`、`"arm64"` 或 `null` |
 | `os.isPE` | 是否运行于 Windows PE | `true`、`false`、`null` |
-| `runtime.version` | Node 运行时版本 | `"24.15.0"` |
-| `runtime.arch` | 运行时进程架构（`process.arch`） | `"x64"` |
+| `runtime.version` | TypeScript 为 Node 版本；Rust 为业务运行时构建版本 | `"24.15.0"`、`"0.1.0"` |
+| `runtime.arch` | 运行时进程架构 | `"x64"` |
 | `admin` | 当前进程是否具有管理员权限 | `true`、`false`、`null` |
 
 ## 模型用量字段

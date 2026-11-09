@@ -19,6 +19,21 @@
 
 公网端点必须使用 HTTPS（本机回环测试允许 HTTP），拒绝包含用户名、密码或片段的 URL。`caFile` 指向扩展目录下的专用公开 CA 证书，仅用于对应端点的 TLS 链校验。
 
+## Rust 宿主接口
+
+宿主通过 `Kit::create_session` 或共享认证入口创建会话。`Kit::session_options` 仅配置工具和资源，低层调用不自动绑定遥测生命周期。
+
+| 接口 | 调用边界 |
+|---|---|
+| `KitSession::telemetry()` | 返回当前 home 的共享服务；遥测禁用时返回 `None` |
+| `KitSession::finalize_telemetry(reason)` | 删除或释放会话前定稿，最多等待当前关闭预算；仅完成本地保存与入队，不等待上传 |
+| `TelemetryService::hint()` | 页面离开、可见或联网后触发提交与补发，2 秒内重复提示合并，不关闭会话 |
+| `TelemetryService::begin_close()` | 真实进程退出前创建同 home 共享的 5 秒截止时刻；后续实例复用该时刻 |
+| `TelemetryService::cancel_close()` | 宿主取消退出时清除当前截止时刻 |
+| `TelemetryService::close_process(reason)` | 并行定稿全部实例，按共享截止时刻返回，停止定时调度并后台发送最终心跳 |
+
+`KitSession::shutdown` 通过 SDK 关闭事件定稿当前实例。多会话宿主退出时先建立共享截止时刻，再关闭各会话并调用 `close_process`。本地写入超时后继续执行，失败草稿留待恢复。
+
 ## 上传鉴权与安装签名
 
 | 请求头 | 格式与规则 |

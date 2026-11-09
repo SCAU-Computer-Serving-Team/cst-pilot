@@ -6,6 +6,7 @@ members = [
     "crates/pi-agent",
     "crates/pi-session",
     "crates/pi-runtime",
+    "crates/cst-pilot",
 ]
 
 [workspace.package]

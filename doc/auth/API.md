@@ -21,6 +21,22 @@
 | `GET` / `POST` | `/v1/models`、`/v1/chat/completions` | Bearer `CSTOA APIKEY` | APIKEY 模型目录与推理接口 |
 | `POST` | `/api/agent/llm/billing` | Bearer `access_token` 或 `APIKEY` | 按 `requestIds`（每批 ≤50）只读查询本人请求的实际消费额度点 |
 
+## Rust 业务接口
+
+`crates/cst-pilot` 提供可信宿主侧的 `AuthRuntime`。`runtime()`、`login()` 与 Provider 对象可能持有明文凭据，仅供后端调用；界面查询使用下表中的掩码结果。
+
+| 接口 | 参数与返回 |
+|---|---|
+| `custom_model_defaults()` | 返回新建模型的 `contextWindow` 与 `maxTokens` 默认值 |
+| `custom_providers()` / `custom_provider(id)` | 列出自定义服务 ID 或读取服务配置；密钥只返回 `apiKeySet`，并附 `revision` |
+| `save_custom_provider(input)` | 接收 `id / name / baseUrl / api / apiKey? / models / revision?`；模型字段为 `id / name / contextWindow / maxTokens / reasoning / image`。更新已有服务必须传修订号，返回 `id / revision` |
+| `delete_custom_provider(id, revision)` | 核对修订号后删除自定义配置并刷新模型目录，返回 `id`；保留其他服务与未知字段 |
+| `account(cancel)` / `quota(provider, cancel)` | 返回本页约定的账号或额度结构，支持取消；CSTOA 两种查询共用一个上游请求与缓存 |
+| `account_snapshot(cancel)` | 同时返回 `{ account, quota }` |
+| `invalidate_account()` / `refresh(force)` | 使账号缓存失效，或检查 CSTOA 模型目录；强制检查跳过目录有效期与失败退避 |
+
+配置并发冲突返回带 `config_conflict` 的中文错误。解析、网络与存储错误不包含配置原文或远端响应正文。上述接口尚未绑定三端 HTTP 路由，三端服务适配按 [Rust 总计划](../rust/plan/0.PLAN.md) 推进。
+
 ## OAuth 令牌载荷与作用域
 
 访问令牌采用 HMAC 签名，载荷字段如下：
