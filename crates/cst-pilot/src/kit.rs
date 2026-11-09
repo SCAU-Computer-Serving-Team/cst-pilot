@@ -88,6 +88,9 @@ impl Kit {
     pub fn path_guard(&self) -> &PathGuard {
         &self.guard
     }
+    pub fn activity_gate(&self) -> &Arc<crate::update::activity::ActivityGate> {
+        &self.gate
+    }
 
     /// Keep model/UI/session options; replace all resource and tool policy overrides.
     /// Only implemented business tools are activated. No built-in ls fallback is exposed.
@@ -96,13 +99,20 @@ impl Kit {
         options: CreateAgentSessionOptions,
     ) -> Result<CreateAgentSessionOptions, String> {
         crate::update::service::startup_check(self.root())?;
-        self.session_options_with_auth(options, None, None, None)
+        self.session_options_with_auth(options, None, None, None, None, None)
     }
 
     /// Validate local assembly during an updater-owned transaction, without starting a session.
     pub(crate) fn check_resources(&self) -> Result<(), String> {
-        self.session_options_with_auth(CreateAgentSessionOptions::default(), None, None, None)
-            .map(|_| ())
+        self.session_options_with_auth(
+            CreateAgentSessionOptions::default(),
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .map(|_| ())
     }
 
     fn session_options_with_auth(
@@ -111,22 +121,30 @@ impl Kit {
         auth: Option<AuthHooks>,
         telemetry: Option<Arc<TelemetryBinding>>,
         updates: Option<Arc<crate::update::service::UpdateService>>,
+        bitlocker_executor: Option<crate::bitlocker::core::Executor>,
+        bitlocker_host: Option<Arc<dyn crate::bitlocker::BitLockerHostChannel>>,
     ) -> Result<CreateAgentSessionOptions, String> {
         self.gate.check()?;
-        let cwd = options
+        let cwd_canonical = options
             .cwd
             .clone()
             .unwrap_or_else(|| self.root.clone())
             .canonicalize()
             .map_err(|_| "工作目录无法读取。")?;
+        let cwd = strip_verbatim(&cwd_canonical);
+        let agent_dir = strip_verbatim(&self.agent_dir());
         let settings = SettingsManager::from_storage(
             Arc::new(KitSettingsStorage(
-                FileSettingsStorage::new(&cwd, self.agent_dir()),
+                FileSettingsStorage::new(&cwd, &agent_dir),
                 self.gate.clone(),
             )),
             false,
         );
-        let extension = CstPilotExtension::new(self)?;
+        let extension = CstPilotExtension::new_with_bitlocker(
+            self,
+            bitlocker_executor.clone(),
+            bitlocker_host.clone(),
+        )?;
         let active = extension
             .tools
             .iter()
@@ -135,18 +153,22 @@ impl Kit {
         let kit = self.clone();
         let update_command = updates.is_some();
         let factory: ExtensionFactory = Arc::new(move || {
-            CstPilotExtension::new(&kit)
-                .map(|mut extension| {
-                    extension.auth = auth.clone();
-                    extension.telemetry = telemetry.clone();
-                    extension.updates = updates.clone();
-                    extension
-                })
-                .map(|extension| Box::new(extension) as Box<dyn Extension>)
-                .map_err(|message| ExtensionInitError {
-                    extension_path: "cst-pilot".into(),
-                    message,
-                })
+            CstPilotExtension::new_with_bitlocker(
+                &kit,
+                bitlocker_executor.clone(),
+                bitlocker_host.clone(),
+            )
+            .map(|mut extension| {
+                extension.auth = auth.clone();
+                extension.telemetry = telemetry.clone();
+                extension.updates = updates.clone();
+                extension
+            })
+            .map(|extension| Box::new(extension) as Box<dyn Extension>)
+            .map_err(|message| ExtensionInitError {
+                extension_path: "cst-pilot".into(),
+                message,
+            })
         });
         let mut skill_paths = Vec::new();
         for name in SKILL_NAMES {
@@ -155,7 +177,7 @@ impl Kit {
         let prompt = self.resource("APPEND_SYSTEM.md")?;
         let resources = DefaultResourceLoader::new(DefaultResourceLoaderOptions {
             cwd: cwd.clone(),
-            agent_dir: self.agent_dir(),
+            agent_dir: agent_dir.clone(),
             settings_manager: Some(settings.clone()),
             extension_factories: vec![factory],
             no_context_files: true,
@@ -174,7 +196,7 @@ impl Kit {
             update_command,
         )));
         options.cwd = Some(cwd);
-        options.agent_dir = Some(self.agent_dir());
+        options.agent_dir = Some(agent_dir);
         options.project_trusted = Some(false);
         options.settings_manager = Some(settings);
         options.resource_loader = Some(Arc::new(resources));
@@ -275,6 +297,8 @@ impl Kit {
             }),
             telemetry.clone(),
             Some(updates.clone()),
+            None,
+            None,
         )?;
         let created = create_agent_session(options).await?;
         let bitlocker_verification = crate::bitlocker::core::Executor::new(Arc::new(
@@ -390,6 +414,278 @@ impl Drop for KitSession {
     }
 }
 
+#[derive(Default)]
+pub struct HostedSessionOptions {
+    pub session: CreateAgentSessionOptions,
+    pub bitlocker_host: Option<Arc<dyn crate::bitlocker::BitLockerHostChannel>>,
+    pub telemetry_source: Option<&'static str>,
+}
+
+impl From<CreateAgentSessionOptions> for HostedSessionOptions {
+    fn from(session: CreateAgentSessionOptions) -> Self {
+        Self {
+            session,
+            bitlocker_host: None,
+            telemetry_source: None,
+        }
+    }
+}
+
+struct KitHostMaintenance {
+    stop: CancellationToken,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for KitHostMaintenance {
+    fn drop(&mut self) {
+        self.stop.cancel();
+        self.handle.abort();
+    }
+}
+
+/// Shared multi-session host for `cst-server`, owning one catalog maintenance loop
+/// and shared `AuthRuntime`, `TelemetryService`, and `UpdateService`.
+#[derive(Clone)]
+pub struct KitHost {
+    kit: Kit,
+    auth: AuthRuntime,
+    telemetry: Option<Arc<TelemetryService>>,
+    updates: Arc<crate::update::service::UpdateService>,
+    bitlocker_executor: crate::bitlocker::core::Executor,
+    stop: CancellationToken,
+    wake: Arc<tokio::sync::Notify>,
+    _maintenance: Arc<KitHostMaintenance>,
+}
+
+impl KitHost {
+    pub async fn new(
+        kit: Kit,
+        auth: AuthRuntime,
+        telemetry_options: TelemetryOptions,
+        update_options: crate::update::service::UpdateOptions,
+    ) -> Result<Self, String> {
+        crate::update::service::startup_check(kit.root())?;
+        if auth.files.path("") != kit.agent_dir() {
+            return Err("会话与认证目录不一致。".into());
+        }
+        let updates = crate::update::service::UpdateService::load(
+            kit.root(),
+            auth.catalog.client.host(),
+            update_options,
+        )?;
+        let telemetry = TelemetryService::load(
+            kit.root(),
+            Arc::new(auth.runtime().credentials().clone()),
+            Arc::new(OaBilling::from_auth(&auth)),
+            telemetry_options,
+        )
+        .await?;
+        let stop = CancellationToken::new();
+        let wake = Arc::new(tokio::sync::Notify::new());
+        let maintenance_auth = auth.clone();
+        let cancel = stop.clone();
+        let wake_task = wake.clone();
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => break,
+                    _ = maintenance_auth.refresh(false) => ()
+                }
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => break,
+                    _ = wake_task.notified() => (),
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => ()
+                }
+            }
+        });
+        Ok(Self {
+            kit,
+            auth,
+            telemetry,
+            updates,
+            bitlocker_executor: crate::bitlocker::core::Executor::new(Arc::new(
+                crate::bitlocker::wmi_encryptable::WindowsBitLocker,
+            )),
+            stop: stop.clone(),
+            wake,
+            _maintenance: Arc::new(KitHostMaintenance { stop, handle }),
+        })
+    }
+
+    pub fn with_bitlocker_executor(mut self, executor: crate::bitlocker::core::Executor) -> Self {
+        self.bitlocker_executor = executor;
+        self
+    }
+
+    pub fn kit(&self) -> &Kit {
+        &self.kit
+    }
+
+    pub fn auth(&self) -> &AuthRuntime {
+        &self.auth
+    }
+
+    pub fn telemetry(&self) -> Option<&Arc<TelemetryService>> {
+        self.telemetry.as_ref()
+    }
+
+    pub fn updates(&self) -> &Arc<crate::update::service::UpdateService> {
+        &self.updates
+    }
+
+    pub fn wake_catalog(&self) {
+        self.wake.notify_one();
+    }
+
+    pub async fn open_session(
+        &self,
+        options: impl Into<HostedSessionOptions>,
+    ) -> Result<HostedSession, String> {
+        let _activity = self.kit.gate.enter()?;
+        let mut hosted = options.into();
+        let host_ui = hosted
+            .session
+            .ui_context
+            .clone()
+            .unwrap_or_else(|| Arc::new(pi_session::NoOpUiContext::new()));
+        let session_stop = self.stop.child_token();
+        hosted.session.model_runtime = Some(self.auth.runtime().clone());
+        hosted.session.initial_model_policy = InitialModelPolicy::FixedIdentity {
+            default_provider: "deepseek".into(),
+            default_model_id: "deepseek-flash".into(),
+            preserve_unauthenticated: true,
+        };
+        let source = hosted
+            .telemetry_source
+            .unwrap_or(match hosted.session.mode {
+                Some(pi_session::ExtensionMode::Interactive) => "tui",
+                _ => "web",
+            });
+        let telemetry = self
+            .telemetry
+            .as_ref()
+            .map(|service| TelemetryBinding::new(service.clone(), source));
+        let session_options = self.kit.session_options_with_auth(
+            hosted.session,
+            Some(AuthHooks {
+                provider: self.auth.provider()?,
+                accounts: self.auth.accounts.clone(),
+                stop: session_stop.clone(),
+                wake: self.wake.clone(),
+            }),
+            telemetry.clone(),
+            Some(self.updates.clone()),
+            Some(self.bitlocker_executor.clone()),
+            hosted.bitlocker_host,
+        )?;
+        let created = Box::pin(create_agent_session(session_options)).await?;
+        let bitlocker_verification = self
+            .bitlocker_executor
+            .reconcile(
+                &created.session.startup_reconciliation_report(),
+                session_stop.child_token(),
+            )
+            .await;
+        if let Some(result) = &bitlocker_verification {
+            created
+                .session
+                .with_session_manager_mut(|manager| {
+                    manager.append_custom_entry(
+                        "cst.bitlocker-state-verification",
+                        Some(result.clone()),
+                    )
+                })
+                .map_err(|_| "BitLocker 中断复查记录无法保存。")?;
+        }
+        let unsubscribe = telemetry.as_ref().map(|binding| {
+            let binding = Arc::downgrade(binding);
+            created.session.subscribe(Arc::new(move |event| {
+                if let Some(binding) = binding.upgrade() {
+                    binding.on_session_event(event);
+                }
+            }))
+        });
+        let auth = self
+            .auth
+            .clone()
+            .with_runtime(created.model_runtime.clone());
+        let registration = self.updates.attach(
+            created.session.clone(),
+            telemetry.as_ref().map(|binding| binding.service.clone()),
+            session_stop.clone(),
+            host_ui,
+        );
+        Ok(HostedSession {
+            updates: self.updates.clone(),
+            _update_registration: registration,
+            created,
+            auth,
+            bitlocker_verification,
+            stop: session_stop,
+            telemetry,
+            unsubscribe,
+        })
+    }
+
+    pub async fn shutdown(&self) {
+        self.shutdown_with_reason("quit").await;
+    }
+
+    pub async fn shutdown_with_reason(&self, reason: &str) {
+        self.stop.cancel();
+        if let Some(telemetry) = &self.telemetry {
+            telemetry.close_process(reason).await;
+        }
+    }
+}
+
+pub struct HostedSession {
+    pub updates: Arc<crate::update::service::UpdateService>,
+    _update_registration: Arc<crate::update::service::SessionRegistration>,
+    pub created: CreateAgentSessionResult,
+    pub auth: AuthRuntime,
+    /// Present only after unresolved BitLocker calls were queried during startup.
+    pub bitlocker_verification: Option<Value>,
+    stop: CancellationToken,
+    telemetry: Option<Arc<TelemetryBinding>>,
+    unsubscribe: Option<Box<dyn FnOnce() + Send + Sync>>,
+}
+
+impl HostedSession {
+    pub fn session(&self) -> &pi_session::AgentSession {
+        &self.created.session
+    }
+
+    pub fn telemetry(&self) -> Option<Arc<TelemetryService>> {
+        self.telemetry.as_ref().map(|b| b.service.clone())
+    }
+
+    pub async fn finalize_telemetry(&self, reason: &str) {
+        if let Some(binding) = &self.telemetry {
+            binding.finalize(reason, None).await;
+        }
+    }
+
+    pub async fn shutdown(&self) -> Result<(), String> {
+        self.stop.cancel();
+        self.created.session.shutdown().await
+    }
+}
+
+impl Drop for HostedSession {
+    fn drop(&mut self) {
+        self.stop.cancel();
+        if let Some(unsubscribe) = self.unsubscribe.take() {
+            unsubscribe();
+        }
+        if let Some(binding) = &self.telemetry {
+            binding.abandon();
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct CstPilotExtension {
     tools: Vec<ToolDefinition>,
@@ -402,6 +698,14 @@ pub struct CstPilotExtension {
 
 impl CstPilotExtension {
     pub fn new(kit: &Kit) -> Result<Self, String> {
+        Self::new_with_bitlocker(kit, None, None)
+    }
+
+    pub fn new_with_bitlocker(
+        kit: &Kit,
+        bitlocker_executor: Option<crate::bitlocker::core::Executor>,
+        bitlocker_host: Option<Arc<dyn crate::bitlocker::BitLockerHostChannel>>,
+    ) -> Result<Self, String> {
         let web = WebAccess::from_config(&kit.agent_dir().join("web-search.json"))?;
         let mut read = create_read_tool_definition(
             kit.root.to_string_lossy(),
@@ -417,7 +721,16 @@ impl CstPilotExtension {
         tools.extend(crate::diagnostics::definitions(kit.root()));
         tools.extend(crate::runbook::definitions(kit.root())?);
         let credentials = crate::bitlocker::credentials::Vault::default();
-        tools.push(crate::bitlocker::definition(credentials.clone()));
+        let executor = bitlocker_executor.unwrap_or_else(|| {
+            crate::bitlocker::core::Executor::new(Arc::new(
+                crate::bitlocker::wmi_encryptable::WindowsBitLocker,
+            ))
+        });
+        tools.push(crate::bitlocker::definition_with_host(
+            credentials.clone(),
+            executor,
+            bitlocker_host,
+        ));
         kit.gate.wrap(&mut tools);
         Ok(Self {
             tools,
@@ -469,6 +782,15 @@ impl Extension for CstPilotExtension {
             api.register_tool(definition.clone());
         }
         Ok(())
+    }
+}
+
+fn strip_verbatim(path: &Path) -> PathBuf {
+    let raw = path.to_string_lossy();
+    if let Some(stripped) = raw.strip_prefix(r"\\?\") {
+        PathBuf::from(stripped)
+    } else {
+        path.to_path_buf()
     }
 }
 
