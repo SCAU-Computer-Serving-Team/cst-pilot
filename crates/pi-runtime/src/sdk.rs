@@ -320,6 +320,7 @@ pub struct CreateAgentSessionOptions {
     pub session_manager: Option<SessionManager>,
     pub execution_log: Option<ExecutionLogController>,
     pub execution_log_factory: Option<ExecutionLogFactory>,
+    pub data_policy: Option<Arc<dyn pi_session::SessionDataPolicy>>,
     pub settings_manager: Option<SettingsManager>,
     pub ui_context: Option<Arc<dyn ExtensionUiContext>>,
     pub mode: Option<ExtensionMode>,
@@ -333,6 +334,7 @@ pub struct CreateAgentSessionFromServicesOptions {
     pub session_manager: SessionManager,
     pub execution_log: Option<ExecutionLogController>,
     pub execution_log_factory: Option<ExecutionLogFactory>,
+    pub data_policy: Option<Arc<dyn pi_session::SessionDataPolicy>>,
     pub session_start_event: Option<(String, Option<PathBuf>)>,
     pub model: Option<Model>,
     pub thinking_level: Option<ModelThinkingLevel>,
@@ -391,6 +393,7 @@ pub async fn create_agent_session_from_services(
         session_manager: Some(options.session_manager),
         execution_log: options.execution_log,
         execution_log_factory: options.execution_log_factory,
+        data_policy: options.data_policy,
         settings_manager: Some(options.services.settings_manager),
         ui_context: options.ui_context,
         mode: options.mode,
@@ -820,6 +823,7 @@ pub async fn create_agent_session(
     session_opts.stream_fn = Some(stream_fn);
     session_opts.execution_log = options.execution_log;
     session_opts.execution_log_factory = options.execution_log_factory;
+    session_opts.data_policy = options.data_policy;
     session_opts.base_tools = builtin_defs_map.into_values().collect();
     session_opts.custom_tools = options.custom_tools;
     session_opts.extension_runner = Some(session_runner.clone());

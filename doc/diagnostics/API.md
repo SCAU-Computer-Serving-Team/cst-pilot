@@ -31,6 +31,7 @@
 | `entries[]` | 按字节降序：`{ name, type: "dir"\|"file"\|"unknown", size: string\|null, bytes: number\|null, pct: number\|null }` |
 | `omitted` | 截断时存在：`{ count, size, unknownCount, note }` |
 | `notice` | 预算截断或权限受限说明 |
+| `childrenTruncated` | 可选；直接子项枚举达到预算时为 `true`，`totalChildren` 仅覆盖已枚举项 |
 
 ## disk
 
@@ -42,7 +43,7 @@
 | `space` | `space[]: { drive, totalGB, freeGB, usedPct }[]` |
 | `info` | `physicalDisks[]: { FriendlyName, SerialNumber, MediaType, BusType, HealthStatus, OperationalStatus, DeviceId, sizeGB }[]`、`volumes[]: { drive, label, fs, driveType, totalGB, freeGB }[]`、可选 `infoNotice`、`degraded` |
 | `health` | `smart: { DeviceId, Wear, Temperature, PowerOnHours, ReadErrorsTotal, WriteErrorsTotal, ... }[] \| null`、可选 `smartErrors[]: { deviceId, error }[]`、`smartNotice`、`degraded` |
-| `usage` | `usage: { root, totalGB, method: "wiztree-mft"\|"wiztree-walk"\|"node-walk", topDirs[]: { path, sizeGB, pct }[], topFiles[]?, extAgg[]: { ext, files, sizeGB }[]?, staleFiles[]: { path, sizeGB, lastWrite }[]?, stats?, truncated?, denied[]?, degradedFrom?, notice }` |
+| `usage` | `usage: { root, totalGB, method: "wiztree-mft"\|"wiztree-walk"\|"node-walk", topDirs[]: { path, sizeGB, pct }[], topFiles[]?, extAgg[]: { ext, files, sizeGB }[]?, staleFiles[]: { path, sizeGB, modified }[]?, stats?, truncated?, denied[]?, degradedFrom?, notice }` |
 | `all` | 同层合并 `space`、`info`、`health` 的全部字段 |
 
 ## sys
@@ -57,6 +58,8 @@
 | `gpu` | `byGpuPct[]: { pid, name, gpuPct, engtypes, engines[] }[]`、`byDedicatedMB[]: { pid, name, dedicatedMB }[]`、`engineSamples`、`adapters[]: { name, vendor, driver, status, bus }[]`、`nvidia: { name, uuid, pciBusId, tempC, powerW, vramUsedMB, vramTotalMB, utilPct, driver }[] \| { error } \| null`、可选 `lhmGpu: { hardware, sensors }`、`counterErrors: { engine, memory }` |
 | `io` | `intervalSec`、`totalProcs`、`disks[]: { disk, queueLen, busyPct, readKBs, writeKBs }[]`、`byIo[]: { name, pid, ioKBs }[]` |
 | `sensor` | `admin`、`pawnio`、`hardware[]`、`sensorCount`、`sensors[]: { hw, name, type, value }[]`、`thermalZones[]: { zone, tempC, passivePct }[]`、`frequency: { cores, minPctOfMax, avgPctOfMax } \| null`、`counterErrors` |
+
+Rust `sys` 的热区、频率与 LHM 独立采集。辅助程序或 DLL 缺失时，保留成功读取的计数器并标记 `degraded`；权限或 PawnIO 注册项读取失败时对应字段为 `null`，具体原因写入 `collectionErrors`。`lhmGpu` 可包含局部采集的 `degraded` / `collectionErrors`。
 
 ## startup
 
@@ -83,7 +86,7 @@
 | `recordId` / `id` | `detail` | 二选一必填：`recordId` 精确记录号，或 `id` 取该事件 ID 最新一条；同时必须提供 `logName` |
 
 - **返回（包装在 `result[scope]` 下）**：
-  - 列表类 `scope`：`logs`、`hours`、`top`、`total`、`truncated`、`events[]: { logName, time, recordId, level, levelName, provider, id, msg }[]`（`msg` 最多 200 字符）、`counts[]: { key, provider, id, n, last }[]`（最多 100 组）、`countsTruncated`、`unreadable`、`firstTime`、`lastTime`、`admin`、`notice`、可选 `noMatch` / `degraded`。
+  - 列表类 `scope`：`logs`、`hours`、`top`、`total`、`truncated`、`events[]: { logName, time, recordId, level, levelName, provider, id, msg }[]`（`msg` 最多 200 字符）、`counts[]: { key, provider, id, n, last }[]`（最多 100 组）、`countsTruncated`、可选 `scanTruncated`（扫描预算停止，统计值仅覆盖已扫描范围）、`unreadable`、`firstTime`、`lastTime`、`admin`、`notice`、可选 `noMatch` / `degraded`。
   - `detail`：`{ found: boolean, logName, recordId?, id?, time?, level?, levelName?, provider?, machine?, msg?, notice }`（`msg` 保留换行，最多 20,000 字符）。
 
 ### eventlog 内置事件范围
@@ -134,4 +137,5 @@
 - **返回（包装在 `result.bitlocker` 下）**：
   - 查询级：`{ scope, collectedAt, admin, source: "Win32_EncryptableVolume", volumes[], notice, degraded?, collectionErrors? }`。
   - `volumes[]` 每项状态：`{ volumeId, drive, volumeType, conversionStatus, encryptionPercentage, encryptionMethod, protectionStatus, lockStatus, autoUnlockEnabled, autoUnlockKeysStored, keyProtectors: { id, type }[], collectionErrors[] }`。
+  - Rust 启动中断核对在 `KitSession::bitlocker_verification` 返回同形状态，并附加查询级 `operation.status="unknown"`；会话保存 `cst.bitlocker-state-verification` 自定义条目。此路径仅查询，不重放原操作。
   - `unlock` / `decrypt` 在每卷附加 `operation`：`{ status: "accepted" | "rejected" | "skipped" | "cancelled" | "unknown", reason, returnCode: number | null, error?: { source, code, message }, credentialSource?: "localInput" | "toolParameter" | null }`。

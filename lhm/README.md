@@ -11,6 +11,20 @@
 
 TFM 选型：pwsh 7.6 运行于 .NET 10，故取 net10.0（HidSharp 取 netstandard2.0）；架构 win-x64。
 
+## Rust 隔离采集
+
+Rust 诊断模块使用 `host/cst-lhm-host.exe` 加载本目录的 DLL，采集过程绑定 Windows Job Object。辅助程序携带 .NET 10 运行时，现场无需安装 .NET；不执行 PowerShell 采集脚本。
+
+构建机需提供 .NET 10 SDK，在仓库根目录执行：
+
+```powershell
+./crates/cst-pilot/lhm-host/publish.ps1 -OutputDirectory ./lhm/host -WorkDirectory E:/tmp/<YYYY-MM-DD>/lhm-build
+```
+
+发布目录包含程序、运行时及 .NET 许可，整目录随包分发；编译缓存保留在 `WorkDirectory`。辅助程序固定从上级读取 `LibreHardwareMonitorLib.dll` 及其依赖，只接受 `gpu` / `sensor` 两种模式。读取错误按来源返回，传感器仅保留有限值，最多 200 项；库的 `Close()` 在正常返回与异常处理时执行。
+
+模拟 DLL 与真实子进程测试见 [TESTING.md](../doc/TESTING.md#rust-测试环境)。
+
 ## 更新方法
 
 1. `https://www.nuget.org/api/v2/package/LibreHardwareMonitorLib/` 下载最新 nupkg（zip）

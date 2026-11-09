@@ -10,6 +10,12 @@
 |---|---|---|
 | Rust 格式与编译 | `cargo fmt --all --check`、`cargo check --workspace --all-targets --locked` | Cargo 工作区格式与全部编译目标 |
 | Rust 静态检查 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | 全部 Rust 编译目标零警告 |
+| Rust 业务契约 | `cargo test -p cst-pilot --locked` | 工具允许名单、资源与凭据隔离、运行态硬链接拦截、普通硬链接放行、文件检索、SSRF、Exa 协议与缓存、常规原生诊断字段与单位、部分失败、取消超时、50 KiB 裁剪，以及方案版本、清单序号、编码、文件占用、链接保护、跨进程互斥、卷缓存、流式扫描、GPU 聚合、I/O 差分、传感器过滤、CSTOA 双模式登录与官方模型能力、损坏缓存备份重建及登出、自定义服务修订、额度缓存隔离和后台任务取消；联网与系统采集使用替身或本机服务，文件交付使用隔离目录 |
+| Rust 遥测专项 | `cargo test -p cst-pilot --test telemetry_collect --test telemetry_storage --test telemetry_network --test telemetry_session --locked` | 静默禁用、身份签名、匿名环境、指标隐私、查账预算、管道存活、跨进程目录锁、草稿封存、精确确认、损坏行隔离、双端发送、心跳合并、独立 CA、链接保护、真实 SDK 事件、重载与会话切换、30 秒定时提交、发行版本读取、关闭中断后的查账恢复、封存重试稳定性、版本化定稿和共享 5 秒关闭预算；仅使用替身及本机 HTTP/TLS 服务 |
+| Rust BitLocker 专项 | `cargo test -p cst-pilot --test bitlocker_privacy --test bitlocker_execution --locked`、`cargo test -p pi-session --test data_policy --locked` | 三条隐私边界、真实 SDK 与隐藏输入、固定目标与权限、原始返回码、超时／取消后复查、进程卷锁及退出释放；原生采集与变更均使用替身，不操作宿主加密状态 |
+| Rust 升级包准备 | `cargo test -p cst-pilot --test update_package --locked` | 双重验签、版本基线、流式下载、10 秒预算、ZIP 目录与解压资源上限、路径和链接保护、全树哈希、凭据扫描、带注释本机设置的合并、严格发行 JSON 及暂存清理；仅使用独立测试密钥、模拟传输和隔离发行树 |
+| Rust 更新执行 | `cargo test -p cst-pilot --test update_applier --locked` | 逐文件中断恢复、配置与用户数据保留、事务与备份冲突、目录联接、跨进程锁、父进程身份、独立交接、事务内公开健康检查、带注释设置与模型配置核验、普通启动隔离，以及真实 Windows 自检的成功／失败／15 秒超时；`rustc` 仅在隔离临时目录编译模拟主程序，不替换当前仓库或真实发行包 |
+| Rust 宿主更新 | `cargo test -p cst-pilot --test update_service --locked` | 共享后台检查、状态提示、真实 SDK 与本地确认、输入许可、忙碌拒绝、失败清理、取消与丢弃等待者、共享遥测关闭和缺少公钥的安全边界；Windows 上使用模拟传输和启动器，不启动真实更新程序 |
 | Rust 核心回归 | `cargo test --workspace --locked` | 模型协议、Agent 循环、会话存储与运行时；默认仅请求本机模拟服务 |
 | Rust 故障恢复 | `cargo test --workspace --locked --features test-support`、`cargo clippy --workspace --all-targets --locked --features test-support -- -D warnings` | 启用存储故障注入，覆盖部分写入、同步与恢复失败；保留默认构建的独立检查 |
 | 工程静态检查 | `npm run check:engineering --prefix agent` | MJS、JSON、CSS 的 Biome 规则与 PowerShell 语法／PSScriptAnalyzer 1.24.0 |
@@ -43,6 +49,16 @@ Rust CI 使用 `1.99.1`，在 Linux 上运行。本地同时验证 Windows；Cli
 `pi-session` 的 `test-support` 功能默认关闭，`pi-runtime` 提供同名转发功能。仅启用时编译故障配置、注入接口与故障分支；CI 同时运行默认构建和启用后的测试与 Clippy。
 
 `crates/pi-ai/tests/protocol_contracts.rs` 通过公开 `Models` 接口验证四种协议的多工具续答、图片输入、签名回放、事件顺序、正文超时与取消，并覆盖历史序列化和费用边界。
+
+Rust LHM 辅助程序需 .NET 10 SDK，仅构建机使用。执行 `./crates/cst-pilot/lhm-host/test.ps1 -WorkDirectory E:/tmp/<YYYY-MM-DD>/lhm-tests`，构建自包含程序与模拟 DLL，再通过真实 Job Object 验证调用。测试覆盖 GPU / sensor 模式、非有限值过滤、200 项上限、局部更新失败、`Open` 失败后的关闭与非法模式；不访问真实硬件。Cargo 默认忽略的 `lhm_host_fixture_is_loaded_through_real_job_object` 由该脚本显式执行。
+
+Rust 更新执行和宿主更新套件仅在 Windows 运行。测试包使用独立签名密钥，宿主协调测试注入模拟启动器；`update_applier` 在隔离目录编译并启动独立模拟业务程序，验证真实 Job Object 超时。正式公钥、发布源签名、主程序入口、U 盘拔插及真实断电需要发行与实机验收。
+
+Rust 认证专项 `auth_and_catalog`、`auth_management` 与 `auth_routing` 使用隔离凭据与模拟时钟。真实 HTTP 测试仅连接本机 Mock OA，核验 OAuth / APIKEY 的目录和 Chat Completions 路由、Bearer 头与拒绝重定向；不使用真实 OA 账号或模型密钥。
+
+Rust BitLocker 测试使用模拟卷与方法、真实通用 UI 通道和命名管道锁。`bitlocker_lock_child` 由父测试启动，用于验证独立进程互斥与强杀释放；Windows BSTR 清零测试仅分配测试字符串。真实 PacketPrivacy 连接、加密卷状态与操作在获准的隔离卷上按 B01–B35 验收。
+
+Rust 遥测网络测试通过 Node 创建本机 HTTP/TLS 服务。`crates/cst-pilot/tests/fixtures/telemetry-tls/` 中的证书和私钥仅供隔离测试，测试不安装 CA、不修改系统证书库；所有子进程在测试结束时回收。
 
 真实 DeepSeek 联调独立执行：仅从 `PI_AI_LIVE_DEEPSEEK_KEY` 接收显式提供的测试凭据，默认忽略，CI 不运行。命令为 `cargo test -p pi-ai live_deepseek_responses_roundtrip_with_tools --locked -- --ignored --exact`。该测试通过 `Models` 完成工具调用、结果回填和最终续答，并检查思考签名与用量。
 

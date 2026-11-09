@@ -58,8 +58,7 @@
 ## 未来计划
 
 1. 根据用户反馈不断迭代
-2. 使用**Rust**重写本项目并提供Web,TUI,Desktop三端支持（已有文档）
-3. 实验性质`Pi-Durable`Rust版支持
+2. 使用 Rust 重写本项目，提供 Web、TUI 和桌面端支持，见 [Rust 重写计划](doc/rust/plan/0.PLAN.md)。
 
 ## 目录结构
 

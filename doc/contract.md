@@ -27,7 +27,7 @@
 | `v` | 记录协议版本 | `"0.1"`、`"0.2"` |
 | `type` | 记录类型 | `"session"` |
 | `recordId` | 记录唯一标识，接收端去重主键 | UUID |
-| `kitVersion` | 工具包发行版本；读取失败为空字符串 | `"v0.5"` |
+| `kitVersion` | 工具包发行版本；从根目录 `VERSION` 的 `cst-pilot <版本>` 行读取，读取失败为空字符串 | `"v0.6.2"` |
 | `revision` | `0.2` 会话快照的递增正整数版本 | `2` |
 | `final` | `0.2` 会话快照是否为实例最终关闭状态 | `false` |
 
@@ -88,12 +88,12 @@ environmentId = HMAC-SHA256(identityKey, message)
 |---|---|---|
 | `os.platform` | 操作系统平台 | `"win32"` |
 | `os.name` | 系统版本名称 | `"Windows 11 Pro"` 或 `null` |
-| `os.version` | 系统内核版本（`os.release()`） | `"10.0.26100"` |
+| `os.version` | 系统内核版本；TypeScript 使用 `os.release()`，Rust 读取原生系统版本字段 | `"10.0.26100"` |
 | `os.displayVersion` | Windows 功能版本 | `"24H2"` 或 `null` |
 | `os.arch` | 独立探测的操作系统原生架构 | `"x64"`、`"arm64"` 或 `null` |
 | `os.isPE` | 是否运行于 Windows PE | `true`、`false`、`null` |
-| `runtime.version` | Node 运行时版本 | `"24.15.0"` |
-| `runtime.arch` | 运行时进程架构（`process.arch`） | `"x64"` |
+| `runtime.version` | TypeScript 为 Node 版本；Rust 为业务运行时构建版本 | `"24.15.0"`、`"0.1.0"` |
+| `runtime.arch` | 运行时进程架构 | `"x64"` |
 | `admin` | 当前进程是否具有管理员权限 | `true`、`false`、`null` |
 
 ## 模型用量字段

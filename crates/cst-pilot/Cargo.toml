@@ -1,0 +1,40 @@
+[package]
+name = "cst-pilot"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+pi-ai = { path = "../pi-ai" }
+pi-agent = { path = "../pi-agent" }
+pi-session = { path = "../pi-session" }
+pi-runtime = { path = "../pi-runtime" }
+csv = "=1.4.0"
+base64.workspace = true
+ed25519-dalek = "=2.2.0"
+hmac = "=0.12.1"
+rand = "=0.10.3"
+zeroize = "=1.9.1"
+globset = "=0.4.21"
+ignore = "=0.4.34"
+same-file = "=1.0.6"
+futures-util.workspace = true
+regex.workspace = true
+reqwest.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+sha2.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+url.workspace = true
+uuid.workspace = true
+chrono = { version = "=0.4.45", default-features = false, features = ["clock", "serde"] }
+quick-xml = { version = "=0.41.0", features = ["serialize"] }
+semver = "=1.0.28"
+zip = { version = "=6.0.0", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+wmi = "=0.18.4"
+windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Wmi", "Win32_System_Variant", "Win32_System_Ole", "Win32_System_Rpc", "Win32_System_Pipes", "Win32_System_IO", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_System_ProcessStatus", "Win32_System_EventLog", "Win32_System_Registry", "Win32_Storage_FileSystem", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Performance", "Win32_System_SystemInformation", "Win32_UI_Shell"] }
