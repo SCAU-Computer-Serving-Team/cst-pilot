@@ -265,6 +265,93 @@ impl AuthRuntime {
         self.invalidate_account();
         Ok(json!({"id":id}))
     }
+    pub async fn with_provider_endpoint<T, Fut>(
+        &self,
+        provider_id: &str,
+        base_url: &str,
+        login: impl FnOnce() -> Fut,
+    ) -> Result<T, String>
+    where
+        Fut: std::future::Future<Output = Result<T, String>>,
+    {
+        if provider_id == "cstoa" {
+            return Err("CSTOA 使用固定服务地址，无需自定义 Provider。".into());
+        }
+        let trimmed = base_url.trim();
+        if trimmed.is_empty() || base_url.len() > 2048 {
+            return Err("请求的 BaseURL 无效".into());
+        }
+        let url = validate_base(trimmed)?;
+        let endpoint = if trimmed.ends_with('/') {
+            url.as_str().to_owned()
+        } else {
+            url.as_str().trim_end_matches('/').to_owned()
+        };
+        if !self
+            .runtime
+            .get_all_models()
+            .iter()
+            .any(|m| m.provider == provider_id)
+        {
+            return Err("请求的 Provider 没有可用模型，请先在 Pi 中配置模型".into());
+        }
+        let _serial = self.config_writes.lock().await;
+        let tx = self.files.transaction().await?;
+        let mut value = config(Some(tx.read("models.json")?))?;
+        let previous = value["providers"].get(provider_id).cloned();
+        if previous.as_ref().is_some_and(|v| !v.is_object()) {
+            return Err("请求的 Provider 配置无效".into());
+        }
+        let mut updated = previous.clone().unwrap_or_else(|| json!({}));
+        updated["baseUrl"] = json!(endpoint);
+        if let Some(models) = updated.get_mut("models").and_then(Value::as_array_mut) {
+            for item in models {
+                if item
+                    .as_object()
+                    .is_some_and(|obj| obj.contains_key("baseUrl"))
+                {
+                    item["baseUrl"] = json!(endpoint);
+                }
+            }
+        }
+        value["providers"][provider_id] = updated.clone();
+        tx.write("models.json", &value)?;
+        drop(tx);
+        let refreshed = self
+            .runtime
+            .refresh(Some(ModelsRefreshOptions {
+                providers: Some(vec![provider_id.into()]),
+                allow_network: Some(false),
+                force: Some(false),
+            }))
+            .await;
+        let provider_models: Vec<_> = self
+            .runtime
+            .get_all_models()
+            .into_iter()
+            .filter(|m| m.provider == provider_id)
+            .collect();
+        let endpoint_ok = self.runtime.get_error().is_none()
+            && !refreshed.errors.contains_key(provider_id)
+            && !provider_models.is_empty()
+            && provider_models.iter().all(|m| m.base_url == endpoint);
+        if !endpoint_ok {
+            self.rollback_custom(provider_id, Some(&updated), previous.as_ref())
+                .await?;
+            return Err("请求的 Provider 无法使用此 BaseURL，请检查模型配置".into());
+        }
+        match login().await {
+            Ok(output) => {
+                self.invalidate_account();
+                Ok(output)
+            }
+            Err(err) => {
+                self.rollback_custom(provider_id, Some(&updated), previous.as_ref())
+                    .await?;
+                Err(err)
+            }
+        }
+    }
     async fn reload_custom(&self, id: &str, require_models: bool) -> bool {
         let result = self
             .runtime

@@ -16,6 +16,7 @@
 | Rust 升级包准备 | `cargo test -p cst-pilot --test update_package --locked` | 双重验签、版本基线、流式下载、10 秒预算、ZIP 目录与解压资源上限、路径和链接保护、全树哈希、凭据扫描、带注释本机设置的合并、严格发行 JSON 及暂存清理；仅使用独立测试密钥、模拟传输和隔离发行树 |
 | Rust 更新执行 | `cargo test -p cst-pilot --test update_applier --locked` | 逐文件中断恢复、配置与用户数据保留、事务与备份冲突、目录联接、跨进程锁、父进程身份、独立交接、事务内公开健康检查、带注释设置与模型配置核验、普通启动隔离，以及真实 Windows 自检的成功／失败／15 秒超时；`rustc` 仅在隔离临时目录编译模拟主程序，不替换当前仓库或真实发行包 |
 | Rust 宿主更新 | `cargo test -p cst-pilot --test update_service --locked` | 共享后台检查、状态提示、真实 SDK 与本地确认、输入许可、忙碌拒绝、失败清理、取消与丢弃等待者、共享遥测关闭和缺少公钥的安全边界；Windows 上使用模拟传输和启动器，不启动真实更新程序 |
+| Rust 后台服务 | `cargo test -p cst-server --locked` | 单实例命名管道锁、正交 `AppPresence` 与 `ChannelMode` 读写锁及 Cookie 世代复核、10 空闲会话 LRU 淘汰与 `unflushed` 快照跨目录恢复、源持锁 `before` 位置安全 `fork`、持久化收件箱 `direct/queue/steer` 调度与 `uncertain` 恢复、三端主题隔离与升级门禁豁免、BitLocker 先校验后消费唤醒结算、SSE 慢连接 `8 MiB` 主动取消断流及多会话聚合流向量游标续传；另覆盖会话写锁等待期间的通道切换、三类 SSE 超限回放、去重任务取消后的等待者结算、并发冷加载、票据兑换后的刷新，以及 32 会话订阅与缺失来源的原子拒绝；覆盖请求体读取后撤销 Web 的三类 SSE 注册、`started` 落盘后的准入释放与重复请求等待、句柄及克隆的 LRU 固定、最后一次释放自动清理、并发回收重开与思考强度锁竞争；OAuth 流校验和业务错误到 HTTP 映射单独验证 |
 | Rust 核心回归 | `cargo test --workspace --locked` | 模型协议、Agent 循环、会话存储与运行时；默认仅请求本机模拟服务 |
 | Rust 故障恢复 | `cargo test --workspace --locked --features test-support`、`cargo clippy --workspace --all-targets --locked --features test-support -- -D warnings` | 启用存储故障注入，覆盖部分写入、同步与恢复失败；保留默认构建的独立检查 |
 | 工程静态检查 | `npm run check:engineering --prefix agent` | MJS、JSON、CSS 的 Biome 规则与 PowerShell 语法／PSScriptAnalyzer 1.24.0 |
@@ -123,6 +124,8 @@ Rust 遥测网络测试通过 Node 创建本机 HTTP/TLS 服务。`crates/cst-pi
 `runtime-input.test.ts` 验证本地扩展命令不刷新模型运行时、不解析可用范围、不检查凭据，以及部分或全部范围失效后的刷新与 Pi 原生发送错误。真实 TUI 另核查 `/model`、`/login` 与 `/web`，使用无凭据、失效范围的隔离配置。
 
 ### Web 端到端核心链路
+
+现有浏览器 E2E 启动 TypeScript 服务。Rust `cst-server` 的 HTTP/SSE 集成测试独立运行；React 前端连接 Rust 服务的浏览器验收尚待完成。
 
 `npm run test:web:e2e --prefix agent` 覆盖以下完整浏览器链路：
 

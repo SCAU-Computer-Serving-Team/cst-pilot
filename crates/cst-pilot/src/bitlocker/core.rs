@@ -4,7 +4,9 @@ use super::{
     model::*,
 };
 use crate::diagnostics::win_native::{Control, NativeError};
+use pi_agent::BoxFuture;
 use pi_session::{ExtensionUiContext, UiDialogOptions};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     sync::{Arc, OnceLock},
@@ -13,6 +15,34 @@ use std::{
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BitLockerPendingKind {
+    Password,
+    Parameter,
+    Decrypt,
+}
+
+pub enum BitLockerAnswer {
+    Password(Zeroizing<String>),
+    Confirm(bool),
+    Cancelled,
+}
+
+pub trait BitLockerHostChannel: Send + Sync {
+    fn is_available(&self) -> bool {
+        true
+    }
+    fn request(
+        &self,
+        tool_call_id: &str,
+        kind: BitLockerPendingKind,
+        targets: Vec<Volume>,
+        timeout: Duration,
+        cancel: CancellationToken,
+    ) -> BoxFuture<'static, Option<BitLockerAnswer>>;
+}
 
 /// Only this seam reaches COM. Implementations must not return credential text.
 /// A mutation returns after the submitted native method ends, including when its
@@ -82,9 +112,24 @@ impl Executor {
     pub async fn execute(
         &self,
         id: &str,
+        input: Input,
+        vault: &Vault,
+        ui: Arc<dyn ExtensionUiContext>,
+        cancel: CancellationToken,
+    ) -> Result<Value, String> {
+        self.execute_with_host(id, input, vault, ui, None, None, cancel)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execute_with_host(
+        &self,
+        id: &str,
         mut input: Input,
         vault: &Vault,
         ui: Arc<dyn ExtensionUiContext>,
+        host: Option<&dyn BitLockerHostChannel>,
+        on_stage: Option<&(dyn Fn(&str) + Send + Sync)>,
         cancel: CancellationToken,
     ) -> Result<Value, String> {
         // Take ownership before validation, including error paths.
@@ -100,6 +145,9 @@ impl Executor {
             .claim(id, input.scope.name(), drive.as_deref(), provided)?
             .map(validate)
             .transpose()?;
+        if let Some(report) = on_stage {
+            report("正在查询 BitLocker 状态");
+        }
         let mut result = self.snapshot(cancel.child_token()).await?;
         result.volumes.retain(|v| {
             drive
@@ -127,9 +175,10 @@ impl Executor {
         if targets.is_empty() {
             return finish(result, input.scope);
         }
+        let has_interaction = host.map_or_else(|| ui.has_ui(), |channel| channel.is_available());
         let rejection = if !result.admin {
             Some("需要管理员权限")
-        } else if !ui.has_ui() {
+        } else if !has_interaction {
             Some("执行操作需要本地交互")
         } else {
             None
@@ -139,17 +188,35 @@ impl Executor {
             return finish(result, input.scope);
         }
         if input.scope == Scope::Decrypt {
-            let fixed = targets.iter().map(label).collect::<Vec<_>>().join("\n");
-            if !confirm(
-                &*ui,
-                "确认完整解密",
-                &format!(
-                    "仅处理以下固定目标卷：\n{fixed}\nWindows 将在后台解密。请先确认备份和供电。"
-                ),
-                &cancel,
-            )
-            .await
-            {
+            if let Some(report) = on_stage {
+                report("等待确认解密目标");
+            }
+            let confirmed = if let Some(channel) = host {
+                matches!(
+                    channel
+                        .request(
+                            id,
+                            BitLockerPendingKind::Decrypt,
+                            targets.clone(),
+                            Duration::from_secs(180),
+                            cancel.child_token(),
+                        )
+                        .await,
+                    Some(BitLockerAnswer::Confirm(true))
+                )
+            } else {
+                let fixed = targets.iter().map(label).collect::<Vec<_>>().join("\n");
+                confirm(
+                    &*ui,
+                    "确认完整解密",
+                    &format!(
+                        "仅处理以下固定目标卷：\n{fixed}\nWindows 将在后台解密。请先确认备份和供电。"
+                    ),
+                    &cancel,
+                )
+                .await
+            };
+            if !confirmed {
                 mark_remaining(&mut result, "cancelled", "用户取消或确认等待已结束");
                 return finish(result, input.scope);
             }
@@ -172,8 +239,41 @@ impl Executor {
             };
             let parameter = provided.is_some();
             let password = if input.scope == Scope::Unlock {
+                if let Some(report) = on_stage {
+                    report("等待本地解锁输入或确认");
+                }
                 let value = if let Some(password) = provided.take() {
-                    if confirm(&*ui, "确认 AI 参数解锁", &format!("{}\n恢复密码已进入模型上下文，可能传送给模型服务商。是否使用本次参数解锁此卷？", label(&target)), &cancel).await { Some(password) } else { None }
+                    let confirmed = if let Some(channel) = host {
+                        matches!(
+                            channel
+                                .request(
+                                    id,
+                                    BitLockerPendingKind::Parameter,
+                                    vec![target.clone()],
+                                    Duration::from_secs(180),
+                                    cancel.child_token(),
+                                )
+                                .await,
+                            Some(BitLockerAnswer::Confirm(true))
+                        )
+                    } else {
+                        confirm(&*ui, "确认 AI 参数解锁", &format!("{}\n恢复密码已进入模型上下文，可能传送给模型服务商。是否使用本次参数解锁此卷？", label(&target)), &cancel).await
+                    };
+                    if confirmed { Some(password) } else { None }
+                } else if let Some(channel) = host {
+                    match channel
+                        .request(
+                            id,
+                            BitLockerPendingKind::Password,
+                            vec![target.clone()],
+                            Duration::from_secs(180),
+                            cancel.child_token(),
+                        )
+                        .await
+                    {
+                        Some(BitLockerAnswer::Password(pw)) => Some(pw),
+                        _ => None,
+                    }
                 } else {
                     let title = format!("解锁 {}", label(&target));
                     let child = cancel.child_token();
@@ -192,6 +292,13 @@ impl Executor {
             } else {
                 None
             };
+            if let Some(report) = on_stage {
+                report(if input.scope == Scope::Unlock {
+                    "正在解锁并复查状态"
+                } else {
+                    "正在提交解密并复查状态"
+                });
+            }
             let _post_lock = lock.clone();
             let source = self.source.clone();
             let scope = input.scope;

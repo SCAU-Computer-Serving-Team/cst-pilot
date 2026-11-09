@@ -8,4 +8,7 @@ pub mod telemetry;
 pub mod tools;
 pub mod update;
 
-pub use kit::{CstPilotExtension, Kit, KitSession, OPEN_TOOL_NAMES, SKILL_NAMES};
+pub use kit::{
+    CstPilotExtension, HostedSession, HostedSessionOptions, Kit, KitHost, KitSession,
+    OPEN_TOOL_NAMES, SKILL_NAMES,
+};

@@ -7,6 +7,7 @@ members = [
     "crates/pi-session",
     "crates/pi-runtime",
     "crates/cst-pilot",
+    "crates/cst-server",
 ]
 
 [workspace.package]
@@ -32,7 +33,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "fs", "io-util", "io-std", "process"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "time", "net", "fs", "io-util", "io-std", "process", "signal"] }
 tokio-util = "0.7"
 url = "2"
 uuid = { version = "1", features = ["v4", "v7"] }

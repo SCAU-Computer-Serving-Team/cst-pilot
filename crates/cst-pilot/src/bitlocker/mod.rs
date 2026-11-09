@@ -6,10 +6,11 @@ pub mod model;
 pub mod wmi_encryptable;
 
 use crate::diagnostics::result::diagnostic_result;
-use core::Executor;
+pub use core::{BitLockerAnswer, BitLockerHostChannel, BitLockerPendingKind, Executor};
 use credentials::{Vault, redact};
 use pi_agent::{ToolExecutionMode, ToolReplayPolicy};
 use pi_session::ToolDefinition;
+use serde_json::json;
 use std::sync::Arc;
 
 pub fn definition(vault: Vault) -> ToolDefinition {
@@ -19,19 +20,47 @@ pub fn definition(vault: Vault) -> ToolDefinition {
     )
 }
 pub fn definition_with(vault: Vault, executor: Executor) -> ToolDefinition {
+    definition_with_host(vault, executor, None)
+}
+pub fn definition_with_host(
+    vault: Vault,
+    executor: Executor,
+    host: Option<Arc<dyn BitLockerHostChannel>>,
+) -> ToolDefinition {
     // A fixed error on argument conversion avoids echoing malformed credentials.
     let mut tool = ToolDefinition::new(
         "bitlocker",
         "BitLocker",
         "实时查询 BitLocker；指定盘符并在本地隐藏输入恢复密码解锁；本地确认固定目标后发起后台完整解密。",
         schemars::schema_for!(model::Input).to_value(),
-        Arc::new(move |id, args, cancel, _, ctx| {
+        Arc::new(move |id, args, cancel, on_update, ctx| {
             let vault = vault.clone();
             let executor = executor.clone();
+            let host = host.clone();
             Box::pin(async move {
                 let input = serde_json::from_value(args).map_err(|_| "BitLocker 参数格式无效。")?;
+                let stage_reporter = on_update.map(|sink| {
+                    move |stage: &str| {
+                        if let Ok(partial) =
+                            diagnostic_result(json!({"bitlocker": {"stage": stage}}))
+                        {
+                            sink(partial);
+                        }
+                    }
+                });
+                let on_stage = stage_reporter
+                    .as_ref()
+                    .map(|f| f as &(dyn Fn(&str) + Send + Sync));
                 let result = executor
-                    .execute(&id, input, &vault, ctx.ui(), cancel.unwrap_or_default())
+                    .execute_with_host(
+                        &id,
+                        input,
+                        &vault,
+                        ctx.ui(),
+                        host.as_deref(),
+                        on_stage,
+                        cancel.unwrap_or_default(),
+                    )
                     .await
                     .map_err(|e| redact(&e))?;
                 diagnostic_result(result)
