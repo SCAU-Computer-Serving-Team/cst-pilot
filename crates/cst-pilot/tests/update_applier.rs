@@ -246,10 +246,21 @@ impl UpdateHost for Host {
         if self.fail {
             Err("synthetic health failure".into())
         } else {
+            assert!(root.join(".state/update/transaction.json").exists());
+            assert!(cst_pilot::update::service::startup_check(root).is_err());
+            assert!(
+                cst_pilot::Kit::new(root)
+                    .unwrap()
+                    .session_options(pi_runtime::CreateAgentSessionOptions::default())
+                    .is_err()
+            );
+            handoff::health_check(root)?;
+            assert!(cst_pilot::update::service::startup_check(root).is_err());
             Ok(())
         }
     }
-    fn restart(&self, _: &Path) -> Result<(), String> {
+    fn restart(&self, root: &Path) -> Result<(), String> {
+        assert!(cst_pilot::update::service::startup_check(root).is_ok());
         self.restarts.fetch_add(1, Ordering::SeqCst);
         if self.restart_fail {
             Err("synthetic launch failure".into())
@@ -328,6 +339,28 @@ async fn health_failure_rolls_back_every_program_and_config_without_touching_use
     assert!(!f.root.join("assets/new-only.txt").exists());
     assert_eq!(host.restarts.load(Ordering::SeqCst), 0);
 }
+#[tokio::test]
+async fn public_health_check_failure_rolls_back_without_overwriting_invalid_user_config() {
+    let f = Fixture::new();
+    f.write("agent/home/auth.json", b"invalid user config");
+    let old = f.old_program();
+    let users = f.users();
+    let package = f.package().await;
+    let host = Host::default();
+    let applier = Applier::new(&f.root, key()).unwrap();
+    assert_eq!(
+        applier
+            .apply(package, &host, &CancellationToken::new())
+            .unwrap(),
+        ApplyOutcome::RolledBack
+    );
+    assert_eq!(host.checks.load(Ordering::SeqCst), 1);
+    assert_eq!(host.restarts.load(Ordering::SeqCst), 0);
+    assert_eq!(old, f.old_program());
+    assert_eq!(users, f.users());
+    assert!(!f.root.join(".state/update/transaction.json").exists());
+}
+
 #[tokio::test]
 async fn every_rename_boundary_recovers_after_a_simulated_process_crash() {
     // Count actual changed entries rather than relying on their lexical order.

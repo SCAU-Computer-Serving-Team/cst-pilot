@@ -123,18 +123,7 @@ impl TelemetryService {
                 let heartbeat =
                     HeartbeatRun::new(environment.identity.clone(), sender, diagnostics.clone());
                 let kit_version = if version.is_empty() {
-                    let storage = crate::runbook::storage::Storage::new(&root)?;
-                    storage
-                        .read_limited(&root.join("VERSION"), 128)
-                        .ok()
-                        .flatten()
-                        .and_then(|bytes| String::from_utf8(bytes).ok())
-                        .map(|v| v.trim().to_owned())
-                        .filter(|v| {
-                            v.bytes()
-                                .all(|b| b.is_ascii_alphanumeric() || b".+-_".contains(&b))
-                        })
-                        .unwrap_or_default()
+                    crate::update::layout::read_version(&root).unwrap_or_default()
                 } else {
                     version
                 };

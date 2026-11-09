@@ -95,7 +95,14 @@ impl Kit {
         &self,
         options: CreateAgentSessionOptions,
     ) -> Result<CreateAgentSessionOptions, String> {
+        crate::update::service::startup_check(self.root())?;
         self.session_options_with_auth(options, None, None, None)
+    }
+
+    /// Validate local assembly during an updater-owned transaction, without starting a session.
+    pub(crate) fn check_resources(&self) -> Result<(), String> {
+        self.session_options_with_auth(CreateAgentSessionOptions::default(), None, None, None)
+            .map(|_| ())
     }
 
     fn session_options_with_auth(
@@ -105,7 +112,6 @@ impl Kit {
         telemetry: Option<Arc<TelemetryBinding>>,
         updates: Option<Arc<crate::update::service::UpdateService>>,
     ) -> Result<CreateAgentSessionOptions, String> {
-        crate::update::service::startup_check(self.root())?;
         self.gate.check()?;
         let cwd = options
             .cwd

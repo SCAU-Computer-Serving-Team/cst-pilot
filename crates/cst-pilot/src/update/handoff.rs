@@ -288,8 +288,7 @@ use sha2::Digest;
 /// It performs only local checks, without creating credentials, telemetry, or contacting a provider.
 pub fn health_check(root: &Path) -> Result<(), String> {
     layout::read_version(root)?;
-    let kit = crate::Kit::new(root)?;
-    kit.session_options(pi_runtime::CreateAgentSessionOptions::default())?;
+    crate::Kit::new(root)?.check_resources()?;
     let storage = Storage::new(root)?;
     let _home = storage.pin_directory(Path::new("agent/home"), false)?;
     for name in ["auth.json", "models.json", "settings.json", "device.json"] {

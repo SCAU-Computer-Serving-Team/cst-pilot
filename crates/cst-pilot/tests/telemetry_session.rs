@@ -911,9 +911,55 @@ async fn sdk_compaction_observer_keeps_reason_tokens_and_survives_reload_without
 }
 
 #[tokio::test]
+async fn default_kit_version_reads_release_format_and_preserves_explicit_override() {
+    for (contents, explicit, expected) in [
+        (Some("cst-pilot v2.3.4\npi 0.85.1\n"), "", "v2.3.4"),
+        (
+            Some("cst-pilot v2.3.4-rc.1+build.7\r\npi 0.85.1\r\n"),
+            "",
+            "v2.3.4-rc.1+build.7",
+        ),
+        (Some("invalid version\n"), "", ""),
+        (None, "", ""),
+        (
+            Some("cst-pilot v2.3.4\npi 0.85.1\n"),
+            "host-version",
+            "host-version",
+        ),
+    ] {
+        let f = Fixture::new(true);
+        if let Some(contents) = contents {
+            fs::write(f.0.join("VERSION"), contents).unwrap();
+        }
+        let network = Arc::new(Network::default());
+        network.fail.store(true, Ordering::SeqCst);
+        let mut settings = options(Arc::default(), network);
+        settings.kit_version = explicit.into();
+        let service = TelemetryService::load(
+            &f.0,
+            Arc::new(InMemoryCredentialStore::new()),
+            Arc::new(Lookup::default()),
+            settings,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let instance = service.instance("release-version", "new", "web");
+        instance.update(|c| c.input("rpc", pi_ai::now_ms()));
+        instance.checkpoint().await.unwrap();
+        assert_eq!(
+            f.draft(&instance.record_id)["record"]["kitVersion"],
+            expected,
+            "contents={contents:?}, explicit={explicit:?}"
+        );
+        service.close_process("quit").await;
+    }
+}
+
+#[tokio::test]
 async fn shared_thirty_second_timer_submits_active_instances_without_foreground_events() {
     let f = Fixture::new(true);
-    fs::write(f.0.join("VERSION"), "v2.3.4\n").unwrap();
+    fs::write(f.0.join("VERSION"), "cst-pilot v2.3.4\npi 0.85.1\n").unwrap();
     let network = Arc::new(Network::default());
     network.fail.store(true, Ordering::SeqCst);
     let mut settings = options(Arc::default(), network);
