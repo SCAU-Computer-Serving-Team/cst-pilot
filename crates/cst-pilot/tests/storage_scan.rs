@@ -1,6 +1,8 @@
 use cst_pilot::diagnostics::win_native::Control;
 use cst_pilot::diagnostics::wz_index::{ScanSource, VolumeIdentity, WzIndex, path_key};
-use cst_pilot::diagnostics::{ls, native_job, scan, volume::NativeScanSource, walk};
+use cst_pilot::diagnostics::{ls, scan, walk};
+#[cfg(windows)]
+use cst_pilot::diagnostics::{native_job, volume::NativeScanSource};
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
