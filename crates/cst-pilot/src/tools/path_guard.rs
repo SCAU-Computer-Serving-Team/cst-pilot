@@ -58,7 +58,54 @@ impl PathGuard {
                 return Err(denied());
             }
         }
+        if state.exists() && resolved.is_file() {
+            let file = File::open(&resolved).map_err(|_| "目标文件无法打开。")?;
+            self.check_state_alias(&file)?;
+        }
         Ok(resolved)
+    }
+
+    /// Only multiply-linked files need a scan; ordinary files keep a constant-cost path.
+    /// Re-scan on every access so newly created protected links are covered.
+    fn check_state_alias(&self, file: &File) -> Result<(), String> {
+        if crate::runbook::storage::link_count(file)? <= 1 {
+            return Ok(());
+        }
+        let state = self.root.join(".state");
+        let state = match state.canonicalize() {
+            Ok(state) => state,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err(denied()),
+        };
+        let handle = same_file::Handle::from_file(file.try_clone().map_err(|_| denied())?)
+            .map_err(|_| denied())?;
+        let mut walker = ignore::WalkBuilder::new(state);
+        walker
+            .hidden(false)
+            .ignore(false)
+            .git_ignore(false)
+            .git_global(false)
+            .git_exclude(false)
+            .parents(false)
+            .follow_links(false);
+        for (visited, entry) in walker.build().enumerate() {
+            if visited >= 100_000 {
+                return Err(denied());
+            }
+            let entry = entry.map_err(|_| denied())?;
+            if entry.file_type().is_some_and(|kind| kind.is_symlink()) {
+                return Err(denied());
+            }
+            if entry.file_type().is_some_and(|kind| kind.is_file()) {
+                match same_file::Handle::from_path(entry.path()) {
+                    Ok(protected) if protected == handle => return Err(denied()),
+                    Ok(_) => (),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                    Err(_) => return Err(denied()),
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn open(&self, path: impl AsRef<Path>) -> Result<File, String> {
@@ -79,6 +126,7 @@ impl PathGuard {
                 return Err(denied());
             }
         }
+        self.check_state_alias(&file)?;
         if !file.metadata().map_err(|_| denied())?.is_file() {
             return Err("目标路径不是普通文件。".into());
         }

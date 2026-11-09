@@ -294,11 +294,9 @@ pub fn health_check(root: &Path) -> Result<(), String> {
     for name in ["auth.json", "models.json", "settings.json", "device.json"] {
         if let Some(bytes) =
             storage.read_limited(&storage.root.join("agent/home").join(name), 8 * 1024 * 1024)?
+            && !super::json::parse_local(&format!("agent/home/{name}"), &bytes)?.is_object()
         {
-            let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes);
-            if !super::json::parse(bytes)?.is_object() {
-                return Err("健康检查发现配置格式无效，原文件已保留。".into());
-            }
+            return Err("健康检查发现配置格式无效，原文件已保留。".into());
         }
     }
     Ok(())

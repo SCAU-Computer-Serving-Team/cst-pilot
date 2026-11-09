@@ -22,6 +22,7 @@ struct Frozen {
     record: SessionRecord,
     requests: Vec<BillingRequest>,
     last_activity: u64,
+    sealed: bool,
 }
 struct State {
     collector: Collector,
@@ -84,6 +85,7 @@ impl SessionSubmission {
             ),
             requests: state.collector.billing.snapshot(),
             last_activity: state.collector.last_activity,
+            sealed: false,
         }
     }
     fn schedule(
@@ -157,7 +159,13 @@ impl SessionSubmission {
         let drafts = backend.drafts.clone();
         let saved = record.clone();
         let result = blocking(CancellationToken::new(), move |token| {
-            drafts.save(&saved, frozen.last_activity, &frozen.requests, &token)
+            drafts.save_snapshot(
+                &saved,
+                frozen.last_activity,
+                &frozen.requests,
+                frozen.sealed,
+                &token,
+            )
         })
         .await;
         if result.is_err() {
@@ -280,6 +288,7 @@ impl SessionSubmission {
                 record: record.clone(),
                 requests: billing.snapshot(),
                 last_activity,
+                sealed,
             },
         )
         .await?;
@@ -335,6 +344,7 @@ impl SessionSubmission {
                     record,
                     requests: billing.snapshot(),
                     last_activity,
+                    sealed: true,
                 },
             )
             .await?;

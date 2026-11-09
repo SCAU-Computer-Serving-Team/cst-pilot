@@ -109,6 +109,28 @@ impl Transaction {
             .read(name)?
             .unwrap_or_else(|| Value::Object(Map::new())))
     }
+    /// Rebuildable caches may be replaced only after preserving damaged bytes.
+    /// Credential and user configuration files keep their strict read path.
+    pub fn read_cache(&self) -> Result<Value, String> {
+        if let Some(value) = self.files.read_cache()? {
+            return Ok(value);
+        }
+        if let Some(bytes) = self
+            .files
+            .0
+            .read_limited(&self.files.path("models-store.json"), 8 * 1024 * 1024)?
+        {
+            let backup = self.files.path(&format!(
+                "models-store.corrupt-{}.json",
+                uuid::Uuid::new_v4()
+            ));
+            self.files
+                .0
+                .atomic(&backup, &bytes, false, &CancellationToken::new())
+                .map_err(|_| "模型目录缓存备份失败，原文件已保留。")?;
+        }
+        Ok(Value::Object(Map::new()))
+    }
     pub fn write(&self, name: &str, value: &Value) -> Result<(), String> {
         let mut bytes = serde_json::to_vec_pretty(value).map_err(|_| "配置无法编码。")?;
         if bytes.len() > 8 * 1024 * 1024 {

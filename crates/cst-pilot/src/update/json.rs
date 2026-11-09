@@ -57,6 +57,17 @@ impl<'de> Deserialize<'de> for Unique {
         d.deserialize_any(Any)
     }
 }
+/// Local settings/model configuration follows the runtime's comment syntax.
+/// Release metadata and all other configuration remain strict JSON.
+pub(super) fn parse_local(path: &str, bytes: &[u8]) -> Result<Value, String> {
+    let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
+    if matches!(path, "agent/home/settings.json" | "agent/home/models.json") {
+        let text = std::str::from_utf8(bytes).map_err(|_| "本机配置编码无效。")?;
+        return parse(pi_runtime::strip_json_comments(text).as_bytes());
+    }
+    parse(bytes)
+}
+
 pub(super) fn parse(bytes: &[u8]) -> Result<Value, String> {
     serde_json::from_slice::<Unique>(bytes)
         .map(|v| v.0)

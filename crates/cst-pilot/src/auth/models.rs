@@ -318,7 +318,7 @@ impl ModelsStore for Catalog {
             {
                 return Err("登录凭据已变更，旧目录不会写入缓存。".into());
             }
-            let mut value = tx.read("models-store.json")?;
+            let mut value = tx.read_cache()?;
             value[provider] = serde_json::to_value(entry).map_err(|_| "模型目录无法编码。")?;
             tx.write("models-store.json", &value)
         })
@@ -326,7 +326,7 @@ impl ModelsStore for Catalog {
     fn delete<'a>(&'a self, provider: &'a str) -> BoxFuture<'a, Result<(), String>> {
         Box::pin(async move {
             let tx = self.files.transaction().await?;
-            let mut value = tx.read("models-store.json")?;
+            let mut value = tx.read_cache()?;
             value
                 .as_object_mut()
                 .ok_or("模型目录缓存格式无效。")?

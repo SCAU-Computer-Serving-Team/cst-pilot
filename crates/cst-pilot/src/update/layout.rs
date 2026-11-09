@@ -158,7 +158,10 @@ pub fn merge_defaults(
     let Some(current) = current else {
         return serde_json::to_vec_pretty(&next).map_err(|_| "配置无法编码。".into());
     };
-    let mut old = parse(current)?;
+    let mut old = super::json::parse_local(path, current)?;
+    if !old.is_object() {
+        return Err("升级配置必须为 JSON 对象，原文件已保留。".into());
+    }
     if path.ends_with("models-store.json") {
         merge_catalog(&mut old, &next);
     } else {

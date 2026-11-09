@@ -347,6 +347,35 @@ fn defaults_preserve_user_values_arrays_unknowns_and_dynamic_models() {
     );
 }
 
+#[test]
+fn commented_local_settings_merge_with_defaults_without_relaxing_release_json() {
+    let current = br#"{
+        // User settings supported by the runtime.
+        "theme": "dark",
+        "url": "https://example.com/a//b",
+        /* Preserve unknown fields. */ "extra": {"mine": 1}
+    }"#;
+    let defaults = br#"{"theme":"light","extra":{"new":2}}"#;
+    let merged: Value = serde_json::from_slice(
+        &layout::merge_defaults("agent/home/settings.json", Some(current), defaults).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        merged,
+        json!({"theme":"dark","url":"https://example.com/a//b","extra":{"mine":1,"new":2}})
+    );
+    for invalid in [
+        br#"{"theme":"dark", /* duplicate */ "theme":"light"}"#.as_slice(),
+        b"{ // broken\n",
+    ] {
+        assert!(
+            layout::merge_defaults("agent/home/settings.json", Some(invalid), defaults).is_err()
+        );
+    }
+    assert!(layout::merge_defaults("agent/home/telemetry.json", Some(current), defaults).is_err());
+    assert!(layout::merge_defaults("agent/home/settings.json", None, current).is_err());
+}
+
 #[cfg(windows)]
 mod windows_tests {
     use super::*;

@@ -436,6 +436,66 @@ async fn cache_restores_only_matching_credentials_retains_on_failure_and_retries
 }
 
 #[tokio::test]
+async fn damaged_catalog_is_preserved_then_rebuilt_after_successful_refresh() {
+    for damaged in [b"{invalid-cache".as_slice(), b"[]", &[0xff]] {
+        let fixture = Fixture::new();
+        fs::write(
+            fixture.file("auth.json"),
+            json!({"cstoa":{"type":"api_key","key":"test-cache-key"}}).to_string(),
+        )
+        .unwrap();
+        fs::write(fixture.file("models-store.json"), damaged).unwrap();
+        let http = Arc::new(MockHttp::default());
+        http.reply(200, json!({"data":[{"id":"deepseek-flash"}]}));
+        let auth = AuthRuntime::create(&fixture.0, Channel::Tui, client(http, Arc::default()))
+            .await
+            .unwrap();
+        assert_eq!(
+            fs::read(fixture.file("models-store.json")).unwrap(),
+            damaged
+        );
+        let result = auth.refresh(true).await;
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert_eq!(
+            fixture.json("models-store.json")["cstoa"]["models"][0]["id"],
+            "deepseek-flash"
+        );
+        assert!(
+            fs::read_dir(fixture.file(""))
+                .unwrap()
+                .filter_map(Result::ok)
+                .any(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("models-store.corrupt-")
+                        && fs::read(entry.path()).unwrap() == damaged
+                })
+        );
+        auth.logout("cstoa").await.unwrap();
+        assert!(fixture.json("auth.json").get("cstoa").is_none());
+    }
+}
+
+#[tokio::test]
+async fn damaged_catalog_does_not_turn_successful_logout_into_an_error() {
+    let fixture = Fixture::new();
+    fs::write(fixture.file("auth.json"), json!({"cstoa":{"type":"api_key","key":"test-cache-key"},"deepseek":{"type":"api_key","key":"other-test-key"}}).to_string()).unwrap();
+    fs::write(fixture.file("models-store.json"), b"{invalid-cache").unwrap();
+    let auth = AuthRuntime::create(
+        &fixture.0,
+        Channel::Tui,
+        client(Arc::default(), Arc::default()),
+    )
+    .await
+    .unwrap();
+    auth.logout("cstoa").await.unwrap();
+    assert!(fixture.json("auth.json").get("cstoa").is_none());
+    assert!(fixture.json("auth.json").get("deepseek").is_some());
+    assert!(fixture.json("models-store.json").get("cstoa").is_none());
+}
+
+#[tokio::test]
 async fn malformed_device_auth_and_catalog_files_are_preserved_without_secret_error_text() {
     for name in ["auth.json", "models.json"] {
         let fixture = Fixture::new();

@@ -176,6 +176,52 @@ fn traversal_and_hard_link_aliases_cannot_read_credentials() {
     }
 }
 
+#[test]
+fn state_hard_links_are_hidden_from_read_and_both_search_modes() {
+    let fixture = Fixture::new();
+    fixture.write(".state/nested/private.txt", "synthetic-state-marker");
+    fixture.write(".state/.gitignore", "*\n");
+    fixture.write("notes/public.txt", "public-content");
+    std::fs::hard_link(
+        fixture.path(".state/nested/private.txt"),
+        fixture.path("state-alias.txt"),
+    )
+    .unwrap();
+    std::fs::hard_link(
+        fixture.path("notes/public.txt"),
+        fixture.path("public-alias.txt"),
+    )
+    .unwrap();
+    let guard = fixture.guard();
+    let ops = GuardedReadOperations(guard.clone());
+    assert!(ops.read_bytes(&fixture.path("state-alias.txt")).is_err());
+    assert!(guard.check(fixture.path("state-alias.txt")).is_err());
+    assert_eq!(
+        ops.read_bytes(&fixture.path("public-alias.txt")).unwrap(),
+        b"public-content"
+    );
+    for (pattern, content) in [("", false), ("synthetic-state-marker", true)] {
+        let found = search(
+            &guard,
+            &fixture.0,
+            file_input(pattern),
+            content,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+        assert!(!found.to_string().contains("state-alias"));
+        assert!(!found.to_string().contains("synthetic-state-marker"));
+    }
+    // Re-check protection when an ordinary file gains a protected hard link later.
+    assert!(guard.open(fixture.path("public-alias.txt")).is_ok());
+    std::fs::hard_link(
+        fixture.path("notes/public.txt"),
+        fixture.path(".state/new-private.txt"),
+    )
+    .unwrap();
+    assert!(guard.open(fixture.path("public-alias.txt")).is_err());
+}
+
 #[cfg(unix)]
 #[test]
 fn symbolic_links_to_credentials_and_state_are_blocked() {

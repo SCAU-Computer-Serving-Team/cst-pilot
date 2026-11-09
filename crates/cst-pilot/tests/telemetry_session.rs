@@ -278,7 +278,9 @@ async fn final_billing_uses_new_revision_and_final_retry_never_mutates_sealed_co
             .await
             .is_err()
     );
-    let sealed = f.draft(&s.record_id)["record"].clone();
+    let draft = f.draft(&s.record_id);
+    assert_eq!(draft["sealed"], true);
+    let sealed = draft["record"].clone();
     assert_eq!(sealed["final"], true);
     assert_eq!(sealed["cstoaBilling"]["quotaPoints"], 0);
     assert!(sealed["revision"].as_u64().unwrap() > intermediate.revision() + 1);
@@ -298,6 +300,114 @@ async fn final_billing_uses_new_revision_and_final_retry_never_mutates_sealed_co
             .exists()
     );
 }
+struct ExitBeforeBilling;
+impl BillingLookup for ExitBeforeBilling {
+    fn lookup<'a>(
+        &'a self,
+        _: &'a [String],
+        _: CancellationToken,
+    ) -> BoxFuture<'a, Result<BTreeMap<String, Option<u64>>, String>> {
+        // Only the isolated test child reaches this point.
+        std::process::exit(0);
+    }
+}
+
+#[tokio::test]
+#[ignore = "isolated process helper"]
+async fn finalize_crash_child() {
+    let root = PathBuf::from(std::env::var_os("CST_TEST_FINALIZE_ROOT").unwrap());
+    let network = Arc::new(Network::default());
+    network.fail.store(true, Ordering::SeqCst);
+    let service = TelemetryService::load(
+        &root,
+        Arc::new(InMemoryCredentialStore::new()),
+        Arc::new(ExitBeforeBilling),
+        options(Arc::default(), network),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let s = service.instance("crash-test", "new", "web");
+    s.update(|c| {
+        c.input("rpc", pi_ai::now_ms());
+        c.before_request("cstoa", "high", pi_ai::now_ms());
+        c.after_response(
+            200,
+            &BTreeMap::from([("x-oneapi-request-id".into(), "test-request".into())]),
+            pi_ai::now_ms(),
+        );
+    });
+    s.checkpoint().await.unwrap();
+    s.finalize("quit", None, Instant::now() + Duration::from_secs(5))
+        .await
+        .unwrap();
+    panic!("child must exit before billing");
+}
+
+#[tokio::test]
+async fn interrupted_finalization_recovers_pending_billing_then_seals_before_retry() {
+    use cst_pilot::telemetry::draft::Drafts;
+    let f = Fixture::new(true);
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "finalize_crash_child",
+            "--nocapture",
+        ])
+        .env("CST_TEST_FINALIZE_ROOT", &f.0)
+        .output()
+        .unwrap();
+    assert!(
+        child.status.success(),
+        "{}",
+        String::from_utf8_lossy(&child.stderr)
+    );
+    let path = fs::read_dir(f.file("telemetry/drafts"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let before: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(before["record"]["final"], true);
+    assert_eq!(before["record"]["endReason"], "quit");
+    assert_eq!(before["sealed"], false);
+    let lookup = Lookup::default();
+    let drafts = Drafts::new(&f.0, Owner::global().unwrap()).unwrap();
+    assert!(
+        drafts
+            .recover(
+                |_| async { Err("queue unavailable".into()) },
+                Some(&lookup),
+                CancellationToken::new()
+            )
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(lookup.calls.load(Ordering::SeqCst), 1);
+    let sealed: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(sealed["sealed"], true);
+    assert_eq!(sealed["record"]["endReason"], "quit");
+    assert_eq!(sealed["record"]["cstoaBilling"]["quotaPoints"], 0);
+    assert!(
+        sealed["record"]["revision"].as_u64().unwrap()
+            > before["record"]["revision"].as_u64().unwrap()
+    );
+    let recovered = drafts
+        .recover(
+            |_| async { Ok(()) },
+            Some(&lookup),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(lookup.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(*recovered[0].value(), sealed["record"]);
+    assert!(!path.exists());
+}
+
 #[tokio::test]
 async fn a_failing_checkpoint_does_not_poison_later_serial_operations() {
     let f = Fixture::new(true);

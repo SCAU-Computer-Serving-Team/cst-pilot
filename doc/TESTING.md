@@ -10,11 +10,11 @@
 |---|---|---|
 | Rust 格式与编译 | `cargo fmt --all --check`、`cargo check --workspace --all-targets --locked` | Cargo 工作区格式与全部编译目标 |
 | Rust 静态检查 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | 全部 Rust 编译目标零警告 |
-| Rust 业务契约 | `cargo test -p cst-pilot --locked` | 工具允许名单、资源与凭据隔离、文件检索、SSRF、Exa 协议与缓存、常规原生诊断字段与单位、部分失败、取消超时、50 KiB 裁剪，以及方案版本、清单序号、编码、文件占用、链接保护、跨进程互斥、卷缓存、流式扫描、GPU 聚合、I/O 差分、传感器过滤、CSTOA 双模式登录与官方模型能力、自定义服务修订、额度缓存隔离和后台任务取消；联网与系统采集使用替身或本机服务，文件交付使用隔离目录 |
-| Rust 遥测专项 | `cargo test -p cst-pilot --test telemetry_collect --test telemetry_storage --test telemetry_network --test telemetry_session --locked` | 静默禁用、身份签名、匿名环境、指标隐私、查账预算、管道存活、跨进程目录锁、草稿封存、精确确认、损坏行隔离、双端发送、心跳合并、独立 CA、链接保护、真实 SDK 事件、重载与会话切换、30 秒定时提交、发行版本读取、版本化定稿和共享 5 秒关闭预算；仅使用替身及本机 HTTP/TLS 服务 |
+| Rust 业务契约 | `cargo test -p cst-pilot --locked` | 工具允许名单、资源与凭据隔离、运行态硬链接拦截、普通硬链接放行、文件检索、SSRF、Exa 协议与缓存、常规原生诊断字段与单位、部分失败、取消超时、50 KiB 裁剪，以及方案版本、清单序号、编码、文件占用、链接保护、跨进程互斥、卷缓存、流式扫描、GPU 聚合、I/O 差分、传感器过滤、CSTOA 双模式登录与官方模型能力、损坏缓存备份重建及登出、自定义服务修订、额度缓存隔离和后台任务取消；联网与系统采集使用替身或本机服务，文件交付使用隔离目录 |
+| Rust 遥测专项 | `cargo test -p cst-pilot --test telemetry_collect --test telemetry_storage --test telemetry_network --test telemetry_session --locked` | 静默禁用、身份签名、匿名环境、指标隐私、查账预算、管道存活、跨进程目录锁、草稿封存、精确确认、损坏行隔离、双端发送、心跳合并、独立 CA、链接保护、真实 SDK 事件、重载与会话切换、30 秒定时提交、发行版本读取、关闭中断后的查账恢复、封存重试稳定性、版本化定稿和共享 5 秒关闭预算；仅使用替身及本机 HTTP/TLS 服务 |
 | Rust BitLocker 专项 | `cargo test -p cst-pilot --test bitlocker_privacy --test bitlocker_execution --locked`、`cargo test -p pi-session --test data_policy --locked` | 三条隐私边界、真实 SDK 与隐藏输入、固定目标与权限、原始返回码、超时／取消后复查、进程卷锁及退出释放；原生采集与变更均使用替身，不操作宿主加密状态 |
-| Rust 升级包准备 | `cargo test -p cst-pilot --test update_package --locked` | 双重验签、版本基线、流式下载、10 秒预算、ZIP 目录与解压资源上限、路径和链接保护、全树哈希、凭据扫描、配置合并及暂存清理；仅使用独立测试密钥、模拟传输和隔离发行树 |
-| Rust 更新执行 | `cargo test -p cst-pilot --test update_applier --locked` | 逐文件中断恢复、配置与用户数据保留、事务与备份冲突、目录联接、跨进程锁、父进程身份、独立交接、事务内公开健康检查与普通启动隔离，以及真实 Windows 自检的成功／失败／15 秒超时；`rustc` 仅在隔离临时目录编译模拟主程序，不替换当前仓库或真实发行包 |
+| Rust 升级包准备 | `cargo test -p cst-pilot --test update_package --locked` | 双重验签、版本基线、流式下载、10 秒预算、ZIP 目录与解压资源上限、路径和链接保护、全树哈希、凭据扫描、带注释本机设置的合并、严格发行 JSON 及暂存清理；仅使用独立测试密钥、模拟传输和隔离发行树 |
+| Rust 更新执行 | `cargo test -p cst-pilot --test update_applier --locked` | 逐文件中断恢复、配置与用户数据保留、事务与备份冲突、目录联接、跨进程锁、父进程身份、独立交接、事务内公开健康检查、带注释设置与模型配置核验、普通启动隔离，以及真实 Windows 自检的成功／失败／15 秒超时；`rustc` 仅在隔离临时目录编译模拟主程序，不替换当前仓库或真实发行包 |
 | Rust 宿主更新 | `cargo test -p cst-pilot --test update_service --locked` | 共享后台检查、状态提示、真实 SDK 与本地确认、输入许可、忙碌拒绝、失败清理、取消与丢弃等待者、共享遥测关闭和缺少公钥的安全边界；Windows 上使用模拟传输和启动器，不启动真实更新程序 |
 | Rust 核心回归 | `cargo test --workspace --locked` | 模型协议、Agent 循环、会话存储与运行时；默认仅请求本机模拟服务 |
 | Rust 故障恢复 | `cargo test --workspace --locked --features test-support`、`cargo clippy --workspace --all-targets --locked --features test-support -- -D warnings` | 启用存储故障注入，覆盖部分写入、同步与恢复失败；保留默认构建的独立检查 |

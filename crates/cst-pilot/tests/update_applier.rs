@@ -318,6 +318,55 @@ async fn replaces_program_merges_defaults_preserves_users_and_removes_obsolete_r
     assert_eq!(applier.recover().unwrap(), Recovery::None);
 }
 #[tokio::test]
+async fn commented_local_settings_and_models_pass_merge_and_public_health_check() {
+    let f = Fixture::new();
+    let models = br#"{
+        // Local model config supports comments.
+        "providers": {}
+    }"#;
+    f.write("agent/home/models.json", models);
+    f.write(
+        "agent/home/settings.json",
+        br#"{
+        /* Existing settings remain effective. */
+        "theme":"dark", "existing":false
+    }"#,
+    );
+    let package = f.package().await;
+    assert_eq!(
+        Applier::new(&f.root, key())
+            .unwrap()
+            .apply(package, &Host::default(), &CancellationToken::new())
+            .unwrap(),
+        ApplyOutcome::Updated { restarted: true }
+    );
+    let settings: Value = serde_json::from_slice(&f.read("agent/home/settings.json")).unwrap();
+    assert_eq!(
+        settings,
+        json!({"theme":"dark","existing":false,"newOption":1})
+    );
+    assert_eq!(f.read("agent/home/models.json"), models);
+    handoff::health_check(&f.root).unwrap();
+}
+
+#[tokio::test]
+async fn health_check_accepts_comments_without_writing_local_settings() {
+    let f = Fixture::new();
+    for (name, bytes) in files() {
+        f.write(&name, &bytes);
+    }
+    let settings = b"{ // local comment\n \"theme\":\"dark\" }";
+    f.write("agent/home/settings.json", settings);
+    handoff::health_check(&f.root).unwrap();
+    assert_eq!(f.read("agent/home/settings.json"), settings);
+    f.write(
+        "agent/home/settings.json",
+        b"{ // duplicate\n \"a\":1,\"a\":2 }",
+    );
+    assert!(handoff::health_check(&f.root).is_err());
+}
+
+#[tokio::test]
 async fn health_failure_rolls_back_every_program_and_config_without_touching_users() {
     let f = Fixture::new();
     let old = f.old_program();

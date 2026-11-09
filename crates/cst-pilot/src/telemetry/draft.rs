@@ -42,8 +42,23 @@ impl Drafts {
         requests: &[BillingRequest],
         cancel: &CancellationToken,
     ) -> Result<(), String> {
+        let sealed = record.value()["final"].as_bool().unwrap_or(false)
+            || !record.value()["endReason"]
+                .as_str()
+                .unwrap_or("")
+                .is_empty();
+        self.save_snapshot(record, last_activity, requests, sealed, cancel)
+    }
+    pub(crate) fn save_snapshot(
+        &self,
+        record: &QueuedRecord,
+        last_activity: u64,
+        requests: &[BillingRequest],
+        sealed: bool,
+        cancel: &CancellationToken,
+    ) -> Result<(), String> {
         let path = self.path(record.id())?;
-        let value = json!({"record":record.value(),"lastTurnEndedAt":last_activity,"ownerPid":std::process::id(),"owner":self.files.owner.proof(),"cstoaRequests":requests});
+        let value = json!({"record":record.value(),"lastTurnEndedAt":last_activity,"ownerPid":std::process::id(),"owner":self.files.owner.proof(),"cstoaRequests":requests,"sealed":sealed});
         let bytes = serde_json::to_vec(&value).map_err(|_| "遥测草稿无法编码。")?;
         if bytes.len() > DRAFT_BYTES {
             return Err("遥测草稿超过大小限制。".into());
@@ -155,6 +170,7 @@ impl Drafts {
             let mut value = candidate.draft.clone();
             let object = value.as_object_mut().ok_or("遥测草稿格式无效。")?;
             object.remove("owner");
+            object.insert("sealed".into(), json!(true));
             object.insert("record".into(), record.value().clone());
             let bytes = serde_json::to_vec(&value).map_err(|_| "遥测草稿无法编码。")?;
             self.files.write(path, &bytes, cancel)?;
@@ -195,12 +211,14 @@ impl Drafts {
             ) else {
                 continue;
             };
-            if candidate.draft["record"]["endReason"]
-                .as_str()
-                .unwrap_or("")
-                .is_empty()
-                && let Some(lookup) = lookup
-            {
+            // Unmarked final drafts are already sealed snapshots from compatible writers.
+            let sealed = candidate.draft["sealed"].as_bool().unwrap_or_else(|| {
+                !candidate.draft["record"]["endReason"]
+                    .as_str()
+                    .unwrap_or("")
+                    .is_empty()
+            });
+            if !sealed && let Some(lookup) = lookup {
                 let requests = candidate
                     .draft
                     .get("cstoaRequests")
@@ -221,8 +239,23 @@ impl Drafts {
                     .settle(lookup, cancel.clone(), Duration::from_millis(4500))
                     .await;
                 if let Some(summary) = billing.summary() {
-                    value["cstoaBilling"] =
+                    let summary =
                         serde_json::to_value(summary).map_err(|_| "遥测扣点汇总无法编码。")?;
+                    if value["cstoaBilling"] != summary
+                        && value["v"] == "0.2"
+                        && value["revision"] == candidate.draft["record"]["revision"]
+                    {
+                        let revision = value["revision"]
+                            .as_u64()
+                            .unwrap_or(0)
+                            .checked_add(1)
+                            .filter(|v| *v <= 9_007_199_254_740_991);
+                        let Some(revision) = revision else {
+                            continue;
+                        };
+                        value["revision"] = json!(revision);
+                    }
+                    value["cstoaBilling"] = summary;
                 }
             }
             let Ok(record) = QueuedRecord::new(value) else {

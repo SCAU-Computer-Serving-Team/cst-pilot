@@ -213,6 +213,12 @@ fn validate_open(file: &File, path: &Path) -> Result<(), String> {
     {
         return Err("方案或清单文件身份已变化。".into());
     }
+    if link_count(file)? != 1 {
+        return Err("方案或清单不能是硬链接文件。".into());
+    }
+    Ok(())
+}
+pub(crate) fn link_count(file: &File) -> Result<u64, String> {
     #[cfg(windows)]
     let links = {
         use std::os::windows::io::AsRawHandle;
@@ -234,10 +240,7 @@ fn validate_open(file: &File, path: &Path) -> Result<(), String> {
     };
     #[cfg(not(any(unix, windows)))]
     let links = 1;
-    if links != 1 {
-        return Err("方案或清单不能是硬链接文件。".into());
-    }
-    Ok(())
+    Ok(links)
 }
 fn rename(from: &Path, to: &Path, replace: bool) -> std::io::Result<()> {
     #[cfg(windows)]

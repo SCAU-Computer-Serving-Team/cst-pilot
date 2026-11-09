@@ -427,6 +427,37 @@ async fn failed_enqueue_preserves_sealed_revision_and_retry_does_not_rebill() {
     assert!(!f.path("drafts/legacy-session-name.json").exists());
 }
 #[tokio::test]
+async fn unmarked_final_drafts_remain_immutable_and_are_not_billed_again() {
+    let f = Fixture::new();
+    let mut value = record("legacy-final", 4).into_value();
+    value["final"] = json!(true);
+    value["endReason"] = json!("quit");
+    value["cstoaBilling"] = json!({"requests":1,"settledRequests":0,"quotaPoints":null});
+    let item = QueuedRecord::new(value).unwrap();
+    orphan(&f, "legacy-final", &item);
+    struct Forbidden;
+    impl BillingLookup for Forbidden {
+        fn lookup<'a>(
+            &'a self,
+            _: &'a [String],
+            _: CancellationToken,
+        ) -> BoxFuture<'a, Result<BTreeMap<String, Option<u64>>, String>> {
+            panic!("unmarked final content must stay stable")
+        }
+    }
+    let recovered = f
+        .drafts()
+        .recover(
+            |_| async { Ok(()) },
+            Some(&Forbidden),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(recovered, vec![item]);
+}
+
+#[tokio::test]
 async fn concurrent_recovery_seals_once_and_slow_billing_cannot_overwrite_fast_result() {
     let f = Fixture::new();
     orphan(&f, "old-session", &record("a", 1));
