@@ -316,6 +316,7 @@ fn ls_preserves_omitted_counts_and_never_publishes_walk() {
             .all(|r| r["pct"].is_null())
     );
 }
+#[cfg(windows)]
 #[test]
 fn ls_uses_complete_shared_index_and_large_file_fallback() {
     let fixture = Fixture::new();
