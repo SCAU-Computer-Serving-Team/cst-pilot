@@ -1,9 +1,6 @@
 use super::applier::UpdateHost;
 use serde::{Deserialize, Serialize};
-use std::{
-    path::Path,
-    time::{Duration, Instant},
-};
+use std::{path::Path, time::Duration};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -76,7 +73,10 @@ pub(super) fn launch(exe: &Path, args: &[std::ffi::OsString], root: &Path) -> Re
 #[cfg(windows)]
 mod native {
     use super::*;
-    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use std::{
+        os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
+        time::Instant,
+    };
     use windows::Win32::{
         Foundation::{FILETIME, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT},
         System::Threading::{
