@@ -615,6 +615,11 @@ pub async fn handle_models_route(
                             msg,
                         )
                     })?;
+                    state.pool.set_scoped_models(if covers_all {
+                        Vec::new()
+                    } else {
+                        scope.scoped_models
+                    });
                     state
                         .web_settings
                         .save_empty_model_scope(empty_flag)

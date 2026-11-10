@@ -51,6 +51,7 @@ pub async fn handle_lifecycle_route(
                 "sessions": sessions_json,
                 "stage": stage,
                 "channelMode": mode_snap.mode.as_str(),
+                "multiplexStream": true,
                 "connected": true,
                 "commands": [
                     "/compact",
@@ -213,7 +214,13 @@ pub async fn handle_lifecycle_route(
                         .pool
                         .update_multiplex_subscriptions(caller, &client_id_owned, update)
                         .await
-                        .map_err(ApiError::from)?;
+                        .map_err(|(missing_sid, err)| match (missing_sid, err) {
+                            (Some(sid), crate::session::SessionPoolError::NotFound(msg)) => {
+                                ApiError::new(StatusCode::NOT_FOUND, "session_not_found", msg)
+                                    .with_session_id(sid)
+                            }
+                            (_, other) => ApiError::from(other),
+                        })?;
                     Ok(json!({ "subscribedSessions": subscribed }))
                 },
             )

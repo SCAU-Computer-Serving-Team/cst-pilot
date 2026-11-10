@@ -707,6 +707,16 @@ async fn multiplex_subscriptions_pin_all_32_sessions_and_reject_missing_sources_
         );
     }
 
+    let state_resp: Value = client
+        .get(format!("{}/api/state", server.base_url()))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(state_resp["multiplexStream"], json!(true));
+
     let response = client
         .put(&url)
         .header("Origin", server.base_url())
@@ -717,6 +727,9 @@ async fn multiplex_subscriptions_pin_all_32_sessions_and_reject_missing_sources_
         .await
         .unwrap();
     assert_eq!(response.status(), http::StatusCode::NOT_FOUND);
+    let err_body: Value = response.json().await.unwrap();
+    assert_eq!(err_body["error"]["code"], json!("session_not_found"));
+    assert_eq!(err_body["error"]["sessionId"], json!("missing-session"));
     for id in &ids {
         assert_eq!(
             server
@@ -1103,4 +1116,41 @@ async fn oversized_sse_replays_cancel_without_blocking_single_or_multiplex_strea
         .await
         .expect("overflowed multiplex slots must release their retained session pins");
     }
+}
+
+#[tokio::test]
+async fn unconnected_multiplex_slot_expires_and_releases_session_pins() {
+    use cst_server::session::events::{MultiplexHub, MultiplexSubscriptionUpdate};
+
+    let global_events = SessionEvents::new();
+    let session_events = SessionEvents::new();
+    let hub = MultiplexHub::with_limits(
+        global_events,
+        8 * 1024 * 1024,
+        Duration::from_secs(20),
+        Duration::from_millis(40),
+    );
+    let source = session_events.clone();
+    let resolver: cst_server::session::events::SessionEventsResolver =
+        Arc::new(move |_| Some(source.clone()));
+
+    hub.update_subscriptions(
+        CallerIdentity::App,
+        "never-connected-client",
+        MultiplexSubscriptionUpdate {
+            sessions: vec!["s1".to_owned()],
+            last_event_ids: Default::default(),
+        },
+        &resolver,
+    )
+    .unwrap();
+    assert_eq!(session_events.active_subscriber_count(), 1);
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while session_events.active_subscriber_count() != 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("unconnected multiplex slot must expire and release session pins");
 }

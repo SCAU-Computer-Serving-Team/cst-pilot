@@ -224,6 +224,7 @@ pub struct SessionPool {
     load_locks: KeyedLocks,
     eviction_lock: Arc<AsyncMutex<()>>,
     removed: Arc<Mutex<BTreeSet<String>>>,
+    scoped_models: Arc<Mutex<Vec<pi_runtime::ScopedModel>>>,
     pub invalid_auth: Arc<Mutex<BTreeSet<String>>>,
     pub images: ImageStore,
     pub receipts: MutationReceipts,
@@ -268,6 +269,7 @@ impl SessionPool {
             load_locks: KeyedLocks::new(),
             eviction_lock: Arc::new(AsyncMutex::new(())),
             removed: Arc::new(Mutex::new(BTreeSet::new())),
+            scoped_models: Arc::new(Mutex::new(Vec::new())),
             invalid_auth: Arc::new(Mutex::new(BTreeSet::new())),
             images,
             receipts,
@@ -460,6 +462,17 @@ impl SessionPool {
         SettingsManager::create_with_trust(&self.default_cwd, &self.agent_dir, false)
     }
 
+    pub fn set_scoped_models(&self, models: Vec<pi_runtime::ScopedModel>) {
+        *self.scoped_models.lock().expect("scoped_models lock") = models;
+    }
+
+    pub fn scoped_models(&self) -> Vec<pi_runtime::ScopedModel> {
+        self.scoped_models
+            .lock()
+            .expect("scoped_models lock")
+            .clone()
+    }
+
     /// Reloads shared `settings.json` and `models.json`/`models-store.json` without network calls,
     /// validating that shared configuration files are not corrupted.
     pub async fn refresh_services(&self) -> Result<SettingsManager, SessionPoolError> {
@@ -539,9 +552,15 @@ impl SessionPool {
             session_start_event: Some((start_reason.to_owned(), None)),
             ..Default::default()
         };
-        if let Some(patterns) = settings.get_enabled_models() {
-            let _ = &mut session_opts;
-            let _ = patterns;
+        let cached_scoped = self.scoped_models();
+        if !cached_scoped.is_empty() {
+            session_opts.scoped_models = cached_scoped;
+        } else if let Some(patterns) = settings.get_enabled_models()
+            && !patterns.is_empty()
+        {
+            let all_models = self.host.auth().runtime().get_all_models();
+            let resolved = pi_runtime::resolve_model_scope_from_models(&patterns, &all_models);
+            session_opts.scoped_models = resolved.scoped_models;
         }
 
         let hosted = Box::pin(self.host.open_session(HostedSessionOptions {
@@ -1331,16 +1350,19 @@ impl SessionPool {
         caller: CallerIdentity,
         client_id: &str,
         update: MultiplexSubscriptionUpdate,
-    ) -> Result<Vec<String>, SessionPoolError> {
+    ) -> Result<Vec<String>, (Option<String>, SessionPoolError)> {
         if update.sessions.len() > MAX_MULTIPLEX_SUBSCRIPTIONS
             || update
                 .sessions
                 .iter()
                 .any(|id| !is_valid_session_id_key(id))
         {
-            return Err(SessionPoolError::InvalidInput(format!(
-                "聚合流订阅列表无效或超过 {MAX_MULTIPLEX_SUBSCRIPTIONS} 个会话"
-            )));
+            return Err((
+                None,
+                SessionPoolError::InvalidInput(format!(
+                    "聚合流订阅列表无效或超过 {MAX_MULTIPLEX_SUBSCRIPTIONS} 个会话"
+                )),
+            ));
         }
 
         let mut leases = Vec::new();
@@ -1348,7 +1370,10 @@ impl SessionPool {
             let mut sources = BTreeMap::new();
             for id in &update.sessions {
                 if let Entry::Vacant(entry) = sources.entry(id.clone()) {
-                    let lease = self.open_saved_pinned(id).await?;
+                    let lease = self
+                        .open_saved_pinned(id)
+                        .await
+                        .map_err(|err| (Some(id.clone()), err))?;
                     entry.insert(lease.events.clone());
                     leases.push(lease);
                 }
@@ -1356,7 +1381,7 @@ impl SessionPool {
             let resolver: SessionEventsResolver = Arc::new(move |id| sources.get(id).cloned());
             self.multiplex_hub
                 .update_subscriptions(caller, client_id, update, &resolver)
-                .map_err(SessionPoolError::InvalidInput)
+                .map_err(|msg| (None, SessionPoolError::InvalidInput(msg)))
         }
         .await;
         drop(leases);

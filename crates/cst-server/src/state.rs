@@ -15,7 +15,10 @@ use crate::discovery::{
     cleanup_discovery_file, generate_random_hex_token, strip_windows_verbatim_prefix,
 };
 use crate::error::{MutationError, ServiceError, ServiceErrorKind};
-use crate::exports::ExportManager;
+use crate::exports::{
+    ExportDirectoryOpenerFn, ExportRenderer, SessionExportStore, create_chromiumoxide_renderer,
+    default_export_directory_opener,
+};
 use crate::locks::KeyedLocks;
 use crate::mode::{CallerIdentity, ModeController, ModeControllerConfig};
 use crate::oauth::OAuthFlowManager;
@@ -39,6 +42,8 @@ pub struct ServerConfig {
     pub max_idle_sessions: usize,
     pub acquire_instance_lock: bool,
     pub open_runbook: Option<RunbookOpenerFn>,
+    pub export_renderer: Option<Arc<dyn ExportRenderer>>,
+    pub open_export_directory: Option<ExportDirectoryOpenerFn>,
 }
 
 impl ServerConfig {
@@ -54,6 +59,8 @@ impl ServerConfig {
             max_idle_sessions: DEFAULT_MAX_IDLE_SESSIONS,
             acquire_instance_lock: true,
             open_runbook: None,
+            export_renderer: None,
+            open_export_directory: None,
         }
     }
 }
@@ -74,8 +81,9 @@ pub struct ServerState {
     pub desktop_settings: DesktopSettingsStore,
     pub oauth_flows: OAuthFlowManager,
     pub file_cache: ProjectFileCache,
-    pub exports: ExportManager,
+    pub exports: SessionExportStore,
     pub open_runbook: RunbookOpenerFn,
+    pub open_export_directory: ExportDirectoryOpenerFn,
     pub server_stop: CancellationToken,
     shutdown_mutex: AsyncMutex<bool>,
 }
@@ -150,6 +158,18 @@ impl ServerState {
             }
         });
 
+        let metadata_dir = agent_dir.join("session-exports");
+        let initial_origin = format!("http://127.0.0.1:{initial_port}");
+        let export_renderer = config.export_renderer.clone().unwrap_or_else(|| {
+            create_chromiumoxide_renderer(
+                &initial_origin,
+                metadata_dir.join("work").join("browsers"),
+            )
+            .expect("default export renderer")
+        });
+        let exports =
+            SessionExportStore::new(artifacts_root.clone(), metadata_dir, export_renderer);
+
         Arc::new(Self {
             host,
             kit_root,
@@ -166,11 +186,15 @@ impl ServerState {
             desktop_settings,
             oauth_flows,
             file_cache: ProjectFileCache::new(),
-            exports: ExportManager::new(),
+            exports,
             open_runbook: config
                 .open_runbook
                 .clone()
                 .unwrap_or_else(default_runbook_opener),
+            open_export_directory: config
+                .open_export_directory
+                .clone()
+                .unwrap_or_else(default_export_directory_opener),
             server_stop: CancellationToken::new(),
             shutdown_mutex: AsyncMutex::new(false),
         })
@@ -202,6 +226,7 @@ impl ServerState {
 
     pub fn set_bound_port(&self, port: u16) {
         self.port.store(port, Ordering::SeqCst);
+        self.exports.set_origin(&format!("http://127.0.0.1:{port}"));
     }
 
     pub fn app_token(&self) -> &str {
@@ -301,6 +326,7 @@ impl ServerState {
         }
         self.mode.begin_shutdown();
         self.oauth_flows.close_all().await;
+        self.exports.close().await;
         self.pool
             .shutdown()
             .await

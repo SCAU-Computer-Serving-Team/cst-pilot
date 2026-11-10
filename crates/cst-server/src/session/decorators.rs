@@ -3,14 +3,15 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use pi_agent::AgentMessage;
-use pi_ai::{ContentBlock, ToolResultMessage, now_ms};
-use pi_session::{AgentSession, AgentSessionEvent, SessionEntry};
+use pi_ai::{ContentBlock, TextContent, ToolResultMessage, UserContentBlock, now_ms};
+use pi_session::{AgentSession, AgentSessionEvent, SessionEntry, parse_iso_timestamp_ms};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 pub const INPUT_MESSAGE_CUSTOM_TYPE: &str = "cst-web-input-message";
 pub const WORK_DURATION_CUSTOM_TYPE: &str = "cst-web-work-duration";
 pub const TOOL_EXECUTION_CUSTOM_TYPE: &str = "cst-web-tool-execution";
+pub const BITLOCKER_VERIFICATION_CUSTOM_TYPE: &str = "cst.bitlocker-state-verification";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,6 +40,8 @@ pub struct ToolExecutionRecord {
     pub stage: Option<String>,
     #[serde(skip)]
     pub result: Option<ToolResultMessage>,
+    #[serde(skip)]
+    pub is_state_verification: bool,
 }
 
 struct DecoratorsInner {
@@ -74,39 +77,106 @@ impl MessageDecorators {
         };
 
         let entries = session.with_session_manager(|sm| sm.get_entries());
+        let mut unresolved_bitlocker_calls: Vec<(u64, String)> = Vec::new();
         for entry in entries {
-            let SessionEntry::Custom(custom) = entry else {
-                continue;
-            };
-            let Some(data) = custom.data else {
-                continue;
-            };
-            match custom.custom_type.as_str() {
-                INPUT_MESSAGE_CUSTOM_TYPE => {
-                    if let (Some(id), Some(ts)) = (
-                        data.get("id").and_then(Value::as_str),
-                        data.get("timestamp").and_then(Value::as_u64),
-                    ) {
-                        inner.input_ids.insert(ts, id.to_owned());
+            match entry {
+                SessionEntry::Message(msg_entry) => match &msg_entry.message {
+                    AgentMessage::Assistant(assistant) => {
+                        for part in &assistant.content {
+                            if let ContentBlock::ToolCall(tc) = part
+                                && tc.name == "bitlocker"
+                            {
+                                unresolved_bitlocker_calls
+                                    .push((assistant.timestamp, tc.id.clone()));
+                            }
+                        }
                     }
-                }
-                WORK_DURATION_CUSTOM_TYPE => {
-                    if let Ok(rec) = serde_json::from_value::<WorkRecord>(data)
-                        && rec.ended_at >= rec.started_at
-                    {
-                        inner.work_records.insert(
-                            rec.message_timestamp,
-                            WorkDuration {
-                                started_at: rec.started_at,
-                                ended_at: rec.ended_at,
-                            },
-                        );
+                    AgentMessage::ToolResult(tr) => {
+                        unresolved_bitlocker_calls.retain(|(_, id)| id != &tr.tool_call_id);
+                        for rec in inner.tool_records.values_mut() {
+                            if rec.tool_call_id == tr.tool_call_id && rec.result.is_some() {
+                                rec.result = None;
+                                rec.is_state_verification = false;
+                            }
+                        }
                     }
-                }
-                TOOL_EXECUTION_CUSTOM_TYPE => {
-                    if let Ok(rec) = serde_json::from_value::<ToolExecutionRecord>(data) {
-                        let key = Self::tool_key(rec.message_timestamp, &rec.tool_call_id);
-                        inner.tool_records.insert(key, rec);
+                    _ => {}
+                },
+                SessionEntry::Custom(custom) => {
+                    let Some(data) = custom.data else {
+                        continue;
+                    };
+                    match custom.custom_type.as_str() {
+                        INPUT_MESSAGE_CUSTOM_TYPE => {
+                            if let (Some(id), Some(ts)) = (
+                                data.get("id").and_then(Value::as_str),
+                                data.get("timestamp").and_then(Value::as_u64),
+                            ) {
+                                inner.input_ids.insert(ts, id.to_owned());
+                            }
+                        }
+                        WORK_DURATION_CUSTOM_TYPE => {
+                            if let Ok(rec) = serde_json::from_value::<WorkRecord>(data)
+                                && rec.ended_at >= rec.started_at
+                            {
+                                inner.work_records.insert(
+                                    rec.message_timestamp,
+                                    WorkDuration {
+                                        started_at: rec.started_at,
+                                        ended_at: rec.ended_at,
+                                    },
+                                );
+                            }
+                        }
+                        TOOL_EXECUTION_CUSTOM_TYPE => {
+                            if let Ok(rec) = serde_json::from_value::<ToolExecutionRecord>(data) {
+                                let key = Self::tool_key(rec.message_timestamp, &rec.tool_call_id);
+                                inner.tool_records.insert(key, rec);
+                            }
+                        }
+                        BITLOCKER_VERIFICATION_CUSTOM_TYPE => {
+                            let verified_at =
+                                parse_iso_timestamp_ms(&custom.timestamp).unwrap_or_else(now_ms);
+                            let raw_text = serde_json::to_string(&data).unwrap_or_default();
+                            for (msg_ts, call_id) in &unresolved_bitlocker_calls {
+                                let synthetic = ToolResultMessage {
+                                    tool_call_id: call_id.clone(),
+                                    tool_name: "bitlocker".to_owned(),
+                                    content: vec![UserContentBlock::Text(TextContent {
+                                        text: raw_text.clone(),
+                                        text_signature: None,
+                                    })],
+                                    details: Some(data.clone()),
+                                    is_error: false,
+                                    timestamp: verified_at,
+                                    usage: None,
+                                    nested_calls: None,
+                                    duration_ms: None,
+                                };
+                                let key = Self::tool_key(*msg_ts, call_id);
+                                inner
+                                    .tool_records
+                                    .entry(key)
+                                    .and_modify(|rec| {
+                                        rec.ended_at =
+                                            Some(rec.ended_at.unwrap_or_else(|| {
+                                                rec.started_at.max(verified_at)
+                                            }));
+                                        rec.result = Some(synthetic.clone());
+                                        rec.is_state_verification = true;
+                                    })
+                                    .or_insert_with(|| ToolExecutionRecord {
+                                        message_timestamp: *msg_ts,
+                                        tool_call_id: call_id.clone(),
+                                        started_at: *msg_ts,
+                                        ended_at: Some((*msg_ts).max(verified_at)),
+                                        stage: None,
+                                        result: Some(synthetic),
+                                        is_state_verification: true,
+                                    });
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 _ => {}
@@ -193,6 +263,7 @@ impl MessageDecorators {
                     for rec in guard.tool_records.values_mut() {
                         if rec.tool_call_id == tr.tool_call_id && rec.result.is_some() {
                             rec.result = None;
+                            rec.is_state_verification = false;
                         }
                     }
                 }
@@ -222,6 +293,7 @@ impl MessageDecorators {
                     ended_at: None,
                     stage: None,
                     result: None,
+                    is_state_verification: false,
                 };
                 let persisted = serde_json::to_value(&record).ok();
                 {
@@ -367,6 +439,21 @@ impl MessageDecorators {
             .expect("decorators lock")
             .tool_records
             .get(&key)
+            .and_then(|rec| rec.result.clone())
+    }
+
+    pub fn verified_bitlocker_result(
+        &self,
+        message_timestamp: u64,
+        tool_call_id: &str,
+    ) -> Option<ToolResultMessage> {
+        let key = Self::tool_key(message_timestamp, tool_call_id);
+        self.inner
+            .lock()
+            .expect("decorators lock")
+            .tool_records
+            .get(&key)
+            .filter(|rec| rec.is_state_verification)
             .and_then(|rec| rec.result.clone())
     }
 

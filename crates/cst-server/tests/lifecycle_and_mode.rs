@@ -60,6 +60,51 @@ fn session_owner_lock_rejects_second_holder_until_dropped() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn distinct_sessions_with_colliding_legacy_lock_ports_can_be_owned_together() {
+    use cst_server::discovery::normalize_canonical_path_for_hash;
+    use sha2::{Digest, Sha256};
+    use std::collections::HashMap;
+
+    let dir = std::env::temp_dir().join(format!("cst-session-collision-{}", Uuid::new_v4()));
+    fs::create_dir_all(&dir).unwrap();
+    let normalized = normalize_canonical_path_for_hash(&dir).unwrap();
+    let mut ports = HashMap::new();
+    let (first, second) = (0..=20000)
+        .find_map(|index| {
+            let id = format!("session-{index}");
+            let hash = Sha256::digest(format!("{normalized}\0{id}").as_bytes());
+            let port = u32::from_be_bytes(hash[..4].try_into().unwrap()) % 20000;
+            ports
+                .insert(port, id.clone())
+                .map(|previous| (previous, id))
+        })
+        .expect("20001 identities must collide in the legacy 20000-port range");
+
+    let first_lock = SessionOwnerLock::acquire(&dir, &first).expect("first identity");
+    let second_lock = SessionOwnerLock::acquire(&dir, &second).expect("independent identity");
+    drop((first_lock, second_lock));
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(not(windows))]
+#[test]
+fn server_instance_lock_does_not_depend_on_tcp_port_availability() {
+    use cst_server::discovery::normalize_canonical_path_for_hash;
+    use sha2::{Digest, Sha256};
+
+    let dir = std::env::temp_dir().join(format!("cst-server-port-{}", Uuid::new_v4()));
+    fs::create_dir_all(&dir).unwrap();
+    let normalized = normalize_canonical_path_for_hash(&dir).unwrap();
+    let hash = Sha256::digest(normalized.as_bytes());
+    let port = 42000 + (u32::from_be_bytes(hash[..4].try_into().unwrap()) % 10000) as u16;
+    // Either this listener or another process occupies the legacy lock port.
+    let _occupied = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port));
+    let lock = ServerInstanceLock::acquire(&dir).expect("unrelated TCP listener is not an owner");
+    drop(lock);
+    fs::remove_dir_all(dir).unwrap();
+}
+
 #[tokio::test]
 async fn app_reconnect_during_web_active_preserves_web_active_and_multi_connection_grace_period() {
     let controller = ModeController::new(ModeControllerConfig {

@@ -2,12 +2,8 @@ import { Button } from "@heroui/react";
 import { ArrowLeft, Download } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
-import type {
-	ExportOptions,
-	ExportSnapshot,
-	SessionExport,
-} from "../../../../../agent/home/extensions/web/shared/exports";
 import { apiJson, sessionPath } from "../data/api";
+import type { ExportOptions, ExportSnapshot, SessionExport } from "../data/types";
 import { ExportPreview } from "../exports/export-preview";
 import { ExportResult } from "../exports/export-result";
 import { ExportSelect } from "../exports/export-select";

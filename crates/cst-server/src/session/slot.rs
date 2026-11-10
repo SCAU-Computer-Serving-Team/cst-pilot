@@ -510,11 +510,13 @@ impl SessionSlot {
         match session.compact(instructions).await {
             Ok(_) => Ok(()),
             Err(err) if err.contains("Already compacted") => {
-                Err(CompactSessionError::AlreadyCompacted(err))
+                Err(CompactSessionError::AlreadyCompacted(
+                    "会话已压缩，继续对话后可再次压缩".to_owned(),
+                ))
             }
-            Err(err) if err.contains("Nothing to compact") => {
-                Err(CompactSessionError::NothingToCompact(err))
-            }
+            Err(err) if err.contains("Nothing to compact") => Err(
+                CompactSessionError::NothingToCompact("当前没有可压缩的较早内容".to_owned()),
+            ),
             Err(err) => Err(CompactSessionError::Failed(err)),
         }
     }

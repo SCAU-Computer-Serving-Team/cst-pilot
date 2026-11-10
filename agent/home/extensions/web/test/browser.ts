@@ -187,7 +187,7 @@ export class BrowserProbe {
 			if (!listeners.size) this.observers.delete(method);
 		};
 	}
-	async call<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+	async call<T = unknown>(method: string, params: Record<string, unknown> = {}, sessionId = this.session): Promise<T> {
 		if (this.socket.readyState !== WebSocket.OPEN) throw new Error("Chrome 调试连接已关闭");
 		const id = ++this.sequence;
 		const result = new Promise<unknown>((resolve, reject) => {
@@ -206,9 +206,7 @@ export class BrowserProbe {
 				},
 			});
 			try {
-				this.socket.send(
-					JSON.stringify({ id, method, params, ...(this.session ? { sessionId: this.session } : {}) }),
-				);
+				this.socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
 			} catch (error) {
 				clearTimeout(timer);
 				this.pending.delete(id);

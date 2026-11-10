@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState } from "react";
-import type { ExportSnapshot } from "../../../../../agent/home/extensions/web/shared/exports";
+import type { ExportSnapshot } from "../data/types";
 
 type Layer = { id: number; snapshot: ExportSnapshot; ready: boolean; animate: boolean };
 

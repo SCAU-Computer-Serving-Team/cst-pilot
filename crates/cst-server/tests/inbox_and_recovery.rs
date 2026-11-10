@@ -74,7 +74,8 @@ impl InboxExecutor for MockInboxExecutor {
                     .lock()
                     .unwrap()
                     .push(format!("prompt:{message_id}:{text}"));
-                (*(started_ptr as *const Notify)).notify_waiters();
+                // Each prompt has one observer; retain a permit until it starts waiting.
+                (*(started_ptr as *const Notify)).notify_one();
                 (*(hold_ptr as *const Notify)).notified().await;
                 (*(busy_ptr as *const AtomicBool)).store(false, Ordering::SeqCst);
             }
@@ -134,7 +135,17 @@ async fn inbox_direct_queue_steer_ordering_and_versioned_mutations() {
     assert_eq!(q3.delivery, ItemDelivery::Queue);
 
     // Wait for `msg-1` to enter busy and `msg-steer` to be delivered after `msg-1`
-    exec.prompt_started.notified().await;
+    // Observe prompt startup before registering the waiter to cover slow CI scheduling.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !exec.is_busy() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("first prompt must start");
+    tokio::time::timeout(Duration::from_secs(5), exec.prompt_started.notified())
+        .await
+        .expect("prompt startup notification must survive a late waiter");
     inbox.wake();
     tokio::time::sleep(Duration::from_millis(30)).await;
 
@@ -197,9 +208,11 @@ async fn inbox_direct_queue_steer_ordering_and_versioned_mutations() {
         .unwrap();
 
     // Release `msg-1` and `msg-3`
-    exec.hold_prompt.notify_waiters();
-    exec.prompt_started.notified().await;
-    exec.hold_prompt.notify_waiters();
+    exec.hold_prompt.notify_one();
+    tokio::time::timeout(Duration::from_secs(5), exec.prompt_started.notified())
+        .await
+        .expect("queued prompt must start");
+    exec.hold_prompt.notify_one();
     inbox.close().await;
 
     let final_events = exec.events.lock().unwrap().clone();

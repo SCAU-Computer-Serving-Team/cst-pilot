@@ -166,8 +166,9 @@ export function Sidebar({
 			window.removeEventListener("resize", moveOnResize);
 		};
 	}, [selectionPath, location.key, navigation.state, sessions, management.managing, recentOpen]);
+	const inactive = preview || state.stage === "app_active";
 	const refreshAccount = useCallback(async () => {
-		if (preview) return;
+		if (inactive) return;
 		try {
 			const data = await apiJson<{ providers: ProviderStatus[] }>("/api/auth");
 			setProviders(data.providers);
@@ -175,9 +176,9 @@ export function Sidebar({
 		} catch (cause) {
 			setAccountError(cause instanceof Error ? cause.message : "无法读取登录状态");
 		}
-	}, [preview]);
+	}, [inactive]);
 	const refreshTheme = useCallback(async () => {
-		if (preview) return;
+		if (inactive) return;
 		try {
 			const settings = await apiJson<{ theme: Theme }>("/api/settings");
 			document.documentElement.dataset.theme = settings.theme;
@@ -185,7 +186,7 @@ export function Sidebar({
 		} catch {
 			/* 页面仍使用当前主题；主题按钮提交失败时另行提示。 */
 		}
-	}, [preview]);
+	}, [inactive]);
 	useEffect(() => {
 		const root = document.documentElement;
 		const observer = new MutationObserver(() => setTheme(currentTheme()));
@@ -193,9 +194,10 @@ export function Sidebar({
 		return () => observer.disconnect();
 	}, []);
 	useEffect(() => {
+		if (inactive) return;
 		void refreshAccount();
 		void refreshTheme();
-	}, [refreshAccount, refreshTheme]);
+	}, [inactive, refreshAccount, refreshTheme]);
 	useGlobalEvents((name, event) => {
 		if (name === "reset") {
 			void refreshAccount();
@@ -210,7 +212,7 @@ export function Sidebar({
 		} catch {
 			/* 其他状态事件不影响当前主题。 */
 		}
-	}, !preview);
+	}, !inactive);
 	async function changeTheme() {
 		const value = nextTheme[theme];
 		if (preview) {

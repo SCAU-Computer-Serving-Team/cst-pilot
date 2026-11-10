@@ -1,9 +1,9 @@
-import type { ExportSnapshot } from "../../../../../agent/home/extensions/web/shared/exports";
 import { matchToolResults } from "../cards/match-results";
 import { AssistantContent } from "../conversation/assistant-content";
 import { groupTurns } from "../conversation/conversation-parts";
 import { SummaryEntry } from "../conversation/summary-entry";
 import { UserMessage } from "../conversation/user-message";
+import type { ExportSnapshot } from "../data/types";
 
 /** 导出与聊天共用轮次、过程、正文和附图；只调整文档宽度、初始折叠层级与动作。 */
 export function ExportDocument({ snapshot, preview = false }: { snapshot: ExportSnapshot; preview?: boolean }) {
