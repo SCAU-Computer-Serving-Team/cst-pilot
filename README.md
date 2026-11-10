@@ -70,12 +70,11 @@ cst-pilot/
 |-- pi-web.cmd                 启动 TUI 宿主并打开 Web
 |-- launcher.ps1               管理员授权与便携运行环境
 |-- assets/                    品牌资源
+|-- design/                    界面设计稿与资源
 |-- agent/home/
 |   |-- extensions/            诊断、Web、认证等扩展
 |   `-- skills/                诊断工具的使用说明
-|-- src/web/
-|   |-- frontend/              Web 前端源码
-|   `-- design/                界面设计稿与资源
+|-- src/web/frontend/          Web 前端源码
 |-- doc/                       产品、设计、工具与测试文档
 `-- pack/                      发行版构建脚本
 ```

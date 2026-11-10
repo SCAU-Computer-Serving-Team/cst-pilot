@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
-import homeShader from "../../../design/asset/blue-hour.glsl?raw";
-import airShader from "../../../design/asset/blue-hour-air.glsl?raw";
-import airDarkPalette from "../../../design/asset/blue-hour-air-dark-palette.png?url";
-import darkPalette from "../../../design/asset/blue-hour-dark-palette.png?url";
-import lightPalette from "../../../design/asset/blue-hour-palette.png?url";
+import homeShader from "../../../../../design/asset/blue-hour.glsl?raw";
+import airShader from "../../../../../design/asset/blue-hour-air.glsl?raw";
+import airDarkPalette from "../../../../../design/asset/blue-hour-air-dark-palette.png?url";
+import darkPalette from "../../../../../design/asset/blue-hour-dark-palette.png?url";
+import lightPalette from "../../../../../design/asset/blue-hour-palette.png?url";
 import { FrameClock } from "./frame-clock";
 
 const vertexShader = `attribute vec2 a_position;

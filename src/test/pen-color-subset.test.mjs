@@ -13,10 +13,11 @@ import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const penPaths = [
-  "src/web/design/cst-pilot-web.pen",
-  "src/web/design/cst-pilot-tools.pen",
+  "design/cst-pilot-desktop.pen",
+  "design/cst-pilot-web.pen",
+  "design/cst-pilot-tools.pen",
 ].map((p) => path.join(root, p));
-const colorsPenPath = path.join(root, "src/web/design/cst-pilot-colors.pen");
+const colorsPenPath = path.join(root, "design/cst-pilot-colors.pen");
 
 /** 提取文本中的十六进制颜色。8 位含透明通道：全透明（alpha=00）视为不可见，跳过。 */
 function extractColors(text) {
