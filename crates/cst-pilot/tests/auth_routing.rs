@@ -133,6 +133,13 @@ async fn both_credential_modes_use_real_chat_completions_routes_and_bearer_heade
             .prompt("验证路由", None)
             .await
             .unwrap();
+        session.created.session.reload().await.unwrap();
+        session
+            .created
+            .session
+            .prompt("重载后继续聊天", None)
+            .await
+            .unwrap();
         let messages = session.created.session.state().messages;
         assert!(
             serde_json::to_string(&messages)
@@ -142,6 +149,26 @@ async fn both_credential_modes_use_real_chat_completions_routes_and_bearer_heade
         session.shutdown().await.unwrap();
         let captured = requests.lock().unwrap().clone();
         let prefix = if oauth { "/api/agent/llm/v1" } else { "/v1" };
+        let chat_requests: Vec<_> = captured
+            .iter()
+            .filter(|r| r.starts_with(&format!("POST {prefix}/chat/completions ")))
+            .collect();
+        assert_eq!(chat_requests.len(), 2);
+        for request in chat_requests {
+            let payload: serde_json::Value =
+                serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+            let bitlocker = payload["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|tool| tool["function"]["name"] == "bitlocker")
+                .expect("ordinary chat must include the BitLocker tool declaration");
+            assert_eq!(
+                bitlocker["function"]["parameters"],
+                schemars::schema_for!(cst_pilot::bitlocker::model::Input).to_value(),
+                "credential redaction must preserve the tool schema sent to the provider"
+            );
+        }
         assert!(
             captured
                 .iter()
