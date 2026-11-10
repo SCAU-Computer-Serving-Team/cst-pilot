@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -275,18 +275,42 @@ test(
 							scope: "status",
 							operation: {
 								status: "unknown",
-								reason: "上次操作异常中断；实时查询失败，请重新查询。",
+								reason: "E2E_OLD_BITLOCKER_VERIFICATION",
 							},
 							degraded: true,
 						},
 					},
 				}),
 			];
-			await writeFile(join(home, "sessions", `2026-11-10_${blSessionId}.jsonl`), `${blEntries.join("\n")}\n`);
+			const blSessionPath = join(home, "sessions", `2026-11-10_${blSessionId}.jsonl`);
+			await writeFile(blSessionPath, `${blEntries.join("\n")}\n`);
+			const blResponse = await fetch(`${origin}/api/sessions/${blSessionId}`);
+			assert.equal(blResponse.status, 200);
+			await blResponse.arrayBuffer();
+			const verifications = (await readFile(blSessionPath, "utf8"))
+				.trim()
+				.split("\n")
+				.map(
+					(line) =>
+						JSON.parse(line) as {
+							customType?: string;
+							data?: { bitlocker?: { operation?: { status?: string; reason?: string } } };
+						},
+				)
+				.filter((entry) => entry.customType === "cst.bitlocker-state-verification");
+			assert.equal(verifications.length, 2, "打开中断会话应追加一次实时复查");
+			const operation = verifications.at(-1)?.data?.bitlocker?.operation;
+			assert.equal(operation?.status, "unknown", "复查不会确认或重放中断操作");
+			const verificationReason = operation?.reason;
+			assert.ok(
+				verificationReason === "上次操作异常中断；实时查询失败，请重新查询。" ||
+					verificationReason === "上次操作异常中断；已实时复查，未重试操作",
+				`应记录本机实时复查结果：${verificationReason}`,
+			);
 
 			await browser.navigate(`${origin}/s/${blSessionId}`);
 			await browser.until(
-				`document.body.innerText.includes("结果未确认") && document.body.innerText.includes("上次操作异常中断；实时查询失败，请重新查询。")`,
+				`document.body.innerText.includes("结果未确认") && document.body.innerText.includes(${JSON.stringify(verificationReason)}) && !document.body.innerText.includes("E2E_OLD_BITLOCKER_VERIFICATION")`,
 				"聊天页渲染强杀重启后的 BitLocker 未知复查状态",
 			);
 
@@ -330,7 +354,8 @@ test(
 					assert.ok(htmlText.includes("Content-Security-Policy"));
 					assert.ok(htmlText.includes("data:font/woff2;base64,"), "离线 HTML 内嵌 WOFF2 字体");
 					assert.ok(htmlText.includes("结果未确认"), "离线 HTML 投影 BitLocker 未知复查状态");
-					assert.ok(htmlText.includes("上次操作异常中断；实时查询失败，请重新查询。"));
+					assert.ok(htmlText.includes(verificationReason), "离线 HTML 与聊天页显示同一次最新复查");
+					assert.ok(!htmlText.includes("E2E_OLD_BITLOCKER_VERIFICATION"));
 				}
 			}
 		} finally {
