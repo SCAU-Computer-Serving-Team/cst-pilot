@@ -84,13 +84,14 @@ pub fn cleanup_discovery_file(kit_root: &Path, expected_pid: u32, expected_port:
     }
 }
 
-/// Kernel-owned single-instance lock for `cst-server` within one kit root (`\\.\pipe\cst-pilot-server-<hash>`).
+/// Kernel-owned single-instance lock within one kit root.
+/// Windows uses `\\.\pipe\cst-pilot-server-<hash>`; other targets use a file lock under `.state`.
 pub struct ServerInstanceLock {
     address: String,
     #[cfg(windows)]
     _handle: std::os::windows::io::OwnedHandle,
     #[cfg(not(windows))]
-    _listener: std::net::TcpListener,
+    _file: fs::File,
 }
 
 impl ServerInstanceLock {
@@ -119,19 +120,16 @@ impl ServerInstanceLock {
         }
         #[cfg(not(windows))]
         {
-            let normalized = normalize_canonical_path_for_hash(kit_root)?;
-            let hash = Sha256::digest(normalized.as_bytes());
-            let prefix = u32::from_be_bytes(hash[..4].try_into().unwrap());
-            let listener = std::net::TcpListener::bind((
-                std::net::Ipv4Addr::LOCALHOST,
-                42000 + (prefix % 10000) as u16,
-            ))
-            .map_err(|_| {
-                "server_already_running: 当前工具包目录已有 cst-server 实例正在运行。".to_owned()
+            let file = acquire_file_lock(kit_root, &address).map_err(|error| match error {
+                fs::TryLockError::WouldBlock => {
+                    "server_already_running: 当前工具包目录已有 cst-server 实例正在运行。"
+                        .to_owned()
+                }
+                fs::TryLockError::Error(_) => "无法获取服务单实例文件锁。".to_owned(),
             })?;
             Ok(Self {
                 address,
-                _listener: listener,
+                _file: file,
             })
         }
     }
@@ -141,14 +139,15 @@ impl ServerInstanceLock {
     }
 }
 
-/// Cross-process session single-writer lock (`\\.\pipe\cst-pilot-session-<hash>`),
-/// matching `agent/home/extensions/runtime/owner.ts`.
+/// Cross-process session single-writer lock.
+/// Windows uses `\\.\pipe\cst-pilot-session-<hash>`, matching
+/// `agent/home/extensions/runtime/owner.ts`; other targets use a file lock under `.state`.
 pub struct SessionOwnerLock {
     address: String,
     #[cfg(windows)]
     _handle: std::os::windows::io::OwnedHandle,
     #[cfg(not(windows))]
-    _listener: std::net::TcpListener,
+    _file: fs::File,
 }
 
 impl SessionOwnerLock {
@@ -176,20 +175,16 @@ impl SessionOwnerLock {
         }
         #[cfg(not(windows))]
         {
-            let normalized = normalize_canonical_path_for_hash(agent_dir)?;
-            let hash = Sha256::digest(format!("{normalized}\0{session_id}").as_bytes());
-            let prefix = u32::from_be_bytes(hash[..4].try_into().unwrap());
-            let listener = std::net::TcpListener::bind((
-                std::net::Ipv4Addr::LOCALHOST,
-                12000 + (prefix % 20000) as u16,
-            ))
-            .map_err(|_| {
-                "session_owned: 该会话正由另一端使用，请先关闭持有该会话的 TUI 或 Web 服务，再重新打开。"
-                    .to_owned()
+            let file = acquire_file_lock(agent_dir, &address).map_err(|error| match error {
+                fs::TryLockError::WouldBlock => {
+                    "session_owned: 该会话正由另一端使用，请先关闭持有该会话的 TUI 或 Web 服务，再重新打开。"
+                        .to_owned()
+                }
+                fs::TryLockError::Error(_) => "无法获取会话单写权文件锁。".to_owned(),
             })?;
             Ok(Self {
                 address,
-                _listener: listener,
+                _file: file,
             })
         }
     }
@@ -197,6 +192,23 @@ impl SessionOwnerLock {
     pub fn address(&self) -> &str {
         &self.address
     }
+}
+
+#[cfg(any(test, not(windows)))]
+fn acquire_file_lock(root: &Path, address: &str) -> Result<fs::File, fs::TryLockError> {
+    let directory = root.join(".state").join("kernel-locks");
+    fs::create_dir_all(&directory).map_err(fs::TryLockError::Error)?;
+    let hash = Sha256::digest(address.as_bytes());
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(directory.join(format!("{hash:x}.lock")))
+        .map_err(fs::TryLockError::Error)?;
+    file.try_lock()?;
+    // Keep the file in place: unlinking it lets another process lock a different inode.
+    Ok(file)
 }
 
 #[cfg(windows)]
@@ -232,4 +244,25 @@ fn acquire_windows_first_pipe(address: &str) -> Result<std::os::windows::io::Own
         return Err(matches!(code, Some(5 | 183 | 231)));
     }
     Ok(unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(handle.0) })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::acquire_file_lock;
+
+    #[test]
+    fn file_locks_preserve_full_identity_and_release_on_drop() {
+        let root = std::env::temp_dir().join(format!("cst-file-lock-{}", uuid::Uuid::new_v4()));
+        let address = "cst-test";
+        let first = acquire_file_lock(&root, address).expect("first holder");
+        assert!(matches!(
+            acquire_file_lock(&root, address),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+        let other = acquire_file_lock(&root, "cst-test-other").expect("distinct identity");
+        drop(first);
+        let reacquired = acquire_file_lock(&root, address).expect("released kernel lock");
+        drop((other, reacquired));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
