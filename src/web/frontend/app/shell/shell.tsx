@@ -500,7 +500,10 @@ export function HomeSurface({
 	externalBackground?: boolean;
 }) {
 	const { outbox, records } = useMessageOutbox();
-	const outgoing = preview ? [] : outgoingFor(records);
+	// 首页只保留需要处理的发送记录；正常气泡由接管后的聊天页展示。
+	const outgoing = preview
+		? []
+		: outgoingFor(records).filter((item) => item.state === "failed" || item.state === "unknown");
 	async function send(text: string, config: ComposerConfig) {
 		const { messageId, ...payload } = config;
 		outbox.enqueue({ ...payload, id: messageId, text });
