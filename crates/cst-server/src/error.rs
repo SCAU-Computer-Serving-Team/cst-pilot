@@ -9,7 +9,10 @@ pub enum ServiceErrorKind {
     NotFound,
     AccessDenied,
     TooLarge,
+    Busy,
     Unavailable,
+    Timeout,
+    StorageFull,
     Internal,
 }
 

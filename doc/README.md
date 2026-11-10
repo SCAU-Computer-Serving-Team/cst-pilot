@@ -36,6 +36,7 @@
 | [rust/plan/4.runtime-and-sdk.md](rust/plan/4.runtime-and-sdk.md) | 阶段 4 运行时与 SDK（`pi-runtime`）的配置、资源、工具与无头入口 |
 | [rust/plan/6.cst-pilot.md](rust/plan/6.cst-pilot.md) | 阶段 6 CST Pilot 业务迁移（`cst-pilot`）的诊断工具、认证、遥测与安全边界 |
 | [rust/plan/7.server.md](rust/plan/7.server.md) | 阶段 7 三端共用后台服务（`cst-server`）的进程拓扑、会话池、通道门禁与本机鉴权 |
+| [rust/plan/8.web.md](rust/plan/8.web.md) | 阶段 8 Web 网页端适配的会话导出引擎、多标签聚合事件流与前后端契约对齐 |
 | [rust/prototype.md](rust/prototype.md) | Rust 重写的推荐技术栈、选择理由与采用条件；尚待原型验证 |
 
 ## 同名文件职责

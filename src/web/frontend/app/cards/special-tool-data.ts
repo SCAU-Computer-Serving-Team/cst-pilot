@@ -284,6 +284,7 @@ export function mapSpecialTool(call: SpecialToolCall, result?: Message, live = f
 		};
 	}
 	const source = record(details?.bitlocker),
+		topOperation = record(source?.operation),
 		scope = call.arguments.scope === "unlock" ? "unlock" : "decrypt";
 	const driveValue = string(call.arguments.drive);
 	const drive = /^[a-z]:?$/i.test(driveValue) ? `${driveValue[0]!.toUpperCase()}:` : "目标待确定";
@@ -305,7 +306,12 @@ export function mapSpecialTool(call: SpecialToolCall, result?: Message, live = f
 			),
 		};
 	});
-	const errors = [...commonErrors, ...errorsOf(source?.collectionErrors), ...volumes.flatMap((v) => v.errors)];
+	const topReason = string(topOperation?.reason);
+	const errors = [
+		...commonErrors,
+		...errorsOf(source?.collectionErrors, !volumes.length && topReason ? topReason : undefined),
+		...volumes.flatMap((v) => v.errors),
+	];
 	const attempted = volumes.filter((v) => v.operation !== "skipped");
 	let status: SpecialStatus = initial,
 		summary =
@@ -324,7 +330,7 @@ export function mapSpecialTool(call: SpecialToolCall, result?: Message, live = f
 		if (result.isError) {
 			status = "error";
 			summary = "执行失败";
-		} else if (volumes.some((v) => v.operation === "unknown")) {
+		} else if (string(topOperation?.status) === "unknown" || volumes.some((v) => v.operation === "unknown")) {
 			status = "unknown";
 			summary = "结果未确认";
 		} else if (attempted.some((v) => v.operation === "cancelled")) {
@@ -353,9 +359,9 @@ export function mapSpecialTool(call: SpecialToolCall, result?: Message, live = f
 					? "部分请求失败"
 					: volumes.some((v) => !["accepted", "skipped"].includes(v.operation))
 						? "请求结果缺失"
-						: scope === "unlock" && volumes.every((v) => v.lock === "已解锁")
+						: scope === "unlock" && volumes.length > 0 && volumes.every((v) => v.lock === "已解锁")
 							? "已解锁，部分状态缺失"
-							: scope === "decrypt" && volumes.every((v) => v.conversionCode === 0)
+							: scope === "decrypt" && volumes.length > 0 && volumes.every((v) => v.conversionCode === 0)
 								? "已完全解密，部分状态缺失"
 								: scope === "unlock" && volumes.some((v) => v.lock === "锁定状态未确认")
 									? "锁定状态未确认"
@@ -365,24 +371,28 @@ export function mapSpecialTool(call: SpecialToolCall, result?: Message, live = f
 			summary = !volumes.length
 				? "无可处理的卷"
 				: scope === "unlock"
-					? volumes.every((v) => v.lock === "已解锁")
+					? volumes.length > 0 && volumes.every((v) => v.lock === "已解锁")
 						? "已解锁"
 						: "请求已返回"
-					: volumes.every((v) => v.conversionCode === 0)
+					: volumes.length > 0 && volumes.every((v) => v.conversionCode === 0)
 						? "已完全解密"
 						: volumes.some((v) => v.conversionCode === 3)
 							? "解密中"
 							: "请求已返回";
 		}
 	}
-	const fields = volumes.flatMap((v) => [
-		field("目标卷", `${v.drive} · ${v.id}`),
-		field("转换状态", `${v.conversion}${v.conversionCode === null ? "" : ` (${v.conversionCode})`}`),
-		field("锁定状态", v.lock),
-		field("请求结果", v.operation || "未知"),
-		field("说明", v.reason),
-		field("采集时刻", source?.collectedAt),
-	]);
+	const fields = volumes.length
+		? volumes.flatMap((v) => [
+				field("目标卷", `${v.drive} · ${v.id}`),
+				field("转换状态", `${v.conversion}${v.conversionCode === null ? "" : ` (${v.conversionCode})`}`),
+				field("锁定状态", v.lock),
+				field("请求结果", v.operation || "未知"),
+				field("说明", v.reason),
+				field("采集时刻", source?.collectedAt),
+			])
+		: topOperation
+			? [field("请求结果", string(topOperation.status, "未知")), field("说明", topReason)]
+			: [];
 	return {
 		...base,
 		kind,

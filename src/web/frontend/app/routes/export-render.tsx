@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
-import type { ExportSnapshot } from "../../../../../agent/home/extensions/web/shared/exports";
+import type { ExportSnapshot } from "../data/types";
 import { ExportDocument } from "../exports/export-document";
 
 /** 预览与 Puppeteer 共用的只读页面；快照经同源消息传入，不读取会话或账号接口。 */

@@ -20,6 +20,7 @@ publish = false
 async-stream = "0.3"
 base64 = "0.22"
 bytes = "1"
+chromiumoxide = { version = "=0.9.1", default-features = false, features = ["bytes"] }
 futures-core = "0.3"
 futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico", "tiff"] }

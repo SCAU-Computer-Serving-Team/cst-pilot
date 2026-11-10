@@ -5,7 +5,10 @@ use pi_session::NavigateTreeOptions;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use crate::exports::{build_export_preview_snapshot, parse_export_options};
+use http::HeaderValue;
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+
+use crate::exports::{EXPORT_CSP, build_export_preview_snapshot, parse_export_options};
 use crate::mode::CallerIdentity;
 use crate::routes::models::get_supported_thinking_levels;
 use crate::routes::{
@@ -37,13 +40,7 @@ pub async fn handle_sessions_and_exports_route(
             return Ok(None);
         }
         if parts.len() == 1 && (*method == Method::GET || *method == Method::HEAD) {
-            let Some(job) = state.exports.get_job(export_id) else {
-                return Err(ApiError::new(
-                    StatusCode::NOT_FOUND,
-                    "not_found",
-                    "导出记录不存在",
-                ));
-            };
+            let job = state.exports.get(export_id).await.map_err(ApiError::from)?;
             return Ok(Some(json_response(
                 StatusCode::OK,
                 &serde_json::to_value(job).unwrap_or(Value::Null),
@@ -68,39 +65,65 @@ pub async fn handle_sessions_and_exports_route(
                     &body,
                     Some(headers),
                     || async move {
-                        let Some(job) = state.exports.get_job(&eid) else {
-                            return Err(ApiError::new(
-                                StatusCode::NOT_FOUND,
-                                "not_found",
-                                "导出记录不存在",
-                            ));
-                        };
-                        if job.status != "completed" {
-                            return Err(ApiError::new(
-                                StatusCode::CONFLICT,
-                                "conflict",
-                                "导出任务尚未完成",
-                            ));
-                        }
+                        let dir = state
+                            .exports
+                            .directory(&eid)
+                            .await
+                            .map_err(ApiError::from)?;
+                        (state.open_export_directory)(dir).await.map_err(|_| {
+                            ApiError::new(
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                "export_launch_failed",
+                                "无法启动文件管理器，请重试或按显示路径手动打开",
+                            )
+                        })?;
                         Ok(json!({ "launched": true }))
                     },
                 )
                 .await?;
             return Ok(Some(json_response(StatusCode::OK, &result, method)));
         }
-        if parts.len() == 3 && parts[1] == "files" && *method == Method::GET {
-            let Some(_job) = state.exports.get_job(export_id) else {
-                return Err(ApiError::new(
+        if parts.len() == 3
+            && parts[1] == "files"
+            && (*method == Method::GET || *method == Method::HEAD)
+        {
+            let index: usize = parts[2].parse().map_err(|_| {
+                ApiError::new(
                     StatusCode::NOT_FOUND,
-                    "not_found",
+                    "export_file_missing",
                     "导出文件不存在",
-                ));
+                )
+            })?;
+            let file = state
+                .exports
+                .file(export_id, index)
+                .await
+                .map_err(ApiError::from)?;
+            let len = file.data.len();
+            let body_bytes = if *method == Method::HEAD {
+                Bytes::new()
+            } else {
+                Bytes::from(file.data)
             };
-            return Err(ApiError::new(
-                StatusCode::NOT_FOUND,
-                "not_found",
-                "导出文件不存在",
-            ));
+            let mut resp = bytes_response(
+                StatusCode::OK,
+                file.content_type,
+                "no-store",
+                len,
+                body_bytes,
+            );
+            let encoded_name = utf8_percent_encode(&file.name, NON_ALPHANUMERIC);
+            if let Ok(cd) =
+                HeaderValue::from_str(&format!("attachment; filename*=UTF-8''{encoded_name}"))
+            {
+                resp.headers_mut()
+                    .insert(http::header::CONTENT_DISPOSITION, cd);
+            }
+            resp.headers_mut().insert(
+                "content-security-policy",
+                HeaderValue::from_static(EXPORT_CSP),
+            );
+            return Ok(Some(resp));
         }
         return Ok(None);
     }
@@ -469,7 +492,7 @@ pub async fn handle_sessions_and_exports_route(
                         .map(|r| r.title)
                         .unwrap_or_else(|| "会话".to_owned());
                     let snap = build_export_preview_snapshot(&slot, &title, &options)?;
-                    let job = state.exports.create_job(&snap);
+                    let job = state.exports.create(&snap).await.map_err(ApiError::from)?;
                     Ok(serde_json::to_value(job).unwrap_or(Value::Null))
                 },
             )
@@ -478,7 +501,7 @@ pub async fn handle_sessions_and_exports_route(
     }
 
     if suffix == "exports" && (*method == Method::GET || *method == Method::HEAD) {
-        let list = state.exports.list_for_session(id);
+        let list = state.exports.list(id).await.map_err(ApiError::from)?;
         return Ok(Some(json_response(
             StatusCode::OK,
             &json!({ "exports": list }),

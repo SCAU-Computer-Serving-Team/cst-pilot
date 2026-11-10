@@ -1121,6 +1121,18 @@ impl MultiplexHub {
 
         let subscribed = guard.subscribed_sessions.iter().cloned().collect();
         let subscriber = guard.active_subscriber.clone();
+        if subscriber.is_none() {
+            if let Some(timer) = guard.expiry_task.take() {
+                timer.abort();
+            }
+            let timeout = self.retention_timeout;
+            let hub = self.clone();
+            let key_clone = key.clone();
+            guard.expiry_task = Some(tokio::spawn(async move {
+                tokio::time::sleep(timeout).await;
+                hub.expire_disconnected_slot(&key_clone);
+            }));
+        }
         drop(guard);
         if let Some(subscriber) = subscriber {
             subscriber.finish_overflow();

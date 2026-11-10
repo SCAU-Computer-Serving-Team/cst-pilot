@@ -59,6 +59,7 @@ pub struct ApiError {
     pub status: StatusCode,
     pub code: &'static str,
     pub message: String,
+    pub session_id: Option<String>,
 }
 
 impl ApiError {
@@ -67,7 +68,13 @@ impl ApiError {
             status,
             code,
             message: message.into(),
+            session_id: None,
         }
+    }
+
+    pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
+        self.session_id = Some(session_id.into());
+        self
     }
 
     pub fn from_config_err(msg: String) -> Self {
@@ -93,7 +100,10 @@ impl From<ServiceError> for ApiError {
             ServiceErrorKind::NotFound => StatusCode::NOT_FOUND,
             ServiceErrorKind::AccessDenied => StatusCode::FORBIDDEN,
             ServiceErrorKind::TooLarge => StatusCode::PAYLOAD_TOO_LARGE,
+            ServiceErrorKind::Busy => StatusCode::TOO_MANY_REQUESTS,
             ServiceErrorKind::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+            ServiceErrorKind::Timeout => StatusCode::GATEWAY_TIMEOUT,
+            ServiceErrorKind::StorageFull => StatusCode::INSUFFICIENT_STORAGE,
             ServiceErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         };
         Self::new(status, error.code, error.message)
@@ -121,6 +131,7 @@ impl From<AuthGuardError> for ApiError {
             status: err.status,
             code: err.code,
             message: err.message,
+            session_id: None,
         }
     }
 }
@@ -236,12 +247,13 @@ pub fn json_response(
 }
 
 pub fn error_response(err: &ApiError) -> Response<SseOrBytesBody> {
-    let body = json!({
-        "error": {
-            "code": err.code,
-            "message": err.message,
-        }
-    });
+    let mut detail = serde_json::Map::new();
+    detail.insert("code".to_owned(), json!(err.code));
+    detail.insert("message".to_owned(), json!(err.message));
+    if let Some(ref sid) = err.session_id {
+        detail.insert("sessionId".to_owned(), json!(sid));
+    }
+    let body = json!({ "error": Value::Object(detail) });
     json_response(err.status, &body, &Method::GET)
 }
 

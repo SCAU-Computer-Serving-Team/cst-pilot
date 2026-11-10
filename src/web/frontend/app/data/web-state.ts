@@ -1,15 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Message } from "../../../../../agent/home/extensions/web/shared/conversation";
 import type { TreeNode } from "../tree/branch-tree";
 import { apiJson } from "./api";
 import { type BitLockerSnapshot, newestBitLocker } from "./bitlocker-state";
+import {
+	type GlobalEventHandler,
+	type GlobalEventName,
+	resumeEventStreamFromStandby,
+	subscribeChannelMode,
+	subscribeGlobalEvents,
+	subscribeSessionEvents,
+} from "./event-stream";
 import { OptimisticSessionDeletion } from "./optimistic-session-deletion";
 import { recentSessionIds, SessionDetailCache } from "./session-cache";
 import { commitMessage, containsAssistant } from "./session-stream";
 import { StreamHealth } from "./stream-health";
 import { StreamPacer } from "./stream-player";
+import type { Message } from "./types";
 
-export type { ContentPart, Message } from "../../../../../agent/home/extensions/web/shared/conversation";
+export type { ContentPart, Message } from "./types";
+export type { GlobalEventHandler, GlobalEventName };
 
 export type SessionRow = { id: string; title: string; updatedAt?: string; running: boolean };
 /** /api/models 返回的模型条目：reasoning 标记是否支持思考强度。 */
@@ -50,42 +59,13 @@ const sessionDetails = new SessionDetailCache((id) =>
 
 let knownSessions: readonly SessionRow[] = [];
 
-type GlobalEventName = "open" | "state" | "reset" | "error";
-type GlobalEventHandler = (name: GlobalEventName, event: MessageEvent | undefined) => void;
-
-// 全局事件流只开一条连接：多个 hook 各自订阅，全部退订后关闭（client-event-listeners）。
-const globalHandlers = new Set<GlobalEventHandler>();
-let globalSource: EventSource | null = null;
-let globalRefs = 0;
-function openGlobalEvents(): EventSource {
-	if (globalSource) return globalSource;
-	const source = new EventSource("/api/events");
-	globalSource = source;
-	for (const name of ["open", "state", "reset", "error"] as const)
-		source.addEventListener(name, (event) => {
-			for (const handler of globalHandlers) handler(name, event as MessageEvent);
-		});
-	return source;
-}
-
-/** 订阅全局 /api/events：回调存 ref，身份变化不重连；enabled 为 false 时不占连接。 */
+/** 订阅全局事件流：通过聚合流或单流回退分发；enabled 为 false 时不占连接。 */
 export function useGlobalEvents(onEvent: GlobalEventHandler, enabled = true) {
 	const handler = useRef(onEvent);
 	handler.current = onEvent;
 	useEffect(() => {
 		if (!enabled) return;
-		openGlobalEvents();
-		const listener: GlobalEventHandler = (name, event) => handler.current(name, event);
-		globalHandlers.add(listener);
-		globalRefs++;
-		return () => {
-			globalHandlers.delete(listener);
-			globalRefs--;
-			if (globalRefs === 0 && globalSource) {
-				globalSource.close();
-				globalSource = null;
-			}
-		};
+		return subscribeGlobalEvents((name, event) => handler.current(name, event));
 	}, [enabled]);
 }
 
@@ -106,18 +86,20 @@ export function useSessions() {
 	const refresh = useCallback(async () => {
 		const sequence = ++requestSequence.current;
 		try {
-			const state = await apiJson<{ sessions: SessionRow[]; stage: string }>("/api/state");
+			const state = await apiJson<{ sessions: SessionRow[]; stage: string; channelMode?: string }>("/api/state");
 			if (sequence !== requestSequence.current) return;
+			const nextStage = state.channelMode === "app_active" ? "app_active" : state.stage;
 			const rows = deletions.current.reconcile(state.sessions);
 			updateRows(rows);
-			if (state.stage !== "preview") {
+			if (nextStage !== "preview" && nextStage !== "app_active") {
+				resumeEventStreamFromStandby();
 				sessionDetails.reconcile(state.sessions);
 				if (!preloaded.current) {
 					preloaded.current = true;
 					void sessionDetails.preload(recentSessionIds(rows));
 				}
 			}
-			setStage(state.stage);
+			setStage(nextStage);
 			setError("");
 		} catch (cause) {
 			if (sequence === requestSequence.current)
@@ -126,7 +108,14 @@ export function useSessions() {
 	}, [updateRows]);
 	useEffect(() => {
 		void refresh();
+		const unsubMode = subscribeChannelMode((mode) => {
+			if (mode === "app_active") {
+				setStage("app_active");
+				setError("");
+			}
+		});
 		return () => {
+			unsubMode();
 			++requestSequence.current;
 			window.clearTimeout(refreshTimer.current);
 		};
@@ -139,7 +128,17 @@ export function useSessions() {
 			}
 			if (name === "state") {
 				try {
-					if (JSON.parse(event?.data ?? "null")?.type !== "sessions_changed") return;
+					const payload = JSON.parse(event?.data ?? "null");
+					if (payload?.type === "channel_mode_changed") {
+						if (payload.mode === "app_active") {
+							setStage("app_active");
+							setError("");
+							return;
+						}
+						void refresh();
+						return;
+					}
+					if (payload?.type !== "sessions_changed") return;
 				} catch {
 					return;
 				}
@@ -149,7 +148,7 @@ export function useSessions() {
 				void refresh();
 			}, 40);
 		},
-		!!stage && stage !== "preview",
+		!!stage && stage !== "preview" && stage !== "app_active",
 	);
 	const beginDeletion = useCallback(
 		(ids: readonly string[]) => {
@@ -194,7 +193,6 @@ export function useSessionTree(id: string | undefined) {
 		setTree(undefined);
 		if (!id) return;
 		void refresh();
-		const events = new EventSource(`/api/sessions/${encodeURIComponent(id)}/events`);
 		// message_end、agent_end、session_tree 常同帧到达：尾随去抖合并成一次拉取。
 		let refreshTimer: number | undefined;
 		const scheduleRefresh = () => {
@@ -203,27 +201,36 @@ export function useSessionTree(id: string | undefined) {
 				void refresh();
 			}, 80);
 		};
-		events.onopen = () => {
-			setError("");
-			void refresh();
-		};
-		events.addEventListener("session", (event) => {
-			try {
-				const change = JSON.parse((event as MessageEvent).data);
-				if (["message_end", "agent_end", "session_tree"].includes(change.type)) scheduleRefresh();
-			} catch {
-				scheduleRefresh();
+		const sub = subscribeSessionEvents(id, (name, data) => {
+			if (name === "open") {
+				setError("");
+				void refresh();
+				return;
+			}
+			if (name === "session") {
+				try {
+					const change = JSON.parse(data ?? "null");
+					if (["message_end", "agent_end", "session_tree"].includes(change?.type)) scheduleRefresh();
+				} catch {
+					scheduleRefresh();
+				}
+				return;
+			}
+			if (name === "reset") {
+				void refresh();
+				return;
+			}
+			if (name === "not_found") {
+				setError(data || "会话不存在");
+				return;
+			}
+			if (name === "error") {
+				setError("事件流已断开。请确认 pi 仍在运行；恢复后页面会自动同步。");
 			}
 		});
-		events.addEventListener("reset", () => {
-			void refresh();
-		});
-		events.onerror = () => {
-			setError("事件流已断开。请确认 pi 仍在运行；恢复后页面会自动同步。");
-		};
 		return () => {
 			window.clearTimeout(refreshTimer);
-			events.close();
+			sub.close();
 		};
 	}, [id, refresh]);
 	return { tree, leafId, error, refresh };
@@ -297,7 +304,7 @@ export function useSessionDetail(id: string | undefined) {
 		const pacer = new StreamPacer(setStreaming);
 		// 一次工具循环会连发 agent_start、message_start、message_end 等事件：尾随去抖合并成一次全量拉取。
 		let refreshTimer: number | undefined;
-		let events: EventSource | undefined;
+		let sub: { close: () => void; reconnect: () => void } | undefined;
 		const scheduleRefresh = () => {
 			window.clearTimeout(refreshTimer);
 			refreshTimer = window.setTimeout(() => {
@@ -306,95 +313,99 @@ export function useSessionDetail(id: string | undefined) {
 		};
 		const health = new StreamHealth(() => {
 			void refresh();
-			connect();
+			sub?.reconnect();
 		});
-		const onSession = (event: Event) => {
-			if (event.currentTarget !== events) return;
-			health.pulse();
-			try {
-				const change = JSON.parse((event as MessageEvent).data);
-				if (change.type === "message_update" && change.message?.role === "assistant") pacer.update(change.message);
-				if (change.type === "message_end" && ["assistant", "user", "toolResult"].includes(change.message?.role)) {
-					if (change.message.role === "assistant") pacer.reset();
-					++requestSequence.current;
-					setDetail((state) => {
-						if (!state) return state;
-						const next = commitMessage(state, change.message);
-						sessionDetails.put(next);
-						return next;
-					});
-					if (change.message.role === "assistant") setStreaming(undefined);
-				}
-				if (change.type === "agent_start") {
-					setDetail((state) => (state ? { ...state, running: true } : state));
-				}
-				if (change.type === "bitlocker_requests_changed") {
-					bitlockerState.current = newestBitLocker(bitlockerState.current, change);
-					setDetail((state) => (state ? { ...state, bitlocker: bitlockerState.current } : state));
-				}
-				if (change.type === "ui_requests")
-					setDetail((state) => (state ? { ...state, ui: change.questions } : state));
-				if (
-					[
-						"message_start",
-						"message_end",
-						"agent_end",
-						"agent_start",
-						"session_tree",
-						"tool_execution_start",
-						"tool_execution_end",
-						"tool_execution_update",
-					].includes(change.type)
-				) {
-					if (change.type === "agent_end") pacer.flush();
-					scheduleRefresh();
-				}
-			} catch {
-				scheduleRefresh();
-			}
-		};
-		const connect = () => {
-			events?.close();
-			events = new EventSource(`/api/sessions/${encodeURIComponent(id)}/events`);
-			events.onopen = (event) => {
-				if (event.currentTarget !== events) return;
+		sub = subscribeSessionEvents(id, (name, data) => {
+			if (name === "open") {
 				health.pulse();
 				setError("");
 				void refresh();
-			};
-			events.addEventListener("heartbeat", (event) => {
-				if (event.currentTarget === events) health.pulse();
-			});
-			events.addEventListener("session", onSession);
-			events.addEventListener("queue", (event) => {
-				if (event.currentTarget !== events) return;
+				return;
+			}
+			if (name === "heartbeat") {
+				health.pulse();
+				return;
+			}
+			if (name === "session") {
 				health.pulse();
 				try {
-					const queue: InboxSnapshot = JSON.parse((event as MessageEvent).data);
+					const change = JSON.parse(data ?? "null");
+					if (change.type === "message_update" && change.message?.role === "assistant")
+						pacer.update(change.message);
+					if (
+						change.type === "message_end" &&
+						["assistant", "user", "toolResult"].includes(change.message?.role)
+					) {
+						if (change.message.role === "assistant") pacer.reset();
+						++requestSequence.current;
+						setDetail((state) => {
+							if (!state) return state;
+							const next = commitMessage(state, change.message);
+							sessionDetails.put(next);
+							return next;
+						});
+						if (change.message.role === "assistant") setStreaming(undefined);
+					}
+					if (change.type === "agent_start") {
+						setDetail((state) => (state ? { ...state, running: true } : state));
+					}
+					if (change.type === "bitlocker_requests_changed") {
+						bitlockerState.current = newestBitLocker(bitlockerState.current, change);
+						setDetail((state) => (state ? { ...state, bitlocker: bitlockerState.current } : state));
+					}
+					if (change.type === "ui_requests")
+						setDetail((state) => (state ? { ...state, ui: change.questions } : state));
+					if (
+						[
+							"message_start",
+							"message_end",
+							"agent_end",
+							"agent_start",
+							"session_tree",
+							"tool_execution_start",
+							"tool_execution_end",
+							"tool_execution_update",
+						].includes(change.type)
+					) {
+						if (change.type === "agent_end") pacer.flush();
+						scheduleRefresh();
+					}
+				} catch {
+					scheduleRefresh();
+				}
+				return;
+			}
+			if (name === "queue") {
+				health.pulse();
+				try {
+					const queue: InboxSnapshot = JSON.parse(data ?? "null");
 					setDetail((state) => (state ? { ...state, queue } : state));
 				} catch {
 					void refresh();
 				}
-			});
-			events.addEventListener("reset", (event) => {
-				if (event.currentTarget !== events) return;
+				return;
+			}
+			if (name === "reset") {
 				health.pulse();
 				pacer.reset();
 				void refresh();
-			});
-			events.onerror = (event) => {
-				if (event.currentTarget !== events) return;
+				return;
+			}
+			if (name === "not_found") {
+				setError(data || "会话不存在");
+				return;
+			}
+			if (name === "error") {
 				setError("事件流已断开。请确认 pi 仍在运行；恢复后页面会自动同步。");
-			};
-		};
-		connect();
+			}
+		});
 		return () => {
 			++requestSequence.current;
 			pacer.reset();
 			window.clearTimeout(refreshTimer);
 			health.stop();
-			events?.close();
-			events = undefined;
+			sub?.close();
+			sub = undefined;
 		};
 	}, [id, refresh]);
 	const currentDetail = detail?.id === id ? detail : sessionDetails.peek(id);

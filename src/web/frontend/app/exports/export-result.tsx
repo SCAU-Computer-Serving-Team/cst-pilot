@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { SessionExport } from "../../../../../agent/home/extensions/web/shared/exports";
 import { apiJson } from "../data/api";
+import type { SessionExport } from "../data/types";
 import { ErrorNotice } from "../shell/error-notice";
 
 /** 结果仅展示数量与保存目录；打开失败单独重试，不重新生成产物。 */

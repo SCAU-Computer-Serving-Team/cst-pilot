@@ -143,6 +143,30 @@ jobs:
         if: inputs.full
       - run: npm run test:fonts --prefix src/web/frontend
         if: inputs.full
+      - uses: dtolnay/rust-toolchain@stable
+        if: inputs.full
+        with:
+          toolchain: '1.99.1'
+      - uses: actions/cache@v4
+        if: inputs.full
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-web-${{ runner.os }}-1.99.1-${{ hashFiles('Cargo.lock') }}
+      - name: Rust Web 后端测试与构建
+        if: inputs.full
+        shell: pwsh
+        env:
+          PI_OFFLINE: '1'
+        run: |
+          $agent = Join-Path $env:RUNNER_TEMP 'cst-rust-web/agent'
+          New-Item -ItemType Directory -Force $agent | Out-Null
+          $env:PI_CODING_AGENT_DIR = $agent
+          cargo test -p cst-server --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build -p cst-server --bin cst-server --locked
       - name: 验证浏览器启动与退出
         if: inputs.full
         shell: pwsh
@@ -154,6 +178,11 @@ jobs:
       - name: 浏览器与跨端用户链路 E2E
         if: inputs.full
         run: npm run test:web:e2e --prefix agent
+        env:
+          CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
+      - name: Rust Web 浏览器 E2E
+        if: inputs.full
+        run: npm run test:web:rust-e2e --prefix agent
         env:
           CST_WEB_TEST_TMPDIR: ${{ runner.temp }}
       - name: 保存 E2E 验证证据

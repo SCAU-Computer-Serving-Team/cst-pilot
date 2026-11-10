@@ -7,23 +7,34 @@ use cst_pilot::update::service::UpdateOptions;
 use cst_pilot::{Kit, KitHost};
 use cst_server::{RunningServer, ServerConfig};
 
+#[derive(Debug, PartialEq, Eq)]
 struct CliArgs {
     standalone_web: bool,
+    open_browser: bool,
     port: Option<u16>,
     kit_root: Option<PathBuf>,
     cwd: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<CliArgs, String> {
+    parse_args_from(std::env::args().skip(1))
+}
+
+fn parse_args_from<I>(args: I) -> Result<CliArgs, String>
+where
+    I: IntoIterator<Item = String>,
+{
     let mut standalone_web = false;
+    let mut open_browser = false;
     let mut port = None;
     let mut kit_root = None;
     let mut cwd = None;
 
-    let mut iter = std::env::args().skip(1);
+    let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--standalone-web" => standalone_web = true,
+            "--open-browser" => open_browser = true,
             "--port" => {
                 let val = iter.next().ok_or("`--port` 缺少端口号参数")?;
                 port = Some(val.parse::<u16>().map_err(|_| "`--port` 端口号格式无效")?);
@@ -40,12 +51,30 @@ fn parse_args() -> Result<CliArgs, String> {
         }
     }
 
+    if open_browser && !standalone_web {
+        return Err("`--open-browser` 需配合 `--standalone-web` 使用".to_owned());
+    }
+
     Ok(CliArgs {
         standalone_web,
+        open_browser,
         port,
         kit_root,
         cwd,
     })
+}
+
+fn open_default_browser(url: &str) {
+    #[cfg(windows)]
+    {
+        let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
+        let explorer = PathBuf::from(system_root).join("explorer.exe");
+        let _ = std::process::Command::new(explorer).arg(url).spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = url;
+    }
 }
 
 fn resolve_default_kit_root() -> Result<PathBuf, String> {
@@ -141,6 +170,9 @@ async fn main() -> ExitCode {
     };
 
     println!("cst-server listening on {}", server.base_url());
+    if args.open_browser {
+        open_default_browser(&format!("{}/", server.base_url()));
+    }
 
     let stop_token = server.state.server_stop.clone();
     tokio::select! {
@@ -152,4 +184,29 @@ async fn main() -> ExitCode {
 
     server.shutdown().await;
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_args_from;
+
+    #[test]
+    fn parse_standalone_web_and_open_browser() {
+        let parsed = parse_args_from(
+            ["--standalone-web", "--open-browser", "--port", "52831"]
+                .into_iter()
+                .map(str::to_owned),
+        )
+        .expect("valid cli args");
+        assert!(parsed.standalone_web);
+        assert!(parsed.open_browser);
+        assert_eq!(parsed.port, Some(52831));
+    }
+
+    #[test]
+    fn open_browser_requires_standalone_web() {
+        let err = parse_args_from(["--open-browser"].into_iter().map(str::to_owned))
+            .expect_err("open-browser without standalone-web should fail");
+        assert!(err.contains("--standalone-web"));
+    }
 }

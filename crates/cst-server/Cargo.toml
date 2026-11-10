@@ -18,6 +18,7 @@ cst-pilot = { path = "../cst-pilot" }
 async-stream.workspace = true
 base64.workspace = true
 bytes.workspace = true
+chromiumoxide.workspace = true
 chrono = { version = "=0.4.45", default-features = false, features = ["clock", "serde"] }
 futures-core.workspace = true
 futures-util.workspace = true

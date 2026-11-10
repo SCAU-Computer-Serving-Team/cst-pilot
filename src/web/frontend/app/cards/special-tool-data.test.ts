@@ -1,7 +1,71 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Message } from "../data/web-state.ts";
+import type { Message } from "../data/types.ts";
 import { mapSpecialTool, type SpecialToolCall, specialToolKind } from "./special-tool-data.ts";
+
+test("BitLocker 实时复查失败顶层 operation.status === unknown 映射为结果未确认并展示原因", () => {
+	const call = {
+		type: "toolCall" as const,
+		id: "bl-1",
+		name: "bitlocker",
+		arguments: { scope: "unlock", drive: "D:" },
+	};
+	const result: Message = {
+		role: "toolResult",
+		toolCallId: "bl-1",
+		toolName: "bitlocker",
+		content: "",
+		timestamp: 100,
+		details: {
+			bitlocker: {
+				scope: "status",
+				operation: {
+					status: "unknown",
+					reason: "上次操作异常中断；实时查询失败，请重新查询。",
+				},
+				degraded: true,
+			},
+		},
+	};
+	const view = mapSpecialTool(call, result);
+	assert.ok(view && view.kind === "bitlocker");
+	assert.equal(view.status, "unknown");
+	assert.equal(view.summary, "结果未确认");
+	assert.equal(view.errors.includes("上次操作异常中断；实时查询失败，请重新查询。"), true);
+	assert.equal(
+		view.fields.some((f) => f.label === "说明" && f.value.includes("实时查询失败")),
+		true,
+	);
+});
+
+test("BitLocker 空卷列表在 degraded 状态下不误判为已解锁或已完全解密", () => {
+	for (const scope of ["unlock", "decrypt"] as const) {
+		const call = {
+			type: "toolCall" as const,
+			id: `bl-${scope}`,
+			name: "bitlocker",
+			arguments: { scope, drive: "D:" },
+		};
+		const result: Message = {
+			role: "toolResult",
+			toolCallId: `bl-${scope}`,
+			toolName: "bitlocker",
+			content: "",
+			timestamp: 100,
+			details: {
+				bitlocker: {
+					scope,
+					volumes: [],
+					degraded: true,
+				},
+			},
+		};
+		const view = mapSpecialTool(call, result);
+		assert.ok(view && view.kind === "bitlocker");
+		assert.equal(view.status, "degraded");
+		assert.equal(view.summary, "部分状态缺失");
+	}
+});
 
 const call = (name: string, args: Record<string, unknown> = {}): SpecialToolCall => ({
 	type: "toolCall",

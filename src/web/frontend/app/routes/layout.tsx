@@ -1,12 +1,12 @@
-import { PanelLeft } from "lucide-react";
+import { Monitor, PanelLeft } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation, useSearchParams, useViewTransitionState } from "react-router";
 import { AccountProvider } from "../account/use-account";
 import { MessageOutboxRecovery } from "../data/use-message-outbox";
 import { BlueHour } from "../shell/blue-hour";
 import { ConnectionStatus } from "../shell/connection-status";
-import { NotificationRegion } from "../shell/notification";
-import { SessionsProvider } from "../shell/sessions-context";
+import { Notification, NotificationRegion } from "../shell/notification";
+import { SessionsProvider, useWorkspaceSessions } from "../shell/sessions-context";
 import { Sidebar } from "../shell/shell";
 import { useSidebarMotion } from "../shell/sidebar-motion";
 
@@ -81,57 +81,132 @@ export default function WorkspaceLayout() {
 	const overlayLayout = settings ? mobile : narrow;
 	const overlay = overlayLayout && !collapsed;
 	return (
-		<AccountProvider enabled={!preview}>
-			<SessionsProvider>
-				<NotificationRegion contentInset={collapsed || (settings && mobile) ? 0 : 264}>
-					<div
-						ref={motion.root}
-						data-startup={(startup && initialPage && !homeTransition && !collapsed) || undefined}
-						data-home-startup={(startup && initialPage && home && !homeTransition) || undefined}
-						data-startup-origin={(initialPage && home) || undefined}
-						data-export-transition={exportTransition || undefined}
-						data-home-transition={homeTransition || undefined}
-						data-settings-boundary={settingsBoundary || undefined}
-						data-session-transition={sessionTransition || undefined}
-						data-content-transition={(routeTransition && !homeTransition && !settingsBoundary) || undefined}
-						data-route-entry={entry.current.local || undefined}
-						data-home-exit={homeExit || undefined}
-						data-view-transitions={typeof document.startViewTransition === "function"}
-						className={`app-layout ${home ? "home-layout" : "chat-layout"} ${settings ? "settings-layout" : ""} ${collapsed ? "sidebar-collapsed" : ""}`}
-					>
-						{overlay && (
-							<div className="sidebar-backdrop" aria-hidden="true" onClick={() => changeCollapsed(true)} />
+		<SessionsProvider>
+			<WorkspaceShell
+				preview={preview}
+				collapsed={collapsed}
+				settings={settings}
+				mobile={mobile}
+				overlay={overlay}
+				startup={startup}
+				initialPage={initialPage}
+				home={home}
+				homeTransition={homeTransition}
+				exportTransition={exportTransition}
+				settingsBoundary={settingsBoundary}
+				sessionTransition={sessionTransition}
+				routeTransition={routeTransition}
+				routeEntry={entry.current.local}
+				homeExit={homeExit}
+				motionRoot={motion.root}
+				changeCollapsed={changeCollapsed}
+			/>
+		</SessionsProvider>
+	);
+}
+
+function WorkspaceShell({
+	preview,
+	collapsed,
+	settings,
+	mobile,
+	overlay,
+	startup,
+	initialPage,
+	home,
+	homeTransition,
+	exportTransition,
+	settingsBoundary,
+	sessionTransition,
+	routeTransition,
+	routeEntry,
+	homeExit,
+	motionRoot,
+	changeCollapsed,
+}: {
+	preview: boolean;
+	collapsed: boolean;
+	settings: boolean;
+	mobile: boolean;
+	overlay: boolean;
+	startup: boolean;
+	initialPage: boolean;
+	home: boolean;
+	homeTransition: boolean;
+	exportTransition: boolean;
+	settingsBoundary: boolean;
+	sessionTransition: boolean;
+	routeTransition: boolean;
+	routeEntry: boolean;
+	homeExit: boolean;
+	motionRoot: React.RefObject<HTMLDivElement | null>;
+	changeCollapsed: (value: boolean) => void;
+}) {
+	const sessionsState = useWorkspaceSessions();
+	const appActive = !preview && sessionsState.stage === "app_active";
+	const activeChannel = !preview && !appActive;
+	return (
+		<AccountProvider enabled={activeChannel}>
+			<NotificationRegion contentInset={collapsed || (settings && mobile) ? 0 : 264}>
+				<div
+					ref={motionRoot}
+					data-startup={(startup && initialPage && !homeTransition && !collapsed) || undefined}
+					data-home-startup={(startup && initialPage && home && !homeTransition) || undefined}
+					data-startup-origin={(initialPage && home) || undefined}
+					data-export-transition={exportTransition || undefined}
+					data-home-transition={homeTransition || undefined}
+					data-settings-boundary={settingsBoundary || undefined}
+					data-session-transition={sessionTransition || undefined}
+					data-content-transition={(routeTransition && !homeTransition && !settingsBoundary) || undefined}
+					data-route-entry={routeEntry || undefined}
+					data-home-exit={homeExit || undefined}
+					data-view-transitions={typeof document.startViewTransition === "function"}
+					className={`app-layout ${home ? "home-layout" : "chat-layout"} ${settings ? "settings-layout" : ""} ${collapsed ? "sidebar-collapsed" : ""}`}
+				>
+					{overlay && (
+						<div className="sidebar-backdrop" aria-hidden="true" onClick={() => changeCollapsed(true)} />
+					)}
+					<Sidebar
+						preview={preview}
+						startup={initialPage && !homeTransition && !collapsed}
+						collapsed={collapsed}
+						onCollapse={() => changeCollapsed(true)}
+						onNavigate={overlay ? () => changeCollapsed(true) : undefined}
+					/>
+					{collapsed && (
+						<button
+							type="button"
+							className="sidebar-restore"
+							aria-label="展开侧栏"
+							onClick={() => changeCollapsed(false)}
+						>
+							<PanelLeft size={22} aria-hidden="true" />
+						</button>
+					)}
+					<div className="workspace-content">
+						{home && (
+							<div className="home-backdrop" aria-hidden="true">
+								<BlueHour kind="home" />
+							</div>
 						)}
-						<Sidebar
-							preview={preview}
-							startup={initialPage && !homeTransition && !collapsed}
-							collapsed={collapsed}
-							onCollapse={() => changeCollapsed(true)}
-							onNavigate={overlay ? () => changeCollapsed(true) : undefined}
-						/>
-						{collapsed && (
-							<button
-								type="button"
-								className="sidebar-restore"
-								aria-label="展开侧栏"
-								onClick={() => changeCollapsed(false)}
-							>
-								<PanelLeft size={22} aria-hidden="true" />
-							</button>
-						)}
-						<div className="workspace-content">
-							{home && (
-								<div className="home-backdrop" aria-hidden="true">
-									<BlueHour kind="home" />
+						{appActive && (
+							<Notification className="connection-status" label="通道待机" kind="warning">
+								<Monitor size={18} aria-hidden="true" />
+								<div>
+									<strong>软件端正在使用中</strong>
+									<p>Web 界面处于待机状态，草稿已保留。从软件端打开 Web 后可继续操作。</p>
 								</div>
-							)}
-							<ConnectionStatus enabled={!preview} />
-							{!preview && <MessageOutboxRecovery />}
-							<Outlet />
-						</div>
+								<button type="button" className="notice-action" onClick={() => void sessionsState.refresh()}>
+									重新检查
+								</button>
+							</Notification>
+						)}
+						<ConnectionStatus enabled={activeChannel} />
+						{activeChannel && <MessageOutboxRecovery />}
+						<Outlet />
 					</div>
-				</NotificationRegion>
-			</SessionsProvider>
+				</div>
+			</NotificationRegion>
 		</AccountProvider>
 	);
 }

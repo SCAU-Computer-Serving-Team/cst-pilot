@@ -30,6 +30,7 @@
 | 前端单元测试 | `npm test --prefix src/web/frontend` | 工具卡片映射、分支树几何算法、会话预载缓存与结束事件合并、草稿图片与通知状态机 |
 | 前端构建与字体 | `npm run build --prefix src/web/frontend`、`npm run test:fonts --prefix src/web/frontend` | 静态资源构建、三档 WOFF2 子集覆盖、哈希与许可校验 |
 | Web 浏览器端到端 | `npm run test:web:e2e --prefix agent` | 构建后在隔离 Chrome 中验证完整用户链路、持久化与进程重启；模型选择专项覆盖三级菜单、双向左右滑动与同步高度、中途返回、逐级 Esc、外部关闭、保存失败与过期响应、首页传递、键盘、浅深与窄屏 |
+| Rust Web 浏览器端到端 | `cargo build -p cst-server --bin cst-server --locked`、`npm run test:web:rust-e2e --prefix agent` | 先构建前端，在 Windows 隔离 Chrome 中验证 Rust 宿主的乐观发送、聚合流分片、BitLocker 复查与 PNG/HTML 导出 |
 | 遥测单元与跨仓库 | `npm run test:telemetry --prefix agent`、`npm run test:telemetry:e2e --prefix agent` | 统计采集、草稿恢复、扣点查询、双端队列、心跳与真实 Go 接收端联调（后者需设置 `CST_TELEMETRY_RECEIVER`） |
 
 ### CI 执行范围
@@ -39,7 +40,7 @@
 | 模式 | 检查范围 |
 |---|---|
 | 日常 | Rust 格式、Clippy 与测试；工程静态检查、后端类型、OAuth 与遥测测试、启动器与发行树回归；前端格式、类型、单元测试及工具与文档契约 |
-| 完整验收 | 在日常范围上增加 Web 后端、跨端共享、全量发行脚本、前端构建、字体与浏览器 E2E；手动执行 `gh workflow run ci.yml -f full=true` |
+| 完整验收 | 在日常范围上增加 Web 后端、跨端共享、全量发行脚本、前端构建、字体、Windows Rust 导出浏览器回归及 TS/Rust 双入口浏览器 E2E；手动执行 `gh workflow run ci.yml -f full=true` |
 
 完整验收先单独验证隔离 Chrome 的启动与退出，再执行浏览器 E2E。启动失败时保存 `browser-startup.json`，包含退出码与标准错误输出；调试请求有时间上限，失败后回收测试进程和服务。`browser-lifecycle.test.ts` 覆盖启动失败诊断与账号测试退出，`page-entrance.e2e.ts` 使用延迟列表响应验证首页与侧栏各自的入场时序。
 
@@ -125,7 +126,9 @@ Rust 遥测网络测试通过 Node 创建本机 HTTP/TLS 服务。`crates/cst-pi
 
 ### Web 端到端核心链路
 
-现有浏览器 E2E 启动 TypeScript 服务。Rust `cst-server` 的 HTTP/SSE 集成测试独立运行；React 前端连接 Rust 服务的浏览器验收尚待完成。
+浏览器 E2E 保留 TS 与 Rust 双入口。`npm run test:web:e2e --prefix agent` 启动 TypeScript 服务，`npm run test:web:rust-e2e --prefix agent` 通过 `startRustWebServer()` 启动 Rust 宿主，验收范围见[阶段 8](rust/plan/8.web.md#阶段-8-开发步骤与验收方案)。
+
+Rust 导出浏览器集成测试在 Windows 上运行，复用已安装的 Chrome 或 Edge。完整 CI 在 Windows 构建 `cst-server` 并运行两套浏览器 E2E；Linux Rust 核心 CI 保留无需本机浏览器的导出契约测试。
 
 `npm run test:web:e2e --prefix agent` 覆盖以下完整浏览器链路：
 
