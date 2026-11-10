@@ -35,7 +35,7 @@ flowchart TB
 |---|---|---|---|
 | `runtime` | `pi.cmd`、`launcher.ps1`、`agent/home/extensions/runtime/`、`branding/` | UAC 提权启动、便携环境隔离、TUI/Web 接管、跨进程会话写权、共享配置重读 | [SPEC](runtime/SPEC.md) · [ARCHITECTURE](runtime/ARCHITECTURE.md) |
 | `diagnostics` | `agent/home/extensions/diagnostics/`、`agent/home/skills/`、`pwsh/`、`wiztree/`、`lhm/` | 10 个注册工具、命令方案版本存储、共享目录大小缓存、PowerShell 安全调用、BitLocker 双端交互与跨进程卷锁 | [SPEC](diagnostics/SPEC.md) · [ARCHITECTURE](diagnostics/ARCHITECTURE.md) · [API](diagnostics/API.md) |
-| `web` | `agent/home/extensions/web/`、`src/web/frontend/`、`src/web/design/` | 本机 HTTP/SSE 服务、多会话池、持久化输入收件箱、React 19 静态 SPA、流式渲染与工具卡片 | [SPEC](web/SPEC.md) · [ARCHITECTURE](web/ARCHITECTURE.md) · [API](web/API.md) |
+| `web` | `agent/home/extensions/web/`、`src/web/frontend/`、`design/` | 本机 HTTP/SSE 服务、多会话池、持久化输入收件箱、React 19 静态 SPA、流式渲染与工具卡片 | [SPEC](web/SPEC.md) · [ARCHITECTURE](web/ARCHITECTURE.md) · [API](web/API.md) |
 | `auth` | `agent/home/extensions/oauth/`、`agent/home/extensions/web/server/api/` | `cstoa` 原生 Provider（设备码 OAuth 与 APIKEY）、动态模型目录、Pi 原生多服务登录与自定义服务 | [SPEC](auth/SPEC.md) · [ARCHITECTURE](auth/ARCHITECTURE.md) · [API](auth/API.md) |
 | `telemetry` | `agent/home/extensions/telemetry/`、`cst-pilot-server` | 会话统计采集、恢复草稿、回答结束/心跳/关闭统一提交、双端独立队列与 Go 接收端 | [SPEC](telemetry/SPEC.md) · [ARCHITECTURE](telemetry/ARCHITECTURE.md) · [API](telemetry/API.md) · [OPERATIONS](telemetry/OPERATIONS.md) |
 | `release` | `pack/`、`src/web/frontend/scripts/` | 官方二进制锁定、扩展 esbuild 预打包、WOFF2 字体子集构建、干净发行树校验与自动冒烟 | [SPEC](release/SPEC.md) · [ARCHITECTURE](release/ARCHITECTURE.md) |

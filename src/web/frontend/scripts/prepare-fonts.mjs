@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const frontend = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const source = resolve(frontend, "../design/fonts");
+const source = resolve(frontend, "../../../design/fonts");
 const publicFonts = resolve(frontend, "public/fonts");
 const revision = "a4f7cf94edfb9d7ffbdfc4841de276358bd7e0f2";
 const upstream = `https://raw.githubusercontent.com/adobe-fonts/source-han-sans/${revision}`;
