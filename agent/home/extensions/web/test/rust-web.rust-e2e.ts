@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -212,6 +212,119 @@ test(
 			};
 			assert.equal(missingSubJson.error?.code, "session_not_found");
 			assert.equal(missingSubJson.error?.sessionId, "deleted-e2e-session");
+
+			// Observe the compiled SharedWorker against the real Rust backend, including the 32/33 boundary.
+			const workerAsset = (await readdir(join(repoRoot, "agent/home/extensions/web/static/assets"))).find((name) =>
+				/^event-stream-worker-.*\.js$/.test(name),
+			);
+			assert.ok(workerAsset, "构建产物包含 SharedWorker");
+			const shardSessionIds: string[] = [chatSessionId];
+			for (let index = 0; index < 32; index++) {
+				const created = await postJson("/api/sessions", {});
+				assert.equal(created.status, 201);
+				shardSessionIds.push(String(created.body.id));
+			}
+			const workerUrl = `${origin}/assets/${workerAsset}?rust-shards-e2e`;
+			await browser.evaluate(`(() => {
+				const probe = window.__rustShardProbe = {
+					workers: [], receivedIds: [], errors: [],
+					bootstrap: new SharedWorker(${JSON.stringify(workerUrl)}, { type: "module", name: "rust-shards-e2e" })
+				};
+				probe.add = (ids) => {
+					for (const sessionId of ids) {
+						const worker = probe.bootstrap ?? new SharedWorker(${JSON.stringify(workerUrl)}, {
+							type: "module", name: "rust-shards-e2e"
+						});
+						probe.bootstrap = null;
+						worker.port.onmessage = ({ data }) => {
+							if (data.type === "session" && (data.name === "queue" || data.name === "session") && !probe.receivedIds.includes(data.sessionId))
+								probe.receivedIds.push(data.sessionId);
+							if (data.type === "session_not_found" || (data.type === "mode" && data.mode !== "multiplex"))
+								probe.errors.push(data);
+						};
+						worker.port.start();
+						worker.port.postMessage({ type: "subscribe", global: false, sessions: [sessionId] });
+						probe.workers.push(worker);
+					}
+				};
+			})()`);
+			let workerTargetId: string | undefined;
+			const targetDeadline = Date.now() + 5000;
+			while (!workerTargetId && Date.now() < targetDeadline) {
+				const targets = await browser.call<{ targetInfos: { targetId: string; url: string }[] }>(
+					"Target.getTargets",
+					{},
+					"",
+				);
+				workerTargetId = targets.targetInfos.find((target) => target.url === workerUrl)?.targetId;
+				if (!workerTargetId) await new Promise((resolve) => setTimeout(resolve, 40));
+			}
+			assert.ok(workerTargetId, "真实 SharedWorker 目标已启动");
+			const attached = await browser.call<{ sessionId: string }>(
+				"Target.attachToTarget",
+				{ targetId: workerTargetId, flatten: true },
+				"",
+			);
+			let streamCount = 0;
+			const pendingSubscriptions = new Map<string, { url: string; sessions: string[] }>();
+			const confirmedSubscriptions = new Map<string, string[]>();
+			const stopRequests = browser.onEvent("Network.requestWillBeSent", (raw) => {
+				const event = raw as { requestId: string; request: { method: string; url: string; postData?: string } };
+				const path = new URL(event.request.url).pathname;
+				if (event.request.method === "GET" && path === "/api/events/stream") streamCount++;
+				if (event.request.method === "PUT" && path.endsWith("/subscriptions")) {
+					const body = JSON.parse(event.request.postData ?? "{}") as { sessions: string[] };
+					pendingSubscriptions.set(event.requestId, { url: event.request.url, sessions: body.sessions });
+				}
+			});
+			const stopResponses = browser.onEvent("Network.responseReceived", (raw) => {
+				const event = raw as { requestId: string; response: { status: number } };
+				const pending = pendingSubscriptions.get(event.requestId);
+				if (pending && event.response.status === 200) confirmedSubscriptions.set(pending.url, pending.sessions);
+			});
+			const waitForSubscriptions = async (count: number) => {
+				const deadline = Date.now() + 15_000;
+				while (new Set([...confirmedSubscriptions.values()].flat()).size !== count && Date.now() < deadline)
+					await new Promise((resolve) => setTimeout(resolve, 40));
+				assert.equal(new Set([...confirmedSubscriptions.values()].flat()).size, count, "服务端确认订阅集合");
+			};
+			try {
+				await browser.call("Network.enable", {}, attached.sessionId);
+				await browser.evaluate(`window.__rustShardProbe.add(${JSON.stringify(shardSessionIds.slice(0, 32))})`);
+				await waitForSubscriptions(32);
+				assert.equal(streamCount, 1, "32 会话共用一条聚合流");
+				await browser.evaluate(`window.__rustShardProbe.add(${JSON.stringify(shardSessionIds.slice(32))})`);
+				await waitForSubscriptions(33);
+				assert.equal(streamCount, 2, "第 33 会话新增一条聚合流");
+				for (const sessionId of [shardSessionIds[0], shardSessionIds[31], shardSessionIds[32]]) {
+					const sent = await postJson(`/api/sessions/${sessionId}/messages`, {
+						id: randomUUID(),
+						text: "聚合流分片验证",
+						delivery: "queue",
+					});
+					assert.equal(sent.status, 202, JSON.stringify(sent.body));
+				}
+				await browser.until(`window.__rustShardProbe.receivedIds.length === 3`, "两个分片的真实会话事件均送达");
+				assert.deepEqual(await browser.evaluate(`window.__rustShardProbe.errors`), []);
+				assert.equal(
+					await browser.evaluate(
+						`fetch('/api/health', { signal: AbortSignal.timeout(3000) }).then(r => r.status)`,
+					),
+					200,
+					"聚合流不阻塞浏览器普通 HTTP 请求",
+				);
+			} finally {
+				stopRequests();
+				stopResponses();
+				await browser.call("Target.detachFromTarget", { sessionId: attached.sessionId }, "");
+				await browser.evaluate(`(() => {
+					for (const worker of window.__rustShardProbe.workers) {
+						worker.port.postMessage({ type: "disconnect" });
+						worker.port.close();
+					}
+					delete window.__rustShardProbe;
+				})()`);
+			}
 
 			// 6. Create a session with crash-reconciled `cst.bitlocker-state-verification` and verify both Chat UI & Export (PNG + Offline HTML)
 			const blSessionId = "bitlocker-reconcile-e2e";
