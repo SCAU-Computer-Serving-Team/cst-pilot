@@ -28,6 +28,7 @@ function useAnimatedDialogClose(dialogRef: RefObject<HTMLDialogElement | null>):
 			const modal = dialogRef.current;
 			const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
 			if (!modal || !modal.open || motion.matches) {
+				if (modal?.open) modal.close();
 				onDone();
 				return;
 			}
@@ -55,6 +56,7 @@ function useAnimatedDialogClose(dialogRef: RefObject<HTMLDialogElement | null>):
 				cleanupRef.current = null;
 				motion.removeEventListener("change", onReduceMotion);
 				animation.cancel();
+				if (modal.open) modal.close();
 				onDone();
 			};
 			const onReduceMotion = () => {
@@ -74,8 +76,8 @@ function useAnimatedDialogClose(dialogRef: RefObject<HTMLDialogElement | null>):
 function restorePreviousFocus(element: HTMLDialogElement | null, previous: Element | null): void {
 	const active = document.activeElement;
 	const focusRemainedInDialog = !active || active === document.body || Boolean(element?.contains(active));
-	element?.close();
-	if (focusRemainedInDialog && previous instanceof HTMLElement && previous.isConnected) {
+	if (element?.open) element.close();
+	if (focusRemainedInDialog && previous instanceof HTMLElement && previous !== document.body && previous.isConnected) {
 		previous.focus();
 	}
 }
