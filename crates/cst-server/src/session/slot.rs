@@ -296,6 +296,13 @@ impl Drop for SessionLease {
 }
 
 /// Single active session instance inside `SessionPool`.
+fn is_browser_visible_message(message: &AgentMessage) -> bool {
+    matches!(
+        message,
+        AgentMessage::User(_) | AgentMessage::Assistant(_) | AgentMessage::ToolResult(_)
+    )
+}
+
 pub struct SessionSlot {
     pub id: String,
     pub hosted: Arc<HostedSession>,
@@ -380,8 +387,17 @@ impl SessionSlot {
         let id_for_session = id.clone();
 
         let unsub = session.subscribe(Arc::new(move |event| {
-            let decorated = decorators_for_session.decorate_event(&event);
-            events_for_session.publish("session", &decorated);
+            let suppress_browser_message_event = matches!(
+                &event,
+                AgentSessionEvent::MessageStart { message }
+                    | AgentSessionEvent::MessageUpdate { message, .. }
+                    | AgentSessionEvent::MessageEnd { message }
+                    if !is_browser_visible_message(message)
+            );
+            if !suppress_browser_message_event {
+                let decorated = decorators_for_session.decorate_event(&event);
+                events_for_session.publish("session", &decorated);
+            }
 
             let is_now_flushed = hosted_for_session
                 .session()
@@ -421,14 +437,16 @@ impl SessionSlot {
                 }
             }
 
-            if matches!(
-                event,
-                AgentSessionEvent::MessageStart { .. }
-                    | AgentSessionEvent::MessageEnd { .. }
-                    | AgentSessionEvent::AgentStart
-                    | AgentSessionEvent::AgentEnd { .. }
-                    | AgentSessionEvent::SessionInfoChanged { .. }
-            ) {
+            if !suppress_browser_message_event
+                && matches!(
+                    event,
+                    AgentSessionEvent::MessageStart { .. }
+                        | AgentSessionEvent::MessageEnd { .. }
+                        | AgentSessionEvent::AgentStart
+                        | AgentSessionEvent::AgentEnd { .. }
+                        | AgentSessionEvent::SessionInfoChanged { .. }
+                )
+            {
                 global_for_session.publish(
                     "state",
                     &json!({
@@ -528,6 +546,7 @@ impl SessionSlot {
         let messages: Vec<Value> = state
             .messages
             .iter()
+            .filter(|msg| is_browser_visible_message(msg))
             .map(|msg| self.decorators.decorate_message_for_snapshot(msg))
             .collect();
 
@@ -536,6 +555,9 @@ impl SessionSlot {
         for entry in branch_entries {
             match entry {
                 SessionEntry::Message(m) => {
+                    if !is_browser_visible_message(&m.message) {
+                        continue;
+                    }
                     entries_json.push(json!({
                         "id": m.id,
                         "parentId": m.parent_id,

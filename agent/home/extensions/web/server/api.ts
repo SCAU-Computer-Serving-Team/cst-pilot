@@ -496,13 +496,23 @@ export function createWebApi(
 							revision: bitLockerWebInteractions.get(id)?.revision ?? 0,
 							epoch: bitLockerWebInteractions.get(id)?.epoch,
 						},
-						messages: slot.session.messages.map((message) =>
-							slot.inputs.decorate(slot.execution.decorate(message)),
-						),
+						messages: slot.session.messages
+							.filter(
+								(message) =>
+									message.role === "user" || message.role === "assistant" || message.role === "toolResult",
+							)
+							.map((message) => slot.inputs.decorate(slot.execution.decorate(message))),
 						entries: slot.session.sessionManager
 							.getBranch()
 							// 分支总结条目的 type 是 branch_summary，得单独转成前端认识的消息，否则正文里看不到它。
 							.filter((entry) => entry.type === "message" || entry.type === "branch_summary")
+							.filter(
+								(entry) =>
+									entry.type === "branch_summary" ||
+									entry.message.role === "user" ||
+									entry.message.role === "assistant" ||
+									entry.message.role === "toolResult",
+							)
 							.map((entry) =>
 								entry.type === "branch_summary"
 									? {

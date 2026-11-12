@@ -1154,3 +1154,258 @@ async fn unconnected_multiplex_slot_expires_and_releases_session_pins() {
     .await
     .expect("unconnected multiplex slot must expire and release session pins");
 }
+
+#[tokio::test]
+async fn session_snapshots_exports_and_fork_omit_system_messages_while_preserving_jsonl_and_tree() {
+    use pi_ai::{SystemContent, SystemMessage, UserMessage};
+
+    let fixture = ContractFixture::new();
+    let server = fixture.start_server(true).await;
+    let port = server.port();
+    let host_header = format!("127.0.0.1:{port}");
+    let origin_header = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+
+    let create_res: Value = client
+        .post(format!("{}/api/sessions", server.base_url()))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "create-sys-role-sess")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let session_id = create_res["id"].as_str().unwrap().to_owned();
+    let slot = server.state.pool.open_saved(&session_id).await.unwrap();
+
+    // Populate initial system metadata, user + assistant + toolResult, mid-conversation system metadata,
+    // second user + branch summary + orphan assistant.
+    let (sys_init_id, u1_id, sys_mid_id, u2_id, session_file) = slot
+        .session()
+        .with_session_manager_mut(|sm| {
+            let sys_init_id = sm.append_message(AgentMessage::System(SystemMessage {
+                content: SystemContent::Text(String::new()),
+                sections: Some(std::collections::BTreeMap::from([(
+                    "append".to_owned(),
+                    Some("INTERNAL_SYSTEM_PROMPT_PATCH".to_owned()),
+                )])),
+                tools_added: None,
+                tools_removed: None,
+                timestamp: 1_000,
+            }))?;
+            let mut u1 = UserMessage::new("首轮排障提问");
+            u1.timestamp = 1_010;
+            let u1_id = sm.append_message(AgentMessage::User(u1))?;
+
+            let mut a1 = faux_assistant_message(
+                vec![faux_tool_call(
+                    "ls",
+                    json!({"path": "."}).as_object().unwrap().clone(),
+                    Some("tc-sys-1".to_owned()),
+                )],
+                Some(StopReason::ToolUse),
+            );
+            a1.timestamp = 1_020;
+            sm.append_message(AgentMessage::Assistant(a1))?;
+
+            sm.append_message(AgentMessage::ToolResult(ToolResultMessage {
+                tool_call_id: "tc-sys-1".to_owned(),
+                tool_name: "ls".to_owned(),
+                content: vec![UserContentBlock::Text(TextContent {
+                    text: "ok".to_owned(),
+                    text_signature: None,
+                })],
+                details: None,
+                is_error: false,
+                timestamp: 1_030,
+                usage: None,
+                nested_calls: None,
+                duration_ms: Some(5),
+            }))?;
+
+            let sys_mid_id = sm.append_message(AgentMessage::System(SystemMessage {
+                content: SystemContent::Text(String::new()),
+                sections: Some(std::collections::BTreeMap::from([(
+                    "tools".to_owned(),
+                    Some("MID_CONVO_TOOL_LOADOUT".to_owned()),
+                )])),
+                tools_added: None,
+                tools_removed: None,
+                timestamp: 1_040,
+            }))?;
+
+            let mut u2 = UserMessage::new("次轮排障提问");
+            u2.timestamp = 1_050;
+            let u2_id = sm.append_message(AgentMessage::User(u2))?;
+
+            let _bs_id = sm.branch_with_summary(Some(&u2_id), "分支总结正文", None, None, None)?;
+
+            let mut orphan_asst = faux_assistant_message(Vec::new(), Some(StopReason::Aborted));
+            orphan_asst.timestamp = 1_070;
+            sm.append_message(AgentMessage::Assistant(orphan_asst))?;
+
+            let file = sm
+                .get_session_file()
+                .expect("flushed session file")
+                .to_path_buf();
+            Ok((sys_init_id, u1_id, sys_mid_id, u2_id, file))
+        })
+        .unwrap();
+
+    // Close and reload the session from disk so `session.state().messages` is hydrated from the
+    // persisted JSONL projection (which contains `AgentMessage::System`), verifying `messages` filtering too.
+    drop(slot);
+    server.shutdown().await;
+    let server = fixture.start_server(true).await;
+    let port = server.port();
+    let host_header = format!("127.0.0.1:{port}");
+    let origin_header = format!("http://127.0.0.1:{port}");
+    let raw_jsonl = fs::read_to_string(&session_file).unwrap();
+    assert_eq!(
+        raw_jsonl.matches("\"role\":\"system\"").count(),
+        2,
+        "JSONL persistence must retain both initial and mid-conversation system entries"
+    );
+
+    let snap_res: Value = client
+        .get(format!("{}/api/sessions/{session_id}", server.base_url()))
+        .header("Host", &host_header)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let snap_messages = snap_res["messages"].as_array().unwrap();
+    assert!(
+        snap_messages
+            .iter()
+            .all(|m| m["role"].as_str() != Some("system")),
+        "GET /api/sessions/:id messages must never expose role=system"
+    );
+
+    let snap_entries = snap_res["entries"].as_array().unwrap();
+    let entry_roles: Vec<&str> = snap_entries
+        .iter()
+        .map(|e| e["message"]["role"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(
+        entry_roles,
+        vec![
+            "user",
+            "assistant",
+            "toolResult",
+            "user",
+            "branchSummary",
+            "assistant",
+        ],
+        "GET /api/sessions/:id entries must exclude system messages while keeping user, assistant, toolResult, branchSummary, and orphan assistant"
+    );
+    assert_eq!(snap_entries[0]["id"].as_str(), Some(u1_id.as_str()));
+    assert_eq!(
+        snap_entries[0]["parentId"].as_str(),
+        Some(sys_init_id.as_str())
+    );
+    assert_eq!(snap_entries[3]["id"].as_str(), Some(u2_id.as_str()));
+    assert_eq!(
+        snap_entries[3]["parentId"].as_str(),
+        Some(sys_mid_id.as_str())
+    );
+
+    // Export preview snapshot must likewise exclude system entries and internal system prompt strings.
+    let preview_res: Value = client
+        .post(format!(
+            "{}/api/sessions/{session_id}/exports/preview",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "preview-sys-role")
+        .json(&json!({
+            "format": "html",
+            "theme": "light",
+            "includeThinking": true,
+            "includeTools": true
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let preview_str = serde_json::to_string(&preview_res).unwrap();
+    assert!(!preview_str.contains("\"role\":\"system\""));
+    assert!(!preview_str.contains("INTERNAL_SYSTEM_PROMPT_PATCH"));
+    assert!(!preview_str.contains("MID_CONVO_TOOL_LOADOUT"));
+
+    // Tree endpoint must retain raw SessionEntry nodes so parentId chains and fork targets never break.
+    let tree_res: Value = client
+        .get(format!(
+            "{}/api/sessions/{session_id}/tree",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let tree_str = serde_json::to_string(&tree_res).unwrap();
+    assert!(tree_str.contains(&sys_init_id));
+    assert!(tree_str.contains(&sys_mid_id));
+
+    // Forking at u2's parentId (`sys_mid_id`) and u1's parentId (`sys_init_id`) must both succeed cleanly!
+    for (idx, fork_target) in [(&sys_mid_id, 1usize), (&sys_init_id, 0usize)]
+        .into_iter()
+        .enumerate()
+    {
+        let fork_resp = client
+            .post(format!(
+                "{}/api/sessions/{session_id}/fork",
+                server.base_url()
+            ))
+            .header("Host", &host_header)
+            .header("Origin", &origin_header)
+            .header("X-CST-Web-Request", "1")
+            .header("Idempotency-Key", format!("fork-sys-{idx}"))
+            .json(&json!({ "entryId": fork_target.0 }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(fork_resp.status(), 201);
+        let fork_json: Value = fork_resp.json().await.unwrap();
+        let forked_id = fork_json["id"].as_str().unwrap();
+        let forked_snap: Value = client
+            .get(format!("{}/api/sessions/{forked_id}", server.base_url()))
+            .header("Host", &host_header)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let user_count = forked_snap["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["message"]["role"].as_str() == Some("user"))
+            .count();
+        assert_eq!(user_count, fork_target.1);
+        assert!(
+            forked_snap["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|e| e["message"]["role"].as_str() != Some("system"))
+        );
+    }
+
+    server.shutdown().await;
+}
