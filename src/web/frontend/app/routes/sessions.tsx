@@ -112,10 +112,7 @@ export default function Sessions() {
 											setMenu(null);
 											management.toggle(session.id);
 										}}
-										onContextMenu={(event) => {
-											event.preventDefault();
-											openSessionMenu(session, event.clientX, event.clientY);
-										}}
+										onOpenMenu={(x, y) => openSessionMenu(session, x, y)}
 									/>
 									{!management.managing && !preview && (
 										<button

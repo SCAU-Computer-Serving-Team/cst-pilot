@@ -75,6 +75,30 @@ export function presentError(
 			action: "重新连接",
 			detail,
 		};
+	if (/export_too_tall|超过\s*100,?000|文档高度超出/i.test(message))
+		return {
+			kind: "general",
+			title: "导出内容过长",
+			description: "请缩短当前分支对话，或改用 HTML 格式导出。",
+			action: "",
+			detail,
+		};
+	if (/export_too_large|超过\s*32\s*MiB|快照超出上限/i.test(message))
+		return {
+			kind: "general",
+			title: "导出体积超出上限",
+			description: "请取消勾选过程结果或缩短当前分支后再试。",
+			action: "",
+			detail,
+		};
+	if (/图片总大小不能超过|仅支持.*图片|图片不完整|无法添加图片|无法恢复未发送的图片/.test(message))
+		return {
+			kind: "general",
+			title: message,
+			description: "已保留当前文字草稿与前序合法图片。",
+			action: "",
+			detail,
+		};
 	if (/\b429\b|rate.limit/i.test(message))
 		return {
 			kind: "rate",

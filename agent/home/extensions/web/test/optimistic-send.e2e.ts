@@ -248,8 +248,9 @@ test(
 				await browser.evaluate("document.querySelector('.composer-input').textContent"),
 				"正在写的下一条草稿",
 			);
-			await browser.evaluate("window.confirm=()=>true");
 			await clickAction("编辑");
+			await browser.until("!!document.querySelector('dialog.confirm-dialog[open]')", "应用内草稿编辑确认弹窗");
+			await browser.click("dialog.confirm-dialog .dialog-primary");
 			await browser.until(
 				"document.querySelector('.composer-input')?.textContent==='第一条待确认消息' && !!document.querySelector('.composer-saved-draft')",
 				"编辑失败消息并保留新草稿",

@@ -338,10 +338,7 @@ export function Sidebar({
 											moveSidebarSelection(topRef.current, selectionRef.current, event.currentTarget, true);
 										onNavigate?.();
 									}}
-									onContextMenu={(event) => {
-										event.preventDefault();
-										openSessionMenu(session, event.clientX, event.clientY);
-									}}
+									onOpenMenu={(x, y) => openSessionMenu(session, x, y)}
 								/>
 							))}
 							{!sessions.length && (state.stage || preview) && <p className="sidebar-empty">暂无会话</p>}
@@ -398,7 +395,12 @@ export function Sidebar({
 					>
 						<Settings size={22} aria-hidden="true" />
 					</Button>
-					<Popover.Content placement="right bottom" offset={20} className="sidebar-account-popover">
+					<Popover.Content
+						placement="right bottom"
+						offset={20}
+						containerPadding={16}
+						className="sidebar-account-popover"
+					>
 						<Popover.Dialog aria-label="账号菜单" className="sidebar-account-menu">
 							{cstoaSummary && (
 								<>

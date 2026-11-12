@@ -121,6 +121,7 @@
 .settings-workspace .settings-grip { display: grid; place-items: center; flex: 0 0 28px; height: var(--control); border-radius: var(--radius-control); }
 .settings-grip-space { flex: 0 0 26px; }
 .settings-workspace .settings-grip:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
+.settings-workspace .settings-grip[aria-disabled="true"] { opacity: .45; cursor: default; }
 .settings-model[data-dragging="true"] { opacity: .45; }
 .settings-route { display: flex; flex-direction: column; gap: var(--space-group); view-transition-name: settings-page; }
 /* 两张透明快照交叉淡化时保持亮度，避免叠在页面底色上闪白。 */

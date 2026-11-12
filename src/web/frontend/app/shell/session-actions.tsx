@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router";
 import { apiJson } from "../data/api";
+import { SessionRenameDialog } from "./app-dialogs";
 import { SessionDeleteDialog, SessionDeleteNotice, useSessionManagement } from "./session-management";
 import { useWorkspaceSessions } from "./sessions-context";
 
@@ -19,6 +20,7 @@ export function useSessionActions(
 	const location = useLocation();
 	const navigate = useNavigate();
 	const [menu, setMenu] = useState<SessionMenuState>(null);
+	const [renaming, setRenaming] = useState<{ id: string; title: string } | null>(null);
 	const menuRef = useRef<HTMLDivElement>(null);
 	const deletionRoute = useRef<{ id: string; from: string; homeKey?: string } | null>(null);
 	const management = useSessionManagement(sessions, {
@@ -59,6 +61,7 @@ export function useSessionActions(
 	// biome-ignore lint/correctness/useExhaustiveDependencies: 路由切换时结束未提交的列表操作
 	useEffect(() => {
 		setMenu(null);
+		setRenaming(null);
 		finishManagement();
 	}, [location.pathname, finishManagement]);
 	useLayoutEffect(() => {
@@ -66,8 +69,8 @@ export function useSessionActions(
 		const element = menuRef.current;
 		if (!element) return;
 		const bounds = element.getBoundingClientRect();
-		element.style.left = `${Math.max(8, Math.min(menu.x, window.innerWidth - bounds.width - 8))}px`;
-		element.style.top = `${Math.max(8, Math.min(menu.y, window.innerHeight - bounds.height - 8))}px`;
+		element.style.left = `${Math.max(16, Math.min(menu.x, window.innerWidth - bounds.width - 16))}px`;
+		element.style.top = `${Math.max(16, Math.min(menu.y, window.innerHeight - bounds.height - 16))}px`;
 		element.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
 	}, [menu]);
 	useEffect(() => {
@@ -106,16 +109,22 @@ export function useSessionActions(
 		if (preview || management.busy || (management.managing && !management.count)) return;
 		setMenu({ ...session, x, y });
 	}
-	async function rename(id: string, current: string) {
+	function rename(id: string, current: string) {
 		setMenu(null);
-		const name = window.prompt("会话名称", current);
-		if (!name || !name.trim() || name.trim() === current) return;
-		try {
-			await apiJson(`/api/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: { name: name.trim() } });
-			await state.refresh();
-		} catch (cause) {
-			window.alert(cause instanceof Error ? cause.message : "重命名失败");
-		}
+		setRenaming({ id, title: current });
+	}
+
+	async function submitRename(id: string, nextTitle: string) {
+		await apiJson(`/api/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: { name: nextTitle } });
+		await state.refresh();
+		setRenaming(null);
+		focusSession(id);
+	}
+
+	function cancelRename() {
+		const targetId = renaming?.id;
+		setRenaming(null);
+		if (targetId) focusSession(targetId);
 	}
 
 	function remove(id: string) {
@@ -123,7 +132,19 @@ export function useSessionActions(
 		management.requestDelete(sessions.filter((session) => session.id === id));
 	}
 
-	return { menu, menuRef, setMenu, management, openSessionMenu, rename, remove, focusSession };
+	return {
+		menu,
+		menuRef,
+		setMenu,
+		renaming,
+		cancelRename,
+		submitRename,
+		management,
+		openSessionMenu,
+		rename,
+		remove,
+		focusSession,
+	};
 }
 
 export function SessionActionsOverlay({ actions }: { actions: ReturnType<typeof useSessionActions> }) {
@@ -204,6 +225,13 @@ export function SessionActionsOverlay({ actions }: { actions: ReturnType<typeof 
 					</div>,
 					document.body,
 				)}
+			{actions.renaming && (
+				<SessionRenameDialog
+					initialTitle={actions.renaming.title}
+					onCancel={actions.cancelRename}
+					onSubmit={(nextTitle) => actions.submitRename(actions.renaming!.id, nextTitle)}
+				/>
+			)}
 			{management.targets && (
 				<SessionDeleteDialog
 					count={management.targets.length}

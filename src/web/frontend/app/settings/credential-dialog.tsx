@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useDialogFocusTrap } from "../shell/dialog-focus";
 
 export function CredentialDialog({
 	name,
@@ -14,6 +15,7 @@ export function CredentialDialog({
 }) {
 	const dialog = useRef<HTMLDialogElement>(null);
 	const cancel = useRef<HTMLButtonElement>(null);
+	useDialogFocusTrap(dialog, cancel);
 	useEffect(() => {
 		const previous = document.activeElement;
 		const element = dialog.current;

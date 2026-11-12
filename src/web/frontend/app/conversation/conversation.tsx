@@ -6,7 +6,14 @@ import type { PendingBitLocker } from "../data/bitlocker-state";
 import type { OutgoingMessage } from "../data/message-outbox";
 import type { Message } from "../data/web-state";
 import { AssistantContent } from "./assistant-content";
-import { activeTurnIndex, formatDuration, groupTurns, type Turn, textOf } from "./conversation-parts";
+import {
+	activeTurnIndex,
+	formatDuration,
+	groupTurns,
+	isConversationMessage,
+	type Turn,
+	textOf,
+} from "./conversation-parts";
 import { SummaryEntry } from "./summary-entry";
 import { UserMessage } from "./user-message";
 
@@ -122,15 +129,22 @@ export function Conversation({
 }) {
 	const scroll = useRef<HTMLDivElement>(null);
 	const scrollAnimation = useRef<number | null>(null);
+	const followingRef = useRef(true);
 	const [following, setFollowing] = useState(true);
 	const [showBottom, setShowBottom] = useState(false);
 	const [error, setError] = useState("");
 	const [visibleCount, setVisibleCount] = useState(80);
+	const prependAnchor = useRef<{ key: string; top: number } | null>(null);
 	const [mountedAt] = useState(() => Date.now());
 	const resultsByTurn = useMemo(() => matchToolResults(entries), [entries]);
-	const history = useMemo(() => entries.filter(({ message }) => message.role !== "toolResult"), [entries]);
+	const history = useMemo(() => entries.filter(({ message }) => isConversationMessage(message)), [entries]);
+	const sliceStart = useMemo(() => {
+		let start = Math.max(0, history.length - visibleCount);
+		while (start > 0 && history[start]?.message.role === "assistant") start--;
+		return start;
+	}, [history, visibleCount]);
 	const display = useMemo(() => {
-		const shown = history.slice(-visibleCount);
+		const shown = history.slice(sliceStart);
 		if (!streaming) return shown;
 		const active = shown.findIndex(
 			({ message }) => message.role === "assistant" && message.timestamp === streaming.timestamp,
@@ -141,7 +155,7 @@ export function Conversation({
 			return copy;
 		}
 		return [...shown, { message: streaming }];
-	}, [history, visibleCount, streaming]);
+	}, [history, sliceStart, streaming]);
 	const turns = useMemo(() => groupTurns(display), [display]);
 	const active = activeTurnIndex(turns, running);
 	const pendingTurns = outgoing.filter((item) => !history.some(({ message }) => message.clientMessageId === item.id));
@@ -166,6 +180,7 @@ export function Conversation({
 		cancelScroll();
 		if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
 			el.scrollTop = el.scrollHeight;
+			followingRef.current = true;
 			setFollowing(true);
 			return;
 		}
@@ -181,6 +196,7 @@ export function Conversation({
 			if (progress < 1) scrollAnimation.current = requestAnimationFrame(step);
 			else {
 				scrollAnimation.current = null;
+				followingRef.current = true;
 				setFollowing(true);
 			}
 		};
@@ -192,21 +208,35 @@ export function Conversation({
 			if (!motion.matches || scrollAnimation.current === null) return;
 			cancelScroll();
 			if (scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
+			followingRef.current = true;
 			setFollowing(true);
 		};
 		const el = scroll.current;
+		const onWheel = (event: WheelEvent) => {
+			cancelScroll();
+			if (event.deltaY < 0) {
+				followingRef.current = false;
+				setFollowing(false);
+			}
+		};
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) cancelScroll();
+			if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) {
+				cancelScroll();
+				if (["ArrowUp", "PageUp", "Home"].includes(event.key)) {
+					followingRef.current = false;
+					setFollowing(false);
+				}
+			}
 		};
 		motion.addEventListener("change", onChange);
-		el?.addEventListener("wheel", cancelScroll, { passive: true });
+		el?.addEventListener("wheel", onWheel, { passive: true });
 		el?.addEventListener("touchstart", cancelScroll, { passive: true });
 		el?.addEventListener("pointerdown", cancelScroll);
 		el?.addEventListener("keydown", onKeyDown);
 		return () => {
 			cancelScroll();
 			motion.removeEventListener("change", onChange);
-			el?.removeEventListener("wheel", cancelScroll);
+			el?.removeEventListener("wheel", onWheel);
 			el?.removeEventListener("touchstart", cancelScroll);
 			el?.removeEventListener("pointerdown", cancelScroll);
 			el?.removeEventListener("keydown", onKeyDown);
@@ -232,9 +262,20 @@ export function Conversation({
 			motion.removeEventListener("change", finish);
 		};
 	}, [following, showBottom]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: visibleCount 增载后同步补偿滚动位置
+	useLayoutEffect(() => {
+		const anchor = prependAnchor.current;
+		const container = scroll.current;
+		if (!anchor || !container) return;
+		prependAnchor.current = null;
+		const target = container.querySelector<HTMLElement>(`[data-turn-key="${CSS.escape(anchor.key)}"]`);
+		if (!target) return;
+		const delta = target.getBoundingClientRect().top - anchor.top;
+		if (delta !== 0) container.scrollTop += delta;
+	}, [visibleCount]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: entries 与 streaming 只作为滚动触发信号，不在 effect 体内读取
 	useLayoutEffect(() => {
-		if (following) scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
+		if (following && followingRef.current) scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
 	}, [entries, streaming, following, outgoing]);
 	return (
 		<>
@@ -243,28 +284,50 @@ export function Conversation({
 				ref={scroll}
 				onScroll={() => {
 					const el = scroll.current;
-					if (el && scrollAnimation.current === null)
-						setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 100);
+					if (el && scrollAnimation.current === null) {
+						const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+						followingRef.current = nearBottom;
+						setFollowing(nearBottom);
+					}
 				}}
 			>
-				{history.length > visibleCount && (
+				{sliceStart > 0 && (
 					<Button
 						variant="ghost"
 						className="show-earlier"
 						onPress={() => {
+							const container = scroll.current;
+							if (container) {
+								const containerTop = container.getBoundingClientRect().top;
+								const firstVisible = [...container.querySelectorAll<HTMLElement>("[data-turn-key]")].find(
+									(node) => node.getBoundingClientRect().bottom > containerTop + 4,
+								);
+								if (firstVisible?.dataset.turnKey) {
+									prependAnchor.current = {
+										key: firstVisible.dataset.turnKey,
+										top: firstVisible.getBoundingClientRect().top,
+									};
+								}
+							}
+							followingRef.current = false;
 							setVisibleCount((count) => count + 80);
 							setFollowing(false);
 						}}
 					>
-						显示更早的消息（剩余 {history.length - visibleCount} 条）
+						显示更早的消息（剩余 {sliceStart} 条）
 					</Button>
 				)}
 				{shownTurns.map((turn, turnIndex) => {
 					const turnKey = `turn-${turn.user?.message.clientMessageId ?? turn.user?.message.timestamp ?? turn.summary?.message.timestamp ?? turn.assistants[0]?.message.timestamp ?? turnIndex}`;
-					if (turn.summary) return <SummaryEntry key={turnKey} entry={turn.summary} />;
+					if (turn.summary)
+						return (
+							<div className="turn-summary-wrap" key={turnKey} data-turn-key={turnKey}>
+								<SummaryEntry entry={turn.summary} />
+							</div>
+						);
 					const live = turnIndex === active;
 					return (
-						<div className="turn" key={turnKey}>
+						<div className="turn" key={turnKey} data-turn-key={turnKey}>
 							{turn.user && (
 								<UserMessage
 									message={turn.user.message}
