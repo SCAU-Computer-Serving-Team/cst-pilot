@@ -130,7 +130,12 @@ export function Conversation({
 	const scroll = useRef<HTMLDivElement>(null);
 	const scrollAnimation = useRef<number | null>(null);
 	const followingRef = useRef(true);
+	const lastScrollTopRef = useRef(0);
 	const [following, setFollowing] = useState(true);
+	const updateFollowing = useCallback((next: boolean) => {
+		followingRef.current = next;
+		setFollowing(next);
+	}, []);
 	const [showBottom, setShowBottom] = useState(false);
 	const [error, setError] = useState("");
 	const [visibleCount, setVisibleCount] = useState(80);
@@ -180,8 +185,8 @@ export function Conversation({
 		cancelScroll();
 		if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
 			el.scrollTop = el.scrollHeight;
-			followingRef.current = true;
-			setFollowing(true);
+			lastScrollTopRef.current = el.scrollTop;
+			updateFollowing(true);
 			return;
 		}
 		const start = el.scrollTop;
@@ -193,11 +198,11 @@ export function Conversation({
 			const progress = Math.min((now - started) / duration, 1);
 			const eased = 1 - (1 - progress) ** 3;
 			el.scrollTop = start + (el.scrollHeight - el.clientHeight - start) * eased;
+			lastScrollTopRef.current = el.scrollTop;
 			if (progress < 1) scrollAnimation.current = requestAnimationFrame(step);
 			else {
 				scrollAnimation.current = null;
-				followingRef.current = true;
-				setFollowing(true);
+				updateFollowing(true);
 			}
 		};
 		scrollAnimation.current = requestAnimationFrame(step);
@@ -207,25 +212,21 @@ export function Conversation({
 		const onChange = () => {
 			if (!motion.matches || scrollAnimation.current === null) return;
 			cancelScroll();
-			if (scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
-			followingRef.current = true;
-			setFollowing(true);
+			if (scroll.current) {
+				scroll.current.scrollTop = scroll.current.scrollHeight;
+				lastScrollTopRef.current = scroll.current.scrollTop;
+			}
+			updateFollowing(true);
 		};
 		const el = scroll.current;
 		const onWheel = (event: WheelEvent) => {
 			cancelScroll();
-			if (event.deltaY < 0) {
-				followingRef.current = false;
-				setFollowing(false);
-			}
+			if (event.deltaY < 0) updateFollowing(false);
 		};
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key)) {
 				cancelScroll();
-				if (["ArrowUp", "PageUp", "Home"].includes(event.key)) {
-					followingRef.current = false;
-					setFollowing(false);
-				}
+				if (["ArrowUp", "PageUp", "Home"].includes(event.key)) updateFollowing(false);
 			}
 		};
 		motion.addEventListener("change", onChange);
@@ -241,7 +242,7 @@ export function Conversation({
 			el?.removeEventListener("pointerdown", cancelScroll);
 			el?.removeEventListener("keydown", onKeyDown);
 		};
-	}, [cancelScroll]);
+	}, [cancelScroll, updateFollowing]);
 	useEffect(() => {
 		if (!following) {
 			setShowBottom(true);
@@ -271,11 +272,18 @@ export function Conversation({
 		const target = container.querySelector<HTMLElement>(`[data-turn-key="${CSS.escape(anchor.key)}"]`);
 		if (!target) return;
 		const delta = target.getBoundingClientRect().top - anchor.top;
-		if (delta !== 0) container.scrollTop += delta;
+		if (delta !== 0) {
+			container.scrollTop += delta;
+			lastScrollTopRef.current = container.scrollTop;
+		}
 	}, [visibleCount]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: entries 与 streaming 只作为滚动触发信号，不在 effect 体内读取
 	useLayoutEffect(() => {
-		if (following && followingRef.current) scroll.current?.scrollTo({ top: scroll.current.scrollHeight });
+		const el = scroll.current;
+		if (el && following && followingRef.current) {
+			el.scrollTo({ top: el.scrollHeight });
+			lastScrollTopRef.current = el.scrollTop;
+		}
 	}, [entries, streaming, following, outgoing]);
 	return (
 		<>
@@ -284,10 +292,18 @@ export function Conversation({
 				ref={scroll}
 				onScroll={() => {
 					const el = scroll.current;
-					if (el && scrollAnimation.current === null) {
-						const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
-						followingRef.current = nearBottom;
-						setFollowing(nearBottom);
+					if (!el) return;
+					const prevTop = lastScrollTopRef.current;
+					const curTop = el.scrollTop;
+					lastScrollTopRef.current = curTop;
+					if (scrollAnimation.current !== null) return;
+					const dist = el.scrollHeight - curTop - el.clientHeight;
+					if (curTop < prevTop - 0.5 && dist >= 0.5) {
+						updateFollowing(false);
+					} else if (!followingRef.current && curTop > prevTop + 0.5 && dist <= 2) {
+						updateFollowing(true);
+					} else if (followingRef.current && dist >= 100) {
+						updateFollowing(false);
 					}
 				}}
 			>
@@ -309,9 +325,8 @@ export function Conversation({
 									};
 								}
 							}
-							followingRef.current = false;
 							setVisibleCount((count) => count + 80);
-							setFollowing(false);
+							updateFollowing(false);
 						}}
 					>
 						显示更早的消息（剩余 {sliceStart} 条）

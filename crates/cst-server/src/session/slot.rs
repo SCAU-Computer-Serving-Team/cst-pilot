@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use crate::discovery::SessionOwnerLock;
 use crate::session::attachments::{ImageRef, ImageStore};
-use crate::session::decorators::MessageDecorators;
+use crate::session::decorators::{MessageDecorators, is_browser_visible_message};
 use crate::session::events::{SessionEvents, browser_json_value};
 use crate::session::inbox::{InboxError, InboxExecutor, SessionInbox};
 use crate::session::interactions::{BitLockerSessionBridge, ServerUiBridge};
@@ -296,13 +296,6 @@ impl Drop for SessionLease {
 }
 
 /// Single active session instance inside `SessionPool`.
-fn is_browser_visible_message(message: &AgentMessage) -> bool {
-    matches!(
-        message,
-        AgentMessage::User(_) | AgentMessage::Assistant(_) | AgentMessage::ToolResult(_)
-    )
-}
-
 pub struct SessionSlot {
     pub id: String,
     pub hosted: Arc<HostedSession>,
@@ -387,17 +380,15 @@ impl SessionSlot {
         let id_for_session = id.clone();
 
         let unsub = session.subscribe(Arc::new(move |event| {
-            let suppress_browser_message_event = matches!(
+            if let Some(projected) = decorators_for_session.project_browser_event(&event) {
+                events_for_session.publish("session", &projected);
+            }
+            let is_non_visible_message_lifecycle = matches!(
                 &event,
                 AgentSessionEvent::MessageStart { message }
-                    | AgentSessionEvent::MessageUpdate { message, .. }
                     | AgentSessionEvent::MessageEnd { message }
                     if !is_browser_visible_message(message)
             );
-            if !suppress_browser_message_event {
-                let decorated = decorators_for_session.decorate_event(&event);
-                events_for_session.publish("session", &decorated);
-            }
 
             let is_now_flushed = hosted_for_session
                 .session()
@@ -437,7 +428,7 @@ impl SessionSlot {
                 }
             }
 
-            if !suppress_browser_message_event
+            if !is_non_visible_message_lifecycle
                 && matches!(
                     event,
                     AgentSessionEvent::MessageStart { .. }

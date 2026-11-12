@@ -1,7 +1,84 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, type RefObject, useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useDialogFocusTrap } from "./dialog-focus";
 import { ErrorNotice } from "./error-notice";
+
+function tokenDurationMs(element: HTMLElement, token: string, fallback: number): number {
+	const raw = getComputedStyle(element).getPropertyValue(token).trim();
+	const parsed = Number.parseFloat(raw);
+	return Number.isFinite(parsed) ? parsed * (raw.endsWith("ms") ? 1 : 1000) : fallback;
+}
+
+/** 执行模态弹窗 150ms (--duration-quick) 关闭过渡后再卸载；支持入场中途打断与减少动态即时关闭。 */
+function useAnimatedDialogClose(dialogRef: RefObject<HTMLDialogElement | null>): (onDone: () => void) => void {
+	const closingRef = useRef(false);
+	const cleanupRef = useRef<(() => void) | null>(null);
+
+	useEffect(
+		() => () => {
+			cleanupRef.current?.();
+		},
+		[],
+	);
+
+	return useCallback(
+		(onDone: () => void) => {
+			if (closingRef.current) return;
+			closingRef.current = true;
+			const modal = dialogRef.current;
+			const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+			if (!modal || !modal.open || motion.matches) {
+				onDone();
+				return;
+			}
+			const style = getComputedStyle(modal);
+			const startOpacity = style.opacity || "1";
+			const startTransform = style.transform === "none" ? "translateY(0px) scale(1)" : style.transform;
+			const distance = style.getPropertyValue("--distance-base").trim() || "8px";
+			const scale = style.getPropertyValue("--scale-large").trim() || "0.96";
+			const easing = style.getPropertyValue("--ease-smooth-out").trim() || "cubic-bezier(0.22, 1, 0.36, 1)";
+			const duration = tokenDurationMs(modal, "--duration-quick", 150);
+
+			modal.dataset.closing = "true";
+			const animation = modal.animate(
+				[
+					{ opacity: startOpacity, transform: startTransform },
+					{ opacity: 0, transform: `translateY(${distance}) scale(${scale})` },
+				],
+				{ duration, easing, fill: "forwards" },
+			);
+
+			let finished = false;
+			const finish = () => {
+				if (finished) return;
+				finished = true;
+				cleanupRef.current = null;
+				motion.removeEventListener("change", onReduceMotion);
+				animation.cancel();
+				onDone();
+			};
+			const onReduceMotion = () => {
+				if (motion.matches) finish();
+			};
+			motion.addEventListener("change", onReduceMotion);
+			cleanupRef.current = () => {
+				motion.removeEventListener("change", onReduceMotion);
+				animation.cancel();
+			};
+			void animation.finished.then(finish, finish);
+		},
+		[dialogRef],
+	);
+}
+
+function restorePreviousFocus(element: HTMLDialogElement | null, previous: Element | null): void {
+	const active = document.activeElement;
+	const focusRemainedInDialog = !active || active === document.body || Boolean(element?.contains(active));
+	element?.close();
+	if (focusRemainedInDialog && previous instanceof HTMLElement && previous.isConnected) {
+		previous.focus();
+	}
+}
 
 export function ConfirmDialog({
 	title,
@@ -26,16 +103,14 @@ export function ConfirmDialog({
 	const cancel = useRef<HTMLButtonElement>(null);
 	const titleId = useId();
 	const descId = useId();
+	const requestClose = useAnimatedDialogClose(dialog);
 	useDialogFocusTrap(dialog, cancel);
 	useEffect(() => {
 		const previous = document.activeElement;
 		const element = dialog.current;
 		element?.showModal();
 		cancel.current?.focus();
-		return () => {
-			element?.close();
-			if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
-		};
+		return () => restorePreviousFocus(element, previous);
 	}, []);
 	return createPortal(
 		<dialog
@@ -45,7 +120,7 @@ export function ConfirmDialog({
 			aria-describedby={descId}
 			onCancel={(event) => {
 				event.preventDefault();
-				if (!busy) onCancel();
+				if (!busy) requestClose(onCancel);
 			}}
 		>
 			<h2 id={titleId}>{title}</h2>
@@ -53,14 +128,14 @@ export function ConfirmDialog({
 				{description}
 			</p>
 			<div className="exit-actions">
-				<button type="button" ref={cancel} disabled={busy} onClick={onCancel}>
+				<button type="button" ref={cancel} disabled={busy} onClick={() => requestClose(onCancel)}>
 					{cancelLabel}
 				</button>
 				<button
 					type="button"
 					className={danger ? "exit-confirm" : "dialog-primary"}
 					disabled={busy}
-					onClick={onConfirm}
+					onClick={() => requestClose(onConfirm)}
 				>
 					{confirmLabel}
 				</button>
@@ -85,6 +160,7 @@ export function SessionRenameDialog({
 	const [name, setName] = useState(initialTitle);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
+	const requestClose = useAnimatedDialogClose(dialog);
 	useDialogFocusTrap(dialog, input);
 	useEffect(() => {
 		const previous = document.activeElement;
@@ -92,10 +168,7 @@ export function SessionRenameDialog({
 		element?.showModal();
 		input.current?.focus();
 		input.current?.select();
-		return () => {
-			element?.close();
-			if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
-		};
+		return () => restorePreviousFocus(element, previous);
 	}, []);
 	async function submit(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
@@ -103,13 +176,14 @@ export function SessionRenameDialog({
 		const trimmed = name.trim();
 		if (!trimmed) return;
 		if (trimmed === initialTitle) {
-			onCancel();
+			requestClose(onCancel);
 			return;
 		}
 		setBusy(true);
 		setError("");
 		try {
 			await onSubmit(trimmed);
+			requestClose(onCancel);
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : "重命名失败");
 			setBusy(false);
@@ -123,7 +197,7 @@ export function SessionRenameDialog({
 			aria-labelledby={titleId}
 			onCancel={(event) => {
 				event.preventDefault();
-				if (!busy) onCancel();
+				if (!busy) requestClose(onCancel);
 			}}
 		>
 			<h2 id={titleId}>重命名会话</h2>
@@ -144,7 +218,7 @@ export function SessionRenameDialog({
 				/>
 				{error && <ErrorNotice message={error} />}
 				<div className="exit-actions">
-					<button type="button" disabled={busy} onClick={onCancel}>
+					<button type="button" disabled={busy} onClick={() => requestClose(onCancel)}>
 						取消
 					</button>
 					<button type="submit" className="dialog-primary" disabled={busy || !name.trim()}>

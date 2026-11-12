@@ -77,11 +77,11 @@ flowchart TD
 | S2-1 | `/settings/general` 主题切换 | 进入 `/settings/general`，依次点击“深色”“浅色”与“跟随系统”，刷新页面 | `<html data-theme>` 立即更新。`PATCH /api/settings` 写入 `web-settings.json`，不影响 `settings.json` 中的 TUI 主题 |
 | S2-2 | `/settings/shortcuts` 快捷键 | 点击设置顶部导航进入 `/settings/shortcuts`，读取页面快照 | 分类下划线与面板平滑过渡，完整展示 7 项聊天快捷键 |
 | S2-3 | `/settings/add` 目录刷新与搜索 | 进入 `/settings/add`，点击“更新模型”按钮，在搜索框输入 `deepseek`，清空后点击“查看全部服务”再收起 | `POST /api/models/refresh` 合并并发请求，按钮展示“更新中…”并禁用连点，完成后弹出成功提示 |
-| S2-4 | `/settings/custom` 自定义服务 | 从 `/settings/add` 进入 `/settings/custom`，遍历 4 种接口协议，填写服务信息与 2 个模型后保存，返回编辑页修改后删除该服务 | `PUT` 与 `DELETE /api/auth/custom/:id` 校验 `revision` 并原子更新 `models.json`，接口响应不回显明文密钥 |
-| S2-5 | `/settings/provider` APIKey 配置 | 进入 `/settings/provider?provider=deepseek&method=api`，填入密钥保存，返回 `/settings` 核对已配置列表，再次进入并移除凭据 | `POST` 与 `DELETE /api/auth/providers/deepseek` 更新 `auth.json`，并通过全局 SSE 广播 `models_changed` |
+| S2-4 | `/settings/custom` 自定义服务 | 从 `/settings/add` 进入 `/settings/custom`，遍历 4 种接口协议，填写服务信息与 2 个模型后保存，返回编辑页修改后删除该服务 | `POST /api/auth/custom`（编辑时校验 `revision`）与 `DELETE /api/auth/custom/:id` 原子更新 `models.json`，`GET /api/auth/custom/:id` 仅返回 `apiKeySet` 且不回显明文密钥 |
+| S2-5 | `/settings/provider` APIKey 配置 | 进入 `/settings/provider?provider=deepseek&method=api`，填入密钥保存，返回 `/settings` 核对已配置列表，再次进入并移除凭据 | `PUT /api/auth/deepseek/api-key` 与 `POST /api/auth/deepseek/logout` 更新 `auth.json`，并通过全局 SSE 广播 `auth_changed` 与 `models_changed` |
 | S2-6 | `/login` CSTOA 扫码登录 | 导航至 `/login`，选择 CSTOA 登录，核对二维码与倒计时显示，由 Mock OA 批准设备授权，观察自动跳转 `/account` | 登录页不显示纯文本设备授权码。授权成功后写入 `device.json` 与 `auth.json`，并拉取动态模型目录 |
-| S2-7 | `/account` 资料展示与退出 | 在 `/account` 核对学号和姓名，查看剩余额度后点击“退出登录” | `DELETE /api/auth/providers/cstoa` 清除凭据，同时清理该账号关联的动态模型缓存 |
-| S2-8 | `/settings/models` 默认模型与范围 | 进入 `/settings/models`，修改新会话默认模型，按服务筛选并搜索模型，取消勾选部分模型后拖拽调整顺序 | 至少保留 1 个启用模型不可清空。`POST /api/models/scoped` 落盘并同步更新 `SessionPool` 中已加载会话的内存列表 |
+| S2-7 | `/account` 资料展示与退出 | 在 `/account` 核对学号和姓名，查看剩余额度后点击“退出登录” | `POST /api/auth/cstoa/logout` 清除凭据，同时清理该账号关联的动态模型缓存 |
+| S2-8 | `/settings/models` 默认模型与范围 | 进入 `/settings/models`，修改新会话默认模型，筛选并勾选调整顺序，点击“清空”后再点击“全选”恢复 | `POST /api/models/scoped` 支持明确清空（`patterns: [], empty: true` 返回 `enabled: []`）与恢复默认（`patterns: []` 返回 `enabled: null`），并同步更新 `SessionPool` 内存列表 |
 
 ### 套件 S3：聊天工作台与输入队列（`/s/:sessionId`）
 
@@ -94,7 +94,7 @@ flowchart TD
 | S3-3 | 图片附件草稿与大图预览 | 在输入框粘贴 PNG 图片，刷新页面核对草稿恢复，发送后点击消息图片打开大图预览，按 `Escape` 关闭 | 未发送图片保存在标签页 `IndexedDB`。发送后通过 `/attachments/:aid` 读取，关闭预览后焦点回到原图片按钮 |
 | S3-4 | 运行中队列编辑、重排与停止 | 保持 Mock LLM 流式挂起，连续提交 3 条消息，在队列面板拖拽重排，点击“编辑”回填输入框，点击“插话”，最后点击“停止” | 队列操作携带 `version` 校验（过期返回 `409`）。插话在下一模型边界优先投递，停止操作终止当前轮次并暂停队列 |
 | S3-5 | 发送失败重试与 `uncertain` 恢复 | 模拟 `500` 错误触发发送失败，测试气泡“重试”与“编辑”。模拟强杀遗留 `delivering` 记录并重启 `cst-server`，刷新聊天页 | 失败气泡支持原 ID 重试。重启后遗留的 `delivering` 条目显示“上次投递结果待核对”，不自动重放模型调用 |
-| S3-6 | 上下文窗口与按需额度查询 | 点击输入框右侧三横线图标展开上下文面板，查看 Token 占用比例与服务额度 | 展开面板时按需调用 `GET /api/quota/:provider`，60 秒缓存期内重复展开不重复请求远端 |
+| S3-6 | 上下文窗口与按需额度查询 | 点击输入框右侧三横线图标展开上下文面板，查看 Token 占用比例与服务额度 | 展开面板时按需调用 `GET /api/quota?provider=<id>`，60 秒缓存期内重复展开不重复请求远端 |
 
 ### 套件 S4：17 个开放工具卡片与特殊组件（`/s/:sessionId`）
 
@@ -139,15 +139,15 @@ flowchart TD
 
 ## 4. 实机执行结果
 
-2026-11-10 在 Windows 11 本机环境使用 `bsk 0.4.2`（Chrome `157.0.0.0`）与 `target\debug\cst-server.exe --standalone-web` 执行全部 7 个测试套件，29 组用例全部通过。
+2026-11-10 至 2026-11-12 在 Windows 11 本机环境使用 `bsk 0.4.2`（Chrome `157.0.0.0`）与 `target\debug\cst-server.exe --standalone-web` 执行全部 7 个测试套件共 32 组用例。本脚本完成 30 组完整浏览器交互断言；`S7-1` 与 `S7-2` 在本脚本中仅验证服务端协议上限与命名管道写锁前置条件，其真实浏览器多标签 `SharedWorker` 分片与 `AppActive` 待机切换分别由 `rust-web.rust-e2e.ts` 和深度验收 `D6-4` 补齐闭环。
 
-| 套件 | 通过数 | 实机核验结果摘要 |
+| 套件 | 核验状态 | 实机核验结果摘要 |
 |---|---|---|
-| S1 全局外壳与会话列表 | 5 / 5 | 首次未配置凭据弹出“尚未配置模型”提示，拦截发送并保留输入框草稿。模型与思考强度切换正常，侧栏限制最近 20 条并支持右键重命名。`/sessions` 四时间分组与多选批量删除正常，`390x844` 移动端抽屉无横向溢出 |
-| S2 登录与设置中心 | 8 / 8 | 主题切换同步更新 `data-theme` 与 `web-settings.json`。7 项快捷键静态展示完整。27 个服务商支持搜索，自定义服务商 4 类协议增删改不回显密钥。DeepSeek 失焦保存与移除凭据正常，CSTOA 扫码页倒计时与 `/account` 退出登录生效，`/settings/models` 启用范围正常落盘 |
-| S3 聊天工作台与输入队列 | 6 / 6 | 首页发送消息创建会话并流式返回工具与正文。`/skill:disk` 与 `@src/diag-report.md` 行内标签补全正常。PNG 草稿跨刷新从 `IndexedDB` 恢复，大图预览关闭后焦点归位。运行中队列支持“立即”插话和行内编辑，停止生成与 `uncertain` 恢复提示符合预期 |
-| S4 工具卡片与特殊组件 | 5 / 5 | 13 个普通工具折叠进“已完成检查 · 13 次工具调用”，支持展开详情与原始数据。`整机概览`、`已联网检索` 与 `清理缓存清单` 常驻展示，后续过程不显示“0 次工具调用”。交付文件具备 UTF-8 BOM 与 CRLF。BitLocker 48 位恢复密码校验与强杀后“结果未确认”复查卡片全部通过，恢复密码未写入磁盘 |
-| S5 派生会话与分支树 | 3 / 3 | `/fork` 弹窗与消息末尾“从此处分支新会话”均创建新会话并回填草稿。`/s/:id/tree` 支持五档视图过滤，关键词搜索与全部折叠展开正常。分支切换支持“不总结”直接切换与“总结”生成分支摘要条目 |
-| S6 会话导出与只读页面 | 2 / 2 | `/s/:id/export` 支持切换格式、主题及思考与工具复选框并实时刷新预览。PNG 导出产物为合法 PNG 字节流（`650,350` 字节），HTML 导出产物为内联样式与 Base64 图片的自包含离线网页。未知路由回退 404 页，缺失附件返回 `404` |
-| S7 事件流分片、锁定与退出 | 3 / 3 | 单流订阅 33 个会话返回 `400`，分片为 `32 + 1` 双流后均返回 `200`。命名管道占用会话单写锁时返回 `409 session_owned`，释放后恢复 `200`。点击账号菜单“退出 CST Pilot”并确认后展示“CST Pilot 已退出”弹窗，`cst-server` 进程退出且 `.state/server.json` 自动清理 |
+| S1 全局外壳与会话列表 | 5 / 5 浏览器通过 | 首次未配置凭据弹出“尚未配置模型”提示，拦截发送并保留输入框草稿。模型与思考强度切换正常，侧栏限制最近 20 条并支持重命名。`/sessions` 四时间分组与多选批量删除正常，`390x844` 移动端抽屉无横向溢出 |
+| S2 登录与设置中心 | 8 / 8 浏览器通过 | 主题切换同步更新 `data-theme` 与 `web-settings.json`。7 项快捷键展示完整。`POST /api/auth/custom` 与 `DELETE /api/auth/custom/:id` 携带 `revision` 增删改且不回显密钥。`PUT /api/auth/<id>/api-key` 与 `POST /api/auth/<id>/logout` 生效，CSTOA 扫码登录与退出正常，`/settings/models` 支持明确清空（`enabled: []`）与恢复默认（`enabled: null`） |
+| S3 聊天工作台与输入队列 | 6 / 6 浏览器通过 | 首页发送消息创建会话并流式返回工具与正文。`/skill:disk` 与 `@src/diag-report.md` 行内标签补全正常。PNG 草稿跨刷新从 `IndexedDB` 恢复，大图预览关闭后焦点归位。运行中队列支持“立即”插话和编辑，停止生成、`uncertain` 恢复与 `GET /api/quota?provider=<id>` 按需查询符合预期 |
+| S4 工具卡片与特殊组件 | 5 / 5 浏览器通过 | 13 个普通工具折叠进“已完成检查 · 13 次工具调用”，支持展开详情与原始数据。`整机概览`、`已联网检索` 与 `清理缓存清单` 常驻展示，后续过程不显示“0 次工具调用”。交付文件具备 UTF-8 BOM 与 CRLF。BitLocker 48 位恢复密码校验与强杀后“结果未确认”复查卡片全部通过，恢复密码未写入磁盘 |
+| S5 派生会话与分支树 | 3 / 3 浏览器通过 | `/fork` 弹窗与消息末尾“从此处分支新会话”均创建新会话并回填草稿。`/s/:id/tree` 支持五档视图过滤，关键词搜索与全部折叠展开正常。分支切换支持“不总结”直接切换与“总结”生成分支摘要条目 |
+| S6 会话导出与只读页面 | 2 / 2 浏览器通过 | `/s/:id/export` 支持切换格式、主题及思考与工具复选框并实时刷新预览。PNG 导出产物为合法 PNG 字节流（`650,350` 字节），HTML 导出产物为内联样式与 Base64 图片的自包含离线网页。未知路由回退 404 页，缺失附件返回 `404` |
+| S7 事件流分片、锁定与退出 | 1 浏览器 + 2 接口前置（由关联套件补齐浏览器闭环） | `S7-3` 浏览器点击“退出 CST Pilot”确认后展示“CST Pilot 已退出”弹窗，`cst-server` 退出且 `.state/server.json` 清理。本脚本仅在接口层核验 `S7-1` 单流 33 会话拒绝与 `32 + 1` 双流订阅及 `S7-2` 命名管道写锁 `409 session_owned`；真实浏览器 `SharedWorker` 自动分片与 `AppActive` 待机恢复分别由 `rust-web.rust-e2e.ts` 与 [web-rust-bsk-deep-e2e.md](web-rust-bsk-deep-e2e.md) `D6-4` 实测通过 |
 

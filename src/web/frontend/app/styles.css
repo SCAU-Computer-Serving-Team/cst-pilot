@@ -1425,7 +1425,9 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .code-copy-feedback:not([data-error]) { width:1px; height:1px; min-height:0; padding:0; margin:-1px; border:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .notice-action { flex:none; display:inline-flex; align-items:center; min-height: var(--control-lg); padding: 0 var(--space-component); border:0; border-radius:var(--radius-control); background:transparent; color:var(--chat-tool); text-decoration:none; cursor:pointer; }
 .exit-dialog { position:fixed; inset:0; margin:auto; width:min(520px, calc(100vw - 48px)); max-height:calc(100vh - 48px); overflow:auto; padding: var(--space-group); border:1px solid var(--chat-border); border-radius:var(--radius-composer); background:var(--notice-bg); color:var(--chat-ink); animation:exit-modal-in var(--duration-fast) var(--ease-smooth-out); }
-.exit-dialog::backdrop { background:#060b0e40; }
+.exit-dialog::backdrop { background:#060b0e40; transition:opacity var(--duration-quick) var(--ease-smooth-out); }
+.exit-dialog[data-closing] { animation:none; pointer-events:none; }
+.exit-dialog[data-closing]::backdrop { opacity:0; }
 .model-key-heading { display:flex; align-items:center; gap: var(--space-component); margin-bottom: var(--space-group); }
 .model-key-heading > svg { flex:none; color:var(--notice-warning); }
 .model-key-dialog .model-key-heading h2 { margin:0; flex:1; min-width:0; }

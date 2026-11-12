@@ -117,8 +117,6 @@ export function useSessionActions(
 	async function submitRename(id: string, nextTitle: string) {
 		await apiJson(`/api/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: { name: nextTitle } });
 		await state.refresh();
-		setRenaming(null);
-		focusSession(id);
 	}
 
 	function cancelRename() {
