@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useDialogFocusTrap } from "../shell/dialog-focus";
 
 /** 所有本地图片共用预览入口；仅在打开时挂载模态与动效监听。 */
 export function PreviewableImage({
@@ -43,6 +44,7 @@ function ImagePreview({ image, onClose }: { image: HTMLImageElement; onClose: ()
 	const zoom = useRef<HTMLButtonElement>(null);
 	const scrim = useRef<HTMLDivElement>(null);
 	const requestClose = useRef(() => {});
+	useDialogFocusTrap(dialog);
 	useLayoutEffect(() => {
 		const modal = dialog.current;
 		const content = zoom.current;

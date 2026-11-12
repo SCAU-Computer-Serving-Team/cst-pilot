@@ -1,0 +1,38 @@
+{
+  "version": "2.22",
+  "children": [
+    {
+      "type": "frame",
+      "id": "dNav01",
+      "x": 0,
+      "y": -880,
+      "name": "00 · 画布导航",
+      "width": 4120,
+      "height": 240,
+      "fill": "#FAFDFF",
+      "cornerRadius": 16,
+      "stroke": "#D5DEE3",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "gap": 20,
+      "padding": 32
+    }
+  ],
+  "fileToken": "3706e5a7-bc8a-4a38-be60-d858a5334729",
+  "fonts": [
+    {
+      "name": "Source Han Sans CN",
+      "url": "fonts/SourceHanSansCN-Regular.otf"
+    },
+    {
+      "name": "Source Han Sans CN",
+      "url": "fonts/SourceHanSansCN-Medium.otf",
+      "weight": 500
+    },
+    {
+      "name": "Source Han Sans CN",
+      "url": "fonts/SourceHanSansCN-Bold.otf",
+      "weight": 700
+    }
+  ]
+}

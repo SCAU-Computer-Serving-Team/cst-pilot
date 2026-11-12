@@ -1,6 +1,6 @@
 import { Button, Checkbox, ListBox, Select } from "@heroui/react";
 import { ChevronDown, ChevronRight, GripVertical } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { apiJson } from "../data/api";
 import type { ModelChoice, ModelSelectionPayload } from "../data/model-selection";
 import type { Model } from "../data/web-state";
@@ -21,6 +21,8 @@ export default function ModelPreferences() {
 	const [provider, setProvider] = useState("all");
 	const [expanded, setExpanded] = useState(false);
 	const [dragId, setDragId] = useState<string | null>(null);
+	const keyboardFocusId = useRef<string | null>(null);
+	const listRoot = useRef<HTMLUListElement>(null);
 	const models = state.data?.models ?? [];
 	const selection = state.data?.enabled ?? null;
 	const allIds = models.map(fullId);
@@ -46,6 +48,15 @@ export default function ModelPreferences() {
 	);
 	const listed = modelListRows(visible, unavailable, expanded || !!needle);
 	const list = useAnimatedHeight(`${expanded}:${query}:${provider}:${listed.total}`);
+	useLayoutEffect(() => {
+		const targetId = keyboardFocusId.current;
+		if (!targetId) return;
+		const button = listRoot.current?.querySelector<HTMLButtonElement>(
+			`button.settings-grip[data-model-id="${CSS.escape(targetId)}"]`,
+		);
+		if (button && document.activeElement !== button) button.focus({ preventScroll: true });
+		if (!state.working) keyboardFocusId.current = null;
+	});
 	const enabledCount = selection === null ? models.length : selection.filter((id) => byId.has(id)).length;
 	async function save(next: string[] | null) {
 		if (!state.data || state.working) return;
@@ -164,7 +175,7 @@ export default function ModelPreferences() {
 							data-expanded={expanded}
 							aria-busy={state.working}
 						>
-							<ul className="settings-models" id="enabled-model-list">
+							<ul className="settings-models" id="enabled-model-list" ref={listRoot}>
 								{listed.ids.map((id) => {
 									const model = byId.get(id)!;
 									const enabled = selection === null || selection.includes(id);
@@ -216,11 +227,16 @@ export default function ModelPreferences() {
 												<button
 													type="button"
 													className="settings-grip"
+													data-model-id={id}
 													draggable={!state.working}
-													disabled={state.working}
+													aria-disabled={state.working || undefined}
 													aria-label={`调整 ${model.name} 的顺序`}
 													title="拖动排序；Alt + ↑ / ↓ 调整顺序"
 													onDragStart={(event) => {
+														if (state.working) {
+															event.preventDefault();
+															return;
+														}
 														event.dataTransfer.setData("text/plain", id);
 														event.dataTransfer.effectAllowed = "move";
 														setDragId(id);
@@ -229,9 +245,11 @@ export default function ModelPreferences() {
 													onKeyDown={(event) => {
 														if (!event.altKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
 														event.preventDefault();
+														if (state.working) return;
 														const target =
 															selection[selection.indexOf(id) + (event.key === "ArrowUp" ? -1 : 1)];
 														if (target) {
+															keyboardFocusId.current = id;
 															displayOrder.current = moveModel(sorted, id, target) ?? sorted;
 															void save(moveModel(selection, id, target));
 														}

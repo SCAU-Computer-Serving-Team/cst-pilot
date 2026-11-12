@@ -50,7 +50,7 @@
 | `POST` | `/api/sessions/<id>/compact` | 执行手动上下文压缩 |
 | `GET` | `/api/sessions/<id>/events` | 单会话 SSE 增量事件流（支持 `Last-Event-ID` 续传） |
 
-消息快照与单会话 SSE 的用户消息可附 `clientMessageId`，值为原消息提交 `id`，用于承接乐观气泡。回执的 `pending`、`delivering`、`delivered`、`failed`、`cancelled` 表示后端收件箱状态；HTTP `202` 只确认持久化接受，不保证模型回答成功。宿主重启后遗留的 `delivering` 条目附 `uncertain: true`，供前端展示待核对状态。查询未找到条目不能证明尚在处理的写请求已取消。
+会话快照（`messages` 与 `entries`）、导出预览快照及浏览器 SSE 仅投递 `user`、`assistant`、`toolResult`、`branchSummary` 四类可见角色，过滤内部 `system` 元数据条目；会话 JSONL 与 `/api/sessions/<id>/tree` 保留完整原始节点与 `parentId` 链路。消息快照与单会话 SSE 的用户消息可附 `clientMessageId`，值为原消息提交 `id`，用于承接乐观气泡。回执的 `pending`、`delivering`、`delivered`、`failed`、`cancelled` 表示后端收件箱状态；HTTP `202` 只确认持久化接受，不保证模型回答成功。宿主重启后遗留的 `delivering` 条目附 `uncertain: true`，供前端展示待核对状态。查询未找到条目不能证明尚在处理的写请求已取消。
 
 ### 清单打开请求
 

@@ -1,6 +1,6 @@
 import { Button } from "@heroui/react";
 import { ArrowUp, Command, FileText, PencilLine, Plus, Sparkles, Square, X } from "lucide-react";
-import { type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type ClipboardEvent, type DragEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ModelKeyDialog, type ModelKeyDialogReason } from "../auth/model-key-dialog";
 import { readModelKeyPromptTime, shouldAutoPrompt, writeModelKeyPromptTime } from "../auth/model-key-prompt";
@@ -10,8 +10,9 @@ import { type ModelChoice, type ModelSelectionPayload, refreshManualSelection } 
 import { messageOutbox } from "../data/use-message-outbox";
 import { type Model, useGlobalEvents } from "../data/web-state";
 import { PreviewableImage } from "../images/image-preview";
+import { ConfirmDialog } from "../shell/app-dialogs";
 import { ErrorNotice } from "../shell/error-notice";
-import { chipCaretSpace, editorHtml, extractPayload, fileReference, parseEditor } from "./composer-editor";
+import { chipCaretSpace, editorHtml, extractPayload, parseEditor, replaceTrailingFileQuery } from "./composer-editor";
 import { ContextMeter } from "./context-meter";
 import { parseImageHashes } from "./draft-image-references";
 import { addImage, collectDraftImages, type DraftImage, loadImages, releaseImageHolds } from "./draft-images";
@@ -84,6 +85,9 @@ export function Composer({
 	const [images, setImages] = useState<DraftImage[]>([]);
 	const [imagesLoading, setImagesLoading] = useState(true);
 	const [attaching, setAttaching] = useState(false);
+	const [dragging, setDragging] = useState(false);
+	const dragDepth = useRef(0);
+	const [pendingEditId, setPendingEditId] = useState<string | null>(null);
 	const attachmentBusy = useRef(false);
 	const imageGeneration = useRef(0);
 	const imagesRef = useRef(images);
@@ -252,8 +256,7 @@ export function Composer({
 		renderEditor(`${name} `);
 	}
 	function selectFile(path: string) {
-		const trimmed = readEditor(false).replace(/@[^\s@]*$/u, "");
-		renderEditor(`${trimmed} ${fileReference(path)} `);
+		renderEditor(replaceTrailingFileQuery(readEditor(true), path));
 		setFileIndex(0);
 		setFilesVisible(false);
 	}
@@ -357,6 +360,37 @@ export function Composer({
 		setImages(next);
 		void collectDraftImages().catch(() => {});
 		setMessageId(crypto.randomUUID());
+	}
+	function hasDraggedFiles(event: DragEvent<HTMLElement>): boolean {
+		return (
+			Array.from(event.dataTransfer?.types ?? []).includes("Files") || (event.dataTransfer?.files?.length ?? 0) > 0
+		);
+	}
+	function dragEnter(event: DragEvent<HTMLElement>) {
+		if (!hasDraggedFiles(event)) return;
+		event.preventDefault();
+		dragDepth.current++;
+		setDragging(true);
+	}
+	function dragOver(event: DragEvent<HTMLElement>) {
+		if (!hasDraggedFiles(event)) return;
+		event.preventDefault();
+		event.dataTransfer.dropEffect = "copy";
+		if (!dragging) setDragging(true);
+	}
+	function dragLeave(event: DragEvent<HTMLElement>) {
+		if (!hasDraggedFiles(event) && !dragging) return;
+		dragDepth.current = Math.max(0, dragDepth.current - 1);
+		if (dragDepth.current === 0) setDragging(false);
+	}
+	function dropFiles(event: DragEvent<HTMLElement>) {
+		dragDepth.current = 0;
+		setDragging(false);
+		const files = [...(event.dataTransfer?.files ?? [])];
+		if (!files.length) return;
+		event.preventDefault();
+		event.stopPropagation();
+		void attach(files);
 	}
 	function paste(event: ClipboardEvent<HTMLDivElement>) {
 		const files = [...event.clipboardData.items]
@@ -646,29 +680,35 @@ export function Composer({
 			for (const image of loaded) URL.revokeObjectURL(image.url);
 		}
 	}
+	function performOutgoingEdit(targetId: string) {
+		const outbox = messageOutbox();
+		const item = outbox.getSnapshot().find((entry) => entry.id === targetId);
+		if (!item || (sessionId ? item.sessionId !== sessionId : !item.fromHome)) return;
+		if (item.state !== "failed" && !(item.state === "waiting" && !item.attempted)) return;
+		try {
+			outbox.beginEdit(item.id);
+		} catch (cause) {
+			setError(cause instanceof Error ? cause.message : "消息状态已变化");
+			return;
+		}
+		void replaceDraft({ text: item.serialized, images: item.images }, true)
+			.then(() => outbox.completeEdit(item.id))
+			.catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "无法恢复消息"))
+			.finally(() => outbox.endEdit(item.id));
+	}
 	// biome-ignore lint/correctness/useExhaustiveDependencies: 事件读写当前会话 DOM 和 refs，不随输入内容重新订阅。
 	useEffect(() => {
 		const edit = (event: Event) => {
 			if (!(event instanceof CustomEvent) || typeof event.detail !== "string") return;
 			const outbox = messageOutbox();
-			const item = outbox.getSnapshot().find((item) => item.id === event.detail);
+			const item = outbox.getSnapshot().find((entry) => entry.id === event.detail);
 			if (!item || (sessionId ? item.sessionId !== sessionId : !item.fromHome)) return;
 			if (item.state !== "failed" && !(item.state === "waiting" && !item.attempted)) return;
-			if (
-				(readEditor(true) || imagesRef.current.length) &&
-				!window.confirm("当前草稿将保留，可通过「恢复保留草稿」取回。继续编辑这条消息？")
-			)
-				return;
-			try {
-				outbox.beginEdit(item.id);
-			} catch (cause) {
-				setError(cause instanceof Error ? cause.message : "消息状态已变化");
+			if (readEditor(true) || imagesRef.current.length) {
+				setPendingEditId(item.id);
 				return;
 			}
-			void replaceDraft({ text: item.serialized, images: item.images }, true)
-				.then(() => outbox.completeEdit(item.id))
-				.catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "无法恢复消息"))
-				.finally(() => outbox.endEdit(item.id));
+			performOutgoingEdit(item.id);
 		};
 		window.addEventListener(EDIT_OUTGOING_EVENT, edit);
 		return () => window.removeEventListener(EDIT_OUTGOING_EVENT, edit);
@@ -715,6 +755,19 @@ export function Composer({
 			{missingKey && (
 				<ModelKeyDialog model={missingKey.model} reason={missingKey.reason} onClose={() => setMissingKey(null)} />
 			)}
+			{pendingEditId && (
+				<ConfirmDialog
+					title="继续编辑这条消息？"
+					description="当前草稿将保留，可通过「恢复保留草稿」取回。"
+					confirmLabel="继续编辑"
+					onCancel={() => setPendingEditId(null)}
+					onConfirm={() => {
+						const id = pendingEditId;
+						setPendingEditId(null);
+						performOutgoingEdit(id);
+					}}
+				/>
+			)}
 			{savedCount > 0 && (
 				<Button
 					variant="ghost"
@@ -753,7 +806,15 @@ export function Composer({
 					))}
 				</ul>
 			)}
-			<section className={`composer ${home ? "composer--home" : "composer--chat"}`} aria-label="消息编辑器">
+			<section
+				className={`composer ${home ? "composer--home" : "composer--chat"}`}
+				aria-label="消息编辑器"
+				data-dragging={dragging || undefined}
+				onDragEnter={dragEnter}
+				onDragOver={dragOver}
+				onDragLeave={dragLeave}
+				onDrop={dropFiles}
+			>
 				{summaryTag && (
 					<div className="composer-command composer-summary-tag">
 						<PencilLine size={16} aria-hidden="true" />

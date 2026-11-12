@@ -439,6 +439,96 @@ test("会话管理：多选、取消、真实删除、运行冲突、断线与�
 		await assertNoticeVisible("multiple-failures-dark");
 		await probe.navigate(`${origin}/s/${keep.id}`);
 		await probe.until(`!!document.querySelector(${JSON.stringify(row(single.id))})`, "新增单项会话");
+		// 验证重命名弹窗在正常动效（Esc/取消/未改名保存/改名保存/入场中Esc）与减少动态关闭后均准确归还焦点至原会话行
+		const openKeepRenameViaKeyboard = async () => {
+			await probe.evaluate(`document.querySelector(${JSON.stringify(row(keep.id))}).focus()`);
+			await probe.call("Input.dispatchKeyEvent", {
+				type: "keyDown",
+				key: "F10",
+				code: "F10",
+				modifiers: 8,
+				windowsVirtualKeyCode: 121,
+			});
+			await probe.call("Input.dispatchKeyEvent", {
+				type: "keyUp",
+				key: "F10",
+				code: "F10",
+				windowsVirtualKeyCode: 121,
+			});
+			await probe.until("!!document.querySelector('.session-menu [role=menuitem]')", "Shift+F10 打开菜单");
+			await probe.call("Input.dispatchKeyEvent", {
+				type: "keyDown",
+				key: "Enter",
+				code: "Enter",
+				text: "\r",
+				windowsVirtualKeyCode: 13,
+			});
+			await probe.call("Input.dispatchKeyEvent", {
+				type: "keyUp",
+				key: "Enter",
+				code: "Enter",
+				windowsVirtualKeyCode: 13,
+			});
+			await probe.until("!!document.querySelector('dialog.session-rename-dialog[open]')", "打开重命名弹窗");
+		};
+		const assertFocusRestoredAfterClose = async (label: string) => {
+			await probe.until("!document.querySelector('dialog.session-rename-dialog')", `${label}: 弹窗卸载`);
+			await new Promise((resolve) => setTimeout(resolve, 300));
+			const focusedKeepRow = await probe.evaluate<boolean>(
+				`document.activeElement?.matches(${JSON.stringify(row(keep.id))}) === true`,
+			);
+			assert.equal(focusedKeepRow, true, `${label}: 300ms 后焦点应保持在原会话行而非 body`);
+		};
+		await probe.call("Emulation.setEmulatedMedia", {
+			features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
+		});
+		// 1) 入场结束后按 Esc
+		await openKeepRenameViaKeyboard();
+		await new Promise((resolve) => setTimeout(resolve, 280));
+		await pressEscape();
+		await assertFocusRestoredAfterClose("正常动效-入场后Esc");
+		// 2) 点击取消
+		await openKeepRenameViaKeyboard();
+		await new Promise((resolve) => setTimeout(resolve, 280));
+		await probe.evaluate(
+			`[...document.querySelectorAll("dialog.session-rename-dialog button")].find(b => b.textContent.trim() === "取消").click()`,
+		);
+		await assertFocusRestoredAfterClose("正常动效-点击取消");
+		// 3) 未改名直接保存
+		await openKeepRenameViaKeyboard();
+		await new Promise((resolve) => setTimeout(resolve, 280));
+		await probe.click("dialog.session-rename-dialog button[type=submit]");
+		await assertFocusRestoredAfterClose("正常动效-未改名保存");
+		// 4) 改名保存成功
+		await openKeepRenameViaKeyboard();
+		await new Promise((resolve) => setTimeout(resolve, 280));
+		await probe.evaluate(`(() => {
+			const input = document.querySelector("dialog.session-rename-dialog input");
+			const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+			setter.call(input, "保留会话-已重命名");
+			input.dispatchEvent(new Event("input", { bubbles: true }));
+		})()`);
+		await probe.click("dialog.session-rename-dialog button[type=submit]");
+		await assertFocusRestoredAfterClose("正常动效-改名保存");
+		assert.equal(
+			await probe.evaluate<string>(`document.querySelector(${JSON.stringify(row(keep.id))}).textContent.trim()`),
+			"保留会话-已重命名",
+		);
+		// 5) 入场中按 Esc
+		await openKeepRenameViaKeyboard();
+		await new Promise((resolve) => setTimeout(resolve, 80));
+		await pressEscape();
+		await assertFocusRestoredAfterClose("正常动效-入场中Esc");
+		// 6) 减少动态下按 Esc
+		await probe.call("Emulation.setEmulatedMedia", {
+			features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+		});
+		await openKeepRenameViaKeyboard();
+		await pressEscape();
+		await assertFocusRestoredAfterClose("减少动态-Esc");
+		await probe.call("Emulation.setEmulatedMedia", {
+			features: [{ name: "prefers-reduced-motion", value: "no-preference" }],
+		});
 		await rightClick(single.id);
 		assert.deepEqual(
 			await probe.evaluate<string[]>(
@@ -540,6 +630,7 @@ test("会话管理：多选、取消、真实删除、运行冲突、断线与�
 						"collapse",
 						"multiple-failures",
 						"keyboard-menu",
+						"rename-focus-restore",
 						"single-delete",
 						"delayed-list-refresh",
 						"all-deleted",

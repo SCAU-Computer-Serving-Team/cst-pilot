@@ -126,7 +126,7 @@ Rust 遥测网络测试通过 Node 创建本机 HTTP/TLS 服务。`crates/cst-pi
 
 ### Web 端到端核心链路
 
-浏览器 E2E 保留 TS 与 Rust 双入口。`npm run test:web:e2e --prefix agent` 启动 TypeScript 服务，`npm run test:web:rust-e2e --prefix agent` 通过 `startRustWebServer()` 启动 Rust 宿主，验收范围见[阶段 8](rust/plan/8.web.md#阶段-8-开发步骤与验收方案)。
+浏览器 E2E 保留 TS 与 Rust 双入口。`npm run test:web:e2e --prefix agent` 启动 TypeScript 服务，`npm run test:web:rust-e2e --prefix agent` 通过 `startRustWebServer()` 启动 Rust 宿主，验收范围见[阶段 8](rust/plan/8.web.md#阶段-8-开发步骤与验收方案)。基于 `bsk` 与 `cst-server --standalone-web` 的实机遍历与体验验收方案见[路由广度 E2E](test/web-rust-bsk-e2e.md)、[长会话与状态机深度 E2E](test/web-rust-bsk-deep-e2e.md)与[用户体验量化 E2E](test/web-rust-ux-e2e.md)。
 
 Rust 导出浏览器集成测试在 Windows 上运行，复用已安装的 Chrome 或 Edge。完整 CI 在 Windows 构建 `cst-server` 并运行两套浏览器 E2E；Linux Rust 核心 CI 保留无需本机浏览器的导出契约测试。
 

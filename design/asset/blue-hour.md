@@ -9,7 +9,7 @@
 | `blue-hour.glsl` | WebGL 1.0 着色器，`@time` 驱动动画 |
 | `blue-hour-palette.png` | 浅色版 256×1 色彩查找表，五色在 Oklab 空间插值后转为 sRGB |
 | `blue-hour-dark-palette.png` | 深色版 256×1 色彩查找表，沿用 Oklab 插值，使用独立颜色和色标位置 |
-| `make-blue-hour-dark-palette.mjs` | 深色色表生成器，运行 `node src/web/design/asset/make-blue-hour-dark-palette.mjs` 重建 |
+| `make-blue-hour-dark-palette.mjs` | 深色色表生成器，运行 `node design/asset/make-blue-hour-dark-palette.mjs` 重建 |
 | `blue-hour.css` | 无 WebGL 时的 CSS 降级：`oklab` 插值线性渐变加噪点层；CSS 画不出板条，只得近似 |
 | `blue-hour.png` | 1920×1080 静态导出，用作色卡画布「cst-pilot 首页背景」的参考图 |
 | `blue-hour-air.glsl` 等 | 登录页 AIR 变体，见 [登录页 AIR 背景](blue-hour-air.md) |
@@ -53,7 +53,7 @@
 
 ## 页面转场
 
-背景由浏览器独立快照承载，退出向上 slide，返回从上方反向进入，均 500ms；Shader 只负责常态背景，不计算退出透明度。无 WebGL 时同样使用整幅 CSS 背景快照。具体组件时间与空间规则见[DESIGN](../../../../DESIGN.md#页面衔接与绘制)。
+背景由浏览器独立快照承载，退出向上 slide，返回从上方反向进入，均 500ms；Shader 只负责常态背景，不计算退出透明度。无 WebGL 时同样使用整幅 CSS 背景快照。具体组件时间与空间规则见[DESIGN](../../DESIGN.md#页面衔接与绘制)。
 
 ## 授权范围
 

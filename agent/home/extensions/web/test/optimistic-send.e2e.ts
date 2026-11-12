@@ -33,6 +33,7 @@ test(
 		let mode: "hold" | "reject" | "accept" | "unknown" | "lost" = "hold";
 		let release: (() => void) | undefined;
 		let holdCreation = false;
+		let creationOutcome: "accept" | "reject" | "unknown" = "accept";
 		let releaseCreation: (() => void) | undefined;
 		let creationWrites = 0;
 		let stamp = Date.now();
@@ -87,6 +88,14 @@ test(
 				}
 				if (path === "/api/sessions" && request.method === "POST") {
 					creationWrites++;
+					if (creationOutcome === "reject") {
+						json(response, { error: { code: "credentials_required", message: "所选模型缺少凭据。" } }, 401);
+						return true;
+					}
+					if (creationOutcome === "unknown") {
+						response.destroy();
+						return true;
+					}
 					const key = String(request.headers["idempotency-key"]);
 					if (holdCreation)
 						await new Promise<void>((resolve) => {
@@ -239,8 +248,9 @@ test(
 				await browser.evaluate("document.querySelector('.composer-input').textContent"),
 				"正在写的下一条草稿",
 			);
-			await browser.evaluate("window.confirm=()=>true");
 			await clickAction("编辑");
+			await browser.until("!!document.querySelector('dialog.confirm-dialog[open]')", "应用内草稿编辑确认弹窗");
+			await browser.click("dialog.confirm-dialog .dialog-primary");
 			await browser.until(
 				"document.querySelector('.composer-input')?.textContent==='第一条待确认消息' && !!document.querySelector('.composer-saved-draft')",
 				"编辑失败消息并保留新草稿",
@@ -326,9 +336,38 @@ test(
 			await browser.fill(".composer-input", "首页首条消息");
 			await browser.click('[aria-label="发送消息"]');
 			await browser.until(
-				"!!document.querySelector('.home-outgoing .user-bubble') && document.querySelector('.composer-input')?.textContent===''",
-				"首页创建期间乐观展示",
+				"document.querySelector('.composer-input')?.textContent==='' && JSON.parse(sessionStorage.getItem('cst-message-outbox:v1')??'[]').some(item=>item.text==='首页首条消息' && item.state==='sending')",
+				"首页创建期间清空编辑器并保留发送记录",
 			);
+			for (const width of [1440, 390]) {
+				await browser.call("Emulation.setDeviceMetricsOverride", {
+					width,
+					height: 900,
+					deviceScaleFactor: 1,
+					mobile: false,
+				});
+				await browser.evaluate("document.querySelector('.sidebar-backdrop')?.click()");
+				if (width === 390)
+					await browser.until(
+						"document.querySelector('.sidebar')?.getBoundingClientRect().right<=0",
+						"窄屏侧栏完全收起后检查首页",
+					);
+				await browser.evaluate(
+					"Promise.all(document.getAnimations().filter(animation=>animation.effect?.getTiming().iterations!==Infinity).map(animation=>animation.finished.catch(()=>{})))",
+				);
+				await browser.screenshot(join(root, `home-creating-${width}.png`));
+				assert.equal(
+					await browser.evaluate("!!document.querySelector('.home-outgoing .user-bubble')"),
+					false,
+					`${width}px 首页创建期间不在蓝白背景上叠加聊天气泡`,
+				);
+			}
+			await browser.call("Emulation.setDeviceMetricsOverride", {
+				width: 1600,
+				height: 1000,
+				deviceScaleFactor: 1,
+				mobile: false,
+			});
 			assert.equal(
 				await browser.evaluate("!!document.querySelector('.home-outgoing .outgoing-status')"),
 				false,
@@ -412,6 +451,25 @@ test(
 				"不为未知投递提供直接重发入口",
 			);
 			assert.equal(writes.length, beforeRecovery);
+
+			for (const outcome of ["reject", "unknown"] as const) {
+				creationOutcome = outcome;
+				const text = `首页创建异常：${outcome}`;
+				const state = outcome === "reject" ? "failed" : "unknown";
+				await browser.navigate(`${origin}/`);
+				await browser.until("!!document.querySelector('.model-name')", "首页模型就绪");
+				await browser.fill(".composer-input", text);
+				await browser.click('[aria-label="发送消息"]');
+				await browser.until(
+					`[...document.querySelectorAll('.home-outgoing .user-line')].some(row=>row.textContent.includes(${JSON.stringify(text)}) && row.querySelector('.outgoing-status[data-state="${state}"]'))`,
+					"首页创建异常保留原消息和恢复操作",
+				);
+				const actions = await browser.evaluate<string[]>(
+					`[...[...document.querySelectorAll('.home-outgoing .user-line')].find(row=>row.textContent.includes(${JSON.stringify(text)})).querySelectorAll('button')].map(button=>button.textContent.trim())`,
+				);
+				assert.ok(actions.includes("重试") && actions.includes("移除"));
+				assert.ok(actions.includes(outcome === "reject" ? "编辑" : "核对状态"));
+			}
 		} finally {
 			release?.();
 			releaseCreation?.();

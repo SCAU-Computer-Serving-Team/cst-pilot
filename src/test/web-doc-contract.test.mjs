@@ -22,7 +22,7 @@ async function collectMarkdown(directory) {
 
 const files = [
   ...(await collectMarkdown(resolve(root, 'doc'))),
-  ...(await collectMarkdown(resolve(root, 'src/web/design/asset'))),
+  ...(await collectMarkdown(resolve(root, 'design/asset'))),
   ...['README.md', 'CHANGELOG.md', 'DESIGN.md', 'CONTRIBUTING.md', 'AGENTS.md', 'pack/README.md', 'lhm/README.md'].map(name => resolve(root, name)),
 ];
 const slug = text => text.toLowerCase().replace(/`/g, '').replace(/[^\p{L}\p{N}_\- ]/gu, '').replace(/ /g, '-');

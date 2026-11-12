@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 test("界面画布的节点 ID 唯一，工作帧没有遗留占位标记", () => {
-  for (const file of ["cst-pilot-web.pen", "cst-pilot-tools.pen"]) {
-    const canvas = JSON.parse(readFileSync(new URL(`../web/design/${file}`, import.meta.url), "utf8"));
+  for (const file of ["cst-pilot-desktop.pen", "cst-pilot-web.pen", "cst-pilot-tools.pen"]) {
+    const canvas = JSON.parse(readFileSync(new URL(`../../design/${file}`, import.meta.url), "utf8"));
     const ids = new Set();
     function visit(node) {
       assert.ok(!ids.has(node.id), `${file} 重复 ID：${node.id}`);
@@ -17,7 +17,7 @@ test("界面画布的节点 ID 唯一，工作帧没有遗留占位标记", () =
 });
 
 test("界面画布顶层按分区收纳，分区之间不重叠", () => {
-  const canvas = JSON.parse(readFileSync(new URL("../web/design/cst-pilot-web.pen", import.meta.url), "utf8"));
+  const canvas = JSON.parse(readFileSync(new URL("../../design/cst-pilot-web.pen", import.meta.url), "utf8"));
   const sections = canvas.children.filter(node => /^\d{2} ·/.test(node.name ?? "") && node.name !== "00 · 画布导航");
   assert.deepEqual(sections.map(node => node.name), ["01 · 对话", "02 · 会话管理", "03 · 设置与模型", "04 · 账号与登录", "05 · 通用组件与反馈", "06 · 仪表盘"]);
   assert.equal(canvas.children.length, 8);
@@ -31,7 +31,7 @@ test("界面画布顶层按分区收纳，分区之间不重叠", () => {
 });
 
 test("聊天工作台和组件画布展示合并的模型与思考强度选择器", () => {
-  const canvas = JSON.parse(readFileSync(new URL("../web/design/cst-pilot-web.pen", import.meta.url), "utf8"));
+  const canvas = JSON.parse(readFileSync(new URL("../../design/cst-pilot-web.pen", import.meta.url), "utf8"));
   function find(node, name) {
     if (node.name === name) return node;
     for (const child of node.children ?? []) {
@@ -92,7 +92,7 @@ test("聊天工作台和组件画布展示合并的模型与思考强度选择�
 });
 
 test("所有输入栏使用合并的模型与思考强度入口", () => {
-  const canvas = JSON.parse(readFileSync(new URL("../web/design/cst-pilot-web.pen", import.meta.url), "utf8"));
+  const canvas = JSON.parse(readFileSync(new URL("../../design/cst-pilot-web.pen", import.meta.url), "utf8"));
   let count = 0;
   function visit(node) {
     assert.notEqual(node.name, "HeroUI Select · 模型");
@@ -115,7 +115,7 @@ test("所有输入栏使用合并的模型与思考强度入口", () => {
 });
 
 test("会话导出预览与保存结果有浅深画布且不覆盖其他分区", () => {
-  const canvas = JSON.parse(readFileSync(new URL("../web/design/cst-pilot-web.pen", import.meta.url), "utf8"));
+  const canvas = JSON.parse(readFileSync(new URL("../../design/cst-pilot-web.pen", import.meta.url), "utf8"));
   const section = canvas.children.find(node => node.name === "02 · 会话管理").children.find(node => node.name === "会话导出");
   assert.ok(section);
   for (const state of ["预览", "保存结果"]) for (const theme of ["浅色", "深色"]) {
@@ -135,7 +135,7 @@ test("会话导出预览与保存结果有浅深画布且不覆盖其他分区",
 });
 
 test("模型选择与协议菜单的浅深主题使用独立画布", () => {
-  const canvas = JSON.parse(readFileSync(new URL("../web/design/cst-pilot-web.pen", import.meta.url), "utf8"));
+  const canvas = JSON.parse(readFileSync(new URL("../../design/cst-pilot-web.pen", import.meta.url), "utf8"));
   const section = canvas.children.find(node => node.name === "03 · 设置与模型").children.find(node => node.name === "设置与模型服务");
   assert.ok(section);
   for (const prefix of ["默认模型选择 · 展开与未配置", "自定义协议菜单"]) {
@@ -159,7 +159,7 @@ test("模型选择与协议菜单的浅深主题使用独立画布", () => {
 });
 
 test("自定义服务浅深画布归属设置区，与下方分区不重叠", () => {
-  const canvas = JSON.parse(readFileSync(new URL("../web/design/cst-pilot-web.pen", import.meta.url), "utf8"));
+  const canvas = JSON.parse(readFileSync(new URL("../../design/cst-pilot-web.pen", import.meta.url), "utf8"));
   const domain = canvas.children.find(node => node.name === "03 · 设置与模型");
   const section = domain.children.find(node => node.name === "设置与模型服务");
   assert.ok(section);

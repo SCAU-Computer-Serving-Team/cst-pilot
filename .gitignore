@@ -33,7 +33,7 @@ agent/home/command-plans/
 agent/home/session-exports/
 
 # ---- 设计资产（发行版需要，开发仓库不存；可由上游 OFL 字体包重建）----
-src/web/design/fonts/
+design/fonts/
 
 # ---- Rust 构建产物 ----
 /target/

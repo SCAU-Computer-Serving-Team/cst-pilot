@@ -15,7 +15,10 @@ export class SessionEvents {
 	constructor(session?: AgentSession, heartbeatMs = 20_000, project?: (event: AgentSessionEvent) => unknown) {
 		this.heartbeatMs = heartbeatMs;
 		this.unsubscribe =
-			session?.subscribe((event) => this.publish("session", project ? project(event) : event)) ?? (() => {});
+			session?.subscribe((event) => {
+				const next = project ? project(event) : event;
+				if (next !== undefined) this.publish("session", next);
+			}) ?? (() => {});
 	}
 
 	publish(name: "session" | "queue" | "state", value: unknown): void {

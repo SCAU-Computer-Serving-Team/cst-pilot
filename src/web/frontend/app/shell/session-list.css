@@ -15,6 +15,7 @@
 .sidebar-all:hover, .sidebar-recent-heading:hover { background: var(--app-hover); color: var(--app-ink); }
 .session-native-check { position: absolute; width: 16px; height: 16px; inset-inline-start: var(--space-inline); margin: 0; opacity: 0; }
 .session-native-check:focus-visible { outline: none; box-shadow: none; }
+.sidebar-session { -webkit-touch-callout: none; user-select: none; }
 .sidebar-recent-list .sidebar-session { flex-shrink: 0; }
 .session-list-main { height: 100%; min-width: 0; }
 .session-list-main .chat-header { gap: var(--space-component); }
