@@ -1282,11 +1282,21 @@ async fn session_snapshots_exports_and_fork_omit_system_messages_while_preservin
         .unwrap();
 
     let snap_messages = snap_res["messages"].as_array().unwrap();
-    assert!(
-        snap_messages
-            .iter()
-            .all(|m| m["role"].as_str() != Some("system")),
-        "GET /api/sessions/:id messages must never expose role=system"
+    let message_roles: Vec<&str> = snap_messages
+        .iter()
+        .map(|m| m["role"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(
+        message_roles,
+        vec![
+            "user",
+            "assistant",
+            "toolResult",
+            "user",
+            "branchSummary",
+            "assistant",
+        ],
+        "GET /api/sessions/:id messages must exclude system while preserving branchSummary and visible messages"
     );
 
     let snap_entries = snap_res["entries"].as_array().unwrap();
@@ -1713,7 +1723,7 @@ async fn browser_sse_single_and_multiplex_streams_filter_system_messages_across_
                     for m in msgs {
                         let role = m.get("role").and_then(Value::as_str).unwrap_or("");
                         assert!(
-                            matches!(role, "user" | "assistant" | "toolResult"),
+                            matches!(role, "user" | "assistant" | "toolResult" | "branchSummary"),
                             "{label} agent_end message had unexpected role: {role}"
                         );
                     }

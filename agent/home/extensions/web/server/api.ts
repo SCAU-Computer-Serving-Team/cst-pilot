@@ -120,7 +120,10 @@ export function createWebApi(
 	const origin = `http://127.0.0.1:${port}`;
 	const exportRoutes = createExportRoutes(pool, agentDir, origin, writeOnce, options);
 	const isBrowserVisibleMessage = (message: { role?: unknown }): boolean =>
-		message.role === "user" || message.role === "assistant" || message.role === "toolResult";
+		message.role === "user" ||
+		message.role === "assistant" ||
+		message.role === "toolResult" ||
+		message.role === "branchSummary";
 	async function inbox(id: string): Promise<SessionInbox> {
 		const slot = await pool.openSaved(id);
 		let instance = inboxes.get(id);
@@ -523,22 +526,13 @@ export function createWebApi(
 							epoch: bitLockerWebInteractions.get(id)?.epoch,
 						},
 						messages: slot.session.messages
-							.filter(
-								(message) =>
-									message.role === "user" || message.role === "assistant" || message.role === "toolResult",
-							)
+							.filter(isBrowserVisibleMessage)
 							.map((message) => slot.inputs.decorate(slot.execution.decorate(message))),
 						entries: slot.session.sessionManager
 							.getBranch()
 							// 分支总结条目的 type 是 branch_summary，得单独转成前端认识的消息，否则正文里看不到它。
 							.filter((entry) => entry.type === "message" || entry.type === "branch_summary")
-							.filter(
-								(entry) =>
-									entry.type === "branch_summary" ||
-									entry.message.role === "user" ||
-									entry.message.role === "assistant" ||
-									entry.message.role === "toolResult",
-							)
+							.filter((entry) => entry.type === "branch_summary" || isBrowserVisibleMessage(entry.message))
 							.map((entry) =>
 								entry.type === "branch_summary"
 									? {

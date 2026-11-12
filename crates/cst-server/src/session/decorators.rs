@@ -15,10 +15,11 @@ pub const BITLOCKER_VERIFICATION_CUSTOM_TYPE: &str = "cst.bitlocker-state-verifi
 
 /// Returns true for message roles that belong in browser snapshots, exports, and SSE streams.
 pub fn is_browser_visible_message(message: &AgentMessage) -> bool {
-    matches!(
-        message,
-        AgentMessage::User(_) | AgentMessage::Assistant(_) | AgentMessage::ToolResult(_)
-    )
+    match message {
+        AgentMessage::User(_) | AgentMessage::Assistant(_) | AgentMessage::ToolResult(_) => true,
+        AgentMessage::Custom(c) => c.role == "branchSummary",
+        AgentMessage::System(_) => false,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
