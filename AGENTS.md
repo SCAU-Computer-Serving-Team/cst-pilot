@@ -7,7 +7,8 @@
   3. 按任务阅读对应模块目录
 4. 请了解 `earendil-works/pi`，本项目基于 Pi 二次开发，但是要遵循 Pi 的工程规范。有充足的文档可供后续阅读。
 5. 了解`Rust`社区与大型项目的最佳实践
-6. 了解`context-management`，本项目**必须优先考虑**`pi-context`提供的工具标注checkpoint。并且在切换任务且上下文开始变长（大于400K）时compact。
+6. 了解`context-management`，本项目**必须优先考虑**`pi-context`提供的工具标注checkpoint。并且**仅在**明确切换任务且上下文开始变长（大于400K）时compact。
+7. 若执行`Pen.dev`等前端设计任务，必须阅读`emil`系、`gpui`系SKILLS，通过mcp获取`pen.dev`的操作方式。
 
 ## 文档规范
 
