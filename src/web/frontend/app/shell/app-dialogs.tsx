@@ -10,21 +10,26 @@ function tokenDurationMs(element: HTMLElement, token: string, fallback: number):
 }
 
 /** 执行模态弹窗 150ms (--duration-quick) 关闭过渡后再卸载；支持入场中途打断与减少动态即时关闭。 */
-function useAnimatedDialogClose(dialogRef: RefObject<HTMLDialogElement | null>): (onDone: () => void) => void {
+function useAnimatedDialogClose(dialogRef: RefObject<HTMLDialogElement | null>) {
+	const [closing, setClosing] = useState(false);
+	const mounted = useRef(false);
 	const closingRef = useRef(false);
 	const cleanupRef = useRef<(() => void) | null>(null);
 
-	useEffect(
-		() => () => {
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
 			cleanupRef.current?.();
-		},
-		[],
-	);
+			cleanupRef.current = null;
+		};
+	}, []);
 
-	return useCallback(
+	const requestClose = useCallback(
 		(onDone: () => void) => {
-			if (closingRef.current) return;
+			if (!mounted.current || closingRef.current) return;
 			closingRef.current = true;
+			setClosing(true);
 			const modal = dialogRef.current;
 			const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
 			if (!modal || !modal.open || motion.matches) {
@@ -51,7 +56,7 @@ function useAnimatedDialogClose(dialogRef: RefObject<HTMLDialogElement | null>):
 
 			let finished = false;
 			const finish = () => {
-				if (finished) return;
+				if (finished || !mounted.current) return;
 				finished = true;
 				cleanupRef.current = null;
 				motion.removeEventListener("change", onReduceMotion);
@@ -71,6 +76,7 @@ function useAnimatedDialogClose(dialogRef: RefObject<HTMLDialogElement | null>):
 		},
 		[dialogRef],
 	);
+	return { requestClose, closing };
 }
 
 function restorePreviousFocus(element: HTMLDialogElement | null, previous: Element | null): void {
@@ -105,7 +111,7 @@ export function ConfirmDialog({
 	const cancel = useRef<HTMLButtonElement>(null);
 	const titleId = useId();
 	const descId = useId();
-	const requestClose = useAnimatedDialogClose(dialog);
+	const { requestClose, closing } = useAnimatedDialogClose(dialog);
 	useDialogFocusTrap(dialog, cancel);
 	useEffect(() => {
 		const previous = document.activeElement;
@@ -130,13 +136,13 @@ export function ConfirmDialog({
 				{description}
 			</p>
 			<div className="exit-actions">
-				<button type="button" ref={cancel} disabled={busy} onClick={() => requestClose(onCancel)}>
+				<button type="button" ref={cancel} disabled={busy || closing} onClick={() => requestClose(onCancel)}>
 					{cancelLabel}
 				</button>
 				<button
 					type="button"
 					className={danger ? "exit-confirm" : "dialog-primary"}
-					disabled={busy}
+					disabled={busy || closing}
 					onClick={() => requestClose(onConfirm)}
 				>
 					{confirmLabel}
@@ -162,7 +168,7 @@ export function SessionRenameDialog({
 	const [name, setName] = useState(initialTitle);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
-	const requestClose = useAnimatedDialogClose(dialog);
+	const { requestClose, closing } = useAnimatedDialogClose(dialog);
 	useDialogFocusTrap(dialog, input);
 	useEffect(() => {
 		const previous = document.activeElement;
@@ -174,7 +180,7 @@ export function SessionRenameDialog({
 	}, []);
 	async function submit(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
-		if (busy) return;
+		if (busy || closing || !dialog.current?.open) return;
 		const trimmed = name.trim();
 		if (!trimmed) return;
 		if (trimmed === initialTitle) {
@@ -210,7 +216,7 @@ export function SessionRenameDialog({
 					className="dialog-text-input"
 					aria-label="会话名称"
 					value={name}
-					disabled={busy}
+					disabled={busy || closing}
 					onChange={(event) => setName(event.target.value)}
 					onKeyDown={(event) => {
 						if (event.key === "Enter" && (event.nativeEvent.isComposing || event.keyCode === 229)) {
@@ -220,10 +226,10 @@ export function SessionRenameDialog({
 				/>
 				{error && <ErrorNotice message={error} />}
 				<div className="exit-actions">
-					<button type="button" disabled={busy} onClick={() => requestClose(onCancel)}>
+					<button type="button" disabled={busy || closing} onClick={() => requestClose(onCancel)}>
 						取消
 					</button>
-					<button type="submit" className="dialog-primary" disabled={busy || !name.trim()}>
+					<button type="submit" className="dialog-primary" disabled={busy || closing || !name.trim()}>
 						{busy ? "正在保存…" : "保存"}
 					</button>
 				</div>

@@ -54,7 +54,12 @@ export default function ModelPreferences() {
 		const button = listRoot.current?.querySelector<HTMLButtonElement>(
 			`button.settings-grip[data-model-id="${CSS.escape(targetId)}"]`,
 		);
-		if (button && document.activeElement !== button) button.focus({ preventScroll: true });
+		const active = document.activeElement;
+		if (active !== document.body && active !== button) {
+			keyboardFocusId.current = null;
+			return;
+		}
+		if (button && active === document.body) button.focus({ preventScroll: true });
 		if (!state.working) keyboardFocusId.current = null;
 	});
 	const enabledCount = selection === null ? models.length : selection.filter((id) => byId.has(id)).length;
