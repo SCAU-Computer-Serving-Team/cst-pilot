@@ -1,5 +1,5 @@
 {
-  "version": "2.17",
+  "version": "2.22",
   "children": [
     {
       "type": "frame",
@@ -5637,7 +5637,7 @@
                 "type": "image",
                 "enabled": true,
                 "url": "asset/blue-hour.png",
-                "mode": "fill"
+                "mode": "cover"
               },
               "width": 1152,
               "height": 648,
@@ -5657,6 +5657,1717 @@
           ]
         }
       ]
+    },
+    {
+      "type": "frame",
+      "id": "jGCvS",
+      "x": 0,
+      "y": 7920,
+      "name": "cst-pilot 桌面端配色 · S1 Sheet & Biro × Graphite",
+      "width": 2312,
+      "fill": "#FFFFFF",
+      "layout": "vertical",
+      "gap": 36,
+      "padding": 64,
+      "children": [
+        {
+          "type": "frame",
+          "id": "g3R1CL",
+          "name": "Header",
+          "layout": "vertical",
+          "gap": 10,
+          "children": [
+            {
+              "type": "text",
+              "id": "NoLT1",
+              "name": "标题",
+              "fill": "#111111",
+              "content": "cst-pilot 桌面端配色 · S1 Sheet & Biro × Graphite",
+              "fontFamily": "Noto Sans SC",
+              "fontSize": 32,
+              "fontWeight": "600"
+            },
+            {
+              "type": "text",
+              "id": "VsVNp",
+              "name": "副标题",
+              "fill": "#6B6B6B",
+              "content": "GPUI Kit 桌面端单轨语义色板（design/cst-pilot-desktop.pen Variables 权威真值）",
+              "fontFamily": "Noto Sans SC",
+              "fontSize": 14,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "C1RDU",
+          "name": "Light · 浅色主题",
+          "width": "fill_container",
+          "fill": "#F4F4F4",
+          "cornerRadius": 8,
+          "stroke": "#D4D4D8",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 20,
+          "padding": 32,
+          "children": [
+            {
+              "type": "text",
+              "id": "kcJJh",
+              "name": "组标题",
+              "fill": "#111111",
+              "content": "Light · 浅色主题",
+              "fontFamily": "Noto Sans SC",
+              "fontSize": 20,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "Z2SnS",
+              "name": "行 1",
+              "width": "fill_container",
+              "gap": 16,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "YReHy",
+                  "name": "bg-shell",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "Yywf4",
+                      "name": "色块",
+                      "fill": "#F4F4F4",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#D4D4D8",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "WUjJ0",
+                      "name": "名",
+                      "fill": "#111111",
+                      "content": "bg-shell",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "b3K14T",
+                      "name": "值",
+                      "fill": "#6B6B6B",
+                      "content": "#F4F4F4",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "bwCtm",
+                      "name": "用",
+                      "fill": "#6B6B6B",
+                      "content": "窗口外壳与侧栏",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "n4vuQR",
+                  "name": "bg-workspace",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "U6yiH",
+                      "name": "色块",
+                      "fill": "#FFFFFF",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#D4D4D8",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "kfgEM",
+                      "name": "名",
+                      "fill": "#111111",
+                      "content": "bg-workspace",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "MkBoz",
+                      "name": "值",
+                      "fill": "#6B6B6B",
+                      "content": "#FFFFFF",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "R9BmiR",
+                      "name": "用",
+                      "fill": "#6B6B6B",
+                      "content": "内缩工作区白纸",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "PFL4o",
+                  "name": "bg-surface",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "jN8H1",
+                      "name": "色块",
+                      "fill": "#F4F4F5",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#D4D4D8",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "Gq0CN",
+                      "name": "名",
+                      "fill": "#111111",
+                      "content": "bg-surface",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "UNKEU",
+                      "name": "值",
+                      "fill": "#6B6B6B",
+                      "content": "#F4F4F5",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "rDQh3",
+                      "name": "用",
+                      "fill": "#6B6B6B",
+                      "content": "气泡/表头/代码块",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "pWjCS",
+                  "name": "bg-item-active",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "AL7B1",
+                      "name": "色块",
+                      "fill": "#EAEAEB",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#D4D4D8",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "DT1dX",
+                      "name": "名",
+                      "fill": "#111111",
+                      "content": "bg-item-active",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "FUhfx",
+                      "name": "值",
+                      "fill": "#6B6B6B",
+                      "content": "#EAEAEB",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "VD5eQ",
+                      "name": "用",
+                      "fill": "#6B6B6B",
+                      "content": "选中项与头像底",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "QlQW0",
+                  "name": "bg-special",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "REX9S",
+                      "name": "色块",
+                      "fill": "#FCFCFC",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#D4D4D8",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "d8iVA0",
+                      "name": "名",
+                      "fill": "#111111",
+                      "content": "bg-special",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "fRdPC",
+                      "name": "值",
+                      "fill": "#6B6B6B",
+                      "content": "#FCFCFC",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "rAvBb",
+                      "name": "用",
+                      "fill": "#6B6B6B",
+                      "content": "特殊工具基板",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "A6RQJ",
+                  "name": "text-primary",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "vtjZZ",
+                      "name": "色块",
+                      "fill": "#111111",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#D4D4D8",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "V11c9n",
+                      "name": "名",
+                      "fill": "#111111",
+                      "content": "text-primary",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "m5Dy4",
+                      "name": "值",
+                      "fill": "#6B6B6B",
+                      "content": "#111111",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "M5mH0",
+                      "name": "用",
+                      "fill": "#6B6B6B",
+                      "content": "主正文与主图标",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "WUUb5",
+                  "name": "text-secondary",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "n9BTx",
+                      "name": "色块",
+                      "fill": "#6B6B6B",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#D4D4D8",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "RuYHZ",
+                      "name": "名",
+                      "fill": "#111111",
+                      "content": "text-secondary",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "c8XcG",
+                      "name": "值",
+                      "fill": "#6B6B6B",
+                      "content": "#6B6B6B",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "IyBGe",
+                      "name": "用",
+                      "fill": "#6B6B6B",
+                      "content": "次要说明与图标",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "B3sdD",
+                  "name": "text-muted",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "JD8rE",
+                      "name": "色块",
+                      "fill": "#8A8A8E",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#D4D4D8",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "WMRFs",
+                      "name": "名",
+                      "fill": "#111111",
+                      "content": "text-muted",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "o28xb",
+                      "name": "值",
+                      "fill": "#6B6B6B",
+                      "content": "#8A8A8E",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "z51S54",
+                      "name": "用",
+                      "fill": "#6B6B6B",
+                      "content": "小标题与快捷键",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "neGds",
+              "name": "行 2",
+              "width": "fill_container",
+              "gap": 16,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "RcaNG",
+                  "name": "border-subtle",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "F9xACj",
+                      "name": "色块",
+                      "fill": "#E4E4E7",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#D4D4D8",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "NtiqJ",
+                      "name": "名",
+                      "fill": "#111111",
+                      "content": "border-subtle",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "VpcDy",
+                      "name": "值",
+                      "fill": "#6B6B6B",
+                      "content": "#E4E4E7",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "b3ITQF",
+                      "name": "用",
+                      "fill": "#6B6B6B",
+                      "content": "内部网格与分隔",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "U6USlS",
+                  "name": "border-strong",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "o7rzrV",
+                      "name": "色块",
+                      "fill": "#D4D4D8",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#D4D4D8",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "wqwEU",
+                      "name": "名",
+                      "fill": "#111111",
+                      "content": "border-strong",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Xkzpe",
+                      "name": "值",
+                      "fill": "#6B6B6B",
+                      "content": "#D4D4D8",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "spaio",
+                      "name": "用",
+                      "fill": "#6B6B6B",
+                      "content": "外框与输入描边",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "F0YNp",
+                  "name": "accent-solid",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "P39rO",
+                      "name": "色块",
+                      "fill": "#1A4BE0",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#D4D4D8",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "s0bAy",
+                      "name": "名",
+                      "fill": "#111111",
+                      "content": "accent-solid",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "pu6et",
+                      "name": "值",
+                      "fill": "#6B6B6B",
+                      "content": "#1A4BE0",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "n9Zh6j",
+                      "name": "用",
+                      "fill": "#6B6B6B",
+                      "content": "实心圆珠笔蓝",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Hyg0P",
+                  "name": "accent-tint",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "wes6z",
+                      "name": "色块",
+                      "fill": "#EEF2FF",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#D4D4D8",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "J2Obwp",
+                      "name": "名",
+                      "fill": "#111111",
+                      "content": "accent-tint",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "MNagy",
+                      "name": "值",
+                      "fill": "#6B6B6B",
+                      "content": "#EEF2FF",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "UxPJQ",
+                      "name": "用",
+                      "fill": "#6B6B6B",
+                      "content": "浅蓝提示徽标",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "J8kv0",
+                  "name": "status-success",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "MMZGU",
+                      "name": "色块",
+                      "fill": "#16A34A",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#D4D4D8",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "RCcUg",
+                      "name": "名",
+                      "fill": "#111111",
+                      "content": "status-success",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "a6hzd",
+                      "name": "值",
+                      "fill": "#6B6B6B",
+                      "content": "#16A34A",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "aqKRa",
+                      "name": "用",
+                      "fill": "#6B6B6B",
+                      "content": "采集与执行成功",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "d1Smv",
+                  "name": "status-warning",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "cwyQo",
+                      "name": "色块",
+                      "fill": "#8C5A00",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#D4D4D8",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "xufYp",
+                      "name": "名",
+                      "fill": "#111111",
+                      "content": "status-warning",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "a8RIz",
+                      "name": "值",
+                      "fill": "#6B6B6B",
+                      "content": "#8C5A00",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "RU2jX",
+                      "name": "用",
+                      "fill": "#6B6B6B",
+                      "content": "高占用预警",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "o7MzQ",
+                  "name": "status-danger",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "Y4GxJ",
+                      "name": "色块",
+                      "fill": "#DC2626",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#D4D4D8",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "Z3q3IN",
+                      "name": "名",
+                      "fill": "#111111",
+                      "content": "status-danger",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "fDcF1",
+                      "name": "值",
+                      "fill": "#6B6B6B",
+                      "content": "#DC2626",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "dSg8n",
+                      "name": "用",
+                      "fill": "#6B6B6B",
+                      "content": "删除与执行失败",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "ARYTZ",
+          "name": "Dark · 石墨深色主题",
+          "width": "fill_container",
+          "fill": "#141416",
+          "cornerRadius": 8,
+          "stroke": "#34343A",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 20,
+          "padding": 32,
+          "children": [
+            {
+              "type": "text",
+              "id": "i2Q56s",
+              "name": "组标题",
+              "fill": "#F2F2F4",
+              "content": "Dark · 石墨深色主题",
+              "fontFamily": "Noto Sans SC",
+              "fontSize": 20,
+              "fontWeight": "600"
+            },
+            {
+              "type": "frame",
+              "id": "Z35oTP",
+              "name": "行 1",
+              "width": "fill_container",
+              "gap": 16,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "elDhK",
+                  "name": "bg-shell",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "FbOrR",
+                      "name": "色块",
+                      "fill": "#141416",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#34343A",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "NE60E",
+                      "name": "名",
+                      "fill": "#F2F2F4",
+                      "content": "bg-shell",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Sfzfb",
+                      "name": "值",
+                      "fill": "#85858B",
+                      "content": "#141416",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "EAr4K",
+                      "name": "用",
+                      "fill": "#85858B",
+                      "content": "深色外壳与侧栏",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "MB1mq",
+                  "name": "bg-workspace",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "p7JC3y",
+                      "name": "色块",
+                      "fill": "#0D0D0F",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#34343A",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "FDu2C",
+                      "name": "名",
+                      "fill": "#F2F2F4",
+                      "content": "bg-workspace",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "RAT06",
+                      "name": "值",
+                      "fill": "#85858B",
+                      "content": "#0D0D0F",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "I61wg",
+                      "name": "用",
+                      "fill": "#85858B",
+                      "content": "深色内缩工作区",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "NoPhb",
+                  "name": "bg-surface",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "g7cmn",
+                      "name": "色块",
+                      "fill": "#1C1C20",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#34343A",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "R6mc9",
+                      "name": "名",
+                      "fill": "#F2F2F4",
+                      "content": "bg-surface",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Xmcw0",
+                      "name": "值",
+                      "fill": "#85858B",
+                      "content": "#1C1C20",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "AuIeW",
+                      "name": "用",
+                      "fill": "#85858B",
+                      "content": "深色气泡/代码块",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "F02bqb",
+                  "name": "bg-item-active",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "Juj2s",
+                      "name": "色块",
+                      "fill": "#242429",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#34343A",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "zqA8x",
+                      "name": "名",
+                      "fill": "#F2F2F4",
+                      "content": "bg-item-active",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "qVEoD",
+                      "name": "值",
+                      "fill": "#85858B",
+                      "content": "#242429",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "MNpww",
+                      "name": "用",
+                      "fill": "#85858B",
+                      "content": "深色选中与浮层",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "KPDgA",
+                  "name": "bg-special",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "gY4lG",
+                      "name": "色块",
+                      "fill": "#121215",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#34343A",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "Be8IL",
+                      "name": "名",
+                      "fill": "#F2F2F4",
+                      "content": "bg-special",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "BLzVH",
+                      "name": "值",
+                      "fill": "#85858B",
+                      "content": "#121215",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "qCdcC",
+                      "name": "用",
+                      "fill": "#85858B",
+                      "content": "深色特殊工具底",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "erlV7",
+                  "name": "text-primary",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "FZN0C",
+                      "name": "色块",
+                      "fill": "#F2F2F4",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#34343A",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "evhcN",
+                      "name": "名",
+                      "fill": "#F2F2F4",
+                      "content": "text-primary",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "c5C4ch",
+                      "name": "值",
+                      "fill": "#85858B",
+                      "content": "#F2F2F4",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "B4zHrZ",
+                      "name": "用",
+                      "fill": "#85858B",
+                      "content": "深色高对比正文",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "wwJFi",
+                  "name": "text-secondary",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "FCZAc",
+                      "name": "色块",
+                      "fill": "#85858B",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#34343A",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "AtPjj",
+                      "name": "名",
+                      "fill": "#F2F2F4",
+                      "content": "text-secondary",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Z5buW8",
+                      "name": "值",
+                      "fill": "#85858B",
+                      "content": "#85858B",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "JF0xv",
+                      "name": "用",
+                      "fill": "#85858B",
+                      "content": "深色次要说明",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "oU1dR",
+                  "name": "text-muted",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "Plrdw",
+                      "name": "色块",
+                      "fill": "#636369",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#34343A",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "C5oOyP",
+                      "name": "名",
+                      "fill": "#F2F2F4",
+                      "content": "text-muted",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "o2mg2i",
+                      "name": "值",
+                      "fill": "#85858B",
+                      "content": "#636369",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "dI8SV",
+                      "name": "用",
+                      "fill": "#85858B",
+                      "content": "深色分组小标",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "I7G3k",
+              "name": "行 2",
+              "width": "fill_container",
+              "gap": 16,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "p2N39z",
+                  "name": "border-subtle",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "SwNpg",
+                      "name": "色块",
+                      "fill": "#26262B",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#34343A",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "tRmD6",
+                      "name": "名",
+                      "fill": "#F2F2F4",
+                      "content": "border-subtle",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "WXBGV",
+                      "name": "值",
+                      "fill": "#85858B",
+                      "content": "#26262B",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "CoWQP",
+                      "name": "用",
+                      "fill": "#85858B",
+                      "content": "深色内部分隔",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "MGO0L",
+                  "name": "border-strong",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "Mti8G",
+                      "name": "色块",
+                      "fill": "#34343A",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#34343A",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "xEs2h",
+                      "name": "名",
+                      "fill": "#F2F2F4",
+                      "content": "border-strong",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Hhx65",
+                      "name": "值",
+                      "fill": "#85858B",
+                      "content": "#34343A",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Hz1QA",
+                      "name": "用",
+                      "fill": "#85858B",
+                      "content": "深色外框与描边",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "XNt0K",
+                  "name": "accent-solid",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "G2l0Pm",
+                      "name": "色块",
+                      "fill": "#3B6BF5",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#34343A",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "bQDtD",
+                      "name": "名",
+                      "fill": "#F2F2F4",
+                      "content": "accent-solid",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "wHNMg",
+                      "name": "值",
+                      "fill": "#85858B",
+                      "content": "#3B6BF5",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "h3WRJU",
+                      "name": "用",
+                      "fill": "#85858B",
+                      "content": "深色实心蓝按钮",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "sIIFw",
+                  "name": "accent-ink",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "NK6Uf",
+                      "name": "色块",
+                      "fill": "#688FF8",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#34343A",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "D9Z4GD",
+                      "name": "名",
+                      "fill": "#F2F2F4",
+                      "content": "accent-ink",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "v9msU",
+                      "name": "值",
+                      "fill": "#85858B",
+                      "content": "#688FF8",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "F4GkC3",
+                      "name": "用",
+                      "fill": "#85858B",
+                      "content": "深色行内蓝字标",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Nj4HS",
+                  "name": "accent-tint",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "iJMz7",
+                      "name": "色块",
+                      "fill": "#192342",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#34343A",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "j3qtO",
+                      "name": "名",
+                      "fill": "#F2F2F4",
+                      "content": "accent-tint",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "O0Lz6s",
+                      "name": "值",
+                      "fill": "#85858B",
+                      "content": "#192342",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "vN9o3",
+                      "name": "用",
+                      "fill": "#85858B",
+                      "content": "深色低饱和蓝底",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "u4tTIg",
+                  "name": "status-success",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "E45x7Y",
+                      "name": "色块",
+                      "fill": "#4CC38A",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#34343A",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "aN1pd",
+                      "name": "名",
+                      "fill": "#F2F2F4",
+                      "content": "status-success",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "C0wTqb",
+                      "name": "值",
+                      "fill": "#85858B",
+                      "content": "#4CC38A",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "CXKZo",
+                      "name": "用",
+                      "fill": "#85858B",
+                      "content": "深色成功绿",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "M8Fad",
+                  "name": "status-warning",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "dGZXG",
+                      "name": "色块",
+                      "fill": "#E4A247",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#34343A",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "Sjx2J",
+                      "name": "名",
+                      "fill": "#F2F2F4",
+                      "content": "status-warning",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "mT1u9",
+                      "name": "值",
+                      "fill": "#85858B",
+                      "content": "#E4A247",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "r80RlD",
+                      "name": "用",
+                      "fill": "#85858B",
+                      "content": "深色警告琥珀",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "DJNFF",
+                  "name": "status-danger",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "type": "rectangle",
+                      "cornerRadius": 4,
+                      "id": "bsR20",
+                      "name": "色块",
+                      "fill": "#E5484D",
+                      "width": "fill_container",
+                      "height": 56,
+                      "stroke": "#34343A",
+                      "strokeWidth": 1
+                    },
+                    {
+                      "type": "text",
+                      "id": "Q43oMm",
+                      "name": "名",
+                      "fill": "#F2F2F4",
+                      "content": "status-danger",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "type": "text",
+                      "id": "ffQRl",
+                      "name": "值",
+                      "fill": "#85858B",
+                      "content": "#E5484D",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "HIq24",
+                      "name": "用",
+                      "fill": "#85858B",
+                      "content": "深色危险红",
+                      "fontFamily": "Noto Sans SC",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
-  ]
+  ],
+  "fileToken": "db1c26b1-ea3d-46a0-bfb8-ec89c7a1983a"
 }
