@@ -3,6 +3,7 @@ import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router";
 import type { ModelChoice } from "../data/model-selection";
+import { useDialogFocusTrap } from "../shell/dialog-focus";
 import { CSTOA_PROVIDER, loginPath, returnPath } from "./providers";
 
 export type ModelKeyDialogReason = "initial" | "unsent" | "missing";
@@ -23,6 +24,7 @@ export function ModelKeyDialog({
 	const location = useLocation();
 	const providerName = model.providerName ?? model.provider;
 	const destination = returnPath(`${location.pathname}${location.search}`);
+	useDialogFocusTrap(dialog);
 	useEffect(() => {
 		const previous = document.activeElement;
 		const node = dialog.current;

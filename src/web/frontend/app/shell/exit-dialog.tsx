@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiJson } from "../data/api";
+import { useDialogFocusTrap } from "./dialog-focus";
 import { ErrorNotice } from "./error-notice";
 
 type Lifecycle = { stopping: boolean; sessions: { id: string; title?: string; running: boolean }[] };
@@ -11,6 +12,7 @@ export function ExitDialog({ onClose }: { onClose: () => void }) {
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [exited, setExited] = useState(false);
+	useDialogFocusTrap(dialog, cancel);
 	useEffect(() => {
 		dialog.current?.showModal();
 		cancel.current?.focus();

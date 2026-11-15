@@ -27,7 +27,8 @@ function PromptField({
 }) {
 	const [value, setValue] = useState("");
 	const [choiceOpen, setChoiceOpen] = useState(false);
-	usePanelDismiss(choiceOpen, () => setChoiceOpen(false));
+	const choiceTrigger = useRef<HTMLButtonElement>(null);
+	usePanelDismiss(choiceOpen, () => setChoiceOpen(false), undefined, choiceTrigger);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
 	async function submit(event: FormEvent<HTMLFormElement>) {
@@ -56,7 +57,7 @@ function PromptField({
 					isDisabled={busy}
 				>
 					<Label>{prompt.message}</Label>
-					<Select.Trigger className="login-input">
+					<Select.Trigger ref={choiceTrigger} className="login-input">
 						<Select.Value>
 							{prompt.options.find((option) => option.id === value)?.label ?? "选择账号或组织"}
 						</Select.Value>

@@ -13,12 +13,32 @@ function escapeKey(event: KeyboardEvent) {
 	for (const dismiss of dismissers) dismiss(event);
 }
 
-/** 共用页面监听；有锚点时只响应会移动锚点的滚动。 */
-export function usePanelDismiss(open: boolean, onDismiss: () => void, anchor?: RefObject<HTMLElement | null>) {
+/** 共用页面监听；有锚点时只响应会移动锚点的滚动，Esc 关闭且焦点落空时归还触发器焦点。 */
+export function usePanelDismiss(
+	open: boolean,
+	onDismiss: () => void,
+	anchor?: RefObject<HTMLElement | null>,
+	returnFocus?: RefObject<HTMLElement | null>,
+) {
 	const callback = useRef(onDismiss);
 	callback.current = onDismiss;
+	const escaped = useRef(false);
+	const focusTarget = returnFocus ?? anchor;
 	useEffect(() => {
-		if (!open) return;
+		if (!open) {
+			if (escaped.current) {
+				escaped.current = false;
+				const restore = () => {
+					if (document.activeElement === document.body) {
+						focusTarget?.current?.focus({ preventScroll: true });
+					}
+				};
+				if (focusTarget?.current?.closest("[inert]")) requestAnimationFrame(restore);
+				else restore();
+			}
+			return;
+		}
+		escaped.current = false;
 		const dismiss = (event: Event) => {
 			if (
 				event.type === "scroll" &&
@@ -27,6 +47,7 @@ export function usePanelDismiss(open: boolean, onDismiss: () => void, anchor?: R
 				!event.target.contains(anchor.current)
 			)
 				return;
+			if (event.type === "keydown") escaped.current = true;
 			callback.current();
 		};
 		dismissers.add(dismiss);
@@ -41,5 +62,5 @@ export function usePanelDismiss(open: boolean, onDismiss: () => void, anchor?: R
 				window.removeEventListener("keydown", escapeKey);
 			}
 		};
-	}, [open, anchor]);
+	}, [open, anchor, focusTarget]);
 }

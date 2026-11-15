@@ -12,6 +12,16 @@ export function fileReference(path: string): string {
 	return `@${/[\s"@]/u.test(path) ? JSON.stringify(path) : path}`;
 }
 
+/** 在保留既有命令与文件 chip 序列化文本的前提下，替换末尾正在输入的 @query。 */
+export function replaceTrailingFileQuery(serialized: string, path: string): string {
+	const ref = `${fileReference(path)} `;
+	if (/(?:^|\s)@[^\s@]*$/u.test(serialized)) {
+		return serialized.replace(/(^|\s)@[^\s@]*$/u, (_, prefix: string) => `${prefix}${ref}`);
+	}
+	const trimmed = serialized.trimEnd();
+	return trimmed ? `${trimmed} ${ref}` : ref;
+}
+
 function chipLabel(token: string): string {
 	if (token.startsWith("/skill:")) return token.slice("/skill:".length);
 	return token.slice(1);

@@ -433,7 +433,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 /* 正文、空态与输入框共用宽度上限、窗口留白和居中规则。 */
 .conversation > *, .chat-empty, .chat-composer-area { width: calc(100% - var(--chat-column-gutter) - var(--chat-column-gutter)); max-width: var(--chat-column-max-width); min-width: 0; box-sizing: border-box; padding-inline: 0; margin-inline: auto; }
 .user-line { display: flex; justify-content: end; }
-.user-bubble { margin: 0; padding: var(--space-component) var(--space-section); border-radius: var(--radius-menu); background: var(--chat-bubble); color: var(--chat-ink); font-size: var(--font-body); line-height: var(--line-body); }
+.user-bubble { margin: 0; padding: var(--space-component) var(--space-section); border-radius: var(--radius-menu); background: var(--chat-bubble); color: var(--chat-ink); font-size: var(--font-body); line-height: var(--line-body); white-space: pre-wrap; }
 .assistant-block { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-component); }
 .turn-visible { display:flex; flex-direction:column; gap:var(--space-component); width:100%; min-width:0; }
 .conversation-status { display: flex; align-items: center; gap: var(--space-inline); min-height: var(--control); color: var(--chat-muted); }
@@ -483,6 +483,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 /* 删除按钮在缩略图右上角外移 6px。 */
 .draft-image-remove { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: var(--radius-full); background: color-mix(in srgb, var(--chat-ink) 90%, transparent); color: var(--chat-bg); opacity: 0; pointer-events: none; cursor: pointer; transition: opacity var(--duration-quick) var(--ease-smooth-out); }
 .draft-image:hover .draft-image-remove, .draft-image:focus-within .draft-image-remove { opacity: 1; pointer-events: auto; }
+.composer[data-dragging] { border-color: var(--chat-tool); box-shadow: var(--focus-shadow); }
 .composer .composer-input { max-height: 120px; }
 .composer--chat { height: auto; min-height: 105px; }
 .composer--chat .composer-actions { min-height: var(--control); }
@@ -1131,6 +1132,17 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 :root[data-theme="dark"] .login-message--error { color: #ff8a80; }
 @media (prefers-color-scheme: dark) { :root[data-theme="system"] .login-message--error { color: #ff8a80; } }
 .login-provider-popover { width: calc(424 * var(--login-unit)); padding: var(--space-section) var(--space-inline); border: var(--login-unit) solid var(--chat-border); border-radius: var(--radius-menu); background: var(--login-card); box-shadow: 0 calc(8 * var(--login-unit)) calc(24 * var(--login-unit)) #1a202414; }
+@media (min-width: 640px) {
+  .login-panel .login-card { width: max(360px, calc(480 * var(--login-unit))); height: auto; min-height: calc(480 * var(--login-unit)); max-height: calc(100% - 144px); top: min(calc(300 * var(--login-unit)), calc(50% - 180px)); }
+  .login-panel .login-switch { width: max(280px, calc(336 * var(--login-unit))); height: max(40px, calc(44 * var(--login-unit))); padding: 4px; }
+  .login-panel .login-switch button { min-height: 32px; }
+  .login-panel .login-fields { height: auto; flex: 1; }
+  .login-panel .login-field .login-input, .login-panel .login-submit { height: max(32px, calc(42 * var(--login-unit))); min-height: 32px; }
+  .login-panel .login-key-visibility { width: max(32px, calc(34 * var(--login-unit))); height: max(32px, calc(34 * var(--login-unit))); }
+  .login-panel .login-custom-checkbox { min-height: 32px; }
+  .login-panel .login-custom-checkbox input { min-width: 32px; min-height: 32px; }
+  .login-panel :is(.oauth-auth-link, .login-qr-actions .button) { min-height: 32px; }
+}
 .login-provider-list { display: flex; flex-direction: column; gap: var(--space-tight); padding: 0; outline: none; }
 .login-provider-option { display: flex; align-items: center; justify-content: space-between; gap: var(--space-inline); height: calc(32 * var(--login-unit)); padding: 0 var(--space-component) 0 var(--space-tight); border-radius: var(--radius-control); color: var(--chat-ink); font-size: calc(14 * var(--login-unit)); line-height: calc(21 * var(--login-unit)); min-height: calc(32 * var(--login-unit)); flex-shrink: 0; outline: none; cursor: pointer; transition: background-color var(--duration-quick) var(--ease-smooth-out); }
 .login-provider-option-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1409,11 +1421,13 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .code-copy-button:hover { background:var(--app-hover); color:var(--chat-ink); }
 .code-copy-button:focus-visible { outline:none; box-shadow:var(--focus-shadow); }
 .code-copy-button[data-copied] { color:var(--chat-tool); }
-.code-copy-feedback { display:block; margin-top:var(--space-micro); color:var(--tool-danger); font:12px/16px "CST UI Sans",sans-serif; }
-.code-copy-feedback:not([data-error]) { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.code-copy-feedback { position:absolute; top:6px; right:42px; z-index:1; display:inline-flex; align-items:center; min-height:var(--control-lg); max-width:calc(100% - 48px); margin:0; padding:0 var(--space-inline); border:1px solid var(--chat-border); border-radius:var(--radius-control); background:var(--notice-bg); color:var(--tool-danger); font:12px/16px "CST UI Sans",sans-serif; pointer-events:none; }
+.code-copy-feedback:not([data-error]) { width:1px; height:1px; min-height:0; padding:0; margin:-1px; border:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .notice-action { flex:none; display:inline-flex; align-items:center; min-height: var(--control-lg); padding: 0 var(--space-component); border:0; border-radius:var(--radius-control); background:transparent; color:var(--chat-tool); text-decoration:none; cursor:pointer; }
 .exit-dialog { position:fixed; inset:0; margin:auto; width:min(520px, calc(100vw - 48px)); max-height:calc(100vh - 48px); overflow:auto; padding: var(--space-group); border:1px solid var(--chat-border); border-radius:var(--radius-composer); background:var(--notice-bg); color:var(--chat-ink); animation:exit-modal-in var(--duration-fast) var(--ease-smooth-out); }
-.exit-dialog::backdrop { background:#060b0e40; }
+.exit-dialog::backdrop { background:#060b0e40; transition:opacity var(--duration-quick) var(--ease-smooth-out); }
+.exit-dialog[data-closing] { animation:none; pointer-events:none; }
+.exit-dialog[data-closing]::backdrop { opacity:0; }
 .model-key-heading { display:flex; align-items:center; gap: var(--space-component); margin-bottom: var(--space-group); }
 .model-key-heading > svg { flex:none; color:var(--notice-warning); }
 .model-key-dialog .model-key-heading h2 { margin:0; flex:1; min-width:0; }
@@ -1429,8 +1443,17 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .exit-dialog > p { margin:0 0 var(--space-section); font-size:var(--font-body); line-height: var(--line-body); }
 .exit-dialog .exit-description { color:var(--chat-muted); font-size:var(--font-ui); line-height: var(--line-ui); }
 .exit-session-list { margin: 0 0 var(--space-section); max-height:180px; overflow:auto; color:var(--chat-muted); font-size:var(--font-ui); line-height: var(--line-ui); }
+.dialog-form { display:flex; flex-direction:column; gap:var(--space-section); }
+.dialog-text-input { width:100%; height:var(--control-field); padding:0 var(--space-component); border:1px solid var(--chat-input-border); border-radius:var(--radius-control); background:var(--login-input-bg); color:var(--chat-ink); font-size:var(--font-body); line-height:var(--line-body); outline:none; transition:border-color var(--duration-quick) var(--ease-smooth-out), box-shadow var(--duration-quick) var(--ease-smooth-out); }
+.dialog-text-input:hover:not(:disabled) { border-color:var(--chat-muted); }
+.dialog-text-input:focus-visible { border-color:var(--chat-muted); box-shadow:var(--focus-shadow); }
+.dialog-text-input:disabled { opacity:.45; }
 .exit-actions { display:flex; justify-content:flex-end; gap: var(--space-component); flex-wrap:wrap; }
-.exit-actions button { min-height:var(--control-lg); border:0; border-radius:var(--radius-control); padding:0 var(--space-component); background:var(--notice-bg); color:var(--chat-ink); font-size:var(--font-ui); cursor:pointer; line-height: var(--line-ui); }
+.exit-actions button { min-height:var(--control-lg); border:0; border-radius:var(--radius-control); padding:0 var(--space-component); background:var(--notice-bg); color:var(--chat-ink); font-size:var(--font-ui); cursor:pointer; line-height: var(--line-ui); transition:background-color var(--duration-quick) var(--ease-smooth-out), opacity var(--duration-quick) var(--ease-smooth-out); }
+.exit-actions button:hover:not(:disabled) { background:var(--chat-bubble); }
+.exit-dialog button:focus-visible { outline:none; box-shadow:var(--focus-shadow); }
+.exit-actions .dialog-primary { background:var(--app-send); color:var(--app-send-icon); }
+.exit-actions .dialog-primary:hover:not(:disabled) { background:var(--app-send-hover); }
 .exit-dialog[data-exited] { background:var(--chat-bg); border-radius:var(--radius-menu); }
 .exit-dialog[data-exited] h2 { margin-bottom:var(--space-inline); }
 .exit-dialog[data-exited] p { margin:0; }

@@ -1,6 +1,6 @@
 import { Label, ListBox, Select } from "@heroui/react";
 import { ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { usePanelDismiss } from "../shell/panel-dismiss";
 
 export function ExportSelect<T extends string>({
@@ -17,7 +17,8 @@ export function ExportSelect<T extends string>({
 	onChange: (value: T) => void;
 }) {
 	const [open, setOpen] = useState(false);
-	usePanelDismiss(open, () => setOpen(false));
+	const trigger = useRef<HTMLButtonElement>(null);
+	usePanelDismiss(open, () => setOpen(false), undefined, trigger);
 	return (
 		<Select
 			className="export-select"
@@ -31,7 +32,7 @@ export function ExportSelect<T extends string>({
 			}}
 		>
 			<Label>{label}</Label>
-			<Select.Trigger className="export-select-trigger">
+			<Select.Trigger ref={trigger} className="export-select-trigger">
 				<Select.Value>{items.find((item) => item.id === value)?.label}</Select.Value>
 				<ChevronDown size={16} aria-hidden="true" />
 			</Select.Trigger>

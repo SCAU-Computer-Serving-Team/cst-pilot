@@ -62,7 +62,8 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 	}, [detail, example, outbox]);
 	const [forkOpen, setForkOpen] = useState(false);
 	const [messageMenuOpen, setMessageMenuOpen] = useState(false);
-	usePanelDismiss(messageMenuOpen, () => setMessageMenuOpen(false));
+	const messageMenuTrigger = useRef<HTMLButtonElement>(null);
+	usePanelDismiss(messageMenuOpen, () => setMessageMenuOpen(false), undefined, messageMenuTrigger);
 	const location = useLocation();
 	const transitioning = useViewTransitionState(location.pathname);
 	const entrance = useRef<{ id: string; snapshot: boolean } | null>(null);
@@ -172,7 +173,13 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 				{example && <span className="preview-tag">设计预览 · 示例数据</span>}
 				{!example && (
 					<Popover isOpen={messageMenuOpen} onOpenChange={setMessageMenuOpen}>
-						<Button variant="ghost" isIconOnly className="chat-menu-trigger" aria-label="消息菜单">
+						<Button
+							ref={messageMenuTrigger}
+							variant="ghost"
+							isIconOnly
+							className="chat-menu-trigger"
+							aria-label="消息菜单"
+						>
 							<EllipsisVertical size={22} />
 						</Button>
 						<Popover.Content placement="bottom end" className="sidebar-account-popover">

@@ -34,7 +34,13 @@ export function ModelPicker({
 	const [busy, setBusy] = useState(false);
 	const pending = useRef(false);
 	const navigation = useRef(0);
+	const openRef = useRef(open);
+	openRef.current = open;
+	const pageRef = useRef<Page>(page);
+	pageRef.current = page;
+	const escapeSubpageGuard = useRef(false);
 	const returnFocus = useRef<Exclude<Page, "main"> | null>(null);
+	const triggerButton = useRef<HTMLButtonElement>(null);
 	const modelButton = useRef<HTMLButtonElement>(null);
 	const thinkingButton = useRef<HTMLButtonElement>(null);
 	const listBox = useRef<HTMLDivElement>(null);
@@ -42,19 +48,30 @@ export function ModelPicker({
 		navigation.current++;
 		setOpen(false);
 	});
+	// 在组件首次挂载时抢先于 Popover 子树注册捕获监听，保证子列表 Esc 只退回主菜单，主菜单 Esc 归还入口焦点。
 	useLayoutEffect(() => {
-		if (!open || page === "main") return;
-		function returnToMain(event: KeyboardEvent) {
-			if (event.key !== "Escape" || event.isComposing || event.defaultPrevented) return;
+		function onEscape(event: KeyboardEvent) {
+			if (!openRef.current || event.key !== "Escape" || event.isComposing || event.defaultPrevented) return;
 			event.preventDefault();
 			event.stopPropagation();
-			returnFocus.current = page === "models" ? "models" : "thinking";
+			event.stopImmediatePropagation();
+			if (pageRef.current !== "main") {
+				escapeSubpageGuard.current = true;
+				queueMicrotask(() => {
+					escapeSubpageGuard.current = false;
+				});
+				returnFocus.current = pageRef.current === "models" ? "models" : "thinking";
+				navigation.current++;
+				setPage("main");
+				return;
+			}
 			navigation.current++;
-			setPage("main");
+			setOpen(false);
+			requestAnimationFrame(() => triggerButton.current?.focus());
 		}
-		window.addEventListener("keydown", returnToMain, true);
-		return () => window.removeEventListener("keydown", returnToMain, true);
-	}, [open, page]);
+		window.addEventListener("keydown", onEscape, true);
+		return () => window.removeEventListener("keydown", onEscape, true);
+	}, []);
 	useLayoutEffect(() => {
 		if (!open || page === "main" || busy) return;
 		function focusList() {
@@ -106,6 +123,7 @@ export function ModelPicker({
 		<Popover
 			isOpen={open}
 			onOpenChange={(next) => {
+				if (!next && escapeSubpageGuard.current) return;
 				navigation.current++;
 				setOpen(next);
 				if (next) {
@@ -116,6 +134,7 @@ export function ModelPicker({
 			}}
 		>
 			<Button
+				ref={triggerButton}
 				variant="ghost"
 				className="composer-model"
 				aria-label={`模型与思考强度：${selected?.name ?? "加载中"}，${thinkingLabel(thinking)}`}

@@ -1,6 +1,6 @@
 import { Label, ListBox, Select } from "@heroui/react";
 import { Check, ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ProviderStatus } from "../data/api";
 import { usePanelDismiss } from "../shell/panel-dismiss";
 
@@ -18,7 +18,8 @@ export function ProviderPicker({
 	onChange: (id: string) => void;
 }) {
 	const [open, setOpen] = useState(false);
-	usePanelDismiss(open, () => setOpen(false));
+	const trigger = useRef<HTMLButtonElement>(null);
+	usePanelDismiss(open, () => setOpen(false), undefined, trigger);
 	return (
 		<Select
 			isOpen={open}
@@ -31,7 +32,7 @@ export function ProviderPicker({
 			isDisabled={disabled || !providers.length}
 		>
 			<Label>{standalone ? "模型服务" : "Provider"}</Label>
-			<Select.Trigger className="login-input">
+			<Select.Trigger ref={trigger} className="login-input">
 				<Select.Value>
 					{providers.find((provider) => provider.id === selected)?.name ?? "选择模型服务"}
 				</Select.Value>
