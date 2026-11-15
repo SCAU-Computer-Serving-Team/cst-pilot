@@ -137,6 +137,10 @@ test("交互竞态：重命名生命周期与排序后的主动焦点切换", { 
 				document.querySelector('.session-rename-dialog').dispatchEvent(new Event('cancel', { cancelable: true }));
 			})()`);
 			await probe.until("!document.querySelector('.session-rename-dialog')", "关闭未保存的新弹窗");
+			await probe.until(
+				`document.activeElement === document.querySelector(${JSON.stringify(row(second.id))})`,
+				"取消后焦点归还会话行",
+			);
 		});
 		await t.test("重命名取消后关闭动画期间按 Enter 不发送保存请求", async () => {
 			await openRename(second.id);
