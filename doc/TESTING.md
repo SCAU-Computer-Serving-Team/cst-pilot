@@ -126,7 +126,7 @@ Rust 遥测网络测试通过 Node 创建本机 HTTP/TLS 服务。`crates/cst-pi
 
 ### Web 端到端核心链路
 
-浏览器 E2E 保留 TS 与 Rust 双入口。`npm run test:web:e2e --prefix agent` 启动 TypeScript 服务，`npm run test:web:rust-e2e --prefix agent` 通过 `startRustWebServer()` 启动 Rust 宿主，验收范围见[阶段 8](rust/plan/8.web.md#阶段-8-开发步骤与验收方案)。
+浏览器 E2E 保留 TS 与 Rust 双入口。`npm run test:web:e2e --prefix agent` 启动 TypeScript 服务，`npm run test:web:rust-e2e --prefix agent` 通过 `startRustWebServer()` 启动 Rust 宿主，验收范围见[阶段 8](rust/plan/8.web.md#阶段-8-开发步骤与验收方案)。基于 `bsk` 与 `cst-server --standalone-web` 的实机遍历与体验验收方案见[路由广度 E2E](test/web-rust-bsk-e2e.md)、[长会话与状态机深度 E2E](test/web-rust-bsk-deep-e2e.md)与[用户体验量化 E2E](test/web-rust-ux-e2e.md)。
 
 Rust 导出浏览器集成测试在 Windows 上运行，复用已安装的 Chrome 或 Edge。完整 CI 在 Windows 构建 `cst-server` 并运行两套浏览器 E2E；Linux Rust 核心 CI 保留无需本机浏览器的导出契约测试。
 
@@ -160,6 +160,7 @@ Rust 导出浏览器集成测试在 Windows 上运行，复用已安装的 Chrom
 - **模型热更新**：`model-catalog.test.ts` 验证 `PI_OFFLINE=1` 下刷新、缓存、并发、取消、临时密钥不落盘与登录刷新去重；`model-catalog.e2e.ts` 验证手动按钮、请求去重、后台 SSE 自动同步、失败缓存及浅深／窄屏布局。
 - **CSTOA 扫码展示**：`cstoa-device-login.e2e.ts` 验证登录页与服务配置页不显示设备授权码，保留真实二维码、倒计时、刷新、取消和手机授权后回账号页；覆盖浅深与窄屏，并验证其他 OAuth 服务仍展示必要设备码。
 - **模型偏好与自动保存**：`model-preferences.e2e.ts` 使用两个固定本地模型服务并隔离目录联网更新，验证最后一个模型勾选后保持启用、保存失败回滚与重试、刷新不改范围，以及保存期间更换提供商后的列表同步与失效筛选清除；`model-parity.test.ts` 核对默认范围保存与读取的返回值一致。
+- **异步交互**：`interaction-races.e2e.ts` 验证旧重命名响应不关闭新弹窗、取消关闭期间按 Enter 不保存，以及模型排序保存期间切换搜索框后保留输入和焦点。
 - **设置、登录与退出**：`settings-tabs.e2e.ts` 验证四分类双向滑动、下划线移动、连续切换、键盘与历史导航、浅深及窄屏、减少动态与无快照降级；另覆盖四分类设置路由、自定义模型服务增删改、模型范围拖拽与键盘排序、CSTOA 扫码与 APIKEY 登录、上下文额度面板、全局顶部通知、断线恢复、空闲与运行中安全退出确认。
 
 ## 实机环境覆盖矩阵
