@@ -4,7 +4,8 @@ use cst_pilot::{
 };
 use pi_agent::{AgentMessage, AgentToolResult};
 use pi_ai::{
-    AssistantMessageEvent, ContentBlock, Message, StopReason, UserContentBlock,
+    AssistantMessageEvent, ContentBlock, Message, StopReason, SystemMessage, Tool,
+    UserContentBlock,
     faux::{
         FauxResponseStep, create_faux_provider, faux_assistant_message, faux_text_message,
         faux_tool_call,
@@ -16,7 +17,8 @@ use pi_runtime::{
 };
 use pi_session::{
     AgentSessionEvent, Extension, ExtensionInitError, ExtensionRegistrar, ExtensionRunner,
-    PromptOptions, SessionDataPolicy, SessionManager, ToolDefinition,
+    PromptOptions, SessionDataPolicy, SessionEntry, SessionManager, SessionMessageEntry,
+    ToolDefinition,
 };
 use serde_json::json;
 use std::{
@@ -115,6 +117,100 @@ fn password_validation_redaction_and_invalid_field_contents_do_not_expose_secret
     ));
     let safe = PrivacyPolicy.persisted_message(message).unwrap();
     assert!(!serde_json::to_string(&safe).unwrap().contains(PASSWORD));
+}
+#[test]
+fn system_tool_schemas_survive_message_hooks_persistence_and_event_projections() {
+    let parameters = schemars::schema_for!(cst_pilot::bitlocker::model::Input).to_value();
+    let message = AgentMessage::System(SystemMessage {
+        content: format!("敏感正文 {PASSWORD}").into(),
+        sections: None,
+        tools_added: Some(vec![Tool {
+            name: "bitlocker".into(),
+            description: "BitLocker".into(),
+            parameters: parameters.clone(),
+            constrained_sampling: None,
+        }]),
+        tools_removed: None,
+        timestamp: 1,
+    });
+    let safe = PrivacyPolicy.persisted_message(message.clone()).unwrap();
+    let mut expected = message.clone();
+    let AgentMessage::System(system) = &mut expected else {
+        unreachable!()
+    };
+    system.content = format!("敏感正文 {HIDDEN}").into();
+    assert_eq!(safe, expected);
+    let entry = SessionEntry::Message(SessionMessageEntry {
+        id: "system-entry".into(),
+        parent_id: None,
+        timestamp: "2026-11-10T00:00:00Z".into(),
+        message: message.clone(),
+    });
+    for (event, pointer) in [
+        (
+            AgentSessionEvent::MessageStart {
+                message: message.clone(),
+            },
+            "/message",
+        ),
+        (
+            AgentSessionEvent::MessageEnd {
+                message: message.clone(),
+            },
+            "/message",
+        ),
+        (
+            AgentSessionEvent::MessageUpdate {
+                message: message.clone(),
+                assistant_message_event: AssistantMessageEvent::Start {
+                    partial: faux_text_message("正文"),
+                },
+            },
+            "/message",
+        ),
+        (
+            AgentSessionEvent::TurnEnd {
+                message: message.clone(),
+                tool_results: vec![],
+            },
+            "/message",
+        ),
+        (
+            AgentSessionEvent::AgentEnd {
+                messages: vec![message.clone()],
+                will_retry: false,
+            },
+            "/messages/0",
+        ),
+        (AgentSessionEvent::EntryAppended { entry }, "/entry/message"),
+    ] {
+        let safe = serde_json::to_value(PrivacyPolicy.project_event(event).unwrap()).unwrap();
+        let projected = safe.pointer(pointer).unwrap();
+        assert_eq!(projected["toolsAdded"][0]["parameters"], parameters);
+        assert_eq!(projected["content"], format!("敏感正文 {HIDDEN}"));
+    }
+}
+#[tokio::test]
+async fn message_end_hook_preserves_tool_schemas() {
+    let runner =
+        ExtensionRunner::from_extensions("test", vec![Box::new(extension(Vault::default()))])
+            .unwrap();
+    let message = AgentMessage::System(SystemMessage {
+        content: "工具定义".into(),
+        sections: None,
+        tools_added: Some(vec![Tool {
+            name: "bitlocker".into(),
+            description: "BitLocker".into(),
+            parameters: schemars::schema_for!(cst_pilot::bitlocker::model::Input).to_value(),
+            constrained_sampling: None,
+        }]),
+        tools_removed: None,
+        timestamp: 1,
+    });
+    assert_eq!(
+        runner.emit_message_end(message.clone()).await.unwrap(),
+        message
+    );
 }
 #[test]
 fn streaming_single_digit_chunks_never_reveal_credential_prefixes_or_json_deltas() {

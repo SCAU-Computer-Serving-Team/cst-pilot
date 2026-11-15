@@ -5,6 +5,7 @@ import {
 	activeTurnIndex,
 	formatDuration,
 	groupTurns,
+	isConversationMessage,
 	orderedParts,
 	splitTurn,
 	type TurnEntry,
@@ -195,4 +196,66 @@ test("formatDuration rounds to seconds and switches to minutes past sixty", () =
 	assert.equal(formatDuration(59_000), "59 秒");
 	assert.equal(formatDuration(65_000), "1 分 5 秒");
 	assert.equal(formatDuration(120_000), "2 分钟");
+});
+
+test("isConversationMessage and groupTurns omit system metadata while preserving orphan assistant turns", () => {
+	const rawSystemInit = {
+		id: "sys-1",
+		message: { role: "system", content: "", timestamp: 1 } as unknown as Message,
+	};
+	const rawSystemMid = {
+		id: "sys-2",
+		message: { role: "system", content: "", timestamp: 4 } as unknown as Message,
+	};
+	const rawToolResult = {
+		id: "tr-1",
+		message: { role: "toolResult" as const, toolCallId: "c1", content: "ok", timestamp: 3 },
+	};
+
+	assert.equal(isConversationMessage(rawSystemInit.message), false);
+	assert.equal(isConversationMessage(rawToolResult.message), false);
+	assert.equal(isConversationMessage(entry("user", 2, "问题").message), true);
+	assert.equal(isConversationMessage(entry("assistant", 3, "回答").message), true);
+	assert.equal(isConversationMessage(summary(5, "摘要").message), true);
+
+	// Leading and mid-conversation system entries must never create a phantom leading turn or attach to assistants.
+	const turnsWithSystem = groupTurns([
+		rawSystemInit,
+		entry("user", 2, "首轮提问"),
+		entry("assistant", 3, "首轮回答", "stop"),
+		rawSystemMid,
+		entry("user", 5, "次轮提问"),
+		entry("assistant", 6, "次轮回答", "stop"),
+	]);
+	assert.equal(turnsWithSystem.length, 2);
+	assert.equal(turnsWithSystem[0].user?.message.timestamp, 2);
+	assert.deepEqual(
+		turnsWithSystem[0].assistants.map((item) => item.message.timestamp),
+		[3],
+	);
+	assert.equal(turnsWithSystem[1].user?.message.timestamp, 5);
+	assert.deepEqual(
+		turnsWithSystem[1].assistants.map((item) => item.message.timestamp),
+		[6],
+	);
+
+	// Legitimate leading orphan assistant messages (truncated history, tool-only, error, aborted) remain intact.
+	const orphanTurns = groupTurns([
+		rawSystemInit,
+		entry("assistant", 10, [call("c-orphan")], "toolUse"),
+		summary(11, "分支摘要"),
+		entry("assistant", 12, "", "aborted"),
+	]);
+	assert.equal(orphanTurns.length, 3);
+	assert.equal(orphanTurns[0].user, undefined);
+	assert.deepEqual(
+		orphanTurns[0].assistants.map((item) => item.message.timestamp),
+		[10],
+	);
+	assert.equal(orphanTurns[1].summary?.message.summary, "分支摘要");
+	assert.equal(orphanTurns[2].user, undefined);
+	assert.deepEqual(
+		orphanTurns[2].assistants.map((item) => item.message.timestamp),
+		[12],
+	);
 });

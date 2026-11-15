@@ -6,6 +6,7 @@ import {
 	extractPayload,
 	fileReference,
 	parseEditor,
+	replaceTrailingFileQuery,
 	stringifyEditor,
 } from "./composer-editor.ts";
 
@@ -124,4 +125,17 @@ test("multiline text survives a round trip", () => {
 	const html = editorHtml(segments);
 	assert.match(html, /第一段<br>第二段/u);
 	assert.match(html, /data-token="@a\.txt"/u);
+});
+
+test("replaceTrailingFileQuery preserves existing skill and file chips across multiple selections", () => {
+	let serialized = "/skill:disk 排查 @chunk";
+	serialized = replaceTrailingFileQuery(serialized, "chunk-01.log");
+	assert.equal(serialized, "/skill:disk 排查 @chunk-01.log ");
+	serialized = replaceTrailingFileQuery(`${serialized}对比 @disk`, "logs/disk check.ps1");
+	assert.equal(serialized, '/skill:disk 排查 @chunk-01.log 对比 @"logs/disk check.ps1" ');
+	const segments = parseEditor(serialized, commands);
+	assert.deepEqual(
+		segments.filter((s) => s.kind === "chip").map((s) => s.token),
+		["/skill:disk", "@chunk-01.log", '@"logs/disk check.ps1"'],
+	);
 });

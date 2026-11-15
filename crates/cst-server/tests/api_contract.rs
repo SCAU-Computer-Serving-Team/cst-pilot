@@ -1154,3 +1154,598 @@ async fn unconnected_multiplex_slot_expires_and_releases_session_pins() {
     .await
     .expect("unconnected multiplex slot must expire and release session pins");
 }
+
+#[tokio::test]
+async fn session_snapshots_exports_and_fork_omit_system_messages_while_preserving_jsonl_and_tree() {
+    use pi_ai::{SystemContent, SystemMessage, UserMessage};
+
+    let fixture = ContractFixture::new();
+    let server = fixture.start_server(true).await;
+    let port = server.port();
+    let host_header = format!("127.0.0.1:{port}");
+    let origin_header = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::new();
+
+    let create_res: Value = client
+        .post(format!("{}/api/sessions", server.base_url()))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "create-sys-role-sess")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let session_id = create_res["id"].as_str().unwrap().to_owned();
+    let slot = server.state.pool.open_saved(&session_id).await.unwrap();
+
+    // Populate initial system metadata, user + assistant + toolResult, mid-conversation system metadata,
+    // second user + branch summary + orphan assistant.
+    let (sys_init_id, u1_id, sys_mid_id, u2_id, session_file) = slot
+        .session()
+        .with_session_manager_mut(|sm| {
+            let sys_init_id = sm.append_message(AgentMessage::System(SystemMessage {
+                content: SystemContent::Text(String::new()),
+                sections: Some(std::collections::BTreeMap::from([(
+                    "append".to_owned(),
+                    Some("INTERNAL_SYSTEM_PROMPT_PATCH".to_owned()),
+                )])),
+                tools_added: None,
+                tools_removed: None,
+                timestamp: 1_000,
+            }))?;
+            let mut u1 = UserMessage::new("首轮排障提问");
+            u1.timestamp = 1_010;
+            let u1_id = sm.append_message(AgentMessage::User(u1))?;
+
+            let mut a1 = faux_assistant_message(
+                vec![faux_tool_call(
+                    "ls",
+                    json!({"path": "."}).as_object().unwrap().clone(),
+                    Some("tc-sys-1".to_owned()),
+                )],
+                Some(StopReason::ToolUse),
+            );
+            a1.timestamp = 1_020;
+            sm.append_message(AgentMessage::Assistant(a1))?;
+
+            sm.append_message(AgentMessage::ToolResult(ToolResultMessage {
+                tool_call_id: "tc-sys-1".to_owned(),
+                tool_name: "ls".to_owned(),
+                content: vec![UserContentBlock::Text(TextContent {
+                    text: "ok".to_owned(),
+                    text_signature: None,
+                })],
+                details: None,
+                is_error: false,
+                timestamp: 1_030,
+                usage: None,
+                nested_calls: None,
+                duration_ms: Some(5),
+            }))?;
+
+            let sys_mid_id = sm.append_message(AgentMessage::System(SystemMessage {
+                content: SystemContent::Text(String::new()),
+                sections: Some(std::collections::BTreeMap::from([(
+                    "tools".to_owned(),
+                    Some("MID_CONVO_TOOL_LOADOUT".to_owned()),
+                )])),
+                tools_added: None,
+                tools_removed: None,
+                timestamp: 1_040,
+            }))?;
+
+            let mut u2 = UserMessage::new("次轮排障提问");
+            u2.timestamp = 1_050;
+            let u2_id = sm.append_message(AgentMessage::User(u2))?;
+
+            let _bs_id = sm.branch_with_summary(Some(&u2_id), "分支总结正文", None, None, None)?;
+
+            let mut orphan_asst = faux_assistant_message(Vec::new(), Some(StopReason::Aborted));
+            orphan_asst.timestamp = 1_070;
+            sm.append_message(AgentMessage::Assistant(orphan_asst))?;
+
+            let file = sm
+                .get_session_file()
+                .expect("flushed session file")
+                .to_path_buf();
+            Ok((sys_init_id, u1_id, sys_mid_id, u2_id, file))
+        })
+        .unwrap();
+
+    // Close and reload the session from disk so `session.state().messages` is hydrated from the
+    // persisted JSONL projection (which contains `AgentMessage::System`), verifying `messages` filtering too.
+    drop(slot);
+    server.shutdown().await;
+    let server = fixture.start_server(true).await;
+    let port = server.port();
+    let host_header = format!("127.0.0.1:{port}");
+    let origin_header = format!("http://127.0.0.1:{port}");
+    let raw_jsonl = fs::read_to_string(&session_file).unwrap();
+    assert_eq!(
+        raw_jsonl.matches("\"role\":\"system\"").count(),
+        2,
+        "JSONL persistence must retain both initial and mid-conversation system entries"
+    );
+
+    let snap_res: Value = client
+        .get(format!("{}/api/sessions/{session_id}", server.base_url()))
+        .header("Host", &host_header)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let snap_messages = snap_res["messages"].as_array().unwrap();
+    let message_roles: Vec<&str> = snap_messages
+        .iter()
+        .map(|m| m["role"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(
+        message_roles,
+        vec![
+            "user",
+            "assistant",
+            "toolResult",
+            "user",
+            "branchSummary",
+            "assistant",
+        ],
+        "GET /api/sessions/:id messages must exclude system while preserving branchSummary and visible messages"
+    );
+
+    let snap_entries = snap_res["entries"].as_array().unwrap();
+    let entry_roles: Vec<&str> = snap_entries
+        .iter()
+        .map(|e| e["message"]["role"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(
+        entry_roles,
+        vec![
+            "user",
+            "assistant",
+            "toolResult",
+            "user",
+            "branchSummary",
+            "assistant",
+        ],
+        "GET /api/sessions/:id entries must exclude system messages while keeping user, assistant, toolResult, branchSummary, and orphan assistant"
+    );
+    assert_eq!(snap_entries[0]["id"].as_str(), Some(u1_id.as_str()));
+    assert_eq!(
+        snap_entries[0]["parentId"].as_str(),
+        Some(sys_init_id.as_str())
+    );
+    assert_eq!(snap_entries[3]["id"].as_str(), Some(u2_id.as_str()));
+    assert_eq!(
+        snap_entries[3]["parentId"].as_str(),
+        Some(sys_mid_id.as_str())
+    );
+
+    // Export preview snapshot must likewise exclude system entries and internal system prompt strings.
+    let preview_res: Value = client
+        .post(format!(
+            "{}/api/sessions/{session_id}/exports/preview",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "preview-sys-role")
+        .json(&json!({
+            "format": "html",
+            "theme": "light",
+            "includeThinking": true,
+            "includeTools": true
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let preview_str = serde_json::to_string(&preview_res).unwrap();
+    assert!(!preview_str.contains("\"role\":\"system\""));
+    assert!(!preview_str.contains("INTERNAL_SYSTEM_PROMPT_PATCH"));
+    assert!(!preview_str.contains("MID_CONVO_TOOL_LOADOUT"));
+
+    // Tree endpoint must retain raw SessionEntry nodes so parentId chains and fork targets never break.
+    let tree_res: Value = client
+        .get(format!(
+            "{}/api/sessions/{session_id}/tree",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let tree_str = serde_json::to_string(&tree_res).unwrap();
+    assert!(tree_str.contains(&sys_init_id));
+    assert!(tree_str.contains(&sys_mid_id));
+
+    // Forking at u2's parentId (`sys_mid_id`) and u1's parentId (`sys_init_id`) must both succeed cleanly!
+    for (idx, fork_target) in [(&sys_mid_id, 1usize), (&sys_init_id, 0usize)]
+        .into_iter()
+        .enumerate()
+    {
+        let fork_resp = client
+            .post(format!(
+                "{}/api/sessions/{session_id}/fork",
+                server.base_url()
+            ))
+            .header("Host", &host_header)
+            .header("Origin", &origin_header)
+            .header("X-CST-Web-Request", "1")
+            .header("Idempotency-Key", format!("fork-sys-{idx}"))
+            .json(&json!({ "entryId": fork_target.0 }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(fork_resp.status(), 201);
+        let fork_json: Value = fork_resp.json().await.unwrap();
+        let forked_id = fork_json["id"].as_str().unwrap();
+        let forked_snap: Value = client
+            .get(format!("{}/api/sessions/{forked_id}", server.base_url()))
+            .header("Host", &host_header)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let user_count = forked_snap["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["message"]["role"].as_str() == Some("user"))
+            .count();
+        assert_eq!(user_count, fork_target.1);
+        assert!(
+            forked_snap["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|e| e["message"]["role"].as_str() != Some("system"))
+        );
+    }
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn browser_sse_single_and_multiplex_streams_filter_system_messages_across_all_event_types() {
+    use futures_util::StreamExt;
+    use pi_ai::{SystemContent, SystemMessage};
+    use tokio::net::TcpListener;
+
+    let mock_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mock_port = mock_listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = mock_listener.accept().await {
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 65536];
+                let _ = socket.readable().await;
+                let _ = socket.read(&mut buf).await;
+                let sse_body = concat!(
+                    "data: {\"id\":\"cmpl-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"已完成核查。\"},\"finish_reason\":null}]}\n\n",
+                    "data: {\"id\":\"cmpl-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":6,\"total_tokens\":18}}\n\n",
+                    "data: [DONE]\n\n"
+                );
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                    sse_body.len(),
+                    sse_body
+                );
+                let _ = socket.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+
+    let fixture = ContractFixture::new();
+    let agent_dir = fixture.root.join("agent/home");
+    fs::create_dir_all(&agent_dir).unwrap();
+    fs::write(
+        agent_dir.join("models.json"),
+        serde_json::to_string_pretty(&json!({
+            "providers": {
+                "mock-sse": {
+                    "baseUrl": format!("http://127.0.0.1:{mock_port}/v1"),
+                    "apiKey": "sk-mock-sse",
+                    "api": "openai-completions",
+                    "models": [{
+                        "id": "mock-chat",
+                        "name": "Mock Chat",
+                        "reasoning": false,
+                        "input": ["text"],
+                        "contextWindow": 128000,
+                        "maxTokens": 4096
+                    }]
+                }
+            }
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let server = fixture.start_server(true).await;
+    let port = server.port();
+    let host_header = format!("127.0.0.1:{port}");
+    let origin_header = format!("http://127.0.0.1:{port}");
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+
+    let create_res: Value = client
+        .post(format!("{}/api/sessions", server.base_url()))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "create-sse-sys-filter")
+        .json(&json!({ "provider": "mock-sse", "modelId": "mock-chat" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let session_id = create_res["id"].as_str().unwrap().to_owned();
+
+    // Open single-session SSE stream
+    let single_resp = client
+        .get(format!(
+            "{}/api/sessions/{session_id}/events",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(single_resp.status(), 200);
+    let mut single_stream = single_resp.bytes_stream();
+
+    // Open multiplex SSE stream and wait for stream_ready before subscribing
+    let mux_resp = client
+        .get(format!(
+            "{}/api/events/stream?clientId=mux-sys-filter",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(mux_resp.status(), 200);
+    let mut mux_stream = mux_resp.bytes_stream();
+
+    let mut mux_raw = String::new();
+    while !mux_raw.contains("\"stream_ready\"") {
+        let chunk = tokio::time::timeout(Duration::from_secs(3), mux_stream.next())
+            .await
+            .expect("multiplex stream_ready timeout")
+            .unwrap()
+            .unwrap();
+        mux_raw.push_str(&String::from_utf8_lossy(&chunk));
+    }
+
+    let sub_resp = client
+        .put(format!(
+            "{}/api/events/stream/mux-sys-filter/subscriptions",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "sub-mux-sys-filter")
+        .json(&json!({
+            "sessions": [&session_id],
+            "lastEventIds": {}
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(sub_resp.status(), 200);
+
+    // Turn 1: triggers initial SystemMessage append + EntryAppended + AgentEnd on a fresh session
+    let send1 = client
+        .post(format!(
+            "{}/api/sessions/{session_id}/messages",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "send-sse-sys-1")
+        .json(&json!({
+            "id": "msg-sse-1",
+            "text": "首轮排障消息",
+            "delivery": "queue"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(send1.status(), 202);
+
+    let mut single_raw = String::new();
+    while !single_raw.contains("\"type\":\"agent_end\"") {
+        let chunk = tokio::time::timeout(Duration::from_secs(5), single_stream.next())
+            .await
+            .expect("single stream turn 1 agent_end timeout")
+            .unwrap()
+            .unwrap();
+        single_raw.push_str(&String::from_utf8_lossy(&chunk));
+    }
+    while !mux_raw.contains("\"type\":\"agent_end\"") {
+        let chunk = tokio::time::timeout(Duration::from_secs(5), mux_stream.next())
+            .await
+            .expect("multiplex stream turn 1 agent_end timeout")
+            .unwrap()
+            .unwrap();
+        mux_raw.push_str(&String::from_utf8_lossy(&chunk));
+    }
+
+    // Simulate mid-session system metadata patch + Turn 2
+    let slot = server.state.pool.open_saved(&session_id).await.unwrap();
+    let session_file = slot
+        .session()
+        .with_session_manager_mut(|sm| {
+            sm.append_message(AgentMessage::System(SystemMessage {
+                content: SystemContent::Text(String::new()),
+                sections: Some(std::collections::BTreeMap::from([(
+                    "tools".to_owned(),
+                    Some("MID_SESSION_TOOL_PATCH_SECRET".to_owned()),
+                )])),
+                tools_added: Some(vec![pi_ai::Tool {
+                    name: "sys".to_owned(),
+                    description: "MID_SESSION_TOOL_DESC_SECRET".to_owned(),
+                    parameters: json!({"type": "object"}),
+                    constrained_sampling: None,
+                }]),
+                tools_removed: None,
+                timestamp: now_ms(),
+            }))?;
+            Ok(sm.get_session_file().unwrap().to_path_buf())
+        })
+        .unwrap();
+
+    let send2 = client
+        .post(format!(
+            "{}/api/sessions/{session_id}/messages",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "send-sse-sys-2")
+        .json(&json!({
+            "id": "msg-sse-2",
+            "text": "次轮排障消息",
+            "delivery": "queue"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(send2.status(), 202);
+
+    while single_raw.matches("\"type\":\"agent_end\"").count() < 2 {
+        let chunk = tokio::time::timeout(Duration::from_secs(5), single_stream.next())
+            .await
+            .expect("single stream turn 2 agent_end timeout")
+            .unwrap()
+            .unwrap();
+        single_raw.push_str(&String::from_utf8_lossy(&chunk));
+    }
+    while mux_raw.matches("\"type\":\"agent_end\"").count() < 2 {
+        let chunk = tokio::time::timeout(Duration::from_secs(5), mux_stream.next())
+            .await
+            .expect("multiplex stream turn 2 agent_end timeout")
+            .unwrap()
+            .unwrap();
+        mux_raw.push_str(&String::from_utf8_lossy(&chunk));
+    }
+
+    let disk_jsonl = fs::read_to_string(&session_file).unwrap();
+    assert!(
+        disk_jsonl.matches("\"role\":\"system\"").count() >= 2,
+        "disk JSONL must retain initial and mid-session system entries"
+    );
+
+    for (label, raw) in [("single", &single_raw), ("multiplex", &mux_raw)] {
+        assert!(
+            !raw.contains("\"role\":\"system\""),
+            "{label} SSE stream must never leak role=system in any event payload"
+        );
+        assert!(
+            !raw.contains("CST Pilot 固定诊断规则"),
+            "{label} SSE stream must never leak system prompt sections"
+        );
+        assert!(
+            !raw.contains("MID_SESSION_TOOL_PATCH_SECRET")
+                && !raw.contains("MID_SESSION_TOOL_DESC_SECRET"),
+            "{label} SSE stream must never leak mid-session system patch sections or tool definitions"
+        );
+        assert!(
+            raw.contains("\"clientMessageId\":\"msg-sse-1\"")
+                && raw.contains("\"clientMessageId\":\"msg-sse-2\""),
+            "{label} SSE stream must deliver decorated user messages for both turns"
+        );
+
+        let mut saw_entry_appended_user = false;
+        let mut saw_entry_appended_assistant = false;
+        let mut agent_end_count = 0usize;
+
+        for line in raw.lines() {
+            let Some(json_str) = line.strip_prefix("data: ") else {
+                continue;
+            };
+            let Ok(val) = serde_json::from_str::<Value>(json_str) else {
+                continue;
+            };
+            let payload = val.get("event").unwrap_or(&val);
+            match payload.get("type").and_then(Value::as_str) {
+                Some("entry_appended") => {
+                    let role = payload
+                        .pointer("/entry/message/role")
+                        .and_then(Value::as_str);
+                    assert_ne!(
+                        role,
+                        Some("system"),
+                        "{label} entry_appended must omit system messages"
+                    );
+                    if role == Some("user") {
+                        saw_entry_appended_user = true;
+                        assert!(
+                            payload
+                                .pointer("/entry/message/clientMessageId")
+                                .and_then(Value::as_str)
+                                .is_some(),
+                            "{label} entry_appended user message must carry clientMessageId"
+                        );
+                    }
+                    if role == Some("assistant") {
+                        saw_entry_appended_assistant = true;
+                    }
+                }
+                Some("agent_end") => {
+                    agent_end_count += 1;
+                    let msgs = payload
+                        .get("messages")
+                        .and_then(Value::as_array)
+                        .expect("agent_end must include messages array");
+                    assert!(
+                        !msgs.is_empty(),
+                        "{label} agent_end messages must retain visible turn messages"
+                    );
+                    for m in msgs {
+                        let role = m.get("role").and_then(Value::as_str).unwrap_or("");
+                        assert!(
+                            matches!(role, "user" | "assistant" | "toolResult" | "branchSummary"),
+                            "{label} agent_end message had unexpected role: {role}"
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        assert!(
+            saw_entry_appended_user,
+            "{label} must emit user entry_appended"
+        );
+        assert!(
+            saw_entry_appended_assistant,
+            "{label} must emit assistant entry_appended"
+        );
+        assert_eq!(
+            agent_end_count, 2,
+            "{label} must emit both agent_end events"
+        );
+    }
+
+    drop(slot);
+    server.shutdown().await;
+}

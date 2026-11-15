@@ -172,8 +172,18 @@ test("模型偏好：勾选自动保存、失败回滚、只读刷新与保存�
 		);
 		await browser.evaluate("window.__holdReads=false;window.__readWaiters.splice(0).forEach(resolve=>resolve())");
 		await browser.until(
-			"document.querySelector('.settings-models')?.textContent.includes('替换后的模型') && document.querySelector('.settings-provider-select')?.textContent.includes('全部')",
+			"document.querySelector('.settings-provider-select button')?.textContent.trim() === '全部'",
 			"保存期间更换服务后自动刷新并重置失效筛选",
+		);
+		if (
+			await browser.evaluate(
+				"document.querySelector('.settings-models-toggle')?.getAttribute('aria-expanded') === 'false'",
+			)
+		)
+			await browser.click(".settings-models-toggle");
+		await browser.until(
+			"document.querySelector('.settings-models')?.textContent.includes('替换后的模型')",
+			"展开完整列表后显示新增模型",
 		);
 		assert.equal(
 			await browser.evaluate(

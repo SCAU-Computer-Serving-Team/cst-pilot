@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-const canvas = JSON.parse(readFileSync(new URL("../web/design/cst-pilot-web.pen", import.meta.url), "utf8"));
+const canvas = JSON.parse(readFileSync(new URL("../../design/cst-pilot-web.pen", import.meta.url), "utf8"));
 function descendants(node) {
   return [node, ...(node.children ?? []).flatMap(descendants)];
 }
@@ -74,7 +74,7 @@ function componentShape(node, tools, sources, theme = {}, root = false) {
 }
 
 test("导出预览与保存结果直接复用正式整机概览工具设计", () => {
-  const tools = JSON.parse(readFileSync(new URL("../web/design/cst-pilot-tools.pen", import.meta.url), "utf8"));
+  const tools = JSON.parse(readFileSync(new URL("../../design/cst-pilot-tools.pen", import.meta.url), "utf8"));
   const sources = descendants(tools);
   for (const theme of ["浅色", "深色"]) for (const state of ["预览", "保存结果"]) {
     const section = canvas.children.find(node => node.name === "02 · 会话管理").children.find(node => node.name === "会话导出");

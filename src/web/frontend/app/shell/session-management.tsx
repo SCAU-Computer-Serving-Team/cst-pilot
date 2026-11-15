@@ -1,6 +1,7 @@
 import { CircleAlert, CircleCheck, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useDialogFocusTrap } from "./dialog-focus";
 import { Notification } from "./notification";
 import {
 	type DeletionResult,
@@ -132,6 +133,7 @@ export function SessionDeleteDialog({
 }) {
 	const dialog = useRef<HTMLDialogElement>(null);
 	const cancel = useRef<HTMLButtonElement>(null);
+	useDialogFocusTrap(dialog, cancel);
 	useEffect(() => {
 		const element = dialog.current;
 		const previous = document.activeElement;

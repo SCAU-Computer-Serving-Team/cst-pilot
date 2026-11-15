@@ -52,13 +52,18 @@ export type TurnEntry = { id?: string; message: Message };
 /** 一轮回答：一条用户消息加上其后全部助手消息（agent 循环里一轮可含多条助手消息）。分支总结自成一块。 */
 export type Turn = { user?: TurnEntry; assistants: TurnEntry[]; summary?: TurnEntry };
 
+/** 允许进入对话流与滑窗计数的消息角色白名单；排除 toolResult 与内部元数据角色（如 system）。 */
+export function isConversationMessage(message: { role?: unknown }): boolean {
+	return message.role === "user" || message.role === "assistant" || message.role === "branchSummary";
+}
+
 /** 按用户消息切分轮次；开头的孤立助手消息（例如被截断的历史）自成一轮，分支总结独占一块。 */
 export function groupTurns(entries: TurnEntry[]): Turn[] {
 	const turns: Turn[] = [];
 	for (const entry of entries) {
 		if (entry.message.role === "user") turns.push({ user: entry, assistants: [] });
 		else if (entry.message.role === "branchSummary") turns.push({ summary: entry, assistants: [] });
-		else {
+		else if (entry.message.role === "assistant") {
 			const last = turns.at(-1);
 			if (last && !last.summary) last.assistants.push(entry);
 			else turns.push({ assistants: [entry] });

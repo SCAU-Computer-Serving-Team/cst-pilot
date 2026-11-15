@@ -45,4 +45,4 @@
 
 ## 对 cst-pilot 的取舍
 
-页面结构以[界面画布](../../cst-pilot-web.pen)为准，跨页面视觉规则见 [DESIGN.md](../../../../../DESIGN.md)。
+页面结构以[界面画布](../../cst-pilot-web.pen)为准，跨页面视觉规则见 [DESIGN.md](../../../DESIGN.md)。

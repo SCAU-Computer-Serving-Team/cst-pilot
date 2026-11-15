@@ -10,6 +10,7 @@ test("认证错误提供重新登录且保留技术详情", () => {
 	assert.equal(e.action, "重新登录");
 	assert.match(e.detail, /401/);
 });
+
 test("写失败、限流与网络错误分类，未知错误不伪造原因", () => {
 	assert.equal(presentError("工具包目录无法写入，输入未被接受").kind, "storage");
 	assert.equal(presentError("429 rate limit").kind, "rate");
@@ -18,6 +19,7 @@ test("写失败、限流与网络错误分类，未知错误不伪造原因", ()
 	assert.equal(e.kind, "general");
 	assert.equal(e.detail, "provider internal exception");
 });
+
 test("会话占用与配置损坏给出对应恢复步骤", () => {
 	const owned = presentError(
 		"session_owned: 该会话正由另一端使用，请先关闭持有该会话的 TUI 或 Web 服务，再重新打开。",
@@ -81,4 +83,27 @@ test("详情遮蔽密钥，不将技术文本放主提示", () => {
 	assert.ok(!e.title.includes("500"));
 	assert.ok(!e.detail.includes("private-placeholder-token"));
 	assert.ok(!e.detail.includes("example-secret"));
+});
+
+test("待发消息 ENOSPC 隐藏原始错误码并保留详情", () => {
+	const out = presentError("Error: ENOSPC: no space left on device, write", { input: true });
+	assert.equal(out.kind, "storage");
+	assert.equal(out.title, "保存失败");
+	assert.ok(!out.title.includes("ENOSPC"));
+	assert.ok(!out.description.includes("ENOSPC"));
+	assert.match(out.detail, /ENOSPC/);
+});
+
+test("图片预算与导出尺寸超限映射为直白中文引导", () => {
+	const budget = presentError("图片总大小不能超过 12 MiB", { input: true });
+	assert.equal(budget.title, "图片总大小不能超过 12 MiB");
+	assert.match(budget.description, /保留当前文字草稿/);
+
+	const tall = presentError("export_too_tall: document exceeds 100000px");
+	assert.equal(tall.title, "导出内容过长");
+	assert.match(tall.description, /HTML/);
+
+	const large = presentError("export_too_large: payload exceeds 32 MiB");
+	assert.equal(large.title, "导出体积超出上限");
+	assert.match(large.description, /缩短当前分支/);
 });

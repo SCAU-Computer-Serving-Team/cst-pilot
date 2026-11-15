@@ -338,10 +338,7 @@ export function Sidebar({
 											moveSidebarSelection(topRef.current, selectionRef.current, event.currentTarget, true);
 										onNavigate?.();
 									}}
-									onContextMenu={(event) => {
-										event.preventDefault();
-										openSessionMenu(session, event.clientX, event.clientY);
-									}}
+									onOpenMenu={(x, y) => openSessionMenu(session, x, y)}
 								/>
 							))}
 							{!sessions.length && (state.stage || preview) && <p className="sidebar-empty">暂无会话</p>}
@@ -398,7 +395,12 @@ export function Sidebar({
 					>
 						<Settings size={22} aria-hidden="true" />
 					</Button>
-					<Popover.Content placement="right bottom" offset={20} className="sidebar-account-popover">
+					<Popover.Content
+						placement="right bottom"
+						offset={20}
+						containerPadding={16}
+						className="sidebar-account-popover"
+					>
 						<Popover.Dialog aria-label="账号菜单" className="sidebar-account-menu">
 							{cstoaSummary && (
 								<>
@@ -500,7 +502,10 @@ export function HomeSurface({
 	externalBackground?: boolean;
 }) {
 	const { outbox, records } = useMessageOutbox();
-	const outgoing = preview ? [] : outgoingFor(records);
+	// 首页只保留需要处理的发送记录；正常气泡由接管后的聊天页展示。
+	const outgoing = preview
+		? []
+		: outgoingFor(records).filter((item) => item.state === "failed" || item.state === "unknown");
 	async function send(text: string, config: ComposerConfig) {
 		const { messageId, ...payload } = config;
 		outbox.enqueue({ ...payload, id: messageId, text });

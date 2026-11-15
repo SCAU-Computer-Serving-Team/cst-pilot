@@ -2,7 +2,7 @@ use pi_agent::AgentMessage;
 use pi_ai::ContentBlock;
 use pi_session::{
     AgentSessionEvent, ExtensionRegistrar, MessageEndEventResult, SessionBeforeEventOutput,
-    SessionDataPolicy,
+    SessionDataPolicy, SessionEntry,
 };
 use regex::Regex;
 use serde::{Serialize, de::DeserializeOwned};
@@ -106,6 +106,28 @@ fn project<T: Serialize + DeserializeOwned>(value: &T, streaming: bool) -> Resul
     serde_json::from_value(json).map_err(|_| "敏感数据投影失败。".into())
 }
 
+fn preserve_tool_schemas(original: &AgentMessage, projected: &mut AgentMessage) {
+    let (AgentMessage::System(original), AgentMessage::System(projected)) = (original, projected)
+    else {
+        return;
+    };
+    // These are trusted tool declarations, not credential-bearing call arguments.
+    // Preserve every schema field, including a property named recoveryPassword.
+    for (original, projected) in original
+        .tools_added
+        .iter()
+        .flatten()
+        .zip(projected.tools_added.iter_mut().flatten())
+    {
+        projected.parameters.clone_from(&original.parameters);
+    }
+}
+fn project_message(message: &AgentMessage) -> Result<AgentMessage, String> {
+    let mut safe = project(message, false)?;
+    preserve_tool_schemas(message, &mut safe);
+    Ok(safe)
+}
+
 /// Stateless durable-input and subscriber projections. Transient secrets stay
 /// in the session's Vault, never in this policy or an event listener.
 pub struct PrivacyPolicy;
@@ -114,14 +136,63 @@ impl SessionDataPolicy for PrivacyPolicy {
         Ok(redact(text))
     }
     fn persisted_message(&self, message: AgentMessage) -> Result<AgentMessage, String> {
-        project(&message, false)
+        project_message(&message)
     }
     fn project_event(&self, event: AgentSessionEvent) -> Result<AgentSessionEvent, String> {
         let streaming = matches!(
             event,
             AgentSessionEvent::MessageUpdate { .. } | AgentSessionEvent::MessageStart { .. }
         );
-        project(&event, streaming)
+        let mut safe = project(&event, streaming)?;
+        match (&event, &mut safe) {
+            (
+                AgentSessionEvent::AgentEnd {
+                    messages: original, ..
+                },
+                AgentSessionEvent::AgentEnd {
+                    messages: projected,
+                    ..
+                },
+            ) => {
+                for (original, projected) in original.iter().zip(projected) {
+                    preserve_tool_schemas(original, projected);
+                }
+            }
+            (
+                AgentSessionEvent::MessageStart { message: original },
+                AgentSessionEvent::MessageStart { message: projected },
+            )
+            | (
+                AgentSessionEvent::MessageUpdate {
+                    message: original, ..
+                },
+                AgentSessionEvent::MessageUpdate {
+                    message: projected, ..
+                },
+            )
+            | (
+                AgentSessionEvent::MessageEnd { message: original },
+                AgentSessionEvent::MessageEnd { message: projected },
+            )
+            | (
+                AgentSessionEvent::TurnEnd {
+                    message: original, ..
+                },
+                AgentSessionEvent::TurnEnd {
+                    message: projected, ..
+                },
+            ) => preserve_tool_schemas(original, projected),
+            (
+                AgentSessionEvent::EntryAppended {
+                    entry: SessionEntry::Message(original),
+                },
+                AgentSessionEvent::EntryAppended {
+                    entry: SessionEntry::Message(projected),
+                },
+            ) => preserve_tool_schemas(&original.message, &mut projected.message),
+            _ => {}
+        }
+        Ok(safe)
     }
 }
 
@@ -230,7 +301,7 @@ impl Vault {
             async move {
                 vault.capture(&event.message)?;
                 Ok(Some(MessageEndEventResult {
-                    message: Some(project(&event.message, false)?),
+                    message: Some(project_message(&event.message)?),
                 }))
             }
         });
