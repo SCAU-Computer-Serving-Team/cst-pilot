@@ -13,6 +13,15 @@ pub const WORK_DURATION_CUSTOM_TYPE: &str = "cst-web-work-duration";
 pub const TOOL_EXECUTION_CUSTOM_TYPE: &str = "cst-web-tool-execution";
 pub const BITLOCKER_VERIFICATION_CUSTOM_TYPE: &str = "cst.bitlocker-state-verification";
 
+/// Returns true for message roles that belong in browser snapshots, exports, and SSE streams.
+pub fn is_browser_visible_message(message: &AgentMessage) -> bool {
+    match message {
+        AgentMessage::User(_) | AgentMessage::Assistant(_) | AgentMessage::ToolResult(_) => true,
+        AgentMessage::Custom(c) => c.role == "branchSummary",
+        AgentMessage::System(_) => false,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkDuration {
@@ -464,10 +473,54 @@ impl MessageDecorators {
         value
     }
 
+    /// Projects an `AgentSessionEvent` for browser SSE streams, omitting internal `system`
+    /// messages from `message_*`, `turn_end`, `entry_appended`, and `agent_end.messages`.
+    pub fn project_browser_event(&self, event: &AgentSessionEvent) -> Option<Value> {
+        match event {
+            AgentSessionEvent::MessageStart { message }
+            | AgentSessionEvent::MessageUpdate { message, .. }
+            | AgentSessionEvent::MessageEnd { message }
+            | AgentSessionEvent::TurnEnd { message, .. }
+                if !is_browser_visible_message(message) =>
+            {
+                None
+            }
+            AgentSessionEvent::EntryAppended {
+                entry: SessionEntry::Message(m),
+            } if !is_browser_visible_message(&m.message) => None,
+            AgentSessionEvent::AgentEnd {
+                messages,
+                will_retry,
+            } => {
+                let visible: Vec<Value> = messages
+                    .iter()
+                    .filter(|m| is_browser_visible_message(m))
+                    .map(|m| {
+                        let mut val = serde_json::to_value(m).unwrap_or(Value::Null);
+                        self.decorate_message_value(&mut val, false);
+                        val
+                    })
+                    .collect();
+                Some(json!({
+                    "type": "agent_end",
+                    "messages": visible,
+                    "willRetry": will_retry,
+                }))
+            }
+            _ => Some(self.decorate_event(event)),
+        }
+    }
+
     /// Decorates an `AgentSessionEvent` for SSE streaming (injects `clientMessageId` on `message`).
     pub fn decorate_event(&self, event: &AgentSessionEvent) -> Value {
         let mut value = serde_json::to_value(event).unwrap_or(Value::Null);
         if let Some(msg) = value.get_mut("message") {
+            self.decorate_message_value(msg, false);
+        }
+        if let Some(msg) = value
+            .get_mut("entry")
+            .and_then(|entry| entry.get_mut("message"))
+        {
             self.decorate_message_value(msg, false);
         }
         value

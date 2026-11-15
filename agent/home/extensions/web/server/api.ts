@@ -119,13 +119,37 @@ export function createWebApi(
 		);
 	const origin = `http://127.0.0.1:${port}`;
 	const exportRoutes = createExportRoutes(pool, agentDir, origin, writeOnce, options);
+	const isBrowserVisibleMessage = (message: { role?: unknown }): boolean =>
+		message.role === "user" ||
+		message.role === "assistant" ||
+		message.role === "toolResult" ||
+		message.role === "branchSummary";
 	async function inbox(id: string): Promise<SessionInbox> {
 		const slot = await pool.openSaved(id);
 		let instance = inboxes.get(id);
 		if (!streams.has(id)) {
-			const stream = new SessionEvents(slot.session, undefined, (event) =>
-				"message" in event ? { ...event, message: slot.inputs.decorate(event.message) } : event,
-			);
+			const stream = new SessionEvents(slot.session, undefined, (event) => {
+				if ("message" in event) {
+					if (!isBrowserVisibleMessage(event.message)) return undefined;
+					return { ...event, message: slot.inputs.decorate(event.message) };
+				}
+				if (event.type === "entry_appended" && event.entry.type === "message") {
+					if (!isBrowserVisibleMessage(event.entry.message)) return undefined;
+					return {
+						...event,
+						entry: { ...event.entry, message: slot.inputs.decorate(event.entry.message) },
+					};
+				}
+				if (event.type === "agent_end") {
+					return {
+						...event,
+						messages: event.messages
+							.filter(isBrowserVisibleMessage)
+							.map((message) => slot.inputs.decorate(message)),
+					};
+				}
+				return event;
+			});
 			streams.set(id, stream);
 			slot.ui.onChange((questions) => stream.publish("session", { type: "ui_requests", questions }));
 			const bitlocker = bitLockerWebInteractions.get(id);
@@ -143,6 +167,11 @@ export function createWebApi(
 					account.invalidate();
 					globalEvents.publish("state", { type: "quota_changed", providerId: "cstoa" });
 				}
+				if (
+					(event.type === "message_start" || event.type === "message_end") &&
+					!isBrowserVisibleMessage(event.message)
+				)
+					return;
 				if (["message_start", "message_end", "agent_start", "agent_end", "session_tree"].includes(event.type))
 					globalEvents.publish("state", { type: "sessions_changed", sessionId: id });
 			});
@@ -496,13 +525,14 @@ export function createWebApi(
 							revision: bitLockerWebInteractions.get(id)?.revision ?? 0,
 							epoch: bitLockerWebInteractions.get(id)?.epoch,
 						},
-						messages: slot.session.messages.map((message) =>
-							slot.inputs.decorate(slot.execution.decorate(message)),
-						),
+						messages: slot.session.messages
+							.filter(isBrowserVisibleMessage)
+							.map((message) => slot.inputs.decorate(slot.execution.decorate(message))),
 						entries: slot.session.sessionManager
 							.getBranch()
 							// 分支总结条目的 type 是 branch_summary，得单独转成前端认识的消息，否则正文里看不到它。
 							.filter((entry) => entry.type === "message" || entry.type === "branch_summary")
+							.filter((entry) => entry.type === "branch_summary" || isBrowserVisibleMessage(entry.message))
 							.map((entry) =>
 								entry.type === "branch_summary"
 									? {
