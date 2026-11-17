@@ -1,55 +1,45 @@
-# 便携发行规格
+# 便携发行与软件升级规格
 
-`release` 模块负责将官方 Pi 运行时、随包诊断程序、预打包第三方扩展与预构建 Web 前端装配为即插即用的 Windows x64 便携发行包。构建与字体管线见 [ARCHITECTURE.md](ARCHITECTURE.md)，命令行用法见 [pack/README.md](../../pack/README.md)。
+`release` 模块负责装配 Windows x64 免安装便携发行包，并提供基于 Ed25519 双重验签与事务回滚的软件内在线升级能力。构建与更新机制见 [ARCHITECTURE.md](ARCHITECTURE.md)，当前发行装配脚本见 [pack/README.md](../../pack/README.md)。
 
 ## 发行包组成要求
 
-现场只需解压 ZIP 并运行 `pi.cmd`，不在机主电脑安装 Node、Python、npm 或下载依赖。
+现场解压 ZIP 后直接启动，不在机主电脑安装任何脚本运行时、开发工具或内核驱动。
 
 | 组成部分 | 发行规格 |
 |---|---|
-| Pi 运行时 | 锁定官方 Windows x64 `0.85.1` 二进制及配套资源，逐文件核验 SHA-256；`pi.exe` 装配为 `agent/.runtime/prx.bin` |
-| 启动与品牌 | 根目录包含 `pi.cmd`、`pi-web.cmd`、`launcher.ps1`、`assets/logo.png`、`README.md`、`CHANGELOG.md`、`LICENSE`、`THIRD-PARTY-NOTICES.md` |
-| 随包诊断组件 | `pwsh/`（排除 Schemas、preview 与远程安装脚本）、`wiztree/`（排除运行期 ini 与 tmp）、`lhm/`（0.9.6 `.NET 10` 运行时 DLL） |
-| 第三方扩展 | `pi-web-access`（0.18.0）与 `@ff-labs/pi-fff`（0.10.6）经 esbuild 预打包至 `agent/home/packages/`，保留 `pi-fff` Windows x64 原生依赖链；`pi-open-tui`（0.2.10）原样复制 |
-| 项目扩展与技能 | `agent/home/extensions/`（排除所有 `test/` 目录）、`agent/home/skills/`、`agent/home/APPEND_SYSTEM.md` |
-| Web 导出运行依赖 | `puppeteer-core`（25.16.0）及其锁定依赖树复制到 `agent/node_modules/`，保留依赖包随附许可证；另附 `licenses/puppeteer-LICENSE.txt`，不包含浏览器或额外 Pi SDK |
-| Web 静态资源 | 每次打包从源码重新构建至 `agent/home/extensions/web/static/`，包含三档 `CSTUISans-*.woff2` 子集字体、`subset.json` 与字体许可 |
-| 预置配置 | 生成标准 `settings.json`、双端 `telemetry.json`、默认使用免费 Exa MCP 且仅放行 `198.18.0.0/15` 的 `web-search.json`，以及补齐默认模型 `deepseek/deepseek-flash` 的离线 `models-store.json` |
-| 元数据与校验 | 根目录生成 `VERSION`、`BUILD-INFO.json` 与覆盖全树文件的 `SHA256SUMS` |
+| 原生主程序 | 当前提供 `cst-updater.exe` 独立升级程序。阶段 9–11 统一切换为根目录提供 `cst-pilot.exe`（桌面与内置 TUI 主程序）、`cst-server.exe`（本机后台服务）与 `cst-updater.exe` |
+| 随包诊断组件 | `wiztree/`（排除运行期 `WizTree3.ini`、`WizTree3.ini.bad` 与 `tmp/`，保留 `license.txt`）、`lhm/`（`LibreHardwareMonitorLib.dll` 0.9.6 及其依赖）与 `lhm/host/cst-lhm-host.exe`（自包含 .NET 10 隔离采集器及运行时许可） |
+| 业务提示词与技能 | `agent/home/APPEND_SYSTEM.md`、`agent/home/skills/`（8 份维护技能说明），以及 `agent/home/extensions/telemetry/` 下的专用证书 `timserver_1.crt` 与币种映射 `currency.json` |
+| 界面与字体资产 | `agent/home/extensions/web/static/` 预构建静态产物（含三档 `CSTUISans-*.woff2` 子集字体与 `subset.json`）。阶段 9 补充随包桌面子集字体 `assets/fonts/CSTUISans-*.otf`、`JetBrainsMono-*.ttf` 及对应字体许可证 |
+| 预置标准配置 | 生成干净 `settings.json`、双端 `telemetry.json`、默认免费 Exa MCP 且仅放行 `198.18.0.0/15` 的 `web-search.json`，以及补齐默认模型 `deepseek/deepseek-flash` 的离线 `models-store.json` |
+| 文档、许可与校验 | `README.md`、`CHANGELOG.md`、`LICENSE`、`THIRD-PARTY-NOTICES.md`、`licenses/`、`doc/`，以及根目录生成的 `VERSION`、`BUILD-INFO.json` 与全树 `SHA256SUMS` |
 
-## Rust 诊断组件
-
-Rust 业务包使用 LHM 时，`lhm/host/` 必须包含通过 [`publish.ps1`](../../crates/cst-pilot/lhm-host/publish.ps1) 生成的完整自包含 .NET 10 目录及运行时许可；`lhm/` 保留 LHM 0.9.6 与原依赖 DLL。构建机安装 SDK，发行包运行时不依赖机主 .NET，也不附带构建缓存或模拟 DLL。
+注：阶段 11 纯 Rust 打包工具切换前，仓库通过 `pack/pack.mjs` 维护 `v0.6.2` 发行包与干净树红线回归检查。
 
 ## Rust 软件内升级
 
-Rust 升级包须满足以下要求：
+软件内升级引擎（`crates/cst-pilot/src/update/` 与 `cst-updater.exe`）满足以下安全与可靠性要求（双进程更新控制接口 `/api/app/update/*` 与双进程自检归属阶段 9 落地）：
 
-- 默认从 CSTOA 的 `/api/agent/releases/latest` 获取签名版本清单，启动后后台检查一次，支持手动检查。仅在新版高于本机版本且满足最低升级基线时提示可升级，安装须经本地确认。
-- 发布构建通过 `CST_UPDATE_PUBLIC_KEY` 编译官方 Ed25519 公钥。未配置公钥时默认升级入口不可用，不发更新请求；公钥不从下载清单获取。
-- 清单签名、`SHA256SUMS` 独立签名、归档摘要及全树哈希必须全部通过。归档仅包含 `cst-pilot/` 顶层目录，禁止链接、保留设备名、备用数据流、路径越界、大小写冲突、运行数据与凭据。
-- Rust 包包含 `cst-pilot.exe`、`cst-updater.exe`、版本与构建信息、8 份技能、系统提示词、遥测证书和第三方许可。版本须高于本机版本，且本机满足最低可升级基线。
-- 用户凭据、会话、遥测队列与 `artifacts/` 保持原样。四份预置配置按缺失字段合并，已有值、数组与动态模型条目保留。本机 `settings.json` 合并及健康检查中的 `settings.json`、`models.json` 沿用运行时的注释语法；重复字段及损坏配置报错并保留原文件，发行包配置继续使用严格 JSON。
-- 升级前拒绝仍在运行的会话、排队输入、工具与配置写入；交接期间关闭新输入和业务写入。更新器启动成功后共用 5 秒遥测定稿预算，不等待网络上传；启动失败保持原会话可用。宿主退出全部已核验的交接进程，库不直接退出进程。
-- 启动检测到未完成事务时，保留现场并先由独立更新器恢复，恢复前不加载业务资源。缺少正式公钥时只关闭更新入口，普通会话保持可用。
-- 运行态替换由独立更新器在原进程退出后执行，核对 PID 与创建时间。新版须在 15 秒内通过只读健康检查，检查期间保留当前事务，普通业务启动仍须先完成恢复；文件替换中断可按事务恢复，现场或备份发生变化时停止并保留文件。通过健康检查的版本保持有效，界面重启失败单独报告。
-
-清单协议与准备流程见 [ARCHITECTURE.md](ARCHITECTURE.md#rust-升级包准备)。生产签名公钥和发布源的签名清单由发行环境配置。
+1. **受控联网发现**：当前库层默认读取 `<oaHost>/api/agent/releases/latest` 获取签名版本清单（阶段 9 收敛为编译期显式注入 `CST_UPDATE_MANIFEST_URL`），启动后后台非阻塞检查一次并支持手动检查。仅在远端版本高于本机且本机不低于 `minUpgradableVersion` 时提示可升级，下载与安装须经本地确认。
+2. **编译期信任根与双重验签**：发布构建通过 `CST_UPDATE_PUBLIC_KEY` 编译注入官方 Ed25519 公钥。缺少编译期升级参数时关闭升级入口，普通会话保持可用，不从远端清单动态读取信任根。升级包安装前必须通过清单签名、`SHA256SUMS` 独立签名、归档哈希及解压后全树逐文件 SHA-256 校验。
+3. **程序区与用户数据区严格隔离**：升级过程原样保留 `agent/home/{auth,models,mcp-auth,web-settings,device}.json`（阶段 9 纳入 `desktop.json`）、`agent/home/{sessions,command-plans,telemetry,web-inbox,session-exports}/` 与 `artifacts/` 下的全部个人数据。四份预置配置（`settings.json`、`models-store.json`、`telemetry.json`、`web-search.json`）仅按缺失字段合并，保留用户已有设置。
+4. **空闲门禁与遥测定稿**：启动交接前先关闭输入与写入门禁（`ActivityGate`），确认无运行中会话、排队输入或 BitLocker 操作。独立更新器启动后在共享 5 秒预算内完成遥测定稿，不阻塞等待网络上传。
+5. **预写事务替换、进程自检与自动回滚**：独立更新器核验原宿主进程 PID 与创建时间并等待其退出后，按 `.state/update/transaction.json` 逐文件备份替换，随后在独立 Job Object 中执行新版 `--health-check`（15 秒总预算，阶段 9 覆盖双进程自检与启动自动 `--recover`）。自检失败、取消或替换中途断电重启时，按事务记录逆序恢复原版本文件。
 
 ## 干净发行树红线
 
-发行检查（`pack/release-checks.mjs`）对输出树执行强制校验，违反任一条即终止打包：
+无论是打包输出树还是在线升级归档，均执行以下六条强制校验，违反任一条立即拒绝发布或安装：
 
-1. **禁止开发与测试文件**：不得包含任何路径下的 `AGENTS.md`、前端源码（`src/`）、扩展测试目录（`extensions/*/test/`）、文档测试目录或构建缓存。
-2. **禁止运行态与个人数据**：不得包含 `.state/`、`.git/`、`sessions/`、`.cache/`、`auth.json`、`models.json`、`web-settings.json`、`agent/home/npm/`、`agent/home/fff/`、`agent/home/telemetry/`、`wiztree/tmp/`、`WizTree3.ini` 或 `.env`。
-3. **禁止完整字体、裸入口与链接**：Web 静态目录不得包含完整 `.otf` 字体文件；发行根不得存在未改名的 `pi.exe`；发行树不得包含符号链接或目录联接。
-4. **禁止任何凭据或密钥**：全树文件扫描拒绝疑似 API 密钥、GitHub 令牌、AWS 密钥、JWT 或私钥块；所有 `.json` 文件递归检查禁止出现非空的 `apiKey`、`accessToken`、`refreshToken`、`token`、`secret`、`password`、`authorization` 字段。
-5. **配置严格匹配**：`agent/home/web-search.json` 与 `agent/home/telemetry.json` 必须与 `pack/release-settings.mjs` 定义的常量完全一致，禁止复制构建机本地配置。
-6. **静态引用与许可完整**：`REQUIRED_RELEASE_FILES` 中的核心代码、证书（`timserver_1.crt`）、三方许可证（`licenses/`、`pwsh/LICENSE.txt`、`wiztree/license.txt`、字体许可）及 `index.html` / CSS 引用的所有静态资源必须全部存在于发行树中。CSS 相对引用按样式表位置解析，禁止越出 Web 静态目录或引用构建机文件。
+1. **禁止开发与测试文件**：不得包含任何路径下的 `AGENTS.md`、前端源码（`src/`）、测试目录或编译缓存。
+2. **禁止运行态与个人数据**：不得包含 `.state/`、`.git/`、`sessions/`、`.cache/`、`artifacts/`、`outbox/`、`agent/home/fff/`、`agent/home/npm/`、`auth.json`、`models.json`、`mcp-auth.json`、`web-settings.json`、`device.json`、`identity.json`（阶段 9 纳入 `desktop.json`）、`telemetry/` 待发与草稿目录、`session-exports/`、`command-plans/`、`wiztree/tmp/`、`WizTree3.ini`、`WizTree3.ini.bad`、`.env` 或 `.env.*`。
+3. **禁止越界路径与链接**：归档与发行树不得包含符号链接、Windows 目录联接（Junction）、硬链接、保留设备名、备用数据流（ADS）、`..` 越界路径或大小写冲突路径。Web 静态目录不得包含未裁剪的完整 `.otf` 源文件。
+4. **禁止任何凭据或密钥**：全树扫描拒绝疑似 API 密钥、GitHub 令牌、云厂商密钥、JWT 或私钥块。所有 `.json` 递归检查禁止出现非空的 `apiKey`、`accessToken`、`refreshToken`、`clientSecret`、`identityKey`、`token`、`secret`、`password` 或 `authorization` 字段。
+5. **预置配置精确匹配**：`agent/home/web-search.json` 与 `agent/home/telemetry.json` 必须与发行标准常量一致，禁止把构建机本机配置带入发行包。
+6. **静态资源与许可证齐备**：入口 HTML 与 CSS 引用的所有本地静态资源、专用证书及第三方开源许可证文件必须全部存在于发行树内，且相对路径不得越出所属静态目录。
 
 ## 验收与发布条件
 
-- 构建命令必须在已提权终端中执行，自动在独立 `_smoke` 副本中完成首次／再次 CLI 启动、10 个核心工具注册核验、Web 服务启动与真实 `read` 工具回合冒烟，测试运行态不进入正式发行目录。
-- 生成 ZIP 后解压到新临时目录，逐文件复核 `SHA256SUMS` 与干净树规则。
-- 实机 U 盘、跨机与目标浏览器验收要求见 [../TESTING.md](../TESTING.md)。
+- 构建产物在隔离副本中通过冷／热启动、17 个开放工具白名单核验、后台对话回合与安全退出冒烟测试，测试运行态不进入正式 ZIP。
+- 生成 ZIP 后解压至全新临时目录，逐文件复核 `SHA256SUMS` 与全部干净树红线。
+- 实机 U 盘、跨机移动与在线升级回滚验收按 [../TESTING.md](../TESTING.md) 执行。

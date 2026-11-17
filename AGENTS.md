@@ -1,19 +1,20 @@
 # 提示词
 
 ## 初始化
-1. 若从未阅读过，按照以下顺序阅读文档，获取关键信息
-  1. 基本情况：`doc\SPEC.md`、`README.md`、`doc\README.md`。
-  2. 架构、待办与测试：`doc\ARCHITECTURE.md`、`doc\TASKS.md`、`doc\TESTING.md`。
-  3. 按任务阅读对应模块目录
-4. 请了解 `earendil-works/pi`，本项目基于 Pi 二次开发，但是要遵循 Pi 的工程规范。有充足的文档可供后续阅读。
-5. 了解`Rust`社区与大型项目的最佳实践
-6. 了解`context-management`，本项目**必须优先考虑**`pi-context`提供的工具标注checkpoint。并且**仅在**明确切换任务且上下文开始变长（大于400K）时compact。
-7. 若执行`Pen.dev`等前端设计任务，必须阅读`emil`系、`gpui`系SKILLS，通过mcp获取`pen.dev`的操作方式。
+
+1. 若从未阅读过项目文档，按以下顺序阅读：
+   1. 基本情况：`doc\SPEC.md`、`README.md`、`doc\README.md`。
+   2. 架构、待办与测试：`doc\ARCHITECTURE.md`、`doc\TASKS.md`、`doc\TESTING.md`。
+   3. 按任务阅读对应模块目录（`pi-core`、`server`、`diagnostics`、`auth`、`telemetry`、`web`、`desktop`、`release`）及 `doc\rust\` 下的子包设计文档。
+2. 了解 `earendil-works/pi`。本项目 Rust 核心对齐上游 Pi `1.5.0`，遵循 Pi 工程规范。
+3. 遵循 Rust 社区与大型工作区工程实践。
+4. 优先使用 `pi-context` 提供的工具标注 checkpoint。仅在明确切换任务且上下文超过 400K 时执行 compact。
+5. 执行 `Pen.dev` 等前端设计任务前，阅读 `emil` 系与 `gpui` 系 SKILLS，并通过 MCP 获取 `pen.dev` 操作方式。
 
 ## 文档规范
 
-1. **必须**根据`timdocize`和`lieflat-less-ai-tone`的指导修改
-2. 也可参考下方对话规范。
+1. **必须**根据 `timdocize` 和 `lieflat-less-ai-tone` 的指导编写与修改。
+2. 同步遵守下方对话规范。
 
 ## 对话规范
 
@@ -24,17 +25,30 @@
    - 步骤用有序列表，并列项用无序列表。
    - 每节先给结论，再给理由。
    - 单段不超过 3 句。
-1. **必须极高信噪比**，对于未来很可能不再使用的信息，如各种旧实现，历史决策，应当不保留。仅保留对当下和未来有价值的内容。
+4. **保持极高信噪比**。旧实现、历史决策等后续不再使用的信息一律删除，仅保留对当下和未来有价值的内容。
+5. 描述 `pen` 画布节点时，同时提供 Node ID 和组件所在区域，避免只写裸 ID。
+6. **设计时可视化**。涉及界面设计方案时，直接在画布中新建或修改节点供查看。
 
-## 运行
+## 运行与调试
 
+构建前端并启动 Rust Web 独立服务：
+
+```powershell
+npm run build --prefix src/web/frontend
+.\pi-web-rust.cmd
 ```
-pi.cmd
+
+过渡期便携入口：
+
+```powershell
+.\pi.cmd
+.\pi-web.cmd
 ```
 
-调试验证：
+PowerShell 隔离配置目录调试（`cst-server` 校验上两级目录下存在 `agent\home`）：
 
-```bash
-export WSLENV=PI_CODING_AGENT_DIR
-export PI_CODING_AGENT_DIR='项目目录'
+```powershell
+New-Item -ItemType Directory -Force 'E:\tmp\<YYYY-MM-DD>\kit\agent\home' | Out-Null
+$env:PI_CODING_AGENT_DIR = 'E:\tmp\<YYYY-MM-DD>\kit\agent\home'
+$env:PI_OFFLINE = '1'
 ```

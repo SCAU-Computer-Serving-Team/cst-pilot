@@ -105,7 +105,7 @@ cst-pilot/
 4. 项目遥测默认启用，未登录时使用工具包安装签名上传，会话统计同时发送到 CSTOA 服务器和 Tim 的 `timserver_1`。CSTOA 登录仅提供经验证的上传账号。收集范围见 [信息收集契约](doc/contract.md)。
 5. WizTree 仅个人使用免费，商业使用需授权。本项目采用 [MIT 许可证](LICENSE)，第三方条款见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
-其他运行限制见 [运行时规格](doc/runtime/SPEC.md)。
+其他运行限制见 [后台服务与运行协调规格](doc/server/SPEC.md)。
 
 ## 使用方式
 
