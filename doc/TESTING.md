@@ -1,175 +1,139 @@
 # 测试与验收规范
 
-本文定义项目的自动化检查入口、测试隔离原则、诊断工具核查基准（B01–B35）、跨端共享矩阵与实机环境验收要求。运行日志、截图与临时状态统一写入仓库外当天临时目录（`E:/tmp/<YYYY-MM-DD>/` 或 `F:/tmp/<YYYY-MM-DD>/`）。
+本文定义项目的自动化检查入口、测试隔离原则，以及诊断工具核查组（B01–B35）与实机环境验收要求。运行日志、截图与临时状态统一写入仓库外临时目录（`E:/tmp/<YYYY-MM-DD>/` 或 `F:/tmp/<YYYY-MM-DD>/`）。
 
 ## 自动检查与测试入口
 
-以下命令均从仓库根目录执行：
+以下命令均从仓库根目录执行。Rust 工作区检查与前端静态检查为主线必跑项。`agent` 与 `pack` 下的 TypeScript 扩展检查在阶段 11 清理旧栈前保留为过渡回归入口。
 
 | 范围 | 命令 | 验证职责 |
 |---|---|---|
 | Rust 格式与编译 | `cargo fmt --all --check`、`cargo check --workspace --all-targets --locked` | Cargo 工作区格式与全部编译目标 |
 | Rust 静态检查 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | 全部 Rust 编译目标零警告 |
-| Rust 业务契约 | `cargo test -p cst-pilot --locked` | 工具允许名单、资源与凭据隔离、运行态硬链接拦截、普通硬链接放行、文件检索、SSRF、Exa 协议与缓存、常规原生诊断字段与单位、部分失败、取消超时、50 KiB 裁剪，以及方案版本、清单序号、编码、文件占用、链接保护、跨进程互斥、卷缓存、流式扫描、GPU 聚合、I/O 差分、传感器过滤、CSTOA 双模式登录与官方模型能力、损坏缓存备份重建及登出、自定义服务修订、额度缓存隔离和后台任务取消；联网与系统采集使用替身或本机服务，文件交付使用隔离目录 |
-| Rust 遥测专项 | `cargo test -p cst-pilot --test telemetry_collect --test telemetry_storage --test telemetry_network --test telemetry_session --locked` | 静默禁用、身份签名、匿名环境、指标隐私、查账预算、管道存活、跨进程目录锁、草稿封存、精确确认、损坏行隔离、双端发送、心跳合并、独立 CA、链接保护、真实 SDK 事件、重载与会话切换、30 秒定时提交、发行版本读取、关闭中断后的查账恢复、封存重试稳定性、版本化定稿和共享 5 秒关闭预算；仅使用替身及本机 HTTP/TLS 服务 |
-| Rust BitLocker 专项 | `cargo test -p cst-pilot --test bitlocker_privacy --test bitlocker_execution --locked`、`cargo test -p pi-session --test data_policy --locked` | 三条隐私边界、真实 SDK 与隐藏输入、固定目标与权限、原始返回码、超时／取消后复查、进程卷锁及退出释放；原生采集与变更均使用替身，不操作宿主加密状态 |
-| Rust 升级包准备 | `cargo test -p cst-pilot --test update_package --locked` | 双重验签、版本基线、流式下载、10 秒预算、ZIP 目录与解压资源上限、路径和链接保护、全树哈希、凭据扫描、带注释本机设置的合并、严格发行 JSON 及暂存清理；仅使用独立测试密钥、模拟传输和隔离发行树 |
-| Rust 更新执行 | `cargo test -p cst-pilot --test update_applier --locked` | 逐文件中断恢复、配置与用户数据保留、事务与备份冲突、目录联接、跨进程锁、父进程身份、独立交接、事务内公开健康检查、带注释设置与模型配置核验、普通启动隔离，以及真实 Windows 自检的成功／失败／15 秒超时；`rustc` 仅在隔离临时目录编译模拟主程序，不替换当前仓库或真实发行包 |
-| Rust 宿主更新 | `cargo test -p cst-pilot --test update_service --locked` | 共享后台检查、状态提示、真实 SDK 与本地确认、输入许可、忙碌拒绝、失败清理、取消与丢弃等待者、共享遥测关闭和缺少公钥的安全边界；Windows 上使用模拟传输和启动器，不启动真实更新程序 |
-| Rust 后台服务 | `cargo test -p cst-server --locked` | 单实例命名管道锁、正交 `AppPresence` 与 `ChannelMode` 读写锁及 Cookie 世代复核、10 空闲会话 LRU 淘汰与 `unflushed` 快照跨目录恢复、源持锁 `before` 位置安全 `fork`、持久化收件箱 `direct/queue/steer` 调度与 `uncertain` 恢复、三端主题隔离与升级门禁豁免、BitLocker 先校验后消费唤醒结算、SSE 慢连接 `8 MiB` 主动取消断流及多会话聚合流向量游标续传；另覆盖会话写锁等待期间的通道切换、三类 SSE 超限回放、去重任务取消后的等待者结算、并发冷加载、票据兑换后的刷新，以及 32 会话订阅与缺失来源的原子拒绝；覆盖请求体读取后撤销 Web 的三类 SSE 注册、`started` 落盘后的准入释放与重复请求等待、句柄及克隆的 LRU 固定、最后一次释放自动清理、并发回收重开与思考强度锁竞争；OAuth 流校验和业务错误到 HTTP 映射单独验证 |
-| Rust 核心回归 | `cargo test --workspace --locked` | 模型协议、Agent 循环、会话存储与运行时；默认仅请求本机模拟服务 |
-| Rust 故障恢复 | `cargo test --workspace --locked --features test-support`、`cargo clippy --workspace --all-targets --locked --features test-support -- -D warnings` | 启用存储故障注入，覆盖部分写入、同步与恢复失败；保留默认构建的独立检查 |
-| 工程静态检查 | `npm run check:engineering --prefix agent` | MJS、JSON、CSS 的 Biome 规则与 PowerShell 语法／PSScriptAnalyzer 1.24.0 |
-| 后端格式与类型 | `npm run check --prefix agent` | `agent/home/extensions/` 全部扩展的 Biome 检查与严格 TypeScript 类型检查 |
-| 前端格式与类型 | `npm run lint --prefix src/web/frontend`、`npm run typecheck --prefix src/web/frontend` | React 规则检查、路由类型生成与 TypeScript 检查 |
-| 工具与文档契约 | `node --test src/test/*.test.mjs` | 诊断工具行为、BitLocker 替身与跨进程卷锁、命令方案版本与交付恢复、runbook 原子写入、画布结构与颜色子集、Markdown 本地链接与锚点 |
-| 发行脚本与策略 | `node --test pack/test/*.test.mjs` | 启动器权限与参数、TUN 放行策略、离线模型目录、发行树白名单与资源完整性 |
-| OAuth 扩展 | `npm run test:oauth --prefix agent` | CSTOA 设备码、轮询、续期、TUI 授权链接展示、Web 设备码事件、动态模型目录与凭据隔离 |
-| Web 后端 | `npm run test:web --prefix agent` | HTTP/SSE 接口、会话池、收件箱队列、鉴权、附件与故障恢复 |
-| 跨端共享专项 | `npm run test:web:shared-audit --prefix agent` | 独立 Pi 进程与 Web 共用设置、模型目录、凭据、历史 `cwd`、单写权与独立主题 |
-| 前端单元测试 | `npm test --prefix src/web/frontend` | 工具卡片映射、分支树几何算法、会话预载缓存与结束事件合并、草稿图片与通知状态机 |
-| 前端构建与字体 | `npm run build --prefix src/web/frontend`、`npm run test:fonts --prefix src/web/frontend` | 静态资源构建、三档 WOFF2 子集覆盖、哈希与许可校验 |
-| Web 浏览器端到端 | `npm run test:web:e2e --prefix agent` | 构建后在隔离 Chrome 中验证完整用户链路、持久化与进程重启；模型选择专项覆盖三级菜单、双向左右滑动与同步高度、中途返回、逐级 Esc、外部关闭、保存失败与过期响应、首页传递、键盘、浅深与窄屏 |
-| Rust Web 浏览器端到端 | `cargo build -p cst-server --bin cst-server --locked`、`npm run test:web:rust-e2e --prefix agent` | 先构建前端，在 Windows 隔离 Chrome 中验证 Rust 宿主的乐观发送、聚合流分片、BitLocker 复查与 PNG/HTML 导出 |
-| 遥测单元与跨仓库 | `npm run test:telemetry --prefix agent`、`npm run test:telemetry:e2e --prefix agent` | 统计采集、草稿恢复、扣点查询、双端队列、心跳与真实 Go 接收端联调（后者需设置 `CST_TELEMETRY_RECEIVER`） |
+| Rust 核心与全局回归 | `cargo test --workspace --locked` | 模型协议（`pi-ai`）、Agent 循环（`pi-agent`）、会话存储与扩展（`pi-session`）、运行时 SDK（`pi-runtime`）、业务包与后台服务全量隔离测试 |
+| Rust 存储故障注入 | `cargo test --workspace --locked --features test-support`、`cargo clippy --workspace --all-targets --locked --features test-support -- -D warnings` | 开启故障注入特性，验证部分写入、同步失败与尾部恢复保护 |
+| Rust 业务与安全专项 | `cargo test -p cst-pilot --locked` | 17 工具白名单、凭据与硬链接拦截、SSRF 与 Exa 检索、原生诊断字段与 50 KiB 裁剪、方案版本与 BOM+CRLF 清单、卷身份缓存、GPU/I/O/传感器采集、CSTOA 双路由登录与额度缓存 |
+| Rust 遥测专项 | `cargo test -p cst-pilot --test telemetry_collect --test telemetry_storage --test telemetry_network --test telemetry_session --locked` | 静默开关、Ed25519 签名、请求扣点有界查询、双命名管道存活证明、目录锁、草稿封存恢复、双端独立队列与共享 5 秒关闭预算 |
+| Rust BitLocker 专项 | `cargo test -p cst-pilot --test bitlocker_privacy --test bitlocker_execution --locked`、`cargo test -p pi-session --test data_policy --locked` | 恢复密码三条隐私边界、BSTR 清零、本地隐藏输入与确认、同卷命名管道互斥、超时与崩溃后实时状态复查 |
+| Rust 软件内升级专项 | `cargo test -p cst-pilot --test update_package --test update_applier --test update_service --locked` | 双重签名与 ZIP 边界校验、配置合并、逐文件中断恢复、真实 Windows Job Object 15 秒健康检查、失败回滚与升级门禁协调 |
+| Rust 后台服务与导出 | `cargo test -p cst-server --locked` | 单实例管道锁、`AppPresence × ChannelMode` 正交门禁与 Cookie 世代作废、10 空闲会话 LRU 与 `unflushed` 快照恢复、安全 `fork`、持久化收件箱、8 MiB 慢连接取消、32 会话向量游标聚合流及 `Chromiumoxide` PNG/HTML 导出契约 |
+| 前端静态检查与单测 | `npm run lint --prefix src/web/frontend`、`npm run typecheck --prefix src/web/frontend`、`npm test --prefix src/web/frontend` | 复用 `agent` 目录已安装的 Biome 检查规则，执行路由类型生成、TypeScript 严格检查，以及工具卡片映射、分支树几何、聚合流状态机与乐观发送单测 |
+| 前端构建与字体子集 | `npm run build --prefix src/web/frontend`、`npm run test:fonts --prefix src/web/frontend` | 静态资源构建至 `agent/home/extensions/web/static/`，核验三档 WOFF2 子集字符覆盖、哈希与许可证 |
+| Rust Web 浏览器端到端 | `cargo build -p cst-server --bin cst-server --locked`、`npm run test:web:rust-e2e --prefix agent` | 在 Windows 隔离 Chrome 中驱动 `cst-server --standalone-web`，验证乐观发送、33 会话分片聚合流、BitLocker 复查卡片及 PNG/HTML 导出 |
+| 设计与文档契约 | `node --test src/test/*.test.mjs` | 画布节点唯一性与颜色令牌子集校验、全仓本地 Markdown 链接与标题锚点校验，以及过渡期工具契约回归 |
+| 工程与发行树检查 | `npm run check:engineering --prefix agent`、`npm run check --prefix agent`、`node --test pack/test/launcher.test.mjs pack/test/release-checks.test.mjs` | MJS/JSON/CSS 静态规则、PowerShell PSScriptAnalyzer 1.24.0 检查、启动器与干净发行树红线校验（按 `ci.yml` 初始化 `agent/home/npm` 后可运行全量 `pack/test/*.test.mjs`） |
+| 过渡期 TS 专项回归 | `npm run test:oauth --prefix agent`、`npm run test:telemetry --prefix agent`、`npm run test:web --prefix agent`、`npm run test:web:shared-audit --prefix agent`、`npm run test:web:e2e --prefix agent` | 阶段 11 下线旧栈前保留的 TypeScript 认证、遥测、Web 后端与浏览器 E2E 对照测试 |
 
 ### CI 执行范围
 
-日常 CI 在 `main` 推送和面向 `main` 的 PR 上运行。同分支的新任务会取消尚未完成的旧任务。
+日常 CI 在 `main` 推送和面向 `main` 的 PR 上运行，同分支新任务自动取消未完成的旧任务。
 
 | 模式 | 检查范围 |
 |---|---|
-| 日常 | Rust 格式、Clippy 与测试；工程静态检查、后端类型、OAuth 与遥测测试、启动器与发行树回归；前端格式、类型、单元测试及工具与文档契约 |
-| 完整验收 | 在日常范围上增加 Web 后端、跨端共享、全量发行脚本、前端构建、字体、Windows Rust 导出浏览器回归及 TS/Rust 双入口浏览器 E2E；手动执行 `gh workflow run ci.yml -f full=true` |
+| 日常 | Rust 格式、Clippy（含 `test-support`）与全工作区测试。前端格式、类型、单测与设计文档契约。工程静态检查、过渡期后端类型、OAuth/遥测测试与启动器及干净发行树回归 |
+| 完整验收 | 在日常范围上增加前端构建、字体子集校验、`cst-server` Windows 构建与导出测试、过渡期 `test:web` 与 `test:web:shared-audit`、全量 `pack/test/*.test.mjs`、隔离浏览器启停预检，以及 Rust / TS 双入口浏览器 E2E。通过 `gh workflow run ci.yml -f full=true` 手动触发 |
 
-完整验收先单独验证隔离 Chrome 的启动与退出，再执行浏览器 E2E。启动失败时保存 `browser-startup.json`，包含退出码与标准错误输出；调试请求有时间上限，失败后回收测试进程和服务。`browser-lifecycle.test.ts` 覆盖启动失败诊断与账号测试退出，`page-entrance.e2e.ts` 使用延迟列表响应验证首页与侧栏各自的入场时序。
+完整验收先单独验证隔离 Chrome 的启动与退出，启动失败时写出 `browser-startup.json` 记录退出码与标准错误，并在超时或失败后回收测试进程。
 
 ### Rust 测试环境
 
-Rust CI 使用 `1.99.1`，在 Linux 上运行。本地同时验证 Windows；Clippy 覆盖全部编译目标，CI 省略重复的 `cargo check`。`CARGO_TARGET_DIR` 指向 runner 临时目录，`PI_CODING_AGENT_DIR` 使用隔离目录，并设置 `PI_OFFLINE=1`。本地验证时，将编译产物和日志写入仓库外当天临时目录。
+Rust CI 使用 `1.99.1` 工具链。日常核心任务在 Linux 运行，完整验收在 Windows 同步编译并验证 `cst-server` 与浏览器导出。测试统一将 `CARGO_TARGET_DIR` 与 `PI_CODING_AGENT_DIR` 指向隔离临时目录，并固定设置 `PI_OFFLINE=1`。
 
-`pi-session` 的 `test-support` 功能默认关闭，`pi-runtime` 提供同名转发功能。仅启用时编译故障配置、注入接口与故障分支；CI 同时运行默认构建和启用后的测试与 Clippy。
+`pi-session` 与 `pi-runtime` 的 `test-support` 特性默认关闭，仅在显式启用时编译存储故障注入接口。CI 同时校验默认构建与 `test-support` 构建。
 
-`crates/pi-ai/tests/protocol_contracts.rs` 通过公开 `Models` 接口验证四种协议的多工具续答、图片输入、签名回放、事件顺序、正文超时与取消，并覆盖历史序列化和费用边界。
+`crates/pi-ai/tests/protocol_contracts.rs` 通过公开 `Models` 接口验证四种对话协议的多工具续答、图片输入与思考签名回放，覆盖事件顺序、超时与取消边界。位于 `crates/pi-ai/tests/stream_events.rs` 的真实 DeepSeek 联调用例默认忽略，仅在显式提供 `PI_AI_LIVE_DEEPSEEK_KEY` 时运行：
 
-Rust LHM 辅助程序需 .NET 10 SDK，仅构建机使用。执行 `./crates/cst-pilot/lhm-host/test.ps1 -WorkDirectory E:/tmp/<YYYY-MM-DD>/lhm-tests`，构建自包含程序与模拟 DLL，再通过真实 Job Object 验证调用。测试覆盖 GPU / sensor 模式、非有限值过滤、200 项上限、局部更新失败、`Open` 失败后的关闭与非法模式；不访问真实硬件。Cargo 默认忽略的 `lhm_host_fixture_is_loaded_through_real_job_object` 由该脚本显式执行。
+```powershell
+cargo test -p pi-ai live_deepseek_responses_roundtrip_with_tools --locked -- --ignored --exact
+```
 
-Rust 更新执行和宿主更新套件仅在 Windows 运行。测试包使用独立签名密钥，宿主协调测试注入模拟启动器；`update_applier` 在隔离目录编译并启动独立模拟业务程序，验证真实 Job Object 超时。正式公钥、发布源签名、主程序入口、U 盘拔插及真实断电需要发行与实机验收。
+LHM 隔离采集辅助程序需在安装 .NET 10 SDK 的构建机上验证，命令如下：
 
-Rust 认证专项 `auth_and_catalog`、`auth_management` 与 `auth_routing` 使用隔离凭据与模拟时钟。真实 HTTP 测试仅连接本机 Mock OA，核验 OAuth / APIKEY 的目录和 Chat Completions 路由、Bearer 头与拒绝重定向；不使用真实 OA 账号或模型密钥。
+```powershell
+./crates/cst-pilot/lhm-host/test.ps1 -WorkDirectory E:/tmp/<YYYY-MM-DD>/lhm-tests
+```
 
-Rust BitLocker 测试使用模拟卷与方法、真实通用 UI 通道和命名管道锁。`bitlocker_lock_child` 由父测试启动，用于验证独立进程互斥与强杀释放；Windows BSTR 清零测试仅分配测试字符串。真实 PacketPrivacy 连接、加密卷状态与操作在获准的隔离卷上按 B01–B35 验收。
+该脚本构建自包含辅助程序与模拟 DLL，在真实 Windows Job Object 中验证 `gpu` / `sensor` 双模式、非有限值过滤、200 项上限与异常关闭路径，不读取真实硬件。
 
-Rust 遥测网络测试通过 Node 创建本机 HTTP/TLS 服务。`crates/cst-pilot/tests/fixtures/telemetry-tls/` 中的证书和私钥仅供隔离测试，测试不安装 CA、不修改系统证书库；所有子进程在测试结束时回收。
-
-真实 DeepSeek 联调独立执行：仅从 `PI_AI_LIVE_DEEPSEEK_KEY` 接收显式提供的测试凭据，默认忽略，CI 不运行。命令为 `cargo test -p pi-ai live_deepseek_responses_roundtrip_with_tools --locked -- --ignored --exact`。该测试通过 `Models` 完成工具调用、结果回填和最终续答，并检查思考签名与用量。
+更新执行与宿主更新测试在 Windows 上运行，使用独立测试密钥与隔离目录编译的模拟主程序验证预写事务替换、15 秒健康检查超时与逆序回滚，不修改当前仓库。认证、BitLocker 与遥测网络测试均连接本机模拟服务（Mock OA、模拟加密卷、本机隔离 TLS 服务），不访问生产端点或宿主加密配置。
 
 ## 测试取舍与隔离原则
 
-1. **行为导向**：自动测试验证公开接口、持久化结果、故障恢复与权限边界；禁用源码字符串匹配、内部文件数量或脆弱的 CSS 字面量断言。
-2. **环境隔离**：测试必须使用临时 `PI_CODING_AGENT_DIR`、隔离浏览器配置与本机模拟服务（Mock OA / Mock LLM），禁止读取或修改本机真实 `auth.json`、会话记录或生产遥测端点。
-3. **诚实记录**：替身测试通过仅证明控制流与协议正确；真实 UAC 弹窗、真实 BitLocker 加密卷、Windows PE 与生产服务联调必须单独在实机环境验证并记录。
+1. **行为导向**：自动测试验证公开接口、持久化结果、故障恢复与权限边界。禁用源码字符串匹配、内部文件数量断言或脆弱的样式字面量比对。
+2. **环境隔离**：测试必须使用临时 `PI_CODING_AGENT_DIR`、隔离浏览器用户目录与本机模拟服务，禁止读取或修改开发者本机真实 `auth.json`、会话记录或生产遥测端点。
+3. **诚实记录**：替身测试通过仅证明控制流与协议正确。真实 UAC 提权、真实 BitLocker 加密卷、Windows PE、可移动介质与生产服务联调须单独在实机完成并记录。
 
 ## 诊断工具公共核查组（B01–B35）
 
-实机验证时，Agent 仅通过项目工具采集，核查者使用独立 PowerShell、系统工具或计时对照。`<Win>` 指系统 Windows 目录，`<Kit>` 指工具包目录，`<Sys>` 指系统盘符，`<Vol>` 指工具包所在卷根。
+实机验证时，Agent 仅通过项目工具采集数据，核查者使用独立系统工具或计时对照。`<Win>` 指系统 Windows 目录，`<Kit>` 指工具包目录，`<Sys>` 指系统盘符，`<Vol>` 指工具包所在卷根。
 
 ### disk 与 ls（B01–B10）
 
-1. **B01** `disk(space)` 全卷：与可访问卷对照，`freeGB <= totalGB`，剩余 0 保留为 `0`。
-2. **B02** `disk(info, drive=Kit盘)`：`volumes` 仅目标卷；物理盘关联成功时按盘过滤，关联失败时返回全量物理盘并附 `infoNotice`。
-3. **B03** `disk(health, drive=Sys)`：保留可用 SMART 字段与 `smartErrors`；区分管理员与普通权限的实际错误。
-4. **B04** `disk(usage, path=Kit, top=10)`：WizTree 成功时四类排行齐全；降级 `node-walk` 时仅含目录排行且标明原因。
+1. **B01** `disk(space)` 全卷：与可访问卷对照，`freeGB <= totalGB`，剩余空间为 0 时保留数值 `0`。
+2. **B02** `disk(info, drive=Kit盘)`：`volumes` 仅含目标卷。物理盘关联成功时按盘过滤，关联失败时返回全量物理盘并附 `infoNotice`。
+3. **B03** `disk(health, drive=Sys)`：保留可用 SMART 字段与 `smartErrors`，区分管理员与普通权限的实际错误。
+4. **B04** `disk(usage, path=Kit, top=10)`：WizTree 成功时四类排行齐全。降级 `node-walk` 时仅返回目录排行并注明原因。
 5. **B05** `disk(usage, path=Win/WinSxS, top=5)` 连续两次：记录冷／热耗时与结果量级。
 6. **B06** `disk(usage)` 不存在路径：整次报错，无挂起。
 7. **B07** `disk(all)`：`space`、`info`、`health` 独立返回成功数据或各自错误，互不吞没。
-8. **B08** `ls(path=Kit/pwsh, top=15)`：按大小倒序，`omitted` 项数与体积正确，未知大小保持 `null`。
-9. **B09** `ls(path=Win/WinSxS, top=10)`：在 B05 后复用共享缓存；跨卷查询不串用缓存。
+8. **B08** `ls(path=Kit/pwsh, top=15)`：按大小倒序，`omitted` 项数与体积准确，未知大小保持 `null`。
+9. **B09** `ls(path=Win/WinSxS, top=10)`：在 B05 后命中共享卷缓存 `wiztree-index`，跨卷查询不串用缓存。
 10. **B10** `ls(path=Vol)`：卷根目录与文件均可枚举，不可读项与预算停止如实说明。
 
 ### sys 与 startup（B11–B16）
 
-1. **B11** `sys(overview)`：CPU 在 0–100，`mem.usedMB <= totalMB`，机型与开机时长合理。
-2. **B12** `sys(proc, top=15)`：`byCpu` 与 `byMem` 各不超过 15 项，按实际采样间隔计算 CPU，内存对应工作集。
-3. **B13** `sys(gpu)`：适配器与设备管理器一致，单进程 `gpuPct` 取最繁忙引擎不累加超 100，多独显按 `uuid/pciBusId` 区分，NVIDIA 缺失可由 LHM 补充。
-4. **B14** `sys(sensor)`：单位正确，允许无可读传感器，`counterErrors` 如实反映热区／频率失败，低频不直接判过热。
-5. **B15** `sys(io)` 连续两次：记录冷／热耗时，区分物理盘吞吐与进程读写口径。
-6. **B16** `startup()`：注册表、启动文件夹、自启服务三类齐全；`disabled` 三态准确，不将 `Run` 状态套给 `RunOnce`。
+1. **B11** `sys(overview)`：CPU 在 `0–100` 之间，`mem.usedMB <= totalMB`，机型与开机时长准确。
+2. **B12** `sys(proc, top=15)`：`byCpu` 与 `byMem` 各不超过 15 项，按实际采样间隔计算 CPU，内存对应工作集 `wsMB`。
+3. **B13** `sys(gpu)`：适配器与设备管理器一致，单进程 `gpuPct` 取最繁忙单一引擎且不累加超 100，多独显按 `uuid / pciBusId` 区分，NVIDIA 缺失时由 LHM 补充。
+4. **B14** `sys(sensor)`：单位准确，允许无可读传感器，`counterErrors` 如实反映热区或频率读取失败，低频不单独判定为过热。
+5. **B15** `sys(io)` 连续两次：记录冷／热耗时，明确区分物理盘吞吐与进程读写差分口径。
+6. **B16** `startup()`：注册表、启动文件夹、自启服务三类齐全。`disabled` 三态准确，不将 `Run` 的禁用记录套给同名 `RunOnce` 项。
 
 ### driver、eventlog 与 runbook（B17–B35）
 
-1. **B17–B22** `driver`：`problem` 区分正常空数组与采集失败；`core` 核对网卡、蓝牙、音频、显示与四类驱动版本；`external` 对照 USB／蓝牙／显示器／可移动盘；`find` 验证 `class`、`id`（含 `HardwareID` 子串与特殊字符）、`name + class` 交集及空条件报错。
-2. **B23–B31** `eventlog`：`recent` 时间倒序且未截断时 `sum(counts.n) = total`；`boot`（含 `bluescreen`）、`crash`（含 Information 级 WER 与 `app` 全分组过滤）、`service`（排除 7045）、`disk`、`query`、`detail`（按 `recordId` 精确读取与轮转未找到）语义正确；`security` 普通权限明确返回 `admin: false, degraded: true`。
-3. **B32–B35** `runbook`：在 `artifacts/<当天>/runbook/` 生成 UTF-8 BOM + CRLF 的四行格式 `.txt`；同日序号递增、指定 `sequence` 覆盖修正且清理旧标题文件、跨天从 `01` 重置；命令含换行或必填项为空时整次报错且不留半成品；只读介质明确报错。
+1. **B17–B22** `driver`：`problem` 区分正常空数组与采集失败。`core` 核对网卡、蓝牙、音频与显示设备及驱动版本。`external` 对照 USB、蓝牙、显示器与可移动盘。`find` 验证 `class`、`id`（含 `HardwareID` 子串与特殊字符）、`name + class` 交集及空条件报错。
+2. **B23–B31** `eventlog`：`recent` 时间倒序且未截断时 `sum(counts.n) = total`。`boot`（含 `bluescreen` 去重）、`crash`（含 Information 级 WER 1001 与 `app` 全组过滤）、`service`（排除 7045）以及 `disk`、`query`、`detail`（按 `recordId` 精确读取与轮转未找到）语义准确。`security` 在非管理员下返回 `admin: false, degraded: true`。
+3. **B32–B35** `runbook`：在 `artifacts/<当天>/runbook/` 生成 UTF-8 BOM + CRLF 格式 `.txt`。同日序号递增，指定 `sequence` 原地替换并清理旧标题文件，跨天从 `01` 重置。命令含换行或必填项为空时整次报错且不留残余文件，只读介质明确报错。
 
-### BitLocker 验收
+### BitLocker 实机核查
 
-自动测试（`node --test src/test/bitlocker.test.mjs` 与 `bitlocker-lock.test.mjs`）使用 CIM 替身覆盖双端隐藏输入、固定目标确认、同卷跨进程互斥与 JSONL 脱敏。实机验收先在正常卷执行只读 `status`，再在获准的隔离测试加密卷上验证恢复密码解锁、错误密码返回码、锁定卷拒绝解密（`0x80310000`）、自动解锁依赖（`0x80310029`）及后台解密完成判据（`FullyDecrypted`）。
+自动测试通过模拟 COM/WMI 接口覆盖三条隐私边界、隐藏输入、固定目标确认，以及同卷跨进程命名管道锁与强杀重启复查。实机验收先在正常卷执行只读 `status`，再在获准的隔离加密测试卷上核验恢复密码解锁与错误返回码，同步覆盖锁定卷拒绝解密（`0x80310000`）、系统卷自动解锁依赖（`0x80310029`）及后台解密完成判据（`FullyDecrypted`）。
 
 ## 跨端共享与 Web 端到端验收
 
 ### 跨端共享矩阵（S01–S21）
 
-`npm run test:web:shared-audit --prefix agent` 与 Herdr 实机终端共同验证以下边界：
-
 | 编号 | 核查项 | 通过标准 |
 |---|---|---|
-| S01–S05 | 会话接管与模型范围 | TUI 落盘后 `/web` 接管一致；TUI `Enter` 与 Web 输入框仅改当前会话，`Ctrl+S` 与 Web 模型偏好保存默认；两端模型范围与顺序双向同步 |
-| S06–S07 | 独立主题与配置合并 | TUI 主题（`settings.json`）与 Web 主题（`web-settings.json`）互不覆盖；共享设置按字段合并 |
-| S08–S12 | 目录、凭据与思考强度 | `models.json` 与 `models-store.json` 更新后重读生效；双端登录与单服务退出同步；思考强度按模型档位保存 |
-| S13–S15 | 历史、`cwd` 与单写权 | 改名与续答双向可见；历史会话沿用原记录 `cwd` 执行 `read` 与 `@` 补全；一端持有写权时另一端拒绝写入（409） |
-| S16–S21 | 隔离与共享资源 | 禁用 `AGENTS.md`、保留 `APPEND_SYSTEM.md`；开放工具白名单一致；损坏配置提示类别且不泄密；收件箱、扫描缓存与遥测互不干扰 |
-
-`web-reopen.test.ts` 验证待机终端可重复输入 `/web` 打开浏览器、复用原服务，以及其他命令和退出快捷键不分发。真实 TUI 另核查关闭浏览器标签页或窗口后重新打开，确认原会话与后台任务保留。
-
-`runtime-input.test.ts` 验证本地扩展命令不刷新模型运行时、不解析可用范围、不检查凭据，以及部分或全部范围失效后的刷新与 Pi 原生发送错误。真实 TUI 另核查 `/model`、`/login` 与 `/web`，使用无凭据、失效范围的隔离配置。
+| S01–S05 | 通道切换与模型范围 | 软件端与 Web 切换通道后会话状态衔接一致。输入框切换仅改当前会话，模型偏好页保存新会话默认值。各端模型启用范围与排序实时同步 |
+| S06–S07 | 三端独立主题与配置合并 | TUI 主题（`settings.json`）、Web 主题（`web-settings.json`）与桌面端设置（`desktop-settings.json`，阶段 9 接入桌面壳层并迁移为 `desktop.json`）互不覆盖。共享设置按字段合并 |
+| S08–S12 | 目录、凭据与思考强度 | `models.json` 与 `models-store.json` 更新后即时生效。任一端登录或退出单服务后全局广播同步。思考强度按模型支持档位保存 |
+| S13–S15 | 历史、`cwd` 与单写权 | 改名与续答跨端可见。历史会话沿用记录中的 `cwd` 执行 `read` 与 `@` 补全。会话被其他进程持有写权时返回 `409` |
+| S16–S21 | 隔离与共享资源 | 忽略工作目录 `AGENTS.md`、保留 `APPEND_SYSTEM.md`。17 工具白名单一致。损坏配置按类别提示且不暴露密钥。收件箱、扫描缓存与遥测互不干扰 |
 
 ### Web 端到端核心链路
 
-浏览器 E2E 保留 TS 与 Rust 双入口。`npm run test:web:e2e --prefix agent` 启动 TypeScript 服务，`npm run test:web:rust-e2e --prefix agent` 通过 `startRustWebServer()` 启动 Rust 宿主，验收范围见[阶段 8](rust/plan/8.web.md#阶段-8-开发步骤与验收方案)。基于 `bsk` 与 `cst-server --standalone-web` 的实机遍历与体验验收方案见[路由广度 E2E](test/web-rust-bsk-e2e.md)、[长会话与状态机深度 E2E](test/web-rust-bsk-deep-e2e.md)与[用户体验量化 E2E](test/web-rust-ux-e2e.md)。
+基于 `bsk` 与 `cst-server --standalone-web` 的完整 Web 验收方案位于 `web` 模块测试目录：
 
-Rust 导出浏览器集成测试在 Windows 上运行，复用已安装的 Chrome 或 Edge。完整 CI 在 Windows 构建 `cst-server` 并运行两套浏览器 E2E；Linux Rust 核心 CI 保留无需本机浏览器的导出契约测试。
+1. [路由广度 E2E（bsk-e2e.md）](web/test/bsk-e2e.md)：覆盖全部 15 个叶路由与 28 个页内交互分支。
+2. [长会话与状态机深度 E2E（bsk-deep-e2e.md）](web/test/bsk-deep-e2e.md)：验证 500K 上下文自动压缩、瞬态重试、乐观发送对账，以及挂起交互桥与 33 会话聚合流分片。
+3. [用户体验量化 E2E（ux-e2e.md）](web/test/ux-e2e.md)：通过 5 类浏览器注入探针在 6 种视口断点与极限数据夹具下量化检验几何对齐、动效连续性、输入法焦点与流式零抖动。
 
-`npm run test:web:e2e --prefix agent` 覆盖以下完整浏览器链路：
+CI 自动化浏览器套件覆盖以下核心回归面：
 
-- **会话导出与产物**：
-  - `session-export.test.ts` 验证统一取时、当前分支、过程筛选、脱敏、路径边界、失败回收、重启登记与文件修改检测；`export-lifecycle.test.ts` 验证并发轮询状态单向、落盘后可见及创建中退出；`export-document.test.ts` 验证分页连续、资源并发与缓存、失败取消、fetch 未转发取消时的响应流回收和外部 URL 拒绝。
-  - `export-browser.e2e.ts` 验证 Puppeteer 进程复用、任务存储隔离、并发崩溃恢复、取消、启动中退出和空闲回收；`export-render.e2e.ts` 对分图逐行核对色带像素，并验证快速编码降级、账号接口阻断及超过 2 MiB 的正文完整传输。兼容降级由协议错误模拟，旧浏览器与企业策略环境仍需实测。
-  - `export-filenames.test.ts` 验证时间与分页命名、整组碰撞回收、并发排他发布及 UUID 文件登记读取；`export-open.test.ts` 验证目录校验、同源去重、路径注入拒绝、越界和启动失败。
-  - `export-controls.e2e.ts` 覆盖浅深窄屏、箭头对齐、菜单动效与键盘、实时分支及离页任务，并验证仅显示数量与目录、打开防连点、独立重试和迟到响应；`session-export.e2e.ts` 通过真实 API 和页面生成浅深 PNG、长文分图与 HTML，断网核对字体、附图、代码和折叠。
-  - `export-preview.e2e.ts` 验证延迟请求与附图加载期间保留旧文档、就绪后 250ms 淡入、滚动衔接、连续切换、失败重试及窄屏减少动态。
-  - `export-presentation.e2e.ts` 验证浅深 PNG 展开过程、思考与工具列表、详情保持折叠，HTML 离线逐层展开、隐藏正文所用字体与图片完整，以及窄屏排版。
-  - `export-layout.e2e.ts` 用同一组消息对照聊天与导出的轮次、过程容器、间距、缩进、两层引导线及箭头位置，逐帧验证 HTML 文档和默认 PNG 预览中的过程、思考与工具分组展开，并检查减少动态。
-  - `export-special-tools.e2e.ts` 对照浅深主题下聊天、PNG、HTML 与离线文档的特殊工具卡片，核对标题、背景、阴影、字号、间距与详情入口，并验证详情和检索关键词可离线展开。
-  - `export-transition.e2e.ts` 验证消息菜单、返回按钮、侧栏所有工作台去向、独立登录页和历史前进后退；逐帧检查右侧整页入退场、侧栏静止、无重复快照和模糊，覆盖浅深 1440/390px、键盘、直达、减少动态及无快照降级。设置 `CST_CAPTURE_EXPORT_MOTION=1` 保存关键帧与完成态截图。
-  - `export-performance.e2e.ts` 测量短会话与 500 段含代码长会话，两种格式各自覆盖冷启动和浏览器复用，共八项；从请求到保存完成逐项断言小于 10 秒，并核对高清尺寸、内容和下载完整性。性能测试单独串行运行，避免构建和并行负载干扰。
-  - `pack/test/runtime-dependencies.test.mjs` 验证发行副本可独立加载 Puppeteer、嵌套版本与许可证齐备、无额外 Pi SDK，版本漂移时拒绝装配。Runbook 契约覆盖指定日期、方案恢复和 `artifacts/<日期>/runbook/`。
-- **工作台滚动边界**：`workspace-scroll.e2e.ts` 验证长导出只在右侧滚动、侧栏始终铺满窗口；聊天、分支树、会话列表、设置、账号和首页切换保持同一侧栏，窄屏不带动外层页面。
-- **命令多轮与布局**：`runbook-roundtrip.e2e.ts` 使用实际方案存储生成两轮修订，覆盖重复调用 ID、结果缺少 `details`、复制、文件打开、压缩后刷新和服务重启恢复；在 1920、1366、960、390px 窗口覆盖正文与输入框边缘对齐、内容列宽度上限及浅深主题。
-- **页面入场**：`page-entrance.e2e.ts` 验证普通地址首次打开、首页与会话刷新、站内快速切换不补播、地址锚点与侧栏偏好保留、窄屏和减少动态。使用 20 个同名会话与 1.6 秒列表延迟，从刷新首帧核对侧栏整组入场、空列表补齐前不可见、选区对齐、底面静止且不透明，以及选中行不叠加背景；覆盖真实空列表、读取失败与刷新恢复。`browser-navigation.e2e.ts` 验证刷新销毁执行环境时，等待操作继续观察新文档。
-- **预载与流式连续性**：`session-preload.e2e.ts` 验证跨月最新十项分两批、每批五路并发预载、点击前路由入口就绪、首次及重复切换无需补载 JS/CSS、延迟刷新下同步切页、无旧正文、浅深与窄屏扫光及减少动态；`session-navigation.e2e.ts` 验证同名会话连续滑动、单层按下反馈、尺寸变化不中断滑动、正文淡入、历史 Markdown 节点数量、取消点击、修饰键、键盘导航、快速切换、历史返回与读取失败恢复；`process-disclosure.e2e.ts` 验证历史过程首次展开才挂载、首次展开高度动画、收起再展开保留节点及分页状态；`streaming-after-tool.e2e.ts` 验证运行中过程立即挂载、完成后保留节点、逐段正文及逐词节点在定稿后保留，延迟快照下正文不闪空。
-- **代码块复制**：`code-copy.e2e.ts` 覆盖高亮、无语言和缩进代码块、工具原文、换行保留、独立反馈、键盘、失败重试及浅深窄屏；`markdown-rendering.e2e.ts` 验证流式与定稿复制，`notification-lifecycle.e2e.ts` 验证技术详情复制与 Esc 焦点恢复。剪贴板测试使用浏览器内替身，不改动用户剪贴板。
-- **圆角与表格**：`radius.e2e.ts` 覆盖 1440、768、390px 浅深主题，检查 Markdown 表格圆角裁切、单层描边、键盘横向滚动、圆角令牌、特殊工具内层控件、分段控件内缩、全圆例外、登录间距网格与无超椭圆增强时的基础样式。
-- **转场清晰度**：`motion-clarity.e2e.ts` 检查已加载动效关键帧与实际页面快照均无高斯模糊，登录页静态背景保留模糊。
-- **图片预览**：`image-preview.e2e.ts` 覆盖消息、工具与草稿的共用预览，原位缩放与中途关闭、键盘打开与 Esc 收回、焦点与滚动恢复、窗口变化、浅深主题、窄屏和减少动态。
-- **特殊工具过程计数**：`turn-segments.test.ts` 与 `tool-state.test.ts` 覆盖所有特殊工具分类、普通工具进度、图片和空段；`special-tool-process.e2e.ts` 验证特殊组件后思考／正文不出现零次计数，保留内容、流式手动收起与工作时长入口，并核对刷新和浅深／窄屏。
-- **乐观发送与恢复**：`message-outbox.test.ts` 覆盖保存失败、同会话顺序、明确拒绝与未知结果、迟到响应、核对确认后继续等待项、刷新不重放、首页分阶段恢复和幂等重试；图片测试覆盖发送备份与保留草稿的回收引用。`input-messages.test.ts` 验证真实 Pi 的实时／历史消息关联、只读回执与宿主重启；`optimistic-send.e2e.ts` 覆盖立即清空与展示、正常发送无额外状态提示、失败期间继续输入、编辑及草稿切换、图片重试、刷新核对、首页接管、浅深窄屏、气泡节点保留、一次发送动效与减少动态。
-- **消息、流式与工具**：首页发送、响应丢失后按回执承接且不重复执行工具、单工具独立计时与冻结、过程折叠、特殊工具组件（BitLocker、整机概览、runbook、联网检索）交互、Markdown 块间距与代码高亮。`inbox.test.ts` 覆盖运行中的立即插话、排队转插话、附件准备顺序、暂停与关闭等待；`e2e.test.ts` 在模型响应被挂起时核对 SDK 已收到插话，并核对后续排队顺序与消息 ID。`pack/test/fetch-policy.test.mjs` 通过真实检索扩展与模拟 Exa 响应验证默认无弹窗、无浏览器审核，保留私网与重定向拦截。
-- **会话管理与分支**：侧栏最近二十项与 16px 字号、折叠、全部会话页四组时间边界与浅深设计稿、原生复选框与范围内全选、乐观删除与失败回滚、`/fork` 派生选择、`/tree` 五档过滤与几何对齐、分支总结三选项与生成中取消。
-- **首次模型配置**：`manual-model-selection.test.ts`、`model-key-prompt.test.ts` 与同名端到端测试验证无密钥时保留默认身份、其他服务不替代、仅在完全没有配置模型时自动提示且 24 小时内一次（刷新与切页不重复）、任一服务已配置时不自动提示、主动发送仍弹窗、草稿保留、CSTOA 登录与 APIKEY 入口、配置后返回、默认值与会话选择分离，以及浅深和窄屏状态。
-- **模型热更新**：`model-catalog.test.ts` 验证 `PI_OFFLINE=1` 下刷新、缓存、并发、取消、临时密钥不落盘与登录刷新去重；`model-catalog.e2e.ts` 验证手动按钮、请求去重、后台 SSE 自动同步、失败缓存及浅深／窄屏布局。
-- **CSTOA 扫码展示**：`cstoa-device-login.e2e.ts` 验证登录页与服务配置页不显示设备授权码，保留真实二维码、倒计时、刷新、取消和手机授权后回账号页；覆盖浅深与窄屏，并验证其他 OAuth 服务仍展示必要设备码。
-- **模型偏好与自动保存**：`model-preferences.e2e.ts` 使用两个固定本地模型服务并隔离目录联网更新，验证最后一个模型勾选后保持启用、保存失败回滚与重试、刷新不改范围，以及保存期间更换提供商后的列表同步与失效筛选清除；`model-parity.test.ts` 核对默认范围保存与读取的返回值一致。
-- **异步交互**：`interaction-races.e2e.ts` 验证旧重命名响应不关闭新弹窗、取消关闭期间按 Enter 不保存，以及模型排序保存期间切换搜索框后保留输入和焦点。
-- **设置、登录与退出**：`settings-tabs.e2e.ts` 验证四分类双向滑动、下划线移动、连续切换、键盘与历史导航、浅深及窄屏、减少动态与无快照降级；另覆盖四分类设置路由、自定义模型服务增删改、模型范围拖拽与键盘排序、CSTOA 扫码与 APIKEY 登录、上下文额度面板、全局顶部通知、断线恢复、空闲与运行中安全退出确认。
+- **会话导出与离线产物**：验证快照时间统一、当前分支与 BitLocker 复查投影、8 任务队列单向状态、同名分页整组换号与 SHA-256 篡改检测。同步验证 Explorer 目录打开、Edge/Chrome 进程复用、1240×3200 两倍图逐行像素连续性、离线 HTML 字体附图内嵌及 10 秒性能上限。
+- **外壳边界与页面转场**：验证右侧页面内部独立滚动、侧栏固定铺满窗口、20 条同名会话列表就绪后整组入场，以及滑动选区定位、导出页转场与图片原位缩放预览。
+- **流式连续性与过程折叠**：验证 10 会话两批预载、历史折叠懒挂载、流式逐词节点保留，以及特殊组件与普通工具分段计数、代码块与工具原文独立复制。
+- **乐观发送与收件箱队列**：验证立即上屏、断线按原 ID 核对、进程重启遗留 `uncertain` 保护，以及运行中立即插话（`steer`）优先于排队项（`queue`）在下一模型调用边界进入。
+- **认证、模型偏好与竞态保护**：验证首次缺密钥 24 小时冷却提示、CSTOA 二维码免授权码展示、模型选择器 224px 双级菜单滑动、模型范围勾选排序失败回滚，以及旧弹窗响应不干扰新弹窗等异步竞态边界。
 
 ## 实机环境覆盖矩阵
 
-发布前按以下四个维度抽样实机验证，不要求穷举笛卡尔积，但每个维度须有实测记录：
+发布前按以下四个维度抽样实机验证，每个维度保留实测记录：
 
 | 维度 | 样本范围 | 重点核查差异项 |
 |---|---|---|
-| 设备形态（D01–D07） | 组装机、品牌台式机、核显+独显笔记本、一体机、4–7 代酷睿 + 机械盘旧机 | `sys overview` 组装机默认字段、OEM 自启项、双显卡与虚拟显示器枚举、机械盘 IO 队列与忙碌度 |
-| 系统镜像（O01–O08） | Windows 11 家／专、Windows 10（1507–22H2）、政采裁剪镜像、非中文语言包 | 随包 `pwsh` 启动、CIM／存储模块缺失报错、PDH 计数器本地化路径、事件日志语言渲染、安全软件虚拟设备与 UKey 枚举 |
-| 启动介质（M01–M08） | USB 2.0 / 3.0 U 盘、移动机械盘、PSSD、SD 卡；覆盖 FAT32、exFAT、NTFS | 低速介质 `pi.cmd` 启动与 WizTree 导出耗时、非 NTFS 卷标 `wiztree-walk`、大文件统计、拔插换盘后清除旧卷缓存 |
-| PE 环境（P01–P10） | 微 PE、FirPE、优启通、官方 ADK WinPE；只读启动介质 | `prx.bin` 与 `pwsh` 启动、WMI／事件服务缺失時の结构化降级、`startup` 标明 PE 自身配置、`wiztree/tmp` 不可写时的降级与 `.state` 写入边界 |
+| 设备形态（D01–D07） | 组装机、品牌台式机、核显+独显笔记本、一体机、4–7 代酷睿 + 机械盘旧机 | `sys overview` 组装机默认字段、OEM 自启项、双显卡与虚拟显示器枚举、机械盘 I/O 队列与忙碌度 |
+| 系统镜像（O01–O08） | Windows 11 家／专、Windows 10（1507–22H2）、政采裁剪镜像、非中文语言包 | 原生 WMI／存储命名空间缺失降级、PDH 英文计数器转本地化路径、事件日志多语言格式化、安全软件虚拟设备与 UKey 枚举 |
+| 启动介质（M01–M08） | USB 2.0 / 3.0 U 盘、移动机械盘、PSSD、SD 卡，覆盖 FAT32、exFAT、NTFS | 低速介质启动与 WizTree 导出耗时、非 NTFS 卷标 `wiztree-walk`、换盘拔插后清空旧卷缓存、U 盘原位升级替换 |
+| PE 环境（P01–P10） | 微 PE、FirPE、优启通、官方 ADK WinPE，以及只读启动介质 | WMI／事件服务缺失时的结构化报错、`startup` 注明 PE 自身注册表、`wiztree/tmp` 或 `.state/` 不可写时的明确提示 |

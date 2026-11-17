@@ -12,7 +12,7 @@ node\node.exe pack\pack.mjs --official <官方ZIP或目录> --out <新的输出�
 
 发行树校验分两类：`checkReleaseTree` 拒绝项目 `AGENTS.md`、运行态、凭据与密钥；`checkReleaseContent` 要求 Web 入口页与样式表引用的资源、随包许可证文件齐备，缺一即拒绝打包。装配完成后 `SHA256SUMS` 覆盖全部发行文件，并在打包后复核。
 
-TUI 默认主题由 Pi 设置管理。Web 默认浅色，运行后保存到独立 `web-settings.json`，不复制构建机的外观选择。项目 `AGENTS.md` 不参与发行，运行指令由 `agent/home/APPEND_SYSTEM.md` 提供，见[运行时规格](../doc/runtime/SPEC.md)。
+TUI 默认主题由 Pi 设置管理。Web 默认浅色，运行后保存到独立 `web-settings.json`，不复制构建机的外观选择。项目 `AGENTS.md` 不参与发行，运行指令由 `agent/home/APPEND_SYSTEM.md` 提供，见[后台服务与运行协调规格](../doc/server/SPEC.md)。
 
 发行配置默认使用 DeepSeek 官方的 `deepseek-flash`（DeepSeek V4.1 Flash）。缺少密钥时保留模型身份并提示配置，其他服务不会自动替代。离线目录沿用 Pi 上游 `https://pi.dev/api/models`；打包时保留已有上游条目，缺少默认模型时补全。不复制本机 `auth.json`；运行时由队员在本机登录。
 
