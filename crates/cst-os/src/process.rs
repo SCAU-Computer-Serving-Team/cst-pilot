@@ -283,6 +283,130 @@ pub fn query_machine_app_path(exe_name: &str) -> Option<PathBuf> {
     }
 }
 
+/// Token security metadata for a running process (`session_id`, user SID bytes, and elevation state).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessTokenInfo {
+    pub session_id: u32,
+    pub user_sid: Vec<u8>,
+    pub elevated: bool,
+}
+
+impl ProcessTokenInfo {
+    /// Returns true if `other` belongs to the exact same OS user SID and logon/Terminal Services session.
+    pub fn same_user_and_session(&self, other: &Self) -> bool {
+        self.session_id == other.session_id && self.user_sid == other.user_sid
+    }
+}
+
+/// Queries the access token of `pid` (`None` if `pid` has exited).
+pub fn query_process_token_info(pid: u32) -> Result<Option<ProcessTokenInfo>, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+        use windows::Win32::{
+            Foundation::HANDLE,
+            Security::{
+                GetLengthSid, GetTokenInformation, IsValidSid, TOKEN_ELEVATION, TOKEN_QUERY,
+                TOKEN_USER, TokenElevation, TokenSessionId, TokenUser,
+            },
+            System::Threading::{OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION},
+        };
+
+        if pid == 0 {
+            return Err("进程标识无效。".into());
+        }
+        let proc_handle =
+            match unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) } {
+                Ok(h) => unsafe { OwnedHandle::from_raw_handle(h.0) },
+                Err(error) if error.code().0 as u32 == 0x8007_0057 => return Ok(None),
+                Err(_) => return Err("无法打开目标进程句柄核验权限。".into()),
+            };
+        let mut raw_token = HANDLE::default();
+        unsafe {
+            OpenProcessToken(
+                HANDLE(proc_handle.as_raw_handle()),
+                TOKEN_QUERY,
+                &mut raw_token,
+            )
+        }
+        .map_err(|_| "无法读取目标进程访问令牌。".to_owned())?;
+        let token = unsafe { OwnedHandle::from_raw_handle(raw_token.0) };
+        let token_handle = HANDLE(token.as_raw_handle());
+
+        let mut session_id = 0u32;
+        let mut ret_len = 0u32;
+        unsafe {
+            GetTokenInformation(
+                token_handle,
+                TokenSessionId,
+                Some((&mut session_id as *mut u32).cast()),
+                std::mem::size_of::<u32>() as u32,
+                &mut ret_len,
+            )
+        }
+        .map_err(|_| "无法读取进程登录会话标识。".to_owned())?;
+
+        let mut elevation = TOKEN_ELEVATION::default();
+        let mut elev_len = 0u32;
+        unsafe {
+            GetTokenInformation(
+                token_handle,
+                TokenElevation,
+                Some((&mut elevation as *mut TOKEN_ELEVATION).cast()),
+                std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+                &mut elev_len,
+            )
+        }
+        .map_err(|_| "无法读取进程令牌提权状态。".to_owned())?;
+
+        let mut user_len = 0u32;
+        let _ = unsafe { GetTokenInformation(token_handle, TokenUser, None, 0, &mut user_len) };
+        if user_len == 0 || user_len > 4096 {
+            return Err("无法读取进程用户安全标识符长度。".into());
+        }
+        let mut user_buf = vec![0u8; user_len as usize];
+        unsafe {
+            GetTokenInformation(
+                token_handle,
+                TokenUser,
+                Some(user_buf.as_mut_ptr().cast()),
+                user_len,
+                &mut user_len,
+            )
+        }
+        .map_err(|_| "无法读取进程用户安全标识符。".to_owned())?;
+
+        let token_user: &TOKEN_USER = unsafe { &*(user_buf.as_ptr().cast::<TOKEN_USER>()) };
+        let sid = token_user.User.Sid;
+        if sid.is_invalid() || !unsafe { IsValidSid(sid) }.as_bool() {
+            return Err("目标进程用户安全标识符无效。".into());
+        }
+        let sid_len = unsafe { GetLengthSid(sid) } as usize;
+        let sid_bytes = unsafe { std::slice::from_raw_parts(sid.0.cast::<u8>(), sid_len) }.to_vec();
+
+        Ok(Some(ProcessTokenInfo {
+            session_id,
+            user_sid: sid_bytes,
+            elevated: elevation.TokenIsElevated != 0,
+        }))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        Ok(Some(ProcessTokenInfo {
+            session_id: 0,
+            user_sid: Vec::new(),
+            elevated: false,
+        }))
+    }
+}
+
+/// Queries the access token of the current process.
+pub fn current_process_token_info() -> Result<ProcessTokenInfo, String> {
+    query_process_token_info(std::process::id())?
+        .ok_or_else(|| "当前进程访问令牌无法读取。".into())
+}
+
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
@@ -302,5 +426,9 @@ mod tests {
             crate::strip_windows_verbatim_prefix(&current_img.canonicalize().unwrap()),
             crate::strip_windows_verbatim_prefix(&expected_img)
         );
+
+        let token_info = current_process_token_info().unwrap();
+        assert!(!token_info.user_sid.is_empty());
+        assert!(token_info.same_user_and_session(&token_info));
     }
 }

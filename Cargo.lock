@@ -413,6 +413,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "cst-client"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "cst-kit",
+ "cst-os",
+ "cst-server",
+ "futures-core",
+ "futures-util",
+ "image",
+ "pi-ai",
+ "pi-runtime",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "url",
+ "uuid",
+ "windows",
+ "zeroize",
+]
+
+[[package]]
 name = "cst-kit"
 version = "0.1.0"
 dependencies = [

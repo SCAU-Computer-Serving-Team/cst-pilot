@@ -1,6 +1,6 @@
 # 桌面端与内置 TUI 规格
 
-`desktop` 模块定义统一软件端主程序 `cst-pilot.exe` 的目标规格（`crates/cst-client` 与 `crates/cst-desktop` 属阶段 9 待实施项，`crates/cst-tui` 属阶段 10 待实施项），通过本机客户端库连接公用后台服务 `cst-server`。静态设计、Shader 与整体设计以 [桌面端画布](../../design/cst-pilot-desktop.pen) 为最高规范，动效、令牌与交互行为以 [storybook.html](../../design/storybook.html) 为最高规范，文本规范见 [DESIGN.md](../../DESIGN.md)。客户端与窗口架构见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段实施细则见 [9.desktop.md](../rust/plan/9.desktop.md)。
+`desktop` 模块定义统一软件端主程序 `cst-pilot.exe` 的功能与交互规格（`crates/cst-client` 已落地，`crates/cst-desktop` 归属阶段 9 实施，`crates/cst-tui` 归属阶段 10 实施），通过本机客户端库连接公用后台服务 `cst-server`。静态设计、Shader 与整体设计以 [桌面端画布](../../design/cst-pilot-desktop.pen) 为最高规范，动效、令牌与交互行为以 [storybook.html](../../design/storybook.html) 为最高规范，文本规范见 [DESIGN.md](../../DESIGN.md)。客户端与窗口架构见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段实施细则见 [9.desktop.md](../rust/plan/9.desktop.md)。
 
 ## 窗口基线与启动约束
 

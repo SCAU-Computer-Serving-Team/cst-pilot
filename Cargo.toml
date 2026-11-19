@@ -10,6 +10,7 @@ members = [
     "crates/cst-updater",
     "crates/cst-kit",
     "crates/cst-server",
+    "crates/cst-client",
 ]
 
 [workspace.package]
