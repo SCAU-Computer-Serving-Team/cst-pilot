@@ -48,8 +48,31 @@ pub fn health_check(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Normalizes optional leading `'v'` on release version tags (`"v0.9.5"` == `"0.9.5"`).
+pub fn normalize_version_tag(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    trimmed.strip_prefix('v').unwrap_or(trimmed)
+}
+
+/// Runs `health_check(root)` and verifies an optional binary-compiled build version against `<kit_root>/VERSION`.
+/// Returns the verified `VERSION` string (`<ver>`) for `--health-check` stdout.
+pub fn run_cli_health_check_with_version(
+    root: &Path,
+    compiled_build_version: Option<&str>,
+) -> Result<String, String> {
+    health_check(root)?;
+    let disk_version = layout::read_version(root)?;
+    if let Some(build_ver) = compiled_build_version
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        && normalize_version_tag(&disk_version) != normalize_version_tag(build_ver)
+    {
+        return Err("健康检查发现程序内置版本与工具包 VERSION 不一致。".into());
+    }
+    Ok(disk_version)
+}
+
 /// Runs `health_check(root)` and returns the verified `VERSION` string (`<ver>`) for `--health-check` stdout.
 pub fn run_cli_health_check(root: &Path) -> Result<String, String> {
-    health_check(root)?;
-    layout::read_version(root)
+    run_cli_health_check_with_version(root, option_env!("CST_BUILD_VERSION"))
 }

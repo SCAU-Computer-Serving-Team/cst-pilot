@@ -109,7 +109,10 @@ async fn main() -> ExitCode {
     };
 
     if args.health_check {
-        return match cst_kit::update::handoff::run_cli_health_check(&kit_root) {
+        return match cst_kit::update::handoff::run_cli_health_check_with_version(
+            &kit_root,
+            option_env!("CST_BUILD_VERSION"),
+        ) {
             Ok(version) => {
                 println!("cst-pilot {version}");
                 ExitCode::SUCCESS

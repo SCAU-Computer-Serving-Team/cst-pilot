@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::error::ClientError;
 use crate::state::LifecycleReportDto;
-use crate::workspace::{ComposerDraft, SendMode, SharedImageHandle};
+use crate::workspace::{ComposerDraft, InlineToken, SendMode, SharedImageHandle};
 
 /// Validates that `id` matches `^[a-zA-Z0-9_-]{1,128}$`.
 pub fn is_valid_client_key(id: &str) -> bool {
@@ -41,6 +41,12 @@ pub enum OutboxItemState {
         message: String,
         credentials_required: bool,
     },
+}
+
+impl OutboxItemState {
+    pub fn is_in_flight(&self) -> bool {
+        matches!(self, Self::CreatingSession { .. } | Self::Sending)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +103,28 @@ impl OutboxItem {
             created_at_ms: now_ms,
             state,
         })
+    }
+
+    pub fn to_composer_draft(&self) -> ComposerDraft {
+        let mut tokens = Vec::new();
+        if let Some(ref skill) = self.skill {
+            let cmd = format!("/skill:{skill}");
+            tokens.push(InlineToken::Command {
+                raw: cmd.clone(),
+                name: cmd,
+            });
+        }
+        let cursor_char_offset = self.text.chars().count();
+        ComposerDraft {
+            text: self.text.clone(),
+            tokens,
+            images: self.images.clone(),
+            send_mode: self.send_mode,
+            cursor_char_offset,
+            selected_provider: self.provider.clone(),
+            selected_model_id: self.model_id.clone(),
+            selected_thinking_level: self.thinking_level.clone(),
+        }
     }
 
     pub fn is_unresolved(&self) -> bool {
@@ -168,6 +196,27 @@ impl SessionOutbox {
     pub fn mark_home_uncertain(&mut self, message: String) {
         if let Some(item) = &mut self.home_pending {
             item.state = OutboxItemState::Uncertain { message };
+        }
+    }
+
+    pub fn mark_home_failed(&mut self, error: &ClientError) {
+        if let Some(item) = &mut self.home_pending {
+            item.state = OutboxItemState::Failed {
+                code: error.code().to_owned(),
+                message: error.to_string(),
+                credentials_required: error.is_credentials_required(),
+            };
+        }
+    }
+
+    pub fn restore_home_failed_item(&mut self, mut item: OutboxItem, error: &ClientError) {
+        item.state = OutboxItemState::Failed {
+            code: error.code().to_owned(),
+            message: error.to_string(),
+            credentials_required: error.is_credentials_required(),
+        };
+        if self.home_pending.is_none() {
+            self.home_pending = Some(item);
         }
     }
 
@@ -265,18 +314,85 @@ impl SessionOutbox {
         }
     }
 
+    /// Transitions a failed/uncertain home item back into `CreatingSession` for retry.
+    /// Returns `(item, was_uncertain)` so the caller checks the existing creation receipt before creating a new session.
+    pub fn prepare_home_retry(
+        &mut self,
+        client_message_id: &str,
+    ) -> Result<(OutboxItem, bool), ClientError> {
+        let Some(item) = &mut self.home_pending else {
+            return Err(ClientError::NotFound {
+                code: "outbox_item_not_found".into(),
+                message: "未找到待重试的主页发送项。".into(),
+            });
+        };
+        if item.client_message_id != client_message_id {
+            return Err(ClientError::NotFound {
+                code: "outbox_item_not_found".into(),
+                message: "待重试的消息标识不匹配。".into(),
+            });
+        }
+        if item.state.is_in_flight() {
+            return Err(ClientError::Conflict {
+                code: "item_in_flight".into(),
+                message: "该消息正在提交中，请勿重复重试。".into(),
+            });
+        }
+        let was_uncertain = matches!(item.state, OutboxItemState::Uncertain { .. });
+        let req_key = if was_uncertain {
+            item.creation_request_key
+                .clone()
+                .unwrap_or_else(generate_creation_request_key)
+        } else {
+            generate_creation_request_key()
+        };
+        item.creation_request_key = Some(req_key.clone());
+        item.state = OutboxItemState::CreatingSession {
+            request_key: req_key,
+        };
+        Ok((item.clone(), was_uncertain))
+    }
+
+    pub fn prepare_session_retry(
+        &mut self,
+        session_id: &str,
+        client_message_id: &str,
+    ) -> Result<(OutboxItem, bool), ClientError> {
+        let Some(list) = self.by_session.get_mut(session_id) else {
+            return Err(ClientError::NotFound {
+                code: "outbox_item_not_found".into(),
+                message: "未找到待重试的消息。".into(),
+            });
+        };
+        let Some(item) = list
+            .iter_mut()
+            .find(|i| i.client_message_id == client_message_id)
+        else {
+            return Err(ClientError::NotFound {
+                code: "outbox_item_not_found".into(),
+                message: "未找到待重试的消息。".into(),
+            });
+        };
+        if item.state.is_in_flight() {
+            return Err(ClientError::Conflict {
+                code: "item_in_flight".into(),
+                message: "该消息正在发送中，请勿重复提交。".into(),
+            });
+        }
+        let was_uncertain = matches!(item.state, OutboxItemState::Uncertain { .. });
+        self.paused_sessions.remove(session_id);
+        item.state = OutboxItemState::Sending;
+        Ok((item.clone(), was_uncertain))
+    }
+
     pub fn prepare_retry(
         &mut self,
         session_id: &str,
         client_message_id: &str,
     ) -> Option<OutboxItem> {
-        self.paused_sessions.remove(session_id);
-        let list = self.by_session.get_mut(session_id)?;
-        let item = list
-            .iter_mut()
-            .find(|i| i.client_message_id == client_message_id)?;
-        item.state = OutboxItemState::Sending;
-        Some(item.clone())
+        self.prepare_session_retry(session_id, client_message_id)
+            .ok()
+            .map(|(item, _)| item)
     }
 
     pub fn remove_item(&mut self, session_id: &str, client_message_id: &str) -> Option<OutboxItem> {
@@ -290,6 +406,71 @@ impl SessionOutbox {
             self.paused_sessions.remove(session_id);
         }
         Some(removed)
+    }
+
+    /// Removes a settled (non-in-flight) outbox item from either Home (`None`) or a specific session (`Some(sid)`).
+    pub fn take_settled_item(
+        &mut self,
+        session_id: Option<&str>,
+        client_message_id: &str,
+    ) -> Result<OutboxItem, ClientError> {
+        match session_id {
+            None => {
+                let Some(home) = &self.home_pending else {
+                    return Err(ClientError::NotFound {
+                        code: "outbox_item_not_found".into(),
+                        message: "未找到指定的主页待发项。".into(),
+                    });
+                };
+                if home.client_message_id != client_message_id {
+                    return Err(ClientError::NotFound {
+                        code: "outbox_item_not_found".into(),
+                        message: "未找到指定的主页待发项。".into(),
+                    });
+                }
+                if home.state.is_in_flight() {
+                    return Err(ClientError::Conflict {
+                        code: "item_in_flight".into(),
+                        message: "消息正在提交中，暂不可编辑或移除。".into(),
+                    });
+                }
+                Ok(self.home_pending.take().expect("checked Some"))
+            }
+            Some(sid) => {
+                let Some(list) = self.by_session.get_mut(sid) else {
+                    return Err(ClientError::NotFound {
+                        code: "outbox_item_not_found".into(),
+                        message: "未找到指定的待发消息。".into(),
+                    });
+                };
+                let Some(idx) = list
+                    .iter()
+                    .position(|i| i.client_message_id == client_message_id)
+                else {
+                    return Err(ClientError::NotFound {
+                        code: "outbox_item_not_found".into(),
+                        message: "未找到指定的待发消息。".into(),
+                    });
+                };
+                if list[idx].state.is_in_flight() {
+                    return Err(ClientError::Conflict {
+                        code: "item_in_flight".into(),
+                        message: "消息正在发送中，暂不可编辑或移除。".into(),
+                    });
+                }
+                let removed = list.remove(idx);
+                if list.is_empty() {
+                    self.by_session.remove(sid);
+                    self.paused_sessions.remove(sid);
+                } else if !list
+                    .iter()
+                    .any(|i| matches!(i.state, OutboxItemState::PausedStorageFull { .. }))
+                {
+                    self.paused_sessions.remove(sid);
+                }
+                Ok(removed)
+            }
+        }
     }
 
     pub fn uncertain_items(&self) -> Vec<(Option<String>, OutboxItem)> {

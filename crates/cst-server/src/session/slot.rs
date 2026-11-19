@@ -680,6 +680,8 @@ impl SessionSlot {
 
     /// Builds the full `GET /api/sessions/:id` snapshot, decorated and sanitized via `browser_json_value`.
     pub async fn full_snapshot(&self) -> Result<Value, InboxError> {
+        let pre_seq = self.events.current_sequence();
+        let event_cursor = format!("{}:{pre_seq}", self.events.epoch());
         let session = self.session();
         let state = session.state();
         let messages: Vec<Value> = state
@@ -724,6 +726,7 @@ impl SessionSlot {
         let queue = self.inbox.snapshot().await?;
         let raw = json!({
             "id": self.id,
+            "eventCursor": event_cursor,
             "bitlocker": self.bitlocker.snapshot(),
             "messages": messages,
             "entries": entries_json,

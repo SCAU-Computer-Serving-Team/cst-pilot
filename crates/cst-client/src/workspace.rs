@@ -331,6 +331,8 @@ pub struct WorkspaceState {
     active_view: WorkspaceView,
     active_session_id: Option<String>,
     drafts: BTreeMap<DraftKey, ComposerDraft>,
+    edit_revisions: BTreeMap<DraftKey, u64>,
+    next_edit_rev: u64,
     image_pool: Arc<ImageBudgetPool>,
 }
 
@@ -346,8 +348,21 @@ impl WorkspaceState {
             active_view: WorkspaceView::Gui,
             active_session_id: None,
             drafts: BTreeMap::new(),
+            edit_revisions: BTreeMap::new(),
+            next_edit_rev: 1,
             image_pool,
         }
+    }
+
+    fn bump_edit_rev(&mut self, key: &DraftKey) -> u64 {
+        let rev = self.next_edit_rev;
+        self.next_edit_rev = self.next_edit_rev.wrapping_add(1);
+        self.edit_revisions.insert(key.clone(), rev);
+        rev
+    }
+
+    pub fn draft_edit_revision(&self, key: &DraftKey) -> u64 {
+        self.edit_revisions.get(key).copied().unwrap_or(0)
     }
 
     pub fn image_pool(&self) -> &Arc<ImageBudgetPool> {
@@ -378,19 +393,36 @@ impl WorkspaceState {
     }
 
     pub fn draft_mut(&mut self, key: DraftKey) -> &mut ComposerDraft {
+        self.bump_edit_rev(&key);
         self.drafts.entry(key).or_default()
     }
 
     pub fn take_draft(&mut self, key: &DraftKey) -> ComposerDraft {
+        self.bump_edit_rev(key);
         self.drafts.remove(key).unwrap_or_default()
     }
 
     pub fn restore_draft(&mut self, key: DraftKey, draft: ComposerDraft) {
+        self.bump_edit_rev(&key);
         if draft.is_empty() {
             self.drafts.remove(&key);
         } else {
             self.drafts.insert(key, draft);
         }
+    }
+
+    /// Restores `draft` into `key` ONLY if `key` currently holds no unsent user edits.
+    /// Returns `true` if restored into the composer, or `false` if the user has already started
+    /// typing a new draft while the previous request was in flight.
+    pub fn restore_draft_if_empty(&mut self, key: DraftKey, draft: ComposerDraft) -> bool {
+        if self
+            .draft(&key)
+            .is_some_and(ComposerDraft::has_unsent_content)
+        {
+            return false;
+        }
+        self.restore_draft(key, draft);
+        true
     }
 
     pub fn has_non_empty_draft(&self, session_id: &str) -> bool {

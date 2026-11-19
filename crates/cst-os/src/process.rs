@@ -283,18 +283,22 @@ pub fn query_machine_app_path(exe_name: &str) -> Option<PathBuf> {
     }
 }
 
-/// Token security metadata for a running process (`session_id`, user SID bytes, and elevation state).
+/// Token security metadata for a running process (`session_id`, `logon_id`, user SID bytes, and elevation state).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessTokenInfo {
     pub session_id: u32,
+    pub logon_id: u64,
     pub user_sid: Vec<u8>,
     pub elevated: bool,
 }
 
 impl ProcessTokenInfo {
-    /// Returns true if `other` belongs to the exact same OS user SID and logon/Terminal Services session.
+    /// Returns true if `other` belongs to the exact same OS user SID, Terminal Services session,
+    /// and (when sharing the same elevation split-token tier) the same `AuthenticationId` logon session.
     pub fn same_user_and_session(&self, other: &Self) -> bool {
-        self.session_id == other.session_id && self.user_sid == other.user_sid
+        self.session_id == other.session_id
+            && self.user_sid == other.user_sid
+            && (self.elevated != other.elevated || self.logon_id == other.logon_id)
     }
 }
 
@@ -307,7 +311,8 @@ pub fn query_process_token_info(pid: u32) -> Result<Option<ProcessTokenInfo>, St
             Foundation::HANDLE,
             Security::{
                 GetLengthSid, GetTokenInformation, IsValidSid, TOKEN_ELEVATION, TOKEN_QUERY,
-                TOKEN_USER, TokenElevation, TokenSessionId, TokenUser,
+                TOKEN_STATISTICS, TOKEN_USER, TokenElevation, TokenSessionId, TokenStatistics,
+                TokenUser,
             },
             System::Threading::{OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION},
         };
@@ -345,6 +350,21 @@ pub fn query_process_token_info(pid: u32) -> Result<Option<ProcessTokenInfo>, St
             )
         }
         .map_err(|_| "无法读取进程登录会话标识。".to_owned())?;
+
+        let mut stats = TOKEN_STATISTICS::default();
+        let mut stats_len = 0u32;
+        unsafe {
+            GetTokenInformation(
+                token_handle,
+                TokenStatistics,
+                Some((&mut stats as *mut TOKEN_STATISTICS).cast()),
+                std::mem::size_of::<TOKEN_STATISTICS>() as u32,
+                &mut stats_len,
+            )
+        }
+        .map_err(|_| "无法读取进程登录凭据会话统计。".to_owned())?;
+        let logon_id = (u64::from(stats.AuthenticationId.HighPart as u32) << 32)
+            | u64::from(stats.AuthenticationId.LowPart);
 
         let mut elevation = TOKEN_ELEVATION::default();
         let mut elev_len = 0u32;
@@ -386,6 +406,7 @@ pub fn query_process_token_info(pid: u32) -> Result<Option<ProcessTokenInfo>, St
 
         Ok(Some(ProcessTokenInfo {
             session_id,
+            logon_id,
             user_sid: sid_bytes,
             elevated: elevation.TokenIsElevated != 0,
         }))
@@ -395,6 +416,7 @@ pub fn query_process_token_info(pid: u32) -> Result<Option<ProcessTokenInfo>, St
         let _ = pid;
         Ok(Some(ProcessTokenInfo {
             session_id: 0,
+            logon_id: 0,
             user_sid: Vec::new(),
             elevated: false,
         }))

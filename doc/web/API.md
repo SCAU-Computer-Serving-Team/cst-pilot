@@ -30,7 +30,7 @@
 | `GET` | `/api/sessions` | 会话列表（返回 `{ id, title, updatedAt, running }[]`） |
 | `POST` | `/api/sessions` | 新建会话，可选指定初始模型与思考强度 |
 | `GET` | `/api/sessions/creation/<requestKey>` | 只读核对创建回执，返回 `status: "missing" \| "started" \| "done"`，完成时附 `sessionId` |
-| `GET` | `/api/sessions/<id>` | 会话完整快照（返回 `{ id, bitlocker, messages, entries, running, contextUsage, queue, ui }`，工作时长内嵌于 `assistant` 消息） |
+| `GET` | `/api/sessions/<id>` | 会话完整快照（返回 `{ id, eventCursor, bitlocker, messages, entries, running, contextUsage, queue, ui }`，工作时长内嵌于 `assistant` 消息） |
 | `PATCH` / `DELETE` | `/api/sessions/<id>` | 重命名会话 / 删除空闲会话及其未落盘快照、收件箱与图片附件目录 |
 | `POST` | `/api/sessions/<id>/open`、`/close` | 打开会话（由其他进程持有写权时返回 `409`）/ 关闭通知（校验 ID 后返回 `{ closed: true }`，无需 `Idempotency-Key`，槽位由空闲 LRU 自动回收） |
 | `POST` | `/api/sessions/<id>/messages` | 提交消息文本、技能标记与 Base64 图片（`delivery: "queue" \| "steer"`），持久化落盘后返回 `202 { item }` |

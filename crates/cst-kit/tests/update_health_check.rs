@@ -387,3 +387,24 @@ async fn local_health_check_has_no_telemetry_credentials_or_network_side_effects
     assert!(handoff::health_check(&f.root).is_err());
     assert_eq!(f.read("agent/home/auth.json"), b"invalid config");
 }
+
+#[test]
+fn cli_health_check_rejects_mixed_binary_build_version() {
+    let f = Fixture::new();
+    for (name, bytes) in files() {
+        f.write(&name, &bytes);
+    }
+    let disk_ver = cst_kit::update::layout::read_version(&f.root).unwrap();
+    assert_eq!(
+        handoff::run_cli_health_check_with_version(&f.root, Some(&disk_ver)).unwrap(),
+        disk_ver
+    );
+    assert_eq!(
+        handoff::run_cli_health_check_with_version(&f.root, Some(disk_ver.trim_start_matches('v')))
+            .unwrap(),
+        disk_ver
+    );
+    let err = handoff::run_cli_health_check_with_version(&f.root, Some("v99.99.99"))
+        .expect_err("mixed binary build version must fail health check");
+    assert!(err.contains("VERSION 不一致"), "got: {err}");
+}

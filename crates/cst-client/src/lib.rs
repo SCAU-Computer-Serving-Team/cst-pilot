@@ -24,8 +24,11 @@ pub use bootstrap::{
 pub use error::ClientError;
 pub use http::AppHttpClient;
 pub use outbox::{ExitCheckReport, OutboxItem, OutboxItemState, SessionOutbox, WebSwitchCheck};
-pub use runtime::{ClientBootstrapResult, ClientHandle, CstClient, SendSubmissionOutcome};
-pub use session_store::{SessionStore, SessionViewSnapshot};
+pub use runtime::{
+    ClientBootstrapResult, ClientHandle, ClientRuntimeOptions, CstClient, OpReceipt,
+    ReconcileReport, SendSubmissionOutcome,
+};
+pub use session_store::{FinishLoadingOutcome, SessionStore, SessionViewSnapshot};
 pub use state::{
     AccountStatusDto, AppHealthDto, ChannelModeDto, ClientSnapshot, DefaultViewDto,
     DesktopSettingsDto, DesktopSettingsPatchDto, LifecycleReportDto, MissingKeyClaimDto,

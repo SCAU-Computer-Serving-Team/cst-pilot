@@ -1,14 +1,65 @@
+use std::collections::{BTreeMap, VecDeque};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::StreamExt;
 use serde_json::Value;
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::http::AppHttpClient;
 
 /// Maximum buffered SSE event size (`16 MiB`) to protect client memory from malformed frames.
 const MAX_SSE_EVENT_BYTES: usize = 16 * 1024 * 1024;
+
+/// Default maximum in-memory byte budget for queued multiplex SSE signals (`8 MiB`).
+pub const DEFAULT_MAX_MULTIPLEX_QUEUE_BYTES: usize = 8 * 1024 * 1024;
+
+pub type SessionCursor = (String, u64);
+
+/// Parses a single `<epoch>:<seq>` cursor string.
+pub fn parse_single_cursor(raw: &str) -> Option<SessionCursor> {
+    let trimmed = raw.trim();
+    let (epoch, seq_str) = trimmed.rsplit_once(':')?;
+    if epoch.is_empty() {
+        return None;
+    }
+    let seq = seq_str.parse::<u64>().ok()?;
+    Some((epoch.to_owned(), seq))
+}
+
+/// Formats a `<epoch>:<seq>` cursor string.
+pub fn format_single_cursor((epoch, seq): &SessionCursor) -> String {
+    format!("{epoch}:{seq}")
+}
+
+/// Parses a multiplex `Last-Event-ID` vector cursor (`global:<e0>:<s0>,<sid1>:<e1>:<s1>,...`).
+pub fn parse_vector_cursor(raw: &str) -> BTreeMap<String, SessionCursor> {
+    let mut out = BTreeMap::new();
+    for token in raw.split(',') {
+        let trimmed = token.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let mut iter = trimmed.rsplitn(3, ':');
+        let Some(seq_str) = iter.next() else {
+            continue;
+        };
+        let Some(epoch) = iter.next() else {
+            continue;
+        };
+        let Some(source) = iter.next() else {
+            continue;
+        };
+        if let Ok(seq) = seq_str.parse::<u64>()
+            && !source.is_empty()
+            && !epoch.is_empty()
+        {
+            out.insert(source.to_owned(), (epoch.to_owned(), seq));
+        }
+    }
+    out
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedSseFrame {
@@ -111,20 +162,130 @@ pub enum MultiplexSignal {
         payload: Value,
     },
     SessionEvent {
-        cursor_id: Option<String>,
+        session_cursor: Option<SessionCursor>,
         session_id: String,
         event: Value,
+        approx_bytes: usize,
     },
     QueueEvent {
-        cursor_id: Option<String>,
+        session_cursor: Option<SessionCursor>,
         session_id: String,
         queue: Value,
+        approx_bytes: usize,
     },
     ResetGlobal,
     ResetSession {
         session_id: String,
     },
+    QueueOverflow,
     Disconnected,
+}
+
+#[derive(Debug)]
+pub struct MultiplexEnvelope {
+    pub mux_generation: u64,
+    pub vector_cursors: BTreeMap<String, SessionCursor>,
+    pub signal: MultiplexSignal,
+}
+
+struct MultiplexQueueInner {
+    queue: VecDeque<(usize, MultiplexEnvelope)>,
+    queued_bytes: usize,
+    max_bytes: usize,
+    overflow_generation: Option<u64>,
+    closed: bool,
+}
+
+/// Non-blocking byte-bounded sender for multiplex business SSE signals.
+/// When queued frames exceed `max_bytes`, drops queued payloads and coalesces a `QueueOverflow`
+/// signal so socket draining never stalls and client memory stays strictly bounded.
+#[derive(Clone)]
+pub struct BoundedMultiplexSender {
+    inner: Arc<Mutex<MultiplexQueueInner>>,
+    notify: Arc<Notify>,
+}
+
+pub struct BoundedMultiplexReceiver {
+    inner: Arc<Mutex<MultiplexQueueInner>>,
+    notify: Arc<Notify>,
+}
+
+pub fn bounded_multiplex_channel(
+    max_bytes: usize,
+) -> (BoundedMultiplexSender, BoundedMultiplexReceiver) {
+    let inner = Arc::new(Mutex::new(MultiplexQueueInner {
+        queue: VecDeque::new(),
+        queued_bytes: 0,
+        max_bytes: max_bytes.max(256),
+        overflow_generation: None,
+        closed: false,
+    }));
+    let notify = Arc::new(Notify::new());
+    (
+        BoundedMultiplexSender {
+            inner: Arc::clone(&inner),
+            notify: Arc::clone(&notify),
+        },
+        BoundedMultiplexReceiver { inner, notify },
+    )
+}
+
+impl BoundedMultiplexSender {
+    pub fn send(&self, envelope: MultiplexEnvelope, approx_bytes: usize) {
+        let cost = approx_bytes.max(64);
+        let mut guard = self.inner.lock().expect("multiplex queue lock");
+        if guard.closed {
+            return;
+        }
+        // Control signals (`StreamReady`, `Reset*`, `Disconnected`) are always admitted unless
+        // an overflow is already pending; bulky data frames trigger overflow if over budget.
+        let is_control = matches!(
+            envelope.signal,
+            MultiplexSignal::StreamReady { .. }
+                | MultiplexSignal::ResetGlobal
+                | MultiplexSignal::ResetSession { .. }
+                | MultiplexSignal::Disconnected
+                | MultiplexSignal::QueueOverflow
+        );
+        if !is_control && guard.queued_bytes.saturating_add(cost) > guard.max_bytes {
+            guard.queue.clear();
+            guard.queued_bytes = 0;
+            guard.overflow_generation = Some(envelope.mux_generation);
+            drop(guard);
+            self.notify.notify_one();
+            return;
+        }
+        guard.queued_bytes = guard.queued_bytes.saturating_add(cost);
+        guard.queue.push_back((cost, envelope));
+        drop(guard);
+        self.notify.notify_one();
+    }
+}
+
+impl BoundedMultiplexReceiver {
+    pub async fn recv(&mut self) -> Option<MultiplexEnvelope> {
+        loop {
+            let notified = self.notify.notified();
+            {
+                let mut guard = self.inner.lock().expect("multiplex queue lock");
+                if let Some(gen_id) = guard.overflow_generation.take() {
+                    return Some(MultiplexEnvelope {
+                        mux_generation: gen_id,
+                        vector_cursors: BTreeMap::new(),
+                        signal: MultiplexSignal::QueueOverflow,
+                    });
+                }
+                if let Some((cost, env)) = guard.queue.pop_front() {
+                    guard.queued_bytes = guard.queued_bytes.saturating_sub(cost);
+                    return Some(env);
+                }
+                if guard.closed {
+                    return None;
+                }
+            }
+            notified.await;
+        }
+    }
 }
 
 /// Runs the dedicated `/api/app/events` keepalive loop.
@@ -211,8 +372,9 @@ pub async fn run_keepalive_sse_loop(
 pub async fn run_multiplex_sse_loop(
     http: AppHttpClient,
     client_id: String,
+    mux_generation: u64,
     initial_cursor: Option<String>,
-    tx: mpsc::UnboundedSender<MultiplexSignal>,
+    tx: BoundedMultiplexSender,
     mode_cancel: CancellationToken,
 ) {
     let mut last_cursor = initial_cursor;
@@ -232,7 +394,14 @@ pub async fn run_multiplex_sse_loop(
                 resp
             }
             Err(_) => {
-                let _ = tx.send(MultiplexSignal::Disconnected);
+                tx.send(
+                    MultiplexEnvelope {
+                        mux_generation,
+                        vector_cursors: BTreeMap::new(),
+                        signal: MultiplexSignal::Disconnected,
+                    },
+                    64,
+                );
                 tokio::select! {
                     biased;
                     _ = mode_cancel.cancelled() => break,
@@ -253,30 +422,53 @@ pub async fn run_multiplex_sse_loop(
                 c = stream.next() => c,
             };
             let Some(Ok(bytes)) = next_chunk else {
-                let _ = tx.send(MultiplexSignal::Disconnected);
+                tx.send(
+                    MultiplexEnvelope {
+                        mux_generation,
+                        vector_cursors: BTreeMap::new(),
+                        signal: MultiplexSignal::Disconnected,
+                    },
+                    64,
+                );
                 break;
             };
             for frame in parser.feed(&bytes) {
+                let vector_cursors = frame
+                    .id
+                    .as_deref()
+                    .map(parse_vector_cursor)
+                    .unwrap_or_default();
                 if let Some(ref id) = frame.id {
                     last_cursor = Some(id.clone());
                 }
+                let raw_cost = frame.data.len().saturating_add(96);
                 match frame.event.as_str() {
                     "heartbeat" => {}
                     "reset" => {
-                        if let Ok(payload) = serde_json::from_str::<Value>(&frame.data)
+                        let signal = if let Ok(payload) = serde_json::from_str::<Value>(&frame.data)
                             && payload.get("scope").and_then(Value::as_str) == Some("session")
                             && let Some(sid) = payload.get("sessionId").and_then(Value::as_str)
                         {
-                            let _ = tx.send(MultiplexSignal::ResetSession {
+                            MultiplexSignal::ResetSession {
                                 session_id: sid.to_owned(),
-                            });
+                            }
                         } else {
-                            let _ = tx.send(MultiplexSignal::ResetGlobal);
-                        }
+                            MultiplexSignal::ResetGlobal
+                        };
+                        tx.send(
+                            MultiplexEnvelope {
+                                mux_generation,
+                                vector_cursors,
+                                signal,
+                            },
+                            raw_cost,
+                        );
                     }
                     "state" => {
                         if let Ok(payload) = serde_json::from_str::<Value>(&frame.data) {
-                            if payload.get("type").and_then(Value::as_str) == Some("stream_ready") {
+                            let signal = if payload.get("type").and_then(Value::as_str)
+                                == Some("stream_ready")
+                            {
                                 let subs = payload
                                     .get("subscribedSessions")
                                     .and_then(Value::as_array)
@@ -287,15 +479,23 @@ pub async fn run_multiplex_sse_loop(
                                             .collect()
                                     })
                                     .unwrap_or_default();
-                                let _ = tx.send(MultiplexSignal::StreamReady {
+                                MultiplexSignal::StreamReady {
                                     subscribed_sessions: subs,
-                                });
+                                }
                             } else {
-                                let _ = tx.send(MultiplexSignal::StateEvent {
+                                MultiplexSignal::StateEvent {
                                     cursor_id: frame.id,
                                     payload,
-                                });
-                            }
+                                }
+                            };
+                            tx.send(
+                                MultiplexEnvelope {
+                                    mux_generation,
+                                    vector_cursors,
+                                    signal,
+                                },
+                                raw_cost,
+                            );
                         }
                     }
                     "session" => {
@@ -303,11 +503,20 @@ pub async fn run_multiplex_sse_loop(
                             && let Some(sid) = wrapper.get("sessionId").and_then(Value::as_str)
                             && let Some(ev) = wrapper.get("event")
                         {
-                            let _ = tx.send(MultiplexSignal::SessionEvent {
-                                cursor_id: frame.id,
-                                session_id: sid.to_owned(),
-                                event: ev.clone(),
-                            });
+                            let session_cursor = vector_cursors.get(sid).cloned();
+                            tx.send(
+                                MultiplexEnvelope {
+                                    mux_generation,
+                                    vector_cursors,
+                                    signal: MultiplexSignal::SessionEvent {
+                                        session_cursor,
+                                        session_id: sid.to_owned(),
+                                        event: ev.clone(),
+                                        approx_bytes: raw_cost,
+                                    },
+                                },
+                                raw_cost,
+                            );
                         }
                     }
                     "queue" => {
@@ -315,11 +524,20 @@ pub async fn run_multiplex_sse_loop(
                             && let Some(sid) = wrapper.get("sessionId").and_then(Value::as_str)
                             && let Some(q) = wrapper.get("queue")
                         {
-                            let _ = tx.send(MultiplexSignal::QueueEvent {
-                                cursor_id: frame.id,
-                                session_id: sid.to_owned(),
-                                queue: q.clone(),
-                            });
+                            let session_cursor = vector_cursors.get(sid).cloned();
+                            tx.send(
+                                MultiplexEnvelope {
+                                    mux_generation,
+                                    vector_cursors,
+                                    signal: MultiplexSignal::QueueEvent {
+                                        session_cursor,
+                                        session_id: sid.to_owned(),
+                                        queue: q.clone(),
+                                        approx_bytes: raw_cost,
+                                    },
+                                },
+                                raw_cost,
+                            );
                         }
                     }
                     _ => {}

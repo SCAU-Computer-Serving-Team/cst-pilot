@@ -105,6 +105,7 @@ async fn privilege_mismatch_cross_session_and_path_spoofing_are_intercepted_with
         current_token_fn: Arc::new(|| {
             Ok(ProcessTokenInfo {
                 session_id: 1,
+                logon_id: 10,
                 user_sid: vec![1, 2, 3, 4],
                 elevated: false,
             })
@@ -132,6 +133,7 @@ async fn privilege_mismatch_cross_session_and_path_spoofing_are_intercepted_with
         current_token_fn: Arc::new(|| {
             Ok(ProcessTokenInfo {
                 session_id: 1,
+                logon_id: 10,
                 user_sid: vec![1, 2, 3, 4],
                 elevated: true,
             })
@@ -143,7 +145,7 @@ async fn privilege_mismatch_cross_session_and_path_spoofing_are_intercepted_with
         .unwrap_err();
     assert!(matches!(bad_img, ClientError::InvalidServerIdentity(_)));
 
-    // Matching image path, same session, elevated desktop vs UN-ELEVATED residual server -> `PrivilegeMismatch`
+    // Matching image path, same interactive session (UAC split-token has distinct logon_id) -> `PrivilegeMismatch`
     let self_exe = std::env::current_exe().unwrap();
     let priv_mismatch_opts = BootstrapOptions {
         require_elevation: true,
@@ -151,6 +153,7 @@ async fn privilege_mismatch_cross_session_and_path_spoofing_are_intercepted_with
         current_token_fn: Arc::new(|| {
             Ok(ProcessTokenInfo {
                 session_id: 1,
+                logon_id: 10,
                 user_sid: vec![1, 2, 3, 4],
                 elevated: true,
             })
@@ -158,6 +161,7 @@ async fn privilege_mismatch_cross_session_and_path_spoofing_are_intercepted_with
         query_token_fn: Arc::new(|_| {
             Ok(Some(ProcessTokenInfo {
                 session_id: 1,
+                logon_id: 20,
                 user_sid: vec![1, 2, 3, 4],
                 elevated: false,
             }))
@@ -169,13 +173,44 @@ async fn privilege_mismatch_cross_session_and_path_spoofing_are_intercepted_with
         .unwrap_err();
     assert!(matches!(mismatch_err, ClientError::PrivilegeMismatch(_)));
 
-    // Matching image path, DIFFERENT logon session_id -> `CrossSessionInstance`
+    // Matching image path, same elevation & session_id, DIFFERENT AuthenticationId (`logon_id`) -> `CrossSessionInstance`
+    let cross_logon_opts = BootstrapOptions {
+        require_elevation: true,
+        expected_server_exe: Some(self_exe.clone()),
+        current_token_fn: Arc::new(|| {
+            Ok(ProcessTokenInfo {
+                session_id: 1,
+                logon_id: 10,
+                user_sid: vec![1, 2, 3, 4],
+                elevated: true,
+            })
+        }),
+        query_token_fn: Arc::new(|_| {
+            Ok(Some(ProcessTokenInfo {
+                session_id: 1,
+                logon_id: 99,
+                user_sid: vec![1, 2, 3, 4],
+                elevated: true,
+            }))
+        }),
+        ..BootstrapOptions::default()
+    };
+    let cross_logon_err = ensure_server_running(&kit.0, &cross_logon_opts)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        cross_logon_err,
+        ClientError::CrossSessionInstance(_)
+    ));
+
+    // Matching image path, DIFFERENT Terminal Services session_id -> `CrossSessionInstance`
     let cross_sess_opts = BootstrapOptions {
         require_elevation: true,
         expected_server_exe: Some(self_exe),
         current_token_fn: Arc::new(|| {
             Ok(ProcessTokenInfo {
                 session_id: 1,
+                logon_id: 10,
                 user_sid: vec![1, 2, 3, 4],
                 elevated: true,
             })
@@ -183,6 +218,7 @@ async fn privilege_mismatch_cross_session_and_path_spoofing_are_intercepted_with
         query_token_fn: Arc::new(|_| {
             Ok(Some(ProcessTokenInfo {
                 session_id: 2,
+                logon_id: 10,
                 user_sid: vec![1, 2, 3, 4],
                 elevated: true,
             }))
