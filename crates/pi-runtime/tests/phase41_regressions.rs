@@ -1,17 +1,23 @@
-#![cfg(feature = "mcp")]
-
+#[cfg(any(feature = "mcp", feature = "codemode"))]
 use std::collections::BTreeMap;
 use std::sync::Arc;
+#[cfg(any(feature = "mcp", feature = "codemode"))]
 use std::time::Duration;
 
+#[cfg(feature = "mcp")]
 use pi_agent::BoxFuture;
+#[cfg(feature = "mcp")]
 use pi_ai::JsonValue;
+use pi_runtime::{CreateAgentSessionOptions, create_agent_session};
+#[cfg(feature = "mcp")]
 use pi_runtime::{
-    CreateAgentSessionOptions, InMemoryTransport, McpClient, McpClientOptions, McpRequestOptions,
-    McpTransport, StreamableHttpTransport, create_agent_session,
+    InMemoryTransport, McpClient, McpClientOptions, McpRequestOptions, McpTransport,
+    StreamableHttpTransport,
 };
 use serde_json::json;
+#[cfg(feature = "mcp")]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(feature = "mcp")]
 use tokio::sync::mpsc;
 
 struct TestDirectory(std::path::PathBuf);
@@ -30,6 +36,7 @@ impl Drop for TestDirectory {
     }
 }
 
+#[cfg(feature = "mcp")]
 fn initialize_result() -> JsonValue {
     json!({
         "protocolVersion": "2026-07-28",
@@ -50,14 +57,19 @@ async fn sdk_registers_builtin_extensions_without_caller_setup() {
     .unwrap();
     let tools = result.session.get_all_tools();
     result.session.shutdown().await.unwrap();
-    assert!(tools.iter().any(|t| t.name == "codemode"));
+    assert_eq!(
+        tools.iter().any(|t| t.name == "codemode"),
+        cfg!(feature = "codemode")
+    );
     assert!(tools.iter().any(|t| t.name == "tool_search"));
 }
 
+#[cfg(feature = "mcp")]
 struct BlockingSendTransport {
     inner: Arc<InMemoryTransport>,
 }
 
+#[cfg(feature = "mcp")]
 impl McpTransport for BlockingSendTransport {
     fn start(&self) -> BoxFuture<'_, Result<mpsc::UnboundedReceiver<JsonValue>, String>> {
         self.inner.start()
@@ -76,6 +88,7 @@ impl McpTransport for BlockingSendTransport {
     }
 }
 
+#[cfg(feature = "mcp")]
 #[tokio::test]
 async fn mcp_deadline_includes_transport_send_and_close_rejects_pending_calls() {
     let (local, remote) = InMemoryTransport::pair();
@@ -129,6 +142,7 @@ async fn mcp_deadline_includes_transport_send_and_close_rejects_pending_calls() 
     server.abort();
 }
 
+#[cfg(feature = "codemode")]
 #[tokio::test]
 async fn codemode_models_use_session_catalog_limit_concurrency_and_record_usage() {
     use pi_ai::{
@@ -235,6 +249,7 @@ async fn codemode_models_use_session_catalog_limit_concurrency_and_record_usage(
     result.session.shutdown().await.unwrap();
 }
 
+#[cfg(feature = "codemode")]
 #[tokio::test]
 async fn dropping_codemode_execution_cancels_pending_host_calls() {
     use pi_runtime::{
@@ -385,7 +400,7 @@ async fn sdk_normalizes_tool_images_to_the_selected_models_limits() {
     assert!(decoded.width() <= 8 && decoded.height() <= 8);
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, feature = "mcp"))]
 fn process_is_running(pid: u32) -> bool {
     #[link(name = "kernel32")]
     unsafe extern "system" {
@@ -406,7 +421,7 @@ fn process_is_running(pid: u32) -> bool {
     }
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, feature = "mcp", feature = "codemode"))]
 #[tokio::test]
 async fn sdk_connects_configured_stdio_mcp_and_shutdown_reaps_descendants() {
     let dir = TestDirectory::new();
@@ -527,7 +542,7 @@ async fn sdk_connects_configured_stdio_mcp_and_shutdown_reaps_descendants() {
     );
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, feature = "mcp"))]
 #[tokio::test]
 async fn stdio_root_exit_reaps_descendants_and_drains_its_final_message() {
     use pi_runtime::{StdioTransport, StdioTransportOptions};
@@ -571,6 +586,7 @@ async fn stdio_root_exit_reaps_descendants_and_drains_its_final_message() {
     transport.close().await.unwrap();
 }
 
+#[cfg(feature = "mcp")]
 #[test]
 fn mcp_oauth_updates_are_locked_and_preserve_corrupt_files() {
     use pi_runtime::{McpOAuthCredential, McpOAuthStore};
@@ -605,6 +621,7 @@ fn mcp_oauth_updates_are_locked_and_preserve_corrupt_files() {
     );
 }
 
+#[cfg(feature = "mcp")]
 async fn read_http_json(socket: &mut tokio::net::TcpStream) -> JsonValue {
     let mut bytes = Vec::new();
     let header_end = loop {
@@ -629,6 +646,7 @@ async fn read_http_json(socket: &mut tokio::net::TcpStream) -> JsonValue {
     serde_json::from_slice(&bytes[header_end..]).unwrap_or(JsonValue::Null)
 }
 
+#[cfg(feature = "mcp")]
 #[tokio::test]
 async fn mcp_http_delivers_sse_response_before_the_server_closes_the_stream() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
