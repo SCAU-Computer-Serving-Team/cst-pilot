@@ -3,16 +3,16 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use cst_pilot::auth::{AuthRuntime, Channel, oa::OaClient};
-use cst_pilot::bitlocker::{
+use cst_kit::auth::{AuthRuntime, Channel, oa::OaClient};
+use cst_kit::bitlocker::{
     BitLockerPendingKind,
     core::{BitLockerSource, Executor},
     model::{Protector, Scope, Snapshot, Volume},
 };
-use cst_pilot::diagnostics::win_native::{Control, NativeError};
-use cst_pilot::telemetry::TelemetryOptions;
-use cst_pilot::update::service::UpdateOptions;
-use cst_pilot::{Kit, KitHost, SKILL_NAMES};
+use cst_kit::diagnostics::win_native::{Control, NativeError};
+use cst_kit::telemetry::TelemetryOptions;
+use cst_kit::update::service::UpdateOptions;
+use cst_kit::{Kit, KitHost, SKILL_NAMES};
 use cst_server::mode::CallerIdentity;
 use cst_server::session::events::SessionEvents;
 use cst_server::{RunningServer, ServerConfig};
@@ -235,7 +235,7 @@ async fn bitlocker_wakeup_settlement_validates_before_consuming_and_redacts_pass
     // 2. Spawn the BitLocker password request on `slot.bitlocker` (simulating the `bitlocker` tool waiting for local password)
     let bridge = slot.bitlocker.clone();
     let wait_handle = tokio::spawn(async move {
-        use cst_pilot::bitlocker::BitLockerHostChannel;
+        use cst_kit::bitlocker::BitLockerHostChannel;
         bridge
             .request(
                 "tc-bitlocker-1",
@@ -344,7 +344,7 @@ async fn bitlocker_wakeup_settlement_validates_before_consuming_and_redacts_pass
     let answer = wait_handle.await.unwrap();
     assert!(matches!(
         answer,
-        Some(cst_pilot::bitlocker::BitLockerAnswer::Password(_))
+        Some(cst_kit::bitlocker::BitLockerAnswer::Password(_))
     ));
 
     // 7. Verify `GET /api/sessions/:id` redacts any 48-digit recovery password in messages
@@ -1747,5 +1747,91 @@ async fn browser_sse_single_and_multiplex_streams_filter_system_messages_across_
     }
 
     drop(slot);
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn create_session_distinguishes_omitted_fields_from_explicit_null_and_state_commands_match_skills()
+ {
+    let fixture = ContractFixture::new();
+    let server = fixture.start_server(true).await;
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let host_header = format!("127.0.0.1:{}", server.port());
+    let origin_header = format!("http://127.0.0.1:{}", server.port());
+
+    // 1. `/api/state` commands are dynamically derived from `cst_kit::SKILL_NAMES`.
+    let state_json: Value = client
+        .get(format!("{}/api/state", server.base_url()))
+        .header("Host", &host_header)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        state_json["commands"],
+        json!([
+            "/compact",
+            "/fork",
+            "/tree",
+            "/skill:bitlocker",
+            "/skill:disk",
+            "/skill:driver",
+            "/skill:eventlog",
+            "/skill:ls",
+            "/skill:runbook",
+            "/skill:startup",
+            "/skill:sys",
+        ])
+    );
+
+    // 2. Explicit `null` fields and mismatched pairs are strictly rejected with `400 invalid_request`.
+    for (idx, bad_body) in [
+        json!({ "provider": null }),
+        json!({ "provider": null, "modelId": null }),
+        json!({ "thinkingLevel": null }),
+        json!({ "provider": "deepseek" }),
+        json!({ "modelId": "deepseek-flash" }),
+        json!({ "unexpected": true }),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let resp = client
+            .post(format!("{}/api/sessions", server.base_url()))
+            .header("Host", &host_header)
+            .header("Origin", &origin_header)
+            .header("X-CST-Web-Request", "1")
+            .header("Idempotency-Key", format!("bad-create-{idx}"))
+            .json(&bad_body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status().as_u16(),
+            400,
+            "body {bad_body} should be rejected"
+        );
+        let err_json: Value = resp.json().await.unwrap();
+        assert_eq!(err_json["error"]["code"], "invalid_request");
+        assert_eq!(err_json["error"]["message"], "请求的新会话配置无效");
+    }
+
+    // 3. Omitted optional fields (`{}`) succeed with `201 Created`.
+    let ok_resp = client
+        .post(format!("{}/api/sessions", server.base_url()))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "ok-create-omitted")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok_resp.status().as_u16(), 201);
+    let ok_json: Value = ok_resp.json().await.unwrap();
+    assert!(ok_json["id"].as_str().is_some());
+
     server.shutdown().await;
 }

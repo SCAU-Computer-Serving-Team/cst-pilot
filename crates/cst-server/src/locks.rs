@@ -1,16 +1,15 @@
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
 use std::future::Future;
-use std::io::{self, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex, Weak};
-use std::time::Duration;
 
 use serde::Serialize;
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
-use uuid::Uuid;
 
-const RETRY_DELAYS_MS: [u64; 5] = [10, 20, 45, 100, 200];
+pub use cst_os::fs_safe::{
+    StorageError, StorageErrorKind, atomic_write_bytes_sync, atomic_write_json_sync,
+    is_storage_full_io, is_transient_replace_error,
+};
 
 /// Per-key asynchronous mutex table (`session:{id}`, `model-selection:{id}`, `model-default`,
 /// `auth:{provider}`, `auth-config:all`).
@@ -27,7 +26,6 @@ pub struct KeyedLockGuard {
 
 impl Drop for KeyedLockGuard {
     fn drop(&mut self) {
-        // Release the async mutex first, then prune expired Weak entries.
         self._guard.take();
         if let Ok(mut map) = self.table.lock()
             && map
@@ -83,137 +81,6 @@ impl KeyedLocks {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StorageErrorKind {
-    StorageFull,
-    StorageUnavailable,
-}
-
-#[derive(Debug, Clone)]
-pub struct StorageError {
-    pub kind: StorageErrorKind,
-    pub message: String,
-}
-
-impl StorageError {
-    pub fn code(&self) -> &'static str {
-        match self.kind {
-            StorageErrorKind::StorageFull => "storage_full",
-            StorageErrorKind::StorageUnavailable => "storage_unavailable",
-        }
-    }
-
-    pub fn status_code(&self) -> u16 {
-        match self.kind {
-            StorageErrorKind::StorageFull => 507,
-            StorageErrorKind::StorageUnavailable => 500,
-        }
-    }
-
-    pub fn from_io(err: &io::Error, context: &str) -> Self {
-        if is_storage_full_io(err) {
-            Self {
-                kind: StorageErrorKind::StorageFull,
-                message: format!("{context}：存储空间不足，输入或配置未被接受。"),
-            }
-        } else {
-            Self {
-                kind: StorageErrorKind::StorageUnavailable,
-                message: format!("{context}：存储介质不可写或访问受拒。"),
-            }
-        }
-    }
-}
-
-impl std::fmt::Display for StorageError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for StorageError {}
-
-pub fn is_storage_full_io(err: &io::Error) -> bool {
-    if err.kind() == io::ErrorKind::StorageFull {
-        return true;
-    }
-    matches!(err.raw_os_error(), Some(28 | 39 | 112))
-}
-
-pub fn is_transient_replace_error(err: &io::Error) -> bool {
-    if is_storage_full_io(err) {
-        return false;
-    }
-    if matches!(
-        err.kind(),
-        io::ErrorKind::PermissionDenied | io::ErrorKind::WouldBlock
-    ) {
-        return true;
-    }
-    matches!(err.raw_os_error(), Some(5 | 32 | 33))
-}
-
-/// Synchronously write `bytes` to a sibling temp file, `sync_all()`, and atomically rename
-/// over `target`, retrying transient Windows sharing/permission locks up to 5 times (<= 375ms).
-pub fn atomic_write_bytes_sync(
-    target: &Path,
-    bytes: &[u8],
-    context: &str,
-) -> Result<(), StorageError> {
-    let parent = target.parent().ok_or_else(|| StorageError {
-        kind: StorageErrorKind::StorageUnavailable,
-        message: format!("{context}：目标路径缺少父目录。"),
-    })?;
-    fs::create_dir_all(parent).map_err(|e| StorageError::from_io(&e, context))?;
-
-    let file_name = target
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("state");
-    let tmp_path = parent.join(format!(".{file_name}.{}.tmp", Uuid::new_v4()));
-
-    let write_res = (|| -> io::Result<()> {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp_path)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        Ok(())
-    })();
-
-    if let Err(err) = write_res {
-        let _ = fs::remove_file(&tmp_path);
-        return Err(StorageError::from_io(&err, context));
-    }
-
-    let mut last_err = None;
-    for (attempt, delay_ms) in RETRY_DELAYS_MS.iter().copied().enumerate() {
-        match fs::rename(&tmp_path, target) {
-            Ok(()) => return Ok(()),
-            Err(err) => {
-                let retryable = is_transient_replace_error(&err);
-                last_err = Some(err);
-                if !retryable {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(delay_ms));
-                if attempt + 1 == RETRY_DELAYS_MS.len() {
-                    if let Err(final_err) = fs::rename(&tmp_path, target) {
-                        last_err = Some(final_err);
-                    } else {
-                        return Ok(());
-                    }
-                }
-            }
-        }
-    }
-
-    let _ = fs::remove_file(&tmp_path);
-    let err = last_err.unwrap_or_else(|| io::Error::other("atomic rename failed"));
-    Err(StorageError::from_io(&err, context))
-}
-
 pub async fn atomic_write_bytes(
     target: impl AsRef<Path>,
     bytes: Vec<u8>,
@@ -241,23 +108,13 @@ pub async fn atomic_write_json<T: Serialize>(
     atomic_write_bytes(target, bytes, context).await
 }
 
-pub fn atomic_write_json_sync<T: Serialize>(
-    target: &Path,
-    value: &T,
-    context: &str,
-) -> Result<(), StorageError> {
-    let mut bytes = serde_json::to_vec_pretty(value).map_err(|_| StorageError {
-        kind: StorageErrorKind::StorageUnavailable,
-        message: format!("{context}：JSON 序列化失败。"),
-    })?;
-    bytes.push(b'\n');
-    atomic_write_bytes_sync(target, &bytes, context)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn keyed_locks_serializes_same_key_and_runs_distinct_keys_concurrently() {

@@ -1,10 +1,11 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet, VecDeque};
+use std::future::Future;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use base64::Engine;
-use cst_pilot::HostedSession;
+use cst_kit::HostedSession;
 use pi_agent::{AgentMessage, BoxFuture};
 use pi_ai::{ImageContent, StopReason};
 use pi_session::{
@@ -15,7 +16,9 @@ use serde_json::{Value, json};
 
 use crate::discovery::SessionOwnerLock;
 use crate::session::attachments::{ImageRef, ImageStore};
-use crate::session::decorators::{MessageDecorators, is_browser_visible_message};
+use crate::session::decorators::{
+    INPUT_MESSAGE_CUSTOM_TYPE, MessageDecorators, is_browser_visible_message,
+};
 use crate::session::events::{SessionEvents, browser_json_value};
 use crate::session::inbox::{InboxError, InboxExecutor, SessionInbox};
 use crate::session::interactions::{BitLockerSessionBridge, ServerUiBridge};
@@ -55,10 +58,98 @@ impl CompactSessionError {
     }
 }
 
+/// Tracks durable inbox input acceptance directly from `AgentSession` entries and events,
+/// independent of UI `MessageDecorators`.
+#[derive(Clone, Default)]
+struct AcceptedInputTracker {
+    inner: Arc<Mutex<AcceptedInputState>>,
+}
+
+#[derive(Default)]
+struct AcceptedInputState {
+    pending: VecDeque<String>,
+    accepted: HashSet<String>,
+}
+
+impl AcceptedInputTracker {
+    fn from_session(session: &AgentSession) -> Self {
+        let mut accepted = HashSet::new();
+        let entries = session.with_session_manager(|sm| sm.get_entries());
+        for entry in entries {
+            if let SessionEntry::Custom(custom) = entry
+                && custom.custom_type == INPUT_MESSAGE_CUSTOM_TYPE
+                && let Some(id) = custom
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.get("id"))
+                    .and_then(Value::as_str)
+            {
+                accepted.insert(id.to_owned());
+            }
+        }
+        Self {
+            inner: Arc::new(Mutex::new(AcceptedInputState {
+                pending: VecDeque::new(),
+                accepted,
+            })),
+        }
+    }
+
+    fn on_event(&self, event: &AgentSessionEvent) {
+        match event {
+            AgentSessionEvent::MessageStart {
+                message: AgentMessage::User(_),
+            } => {
+                let mut guard = self.inner.lock().expect("accepted_inputs lock");
+                if let Some(id) = guard.pending.pop_front() {
+                    guard.accepted.insert(id);
+                }
+            }
+            AgentSessionEvent::AgentEnd { .. } => {
+                self.inner
+                    .lock()
+                    .expect("accepted_inputs lock")
+                    .pending
+                    .clear();
+            }
+            _ => {}
+        }
+    }
+
+    async fn track<T, F, Fut>(&self, id: &str, deferred: bool, action: F) -> Result<T, String>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<T, String>>,
+    {
+        self.inner
+            .lock()
+            .expect("accepted_inputs lock")
+            .pending
+            .push_back(id.to_owned());
+        let res = action().await;
+        if res.is_err() || !deferred {
+            let mut guard = self.inner.lock().expect("accepted_inputs lock");
+            if let Some(pos) = guard.pending.iter().position(|item| item == id) {
+                guard.pending.remove(pos);
+            }
+        }
+        res
+    }
+
+    fn contains(&self, id: &str) -> bool {
+        self.inner
+            .lock()
+            .expect("accepted_inputs lock")
+            .accepted
+            .contains(id)
+    }
+}
+
 struct SlotInboxExecutor {
     session_id: String,
     hosted: Arc<HostedSession>,
     decorators: MessageDecorators,
+    accepted_inputs: AcceptedInputTracker,
     images: ImageStore,
     global_events: SessionEvents,
     invalid_auth: Arc<Mutex<BTreeSet<String>>>,
@@ -143,6 +234,7 @@ impl InboxExecutor for SlotInboxExecutor {
         let session_id = self.session_id.clone();
         let hosted = self.hosted.clone();
         let decorators = self.decorators.clone();
+        let accepted_inputs = self.accepted_inputs.clone();
         let images_store = self.images.clone();
         let global_events = self.global_events.clone();
         let invalid_auth = self.invalid_auth.clone();
@@ -151,6 +243,7 @@ impl InboxExecutor for SlotInboxExecutor {
                 session_id,
                 hosted: hosted.clone(),
                 decorators: decorators.clone(),
+                accepted_inputs: accepted_inputs.clone(),
                 images: images_store,
                 global_events,
                 invalid_auth,
@@ -169,20 +262,25 @@ impl InboxExecutor for SlotInboxExecutor {
             let formatted = Self::format_skill_message(&text, skill.as_deref());
             let has_skill = skill.is_some();
             let session_clone = session.clone();
-            let res = decorators
-                .track_input(&message_id, false, move || async move {
-                    session_clone
-                        .prompt(
-                            &formatted,
-                            Some(PromptOptions {
-                                expand_prompt_templates: Some(has_skill),
-                                images: Some(image_blocks),
-                                source: Some(InputSource::Rpc),
-                                ..Default::default()
-                            }),
-                        )
+            let msg_id_for_dec = message_id.clone();
+            let res = accepted_inputs
+                .track(&message_id, false, || async move {
+                    decorators
+                        .track_input(&msg_id_for_dec, false, move || async move {
+                            session_clone
+                                .prompt(
+                                    &formatted,
+                                    Some(PromptOptions {
+                                        expand_prompt_templates: Some(has_skill),
+                                        images: Some(image_blocks),
+                                        source: Some(InputSource::Rpc),
+                                        ..Default::default()
+                                    }),
+                                )
+                                .await
+                                .map(|_| ())
+                        })
                         .await
-                        .map(|_| ())
                 })
                 .await;
 
@@ -194,7 +292,7 @@ impl InboxExecutor for SlotInboxExecutor {
                 Err(err) => {
                     exec.check_and_mark_auth_error(Some(&err));
                     // If the user message was already persisted into the session, treat model error as `delivered`.
-                    if decorators.has_input_message(&message_id) {
+                    if accepted_inputs.contains(&message_id) {
                         Ok(())
                     } else {
                         Err(err)
@@ -214,6 +312,7 @@ impl InboxExecutor for SlotInboxExecutor {
         let session_id = self.session_id.clone();
         let hosted = self.hosted.clone();
         let decorators = self.decorators.clone();
+        let accepted_inputs = self.accepted_inputs.clone();
         let images_store = self.images.clone();
         let global_events = self.global_events.clone();
         let invalid_auth = self.invalid_auth.clone();
@@ -222,39 +321,45 @@ impl InboxExecutor for SlotInboxExecutor {
                 session_id,
                 hosted: hosted.clone(),
                 decorators: decorators.clone(),
+                accepted_inputs: accepted_inputs.clone(),
                 images: images_store,
                 global_events,
                 invalid_auth,
             };
             let image_blocks = exec.load_images(&images).await?;
             let session_clone = hosted.session().clone();
-            decorators
-                .track_input(&message_id, true, move || async move {
-                    if let Some(ref s) = skill {
-                        let formatted = Self::format_skill_message(&text, Some(s));
-                        session_clone
-                            .prompt(
-                                &formatted,
-                                Some(PromptOptions {
-                                    expand_prompt_templates: Some(true),
-                                    images: Some(image_blocks),
-                                    streaming_behavior: Some(StreamingInputBehavior::Steer),
-                                    source: Some(InputSource::Rpc),
-                                    ..Default::default()
-                                }),
-                            )
-                            .await
-                            .map(|_| ())
-                    } else {
-                        session_clone.steer(&text, Some(image_blocks)).await
-                    }
+            let msg_id_for_dec = message_id.clone();
+            accepted_inputs
+                .track(&message_id, true, || async move {
+                    decorators
+                        .track_input(&msg_id_for_dec, true, move || async move {
+                            if let Some(ref s) = skill {
+                                let formatted = Self::format_skill_message(&text, Some(s));
+                                session_clone
+                                    .prompt(
+                                        &formatted,
+                                        Some(PromptOptions {
+                                            expand_prompt_templates: Some(true),
+                                            images: Some(image_blocks),
+                                            streaming_behavior: Some(StreamingInputBehavior::Steer),
+                                            source: Some(InputSource::Rpc),
+                                            ..Default::default()
+                                        }),
+                                    )
+                                    .await
+                                    .map(|_| ())
+                            } else {
+                                session_clone.steer(&text, Some(image_blocks)).await
+                            }
+                        })
+                        .await
                 })
                 .await
         })
     }
 
     fn was_accepted(&self, id: &str) -> bool {
-        self.decorators.has_input_message(id)
+        self.accepted_inputs.contains(id)
     }
 }
 
@@ -327,6 +432,7 @@ impl SessionSlot {
     ) -> Result<Arc<Self>, String> {
         let session = hosted.session().clone();
         bitlocker.bind_session(session.clone());
+        let accepted_inputs = AcceptedInputTracker::from_session(&session);
         let decorators = MessageDecorators::attach(session.clone());
         let events = SessionEvents::new();
         let hosted = Arc::new(hosted);
@@ -354,6 +460,7 @@ impl SessionSlot {
             session_id: id.clone(),
             hosted: hosted.clone(),
             decorators: decorators.clone(),
+            accepted_inputs: accepted_inputs.clone(),
             images,
             global_events: global_events.clone(),
             invalid_auth,
@@ -374,12 +481,14 @@ impl SessionSlot {
 
         let events_for_session = events.clone();
         let decorators_for_session = decorators.clone();
+        let accepted_for_session = accepted_inputs;
         let global_for_session = global_events;
         let hosted_for_session = hosted.clone();
         let inbox_for_session = inbox.clone();
         let id_for_session = id.clone();
 
         let unsub = session.subscribe(Arc::new(move |event| {
+            accepted_for_session.on_event(&event);
             if let Some(projected) = decorators_for_session.project_browser_event(&event) {
                 events_for_session.publish("session", &projected);
             }
@@ -416,13 +525,16 @@ impl SessionSlot {
                         "sessionId": id_for_session,
                     }),
                 );
-                if hosted_for_session.session().model().provider == "cstoa" {
-                    hosted_for_session.auth.invalidate_account();
+                let provider = hosted_for_session.session().model().provider;
+                if hosted_for_session
+                    .auth
+                    .invalidate_provider_account(&provider)
+                {
                     global_for_session.publish(
                         "state",
                         &json!({
                             "type": "quota_changed",
-                            "providerId": "cstoa",
+                            "providerId": provider,
                         }),
                     );
                 }
@@ -485,6 +597,40 @@ impl SessionSlot {
 
     pub fn is_flushed(&self) -> bool {
         self.session().with_session_manager(|sm| sm.is_flushed())
+    }
+
+    /// Computes this loaded session's display title (`session_name` -> first user message -> `"新对话"`),
+    /// avoiding a full-disk `SessionPool::list()` scan when only one session title is needed.
+    pub fn display_title(&self) -> String {
+        let session = self.session();
+        if let Some(name) = session.session_name()
+            && !name.trim().is_empty()
+        {
+            return name;
+        }
+        let state = session.state();
+        if let Some(first_text) = state.messages.iter().find_map(|m| match m {
+            AgentMessage::User(u) => {
+                let t = match &u.content {
+                    pi_ai::UserContent::Text(s) => s.trim().to_owned(),
+                    pi_ai::UserContent::Blocks(blocks) => blocks
+                        .iter()
+                        .filter_map(|b| match b {
+                            pi_ai::UserContentBlock::Text(tc) => Some(tc.text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                        .trim()
+                        .to_owned(),
+                };
+                (!t.is_empty()).then(|| t.chars().take(160).collect::<String>())
+            }
+            _ => None,
+        }) {
+            return first_text;
+        }
+        "新对话".to_owned()
     }
 
     /// A retained session handle or any of these four conditions prevents LRU eviction:

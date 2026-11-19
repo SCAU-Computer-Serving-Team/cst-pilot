@@ -3,7 +3,7 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 
 use pi_agent::AgentMessage;
-use pi_ai::{ContentBlock, TextContent, ToolResultMessage, UserContentBlock, now_ms};
+use pi_ai::{ContentBlock, ToolResultMessage, now_ms};
 use pi_session::{AgentSession, AgentSessionEvent, SessionEntry, parse_iso_timestamp_ms};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 pub const INPUT_MESSAGE_CUSTOM_TYPE: &str = "cst-web-input-message";
 pub const WORK_DURATION_CUSTOM_TYPE: &str = "cst-web-work-duration";
 pub const TOOL_EXECUTION_CUSTOM_TYPE: &str = "cst-web-tool-execution";
-pub const BITLOCKER_VERIFICATION_CUSTOM_TYPE: &str = "cst.bitlocker-state-verification";
+pub const BITLOCKER_VERIFICATION_CUSTOM_TYPE: &str = cst_kit::bitlocker::VERIFICATION_CUSTOM_TYPE;
 
 /// Returns true for message roles that belong in browser snapshots, exports, and SSE streams.
 pub fn is_browser_visible_message(message: &AgentMessage) -> bool {
@@ -146,22 +146,12 @@ impl MessageDecorators {
                         BITLOCKER_VERIFICATION_CUSTOM_TYPE => {
                             let verified_at =
                                 parse_iso_timestamp_ms(&custom.timestamp).unwrap_or_else(now_ms);
-                            let raw_text = serde_json::to_string(&data).unwrap_or_default();
                             for (msg_ts, call_id) in &unresolved_bitlocker_calls {
-                                let synthetic = ToolResultMessage {
-                                    tool_call_id: call_id.clone(),
-                                    tool_name: "bitlocker".to_owned(),
-                                    content: vec![UserContentBlock::Text(TextContent {
-                                        text: raw_text.clone(),
-                                        text_signature: None,
-                                    })],
-                                    details: Some(data.clone()),
-                                    is_error: false,
-                                    timestamp: verified_at,
-                                    usage: None,
-                                    nested_calls: None,
-                                    duration_ms: None,
-                                };
+                                let synthetic = cst_kit::bitlocker::synthesize_verification_result(
+                                    call_id,
+                                    &data,
+                                    verified_at,
+                                );
                                 let key = Self::tool_key(*msg_ts, call_id);
                                 inner
                                     .tool_records
@@ -320,11 +310,8 @@ impl MessageDecorators {
                 partial_result,
                 ..
             } => {
-                if let Some(stage) = partial_result
-                    .details
-                    .get("bitlocker")
-                    .and_then(|b| b.get("stage"))
-                    .and_then(Value::as_str)
+                if let Some(stage) =
+                    cst_kit::bitlocker::extract_progress_stage(&partial_result.details)
                 {
                     let mut guard = self.inner.lock().expect("decorators lock");
                     if let Some(key) = guard.active_tools.get(tool_call_id).cloned()

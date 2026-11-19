@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use chrono::{Local, TimeZone};
-use cst_pilot::auth::{AuthRuntime, Channel, oa::OaClient};
-use cst_pilot::telemetry::TelemetryOptions;
-use cst_pilot::update::service::UpdateOptions;
-use cst_pilot::{Kit, KitHost, SKILL_NAMES};
+use cst_kit::auth::{AuthRuntime, Channel, oa::OaClient};
+use cst_kit::telemetry::TelemetryOptions;
+use cst_kit::update::service::UpdateOptions;
+use cst_kit::{Kit, KitHost, SKILL_NAMES};
 use cst_server::exports::{
     AssetResponse, ExportDocumentSource, ExportRenderer, ExportStyleSheet, OfflineHtml,
     SessionExportStore, artifact_name, build_export_snapshot_from_entries,

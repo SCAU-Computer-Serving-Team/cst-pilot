@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use pi_agent::{AgentMessage, BoxFuture};
-use pi_ai::{ContentBlock, ToolResultMessage, UserContentBlock};
+use pi_ai::{ContentBlock, ToolResultMessage};
 use pi_session::SessionEntry;
 use serde_json::{Value, json};
 
@@ -40,28 +40,7 @@ pub fn default_runbook_opener() -> RunbookOpenerFn {
     })
 }
 
-pub fn extract_delivered_runbook_file(message: &ToolResultMessage) -> Option<String> {
-    if message.is_error {
-        return None;
-    }
-    let details_val = message.details.clone().or_else(|| {
-        let joined: String = message
-            .content
-            .iter()
-            .filter_map(|part| match part {
-                UserContentBlock::Text(t) => Some(t.text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        serde_json::from_str::<Value>(&joined).ok()
-    })?;
-    details_val
-        .get("runbook")
-        .and_then(|r| r.get("file"))
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-}
+pub use cst_kit::runbook::extract_delivered_runbook_file;
 
 pub fn resolve_runbook_file_from_slot(
     slot: &SessionSlot,
@@ -94,8 +73,7 @@ pub fn resolve_runbook_file_from_slot(
     };
     let Some(call_name) = assistant.content.iter().find_map(|part| match part {
         ContentBlock::ToolCall(tc)
-            if tc.id == tool_call_id
-                && matches!(tc.name.as_str(), "runbook" | "runbook_deliver") =>
+            if tc.id == tool_call_id && cst_kit::runbook::is_runbook_delivery_tool(&tc.name) =>
         {
             Some(tc.name.clone())
         }

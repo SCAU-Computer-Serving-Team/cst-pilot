@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use http::{HeaderMap, Method, Response, StatusCode};
-use pi_ai::{Model, ModelThinkingLevel, ModelsRefreshOptions, is_thinking_level_supported};
+use pi_ai::{Model, ModelThinkingLevel, is_thinking_level_supported};
 use pi_runtime::{
     ModelRuntime, SettingsManager, SettingsScope, parse_model_thinking_level_cli,
     resolve_model_scope_from_models,
@@ -107,31 +107,17 @@ pub async fn handle_models_route(
             ));
         }
         let result = state
-            .write_once(
+            .write_once_keyed(
                 caller,
                 method.as_str(),
                 pathname,
                 &body,
-                Some(headers),
+                headers,
+                "model-refresh",
                 || async move {
-                    let cstoa_refresh = state.host.auth().refresh(true).await;
-                    let all_refresh = state
-                        .host
-                        .auth()
-                        .runtime()
-                        .refresh(Some(ModelsRefreshOptions {
-                            allow_network: Some(true),
-                            providers: None,
-                            force: Some(true),
-                        }))
-                        .await;
-                    let aborted = cstoa_refresh.aborted || all_refresh.aborted;
-                    let mut failed: Vec<String> = cstoa_refresh
-                        .errors
-                        .keys()
-                        .chain(all_refresh.errors.keys())
-                        .cloned()
-                        .collect();
+                    let refreshed = state.host.auth().refresh_all(true).await;
+                    let aborted = refreshed.aborted;
+                    let mut failed: Vec<String> = refreshed.errors.keys().cloned().collect();
                     failed.sort();
                     failed.dedup();
 
@@ -360,91 +346,86 @@ pub async fn handle_models_route(
         };
 
         let result = state
-            .write_once(
+            .write_once_keyed(
                 caller,
                 method.as_str(),
                 pathname,
                 &body,
-                Some(headers),
+                headers,
+                lock_key,
                 || async move {
-                    state
-                        .locks
-                        .serialize(lock_key, || async move {
-                            let slot = if let Some(ref sid) = session_id {
-                                Some(state.pool.open_saved(sid).await.map_err(ApiError::from)?)
-                            } else {
-                                None
-                            };
-                            if save_default {
-                                settings
-                                    .set_default_model_and_provider(
-                                        &model.provider,
-                                        &model.id,
-                                        SettingsScope::Global,
-                                    )
-                                    .map_err(|msg| {
-                                        ApiError::new(
-                                            StatusCode::SERVICE_UNAVAILABLE,
-                                            "configuration_unavailable",
-                                            msg,
-                                        )
-                                    })?;
-                                state
-                                    .pool
-                                    .global_events
-                                    .publish("state", &json!({ "type": "settings_changed" }));
-                            } else if let Some(ref s) = slot {
-                                require_model_credentials(
-                                    &runtime,
-                                    &state.pool.invalid_auth,
-                                    &model.provider,
-                                    &model.id,
+                    let slot = if let Some(ref sid) = session_id {
+                        Some(state.pool.open_saved(sid).await.map_err(ApiError::from)?)
+                    } else {
+                        None
+                    };
+                    if save_default {
+                        settings
+                            .set_default_model_and_provider(
+                                &model.provider,
+                                &model.id,
+                                SettingsScope::Global,
+                            )
+                            .map_err(|msg| {
+                                ApiError::new(
+                                    StatusCode::SERVICE_UNAVAILABLE,
+                                    "configuration_unavailable",
+                                    msg,
                                 )
-                                .await
-                                .map_err(ApiError::from)?;
-                                state
-                                    .pool
-                                    .set_session_model(&s.id, model.clone())
-                                    .await
-                                    .map_err(ApiError::from)?;
-                            }
-
-                            let provider_name = runtime
-                                .models()
-                                .get_provider(&model.provider)
-                                .map(|p| p.name().to_owned())
-                                .unwrap_or_else(|| model.provider.clone());
-                            let marked_invalid = state
-                                .pool
-                                .invalid_auth
-                                .lock()
-                                .expect("invalid_auth lock")
-                                .contains(&model.provider);
-                            let cred_ready =
-                                !marked_invalid && runtime.has_configured_auth(&model.provider);
-                            let levels: Vec<&'static str> =
-                                get_supported_thinking_levels(Some(&model))
-                                    .into_iter()
-                                    .map(|lvl| lvl.as_str())
-                                    .collect();
-                            let thinking_level = slot
-                                .as_ref()
-                                .map(|s| s.session().thinking_level())
-                                .unwrap_or_else(|| home_thinking_level(&model, &settings));
-
-                            Ok(json!({
-                                "provider": model.provider,
-                                "id": model.id,
-                                "name": model.name,
-                                "providerName": provider_name,
-                                "credentialReady": cred_ready,
-                                "catalogPresent": true,
-                                "thinkingLevel": thinking_level.as_str(),
-                                "reasoning": model.reasoning,
-                                "thinkingLevels": levels,
-                            }))
-                        })
+                            })?;
+                        state
+                            .pool
+                            .global_events
+                            .publish("state", &json!({ "type": "settings_changed" }));
+                    } else if let Some(ref s) = slot {
+                        require_model_credentials(
+                            &runtime,
+                            &state.pool.invalid_auth,
+                            &model.provider,
+                            &model.id,
+                        )
                         .await
+                        .map_err(ApiError::from)?;
+                        state
+                            .pool
+                            .set_session_model(&s.id, model.clone())
+                            .await
+                            .map_err(ApiError::from)?;
+                    }
+
+                    let provider_name = runtime
+                        .models()
+                        .get_provider(&model.provider)
+                        .map(|p| p.name().to_owned())
+                        .unwrap_or_else(|| model.provider.clone());
+                    let marked_invalid = state
+                        .pool
+                        .invalid_auth
+                        .lock()
+                        .expect("invalid_auth lock")
+                        .contains(&model.provider);
+                    let cred_ready =
+                        !marked_invalid && runtime.has_configured_auth(&model.provider);
+                    let levels: Vec<&'static str> = get_supported_thinking_levels(Some(&model))
+                        .into_iter()
+                        .map(|lvl| lvl.as_str())
+                        .collect();
+                    let thinking_level = slot
+                        .as_ref()
+                        .map(|s| s.session().thinking_level())
+                        .unwrap_or_else(|| home_thinking_level(&model, &settings));
+
+                    Ok(json!({
+                        "provider": model.provider,
+                        "id": model.id,
+                        "name": model.name,
+                        "providerName": provider_name,
+                        "credentialReady": cred_ready,
+                        "catalogPresent": true,
+                        "thinkingLevel": thinking_level.as_str(),
+                        "reasoning": model.reasoning,
+                        "thinkingLevels": levels,
+                    }))
                 },
             )
             .await?;
@@ -501,17 +482,19 @@ pub async fn handle_models_route(
             ));
         }
 
+        let sid_for_action = session_id.clone();
         let result = state
-            .write_once(
+            .write_once_for_session(
                 caller,
                 method.as_str(),
                 pathname,
                 &body,
-                Some(headers),
+                headers,
+                &session_id,
                 || async move {
                     let level = state
                         .pool
-                        .set_session_thinking_level(&session_id, parsed_level)
+                        .set_session_thinking_level(&sid_for_action, parsed_level)
                         .await
                         .map_err(ApiError::from)?;
                     Ok(json!({ "level": level.as_str() }))
@@ -575,12 +558,13 @@ pub async fn handle_models_route(
         }
 
         let result = state
-            .write_once(
+            .write_once_keyed(
                 caller,
                 method.as_str(),
                 pathname,
                 &body,
-                Some(headers),
+                headers,
+                "model-scoped",
                 || async move {
                     let settings = state.pool.settings_manager();
                     let runtime = state.host.auth().runtime();

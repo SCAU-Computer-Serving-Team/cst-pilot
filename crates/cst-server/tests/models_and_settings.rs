@@ -4,11 +4,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use cst_pilot::auth::{AuthRuntime, Channel, oa::OaClient};
-use cst_pilot::telemetry::TelemetryOptions;
-use cst_pilot::tools::ssrf::{HttpRequest, HttpResponse, HttpTransport};
-use cst_pilot::update::service::UpdateOptions;
-use cst_pilot::{Kit, KitHost, SKILL_NAMES};
+use cst_kit::auth::{AuthRuntime, Channel, oa::OaClient};
+use cst_kit::telemetry::TelemetryOptions;
+use cst_kit::tools::ssrf::{HttpRequest, HttpResponse, HttpTransport};
+use cst_kit::update::service::UpdateOptions;
+use cst_kit::{Kit, KitHost, SKILL_NAMES};
 use cst_server::{RunningServer, ServerConfig};
 use pi_agent::BoxFuture;
 use serde_json::{Value, json};
@@ -109,7 +109,7 @@ async fn kit_host_shares_single_catalog_maintenance_task_when_individual_session
     let oa = OaClient::with_transport(
         "https://oa.example",
         transport.clone(),
-        Arc::new(cst_pilot::auth::oa::SystemClock),
+        Arc::new(cst_kit::auth::oa::SystemClock),
     )
     .unwrap();
     let kit = Kit::new(&fixture.0).unwrap();

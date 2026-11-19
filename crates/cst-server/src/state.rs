@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 
-use cst_pilot::KitHost;
+use cst_kit::KitHost;
 use http::HeaderMap;
 use serde_json::{Value, json};
 use tokio::sync::Mutex as AsyncMutex;
@@ -137,9 +137,9 @@ impl ServerState {
                     .lock()
                     .expect("invalid_auth lock")
                     .remove(provider_id);
-                if provider_id == "cstoa" {
-                    host_for_oauth.auth().invalidate_account();
-                }
+                host_for_oauth
+                    .auth()
+                    .invalidate_provider_account(provider_id);
                 global_for_oauth.publish(
                     "state",
                     &json!({
@@ -294,6 +294,31 @@ impl ServerState {
         }
     }
 
+    /// Enforces the server-wide write lock order:
+    /// `KeyedLocks -> ModeController::admit_write -> ActivityGate -> MutationReceipts`.
+    /// Channel admission (`ModeController` read lock) is released immediately after writing the
+    /// durable `started` receipt; `ActivityLease` stays held until `action` completes.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn write_once_keyed<E, F, Fut>(
+        &self,
+        caller: CallerIdentity,
+        method: &str,
+        pathname: &str,
+        body: &Value,
+        headers: &HeaderMap,
+        lock_key: impl Into<String>,
+        action: F,
+    ) -> Result<Value, MutationError<E>>
+    where
+        E: std::fmt::Display,
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<Value, E>>,
+    {
+        let _scoped_guard = self.locks.lock(lock_key).await;
+        self.write_once(caller, method, pathname, body, Some(headers), action)
+            .await
+    }
+
     /// Acquires `session:{session_id}` before admitting and persisting an idempotent mutation.
     /// A request waiting for its session never retains channel admission.
     #[allow(clippy::too_many_arguments)]
@@ -312,9 +337,16 @@ impl ServerState {
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<Value, E>>,
     {
-        let _session_guard = self.locks.lock(format!("session:{session_id}")).await;
-        self.write_once(caller, method, pathname, body, Some(headers), action)
-            .await
+        self.write_once_keyed(
+            caller,
+            method,
+            pathname,
+            body,
+            headers,
+            format!("session:{session_id}"),
+            action,
+        )
+        .await
     }
 
     /// Pauses all session inboxes, stops running generations, finalizes telemetry (5s budget),
