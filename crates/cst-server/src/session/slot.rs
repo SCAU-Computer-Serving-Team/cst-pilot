@@ -599,38 +599,40 @@ impl SessionSlot {
         self.session().with_session_manager(|sm| sm.is_flushed())
     }
 
-    /// Computes this loaded session's display title (`session_name` -> first user message -> `"新对话"`),
-    /// avoiding a full-disk `SessionPool::list()` scan when only one session title is needed.
+    /// Computes this session's canonical display title matching `SessionPool::list()`:
+    /// explicit trimmed `SessionInfo.name` -> chronological first user message across all JSONL entries -> `"新对话"`.
     pub fn display_title(&self) -> String {
         let session = self.session();
-        if let Some(name) = session.session_name()
-            && !name.trim().is_empty()
-        {
-            return name;
+        if let Some(name) = session.session_name() {
+            let trimmed = name.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_owned();
+            }
         }
-        let state = session.state();
-        if let Some(first_text) = state.messages.iter().find_map(|m| match m {
-            AgentMessage::User(u) => {
-                let t = match &u.content {
-                    pi_ai::UserContent::Text(s) => s.trim().to_owned(),
+        let first_text = session.with_session_manager(|sm| {
+            sm.get_entries().into_iter().find_map(|entry| {
+                let pi_session::SessionEntry::Message(m) = entry else {
+                    return None;
+                };
+                let AgentMessage::User(u) = m.message else {
+                    return None;
+                };
+                let raw = match u.content {
+                    pi_ai::UserContent::Text(s) => s,
                     pi_ai::UserContent::Blocks(blocks) => blocks
-                        .iter()
+                        .into_iter()
                         .filter_map(|b| match b {
-                            pi_ai::UserContentBlock::Text(tc) => Some(tc.text.as_str()),
+                            pi_ai::UserContentBlock::Text(tc) => Some(tc.text),
                             _ => None,
                         })
                         .collect::<Vec<_>>()
-                        .join(" ")
-                        .trim()
-                        .to_owned(),
+                        .join(" "),
                 };
-                (!t.is_empty()).then(|| t.chars().take(160).collect::<String>())
-            }
-            _ => None,
-        }) {
-            return first_text;
-        }
-        "新对话".to_owned()
+                (!raw.is_empty() && !raw.trim().is_empty())
+                    .then(|| raw.chars().take(160).collect::<String>())
+            })
+        });
+        first_text.unwrap_or_else(|| "新对话".to_owned())
     }
 
     /// A retained session handle or any of these four conditions prevents LRU eviction:

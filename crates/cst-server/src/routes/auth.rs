@@ -346,13 +346,6 @@ pub async fn handle_auth_route(
                     let pid_owned = provider_id.to_owned();
                     let state_for_login = state.clone();
                     let has_inline_key = key_opt.is_some();
-                    // Keep lock order identical to `PUT /api/auth/<provider>/api-key`:
-                    // `auth-config:all` -> `auth:<provider>` whenever inline key + baseUrl run together.
-                    let inline_cfg_guard = if base_url_opt.is_some() && has_inline_key {
-                        Some(state.locks.lock("auth-config:all").await)
-                    } else {
-                        None
-                    };
                     let result = state
                         .write_once_keyed(
                             caller,
@@ -362,14 +355,13 @@ pub async fn handle_auth_route(
                             headers,
                             format!("auth:{pid_owned}"),
                             || async move {
-                                let mut inline_cfg_guard = inline_cfg_guard;
                                 let prev =
                                     state_for_login.oauth_flows.status(&pid_owned, None);
                                 if prev.get("state").and_then(Value::as_str) == Some("pending")
                                     && prev.get("authType").and_then(Value::as_str)
                                         != Some(auth_type_str(auth_type))
                                 {
-                                    // ModeController read lock has already been released after durable `started` receipt.
+                                    // ModeController read lock is already dropped; `auth-config:all` is not held here.
                                     state_for_login
                                         .oauth_flows
                                         .cancel_and_wait(&pid_owned)
@@ -383,36 +375,14 @@ pub async fn handle_auth_route(
                                     auth_type,
                                     key_opt,
                                     move |interaction| {
-                                        let held_cfg_guard = inline_cfg_guard.take();
                                         Box::pin(async move {
+                                            let cancel_tok = interaction
+                                                .cancel_token
+                                                .clone()
+                                                .unwrap_or_default();
                                             if let Some(ref base) = base_url_opt {
-                                                if let Some(_cfg_guard) = held_cfg_guard {
-                                                    if st
-                                                        .pool
-                                                        .has_running_session_for_provider(&pid_task)
-                                                        .await
-                                                    {
-                                                        return Err("此 Provider 的会话正在执行，请完成后再修改 BaseURL".to_owned());
-                                                    }
-                                                    let do_login = || async {
-                                                        st.host
-                                                            .auth()
-                                                            .login_provider(
-                                                                &pid_task,
-                                                                auth_type,
-                                                                interaction,
-                                                            )
-                                                            .await
-                                                            .map(|_| ())
-                                                    };
-                                                    st.host
-                                                        .auth()
-                                                        .with_provider_endpoint(
-                                                            &pid_task,
-                                                            base,
-                                                            do_login,
-                                                        )
-                                                        .await
+                                                let login_interaction = if has_inline_key {
+                                                    interaction
                                                 } else {
                                                     st.host
                                                         .auth()
@@ -431,7 +401,7 @@ pub async fn handle_auth_route(
                                                                 .to_owned(),
                                                         );
                                                     };
-                                                    // Wait for user secret with zero config/session locks held;
+                                                    // Wait for user secret with zero config locks or ActivityLease held;
                                                     // `wait_until_ready` returns as soon as this prompt registers.
                                                     let collected = Zeroizing::new(
                                                         interaction
@@ -444,10 +414,8 @@ pub async fn handle_auth_route(
                                                             })
                                                             .await?,
                                                     );
-                                                    let replay_interaction = AuthInteraction {
-                                                        cancel_token: interaction
-                                                            .cancel_token
-                                                            .clone(),
+                                                    AuthInteraction {
+                                                        cancel_token: Some(cancel_tok.clone()),
                                                         prompt: Arc::new(move |q| {
                                                             let secret = collected.clone();
                                                             Box::pin(async move {
@@ -463,39 +431,46 @@ pub async fn handle_auth_route(
                                                             })
                                                         }),
                                                         notify: interaction.notify.clone(),
-                                                    };
-                                                    st.locks
-                                                        .serialize("auth-config:all", || async {
-                                                            if st
-                                                                .pool
-                                                                .has_running_session_for_provider(
-                                                                    &pid_task,
-                                                                )
-                                                                .await
-                                                            {
-                                                                return Err("此 Provider 的会话正在执行，请完成后再修改 BaseURL".to_owned());
-                                                            }
+                                                    }
+                                                };
+
+                                                // Cancel-aware wait on `auth-config:all` so cancelling this flow never blocks
+                                                // behind another provider's custom config edit.
+                                                let _cfg_guard = tokio::select! {
+                                                    biased;
+                                                    _ = cancel_tok.cancelled() => {
+                                                        return Err("登录已取消".to_owned());
+                                                    }
+                                                    guard = st.locks.lock("auth-config:all") => guard,
+                                                };
+                                                if cancel_tok.is_cancelled() {
+                                                    return Err("登录已取消".to_owned());
+                                                }
+                                                if st
+                                                    .pool
+                                                    .has_running_session_for_provider(&pid_task)
+                                                    .await
+                                                {
+                                                    return Err("此 Provider 的会话正在执行，请完成后再修改 BaseURL".to_owned());
+                                                }
+                                                st.host
+                                                    .auth()
+                                                    .with_provider_endpoint(
+                                                        &pid_task,
+                                                        base,
+                                                        || async {
                                                             st.host
                                                                 .auth()
-                                                                .with_provider_endpoint(
+                                                                .login_provider(
                                                                     &pid_task,
-                                                                    base,
-                                                                    || async {
-                                                                        st.host
-                                                                            .auth()
-                                                                            .login_provider(
-                                                                                &pid_task,
-                                                                                auth_type,
-                                                                                replay_interaction,
-                                                                            )
-                                                                            .await
-                                                                            .map(|_| ())
-                                                                    },
+                                                                    auth_type,
+                                                                    login_interaction,
                                                                 )
                                                                 .await
-                                                        })
-                                                        .await
-                                                }
+                                                                .map(|_| ())
+                                                        },
+                                                    )
+                                                    .await
                                             } else {
                                                 st.host
                                                     .auth()
@@ -685,12 +660,6 @@ pub async fn handle_auth_route(
 
                     let pid_owned = provider_id.to_owned();
                     let st = state.clone();
-                    // Acquire scoped locks strictly before channel admission (`ModeController::admit_write`).
-                    let _cfg_guard = if base_url_opt.is_some() {
-                        Some(state.locks.lock("auth-config:all").await)
-                    } else {
-                        None
-                    };
                     let result = state
                         .write_once_keyed(
                             caller,
@@ -700,8 +669,11 @@ pub async fn handle_auth_route(
                             headers,
                             format!("auth:{pid_owned}"),
                             || async move {
+                                // Cancel and await any pending interactive/OAuth flow BEFORE acquiring `auth-config:all`,
+                                // keeping consistent lock hierarchy (`auth:<provider>` -> `auth-config:all`).
+                                st.oauth_flows.cancel_and_wait(&pid_owned).await;
+
                                 let login_action = || async {
-                                    st.oauth_flows.cancel_and_wait(&pid_owned).await;
                                     let prompts = Arc::new(Mutex::new(0usize));
                                     let secret = key_secret.clone();
                                     let interaction = AuthInteraction::new(
@@ -737,6 +709,7 @@ pub async fn handle_auth_route(
                                 };
 
                                 let resp_val = if let Some(ref base) = base_url_opt {
+                                    let _cfg_guard = st.locks.lock("auth-config:all").await;
                                     if st.pool.has_running_session_for_provider(&pid_owned).await {
                                         return Err(ApiError::new(
                                             StatusCode::CONFLICT,

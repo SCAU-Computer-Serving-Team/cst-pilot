@@ -430,6 +430,12 @@ impl AuthRuntime {
         Fut: std::future::Future<Output = Result<T, String>>,
     {
         let endpoint = self.validate_provider_endpoint(provider_id, base_url)?;
+        // Hold one outer ActivityLease across initial write, local refresh, login, and rollback
+        // so an update handoff cannot close the gate mid-sequence and strand a half-committed BaseURL.
+        let _activity = self
+            .files
+            .enter_activity()
+            .map_err(CustomProviderError::config_unavailable)?;
         let _serial = self.config_writes.lock().await;
         let tx = self
             .files

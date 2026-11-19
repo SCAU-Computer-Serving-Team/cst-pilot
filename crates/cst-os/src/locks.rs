@@ -159,7 +159,7 @@ impl RunbookDirectoryLock {
         }
         #[cfg(not(windows))]
         {
-            let lock_dir = std::env::temp_dir().join("cst-pilot-kernel-locks");
+            let lock_dir = resolve_non_windows_lock_dir(&canonical);
             let file = acquire_file_lock(&lock_dir, &address)
                 .map_err(|_| "清单目录正由另一进程写入，请稍后重试。".to_owned())?;
             Ok(Self { _file: file })
@@ -200,12 +200,32 @@ impl UpdateLock {
         }
         #[cfg(not(windows))]
         {
-            let lock_dir = std::env::temp_dir().join("cst-pilot-kernel-locks");
+            let canonical_root = root.canonicalize().map_err(|_| "升级根目录无法读取。")?;
+            let lock_dir = canonical_root.join(".state").join("kernel-locks");
             let file = acquire_file_lock(&lock_dir, &name)
                 .map_err(|_| "工具包已有升级或恢复任务进行中。".to_owned())?;
             Ok(Self { _file: file })
         }
     }
+}
+
+#[cfg(not(windows))]
+fn resolve_non_windows_lock_dir(canonical_target: &Path) -> std::path::PathBuf {
+    for ancestor in canonical_target.ancestors() {
+        if ancestor.join("agent").join("home").is_dir() {
+            return ancestor.join(".state").join("kernel-locks");
+        }
+        if ancestor.file_name().and_then(|n| n.to_str()) == Some("artifacts")
+            && let Some(kit_root) = ancestor.parent()
+        {
+            return kit_root.join(".state").join("kernel-locks");
+        }
+    }
+    canonical_target
+        .parent()
+        .unwrap_or(canonical_target)
+        .join(".state")
+        .join("kernel-locks")
 }
 
 #[cfg(any(test, not(windows)))]

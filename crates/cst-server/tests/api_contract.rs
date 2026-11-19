@@ -1883,5 +1883,83 @@ async fn create_session_distinguishes_omitted_fields_from_explicit_null_and_stat
     .unwrap();
     assert_eq!(custom_resp.status().as_u16(), 200);
 
+    // 5. Even after answering the interactive prompt so the background login task enters the
+    //    `auth-config:all` wait queue, a concurrent `PUT /api/auth/deepseek/api-key` with `baseUrl`
+    //    cancels the waiting flow immediately without deadlocking behind `auth-config:all`.
+    let held_cfg = server.state.locks.lock("auth-config:all").await;
+    let flow_id = start_json["flowId"].as_str().unwrap().to_owned();
+    let prompt_id = start_json["prompt"]["id"].as_str().unwrap().to_owned();
+    let respond_resp = client
+        .post(format!(
+            "{}/api/auth/deepseek/api-key/respond",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "deepseek-interactive-respond")
+        .json(&json!({
+            "flowId": flow_id,
+            "promptId": prompt_id,
+            "value": "sk-old-interactive-key"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(respond_resp.status().as_u16(), 200);
+    // Give the spawned task a moment to park on `st.locks.lock("auth-config:all")`.
+    tokio::time::sleep(Duration::from_millis(40)).await;
+
+    let put_client = client.clone();
+    let put_url = format!("{}/api/auth/deepseek/api-key", server.base_url());
+    let put_host = host_header.clone();
+    let put_origin = origin_header.clone();
+    let put_handle = tokio::spawn(async move {
+        put_client
+            .put(put_url)
+            .header("Host", put_host)
+            .header("Origin", put_origin)
+            .header("X-CST-Web-Request", "1")
+            .header("Idempotency-Key", "deepseek-put-override")
+            .json(&json!({
+                "key": "sk-new-override-key",
+                "baseUrl": "https://api.deepseek.com/v1"
+            }))
+            .send()
+            .await
+            .unwrap()
+    });
+
+    // While `held_cfg` is STILL held, `PUT` must cancel the parked flow via `cancel_and_wait` without deadlocking!
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let st_json: Value = client
+                .get(format!(
+                    "{}/api/auth/deepseek/api-key/status",
+                    server.base_url()
+                ))
+                .header("Host", &host_header)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if st_json["state"] == "cancelled" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("PUT must cancel interactive flow waiting on auth-config:all before acquiring auth-config:all");
+
+    drop(held_cfg);
+    let put_resp = tokio::time::timeout(Duration::from_secs(3), put_handle)
+        .await
+        .expect("PUT must finish promptly once auth-config:all is released")
+        .unwrap();
+    assert_eq!(put_resp.status().as_u16(), 200);
+
     server.shutdown().await;
 }

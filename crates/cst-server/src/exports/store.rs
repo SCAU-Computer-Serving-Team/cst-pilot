@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -119,7 +119,7 @@ struct QueueState {
     active: Option<Arc<WorkItem>>,
     active_cancel: Option<CancellationToken>,
     active_cancel_error: Option<ServiceError>,
-    reservations: usize,
+    publishing: HashSet<String>,
     pumping: Option<JoinHandle<()>>,
 }
 
@@ -153,7 +153,7 @@ impl SessionExportStore {
                 active: None,
                 active_cancel: None,
                 active_cancel_error: None,
-                reservations: 0,
+                publishing: HashSet::new(),
                 pumping: None,
             })),
             revision: Arc::new(AtomicU64::new(0)),
@@ -244,8 +244,8 @@ impl SessionExportStore {
     }
 
     pub async fn create(&self, snapshot: &Value) -> Result<ExportJobRecord, ServiceError> {
-        struct CreatingGuard<'a>(&'a SessionExportStore);
-        impl Drop for CreatingGuard<'_> {
+        struct CreatingGuard(SessionExportStore);
+        impl Drop for CreatingGuard {
             fn drop(&mut self) {
                 if self.0.creating_count.fetch_sub(1, Ordering::SeqCst) == 1 {
                     self.0.creating_done.notify_waiters();
@@ -253,28 +253,38 @@ impl SessionExportStore {
             }
         }
 
-        self.creating_count.fetch_add(1, Ordering::SeqCst);
-        let _creating = CreatingGuard(self);
-        self.enqueue(snapshot).await
-    }
-
-    async fn enqueue(&self, snapshot: &Value) -> Result<ExportJobRecord, ServiceError> {
-        struct ReservationGuard<'a> {
-            store: &'a SessionExportStore,
+        struct CallerCancelGuard {
+            flag: Arc<AtomicBool>,
             armed: bool,
         }
-        impl Drop for ReservationGuard<'_> {
+        impl Drop for CallerCancelGuard {
             fn drop(&mut self) {
                 if self.armed {
-                    self.store
-                        .inner
-                        .lock()
-                        .expect("export queue lock")
-                        .reservations -= 1;
+                    self.flag.store(true, Ordering::SeqCst);
                 }
             }
         }
 
+        self.creating_count.fetch_add(1, Ordering::SeqCst);
+        let creating = CreatingGuard(self.clone());
+        let caller_cancelled = Arc::new(AtomicBool::new(false));
+        let mut cancel_guard = CallerCancelGuard {
+            flag: caller_cancelled.clone(),
+            armed: true,
+        };
+        let res = self.enqueue(snapshot, creating, caller_cancelled).await;
+        if res.is_ok() {
+            cancel_guard.armed = false;
+        }
+        res
+    }
+
+    async fn enqueue(
+        &self,
+        snapshot: &Value,
+        creating: impl Send + 'static,
+        caller_cancelled: Arc<AtomicBool>,
+    ) -> Result<ExportJobRecord, ServiceError> {
         if self.closing.load(Ordering::SeqCst) {
             return Err(ServiceError::new(
                 ServiceErrorKind::Unavailable,
@@ -284,23 +294,6 @@ impl SessionExportStore {
         }
         let store_for_init = self.clone();
         Self::run_blocking(move || store_for_init.initialize_work_dir_sync()).await?;
-        {
-            let mut guard = self.inner.lock().expect("export queue lock");
-            let total =
-                guard.queue.len() + guard.reservations + usize::from(guard.active.is_some());
-            if total >= 8 {
-                return Err(ServiceError::new(
-                    ServiceErrorKind::Busy,
-                    "export_busy",
-                    "导出任务较多，请等待已有任务完成",
-                ));
-            }
-            guard.reservations += 1;
-        }
-        let mut reservation = ReservationGuard {
-            store: self,
-            armed: true,
-        };
 
         let id = Uuid::new_v4().to_string();
         let session_id = snapshot
@@ -331,6 +324,28 @@ impl SessionExportStore {
         })
         .await?;
 
+        {
+            let mut guard = self.inner.lock().expect("export queue lock");
+            if self.closing.load(Ordering::SeqCst) {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::Unavailable,
+                    "export_stopping",
+                    "程序正在退出，请稍后导出",
+                ));
+            }
+            let total =
+                guard.queue.len() + guard.publishing.len() + usize::from(guard.active.is_some());
+            if total >= 8 {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::Busy,
+                    "export_busy",
+                    "导出任务较多，请等待已有任务完成",
+                ));
+            }
+            guard.publishing.insert(id.clone());
+            self.revision.fetch_add(1, Ordering::SeqCst);
+        }
+
         let result = ExportJobRecord {
             id: id.clone(),
             session_id,
@@ -346,38 +361,77 @@ impl SessionExportStore {
             result: result.clone(),
             stored: Vec::new(),
         };
-        let store_for_save = self.clone();
-        let record_to_save = record.clone();
-        Self::run_blocking(move || store_for_save.save_record_sync(&record_to_save)).await?;
+        let snapshot_owned = snapshot.clone();
+        let store_for_publish = self.clone();
 
-        if self.closing.load(Ordering::SeqCst) {
-            let stale = self.metadata.join(format!("{id}.json"));
-            let _ = tokio::task::spawn_blocking(move || {
+        // Execute record persistence + queue insertion as one owned blocking transition so:
+        // 1. Concurrent `list()`/`get()` sees `id` in `publishing` and never marks it `export_interrupted`.
+        // 2. If the caller cancels or `close()` begins mid-write, the worker removes `<id>.json` before releasing `publishing`/`creating`.
+        Self::run_blocking(move || {
+            let _creating = creating;
+            struct PublishingGuard<'a> {
+                store: &'a SessionExportStore,
+                id: String,
+                armed: bool,
+            }
+            impl Drop for PublishingGuard<'_> {
+                fn drop(&mut self) {
+                    if self.armed {
+                        let mut guard = self.store.inner.lock().expect("export queue lock");
+                        guard.publishing.remove(&self.id);
+                        self.store.revision.fetch_add(1, Ordering::SeqCst);
+                    }
+                }
+            }
+            let mut pub_guard = PublishingGuard {
+                store: &store_for_publish,
+                id: id.clone(),
+                armed: true,
+            };
+
+            store_for_publish.save_record_sync(&record)?;
+
+            if store_for_publish.closing.load(Ordering::SeqCst)
+                || caller_cancelled.load(Ordering::SeqCst)
+            {
+                let stale = store_for_publish.metadata.join(format!("{id}.json"));
                 let _ = fs::remove_file(stale);
-            })
-            .await;
-            return Err(ServiceError::new(
-                ServiceErrorKind::Unavailable,
-                "export_stopping",
-                "程序正在退出，请稍后导出",
-            ));
-        }
+                return Err(ServiceError::new(
+                    ServiceErrorKind::Unavailable,
+                    "export_stopping",
+                    "程序正在退出，请稍后导出",
+                ));
+            }
 
-        let work = Arc::new(WorkItem {
-            id,
-            snapshot: snapshot.clone(),
-            state: Mutex::new((record, result.clone())),
-        });
+            let work = Arc::new(WorkItem {
+                id: id.clone(),
+                snapshot: snapshot_owned,
+                state: Mutex::new((record, result.clone())),
+            });
 
-        {
-            let mut guard = self.inner.lock().expect("export queue lock");
-            reservation.armed = false;
-            guard.reservations -= 1;
-            guard.queue.push_back(work);
-            self.revision.fetch_add(1, Ordering::SeqCst);
-            self.ensure_pumping_locked(&mut guard);
-        }
-        Ok(result)
+            {
+                let mut guard = store_for_publish.inner.lock().expect("export queue lock");
+                if store_for_publish.closing.load(Ordering::SeqCst)
+                    || caller_cancelled.load(Ordering::SeqCst)
+                {
+                    drop(guard);
+                    let stale = store_for_publish.metadata.join(format!("{id}.json"));
+                    let _ = fs::remove_file(stale);
+                    return Err(ServiceError::new(
+                        ServiceErrorKind::Unavailable,
+                        "export_stopping",
+                        "程序正在退出，请稍后导出",
+                    ));
+                }
+                pub_guard.armed = false;
+                guard.publishing.remove(&id);
+                guard.queue.push_back(work);
+                store_for_publish.revision.fetch_add(1, Ordering::SeqCst);
+                store_for_publish.ensure_pumping_locked(&mut guard);
+            }
+            Ok(result)
+        })
+        .await
     }
 
     fn ensure_pumping_locked(&self, guard: &mut QueueState) {
@@ -778,6 +832,14 @@ impl SessionExportStore {
             .map(|item| item.visible_record())
     }
 
+    fn is_publishing(&self, id: &str) -> bool {
+        self.inner
+            .lock()
+            .expect("export queue lock")
+            .publishing
+            .contains(id)
+    }
+
     fn read_record_sync(&self, id: &str) -> Result<ExportRecord, ServiceError> {
         if !is_valid_export_id(id) {
             return Err(ServiceError::new(
@@ -791,6 +853,13 @@ impl SessionExportStore {
         loop {
             if let Some(live) = self.live_record(id) {
                 return Ok(live);
+            }
+            if self.is_publishing(id) {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::NotFound,
+                    "export_not_found",
+                    "导出记录不存在",
+                ));
             }
             let rev = self.revision.load(Ordering::SeqCst);
             let file_path = self.metadata.join(format!("{id}.json"));
@@ -814,6 +883,13 @@ impl SessionExportStore {
 
             if let Some(live) = self.live_record(id) {
                 return Ok(live);
+            }
+            if self.is_publishing(id) {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::NotFound,
+                    "export_not_found",
+                    "导出记录不存在",
+                ));
             }
             if self.revision.load(Ordering::SeqCst) != rev {
                 continue;

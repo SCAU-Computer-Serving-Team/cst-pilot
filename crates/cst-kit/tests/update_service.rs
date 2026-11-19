@@ -934,4 +934,80 @@ async fn same_root_activity_gate_is_shared_isolated_across_roots_and_blocks_writ
             .session_options(CreateAgentSessionOptions::default())
             .is_ok()
     );
+
+    // Two distinct `KitHost` instances targeting root A share the same update participant registry,
+    // and `with_provider_endpoint_checked` holds an unbroken `ActivityLease` across write + login + rollback.
+    let host_a1 = a.host(Network::new(), Arc::new(Launcher::default())).await;
+    let host_a2 = a.host(Network::new(), Arc::new(Launcher::default())).await;
+    host_a2
+        .updates()
+        .check(CancellationToken::new())
+        .await
+        .unwrap();
+    host_a2
+        .updates()
+        .prepare(CancellationToken::new())
+        .await
+        .unwrap();
+
+    // Verify `with_provider_endpoint_checked` keeps `ActivityGate` leased while `login` closure runs,
+    // and rolls back cleanly even when `login` fails.
+    auth_a2
+        .save_custom_provider_checked(cst_kit::auth::custom_provider::CustomProviderInput {
+            id: "ep-test".into(),
+            name: "EP Test".into(),
+            base_url: "https://old.example/v1".into(),
+            api: cst_kit::auth::custom_provider::CustomApi::OpenaiCompletions,
+            api_key: Some("sk-initial".into()),
+            models: vec![cst_kit::auth::custom_provider::CustomModel {
+                id: "m1".into(),
+                name: "M1".into(),
+                context_window: 32000,
+                max_tokens: 4096,
+                reasoning: false,
+                image: false,
+            }],
+            revision: None,
+        })
+        .await
+        .unwrap();
+    let gate_check = host_a2.kit().activity_gate().clone();
+    let ep_err = auth_a2
+        .with_provider_endpoint_checked("ep-test", "https://new.example/v1", || async move {
+            assert!(
+                gate_check.close().is_err(),
+                "ActivityGate must stay leased across with_provider_endpoint_checked login/rollback window"
+            );
+            Err::<(), String>("simulated login failure".into())
+        })
+        .await
+        .unwrap_err();
+    assert!(ep_err.message.contains("simulated login failure"));
+    let rolled_back = auth_a2.custom_provider_checked("ep-test").unwrap().unwrap();
+    assert_eq!(rolled_back["baseUrl"], "https://old.example/v1");
+
+    // Queue a pending follow-up message on a session opened via `host_a1`; `host_a2.updates().launch(...)`
+    // must observe `host_a1`'s session participant and refuse handoff.
+    let sess_a1 = host_a1
+        .open_session(CreateAgentSessionOptions::default())
+        .await
+        .unwrap();
+    sess_a1
+        .session()
+        .follow_up("queued work", None)
+        .await
+        .unwrap();
+    assert!(
+        host_a2
+            .updates()
+            .launch(
+                vec![ProcessIdentity::current().unwrap()],
+                RestartUi::Web,
+                CancellationToken::new(),
+            )
+            .await
+            .is_err(),
+        "second KitHost on same root must see queued session participant on first KitHost"
+    );
+    sess_a1.shutdown().await.unwrap();
 }

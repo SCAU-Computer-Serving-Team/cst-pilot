@@ -1029,17 +1029,54 @@ fn artifact_sessions_dir_rejects_ntfs_junction_escape() {
 }
 
 #[tokio::test]
-async fn cancelled_create_futures_release_reservations_and_allow_clean_close() {
+async fn cancelled_create_futures_and_concurrent_lists_never_corrupt_or_leak_jobs() {
     let dir = TempDirGuard::new("export-cancel-create");
     let artifacts = dir.path().join("artifacts");
     let metadata = dir.path().join("meta");
-    let (renderer, _) = MockRenderer::new(|_s, emit, _c| {
-        Box::pin(async move { emit("html", b"<!DOCTYPE html>ok".to_vec()).await })
+    let (gate_tx, gate_rx) = tokio::sync::watch::channel(false);
+    let (renderer, _) = MockRenderer::new(move |_s, emit, cancel| {
+        let mut rx = gate_rx.clone();
+        Box::pin(async move {
+            while !*rx.borrow_and_update() {
+                tokio::select! {
+                    _ = cancel.cancelled() => return Err(cst_server::error::ServiceError::new(
+                        cst_server::error::ServiceErrorKind::Unavailable,
+                        "export_interrupted",
+                        "导出已取消",
+                    )),
+                    res = rx.changed() => {
+                        if res.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+            emit("html", b"<!DOCTYPE html>ok".to_vec()).await
+        })
     });
     let store = SessionExportStore::new(&artifacts, &metadata, renderer);
     let snap = fixture_snapshot("html");
+    let session_id = snap["sessionId"].as_str().unwrap().to_owned();
 
-    // Poll `create` once and immediately drop 12 times; neither reservations (limit 8) nor creating_count may leak.
+    // Continuously poll `list()` while concurrent `create()` and cancelled `create()` run.
+    let stop_list = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop_list_reader = stop_list.clone();
+    let store_reader = store.clone();
+    let sid_reader = session_id.clone();
+    let reader_task = tokio::spawn(async move {
+        while !stop_list_reader.load(Ordering::SeqCst) {
+            let items = store_reader.list(&sid_reader).await.unwrap();
+            for item in items {
+                assert_ne!(
+                    item.status, "failed",
+                    "concurrent list() must never misclassify an in-flight publish as export_interrupted: {item:?}"
+                );
+            }
+            tokio::task::yield_now().await;
+        }
+    });
+
+    // Drop 12 mid-flight `create` futures.
     for _ in 0..12 {
         let mut fut = Box::pin(store.create(&snap));
         let waker = futures_util::task::noop_waker();
@@ -1047,9 +1084,47 @@ async fn cancelled_create_futures_release_reservations_and_allow_clean_close() {
         let _ = fut.as_mut().poll(&mut cx);
         drop(fut);
     }
-    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Create 6 real jobs concurrently while `reader_task` hammers `list()`.
+    let mut handles = Vec::new();
+    for _ in 0..6 {
+        let s = store.clone();
+        let sn = snap.clone();
+        handles.push(tokio::spawn(async move { s.create(&sn).await.unwrap() }));
+    }
+    let mut created_ids = Vec::new();
+    for h in handles {
+        created_ids.push(h.await.unwrap().id);
+    }
+
+    let _ = gate_tx.send(true);
+    for id in &created_ids {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let rec = store.get(id).await.unwrap();
+                assert_ne!(rec.status, "failed", "{rec:?}");
+                if rec.status == "completed" {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("real export job must complete without corruption");
+    }
+
+    stop_list.store(true, Ordering::SeqCst);
+    reader_task.await.unwrap();
 
     tokio::time::timeout(Duration::from_secs(3), store.close())
         .await
         .expect("store.close() must not hang after cancelled create() futures");
+
+    // Only the 6 real jobs may exist as `.json` metadata records on disk (no orphan records from cancelled creates).
+    let json_files: Vec<_> = fs::read_dir(&metadata)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("json"))
+        .collect();
+    assert_eq!(json_files.len(), 6);
 }

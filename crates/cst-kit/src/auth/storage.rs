@@ -32,6 +32,9 @@ impl JsonFiles {
         let root_state = crate::kit::root_state_for(root)?;
         Ok(Self(Storage::new(root)?, root_state))
     }
+    pub fn enter_activity(&self) -> Result<crate::update::activity::ActivityLease, String> {
+        self.1.gate.enter()
+    }
     pub fn path(&self, name: &str) -> PathBuf {
         self.0.root.join("agent/home").join(name)
     }

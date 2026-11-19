@@ -56,6 +56,7 @@ pub(crate) struct KitRootState {
     pub(crate) auth_writes: Arc<tokio::sync::Mutex<()>>,
     pub(crate) runbook_writes: Arc<tokio::sync::Mutex<()>>,
     pub(crate) telemetry_file_lock: Arc<tokio::sync::Mutex<()>>,
+    pub(crate) update_sessions: Arc<Mutex<Vec<Weak<crate::update::service::SessionRegistration>>>>,
 }
 
 struct WeakRootState {
@@ -63,6 +64,7 @@ struct WeakRootState {
     auth_writes: Weak<tokio::sync::Mutex<()>>,
     runbook_writes: Weak<tokio::sync::Mutex<()>>,
     telemetry_file_lock: Weak<tokio::sync::Mutex<()>>,
+    update_sessions: Weak<Mutex<Vec<Weak<crate::update::service::SessionRegistration>>>>,
 }
 
 impl WeakRootState {
@@ -71,6 +73,7 @@ impl WeakRootState {
             || self.auth_writes.strong_count() > 0
             || self.runbook_writes.strong_count() > 0
             || self.telemetry_file_lock.strong_count() > 0
+            || self.update_sessions.strong_count() > 0
     }
 }
 
@@ -88,6 +91,7 @@ pub(crate) fn root_state_for(root: &Path) -> Result<Arc<KitRootState>, String> {
         auth_writes: Weak::new(),
         runbook_writes: Weak::new(),
         telemetry_file_lock: Weak::new(),
+        update_sessions: Weak::new(),
     });
     let gate = entry.gate.upgrade().unwrap_or_else(|| {
         let created = ActivityGate::new();
@@ -109,11 +113,17 @@ pub(crate) fn root_state_for(root: &Path) -> Result<Arc<KitRootState>, String> {
         entry.telemetry_file_lock = Arc::downgrade(&created);
         created
     });
+    let update_sessions = entry.update_sessions.upgrade().unwrap_or_else(|| {
+        let created = Arc::new(Mutex::default());
+        entry.update_sessions = Arc::downgrade(&created);
+        created
+    });
     Ok(Arc::new(KitRootState {
         gate,
         auth_writes,
         runbook_writes,
         telemetry_file_lock,
+        update_sessions,
     }))
 }
 

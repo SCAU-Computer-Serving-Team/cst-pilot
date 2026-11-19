@@ -98,20 +98,20 @@ pub struct UpdateService {
     launcher: Arc<dyn HandoffLauncher>,
     state: Mutex<State>,
     operation: tokio::sync::Mutex<()>,
-    sessions: Mutex<Vec<Weak<SessionRegistration>>>,
+    sessions: Arc<Mutex<Vec<Weak<SessionRegistration>>>>,
     stop: CancellationToken,
 }
 
 impl UpdateService {
     /// Construct an `UpdateService` bound to an explicitly injected `ActivityGate`.
-    /// Callers who need multiple sessions to share one `UpdateService` use `KitHost`
-    /// rather than relying on a hidden process-global singleton table.
+    /// Session registrations are shared across all hosts targeting the same canonical kit root.
     pub fn new(
         root: &Path,
         oa_host: &str,
         gate: Arc<ActivityGate>,
         options: UpdateOptions,
     ) -> Result<Arc<Self>, String> {
+        let root_state = crate::kit::root_state_for(root)?;
         let root = root.canonicalize().map_err(|_| "工具包目录无法读取。")?;
         let (client, launcher, message): (_, Arc<dyn HandoffLauncher>, _) = match options {
             UpdateOptions::Disabled => (None, Arc::new(NativeLauncher), "此宿主已关闭升级检查。"),
@@ -153,7 +153,7 @@ impl UpdateService {
             }),
             client,
             operation: tokio::sync::Mutex::new(()),
-            sessions: Mutex::default(),
+            sessions: root_state.update_sessions.clone(),
             stop: CancellationToken::new(),
         });
         if service.client.is_some() {
@@ -387,10 +387,18 @@ impl UpdateService {
             state.handoff_gate = Some(gate);
             state.status.launch = Some(receipt.clone());
         }
+        let mut telemetries: Vec<Arc<TelemetryService>> = Vec::new();
         for participant in &participants {
             participant.stop.cancel();
+            if let Some(ref telemetry) = participant.telemetry
+                && !telemetries
+                    .iter()
+                    .any(|existing| Arc::ptr_eq(existing, telemetry))
+            {
+                telemetries.push(telemetry.clone());
+            }
         }
-        if let Some(telemetry) = participants.iter().find_map(|p| p.telemetry.clone()) {
+        for telemetry in telemetries {
             telemetry.close_process("quit").await;
         }
         self.publish(
