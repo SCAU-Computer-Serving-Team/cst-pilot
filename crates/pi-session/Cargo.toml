@@ -6,7 +6,7 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-test-support = []
+test-support = ["pi-ai/test-support"]
 
 [dependencies]
 pi-ai = { path = "../pi-ai" }
@@ -27,3 +27,6 @@ tokio.workspace = true
 tokio-util.workspace = true
 url.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+pi-ai = { path = "../pi-ai", features = ["test-support"] }

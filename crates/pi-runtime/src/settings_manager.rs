@@ -185,25 +185,7 @@ pub fn get_tool_list_error(entries: &[String]) -> Option<String> {
     None
 }
 
-pub fn apply_tool_modifiers(base: &[String], entries: &[String]) -> Vec<String> {
-    let mut tools = base.to_vec();
-    for entry in entries {
-        if !is_tool_modifier(entry) {
-            continue;
-        }
-        let name = &entry[1..];
-        if entry.starts_with('+') {
-            if !name.is_empty() && !tools.iter().any(|t| t == name) {
-                tools.push(name.to_owned());
-            }
-        } else if entry.starts_with('-')
-            && let Some(pos) = tools.iter().position(|t| t == name)
-        {
-            tools.remove(pos);
-        }
-    }
-    tools
-}
+pub use pi_session::apply_tool_modifiers;
 
 fn merge_default_tools_values(base: Option<&Value>, overrides: Option<&Value>) -> Option<Value> {
     let Some(ov) = overrides else {

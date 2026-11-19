@@ -1,3 +1,5 @@
+#![cfg(all(feature = "codemode", feature = "mcp"))]
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

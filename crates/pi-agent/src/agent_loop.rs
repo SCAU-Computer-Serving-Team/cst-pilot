@@ -19,9 +19,9 @@ use tokio_util::sync::CancellationToken;
 use crate::event_stream::{AgentEventStream, create_agent_event_stream};
 use crate::types::{
     AfterToolCallContext, AfterToolCallFn, AgentContext, AgentEvent, AgentLoopConfig, AgentMessage,
-    AgentTool, AgentToolCallOutcome, AgentToolResult, AgentTurnContext, AgentTurnDecision,
-    BeforeToolCallContext, BeforeToolCallFn, BoxFuture, PrepareNextTurnContext,
-    PrepareRequestContext, StreamFn, ToolExecutionMode, create_error_assistant_message,
+    AgentStreamFn, AgentTool, AgentToolCallOutcome, AgentToolResult, AgentTurnContext,
+    AgentTurnDecision, BeforeToolCallContext, BeforeToolCallFn, BoxFuture, PrepareNextTurnContext,
+    PrepareRequestContext, ToolExecutionMode, create_error_assistant_message,
     get_agent_current_tools,
 };
 use crate::validation::validate_tool_arguments;
@@ -51,7 +51,7 @@ pub fn agent_loop(
     context: AgentContext,
     config: AgentLoopConfig,
     cancel_token: Option<CancellationToken>,
-    stream_fn: StreamFn,
+    stream_fn: AgentStreamFn,
 ) -> AgentEventStream {
     let stream_fn = isolate_stream_fn(stream_fn);
     let stream = create_agent_event_stream();
@@ -80,7 +80,7 @@ pub fn agent_loop_continue(
     context: AgentContext,
     config: AgentLoopConfig,
     cancel_token: Option<CancellationToken>,
-    stream_fn: StreamFn,
+    stream_fn: AgentStreamFn,
 ) -> Result<AgentEventStream, String> {
     if context.messages.is_empty() {
         return Err("Cannot continue: no messages in context".to_owned());
@@ -122,7 +122,7 @@ pub fn agent_loop_continue(
 // The stateless APIs have no Agent lifecycle owner to settle provider failures.
 // Isolate only the caller-supplied stream function; normal loop finalization then
 // persists the error message and emits MessageEnd, TurnEnd and AgentEnd.
-fn isolate_stream_fn(stream_fn: StreamFn) -> StreamFn {
+fn isolate_stream_fn(stream_fn: AgentStreamFn) -> AgentStreamFn {
     Arc::new(move |model, context, options| {
         let stream_fn = stream_fn.clone();
         Box::pin(async move {
@@ -157,7 +157,7 @@ pub async fn run_agent_loop(
     config: AgentLoopConfig,
     emit: AgentEventSink,
     cancel_token: Option<CancellationToken>,
-    stream_fn: StreamFn,
+    stream_fn: AgentStreamFn,
 ) -> Vec<AgentMessage> {
     match try_run_agent_loop_with_messages(prompts, context, config, emit, cancel_token, stream_fn)
         .await
@@ -173,7 +173,7 @@ pub async fn try_run_agent_loop(
     config: AgentLoopConfig,
     emit: AgentEventSink,
     cancel_token: Option<CancellationToken>,
-    stream_fn: StreamFn,
+    stream_fn: AgentStreamFn,
 ) -> Result<Vec<AgentMessage>, String> {
     try_run_agent_loop_with_messages(prompts, context, config, emit, cancel_token, stream_fn)
         .await
@@ -186,7 +186,7 @@ async fn try_run_agent_loop_with_messages(
     config: AgentLoopConfig,
     emit: AgentEventSink,
     cancel_token: Option<CancellationToken>,
-    stream_fn: StreamFn,
+    stream_fn: AgentStreamFn,
 ) -> Result<Vec<AgentMessage>, (String, Vec<AgentMessage>)> {
     let initial_messages = declare_tool_changes(&context, &prompts);
     let mut new_messages = Vec::new();
@@ -240,7 +240,7 @@ pub async fn run_agent_loop_continue(
     config: AgentLoopConfig,
     emit: AgentEventSink,
     cancel_token: Option<CancellationToken>,
-    stream_fn: StreamFn,
+    stream_fn: AgentStreamFn,
 ) -> Result<Vec<AgentMessage>, String> {
     if context.messages.is_empty() {
         return Err("Cannot continue: no messages in context".to_owned());
@@ -313,7 +313,7 @@ async fn run_loop(
     initial_config: AgentLoopConfig,
     cancel_token: Option<CancellationToken>,
     emit: AgentEventSink,
-    stream_fn: StreamFn,
+    stream_fn: AgentStreamFn,
 ) -> Result<(), String> {
     let mut config = initial_config;
     let mut last_completed_turn: Option<PrepareNextTurnContext> = None;
@@ -704,7 +704,7 @@ async fn stream_assistant_response(
     config: &AgentLoopConfig,
     cancel_token: Option<CancellationToken>,
     emit: &AgentEventSink,
-    stream_fn: &StreamFn,
+    stream_fn: &AgentStreamFn,
 ) -> Result<AssistantMessage, String> {
     let mut messages = context.messages.clone();
     if let Some(transform) = &config.transform_context {

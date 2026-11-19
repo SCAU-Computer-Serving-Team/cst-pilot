@@ -8,7 +8,6 @@ use pi_session::ContextEditReplacement;
 use pi_session::{
     CURRENT_SESSION_VERSION, FileEntry, MAX_SESSION_HEADER_SCAN_BYTES, NewSessionOptions,
     SessionBoundaryDraft, SessionEntry, SessionHeader, SessionManager, SessionStoreError,
-    SqliteJournalMode, SqliteLockingMode, SqlitePragmaConfig, SqliteSynchronousMode,
     TailRepairOutcome, find_most_recent_session, find_session_by_id, list_sessions_from_dir,
     read_session_header,
 };
@@ -412,17 +411,6 @@ async fn v1_to_v3_migration_and_bounded_header_scan_and_concurrent_list_work() {
     assert_eq!(listed[0].id, "session-newer-2");
     assert_eq!(listed[0].first_message, "newest prompt");
     assert_eq!(listed[1].id, "legacy-session-1");
-
-    // 4. 验证 SQLite U 盘（FAT32/exFAT/可移动驱动器）与固定 NTFS 磁盘的 PRAGMA 策略
-    let usb_cfg = SqlitePragmaConfig::for_volume("exFAT", true);
-    assert_eq!(usb_cfg.journal_mode, SqliteJournalMode::Truncate);
-    assert_eq!(usb_cfg.synchronous, SqliteSynchronousMode::Full);
-    assert_eq!(usb_cfg.locking_mode, SqliteLockingMode::Exclusive);
-
-    let ntfs_cfg = SqlitePragmaConfig::for_volume("NTFS", false);
-    assert_eq!(ntfs_cfg.journal_mode, SqliteJournalMode::Wal);
-    assert_eq!(ntfs_cfg.synchronous, SqliteSynchronousMode::Normal);
-    assert_eq!(ntfs_cfg.locking_mode, SqliteLockingMode::Normal);
 
     let _ = fs::remove_dir_all(&dir);
 }

@@ -1,18 +1,24 @@
+#[cfg(feature = "codemode")]
 pub mod codemode;
+#[cfg(feature = "codemode")]
 mod codemode_models;
+#[cfg(feature = "mcp")]
 pub mod mcp;
+#[cfg(feature = "mcp")]
 mod mcp_runtime;
 pub mod tool_search;
 
 use crate::resource_loader::BuiltinExtensionDescriptor;
 use crate::settings_manager::SettingsManager;
 
+#[cfg(feature = "codemode")]
 pub use codemode::{
     CODEMODE_DESCRIPTION, CODEMODE_ONLY_GUIDELINE, CODEMODE_STORE_ENTRY_TYPE, CODEMODE_TOOL_NAME,
     CodemodeDescriptionOptions, CodemodeExtensionOptions, CodemodeMode, DEFAULT_INLINE_BUDGET,
     DEFAULT_MAX_CODEMODE_WORKERS, DEFAULT_MAX_OUTPUT_TOKENS, create_codemode_description,
     create_codemode_extension, create_codemode_tool_definition,
 };
+#[cfg(feature = "mcp")]
 pub use mcp::{
     ConnectedMcpResourceServer, MCP_OUTPUT_MAX_BYTES, McpExtensionOptions, McpToolDetails,
     PreconnectedMcpServer, convert_mcp_result, create_default_transport, create_mcp_extension,
@@ -27,12 +33,14 @@ pub use tool_search::{
     create_tool_search_tool_definition, is_searchable_exposure, tokenize,
 };
 
+#[allow(unused_variables, unused_mut)]
 pub(crate) fn built_in_extensions_for_session(
     settings: SettingsManager,
     cwd: &std::path::Path,
     agent_dir: &std::path::Path,
 ) -> Vec<BuiltinExtensionDescriptor> {
     let mut extensions = built_in_extensions(Some(settings.clone()));
+    #[cfg(feature = "mcp")]
     if let Some(mcp) = extensions.iter_mut().find(|e| e.name == "mcp") {
         mcp.factory = create_mcp_extension(McpExtensionOptions {
             agent_dir: Some(agent_dir.to_path_buf()),
@@ -44,10 +52,12 @@ pub(crate) fn built_in_extensions_for_session(
     extensions
 }
 
+#[allow(unused_variables)]
 pub fn built_in_extensions(
     settings_manager: Option<SettingsManager>,
 ) -> Vec<BuiltinExtensionDescriptor> {
     vec![
+        #[cfg(feature = "codemode")]
         BuiltinExtensionDescriptor::new(
             "codemode",
             create_codemode_extension(CodemodeExtensionOptions {
@@ -56,6 +66,7 @@ pub fn built_in_extensions(
             }),
         ),
         BuiltinExtensionDescriptor::new("tool-search", create_tool_search_extension()),
+        #[cfg(feature = "mcp")]
         BuiltinExtensionDescriptor::new(
             "mcp",
             create_mcp_extension(McpExtensionOptions::default()),

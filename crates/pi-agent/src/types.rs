@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 use std::future::Future;
-use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 
 use pi_ai::{
@@ -23,7 +22,7 @@ use crate::validation::{
     try_compile_schema,
 };
 
-pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+pub use pi_ai::BoxFuture;
 
 // =============================================================================
 // 1.1 AgentMessage & CustomAgentMessage
@@ -702,7 +701,7 @@ pub enum AgentEvent {
 }
 
 // =============================================================================
-// 1.4 Context, Hooks, StreamFn & Config Types
+// 1.4 Context, Hooks, AgentStreamFn & Config Types
 // =============================================================================
 
 #[derive(Debug, Clone, Default)]
@@ -798,8 +797,8 @@ pub struct AgentRequestUpdate {
     pub thinking_level: Option<ModelThinkingLevel>,
 }
 
-/// 模型流式请求函数签名（对照 `StreamFn`）。
-pub type StreamFn = Arc<
+/// 模型流式请求函数签名（对照 `AgentStreamFn`）。
+pub type AgentStreamFn = Arc<
     dyn Fn(
             Model,
             TranscriptContext,
@@ -809,8 +808,8 @@ pub type StreamFn = Arc<
         + Sync,
 >;
 
-/// 将 `Arc<pi_ai::Models>` 适配为 `pi-agent` 的 `StreamFn`（调用 `models.stream_simple`）。
-pub fn models_stream_fn(models: Arc<Models>) -> StreamFn {
+/// 将 `Arc<pi_ai::Models>` 适配为 `pi-agent` 的 `AgentStreamFn`（调用 `models.stream_simple`）。
+pub fn models_stream_fn(models: Arc<Models>) -> AgentStreamFn {
     Arc::new(move |model, transcript, options| {
         let models = models.clone();
         Box::pin(async move {

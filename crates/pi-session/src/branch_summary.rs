@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use pi_agent::{AgentMessage, StreamFn};
+use pi_agent::{AgentMessage, AgentStreamFn};
 use pi_ai::{
     ContentBlock, Model, ProviderHeaders, RetryCallbacks, RetryPolicy, SimpleStreamOptions,
     StopReason, StreamOptions, ThinkingLevel, Usage,
@@ -71,7 +71,7 @@ pub struct GenerateBranchSummaryOptions {
     pub custom_instructions: Option<String>,
     pub replace_instructions: bool,
     pub reserve_tokens: u64,
-    pub stream_fn: Option<StreamFn>,
+    pub stream_fn: Option<AgentStreamFn>,
     pub retry: Option<RetryPolicy>,
     pub callbacks: Option<RetryCallbacks>,
     pub block_images: bool,
