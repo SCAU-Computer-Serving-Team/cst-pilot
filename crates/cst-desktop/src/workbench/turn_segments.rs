@@ -1,0 +1,704 @@
+use std::collections::BTreeMap;
+use std::time::Instant;
+
+use gpui_kit::{Hsla, IntoElement, ParentElement, SharedString, Styled, Window, div};
+use serde_json::Value;
+use unicode_segmentation::UnicodeSegmentation;
+
+use crate::theme::{DesktopPalette, apply_scale, scale};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpecialToolKind {
+    SysOverview,
+    Runbook,
+    WebSearch,
+    BitLocker,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolCallPart {
+    pub id: String,
+    pub name: String,
+    pub arguments: Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ThinkingPart {
+    pub thinking: String,
+    pub redacted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageContentPart {
+    pub mime_type: String,
+    pub data_base64: Option<String>,
+    pub attachment_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConversationPart {
+    Thinking(ThinkingPart),
+    Text(String),
+    Tools(Vec<ToolCallPart>),
+    Special {
+        kind: SpecialToolKind,
+        call: ToolCallPart,
+    },
+    Image(ImageContentPart),
+}
+
+#[derive(Debug, Clone)]
+pub struct TurnEntry {
+    pub id: Option<String>,
+    pub role: String,
+    pub timestamp_ms: u64,
+    pub duration_ms: Option<u64>,
+    pub stop_reason: Option<String>,
+    pub error_message: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub raw: Value,
+}
+
+impl TurnEntry {
+    pub fn from_json(val: &Value, fallback_idx: usize) -> Self {
+        let msg = val.get("message").unwrap_or(val);
+        let id = val
+            .get("id")
+            .or_else(|| msg.get("id"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| Some(format!("entry-{fallback_idx}")));
+        let role = msg
+            .get("role")
+            .or_else(|| val.get("type"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let timestamp_ms = msg
+            .get("timestamp")
+            .or_else(|| val.get("timestamp"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let duration_ms = msg
+            .get("durationMs")
+            .or_else(|| val.get("durationMs"))
+            .and_then(Value::as_u64);
+        let stop_reason = msg
+            .get("stopReason")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let error_message = msg
+            .get("errorMessage")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let provider = msg
+            .get("provider")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let model = msg.get("model").and_then(Value::as_str).map(str::to_owned);
+        Self {
+            id,
+            role,
+            timestamp_ms,
+            duration_ms,
+            stop_reason,
+            error_message,
+            provider,
+            model,
+            raw: msg.clone(),
+        }
+    }
+
+    pub fn stable_key(&self) -> String {
+        self.id
+            .clone()
+            .unwrap_or_else(|| format!("stamp:{}", self.timestamp_ms))
+    }
+}
+
+/// Classifies the 4 standalone special diagnostic tools (`sys(overview)`, `runbook*`, `web_search`, `bitlocker(unlock/decrypt)`).
+pub fn special_tool_kind(call: &ToolCallPart) -> Option<SpecialToolKind> {
+    let scope = call
+        .arguments
+        .get("scope")
+        .or_else(|| call.arguments.get("action"))
+        .and_then(Value::as_str);
+    if call.name == "sys" && scope.unwrap_or("overview") == "overview" {
+        return Some(SpecialToolKind::SysOverview);
+    }
+    if matches!(
+        call.name.as_str(),
+        "runbook" | "command_plan" | "runbook_deliver"
+    ) {
+        return Some(SpecialToolKind::Runbook);
+    }
+    if call.name == "web_search" {
+        return Some(SpecialToolKind::WebSearch);
+    }
+    if call.name == "bitlocker" && matches!(scope, Some("unlock" | "decrypt")) {
+        return Some(SpecialToolKind::BitLocker);
+    }
+    None
+}
+
+pub fn is_standalone_tool(call: &ToolCallPart, result: Option<&Value>) -> bool {
+    if special_tool_kind(call).is_some() {
+        return true;
+    }
+    if call.name == "read"
+        && let Some(res) = result
+    {
+        let content = res
+            .get("message")
+            .unwrap_or(res)
+            .get("content")
+            .and_then(Value::as_array);
+        if content.is_some_and(|arr| {
+            arr.iter()
+                .any(|p| p.get("type").and_then(Value::as_str) == Some("image"))
+        }) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Extracts plain text of a message (`string` or concatenated `text` blocks).
+pub fn extract_message_text(msg: &Value) -> String {
+    let content = msg.get("content").unwrap_or(&Value::Null);
+    if let Some(s) = content.as_str() {
+        return s.to_owned();
+    }
+    if let Some(arr) = content.as_array() {
+        let mut lines = Vec::new();
+        for item in arr {
+            if item.get("type").and_then(Value::as_str) == Some("text")
+                && let Some(t) = item.get("text").and_then(Value::as_str)
+            {
+                lines.push(t);
+            }
+        }
+        return lines.join("\n");
+    }
+    if let Some(summary) = msg.get("summary").and_then(Value::as_str) {
+        return summary.to_owned();
+    }
+    String::new()
+}
+
+pub fn extract_user_images(msg: &Value) -> Vec<ImageContentPart> {
+    let mut out = Vec::new();
+    if let Some(arr) = msg.get("content").and_then(Value::as_array) {
+        for item in arr {
+            if item.get("type").and_then(Value::as_str) == Some("image") {
+                out.push(ImageContentPart {
+                    mime_type: item
+                        .get("mimeType")
+                        .and_then(Value::as_str)
+                        .unwrap_or("image/png")
+                        .to_owned(),
+                    data_base64: item.get("data").and_then(Value::as_str).map(str::to_owned),
+                    attachment_id: item
+                        .get("attachmentId")
+                        .or_else(|| item.get("id"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                });
+            }
+        }
+    }
+    out
+}
+
+pub fn ordered_parts(msg: &Value) -> Vec<ConversationPart> {
+    let mut parts: Vec<ConversationPart> = Vec::new();
+    let content = msg.get("content").unwrap_or(&Value::Null);
+    if let Some(s) = content.as_str() {
+        if !s.is_empty() {
+            parts.push(ConversationPart::Text(s.to_owned()));
+        }
+        return parts;
+    }
+    let Some(arr) = content.as_array() else {
+        return parts;
+    };
+
+    for item in arr {
+        let ptype = item.get("type").and_then(Value::as_str).unwrap_or("");
+        match ptype {
+            "image" => {
+                parts.push(ConversationPart::Image(ImageContentPart {
+                    mime_type: item
+                        .get("mimeType")
+                        .and_then(Value::as_str)
+                        .unwrap_or("image/png")
+                        .to_owned(),
+                    data_base64: item.get("data").and_then(Value::as_str).map(str::to_owned),
+                    attachment_id: item
+                        .get("attachmentId")
+                        .or_else(|| item.get("id"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                }));
+            }
+            "thinking" => {
+                let thinking = item
+                    .get("thinking")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_owned();
+                let redacted = item
+                    .get("redacted")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                parts.push(ConversationPart::Thinking(ThinkingPart {
+                    thinking,
+                    redacted,
+                }));
+            }
+            "toolCall" => {
+                let call = ToolCallPart {
+                    id: item
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned(),
+                    name: item
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_owned(),
+                    arguments: item
+                        .get("arguments")
+                        .cloned()
+                        .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+                };
+                if let Some(kind) = special_tool_kind(&call) {
+                    parts.push(ConversationPart::Special { kind, call });
+                } else if let Some(ConversationPart::Tools(calls)) = parts.last_mut() {
+                    calls.push(call);
+                } else {
+                    parts.push(ConversationPart::Tools(vec![call]));
+                }
+            }
+            "text" => {
+                let text = item.get("text").and_then(Value::as_str).unwrap_or("");
+                if let Some(ConversationPart::Text(prev)) = parts.last_mut() {
+                    prev.push('\n');
+                    prev.push_str(text);
+                } else {
+                    parts.push(ConversationPart::Text(text.to_owned()));
+                }
+            }
+            _ => {}
+        }
+    }
+    parts
+}
+
+#[derive(Debug, Clone)]
+pub struct Turn {
+    pub user: Option<TurnEntry>,
+    pub assistants: Vec<TurnEntry>,
+    pub summary: Option<TurnEntry>,
+}
+
+pub fn is_conversation_role(role: &str) -> bool {
+    matches!(role, "user" | "assistant" | "branchSummary")
+}
+
+/// Groups visible session entries into turns (`user` + following `assistant`s; `branchSummary` stands alone).
+/// Also builds a lookup map from `toolCallId` -> `toolResult` JSON payload.
+pub fn group_turns_and_results(raw_entries: &[Value]) -> (Vec<Turn>, BTreeMap<String, Value>) {
+    let mut turns: Vec<Turn> = Vec::new();
+    let mut tool_results: BTreeMap<String, Value> = BTreeMap::new();
+
+    for (idx, raw) in raw_entries.iter().enumerate() {
+        let entry = TurnEntry::from_json(raw, idx);
+        if entry.role == "toolResult" {
+            let tcid = entry
+                .raw
+                .get("toolCallId")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if !tcid.is_empty() {
+                tool_results.insert(tcid.to_owned(), entry.raw.clone());
+            }
+            continue;
+        }
+        if !is_conversation_role(&entry.role) {
+            continue;
+        }
+        match entry.role.as_str() {
+            "user" => turns.push(Turn {
+                user: Some(entry),
+                assistants: Vec::new(),
+                summary: None,
+            }),
+            "branchSummary" => turns.push(Turn {
+                user: None,
+                assistants: Vec::new(),
+                summary: Some(entry),
+            }),
+            "assistant" => {
+                if let Some(last) = turns.last_mut()
+                    && last.summary.is_none()
+                {
+                    last.assistants.push(entry);
+                } else {
+                    turns.push(Turn {
+                        user: None,
+                        assistants: vec![entry],
+                        summary: None,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    (turns, tool_results)
+}
+
+pub fn active_turn_index(turns: &[Turn], running: bool) -> Option<usize> {
+    if !running || turns.is_empty() {
+        return None;
+    }
+    let mut idx = turns.len();
+    while idx > 0 {
+        idx -= 1;
+        if turns[idx].summary.is_none() {
+            return Some(idx);
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone)]
+pub struct TurnPart {
+    pub entry_key: String,
+    pub timestamp_ms: u64,
+    pub is_final_entry: bool,
+    pub part: ConversationPart,
+}
+
+#[derive(Debug, Clone)]
+pub struct SplitTurnOutput {
+    pub process: Vec<TurnPart>,
+    pub final_text: String,
+    pub final_entry_id: Option<String>,
+    pub total_duration_ms: u64,
+    pub was_aborted: bool,
+    pub assistant_error: Option<AssistantErrorPresentation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AssistantErrorPresentation {
+    pub headline: String,
+    pub raw_detail: Option<String>,
+}
+
+pub fn format_assistant_error(provider: Option<&str>, raw_err: &str) -> AssistantErrorPresentation {
+    let prov = provider.filter(|s| !s.is_empty()).unwrap_or("模型服务");
+    let lower = raw_err.to_ascii_lowercase();
+    let headline = if lower.contains("401")
+        || lower.contains("403")
+        || lower.contains("unauthorized")
+        || lower.contains("invalid api key")
+        || raw_err.contains("凭据")
+        || raw_err.contains("密钥")
+    {
+        format!("{prov} 凭据无效或已过期，请在「设置 · 模型服务」更新后重试。")
+    } else if lower.contains("429") || lower.contains("rate limit") || raw_err.contains("频繁") {
+        format!("{prov} 请求过于频繁，请稍后重试或切换其他模型。")
+    } else {
+        format!("{prov} 服务响应异常，请检查网络后重新发送。")
+    };
+    let detail = (!raw_err.trim().is_empty()).then(|| raw_err.trim().to_owned());
+    AssistantErrorPresentation {
+        headline,
+        raw_detail: detail,
+    }
+}
+
+/// Splits an assistant chain into collapsible `process` items + standalone items vs trailing `final_text`.
+pub fn split_turn(assistants: &[TurnEntry]) -> SplitTurnOutput {
+    let mut process = Vec::new();
+    let mut final_text = String::new();
+    let mut final_entry_id = None;
+    let mut total_duration_ms = 0u64;
+    let mut was_aborted = false;
+    let mut assistant_error = None;
+
+    for (index, entry) in assistants.iter().enumerate() {
+        total_duration_ms = total_duration_ms.saturating_add(entry.duration_ms.unwrap_or(0));
+        let is_final = index + 1 == assistants.len();
+        if is_final {
+            final_entry_id = entry.id.clone();
+            if entry.stop_reason.as_deref() == Some("aborted") {
+                was_aborted = true;
+            }
+            if let Some(ref err_msg) = entry.error_message
+                && !err_msg.trim().is_empty()
+            {
+                assistant_error = Some(format_assistant_error(entry.provider.as_deref(), err_msg));
+            }
+        }
+
+        let parts = ordered_parts(&entry.raw);
+        let mut final_part_idx: Option<usize> = None;
+        for (pi, p) in parts.iter().enumerate().rev() {
+            match p {
+                ConversationPart::Thinking(_) => continue,
+                ConversationPart::Text(t) if t.trim().is_empty() => continue,
+                _ => {
+                    final_part_idx = Some(pi);
+                    break;
+                }
+            }
+        }
+
+        for (pi, p) in parts.into_iter().enumerate() {
+            if is_final
+                && Some(pi) == final_part_idx
+                && let ConversationPart::Text(t) = p
+            {
+                final_text = t;
+                continue;
+            }
+            if let ConversationPart::Text(ref t) = p
+                && t.trim().is_empty()
+            {
+                continue;
+            }
+            process.push(TurnPart {
+                entry_key: entry.stable_key(),
+                timestamp_ms: entry.timestamp_ms,
+                is_final_entry: is_final,
+                part: p,
+            });
+        }
+    }
+
+    SplitTurnOutput {
+        process,
+        final_text,
+        final_entry_id,
+        total_duration_ms,
+        was_aborted,
+        assistant_error,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnSegmentKind {
+    Process,
+    Visible,
+}
+
+#[derive(Debug, Clone)]
+pub struct TurnSegment {
+    pub kind: TurnSegmentKind,
+    pub key: String,
+    pub parts: Vec<TurnPart>,
+}
+
+/// Groups `process` parts into alternating `Process` and `Visible` (special tools / standalone images) segments,
+/// always preserving `process-start` at index `0` for the turn working-duration header.
+pub fn build_turn_segments(process: Vec<TurnPart>) -> Vec<TurnSegment> {
+    let mut segments: Vec<TurnSegment> = Vec::new();
+    for item in process {
+        let kind = match item.part {
+            ConversationPart::Special { .. } | ConversationPart::Image(_) => {
+                TurnSegmentKind::Visible
+            }
+            _ => TurnSegmentKind::Process,
+        };
+        if let Some(prev) = segments.last_mut()
+            && prev.kind == kind
+        {
+            prev.parts.push(item);
+        } else {
+            let key = format!(
+                "{}-{}-{}",
+                if kind == TurnSegmentKind::Visible {
+                    "visible"
+                } else {
+                    "process"
+                },
+                item.timestamp_ms,
+                segments.len()
+            );
+            segments.push(TurnSegment {
+                kind,
+                key,
+                parts: vec![item],
+            });
+        }
+    }
+    if segments
+        .first()
+        .is_none_or(|s| s.kind != TurnSegmentKind::Process)
+    {
+        segments.insert(
+            0,
+            TurnSegment {
+                kind: TurnSegmentKind::Process,
+                key: "process-start".to_owned(),
+                parts: Vec::new(),
+            },
+        );
+    } else if let Some(first) = segments.first_mut() {
+        first.key = "process-start".to_owned();
+    }
+    segments
+}
+
+/// Computes the exact Chinese header label for a collapsible `Process` segment (`turn-segments.ts` parity).
+pub fn process_segment_label(
+    parts: &[TurnPart],
+    tool_results: &BTreeMap<String, Value>,
+    live: bool,
+) -> Option<String> {
+    let mut ordinary_total = 0usize;
+    let mut ordinary_completed = 0usize;
+    for tp in parts {
+        if let ConversationPart::Tools(ref calls) = tp.part {
+            for call in calls {
+                let res = tool_results.get(&call.id);
+                if !is_standalone_tool(call, res) {
+                    ordinary_total += 1;
+                    if res.is_some() {
+                        ordinary_completed += 1;
+                    }
+                }
+            }
+        }
+    }
+    if ordinary_total > 0 {
+        if ordinary_completed == 0 {
+            return Some(if live {
+                format!("正在调用 {ordinary_total} 个工具")
+            } else {
+                "检查未完成".to_owned()
+            });
+        }
+        return Some(if ordinary_completed == ordinary_total {
+            format!("已完成 {ordinary_completed} 次工具调用")
+        } else {
+            format!("已完成 {ordinary_completed} / {ordinary_total} 次工具调用")
+        });
+    }
+
+    let meaningful: Vec<&TurnPart> = parts
+        .iter()
+        .filter(|tp| match &tp.part {
+            ConversationPart::Thinking(t) => t.redacted || !t.thinking.trim().is_empty(),
+            ConversationPart::Text(s) => !s.trim().is_empty(),
+            ConversationPart::Tools(c) => !c.is_empty(),
+            _ => false,
+        })
+        .collect();
+    if meaningful.is_empty() {
+        return None;
+    }
+    if meaningful
+        .iter()
+        .all(|tp| matches!(tp.part, ConversationPart::Thinking(_)))
+    {
+        Some("思考过程".to_owned())
+    } else {
+        Some("处理过程".to_owned())
+    }
+}
+
+pub fn format_duration_zh(ms: u64) -> String {
+    let seconds = ((ms as f64) / 1000.0).round().max(0.0) as u64;
+    if seconds < 1 {
+        return "不足 1 秒".to_owned();
+    }
+    if seconds < 60 {
+        return format!("{seconds} 秒");
+    }
+    let minutes = seconds / 60;
+    let rest = seconds % 60;
+    if rest > 0 {
+        format!("{minutes} 分 {rest} 秒")
+    } else {
+        format!("{minutes} 分钟")
+    }
+}
+
+/// Segments `text` into extended Unicode grapheme clusters (`RunningLight` `lightGlyphs` parity).
+pub fn light_glyphs(text: &str) -> Vec<&str> {
+    text.graphemes(true).collect()
+}
+
+/// Computes the 5-glyph sweep highlight strength `[0.0, 0.48]` for grapheme `index` out of `count`
+/// at normalized linear cycle `phase` (`0.0..1.0`, `2000ms` period).
+/// Matches `glyphLightFrames` in `design/storybook.html` & `running-light-timing.ts`.
+pub fn glyph_light_strength(index: usize, count: usize, phase: f32) -> f32 {
+    if count == 0 {
+        return 0.0;
+    }
+    let cycle = (count + 5) as f32;
+    let weights: [f32; 7] = [0.0, 0.08, 0.24, 0.48, 0.24, 0.08, 0.0];
+    let p = phase.rem_euclid(1.0);
+    let pos = p * cycle - (index as f32);
+    if pos <= 0.0 || pos >= 6.0 {
+        return 0.0;
+    }
+    let step = (pos.floor() as usize).min(5);
+    let frac = pos - (step as f32);
+    weights[step] + (weights[step + 1] - weights[step]) * frac
+}
+
+/// Renders a `RunningLight` per-grapheme sweep label (`2000ms` linear cycle, 5-glyph window).
+/// Immediately stops requesting animation frames (`0 FPS`) when `!active`, window unfocused, minimized, or `reduce_motion`.
+pub fn render_running_light_label(
+    text: &str,
+    active: bool,
+    started_at: Instant,
+    reduce_motion: bool,
+    palette: &DesktopPalette,
+    window: &mut Window,
+) -> impl IntoElement {
+    let vp = window.viewport_size();
+    let minimized = f32::from(vp.width) <= 1.0 || f32::from(vp.height) <= 1.0;
+    let should_sweep = active && !reduce_motion && window.is_window_active() && !minimized;
+
+    if !should_sweep {
+        return apply_scale(div(), scale::UI)
+            .text_color(palette.text_secondary)
+            .child(SharedString::from(text.to_owned()));
+    }
+
+    window.request_animation_frame();
+    let elapsed_ms = started_at.elapsed().as_millis() as u64;
+    let phase = ((elapsed_ms % 2000) as f32) / 2000.0;
+    let glyphs = light_glyphs(text);
+    let count = glyphs.len();
+
+    let base = palette.text_secondary;
+    let hi = palette.text_primary;
+
+    let mut row = apply_scale(div(), scale::UI).flex().items_center();
+    for (idx, g) in glyphs.into_iter().enumerate() {
+        let strength = glyph_light_strength(idx, count, phase);
+        // Strength peaks at 0.48 -> normalize to [0, 1] blend toward primary highlight
+        let t = (strength / 0.48).clamp(0.0, 1.0);
+        let color = Hsla {
+            h: base.h + (hi.h - base.h) * t,
+            s: base.s + (hi.s - base.s) * t,
+            l: base.l + (hi.l - base.l) * t,
+            a: base.a + (hi.a - base.a) * t,
+        };
+        row = row.child(
+            div()
+                .text_color(color)
+                .child(SharedString::from(g.to_owned())),
+        );
+    }
+    row
+}

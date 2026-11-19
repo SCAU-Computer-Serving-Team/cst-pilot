@@ -15,9 +15,9 @@ use cst_client::{
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::{
-    App, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyBinding,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Task,
-    TestSupportExt, Window, div, px,
+    App, AppContext as _, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    KeyBinding, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, Task, TestSupportExt, Window, div, px,
 };
 
 use crate::background::{
@@ -39,6 +39,8 @@ use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, FontLoadReport, apply_desktop_theme, apply_scale,
     cjk_inline_label, height, layout, radius, scale, space,
 };
+use crate::workbench::composer::SlashNavigationTarget;
+use crate::workbench::{WorkbenchEvent, WorkbenchView};
 
 gpui_kit::actions!(
     cst_shell,
@@ -76,6 +78,7 @@ pub struct AppShell {
     client: ClientHandle,
     snapshot: std::sync::Arc<ClientSnapshot>,
     route: ShellRoute,
+    workbench: Entity<WorkbenchView>,
     sidebar_collapsed: bool,
     sidebar_batch_mode: bool,
     sidebar_selected_ids: BTreeSet<String>,
@@ -152,7 +155,10 @@ impl AppShell {
         let exit_cancel_focus = cx.focus_handle();
         let exit_confirm_focus = cx.focus_handle();
 
+        let workbench = cx.new(|cx| WorkbenchView::new(client.clone(), window, cx));
+
         let mut subscriptions = Vec::new();
+        subscriptions.push(cx.subscribe_in(&workbench, window, Self::on_workbench_event));
 
         // Observe system light/dark appearance changes
         subscriptions.push(cx.observe_window_appearance(window, |this, window, cx| {
@@ -185,6 +191,7 @@ impl AppShell {
             client: client.clone(),
             snapshot: initial_snapshot,
             route: ShellRoute::Home,
+            workbench,
             sidebar_collapsed,
             sidebar_batch_mode: false,
             sidebar_selected_ids: BTreeSet::new(),
@@ -225,6 +232,10 @@ impl AppShell {
 
     pub fn route(&self) -> ShellRoute {
         self.route
+    }
+
+    pub fn workbench(&self) -> &Entity<WorkbenchView> {
+        &self.workbench
     }
 
     pub fn set_route(&mut self, route: ShellRoute, cx: &mut Context<Self>) {
@@ -430,6 +441,13 @@ impl AppShell {
             cx.notify();
             return true;
         }
+        if matches!(self.route, ShellRoute::Home | ShellRoute::Session)
+            && self
+                .workbench
+                .update(cx, |wb, cx| wb.dismiss_topmost_surface(window, cx))
+        {
+            return true;
+        }
         if self.sidebar_batch_mode {
             self.sidebar_batch_mode = false;
             self.sidebar_selected_ids.clear();
@@ -578,60 +596,51 @@ impl AppShell {
         cx.notify();
     }
 
+    fn on_workbench_event(
+        &mut self,
+        _wb: &Entity<WorkbenchView>,
+        event: &WorkbenchEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            WorkbenchEvent::ActivatedSession(sid) => {
+                self.activate_session_by_id(sid.clone(), cx);
+            }
+            WorkbenchEvent::MissingCredentials { provider } => {
+                self.show_workspace_error(
+                    format!("{provider} 未配置凭据，请在「设置 · 模型服务」添加密钥后重试。"),
+                    cx,
+                );
+            }
+            WorkbenchEvent::OpenSlashRoute(target) => {
+                let label = match target {
+                    SlashNavigationTarget::Tree => "会话分支树视图",
+                    SlashNavigationTarget::Export => "会话导出预览视图",
+                    SlashNavigationTarget::ForkLatest => "派生对话",
+                };
+                self.show_top_notice(format!("已触发 {label}。"), cx);
+            }
+            WorkbenchEvent::OpenAccountPage => {
+                self.route = ShellRoute::Account;
+                cx.notify();
+            }
+            WorkbenchEvent::WorkspaceError(msg) => {
+                self.show_workspace_error(msg.clone(), cx);
+            }
+            WorkbenchEvent::TopNotice(msg) => {
+                self.show_top_notice(msg.clone(), cx);
+            }
+        }
+    }
+
     fn render_workspace_body(
         &self,
         sky_time: f32,
         palette: &DesktopPalette,
     ) -> gpui_kit::AnyElement {
         match self.route {
-            ShellRoute::Home => div()
-                .id("workspace-home-view")
-                .test_support()
-                .relative()
-                .size_full()
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .right_0()
-                        .bottom_0()
-                        .child(render_sky_background(
-                            SkyPreset::home_for_theme(palette.mode),
-                            sky_time,
-                            1.0,
-                        )),
-                )
-                .child(
-                    div()
-                        .relative()
-                        .size_full()
-                        .px(space::GROUP)
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .justify_center()
-                        .child(
-                            div()
-                                .w_full()
-                                .max_w(layout::CENTER_COLUMN_MAX_WIDTH)
-                                .flex()
-                                .flex_col()
-                                .items_center()
-                                .gap(space::LG)
-                                .child(
-                                    apply_scale(div(), scale::HERO)
-                                        .text_color(palette.text_primary)
-                                        .child("有什么需要诊断或修复？"),
-                                )
-                                .child(
-                                    apply_scale(div(), scale::UI)
-                                        .text_color(palette.text_secondary)
-                                        .child("支持硬件巡检、蓝屏与日志排查、启动项分析及命令清单交付"),
-                                ),
-                        ),
-                )
-                .into_any_element(),
+            ShellRoute::Home | ShellRoute::Session => self.workbench.clone().into_any_element(),
             ShellRoute::Login => div()
                 .id("workspace-login-view")
                 .test_support()
@@ -684,11 +693,10 @@ impl AppShell {
                 .into_any_element(),
             other => {
                 let (id, heading) = match other {
-                    ShellRoute::Session => ("workspace-session-view", "对话工作台"),
                     ShellRoute::AllSessions => ("workspace-all-sessions-view", "全部会话"),
                     ShellRoute::Settings => ("workspace-settings-view", "设置"),
                     ShellRoute::Account => ("workspace-account-view", "专属账号"),
-                    ShellRoute::Home | ShellRoute::Login => unreachable!(),
+                    ShellRoute::Home | ShellRoute::Session | ShellRoute::Login => unreachable!(),
                 };
                 div()
                     .id(id)
@@ -701,14 +709,11 @@ impl AppShell {
                     .flex_col()
                     .items_center()
                     .child(
-                        div()
-                            .w_full()
-                            .max_w(layout::CENTER_COLUMN_MAX_WIDTH)
-                            .child(
-                                apply_scale(div(), scale::TITLE)
-                                    .text_color(palette.text_primary)
-                                    .child(heading),
-                            ),
+                        div().w_full().max_w(layout::CENTER_COLUMN_MAX_WIDTH).child(
+                            apply_scale(div(), scale::TITLE)
+                                .text_color(palette.text_primary)
+                                .child(heading),
+                        ),
                     )
                     .into_any_element()
             }
@@ -964,6 +969,14 @@ impl Render for AppShell {
         let (active_session_id, active_view) = self
             .client
             .with_workspace(|ws| (ws.active_session_id().map(str::to_owned), ws.active_view()));
+
+        let wb_session_id = match self.route {
+            ShellRoute::Session => active_session_id.clone(),
+            _ => None,
+        };
+        self.workbench.update(cx, |wb, cx| {
+            wb.sync_route_and_sky(wb_session_id, sky_time, window, cx);
+        });
 
         let (account_label, account_initial) = match self.snapshot.account.as_ref() {
             Some(acc) if acc.signed_in => {
@@ -1507,7 +1520,7 @@ impl Render for AppShell {
     }
 }
 
-fn open_url_in_trusted_browser(url: &str) {
+pub fn open_url_in_trusted_browser(url: &str) {
     #[cfg(windows)]
     {
         if (url.starts_with("http://127.0.0.1:") || url.starts_with("https://"))

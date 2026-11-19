@@ -142,6 +142,35 @@ impl AppHttpClient {
         Ok(parsed.unwrap_or(Value::Null))
     }
 
+    pub async fn request_bytes(
+        &self,
+        path_and_query: &str,
+        timeout: Option<Duration>,
+    ) -> Result<Vec<u8>, ClientError> {
+        let url = self.loopback_url(path_and_query)?;
+        let req = self
+            .client
+            .get(url)
+            .header("Host", &self.host_header)
+            .header("X-CST-Client", "app")
+            .header("Authorization", self.auth_header_value())
+            .timeout(timeout.unwrap_or(Duration::from_secs(15)));
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| ClientError::Disconnected(format!("无法连接本机后台服务：{e}")))?;
+        let status = resp.status().as_u16();
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| ClientError::Disconnected(format!("读取本机后台服务响应中断：{e}")))?;
+        if !(200..300).contains(&status) {
+            let parsed: Option<Value> = serde_json::from_slice(&bytes).ok();
+            return Err(ClientError::from_http_response(status, parsed.as_ref()));
+        }
+        Ok(bytes.to_vec())
+    }
+
     pub async fn open_sse_stream(
         &self,
         path_and_query: &str,
@@ -549,6 +578,273 @@ impl AppHttpClient {
             Some(Duration::from_secs(15)),
         )
         .await
+    }
+
+    pub async fn abort_session(&self, session_id: &str) -> Result<Value, ClientError> {
+        let sid = encode_segment(session_id);
+        self.request_value(
+            Method::POST,
+            &format!("/api/sessions/{sid}/abort"),
+            Some(&json!({})),
+            None,
+            Some(Duration::from_secs(5)),
+        )
+        .await
+    }
+
+    pub async fn compact_session(
+        &self,
+        session_id: &str,
+        instructions: Option<&str>,
+    ) -> Result<Value, ClientError> {
+        let sid = encode_segment(session_id);
+        let body = match instructions.filter(|s| !s.trim().is_empty()) {
+            Some(inst) => json!({ "instructions": inst }),
+            None => json!({}),
+        };
+        self.request_value(
+            Method::POST,
+            &format!("/api/sessions/{sid}/compact"),
+            Some(&body),
+            None,
+            Some(Duration::from_secs(120)),
+        )
+        .await
+    }
+
+    pub async fn fork_session(
+        &self,
+        session_id: &str,
+        entry_id: &str,
+    ) -> Result<String, ClientError> {
+        let sid = encode_segment(session_id);
+        let val = self
+            .request_value(
+                Method::POST,
+                &format!("/api/sessions/{sid}/fork"),
+                Some(&json!({ "entryId": entry_id })),
+                None,
+                Some(Duration::from_secs(10)),
+            )
+            .await?;
+        val.get("id")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| ClientError::Server {
+                status: 200,
+                code: "invalid_response".into(),
+                message: "派生会话未返回新会话 ID。".into(),
+            })
+    }
+
+    pub async fn navigate_session_tree(
+        &self,
+        session_id: &str,
+        entry_id: &str,
+        summarize: bool,
+        custom_instructions: Option<&str>,
+    ) -> Result<Value, ClientError> {
+        let sid = encode_segment(session_id);
+        let mut body = serde_json::Map::new();
+        body.insert("entryId".into(), Value::String(entry_id.to_owned()));
+        if summarize {
+            body.insert("summarize".into(), Value::Bool(true));
+        }
+        if let Some(inst) = custom_instructions.filter(|s| !s.trim().is_empty()) {
+            body.insert("customInstructions".into(), Value::String(inst.to_owned()));
+        }
+        self.request_value(
+            Method::POST,
+            &format!("/api/sessions/{sid}/tree/navigate"),
+            Some(&Value::Object(body)),
+            None,
+            Some(Duration::from_secs(120)),
+        )
+        .await
+    }
+
+    pub async fn edit_queue_item(
+        &self,
+        session_id: &str,
+        item_id: &str,
+        version: u64,
+        text: &str,
+    ) -> Result<Value, ClientError> {
+        let sid = encode_segment(session_id);
+        let iid = encode_segment(item_id);
+        self.request_value(
+            Method::PATCH,
+            &format!("/api/sessions/{sid}/queue/{iid}"),
+            Some(&json!({ "version": version, "text": text })),
+            None,
+            Some(Duration::from_secs(5)),
+        )
+        .await
+    }
+
+    pub async fn delete_queue_item(
+        &self,
+        session_id: &str,
+        item_id: &str,
+        version: u64,
+    ) -> Result<Value, ClientError> {
+        let sid = encode_segment(session_id);
+        let iid = encode_segment(item_id);
+        self.request_value(
+            Method::DELETE,
+            &format!("/api/sessions/{sid}/queue/{iid}"),
+            Some(&json!({ "version": version })),
+            None,
+            Some(Duration::from_secs(5)),
+        )
+        .await
+    }
+
+    pub async fn reorder_queue(
+        &self,
+        session_id: &str,
+        version: u64,
+        ids: &[String],
+    ) -> Result<Value, ClientError> {
+        let sid = encode_segment(session_id);
+        self.request_value(
+            Method::PUT,
+            &format!("/api/sessions/{sid}/queue/order"),
+            Some(&json!({ "version": version, "ids": ids })),
+            None,
+            Some(Duration::from_secs(5)),
+        )
+        .await
+    }
+
+    pub async fn steer_queue_item(
+        &self,
+        session_id: &str,
+        item_id: &str,
+        version: u64,
+    ) -> Result<Value, ClientError> {
+        let sid = encode_segment(session_id);
+        let iid = encode_segment(item_id);
+        self.request_value(
+            Method::POST,
+            &format!("/api/sessions/{sid}/queue/{iid}/steer"),
+            Some(&json!({ "version": version })),
+            None,
+            Some(Duration::from_secs(5)),
+        )
+        .await
+    }
+
+    pub async fn retry_queue_item(
+        &self,
+        session_id: &str,
+        item_id: &str,
+        version: u64,
+    ) -> Result<Value, ClientError> {
+        let sid = encode_segment(session_id);
+        let iid = encode_segment(item_id);
+        self.request_value(
+            Method::POST,
+            &format!("/api/sessions/{sid}/queue/{iid}/retry"),
+            Some(&json!({ "version": version })),
+            None,
+            Some(Duration::from_secs(5)),
+        )
+        .await
+    }
+
+    pub async fn select_model(
+        &self,
+        session_id: Option<&str>,
+        provider: &str,
+        model_id: &str,
+    ) -> Result<Value, ClientError> {
+        let mut body = serde_json::Map::new();
+        body.insert("provider".into(), Value::String(provider.to_owned()));
+        body.insert("modelId".into(), Value::String(model_id.to_owned()));
+        if let Some(sid) = session_id {
+            body.insert("sessionId".into(), Value::String(sid.to_owned()));
+        }
+        self.request_value(
+            Method::POST,
+            "/api/models/select",
+            Some(&Value::Object(body)),
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
+
+    pub async fn set_session_thinking_level(
+        &self,
+        session_id: &str,
+        level: &str,
+    ) -> Result<Value, ClientError> {
+        self.request_value(
+            Method::POST,
+            "/api/models/thinking",
+            Some(&json!({ "sessionId": session_id, "level": level })),
+            None,
+            Some(Duration::from_secs(5)),
+        )
+        .await
+    }
+
+    pub async fn get_provider_quota(
+        &self,
+        provider: &str,
+        refresh: bool,
+    ) -> Result<Value, ClientError> {
+        let p = encode_segment(provider);
+        let path = if refresh {
+            format!("/api/quota?provider={p}&refresh=1")
+        } else {
+            format!("/api/quota?provider={p}")
+        };
+        self.request_value(
+            Method::GET,
+            &path,
+            None,
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
+
+    pub async fn search_files(
+        &self,
+        session_id: Option<&str>,
+        query: &str,
+    ) -> Result<Vec<String>, ClientError> {
+        let q = encode_segment(query);
+        let path = match session_id {
+            Some(sid) => format!("/api/files?sessionId={}&query={q}", encode_segment(sid)),
+            None => format!("/api/files?query={q}"),
+        };
+        let val = self
+            .request_value(Method::GET, &path, None, None, Some(Duration::from_secs(5)))
+            .await?;
+        let files = val
+            .get("files")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| item.get("path").and_then(Value::as_str).map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(files)
+    }
+
+    pub async fn get_session_attachment_bytes(
+        &self,
+        session_id: &str,
+        attachment_id: &str,
+    ) -> Result<Vec<u8>, ClientError> {
+        let sid = encode_segment(session_id);
+        let aid = encode_segment(attachment_id);
+        self.request_bytes(&format!("/api/sessions/{sid}/attachments/{aid}"), None)
+            .await
     }
 }
 

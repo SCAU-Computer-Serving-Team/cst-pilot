@@ -605,6 +605,173 @@ impl ClientHandle {
             .await
     }
 
+    pub async fn abort_session(&self, session_id: String) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.abort_session(&session_id).await })
+            .await
+    }
+
+    pub async fn compact_session(
+        &self,
+        session_id: String,
+        instructions: Option<String>,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.compact_session(&session_id, instructions.as_deref())
+                .await
+        })
+        .await
+    }
+
+    pub async fn fork_session(
+        &self,
+        session_id: String,
+        entry_id: String,
+    ) -> Result<String, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.fork_session(&session_id, &entry_id).await })
+            .await
+    }
+
+    pub async fn navigate_session_tree(
+        &self,
+        session_id: String,
+        entry_id: String,
+        summarize: bool,
+        custom_instructions: Option<String>,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.navigate_session_tree(
+                &session_id,
+                &entry_id,
+                summarize,
+                custom_instructions.as_deref(),
+            )
+            .await
+        })
+        .await
+    }
+
+    pub async fn edit_queue_item(
+        &self,
+        session_id: String,
+        item_id: String,
+        version: u64,
+        text: String,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.edit_queue_item(&session_id, &item_id, version, &text)
+                .await
+        })
+        .await
+    }
+
+    pub async fn delete_queue_item(
+        &self,
+        session_id: String,
+        item_id: String,
+        version: u64,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(
+            async move { http.delete_queue_item(&session_id, &item_id, version).await },
+        )
+        .await
+    }
+
+    pub async fn reorder_queue(
+        &self,
+        session_id: String,
+        version: u64,
+        ids: Vec<String>,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.reorder_queue(&session_id, version, &ids).await })
+            .await
+    }
+
+    pub async fn steer_queue_item(
+        &self,
+        session_id: String,
+        item_id: String,
+        version: u64,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.steer_queue_item(&session_id, &item_id, version).await })
+            .await
+    }
+
+    pub async fn retry_queue_item(
+        &self,
+        session_id: String,
+        item_id: String,
+        version: u64,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.retry_queue_item(&session_id, &item_id, version).await })
+            .await
+    }
+
+    pub async fn select_model(
+        &self,
+        session_id: Option<String>,
+        provider: String,
+        model_id: String,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.select_model(session_id.as_deref(), &provider, &model_id)
+                .await
+        })
+        .await
+    }
+
+    pub async fn set_session_thinking_level(
+        &self,
+        session_id: String,
+        level: String,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.set_session_thinking_level(&session_id, &level).await })
+            .await
+    }
+
+    pub async fn get_provider_quota(
+        &self,
+        provider: String,
+        refresh: bool,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.get_provider_quota(&provider, refresh).await })
+            .await
+    }
+
+    pub async fn search_files(
+        &self,
+        session_id: Option<String>,
+        query: String,
+    ) -> Result<Vec<String>, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.search_files(session_id.as_deref(), &query).await })
+            .await
+    }
+
+    pub async fn get_session_attachment_bytes(
+        &self,
+        session_id: String,
+        attachment_id: String,
+    ) -> Result<Vec<u8>, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.get_session_attachment_bytes(&session_id, &attachment_id)
+                .await
+        })
+        .await
+    }
+
     pub async fn claim_missing_key_prompt(&self) -> Result<MissingKeyClaimDto, ClientError> {
         let http = self.core.http.clone();
         self.spawn_tokio(async move { http.claim_missing_key_prompt(None).await })

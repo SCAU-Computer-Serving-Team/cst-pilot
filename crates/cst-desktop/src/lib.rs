@@ -1,6 +1,7 @@
 pub mod background;
 pub mod shell;
 pub mod theme;
+pub mod workbench;
 
 pub mod shaders {
     include!(concat!(env!("OUT_DIR"), "/compiled_shaders.rs"));

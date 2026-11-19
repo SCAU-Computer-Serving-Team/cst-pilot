@@ -1522,6 +1522,7 @@ name = "cst-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "cst-client",
  "cst-os",
  "embed-resource",
@@ -1533,6 +1534,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tokio",
+ "unicode-segmentation",
  "uuid",
  "windows 0.62.2",
 ]

@@ -25,11 +25,13 @@ cst-client = { path = "../cst-client" }
 gpui-kit = "0.10.0"
 gpui = { package = "gpui-pre", version = "=0.3.12", default-features = false, features = ["windows-manifest-provided-by-host"] }
 anyhow = "1.0"
+base64.workspace = true
 image.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
+unicode-segmentation.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
