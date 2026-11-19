@@ -713,7 +713,7 @@ async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handle
     assert_eq!(sub_with_cursor.as_deref(), Some("ep1:11"));
 
     // 4. Overflow the 768-byte bounded multiplex queue -> automatic targeted reload converges to `ep1:25` (`"m-25"`)!
-    let big_pad = "x".repeat(450);
+    let big_pad = "x".repeat(900);
     for seq in 12..18u64 {
         let _ = mux_sender.send(format!(
             "id: global:g0:1,s1:ep1:{seq}\nevent: session\ndata: {{\"sessionId\":\"s1\",\"event\":{{\"type\":\"turn_start\",\"pad\":\"{big_pad}\"}}}}\n\n"

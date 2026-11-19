@@ -828,6 +828,190 @@ impl ClientHandle {
         .await
     }
 
+    pub async fn preview_session_export(
+        &self,
+        session_id: String,
+        format: String,
+        theme: String,
+        include_thinking: bool,
+        include_tools: bool,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.preview_session_export(
+                &session_id,
+                &format,
+                &theme,
+                include_thinking,
+                include_tools,
+            )
+            .await
+        })
+        .await
+    }
+
+    pub async fn create_session_export(
+        &self,
+        session_id: String,
+        format: String,
+        theme: String,
+        include_thinking: bool,
+        include_tools: bool,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.create_session_export(
+                &session_id,
+                &format,
+                &theme,
+                include_thinking,
+                include_tools,
+            )
+            .await
+        })
+        .await
+    }
+
+    pub async fn get_export_job(&self, export_id: String) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.get_export_job(&export_id).await })
+            .await
+    }
+
+    pub async fn open_export_directory(&self, export_id: String) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.open_export_directory(&export_id).await })
+            .await
+    }
+
+    pub async fn refresh_models_catalog(&self) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.refresh_models_catalog().await })
+            .await
+    }
+
+    pub async fn set_default_model(
+        &self,
+        provider: String,
+        model_id: String,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.set_default_model(&provider, &model_id).await })
+            .await
+    }
+
+    pub async fn set_scoped_models(
+        &self,
+        patterns: Vec<String>,
+        empty: bool,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.set_scoped_models(&patterns, empty).await })
+            .await
+    }
+
+    pub async fn get_custom_provider(&self, provider_id: String) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.get_custom_provider(&provider_id).await })
+            .await
+    }
+
+    pub async fn save_custom_provider(&self, payload: Value) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.save_custom_provider(&payload).await })
+            .await
+    }
+
+    pub async fn delete_custom_provider(
+        &self,
+        provider_id: String,
+        revision: String,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.delete_custom_provider(&provider_id, &revision).await })
+            .await
+    }
+
+    pub async fn start_auth_flow(
+        &self,
+        provider_id: String,
+        channel: String,
+        base_url: Option<String>,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.start_auth_flow(&provider_id, &channel, base_url.as_deref())
+                .await
+        })
+        .await
+    }
+
+    pub async fn get_auth_flow_status(
+        &self,
+        provider_id: String,
+        channel: String,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.get_auth_flow_status(&provider_id, &channel).await })
+            .await
+    }
+
+    pub async fn cancel_auth_flow(
+        &self,
+        provider_id: String,
+        channel: String,
+        flow_id: Option<String>,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.cancel_auth_flow(&provider_id, &channel, flow_id.as_deref())
+                .await
+        })
+        .await
+    }
+
+    pub async fn respond_auth_flow(
+        &self,
+        provider_id: String,
+        channel: String,
+        flow_id: String,
+        prompt_id: String,
+        value: String,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.respond_auth_flow(&provider_id, &channel, &flow_id, &prompt_id, &value)
+                .await
+        })
+        .await
+    }
+
+    pub async fn save_provider_api_key(
+        &self,
+        provider_id: String,
+        api_key: zeroize::Zeroizing<String>,
+        base_url: Option<String>,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.save_provider_api_key(&provider_id, api_key, base_url.as_deref())
+                .await
+        })
+        .await
+    }
+
+    pub async fn logout_provider(&self, provider_id: String) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.logout_provider(&provider_id).await })
+            .await
+    }
+
+    pub async fn refresh_account(&self) -> Result<AccountStatusDto, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.get_account(true).await })
+            .await
+    }
+
     pub async fn claim_missing_key_prompt(&self) -> Result<MissingKeyClaimDto, ClientError> {
         let http = self.core.http.clone();
         self.spawn_tokio(async move { http.claim_missing_key_prompt(None).await })

@@ -9,21 +9,30 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use cst_client::{
-    ChannelModeDto, ClientHandle, ClientSnapshot, DesktopSettingsPatchDto, ExitCheckReport,
-    UpdatePhaseDto, WorkspaceView,
+    ChannelModeDto, ClientError, ClientHandle, ClientSnapshot, DesktopSettingsPatchDto,
+    ExitCheckReport, UpdatePhaseDto, WorkspaceView,
 };
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
+use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
     KeyBinding, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
     Subscription, Task, TestSupportExt, Window, div, px,
 };
 
+use crate::auth::account_view::{AccountView, AccountViewEvent};
+use crate::auth::login_view::{LoginView, LoginViewEvent};
+use crate::auth::missing_key::{MissingKeyModalState, render_missing_key_dialog};
 use crate::background::{
-    FrostedGlassSpec, ShaderFrameScheduler, SkyPreset, has_active_hardware_diagnostic,
-    render_frosted_surface, render_login_9_stop_fade, render_sky_background,
+    FrostedGlassSpec, ShaderFrameScheduler, has_active_hardware_diagnostic, render_frosted_surface,
 };
+use crate::palette::{CommandPaletteEvent, CommandPaletteModal, PaletteCommandTarget};
+use crate::sessions::all_sessions::{AllSessionsEvent, AllSessionsView};
+use crate::sessions::branch_tree::{BranchTreeEvent, BranchTreeView};
+use crate::sessions::export_view::{ExportView, ExportViewEvent};
+use crate::settings::update_dialog::{UpdateDialogState, render_update_dialog};
+use crate::settings::{SettingsCategory, SettingsView, SettingsViewEvent};
 use crate::shell::exit_dialog::render_exit_confirm_dialog;
 use crate::shell::overlays::{
     render_top_notice_banner, render_web_active_lock_overlay, render_workspace_error_bar,
@@ -48,6 +57,7 @@ gpui_kit::actions!(
         ToggleSidebar,
         NewSession,
         OpenSettings,
+        ToggleCommandPalette,
         DismissTopSurface,
         RequestAppExit
     ]
@@ -60,8 +70,17 @@ pub fn register_shell_keys(cx: &mut App) {
         KeyBinding::new("ctrl-b", ToggleSidebar, Some(SHELL_KEY_CONTEXT)),
         KeyBinding::new("ctrl-n", NewSession, Some(SHELL_KEY_CONTEXT)),
         KeyBinding::new("ctrl-,", OpenSettings, Some(SHELL_KEY_CONTEXT)),
+        KeyBinding::new("ctrl-k", ToggleCommandPalette, Some(SHELL_KEY_CONTEXT)),
         KeyBinding::new("escape", DismissTopSurface, Some(SHELL_KEY_CONTEXT)),
     ]);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SessionSubView {
+    #[default]
+    Chat,
+    Tree,
+    Export,
 }
 
 struct ExitDialogModalState {
@@ -74,14 +93,37 @@ struct WebSwitchConfirmState {
     prior_focus: Option<FocusHandle>,
 }
 
+struct RenameSessionModalState {
+    session_id: String,
+    input: Entity<InputState>,
+    prior_focus: Option<FocusHandle>,
+}
+
 pub struct AppShell {
     client: ClientHandle,
     snapshot: std::sync::Arc<ClientSnapshot>,
     route: ShellRoute,
+    session_subview: SessionSubView,
     workbench: Entity<WorkbenchView>,
+    all_sessions_view: Entity<AllSessionsView>,
+    branch_tree_view: Entity<BranchTreeView>,
+    export_view: Entity<ExportView>,
+    settings_view: Entity<SettingsView>,
+    login_view: Entity<LoginView>,
+    account_view: Entity<AccountView>,
+    command_palette: Option<Entity<CommandPaletteModal>>,
+    command_palette_sub: Option<Subscription>,
+    missing_key_modal: Option<MissingKeyModalState>,
+    pending_return_session_id: Option<Option<String>>,
+    startup_missing_key_checked: bool,
+    update_dialog: UpdateDialogState,
+    last_prompted_update_version: Option<String>,
+    branch_summarizing_session: Option<String>,
     sidebar_collapsed: bool,
     sidebar_batch_mode: bool,
     sidebar_selected_ids: BTreeSet<String>,
+    sidebar_context_menu_sid: Option<String>,
+    rename_modal: Option<RenameSessionModalState>,
     recent_drawer_open: bool,
     recent_drawer_prior_focus: Option<FocusHandle>,
     account_menu_open: bool,
@@ -156,9 +198,26 @@ impl AppShell {
         let exit_confirm_focus = cx.focus_handle();
 
         let workbench = cx.new(|cx| WorkbenchView::new(client.clone(), window, cx));
+        let all_sessions_view = cx.new(|_| AllSessionsView::new(client.clone()));
+        let branch_tree_view =
+            cx.new(|cx| BranchTreeView::new(client.clone(), String::new(), window, cx));
+        let export_view = cx.new(|cx| ExportView::new(client.clone(), String::new(), cx));
+        let settings_view = cx.new(|cx| SettingsView::new(client.clone(), window, cx));
+        let login_view = cx.new(|cx| LoginView::new(client.clone(), window, cx));
+        let account_view = cx.new(|cx| AccountView::new(client.clone(), cx));
 
         let mut subscriptions = Vec::new();
         subscriptions.push(cx.subscribe_in(&workbench, window, Self::on_workbench_event));
+        subscriptions.push(cx.subscribe_in(
+            &all_sessions_view,
+            window,
+            Self::on_all_sessions_event,
+        ));
+        subscriptions.push(cx.subscribe_in(&branch_tree_view, window, Self::on_branch_tree_event));
+        subscriptions.push(cx.subscribe_in(&export_view, window, Self::on_export_view_event));
+        subscriptions.push(cx.subscribe_in(&settings_view, window, Self::on_settings_view_event));
+        subscriptions.push(cx.subscribe_in(&login_view, window, Self::on_login_view_event));
+        subscriptions.push(cx.subscribe_in(&account_view, window, Self::on_account_view_event));
 
         // Observe system light/dark appearance changes
         subscriptions.push(cx.observe_window_appearance(window, |this, window, cx| {
@@ -187,14 +246,31 @@ impl AppShell {
             false
         });
 
-        let shell = Self {
+        let mut shell = Self {
             client: client.clone(),
             snapshot: initial_snapshot,
             route: ShellRoute::Home,
+            session_subview: SessionSubView::Chat,
             workbench,
+            all_sessions_view,
+            branch_tree_view,
+            export_view,
+            settings_view,
+            login_view,
+            account_view,
+            command_palette: None,
+            command_palette_sub: None,
+            missing_key_modal: None,
+            pending_return_session_id: None,
+            startup_missing_key_checked: false,
+            update_dialog: UpdateDialogState::default(),
+            last_prompted_update_version: None,
+            branch_summarizing_session: None,
             sidebar_collapsed,
             sidebar_batch_mode: false,
             sidebar_selected_ids: BTreeSet::new(),
+            sidebar_context_menu_sid: None,
+            rename_modal: None,
             recent_drawer_open: false,
             recent_drawer_prior_focus: None,
             account_menu_open: false,
@@ -225,6 +301,7 @@ impl AppShell {
         };
 
         root_focus.focus(window, cx);
+        shell.maybe_check_startup_missing_key_and_updates(window, cx);
         shell.spawn_client_revision_listener(window, cx);
         shell.spawn_wakeup_listener(window, cx);
         shell
@@ -234,8 +311,40 @@ impl AppShell {
         self.route
     }
 
+    pub fn session_subview(&self) -> SessionSubView {
+        self.session_subview
+    }
+
     pub fn workbench(&self) -> &Entity<WorkbenchView> {
         &self.workbench
+    }
+
+    pub fn all_sessions_view(&self) -> &Entity<AllSessionsView> {
+        &self.all_sessions_view
+    }
+
+    pub fn branch_tree_view(&self) -> &Entity<BranchTreeView> {
+        &self.branch_tree_view
+    }
+
+    pub fn export_view(&self) -> &Entity<ExportView> {
+        &self.export_view
+    }
+
+    pub fn settings_view(&self) -> &Entity<SettingsView> {
+        &self.settings_view
+    }
+
+    pub fn login_view(&self) -> &Entity<LoginView> {
+        &self.login_view
+    }
+
+    pub fn account_view(&self) -> &Entity<AccountView> {
+        &self.account_view
+    }
+
+    pub fn command_palette(&self) -> Option<&Entity<CommandPaletteModal>> {
+        self.command_palette.as_ref()
     }
 
     pub fn set_route(&mut self, route: ShellRoute, cx: &mut Context<Self>) {
@@ -251,34 +360,82 @@ impl AppShell {
         self.exit_dialog.is_some()
     }
 
+    pub fn open_update_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.update_dialog.open = true;
+        self.update_dialog.busy_error = None;
+        self.update_dialog.prior_focus = window.focused(cx);
+        cx.notify();
+    }
+
     pub fn show_workspace_error(
         &mut self,
         message: impl Into<SharedString>,
         cx: &mut Context<Self>,
     ) {
         self.workspace_error = Some(message.into());
-        self.error_dismiss_task = Some(cx.spawn(async move |weak, cx| {
-            cx.background_executor().timer(Duration::from_secs(4)).await;
-            let _ = weak.update(cx, |this, cx| {
-                this.workspace_error = None;
-                cx.notify();
-            });
-        }));
+        self.error_dismiss_task = None;
         cx.notify();
     }
 
     pub fn show_top_notice(&mut self, message: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.top_notice = Some(message.into());
-        self.notice_dismiss_task = Some(cx.spawn(async move |weak, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(3500))
-                .await;
-            let _ = weak.update(cx, |this, cx| {
-                this.top_notice = None;
-                cx.notify();
-            });
-        }));
+        self.notice_dismiss_task = None;
         cx.notify();
+    }
+
+    fn maybe_check_startup_missing_key_and_updates(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // 1. Startup 24h shared missing-key prompt check when entering Home with 0 ready models
+        if !self.startup_missing_key_checked
+            && self.route == ShellRoute::Home
+            && let Some(models) = self.snapshot.models.as_ref()
+        {
+            self.startup_missing_key_checked = true;
+            if !models.any_model_configured() {
+                let prior = window.focused(cx);
+                let client = self.client.clone();
+                cx.spawn(async move |weak, cx| {
+                    if let Ok(claimed) = client.claim_missing_key_prompt().await
+                        && claimed.claimed
+                    {
+                        let _ = weak.update(cx, |this, cx| {
+                            if this.missing_key_modal.is_none() {
+                                this.missing_key_modal = Some(MissingKeyModalState {
+                                    provider_label: None,
+                                    return_session_id: None,
+                                    prior_focus: prior,
+                                });
+                                cx.notify();
+                            }
+                        });
+                    }
+                })
+                .detach();
+            }
+        }
+
+        // 2. Auto-surface UpdateDialog when a new `Available` version arrives, or auto-launch when `Ready`
+        if let Some(ref us) = self.snapshot.update_state {
+            match us.status.phase {
+                UpdatePhaseDto::Available => {
+                    let ver = us.status.version.clone().unwrap_or_default();
+                    if !ver.is_empty() && self.last_prompted_update_version.as_deref() != Some(&ver)
+                    {
+                        self.last_prompted_update_version = Some(ver);
+                        self.update_dialog.open = true;
+                        self.update_dialog.prior_focus = window.focused(cx);
+                    }
+                }
+                UpdatePhaseDto::Ready if self.update_dialog.auto_launch_when_ready => {
+                    self.update_dialog.auto_launch_when_ready = false;
+                    self.trigger_update_launch_handoff(window, cx);
+                }
+                _ => {}
+            }
+        }
     }
 
     fn spawn_client_revision_listener(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -306,6 +463,7 @@ impl AppShell {
                     {
                         this.web_lock_switch_focus.focus(window, cx);
                     }
+                    this.maybe_check_startup_missing_key_and_updates(window, cx);
                     cx.notify();
                 });
                 if keep_going.is_err() {
@@ -373,10 +531,179 @@ impl AppShell {
         }
     }
 
+    pub fn toggle_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(palette_ent) = self.command_palette.take() {
+            self.command_palette_sub = None;
+            if let Some(pf) = palette_ent.read(cx).prior_focus() {
+                pf.focus(window, cx);
+            }
+            cx.notify();
+            return;
+        }
+        let prior = window.focused(cx);
+        let sessions = self.snapshot.sessions.as_ref().clone();
+        let has_active_session = self.route == ShellRoute::Session
+            && self
+                .client
+                .with_workspace(|ws| ws.active_session_id().is_some());
+        let modal =
+            cx.new(|cx| CommandPaletteModal::new(sessions, has_active_session, prior, window, cx));
+        let sub = cx.subscribe_in(&modal, window, Self::on_command_palette_event);
+        self.command_palette = Some(modal);
+        self.command_palette_sub = Some(sub);
+        cx.notify();
+    }
+
+    fn on_command_palette_event(
+        &mut self,
+        palette_ent: &Entity<CommandPaletteModal>,
+        event: &CommandPaletteEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            CommandPaletteEvent::Dismiss => {
+                if let Some(pf) = palette_ent.read(cx).prior_focus() {
+                    pf.focus(window, cx);
+                }
+                self.command_palette = None;
+                self.command_palette_sub = None;
+                cx.notify();
+            }
+            CommandPaletteEvent::Execute(target) => {
+                let target_cloned = target.clone();
+                if let Some(pf) = palette_ent.read(cx).prior_focus() {
+                    pf.focus(window, cx);
+                }
+                self.command_palette = None;
+                self.command_palette_sub = None;
+                self.execute_palette_target(target_cloned, window, cx);
+                cx.notify();
+            }
+        }
+    }
+
+    fn execute_palette_target(
+        &mut self,
+        target: PaletteCommandTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let active_sid = self
+            .client
+            .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
+        match target {
+            PaletteCommandTarget::SlashExport => {
+                if let Some(sid) = active_sid {
+                    self.open_session_export(sid, cx);
+                } else {
+                    self.show_top_notice("请先进入一个会话后再执行导出。", cx);
+                }
+            }
+            PaletteCommandTarget::SlashTree => {
+                if let Some(sid) = active_sid {
+                    self.open_session_tree(sid, window, cx);
+                } else {
+                    self.show_top_notice("请先进入一个会话后再查看分支树。", cx);
+                }
+            }
+            PaletteCommandTarget::SlashCompact => {
+                if let Some(sid) = active_sid {
+                    let client = self.client.clone();
+                    cx.spawn(async move |weak, cx| {
+                        let res = client.compact_session(sid.clone(), None).await;
+                        let _ = client.activate_session(Some(sid)).await;
+                        let _ = weak.update(cx, |this, cx| match res {
+                            Ok(_) => this.show_top_notice("会话上下文已完成压缩。", cx),
+                            Err(e) => this.show_workspace_error(e.to_string(), cx),
+                        });
+                    })
+                    .detach();
+                } else {
+                    self.show_top_notice("请先进入一个会话后再压缩上下文。", cx);
+                }
+            }
+            PaletteCommandTarget::SlashFork => {
+                if let Some(sid) = active_sid {
+                    let latest_user_eid = self.snapshot.loaded_sessions.get(&sid).and_then(|s| {
+                        s.messages.iter().rev().find_map(|m| {
+                            let msg = m.get("message").unwrap_or(m);
+                            (msg.get("role").and_then(serde_json::Value::as_str) == Some("user"))
+                                .then(|| {
+                                    m.get("id")
+                                        .or_else(|| msg.get("id"))
+                                        .and_then(serde_json::Value::as_str)
+                                        .map(str::to_owned)
+                                })
+                                .flatten()
+                        })
+                    });
+                    if let Some(eid) = latest_user_eid {
+                        let client = self.client.clone();
+                        cx.spawn(async move |weak, cx| {
+                            let res = client.fork_session(sid, eid).await;
+                            let _ = client.refresh_globals().await;
+                            let _ = weak.update(cx, |this, cx| match res {
+                                Ok(new_sid) if !new_sid.is_empty() => {
+                                    this.activate_session_by_id(new_sid, cx);
+                                }
+                                Ok(_) => {}
+                                Err(e) => this.show_workspace_error(e.to_string(), cx),
+                            });
+                        })
+                        .detach();
+                    }
+                } else {
+                    self.show_top_notice("请先进入一个会话后再派生新分支。", cx);
+                }
+            }
+            PaletteCommandTarget::OpenSession(sid) => {
+                self.activate_session_by_id(sid, cx);
+            }
+            PaletteCommandTarget::NewSession => {
+                self.route = ShellRoute::Home;
+                self.session_subview = SessionSubView::Chat;
+                let c = self.client.clone();
+                cx.background_executor()
+                    .spawn(async move {
+                        let _ = c.activate_session(None).await;
+                    })
+                    .detach();
+                cx.notify();
+            }
+            PaletteCommandTarget::OpenSettings => {
+                self.route = ShellRoute::Settings;
+                cx.notify();
+            }
+            PaletteCommandTarget::OpenWeb => {
+                self.trigger_open_web(false, window, cx);
+            }
+        }
+    }
+
+    fn open_session_tree(&mut self, sid: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.route = ShellRoute::Session;
+        self.session_subview = SessionSubView::Tree;
+        self.branch_tree_view.update(cx, |tv, cx| {
+            tv.set_session_id(sid, cx);
+            tv.focus_handle(cx).focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    fn open_session_export(&mut self, sid: String, cx: &mut Context<Self>) {
+        self.route = ShellRoute::Session;
+        self.session_subview = SessionSubView::Export;
+        self.export_view
+            .update(cx, |ev, cx| ev.set_session_id(sid, cx));
+        cx.notify();
+    }
+
     pub fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let next_collapsed = !self.sidebar_collapsed;
         self.sidebar_collapsed = next_collapsed;
         self.recent_drawer_open = false;
+        self.sidebar_context_menu_sid = None;
         if next_collapsed {
             self.topbar_expand_focus.focus(window, cx);
         } else {
@@ -416,6 +743,47 @@ impl AppShell {
             cx.notify();
             return true;
         }
+        if self.update_dialog.open && !self.update_dialog.handoff_locked {
+            self.update_dialog.open = false;
+            self.update_dialog.busy_error = None;
+            if let Some(prev) = self.update_dialog.prior_focus.take() {
+                prev.focus(window, cx);
+            } else {
+                self.root_focus.focus(window, cx);
+            }
+            cx.notify();
+            return true;
+        }
+        if let Some(mk) = self.missing_key_modal.take() {
+            if let Some(prev) = mk.prior_focus {
+                prev.focus(window, cx);
+            } else {
+                self.root_focus.focus(window, cx);
+            }
+            cx.notify();
+            return true;
+        }
+        if let Some(rm) = self.rename_modal.take() {
+            if let Some(prev) = rm.prior_focus {
+                prev.focus(window, cx);
+            } else {
+                self.root_focus.focus(window, cx);
+            }
+            cx.notify();
+            return true;
+        }
+        if let Some(palette_ent) = self.command_palette.take() {
+            self.command_palette_sub = None;
+            if let Some(pf) = palette_ent.read(cx).prior_focus() {
+                pf.focus(window, cx);
+            }
+            cx.notify();
+            return true;
+        }
+        if self.sidebar_context_menu_sid.take().is_some() {
+            cx.notify();
+            return true;
+        }
         if let Some(confirm) = self.web_switch_confirm.take() {
             if let Some(prev) = confirm.prior_focus {
                 prev.focus(window, cx);
@@ -441,6 +809,18 @@ impl AppShell {
             cx.notify();
             return true;
         }
+        if self.route == ShellRoute::Session && self.session_subview != SessionSubView::Chat {
+            self.session_subview = SessionSubView::Chat;
+            cx.notify();
+            return true;
+        }
+        if self.route == ShellRoute::AllSessions
+            && self
+                .all_sessions_view
+                .update(cx, |av, cx| av.dismiss_batch_mode(cx))
+        {
+            return true;
+        }
         if matches!(self.route, ShellRoute::Home | ShellRoute::Session)
             && self
                 .workbench
@@ -455,6 +835,76 @@ impl AppShell {
             return true;
         }
         false
+    }
+
+    fn trigger_update_prepare(&mut self, cx: &mut Context<Self>) {
+        self.update_dialog.busy_error = None;
+        self.update_dialog.auto_launch_when_ready = true;
+        let client = self.client.clone();
+        cx.spawn(async move |weak, cx| {
+            let res = client.prepare_update().await;
+            let _ = client.refresh_globals().await;
+            let _ = weak.update(cx, |this, cx| {
+                if let Err(err) = res {
+                    this.update_dialog.auto_launch_when_ready = false;
+                    this.update_dialog.busy_error = Some(SharedString::from(err.to_string()));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn trigger_update_cancel(&mut self, cx: &mut Context<Self>) {
+        self.update_dialog.auto_launch_when_ready = false;
+        self.update_dialog.busy_error = None;
+        let op_id = self
+            .snapshot
+            .update_state
+            .as_ref()
+            .and_then(|u| u.status.operation_id.clone());
+        let client = self.client.clone();
+        cx.spawn(async move |weak, cx| {
+            let res = client.cancel_update(op_id.as_deref()).await;
+            let _ = client.refresh_globals().await;
+            let _ = weak.update(cx, |this, cx| {
+                if let Err(err) = res {
+                    this.show_workspace_error(err.to_string(), cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn trigger_update_launch_handoff(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.update_dialog.busy_error = None;
+        let client = self.client.clone();
+        cx.spawn_in(window, async move |weak, cx| {
+            let res = client.launch_update("desktop").await;
+            let _ = weak.update_in(cx, |this, window, cx| match res {
+                Ok(_) => {
+                    // Receipt received: lock UI with `"正在重启完成更新…"` and immediately close window & quit!
+                    this.update_dialog.open = true;
+                    this.update_dialog.handoff_locked = true;
+                    this.allow_immediate_close = true;
+                    cx.notify();
+                    window.remove_window();
+                    cx.quit();
+                }
+                Err(ClientError::Conflict { message, .. }) => {
+                    this.update_dialog.open = true;
+                    this.update_dialog.busy_error = Some(SharedString::from(message));
+                    cx.notify();
+                }
+                Err(err) => {
+                    this.update_dialog.open = true;
+                    this.update_dialog.busy_error = Some(SharedString::from(err.to_string()));
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     pub fn request_close_flow(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -579,7 +1029,9 @@ impl AppShell {
 
     fn activate_session_by_id(&mut self, session_id: String, cx: &mut Context<Self>) {
         self.route = ShellRoute::Session;
+        self.session_subview = SessionSubView::Chat;
         self.recent_drawer_open = false;
+        self.sidebar_context_menu_sid = None;
         let client = self.client.clone();
         cx.spawn(async move |weak, cx| {
             let res = cx
@@ -596,11 +1048,26 @@ impl AppShell {
         cx.notify();
     }
 
+    fn return_after_credentials_saved(&mut self, cx: &mut Context<Self>) {
+        if let Some(target_opt) = self.pending_return_session_id.take() {
+            match target_opt {
+                Some(sid) => {
+                    // Return to original session WITHOUT auto-resending!
+                    self.activate_session_by_id(sid, cx);
+                }
+                None => {
+                    self.route = ShellRoute::Home;
+                    cx.notify();
+                }
+            }
+        }
+    }
+
     fn on_workbench_event(
         &mut self,
         _wb: &Entity<WorkbenchView>,
         event: &WorkbenchEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event {
@@ -608,18 +1075,33 @@ impl AppShell {
                 self.activate_session_by_id(sid.clone(), cx);
             }
             WorkbenchEvent::MissingCredentials { provider } => {
-                self.show_workspace_error(
-                    format!("{provider} 未配置凭据，请在「设置 · 模型服务」添加密钥后重试。"),
-                    cx,
-                );
+                let active_sid = self
+                    .client
+                    .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
+                self.missing_key_modal = Some(MissingKeyModalState {
+                    provider_label: Some(provider.clone()),
+                    return_session_id: active_sid,
+                    prior_focus: window.focused(cx),
+                });
+                cx.notify();
             }
             WorkbenchEvent::OpenSlashRoute(target) => {
-                let label = match target {
-                    SlashNavigationTarget::Tree => "会话分支树视图",
-                    SlashNavigationTarget::Export => "会话导出预览视图",
-                    SlashNavigationTarget::ForkLatest => "派生对话",
-                };
-                self.show_top_notice(format!("已触发 {label}。"), cx);
+                let active_sid = self
+                    .client
+                    .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
+                match target {
+                    SlashNavigationTarget::Tree => {
+                        if let Some(sid) = active_sid {
+                            self.open_session_tree(sid, window, cx);
+                        }
+                    }
+                    SlashNavigationTarget::Export => {
+                        if let Some(sid) = active_sid {
+                            self.open_session_export(sid, cx);
+                        }
+                    }
+                    SlashNavigationTarget::ForkLatest => {}
+                }
             }
             WorkbenchEvent::OpenAccountPage => {
                 self.route = ShellRoute::Account;
@@ -634,90 +1116,410 @@ impl AppShell {
         }
     }
 
-    fn render_workspace_body(
-        &self,
-        sky_time: f32,
-        palette: &DesktopPalette,
-    ) -> gpui_kit::AnyElement {
-        match self.route {
-            ShellRoute::Home | ShellRoute::Session => self.workbench.clone().into_any_element(),
-            ShellRoute::Login => div()
-                .id("workspace-login-view")
-                .test_support()
-                .flex()
-                .flex_row()
-                .items_stretch()
-                .size_full()
-                .bg(palette.bg_workspace)
-                .child(
-                    div()
-                        .relative()
-                        .w(layout::LOGIN_SHADER_WIDTH)
-                        .h_full()
-                        .flex_shrink_0()
-                        .overflow_hidden()
-                        .child(render_sky_background(
-                            SkyPreset::login_for_theme(palette.mode),
-                            sky_time,
-                            1.0,
-                        ))
-                        .child(render_login_9_stop_fade(palette)),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .h_full()
-                        .px(space::GROUP)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(
-                            div()
-                                .w(px(300.0))
-                                .flex()
-                                .flex_col()
-                                .gap(space::MD)
-                                .child(
-                                    apply_scale(div(), scale::TITLE)
-                                        .text_color(palette.text_primary)
-                                        .child("连接模型服务"),
-                                )
-                                .child(
-                                    apply_scale(div(), scale::UI)
-                                        .text_color(palette.text_secondary)
-                                        .child("支持 CSTOA 扫码授权、OAuth 与 APIKEY 服务配置。"),
-                                ),
-                        ),
-                )
-                .into_any_element(),
-            other => {
-                let (id, heading) = match other {
-                    ShellRoute::AllSessions => ("workspace-all-sessions-view", "全部会话"),
-                    ShellRoute::Settings => ("workspace-settings-view", "设置"),
-                    ShellRoute::Account => ("workspace-account-view", "专属账号"),
-                    ShellRoute::Home | ShellRoute::Session | ShellRoute::Login => unreachable!(),
-                };
-                div()
-                    .id(id)
-                    .test_support()
-                    .size_full()
-                    .bg(palette.bg_workspace)
-                    .px(space::GROUP)
-                    .py(space::GROUP)
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .child(
-                        div().w_full().max_w(layout::CENTER_COLUMN_MAX_WIDTH).child(
-                            apply_scale(div(), scale::TITLE)
-                                .text_color(palette.text_primary)
-                                .child(heading),
-                        ),
-                    )
-                    .into_any_element()
+    fn on_all_sessions_event(
+        &mut self,
+        _av: &Entity<AllSessionsView>,
+        event: &AllSessionsEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            AllSessionsEvent::OpenSession(sid) => {
+                self.activate_session_by_id(sid.clone(), cx);
+            }
+            AllSessionsEvent::ActiveSessionDeletedSwitchHome => {
+                let c = self.client.clone();
+                cx.background_executor()
+                    .spawn(async move {
+                        let _ = c.activate_session(None).await;
+                    })
+                    .detach();
+            }
+            AllSessionsEvent::Notice(msg) => {
+                self.show_top_notice(msg.clone(), cx);
+            }
+            AllSessionsEvent::ErrorMessage(msg) => {
+                self.show_workspace_error(msg.clone(), cx);
             }
         }
+    }
+
+    fn on_branch_tree_event(
+        &mut self,
+        _tv: &Entity<BranchTreeView>,
+        event: &BranchTreeEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            BranchTreeEvent::BackToChat => {
+                self.session_subview = SessionSubView::Chat;
+                cx.notify();
+            }
+            BranchTreeEvent::SwitchToForkedSession(sid) => {
+                self.activate_session_by_id(sid.clone(), cx);
+            }
+            BranchTreeEvent::PrefillComposer(text) => {
+                self.workbench
+                    .update(cx, |wb, cx| wb.prefill_session_composer(text, window, cx));
+            }
+            BranchTreeEvent::SummarizingStarted { session_id } => {
+                self.branch_summarizing_session = Some(session_id.clone());
+                self.session_subview = SessionSubView::Chat;
+                cx.notify();
+            }
+            BranchTreeEvent::SummarizingFinished => {
+                self.branch_summarizing_session = None;
+                cx.notify();
+            }
+            BranchTreeEvent::ErrorMessage(msg) => {
+                self.show_workspace_error(msg.clone(), cx);
+            }
+        }
+    }
+
+    fn on_export_view_event(
+        &mut self,
+        _ev: &Entity<ExportView>,
+        event: &ExportViewEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            ExportViewEvent::BackToChat => {
+                self.session_subview = SessionSubView::Chat;
+                cx.notify();
+            }
+            ExportViewEvent::Notice(msg) => {
+                self.show_top_notice(msg.clone(), cx);
+            }
+            ExportViewEvent::ErrorMessage(msg) => {
+                self.show_workspace_error(msg.clone(), cx);
+            }
+        }
+    }
+
+    fn on_settings_view_event(
+        &mut self,
+        _sv: &Entity<SettingsView>,
+        event: &SettingsViewEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            SettingsViewEvent::OpenUpdateDialog => {
+                self.open_update_dialog(window, cx);
+            }
+            SettingsViewEvent::CancelUpdate => {
+                self.trigger_update_cancel(cx);
+            }
+            SettingsViewEvent::OpenLoginOrAccount { signed_in } => {
+                self.route = if *signed_in {
+                    ShellRoute::Account
+                } else {
+                    ShellRoute::Login
+                };
+                cx.notify();
+            }
+            SettingsViewEvent::CredentialsSaved => {
+                self.return_after_credentials_saved(cx);
+            }
+            SettingsViewEvent::Notice(msg) => {
+                self.show_top_notice(msg.clone(), cx);
+            }
+            SettingsViewEvent::ErrorMessage(msg) => {
+                self.show_workspace_error(msg.clone(), cx);
+            }
+        }
+    }
+
+    fn on_login_view_event(
+        &mut self,
+        _lv: &Entity<LoginView>,
+        event: &LoginViewEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            LoginViewEvent::NavigateToAccount => {
+                self.account_view
+                    .update(cx, |av, cx| av.refresh_cstoa_quota(true, cx));
+                self.route = ShellRoute::Account;
+                cx.notify();
+            }
+            LoginViewEvent::NavigateToCustomGatewaySettings => {
+                self.route = ShellRoute::Settings;
+                self.settings_view
+                    .update(cx, |sv, cx| sv.open_custom_gateway_creator(window, cx));
+                cx.notify();
+            }
+            LoginViewEvent::CredentialsSavedReturn => {
+                if self.pending_return_session_id.is_some() {
+                    self.return_after_credentials_saved(cx);
+                } else {
+                    self.route = ShellRoute::Home;
+                    cx.notify();
+                }
+            }
+            LoginViewEvent::ErrorMessage(msg) => {
+                self.show_workspace_error(msg.clone(), cx);
+            }
+        }
+    }
+
+    fn on_account_view_event(
+        &mut self,
+        _av: &Entity<AccountView>,
+        event: &AccountViewEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            AccountViewEvent::LoggedOutCstoa => {
+                self.show_top_notice("已退出 CSTOA 登录，其余模型服务凭据保持不变。", cx);
+                self.route = ShellRoute::Login;
+                cx.notify();
+            }
+            AccountViewEvent::ErrorMessage(msg) => {
+                self.show_workspace_error(msg.clone(), cx);
+            }
+        }
+    }
+
+    fn render_workspace_body(
+        &self,
+        palette: &DesktopPalette,
+        entity: &Entity<Self>,
+    ) -> gpui_kit::AnyElement {
+        match self.route {
+            ShellRoute::Home => self.workbench.clone().into_any_element(),
+            ShellRoute::Session => match self.session_subview {
+                SessionSubView::Tree => self.branch_tree_view.clone().into_any_element(),
+                SessionSubView::Export => self.export_view.clone().into_any_element(),
+                SessionSubView::Chat => {
+                    if let Some(ref sum_sid) = self.branch_summarizing_session {
+                        let sid_abort = sum_sid.clone();
+                        let ent_abort = entity.clone();
+                        div()
+                            .size_full()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .id("branch-summarizing-banner")
+                                    .test_support()
+                                    .w_full()
+                                    .h(height::CONTROL)
+                                    .px(space::GROUP)
+                                    .bg(palette.bg_surface)
+                                    .border_b_1()
+                                    .border_color(palette.border_subtle)
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .child(
+                                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                                            .text_color(palette.accent_solid)
+                                            .child("正在生成所选分支的上下文总结…"),
+                                    )
+                                    .child(
+                                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                                            .id("branch-summarizing-cancel-btn")
+                                            .test_support()
+                                            .h(height::INLINE)
+                                            .px(space::SM)
+                                            .rounded(radius::CONTROL)
+                                            .text_color(palette.status_danger)
+                                            .flex()
+                                            .items_center()
+                                            .on_click(move |_, _, cx| {
+                                                let s = sid_abort.clone();
+                                                ent_abort.update(cx, |this, cx| {
+                                                    this.branch_summarizing_session = None;
+                                                    let c = this.client.clone();
+                                                    cx.spawn(async move |_, _| {
+                                                        let _ = c.abort_session(s).await;
+                                                    })
+                                                    .detach();
+                                                    cx.notify();
+                                                });
+                                            })
+                                            .child(cjk_inline_label("取消总结")),
+                                    ),
+                            )
+                            .child(div().flex_1().min_h_0().child(self.workbench.clone()))
+                            .into_any_element()
+                    } else {
+                        self.workbench.clone().into_any_element()
+                    }
+                }
+            },
+            ShellRoute::AllSessions => self.all_sessions_view.clone().into_any_element(),
+            ShellRoute::Settings => self.settings_view.clone().into_any_element(),
+            ShellRoute::Login => self.login_view.clone().into_any_element(),
+            ShellRoute::Account => self.account_view.clone().into_any_element(),
+        }
+    }
+
+    fn render_sidebar_context_menu(
+        &self,
+        sid: &str,
+        palette: &DesktopPalette,
+        transparency_enabled: bool,
+        scale_factor: f32,
+        entity: &Entity<Self>,
+    ) -> impl IntoElement {
+        let sid_rename = sid.to_owned();
+        let sid_del = sid.to_owned();
+        let ent_rename = entity.clone();
+        let ent_manage = entity.clone();
+        let ent_del = entity.clone();
+        let ent_backdrop = entity.clone();
+
+        let mut menu_box = render_frosted_surface(
+            "sidebar-session-context-menu",
+            FrostedGlassSpec::popover_h2p2z(palette),
+            palette.bg_elevated,
+            transparency_enabled,
+            scale_factor,
+        )
+        .test_support()
+        .w(px(148.0))
+        .p(space::XS)
+        .rounded(radius::ROW)
+        .border_1()
+        .border_color(palette.border_hairline)
+        .flex()
+        .flex_col()
+        .gap(space::MICRO)
+        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation());
+
+        // In batch mode, right-click menu converges to single `"删除"`!
+        if !self.sidebar_batch_mode {
+            menu_box = menu_box
+                .child(
+                    apply_scale(div(), scale::UI)
+                        .id("sidebar-ctx-rename")
+                        .test_support()
+                        .relative()
+                        .h(height::CONTROL)
+                        .px(space::SM)
+                        .rounded(radius::CONTROL)
+                        .text_color(palette.text_primary)
+                        .flex()
+                        .items_center()
+                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .on_click(move |_, window, cx| {
+                            let target = sid_rename.clone();
+                            ent_rename.update(cx, |this, cx| {
+                                this.sidebar_context_menu_sid = None;
+                                let existing_title = this
+                                    .snapshot
+                                    .sessions
+                                    .iter()
+                                    .find(|s| s.id == target)
+                                    .map(|s| s.title.clone())
+                                    .unwrap_or_default();
+                                let prior = window.focused(cx);
+                                let input = cx.new(|cx| {
+                                    let mut st =
+                                        InputState::new(window, cx).placeholder("输入新会话标题…");
+                                    st.set_value(existing_title, window, cx);
+                                    st
+                                });
+                                input.update(cx, |st, cx| st.focus(window, cx));
+                                this.rename_modal = Some(RenameSessionModalState {
+                                    session_id: target,
+                                    input,
+                                    prior_focus: prior,
+                                });
+                                cx.notify();
+                            });
+                        })
+                        .child(cjk_inline_label("重命名")),
+                )
+                .child(
+                    apply_scale(div(), scale::UI)
+                        .id("sidebar-ctx-manage")
+                        .test_support()
+                        .relative()
+                        .h(height::CONTROL)
+                        .px(space::SM)
+                        .rounded(radius::CONTROL)
+                        .text_color(palette.text_primary)
+                        .flex()
+                        .items_center()
+                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .on_click(move |_, _, cx| {
+                            ent_manage.update(cx, |this, cx| {
+                                this.sidebar_context_menu_sid = None;
+                                this.sidebar_batch_mode = true;
+                                this.sidebar_selected_ids.clear();
+                                cx.notify();
+                            });
+                        })
+                        .child(cjk_inline_label("管理")),
+                );
+        }
+
+        menu_box = menu_box.child(
+            apply_scale(div(), scale::UI)
+                .id("sidebar-ctx-delete")
+                .test_support()
+                .relative()
+                .h(height::CONTROL)
+                .px(space::SM)
+                .rounded(radius::CONTROL)
+                .text_color(palette.status_danger)
+                .flex()
+                .items_center()
+                .hover(|s| s.bg(palette.bg_item_hover))
+                .on_click(move |_, _, cx| {
+                    let target = sid_del.clone();
+                    ent_del.update(cx, |this, cx| {
+                        this.sidebar_context_menu_sid = None;
+                        let active_sid = this
+                            .client
+                            .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
+                        if active_sid.as_deref() == Some(target.as_str()) {
+                            this.route = ShellRoute::Home;
+                        }
+                        let c = this.client.clone();
+                        cx.spawn(async move |weak, cx| {
+                            let res = c.delete_session(target).await;
+                            let _ = c.refresh_globals().await;
+                            if let Err(err) = res {
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.show_workspace_error(err.to_string(), cx);
+                                });
+                            }
+                        })
+                        .detach();
+                        cx.notify();
+                    });
+                })
+                .child(cjk_inline_label("删除")),
+        );
+
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .on_mouse_down(gpui::MouseButton::Left, move |_, _, cx| {
+                ent_backdrop.update(cx, |this, cx| {
+                    this.sidebar_context_menu_sid = None;
+                    cx.notify();
+                });
+            })
+            .child(
+                div()
+                    .absolute()
+                    .top(px(160.0))
+                    .left(px(84.0))
+                    .child(menu_box),
+            )
     }
 
     fn render_recent_drawer_popover(
@@ -953,6 +1755,7 @@ impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme_global = DesktopThemeGlobal::current(cx);
         let palette = theme_global.palette;
+        let mono_family = theme_global.mono_font_family;
         let transparency_enabled = theme_global.transparency_enabled;
         let scale_factor = window.scale_factor();
 
@@ -977,6 +1780,15 @@ impl Render for AppShell {
         self.workbench.update(cx, |wb, cx| {
             wb.sync_route_and_sky(wb_session_id, sky_time, window, cx);
         });
+        if self.route == ShellRoute::Login {
+            self.login_view
+                .update(cx, |lv, _| lv.set_sky_time(sky_time));
+        }
+        if let Some(ref cp) = self.command_palette {
+            let sess_vec = self.snapshot.sessions.as_ref().clone();
+            let has_act = self.route == ShellRoute::Session && active_session_id.is_some();
+            cp.update(cx, |m, _| m.sync_context(sess_vec, has_act));
+        }
 
         let (account_label, account_initial) = match self.snapshot.account.as_ref() {
             Some(acc) if acc.signed_in => {
@@ -1044,6 +1856,7 @@ impl Render for AppShell {
                     on_new_session: Rc::new(move |_, cx| {
                         e3.update(cx, |this, cx| {
                             this.route = ShellRoute::Home;
+                            this.session_subview = SessionSubView::Chat;
                             let c = this.client.clone();
                             cx.background_executor()
                                 .spawn(async move {
@@ -1081,10 +1894,14 @@ impl Render for AppShell {
                             cx.notify();
                         });
                     }),
-                    on_open_settings: Rc::new(move |_, cx| {
+                    on_open_settings: Rc::new(move |w, cx| {
                         e8.update(cx, |this, cx| {
-                            this.route = ShellRoute::Settings;
-                            cx.notify();
+                            if update_available && !this.update_dialog.open {
+                                this.open_update_dialog(w, cx);
+                            } else {
+                                this.route = ShellRoute::Settings;
+                                cx.notify();
+                            }
                         });
                     }),
                     on_minimize_window: Rc::new(|w, _| w.minimize_window()),
@@ -1106,7 +1923,7 @@ impl Render for AppShell {
             .border_color(palette.border_subtle)
             .bg(palette.bg_workspace)
             .overflow_hidden()
-            .child(self.render_workspace_body(sky_time, &palette));
+            .child(self.render_workspace_body(&palette, &entity));
 
         if let Some(ref err_msg) = self.workspace_error {
             workspace_card = workspace_card.child(render_workspace_error_bar(
@@ -1117,7 +1934,6 @@ impl Render for AppShell {
             ));
         }
 
-        // Frame strips (`8px` `$bg-shell` around workspace)
         let framed_workspace = if self.sidebar_collapsed {
             div()
                 .flex_1()
@@ -1162,6 +1978,7 @@ impl Render for AppShell {
             let s3 = entity.clone();
             let s4 = entity.clone();
             let s5 = entity.clone();
+            let s5_menu = entity.clone();
             let s6 = entity.clone();
             let s7 = entity.clone();
             let s8 = entity.clone();
@@ -1187,6 +2004,7 @@ impl Render for AppShell {
                     on_new_session: Rc::new(move |_, cx| {
                         s2.update(cx, |this, cx| {
                             this.route = ShellRoute::Home;
+                            this.session_subview = SessionSubView::Chat;
                             let c = this.client.clone();
                             cx.background_executor()
                                 .spawn(async move {
@@ -1209,6 +2027,12 @@ impl Render for AppShell {
                     }),
                     on_select_session: Rc::new(move |sid, _, cx| {
                         s5.update(cx, |this, cx| this.activate_session_by_id(sid, cx));
+                    }),
+                    on_open_session_menu: Rc::new(move |sid, _, cx| {
+                        s5_menu.update(cx, |this, cx| {
+                            this.sidebar_context_menu_sid = Some(sid);
+                            cx.notify();
+                        });
                     }),
                     on_toggle_batch_mode: Rc::new(move |_, cx| {
                         s6.update(cx, |this, cx| {
@@ -1243,6 +2067,14 @@ impl Render for AppShell {
                                 this.sidebar_selected_ids.iter().cloned().collect();
                             if targets.is_empty() {
                                 return;
+                            }
+                            let active_sid = this
+                                .client
+                                .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
+                            if let Some(ref cur) = active_sid
+                                && targets.contains(cur)
+                            {
+                                this.route = ShellRoute::Home;
                             }
                             this.sidebar_selected_ids.clear();
                             this.sidebar_batch_mode = false;
@@ -1317,6 +2149,7 @@ impl Render for AppShell {
             }))
             .on_action(cx.listener(|this, _: &NewSession, _, cx| {
                 this.route = ShellRoute::Home;
+                this.session_subview = SessionSubView::Chat;
                 let c = this.client.clone();
                 cx.background_executor()
                     .spawn(async move {
@@ -1329,6 +2162,9 @@ impl Render for AppShell {
                 this.route = ShellRoute::Settings;
                 cx.notify();
             }))
+            .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| {
+                this.toggle_command_palette(window, cx);
+            }))
             .on_action(cx.listener(|this, _: &DismissTopSurface, window, cx| {
                 let _ = this.dismiss_topmost_surface(window, cx);
             }))
@@ -1336,6 +2172,16 @@ impl Render for AppShell {
                 this.request_close_flow(window, cx);
             }))
             .child(main_layout);
+
+        if let Some(ref menu_sid) = self.sidebar_context_menu_sid {
+            root = root.child(self.render_sidebar_context_menu(
+                menu_sid,
+                &palette,
+                transparency_enabled,
+                scale_factor,
+                &entity,
+            ));
+        }
 
         if self.recent_drawer_open && self.sidebar_collapsed {
             root = root.child(self.render_recent_drawer_popover(
@@ -1361,6 +2207,184 @@ impl Render for AppShell {
                 &palette,
                 transparency_enabled,
                 scale_factor,
+            ));
+        }
+
+        // `Ctrl+K` `520px` Command Palette (`I70mz`)
+        if let Some(ref cp_modal) = self.command_palette {
+            root = root.child(cp_modal.clone());
+        }
+
+        // Rename Session Modal
+        if let Some(ref rm) = self.rename_modal {
+            let sid_save = rm.session_id.clone();
+            let inp_save = rm.input.clone();
+            let ent_cancel = entity.clone();
+            let ent_save = entity.clone();
+            root = root.child(
+                render_frosted_surface(
+                    "rename-session-scrim",
+                    FrostedGlassSpec::scrim_dz0fp(&palette),
+                    palette.bg_scrim,
+                    transparency_enabled,
+                    scale_factor,
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .bottom_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .occlude()
+                .child(
+                    render_frosted_surface(
+                        "rename-session-modal",
+                        FrostedGlassSpec::modal_k3x72(&palette, 8.0),
+                        palette.bg_modal,
+                        transparency_enabled,
+                        scale_factor,
+                    )
+                    .test_support()
+                    .w(layout::MODAL_STANDARD_WIDTH)
+                    .p(space::GROUP)
+                    .rounded(radius::SPECIAL)
+                    .border_1()
+                    .border_color(palette.border_subtle)
+                    .flex()
+                    .flex_col()
+                    .gap(space::LG)
+                    .child(
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .relative()
+                            .text_color(palette.text_primary)
+                            .child("重命名对话"),
+                    )
+                    .child(div().relative().child(Input::new(&rm.input)))
+                    .child(
+                        div()
+                            .relative()
+                            .flex()
+                            .justify_end()
+                            .gap(space::SM)
+                            .child(
+                                apply_scale(div(), scale::UI_MEDIUM)
+                                    .id("rename-session-cancel-btn")
+                                    .test_support()
+                                    .h(height::CONTROL)
+                                    .px(space::MD)
+                                    .rounded(radius::CONTROL)
+                                    .border_1()
+                                    .border_color(palette.border_strong)
+                                    .bg(palette.bg_elevated)
+                                    .flex()
+                                    .items_center()
+                                    .on_click(move |_, w, cx| {
+                                        ent_cancel.update(cx, |this, cx| {
+                                            let _ = this.dismiss_topmost_surface(w, cx);
+                                        });
+                                    })
+                                    .child(cjk_inline_label("取消")),
+                            )
+                            .child(
+                                apply_scale(div(), scale::UI_MEDIUM)
+                                    .id("rename-session-confirm-btn")
+                                    .test_support()
+                                    .h(height::CONTROL)
+                                    .px(space::MD)
+                                    .rounded(radius::CONTROL)
+                                    .bg(palette.accent_solid)
+                                    .text_color(palette.text_on_accent)
+                                    .flex()
+                                    .items_center()
+                                    .on_click(move |_, w, cx| {
+                                        let new_name = inp_save.read(cx).value().trim().to_owned();
+                                        let target = sid_save.clone();
+                                        ent_save.update(cx, |this, cx| {
+                                            let _ = this.dismiss_topmost_surface(w, cx);
+                                            if !new_name.is_empty() {
+                                                let c = this.client.clone();
+                                                cx.spawn(async move |weak, cx| {
+                                                    let res =
+                                                        c.rename_session(target, new_name).await;
+                                                    let _ = c.refresh_globals().await;
+                                                    if let Err(err) = res {
+                                                        let _ = weak.update(cx, |this, cx| {
+                                                            this.show_workspace_error(
+                                                                err.to_string(),
+                                                                cx,
+                                                            );
+                                                        });
+                                                    }
+                                                })
+                                                .detach();
+                                            }
+                                        });
+                                    })
+                                    .child(cjk_inline_label("保存")),
+                            ),
+                    ),
+                ),
+            );
+        }
+
+        // `384px` Missing Key Dialog (`e7fEty`)
+        if let Some(ref mk_state) = self.missing_key_modal {
+            let ent_cancel = entity.clone();
+            let ent_cfg = entity.clone();
+            root = root.child(render_missing_key_dialog(
+                mk_state,
+                &palette,
+                transparency_enabled,
+                scale_factor,
+                move |w, cx| {
+                    ent_cancel.update(cx, |this, cx| {
+                        let _ = this.dismiss_topmost_surface(w, cx);
+                    });
+                },
+                move |_, cx| {
+                    ent_cfg.update(cx, |this, cx| {
+                        if let Some(taken) = this.missing_key_modal.take() {
+                            this.pending_return_session_id = Some(taken.return_session_id);
+                        }
+                        this.route = ShellRoute::Settings;
+                        this.settings_view.update(cx, |sv, cx| {
+                            sv.set_category(SettingsCategory::Providers, cx);
+                        });
+                        cx.notify();
+                    });
+                },
+            ));
+        }
+
+        // `384px` Software Update Dialog (`kOm7J` / `TqiZo`)
+        if self.update_dialog.open || self.update_dialog.handoff_locked {
+            let ent_later = entity.clone();
+            let ent_prep = entity.clone();
+            let ent_canc = entity.clone();
+            let ent_lnch = entity.clone();
+            root = root.child(render_update_dialog(
+                &self.update_dialog,
+                self.snapshot.update_state.as_deref(),
+                mono_family,
+                &palette,
+                transparency_enabled,
+                scale_factor,
+                move |w, cx| {
+                    ent_later.update(cx, |this, cx| {
+                        let _ = this.dismiss_topmost_surface(w, cx);
+                    });
+                },
+                move |_, cx| {
+                    ent_prep.update(cx, |this, cx| this.trigger_update_prepare(cx));
+                },
+                move |_, cx| {
+                    ent_canc.update(cx, |this, cx| this.trigger_update_cancel(cx));
+                },
+                move |w, cx| {
+                    ent_lnch.update(cx, |this, cx| this.trigger_update_launch_handoff(w, cx));
+                },
             ));
         }
 

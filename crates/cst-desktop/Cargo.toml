@@ -26,7 +26,9 @@ gpui-kit = "0.10.0"
 gpui = { package = "gpui-pre", version = "=0.3.12", default-features = false, features = ["windows-manifest-provided-by-host"] }
 anyhow = "1.0"
 base64.workspace = true
+chrono = { version = "=0.4.45", default-features = false, features = ["clock", "serde"] }
 image.workspace = true
+qrcode = { version = "=0.15.0", default-features = false, features = ["std"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

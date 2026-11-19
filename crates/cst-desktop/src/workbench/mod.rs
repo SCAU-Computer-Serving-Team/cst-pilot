@@ -119,6 +119,22 @@ impl WorkbenchView {
         }
     }
 
+    pub fn prefill_session_composer(
+        &mut self,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let owned = text.to_owned();
+        self.session_composer.update(cx, |comp, cx| {
+            comp.textarea_state().update(cx, |st, cx| {
+                st.set_value(owned, window, cx);
+                st.focus_handle(cx).focus(window, cx);
+            });
+            cx.notify();
+        });
+    }
+
     /// Dismisses the single topmost open workbench surface (`lightbox` -> active `ComposerView` popovers)
     /// and restores focus within 1 frame.
     pub fn dismiss_topmost_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {

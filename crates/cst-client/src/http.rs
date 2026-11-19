@@ -986,6 +986,289 @@ impl AppHttpClient {
         )
         .await
     }
+
+    pub async fn preview_session_export(
+        &self,
+        session_id: &str,
+        format: &str,
+        theme: &str,
+        include_thinking: bool,
+        include_tools: bool,
+    ) -> Result<Value, ClientError> {
+        let sid = encode_segment(session_id);
+        self.request_value(
+            Method::POST,
+            &format!("/api/sessions/{sid}/exports/preview"),
+            Some(&json!({
+                "format": format,
+                "theme": theme,
+                "includeThinking": include_thinking,
+                "includeTools": include_tools,
+            })),
+            None,
+            Some(Duration::from_secs(20)),
+        )
+        .await
+    }
+
+    pub async fn create_session_export(
+        &self,
+        session_id: &str,
+        format: &str,
+        theme: &str,
+        include_thinking: bool,
+        include_tools: bool,
+    ) -> Result<Value, ClientError> {
+        let sid = encode_segment(session_id);
+        self.request_value(
+            Method::POST,
+            &format!("/api/sessions/{sid}/exports"),
+            Some(&json!({
+                "format": format,
+                "theme": theme,
+                "includeThinking": include_thinking,
+                "includeTools": include_tools,
+            })),
+            None,
+            Some(Duration::from_secs(30)),
+        )
+        .await
+    }
+
+    pub async fn get_export_job(&self, export_id: &str) -> Result<Value, ClientError> {
+        let eid = encode_segment(export_id);
+        self.request_value(
+            Method::GET,
+            &format!("/api/exports/{eid}"),
+            None,
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
+
+    pub async fn open_export_directory(&self, export_id: &str) -> Result<Value, ClientError> {
+        let eid = encode_segment(export_id);
+        self.request_value(
+            Method::POST,
+            &format!("/api/exports/{eid}/open"),
+            Some(&json!({})),
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
+
+    pub async fn refresh_models_catalog(&self) -> Result<Value, ClientError> {
+        self.request_value(
+            Method::POST,
+            "/api/models/refresh",
+            Some(&json!({})),
+            None,
+            Some(Duration::from_secs(60)),
+        )
+        .await
+    }
+
+    pub async fn set_default_model(
+        &self,
+        provider: &str,
+        model_id: &str,
+    ) -> Result<Value, ClientError> {
+        self.request_value(
+            Method::POST,
+            "/api/models/default",
+            Some(&json!({
+                "provider": provider,
+                "modelId": model_id,
+            })),
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
+
+    pub async fn set_scoped_models(
+        &self,
+        patterns: &[String],
+        empty: bool,
+    ) -> Result<Value, ClientError> {
+        let mut body = serde_json::Map::new();
+        body.insert(
+            "patterns".into(),
+            Value::Array(patterns.iter().cloned().map(Value::String).collect()),
+        );
+        if empty {
+            body.insert("empty".into(), Value::Bool(true));
+        }
+        self.request_value(
+            Method::POST,
+            "/api/models/scoped",
+            Some(&Value::Object(body)),
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
+
+    pub async fn get_custom_provider(&self, provider_id: &str) -> Result<Value, ClientError> {
+        let pid = encode_segment(provider_id);
+        self.request_value(
+            Method::GET,
+            &format!("/api/auth/custom/{pid}"),
+            None,
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
+
+    pub async fn save_custom_provider(&self, payload: &Value) -> Result<Value, ClientError> {
+        self.request_value(
+            Method::POST,
+            "/api/auth/custom",
+            Some(payload),
+            None,
+            Some(Duration::from_secs(20)),
+        )
+        .await
+    }
+
+    pub async fn delete_custom_provider(
+        &self,
+        provider_id: &str,
+        revision: &str,
+    ) -> Result<Value, ClientError> {
+        let pid = encode_segment(provider_id);
+        self.request_value(
+            Method::DELETE,
+            &format!("/api/auth/custom/{pid}"),
+            Some(&json!({ "revision": revision })),
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
+
+    pub async fn start_auth_flow(
+        &self,
+        provider_id: &str,
+        channel: &str,
+        base_url: Option<&str>,
+    ) -> Result<Value, ClientError> {
+        let pid = encode_segment(provider_id);
+        let ch = encode_segment(channel);
+        let body = match base_url.filter(|s| !s.trim().is_empty()) {
+            Some(u) => json!({ "baseUrl": u }),
+            None => json!({}),
+        };
+        self.request_value(
+            Method::POST,
+            &format!("/api/auth/{pid}/{ch}/start"),
+            Some(&body),
+            None,
+            Some(Duration::from_secs(20)),
+        )
+        .await
+    }
+
+    pub async fn get_auth_flow_status(
+        &self,
+        provider_id: &str,
+        channel: &str,
+    ) -> Result<Value, ClientError> {
+        let pid = encode_segment(provider_id);
+        let ch = encode_segment(channel);
+        self.request_value(
+            Method::GET,
+            &format!("/api/auth/{pid}/{ch}/status"),
+            None,
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
+
+    pub async fn cancel_auth_flow(
+        &self,
+        provider_id: &str,
+        channel: &str,
+        flow_id: Option<&str>,
+    ) -> Result<Value, ClientError> {
+        let pid = encode_segment(provider_id);
+        let ch = encode_segment(channel);
+        let body = match flow_id.filter(|s| !s.trim().is_empty()) {
+            Some(fid) => json!({ "flowId": fid }),
+            None => json!({}),
+        };
+        self.request_value(
+            Method::POST,
+            &format!("/api/auth/{pid}/{ch}/cancel"),
+            Some(&body),
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
+
+    pub async fn respond_auth_flow(
+        &self,
+        provider_id: &str,
+        channel: &str,
+        flow_id: &str,
+        prompt_id: &str,
+        value: &str,
+    ) -> Result<Value, ClientError> {
+        let pid = encode_segment(provider_id);
+        let ch = encode_segment(channel);
+        self.request_value(
+            Method::POST,
+            &format!("/api/auth/{pid}/{ch}/respond"),
+            Some(&json!({
+                "flowId": flow_id,
+                "promptId": prompt_id,
+                "value": value,
+            })),
+            None,
+            Some(Duration::from_secs(15)),
+        )
+        .await
+    }
+
+    pub async fn save_provider_api_key(
+        &self,
+        provider_id: &str,
+        api_key: zeroize::Zeroizing<String>,
+        base_url: Option<&str>,
+    ) -> Result<Value, ClientError> {
+        let pid = encode_segment(provider_id);
+        let mut body = serde_json::Map::new();
+        body.insert("key".into(), Value::String(api_key.as_str().to_owned()));
+        drop(api_key);
+        if let Some(u) = base_url.filter(|s| !s.trim().is_empty()) {
+            body.insert("baseUrl".into(), Value::String(u.to_owned()));
+        }
+        self.request_value(
+            Method::PUT,
+            &format!("/api/auth/{pid}/api-key"),
+            Some(&Value::Object(body)),
+            None,
+            Some(Duration::from_secs(15)),
+        )
+        .await
+    }
+
+    pub async fn logout_provider(&self, provider_id: &str) -> Result<Value, ClientError> {
+        let pid = encode_segment(provider_id);
+        self.request_value(
+            Method::POST,
+            &format!("/api/auth/{pid}/logout"),
+            Some(&json!({})),
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
 }
 
 fn encode_segment(raw: &str) -> String {

@@ -40,6 +40,7 @@ pub struct SidebarCallbacks {
     pub on_open_all_sessions: SidebarActionFn,
     pub on_open_dashboard: SidebarActionFn,
     pub on_select_session: SidebarSessionFn,
+    pub on_open_session_menu: SidebarSessionFn,
     pub on_toggle_batch_mode: SidebarActionFn,
     pub on_toggle_select_all: SidebarActionFn,
     pub on_batch_delete: SidebarActionFn,
@@ -63,11 +64,12 @@ pub fn render_sidebar_l081m1(
     palette: &DesktopPalette,
     cb: SidebarCallbacks,
 ) -> impl IntoElement {
-    let recent: &[SessionSummary] = if sessions.len() > MAX_RECENT_SIDEBAR_SESSIONS {
-        &sessions[..MAX_RECENT_SIDEBAR_SESSIONS]
-    } else {
-        sessions
-    };
+    let mut sorted_sessions: Vec<SessionSummary> = sessions.to_vec();
+    sorted_sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    if sorted_sessions.len() > MAX_RECENT_SIDEBAR_SESSIONS {
+        sorted_sessions.truncate(MAX_RECENT_SIDEBAR_SESSIONS);
+    }
+    let recent: &[SessionSummary] = &sorted_sessions;
 
     let mut recent_list = div()
         .id("sidebar-recent-scroll")
@@ -107,7 +109,11 @@ pub fn render_sidebar_l081m1(
 
             let on_select = Rc::clone(&cb.on_select_session);
             let on_check = Rc::clone(&cb.on_toggle_session_checked);
+            let on_menu_rclick = Rc::clone(&cb.on_open_session_menu);
+            let on_menu_btn = Rc::clone(&cb.on_open_session_menu);
             let sid_click = sid.clone();
+            let sid_rclick = sid.clone();
+            let sid_menu = sid.clone();
 
             let leading = if batch_mode {
                 div()
@@ -160,6 +166,10 @@ pub fn render_sidebar_l081m1(
                     .items_center()
                     .gap(space::SM)
                     .hover(|s| s.bg(palette.bg_item_hover))
+                    .on_mouse_down(gpui::MouseButton::Right, move |_, window, cx| {
+                        (on_menu_rclick)(sid_rclick.clone(), window, cx);
+                        cx.stop_propagation();
+                    })
                     .on_click(move |_, window, cx| {
                         if batch_mode {
                             (on_check)(sid_click.clone(), window, cx);
@@ -174,6 +184,28 @@ pub fn render_sidebar_l081m1(
                             .min_w_0()
                             .truncate()
                             .child(cjk_inline_label(title_text)),
+                    )
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("sidebar-row-menu-btn-{sid}")))
+                            .test_support()
+                            .w(px(20.0))
+                            .h(px(20.0))
+                            .rounded(radius::CONTROL)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .flex_shrink_0()
+                            .hover(|s| s.bg(palette.bg_surface))
+                            .on_click(move |_, window, cx| {
+                                (on_menu_btn)(sid_menu.clone(), window, cx);
+                                cx.stop_propagation();
+                            })
+                            .child(
+                                Icon::new(IconName::Ellipsis)
+                                    .size(px(12.0))
+                                    .text_color(palette.text_muted),
+                            ),
                     ),
             );
         }

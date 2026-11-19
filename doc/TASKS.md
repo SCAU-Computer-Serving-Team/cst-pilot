@@ -8,7 +8,6 @@
 
 | 阶段 | 模块 | 待完成内容 | 设计依据 |
 |---|---|---|---|
-| 阶段 9 | `desktop` / `server` / `diagnostics` | 基于阶段 8.5 产出的 `crates/cst-os`、`crates/cst-updater` 与 `crates/cst-kit` 实现 `crates/cst-client` 与 GPUI 桌面端 `crates/cst-desktop`（产出 `cst-pilot.exe`），将 `desktop-settings.json` 升级为 `desktop.json` 并接入 `.state/ui-hints.json` 与 `/api/app/update/*` | [9.desktop.md](rust/plan/9.desktop.md) |
 | 阶段 10 | `desktop` | 在 `cst-pilot.exe` 同一窗口内集成基于 `Ratatui` 的内置 TUI 视图 `crates/cst-tui`，与图形视图共享 `cst-client` 状态层与草稿。评估以 `cst-tui` 替代 `tree-parity.test.ts` 的旧 Pi 对照基准（无可靠新参照前保留当前对照基准） | [0.PLAN.md](rust/plan/0.PLAN.md#10-内置-tui-终端适配) |
 | 阶段 11 | `release` | 实现纯 Rust 便携发行装配与签名发布管线，接入生产升级公钥 `CST_UPDATE_PUBLIC_KEY`，迁移唯一 Biome 安装点与 Web 静态资源目录，移除过渡期 TypeScript 扩展与旧版 `pack/` 运行时装配 | [0.PLAN.md](rust/plan/0.PLAN.md#11-便携打包与三端验收) · [ADR.md](ADR.md) |
 

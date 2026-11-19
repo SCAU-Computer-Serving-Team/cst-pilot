@@ -14,6 +14,7 @@ pub struct SessionViewSnapshot {
     pub id: String,
     pub revision: u64,
     pub event_cursor: Option<SessionCursor>,
+    pub leaf_id: Option<String>,
     pub running: bool,
     pub messages: Arc<Vec<Value>>,
     pub entries: Arc<Vec<Value>>,
@@ -35,6 +36,7 @@ impl SessionViewSnapshot {
             .get("eventCursor")
             .and_then(Value::as_str)
             .and_then(parse_single_cursor);
+        let leaf_id = obj.get("leafId").and_then(Value::as_str).map(str::to_owned);
         let running = obj.get("running").and_then(Value::as_bool).unwrap_or(false);
         let messages_vec = obj
             .get("messages")
@@ -56,6 +58,7 @@ impl SessionViewSnapshot {
             id,
             revision,
             event_cursor,
+            leaf_id,
             running,
             messages: Arc::new(messages_vec),
             entries: Arc::new(entries_vec),

@@ -244,6 +244,8 @@ pub struct UpdateStatusDto {
     #[serde(default)]
     pub archive_bytes: Option<u64>,
     #[serde(default)]
+    pub downloaded_bytes: Option<u64>,
+    #[serde(default)]
     pub release_notes: Option<String>,
     #[serde(default)]
     pub operation_id: Option<String>,

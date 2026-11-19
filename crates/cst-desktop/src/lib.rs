@@ -1,4 +1,8 @@
+pub mod auth;
 pub mod background;
+pub mod palette;
+pub mod sessions;
+pub mod settings;
 pub mod shell;
 pub mod theme;
 pub mod tools;

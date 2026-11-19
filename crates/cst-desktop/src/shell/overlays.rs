@@ -198,36 +198,43 @@ pub fn render_workspace_error_bar(
         )
 }
 
-/// Non-blocking top notice banner (e.g. font fallback notice or feature placeholder notice).
+/// Non-blocking top notice banner centered below the topbar/header so it never overlaps right-side header buttons.
 pub fn render_top_notice_banner(
     message: SharedString,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
 ) -> impl IntoElement {
-    div().absolute().top(space::MD).right(space::LG).child(
-        render_frosted_surface(
-            "top-notice-banner",
-            FrostedGlassSpec::popover_h2p2z(palette),
-            palette.bg_elevated,
-            transparency_enabled,
-            scale_factor,
-        )
-        .test_support()
-        .h(height::FIELD)
-        .max_w(px(480.0))
-        .px(space::LG)
-        .rounded(radius::ROW)
-        .border_1()
-        .border_color(palette.border_hairline)
+    div()
+        .absolute()
+        .top(px(92.0))
+        .left_0()
+        .right_0()
         .flex()
-        .items_center()
+        .justify_center()
         .child(
-            apply_scale(div(), scale::UI)
-                .relative()
-                .text_color(palette.text_primary)
-                .truncate()
-                .child(cjk_inline_label(message)),
-        ),
-    )
+            render_frosted_surface(
+                "top-notice-banner",
+                FrostedGlassSpec::popover_h2p2z(palette),
+                palette.bg_elevated,
+                transparency_enabled,
+                scale_factor,
+            )
+            .test_support()
+            .h(height::FIELD)
+            .max_w(px(480.0))
+            .px(space::LG)
+            .rounded(radius::ROW)
+            .border_1()
+            .border_color(palette.border_hairline)
+            .flex()
+            .items_center()
+            .child(
+                apply_scale(div(), scale::UI)
+                    .relative()
+                    .text_color(palette.text_primary)
+                    .truncate()
+                    .child(cjk_inline_label(message)),
+            ),
+        )
 }

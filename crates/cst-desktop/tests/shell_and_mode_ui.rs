@@ -507,6 +507,7 @@ fn shader_frame_scheduler_zero_fps_freeze_and_static_start_frame() {
             id: "s1".to_owned(),
             revision: 1,
             event_cursor: None,
+            leaf_id: None,
             running: true,
             active_turn_started_ms: None,
             messages: Arc::new(Vec::new()),
