@@ -11,13 +11,12 @@ use uuid::Uuid;
 
 use crate::bootstrap::{
     BootstrapOptions, DesktopInstanceGuard, DesktopInstanceOutcome, VerifiedServerEndpoint,
-    acquire_or_activate_desktop_instance, ensure_server_running, recover_pending_update_transaction,
+    acquire_or_activate_desktop_instance, ensure_server_running,
+    recover_pending_update_transaction,
 };
 use crate::error::ClientError;
 use crate::http::AppHttpClient;
-use crate::outbox::{
-    ExitCheckReport, OutboxItem, SessionOutbox, WebSwitchCheck,
-};
+use crate::outbox::{ExitCheckReport, OutboxItem, SessionOutbox, WebSwitchCheck};
 use crate::session_store::{SessionStore, SessionViewSnapshot};
 use crate::sse::{
     KeepaliveSignal, MultiplexSignal, run_keepalive_sse_loop, run_multiplex_sse_loop,
@@ -398,7 +397,11 @@ impl ClientHandle {
     pub async fn launch_update(&self, ui: &str) -> Result<Value, ClientError> {
         self.core
             .http
-            .launch_update(self.core.app_identity.pid, self.core.app_identity.created, ui)
+            .launch_update(
+                self.core.app_identity.pid,
+                self.core.app_identity.created,
+                ui,
+            )
             .await
     }
 
@@ -537,6 +540,7 @@ async fn run_state_reducer_loop(
     let mut refresh_in_flight = false;
 
     let mut mux_cancel: Option<CancellationToken> = None;
+    let mut send_tails: BTreeMap<String, watch::Receiver<()>> = BTreeMap::new();
 
     let publish = |core: &Arc<SharedClientCore>,
                    revision_tx: &watch::Sender<u64>,
@@ -550,7 +554,7 @@ async fn run_state_reducer_loop(
             *guard = Arc::new(next);
             rev
         };
-        revision_tx.send_replace(next_rev);
+        notify_revision(revision_tx, next_rev);
     };
 
     let ensure_multiplex_running =
@@ -656,27 +660,16 @@ async fn run_state_reducer_loop(
                 match msig {
                     MultiplexSignal::StreamReady { subscribed_sessions } => {
                         let current_desired = compute_desired_subscriptions(&core);
-                        if subscribed_sessions != current_desired {
+                        if subscribed_sessions.len() != current_desired.len()
+                            || current_desired.iter().any(|id| !subscribed_sessions.contains(id))
+                        {
                             desired_subs = current_desired;
                             sub_debounce_pending = true;
                             sub_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(5));
                         }
                     }
-                    MultiplexSignal::StateEvent { payload, .. } => {
-                        handle_global_state_payload(
-                            &core,
-                            &revision_tx,
-                            &payload,
-                            &mut dirty,
-                            &mut mux_cancel,
-                            &client_id,
-                            &mux_tx,
-                        );
-                        if dirty.any() && !refresh_timer_armed {
-                            refresh_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(STATE_REFRESH_COALESCE_MS));
-                            refresh_timer_armed = true;
-                        }
-                    }
+                    // The independent app stream is the sole source of global state.
+                    MultiplexSignal::StateEvent { .. } => {}
                     MultiplexSignal::SessionEvent { session_id, event, .. } => {
                         // Observe clientMessageId in incoming user message to clear optimistic outbox
                         if let Some(cmid) = event
@@ -727,6 +720,9 @@ async fn run_state_reducer_loop(
                         }
                     }
                     MultiplexSignal::ResetSession { session_id } => {
+                        if !session_store.has_ready(&session_id) {
+                            continue;
+                        }
                         session_store.reset_to_loading(&session_id);
                         spawn_session_snapshot_fetch(
                             core.http.clone(),
@@ -830,9 +826,19 @@ async fn run_state_reducer_loop(
                         }
                         match result {
                             Ok(payload) => {
-                                let loaded = session_store.finish_loading_snapshot(&session_id, payload);
-                                if let Some(ref snap_arc) = loaded {
-                                    let inbox_ids = snap_arc.server_inbox_ids();
+                                let Some(loaded) = session_store.finish_loading_snapshot(&session_id, payload) else {
+                                    session_store.cancel_loading(&session_id);
+                                    for waiter in waiters {
+                                        let _ = waiter.send(Err(ClientError::Server {
+                                            status: 200,
+                                            code: "invalid_response".into(),
+                                            message: "后台返回的会话快照不匹配。".into(),
+                                        }));
+                                    }
+                                    continue;
+                                };
+                                {
+                                    let inbox_ids = loaded.server_inbox_ids();
                                     if !inbox_ids.is_empty() {
                                         core.outbox
                                             .lock()
@@ -847,7 +853,7 @@ async fn run_state_reducer_loop(
                                     snap.loaded_sessions = Arc::clone(&map);
                                 });
                                 for waiter in waiters {
-                                    let _ = waiter.send(Ok(loaded.clone()));
+                                    let _ = waiter.send(Ok(Some(loaded.clone())));
                                 }
                             }
                             Err(err) => {
@@ -899,21 +905,12 @@ async fn run_state_reducer_loop(
                         desired_subs = compute_desired_subscriptions(&core);
                         sub_debounce_pending = false;
                         let is_app_active = core.snapshot.lock().expect("snapshot lock").channel_mode == ChannelModeDto::AppActive;
-                        let http = core.http.clone();
-                        let cid = client_id.clone();
-                        let subs_to_put = desired_subs.clone();
-                        let done_tx_clone = done_tx.clone();
-                        tokio::spawn(async move {
-                            if is_app_active && !subs_to_put.is_empty() {
-                                let _ = http.put_multiplex_subscriptions(&cid, &subs_to_put, None).await;
-                            }
-                            let res = http.get_session_snapshot(&sid).await;
-                            let _ = done_tx_clone.send(InternalAsyncCompletion::SessionSnapshotLoaded {
-                                session_id: sid,
-                                result: res,
-                                waiters: vec![reply],
-                            });
-                        });
+                        if is_app_active && let Err(error) = core.http.put_multiplex_subscriptions(&client_id, &desired_subs, None).await {
+                            session_store.cancel_loading(&sid);
+                            let _ = reply.send(Err(error));
+                            continue;
+                        }
+                        spawn_session_snapshot_fetch(core.http.clone(), done_tx.clone(), sid, vec![reply]);
                     }
                     WorkerCommand::RefreshGlobals { reply } => {
                         let http = core.http.clone();
@@ -962,7 +959,7 @@ async fn run_state_reducer_loop(
                                         *guard = Arc::new(next);
                                         r
                                     };
-                                    rev_tx.send_replace(next_rev);
+                                    notify_revision(&rev_tx, next_rev);
                                     let _ = reply.send(Ok(arc));
                                 }
                                 Err(e) => {
@@ -972,11 +969,19 @@ async fn run_state_reducer_loop(
                         });
                     }
                     WorkerCommand::SendDraft { target, draft, reply } => {
+                        send_tails.retain(|_, tail| tail.has_changed().is_ok());
+                        let (tail, previous) = if let DraftKey::Session(sid) = &target {
+                            let (tx, rx) = watch::channel(());
+                            (Some(tx), send_tails.insert(sid.clone(), rx))
+                        } else {
+                            (None, None)
+                        };
                         let core_clone = Arc::clone(&core);
                         let rev_tx = revision_tx.clone();
                         tokio::spawn(async move {
-                            let res = execute_send_draft(&core_clone, &rev_tx, target, &draft).await;
+                            let res = execute_send_draft(&core_clone, &rev_tx, target, &draft, previous).await;
                             let _ = reply.send(res);
+                            drop(tail);
                         });
                     }
                     WorkerCommand::ReconcileUncertain { reply } => {
@@ -1004,7 +1009,7 @@ async fn run_state_reducer_loop(
                                     *guard = Arc::new(next);
                                     r
                                 };
-                                rev_tx.send_replace(next_rev);
+                                notify_revision(&rev_tx, next_rev);
                             }
                             let _ = reply.send(res);
                         });
@@ -1041,14 +1046,20 @@ async fn run_state_reducer_loop(
                                 &core.stop,
                             );
                             dirty.sessions_and_state = true;
-                            if let Some(active_sid) = core.workspace.lock().expect("workspace lock").active_session_id().map(str::to_owned) {
+                            let active = core.workspace.lock().expect("workspace lock").active_session_id().map(str::to_owned);
+                            if let Some(active_sid) = active {
                                 session_store.reset_to_loading(&active_sid);
-                                spawn_session_snapshot_fetch(
-                                    core.http.clone(),
-                                    done_tx.clone(),
-                                    active_sid,
-                                    Vec::new(),
-                                );
+                                let subs = compute_desired_subscriptions(&core);
+                                if core.http.put_multiplex_subscriptions(&client_id, &subs, None).await.is_ok() {
+                                    spawn_session_snapshot_fetch(
+                                        core.http.clone(),
+                                        done_tx.clone(),
+                                        active_sid,
+                                        Vec::new(),
+                                    );
+                                } else {
+                                    session_store.cancel_loading(&active_sid);
+                                }
                             }
                             if !refresh_timer_armed {
                                 refresh_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(10));
@@ -1059,22 +1070,24 @@ async fn run_state_reducer_loop(
                     }
                     WorkerCommand::ShutdownAndExit { reply } => {
                         let res = core.http.app_exit(Duration::from_millis(5_500)).await;
-                        core.stop.cancel();
+                        let exited = res.is_ok();
                         let _ = reply.send(res.map(|_| ()));
-                        break;
+                        if exited {
+                            core.stop.cancel();
+                            break;
+                        }
                     }
                 }
             }
             () = &mut sub_sleep, if sub_debounce_pending => {
                 sub_debounce_pending = false;
                 let cur_mode = core.snapshot.lock().expect("snapshot lock").channel_mode;
-                if cur_mode == ChannelModeDto::AppActive {
-                    let http = core.http.clone();
-                    let cid = client_id.clone();
-                    let subs = desired_subs.clone();
-                    tokio::spawn(async move {
-                        let _ = http.put_multiplex_subscriptions(&cid, &subs, None).await;
-                    });
+                if cur_mode == ChannelModeDto::AppActive
+                    && let Err(error) = core.http.put_multiplex_subscriptions(&client_id, &desired_subs, None).await
+                    && error.is_disconnected()
+                {
+                    sub_debounce_pending = true;
+                    sub_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(500));
                 }
             }
             () = &mut refresh_sleep, if refresh_timer_armed => {
@@ -1188,6 +1201,7 @@ fn handle_global_state_payload(
         "models_changed" => {
             dirty.models = true;
         }
+        "quota_changed" => dirty.auth = true,
         "auth_changed" => {
             dirty.auth = true;
             dirty.models = true;
@@ -1215,7 +1229,8 @@ fn handle_global_state_payload(
                     next.revision = next.revision.wrapping_add(1);
                     let r = next.revision;
                     *guard = Arc::new(next);
-                    revision_tx.send_replace(r);
+                    drop(guard);
+                    notify_revision(revision_tx, r);
                     true
                 } else {
                     false
@@ -1260,7 +1275,8 @@ fn handle_global_state_payload(
                 next.revision = next.revision.wrapping_add(1);
                 let r = next.revision;
                 *guard = Arc::new(next);
-                revision_tx.send_replace(r);
+                drop(guard);
+                notify_revision(revision_tx, r);
             } else {
                 dirty.update_status = true;
             }
@@ -1272,7 +1288,8 @@ fn handle_global_state_payload(
             next.revision = next.revision.wrapping_add(1);
             let r = next.revision;
             *guard = Arc::new(next);
-            revision_tx.send_replace(r);
+            drop(guard);
+            notify_revision(revision_tx, r);
             if ev_type == "oauth_result" {
                 dirty.auth = true;
                 dirty.models = true;
@@ -1348,6 +1365,7 @@ async fn execute_send_draft(
     revision_tx: &watch::Sender<u64>,
     target: DraftKey,
     draft: &ComposerDraft,
+    previous: Option<watch::Receiver<()>>,
 ) -> Result<SendSubmissionOutcome, ClientError> {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1363,21 +1381,25 @@ async fn execute_send_draft(
 
     let session_id = match initial_session_id {
         Some(sid) => {
-            if core.outbox.lock().expect("outbox lock").is_session_paused(&sid) {
-                core.outbox
-                    .lock()
-                    .expect("outbox lock")
-                    .enqueue_session(&sid, item);
-                bump_revision(core, revision_tx);
-                return Err(ClientError::StorageFull(
-                    "本机磁盘空间已满，当前会话后续消息已暂停发送。".into(),
-                ));
-            }
             core.outbox
                 .lock()
                 .expect("outbox lock")
                 .enqueue_session(&sid, item);
             bump_revision(core, revision_tx);
+            if let Some(mut previous) = previous {
+                // The preceding task closes its channel after applying its HTTP result.
+                let _ = previous.changed().await;
+            }
+            if core
+                .outbox
+                .lock()
+                .expect("outbox lock")
+                .is_session_paused(&sid)
+            {
+                return Err(ClientError::StorageFull(
+                    "本机磁盘空间已满，当前会话后续消息已暂停发送。".into(),
+                ));
+            }
             sid
         }
         None => {
@@ -1385,7 +1407,10 @@ async fn execute_send_draft(
                 .creation_request_key
                 .clone()
                 .expect("home item has creation_request_key");
-            core.outbox.lock().expect("outbox lock").enqueue_home(item)?;
+            core.outbox
+                .lock()
+                .expect("outbox lock")
+                .enqueue_home(item)?;
             bump_revision(core, revision_tx);
 
             match core
@@ -1488,8 +1513,7 @@ async fn reconcile_uncertain_items(core: &Arc<SharedClientCore>) -> Result<usize
         match maybe_sid {
             None => {
                 if let Some(req_key) = &item.creation_request_key {
-                    let (status, created_sid) =
-                        core.http.check_session_creation(req_key).await?;
+                    let (status, created_sid) = core.http.check_session_creation(req_key).await?;
                     if status == "done"
                         && let Some(sid) = created_sid
                     {
@@ -1550,5 +1574,16 @@ fn bump_revision(core: &Arc<SharedClientCore>, revision_tx: &watch::Sender<u64>)
         *guard = Arc::new(next);
         r
     };
-    revision_tx.send_replace(next_rev);
+    notify_revision(revision_tx, next_rev);
+}
+
+fn notify_revision(tx: &watch::Sender<u64>, revision: u64) {
+    // Concurrent HTTP completions may publish out of order after releasing the snapshot lock.
+    tx.send_if_modified(|current| {
+        if revision <= *current {
+            return false;
+        }
+        *current = revision;
+        true
+    });
 }

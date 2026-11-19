@@ -187,7 +187,8 @@ impl SessionStore {
     ) -> Option<Arc<SessionViewSnapshot>> {
         let rev = self.alloc_revision();
         let touch = self.alloc_touch();
-        let mut snap = SessionViewSnapshot::from_http_payload(http_payload, rev)?;
+        let mut snap = SessionViewSnapshot::from_http_payload(http_payload, rev)
+            .filter(|snapshot| snapshot.id == session_id)?;
         let buffered = match self.slots.remove(session_id) {
             Some(SlotState::Loading { buffered }) => buffered,
             _ => Vec::new(),
@@ -348,13 +349,11 @@ fn apply_frame_to_snapshot(snap: &mut SessionViewSnapshot, frame: BufferedSessio
                     }
                 }
                 "message_start" => {
-                    if let Some(msg) = ev.get("message") {
-                        if msg.get("role").and_then(Value::as_str) == Some("assistant") {
-                            snap.running = true;
-                            snap.streaming_assistant = Some(msg.clone());
-                        } else {
-                            upsert_message(&mut snap.messages, msg.clone());
-                        }
+                    if let Some(msg) = ev.get("message")
+                        && msg.get("role").and_then(Value::as_str) == Some("assistant")
+                    {
+                        snap.running = true;
+                        snap.streaming_assistant = Some(msg.clone());
                     }
                 }
                 "message_update" => {
@@ -372,10 +371,11 @@ fn apply_frame_to_snapshot(snap: &mut SessionViewSnapshot, frame: BufferedSessio
                         }
                         if msg.get("role").and_then(Value::as_str) != Some("system") {
                             let added_bytes = serde_json::to_vec(msg).map(|b| b.len()).unwrap_or(0);
-                            if upsert_message(&mut snap.messages, msg.clone()) {
-                                snap.estimated_bytes =
-                                    snap.estimated_bytes.saturating_add(added_bytes);
-                            }
+                            let previous_bytes = upsert_message(&mut snap.messages, msg.clone());
+                            snap.estimated_bytes = snap
+                                .estimated_bytes
+                                .saturating_sub(previous_bytes)
+                                .saturating_add(added_bytes);
                         }
                     }
                 }
@@ -424,24 +424,27 @@ fn message_dedup_key(msg: &Value) -> Option<String> {
     {
         return Some(format!("tool:{tcid}"));
     }
-    None
+    Some(format!(
+        "timestamp:{}:{}",
+        obj.get("role")?.as_str()?,
+        obj.get("timestamp")?
+    ))
 }
 
-/// Inserts or replaces `msg` idempotently. Returns `true` if appended as a new item.
-fn upsert_message(messages: &mut Arc<Vec<Value>>, msg: Value) -> bool {
-    let mut vec = (**messages).clone();
-    if let Some(key) = message_dedup_key(&msg)
-        && let Some(existing) = vec
-            .iter_mut()
-            .find(|m| message_dedup_key(m).as_deref() == Some(key.as_str()))
+/// Merge messages already covered by the HTTP snapshot and return the replaced size.
+fn upsert_message(messages: &mut Arc<Vec<Value>>, msg: Value) -> usize {
+    let vec = Arc::make_mut(messages);
+    let key = message_dedup_key(&msg);
+    if let Some(existing) = vec
+        .iter_mut()
+        .find(|existing| **existing == msg || (key.is_some() && key == message_dedup_key(existing)))
     {
+        let previous = serde_json::to_vec(existing).map_or(0, |bytes| bytes.len());
         *existing = msg;
-        *messages = Arc::new(vec);
-        return false;
+        return previous;
     }
     vec.push(msg);
-    *messages = Arc::new(vec);
-    true
+    0
 }
 
 fn apply_assistant_delta(slot: &mut Option<Value>, delta_ev: &Value) {
@@ -484,4 +487,21 @@ fn now_epoch_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn buffered_assistant_completion_overlapping_http_snapshot_is_applied_once() {
+        let assistant = json!({"role": "assistant", "timestamp": 100, "content": [{"type": "text", "text": "完成"}]});
+        let mut store = SessionStore::default();
+        assert!(store.begin_loading_if_absent("s1"));
+        store.apply_session_event("s1", json!({"type": "message_end", "message": assistant}));
+        let snap = store
+            .finish_loading_snapshot("s1", json!({"id": "s1", "messages": [assistant]}))
+            .unwrap();
+        assert_eq!(snap.messages.as_slice(), &[assistant]);
+    }
 }

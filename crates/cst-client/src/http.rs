@@ -41,7 +41,9 @@ impl AppHttpClient {
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(3))
             .build()
-            .map_err(|e| ClientError::BootstrapFailed(format!("无法初始化本机 HTTP 客户端：{e}")))?;
+            .map_err(|e| {
+                ClientError::BootstrapFailed(format!("无法初始化本机 HTTP 客户端：{e}"))
+            })?;
         Ok(Self {
             port,
             base_url: format!("http://127.0.0.1:{port}"),
@@ -61,6 +63,16 @@ impl AppHttpClient {
 
     fn auth_header_value(&self) -> String {
         format!("Bearer {}", self.app_token.as_str())
+    }
+
+    fn loopback_url(&self, path_and_query: &str) -> Result<String, ClientError> {
+        if !path_and_query.starts_with('/') {
+            return Err(ClientError::BadRequest {
+                code: "invalid_path".into(),
+                message: "本机接口路径必须以 / 开头。".into(),
+            });
+        }
+        Ok(format!("{}{}", self.base_url, path_and_query))
     }
 
     pub async fn request_json<T: DeserializeOwned>(
@@ -89,7 +101,7 @@ impl AppHttpClient {
         idempotency_key: Option<&str>,
         timeout: Option<Duration>,
     ) -> Result<Value, ClientError> {
-        let url = format!("{}{}", self.base_url, path_and_query);
+        let url = self.loopback_url(path_and_query)?;
         let is_read = method == Method::GET || method == Method::HEAD;
         let mut req = self
             .client
@@ -135,7 +147,7 @@ impl AppHttpClient {
         path_and_query: &str,
         last_event_id: Option<&str>,
     ) -> Result<Response, ClientError> {
-        let url = format!("{}{}", self.base_url, path_and_query);
+        let url = self.loopback_url(path_and_query)?;
         let mut req = self
             .client
             .get(url)
@@ -333,7 +345,10 @@ impl AppHttpClient {
         .await
     }
 
-    pub async fn get_models(&self, session_id: Option<&str>) -> Result<ModelsSnapshot, ClientError> {
+    pub async fn get_models(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<ModelsSnapshot, ClientError> {
         let path = match session_id {
             Some(sid) => format!("/api/models?sessionId={}", encode_segment(sid)),
             None => "/api/models".into(),

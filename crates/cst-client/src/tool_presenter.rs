@@ -938,10 +938,8 @@ pub fn map_tool(call: &ToolCallInput, result: &ToolResultInput) -> ToolCardView 
         detail
     };
 
-    let has_useful_data = source.is_some_and(|src| {
-        src.iter()
-            .any(|(k, v)| !is_notice_key(k) && !v.is_null())
-    });
+    let has_useful_data =
+        source.is_some_and(|src| src.iter().any(|(k, v)| !is_notice_key(k) && !v.is_null()));
     let has_error = detail
         .and_then(|d| d.get("error"))
         .is_some_and(is_js_truthy)
@@ -949,11 +947,18 @@ pub fn map_tool(call: &ToolCallInput, result: &ToolResultInput) -> ToolCardView 
             .and_then(|s| s.get("error"))
             .is_some_and(is_js_truthy);
     let partial_error = source.is_some_and(|src| {
-        src.values()
-            .any(|v| v.as_object().and_then(|o| o.get("error")).is_some_and(is_js_truthy))
-            || ["degradedFrom", "collectionErrors", "smartErrors", "counterErrors"]
-                .iter()
-                .any(|k| src.get(*k).is_some_and(is_js_truthy))
+        src.values().any(|v| {
+            v.as_object()
+                .and_then(|o| o.get("error"))
+                .is_some_and(is_js_truthy)
+        }) || [
+            "degradedFrom",
+            "collectionErrors",
+            "smartErrors",
+            "counterErrors",
+        ]
+        .iter()
+        .any(|k| src.get(*k).is_some_and(is_js_truthy))
     });
     let partially_searched = detail
         .and_then(|d| {
@@ -973,8 +978,12 @@ pub fn map_tool(call: &ToolCallInput, result: &ToolResultInput) -> ToolCardView 
         || partial_error
         || partially_searched
         || partially_fetched
-        || source.and_then(|s| s.get("degraded")).is_some_and(is_js_truthy)
-        || detail.and_then(|d| d.get("degraded")).is_some_and(is_js_truthy)
+        || source
+            .and_then(|s| s.get("degraded"))
+            .is_some_and(is_js_truthy)
+        || detail
+            .and_then(|d| d.get("degraded"))
+            .is_some_and(is_js_truthy)
     {
         CardStatus::Degraded
     } else {
@@ -1019,7 +1028,9 @@ pub fn map_tool(call: &ToolCallInput, result: &ToolResultInput) -> ToolCardView 
             for (idx, item) in claims.iter().enumerate() {
                 let claim = item.as_object();
                 if idx == 0
-                    && let Some(q) = artifact.and_then(|a| a.get("query")).filter(|v| !v.is_null())
+                    && let Some(q) = artifact
+                        .and_then(|a| a.get("query"))
+                        .filter(|v| !v.is_null())
                 {
                     rows.push(FieldRow {
                         label: "主张".into(),
@@ -1114,7 +1125,9 @@ pub fn map_tool(call: &ToolCallInput, result: &ToolResultInput) -> ToolCardView 
             });
         }
         if call.name == "get_search_content"
-            && detail.and_then(|d| d.get("truncated")).is_some_and(is_js_truthy)
+            && detail
+                .and_then(|d| d.get("truncated"))
+                .is_some_and(is_js_truthy)
         {
             let next_off = words(detail.and_then(|d| d.get("nextOffset")));
             blocks.push(ToolBlock::Notice {
@@ -1174,7 +1187,7 @@ pub fn map_tool(call: &ToolCallInput, result: &ToolResultInput) -> ToolCardView 
                 &mut blocks,
             );
         }
-        if ! same_map_ptr(source, detail)
+        if !same_map_ptr(source, detail)
             && let Some(d) = detail
         {
             let filtered: Map<String, Value> = d
@@ -1688,7 +1701,12 @@ fn push_notices(
                         .filter(|v| !v.is_null());
                     match scope_val {
                         Some(sv) => {
-                            format!("{}：{} · {}", label(key), words(Some(sv)), words(Some(body)))
+                            format!(
+                                "{}：{} · {}",
+                                label(key),
+                                words(Some(sv)),
+                                words(Some(body))
+                            )
                         }
                         None => format!("{}：{}", label(key), words(Some(body))),
                     }
@@ -1797,7 +1815,10 @@ fn format_gb_from_mb(mb: Option<&Value>) -> String {
         return "未知".into();
     };
     let formatted = format!("{:.1}", num / 1024.0);
-    formatted.strip_suffix(".0").unwrap_or(&formatted).to_owned()
+    formatted
+        .strip_suffix(".0")
+        .unwrap_or(&formatted)
+        .to_owned()
 }
 
 /// Projects any of the 4 special persistent tool components (`sys(overview)`, `runbook` / `command_plan` / `runbook_deliver`,
@@ -1812,11 +1833,7 @@ pub fn map_special_tool(
         .and_then(|r| r.details.as_ref())
         .and_then(Value::as_object);
     let raw = result.map(|r| r.raw_text.clone()).unwrap_or_default();
-    let started = call
-        .execution
-        .as_ref()
-        .and_then(|e| e.started_at)
-        .is_some();
+    let started = call.execution.as_ref().and_then(|e| e.started_at).is_some();
     let initial = SpecialStatus::from(compute_tool_state(
         result,
         Some(CardStatus::Success),
@@ -1870,7 +1887,9 @@ pub fn map_special_tool(
                 None => initial,
                 Some(res)
                     if res.is_error
-                        || source.and_then(|s| s.get("error")).is_some_and(|v| !v.is_null()) =>
+                        || source
+                            .and_then(|s| s.get("error"))
+                            .is_some_and(|v| !v.is_null()) =>
                 {
                     SpecialStatus::Error
                 }
@@ -1911,7 +1930,9 @@ pub fn map_special_tool(
             let pool_obj = source
                 .and_then(|s| s.get("pool"))
                 .and_then(Value::as_object);
-            let pool_val = match pool_obj.and_then(|p| p.get("nonpagedMB")).filter(|v| !v.is_null())
+            let pool_val = match pool_obj
+                .and_then(|p| p.get("nonpagedMB"))
+                .filter(|v| !v.is_null())
             {
                 None => "未知".into(),
                 Some(np) => format!(
@@ -2044,7 +2065,9 @@ pub fn map_special_tool(
                         .and_then(Value::as_object)
                 });
             let mut errors = common_errors;
-            errors.extend(collect_special_errors(&[source.and_then(|s| s.get("error"))]));
+            errors.extend(collect_special_errors(&[
+                source.and_then(|s| s.get("error"))
+            ]));
             let status = match result {
                 None => initial,
                 Some(res) if res.is_error || !errors.is_empty() => SpecialStatus::Error,
@@ -2103,8 +2126,8 @@ pub fn map_special_tool(
                 })
                 .unwrap_or_default();
 
-            let planned = source.and_then(|s| s.get("action")).and_then(Value::as_str)
-                == Some("planned");
+            let planned =
+                source.and_then(|s| s.get("action")).and_then(Value::as_str) == Some("planned");
             let summary = if result.is_none() {
                 base_summary
             } else if status == SpecialStatus::Error {
@@ -2195,7 +2218,9 @@ pub fn map_special_tool(
                 None => initial,
                 Some(res)
                     if res.is_error
-                        || details.and_then(|d| d.get("error")).is_some_and(|v| !v.is_null())
+                        || details
+                            .and_then(|d| d.get("error"))
+                            .is_some_and(|v| !v.is_null())
                         || failed =>
                 {
                     SpecialStatus::Error
@@ -2261,7 +2286,10 @@ pub fn map_special_tool(
                     && raw_drive.as_bytes()[0].is_ascii_alphabetic()
                     && raw_drive.as_bytes()[1] == b':')
             {
-                format!("{}:", (raw_drive.as_bytes()[0] as char).to_ascii_uppercase())
+                format!(
+                    "{}:",
+                    (raw_drive.as_bytes()[0] as char).to_ascii_uppercase()
+                )
             } else {
                 "目标待确定".into()
             };
@@ -2330,8 +2358,8 @@ pub fn map_special_tool(
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_owned();
-            let top_reason_val =
-                (volumes.is_empty() && !top_reason.is_empty()).then(|| Value::String(top_reason.clone()));
+            let top_reason_val = (volumes.is_empty() && !top_reason.is_empty())
+                .then(|| Value::String(top_reason.clone()));
             let mut errors = common_errors;
             errors.extend(collect_special_errors(&[
                 source.and_then(|s| s.get("collectionErrors")),
@@ -2341,8 +2369,10 @@ pub fn map_special_tool(
                 errors.extend(vol.errors.iter().cloned());
             }
 
-            let attempted: Vec<&SpecialVolumeView> =
-                volumes.iter().filter(|v| v.operation != "skipped").collect();
+            let attempted: Vec<&SpecialVolumeView> = volumes
+                .iter()
+                .filter(|v| v.operation != "skipped")
+                .collect();
             let mut status = initial;
             let mut summary = if initial == SpecialStatus::Running {
                 match call
@@ -2374,7 +2404,8 @@ pub fn map_special_tool(
                 if res.is_error {
                     status = SpecialStatus::Error;
                     summary = "执行失败".into();
-                } else if top_status == "unknown" || volumes.iter().any(|v| v.operation == "unknown")
+                } else if top_status == "unknown"
+                    || volumes.iter().any(|v| v.operation == "unknown")
                 {
                     status = SpecialStatus::Unknown;
                     summary = "结果未确认".into();

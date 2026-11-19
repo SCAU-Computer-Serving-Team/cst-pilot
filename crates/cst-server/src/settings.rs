@@ -416,10 +416,7 @@ impl DesktopSettingsStore {
         };
 
         if let Some(theme) = patch.theme {
-            map.insert(
-                "theme".to_owned(),
-                Value::String(theme.as_str().to_owned()),
-            );
+            map.insert("theme".to_owned(), Value::String(theme.as_str().to_owned()));
         } else if !map.contains_key("theme") {
             map.insert(
                 "theme".to_owned(),
@@ -557,7 +554,10 @@ impl UiHintsStore {
             && now_ms.saturating_sub(last) < MISSING_KEY_PROMPT_COOLDOWN_MS
         {
             if merged_last != disk_last {
-                map.insert("missingKeyPromptedAtMs".to_owned(), Value::Number(last.into()));
+                map.insert(
+                    "missingKeyPromptedAtMs".to_owned(),
+                    Value::Number(last.into()),
+                );
                 atomic_write_json(&self.file, &Value::Object(map), "保存运行态界面提示")
                     .await
                     .map_err(SettingsError::Storage)?;

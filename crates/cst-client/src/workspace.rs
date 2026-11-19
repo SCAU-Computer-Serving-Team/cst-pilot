@@ -53,14 +53,8 @@ impl SendMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum InlineToken {
-    Command {
-        raw: String,
-        name: String,
-    },
-    FileRef {
-        path: String,
-        display_name: String,
-    },
+    Command { raw: String, name: String },
+    FileRef { path: String, display_name: String },
 }
 
 struct ImageEntryInner {
@@ -79,7 +73,13 @@ impl Drop for ImageEntryInner {
         if let Some(pool) = self.pool.upgrade()
             && let Ok(mut guard) = pool.lock()
         {
-            guard.entries.remove(&self.sha256);
+            if guard
+                .entries
+                .get(&self.sha256)
+                .is_some_and(|entry| std::ptr::eq(entry.as_ptr(), self))
+            {
+                guard.entries.remove(&self.sha256);
+            }
             guard.used_bytes = guard.used_bytes.saturating_sub(self.charged_bytes);
         }
     }
@@ -299,7 +299,10 @@ impl ComposerDraft {
     }
 
     pub fn total_compressed_image_bytes(&self) -> usize {
-        self.images.iter().map(SharedImageHandle::compressed_len).sum()
+        self.images
+            .iter()
+            .map(SharedImageHandle::compressed_len)
+            .sum()
     }
 
     pub fn attach_image(&mut self, handle: SharedImageHandle) -> Result<(), ClientError> {

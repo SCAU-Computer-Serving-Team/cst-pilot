@@ -127,30 +127,29 @@ pub async fn handle_settings_route(
                 )
             })?),
         };
-        let (_web_admission, _app_lease) = match caller {
-            CallerIdentity::Web { .. } => (
-                Some(
-                    state
-                        .mode
-                        .admit_write(caller, Some(state.host.kit().activity_gate()))
-                        .await
-                        .map_err(ApiError::from)?,
+        let (_web_admission, _app_lease) =
+            match caller {
+                CallerIdentity::Web { .. } => (
+                    Some(
+                        state
+                            .mode
+                            .admit_write(caller, Some(state.host.kit().activity_gate()))
+                            .await
+                            .map_err(ApiError::from)?,
+                    ),
+                    None,
                 ),
-                None,
-            ),
-            CallerIdentity::App => {
-                if state.mode.is_stopping() {
-                    return Err(ApiError::from(crate::mode::ModeRejection::Stopping));
+                CallerIdentity::App => {
+                    if state.mode.is_stopping() {
+                        return Err(ApiError::from(crate::mode::ModeRejection::Stopping));
+                    }
+                    let lease =
+                        state.host.kit().activity_gate().enter().map_err(|msg| {
+                            ApiError::from(crate::mode::ModeRejection::Updating(msg))
+                        })?;
+                    (None, Some(lease))
                 }
-                let lease = state
-                    .host
-                    .kit()
-                    .activity_gate()
-                    .enter()
-                    .map_err(|msg| ApiError::from(crate::mode::ModeRejection::Updating(msg)))?;
-                (None, Some(lease))
-            }
-        };
+            };
         let claimed = state
             .ui_hints
             .claim_missing_key_prompt(client_last, pi_ai::now_ms())

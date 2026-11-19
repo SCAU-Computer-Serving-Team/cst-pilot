@@ -34,8 +34,8 @@
 | `GET` | `/api/app/update/status` | 要求 `X-CST-Client: app`，返回 `{ currentVersion, status: UpdateStatus, lastReport }` |
 | `POST` | `/api/app/update/check` | 要求 `X-CST-Client: app`，检查更新并广播 `update_changed`，返回 `UpdateStatus`（未启用在线更新时原样返回 `200`） |
 | `POST` | `/api/app/update/prepare` | 要求 `X-CST-Client: app`，分配 `operationId` 流式下载归档并双重验签解压至暂存目录，返回 `UpdateStatus` |
-| `POST` | `/api/app/update/cancel` | 要求 `X-CST-Client: app`，可选传入 `{ operationId }` 取消进行中的下载并清理暂存目录，状态回退至 `available` |
-| `POST` | `/api/app/update/launch` | 要求 `X-CST-Client: app`，传入 `{ appPid, appCreated, ui? }`。核验活跃 `/api/app/events` 连接、宿主进程身份与无繁忙会话后关闭 `ActivityGate`，拉起 `cst-updater.exe` 并在返回 `{ receipt }` 后异步收尾退出服务 |
+| `POST` | `/api/app/update/cancel` | 要求 `X-CST-Client: app`，取消下载或撤销已准备的升级包，清理暂存目录后回到 `available`。传入 `{ operationId }` 时仅取消对应操作；标识不匹配返回 `409 conflict` |
+| `POST` | `/api/app/update/launch` | 要求 `X-CST-Client: app`，传入 `{ appPid, appCreated, ui? }`。核验活跃 `/api/app/events` 连接与宿主进程身份。关闭 `ActivityGate` 后检查运行中会话、未决收件箱与活动导出。全部空闲时拉起 `cst-updater.exe` 并在返回 `{ receipt }` 后异步收尾退出服务 |
 | `POST` | `/api/app/exit` | 关闭桌面窗口时调用，跳过断线宽限期，暂停收件箱、停止活跃任务并在 5 秒预算内定稿遥测后退出服务，返回 `{ exited: true }` |
 
 ## SSE 帧协议与多会话聚合流

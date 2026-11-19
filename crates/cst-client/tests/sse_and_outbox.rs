@@ -75,7 +75,7 @@ fn sample_png() -> Vec<u8> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn stalled_ui_consumer_over_thirty_seconds_with_continuous_streaming_never_disconnects_keepalive()
-{
+ {
     let fixture = ServerFixture::new();
     let kit = Kit::new(&fixture.root).unwrap();
     let oa = OaClient::new("https://oa.example").unwrap();
@@ -141,7 +141,9 @@ async fn stalled_ui_consumer_over_thirty_seconds_with_continuous_streaming_never
 
     // Submit a home-page message (two-phase create + send) with an image attachment
     let pool = handle.with_workspace(|ws| ws.image_pool().clone());
-    let img_handle = pool.admit_image(sample_png(), Some("diag.png".into())).unwrap();
+    let img_handle = pool
+        .admit_image(sample_png(), Some("diag.png".into()))
+        .unwrap();
     assert!(pool.used_bytes() > 0);
     handle.with_workspace_mut(|ws| {
         let d = ws.draft_mut(DraftKey::NewSession);
@@ -185,7 +187,8 @@ async fn stalled_ui_consumer_over_thirty_seconds_with_continuous_streaming_never
         let snap = handle.snapshot();
         if let Some(sess) = snap.loaded_sessions.get(&outcome.session_id) {
             let text_joined = serde_json::to_string(sess.messages.as_slice()).unwrap();
-            if text_joined.contains("长达三十一秒的连续诊断分析已完成") && !sess.running {
+            if text_joined.contains("长达三十一秒的连续诊断分析已完成") && !sess.running
+            {
                 break;
             }
         }

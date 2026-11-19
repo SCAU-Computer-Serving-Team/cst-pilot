@@ -115,7 +115,8 @@ pub fn collect_browser_candidate_paths(
         if allow_env_override
             && let Some(local_app) = local_appdata.filter(|s| !s.trim().is_empty())
         {
-            let local_chrome = PathBuf::from(local_app).join("Google/Chrome/Application/chrome.exe");
+            let local_chrome =
+                PathBuf::from(local_app).join("Google/Chrome/Application/chrome.exe");
             if !list.contains(&local_chrome) {
                 list.push(local_chrome);
             }

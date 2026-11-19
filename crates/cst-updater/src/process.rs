@@ -43,7 +43,7 @@ pub(crate) fn launch(exe: &Path, args: &[OsString], root: &Path) -> Result<u32, 
 
 #[cfg(windows)]
 fn run_health_checks_in_shared_job(
-    exes: &[ std::path::PathBuf ],
+    exes: &[std::path::PathBuf],
     args: &[OsString],
     expected_line: &str,
     timeout: Duration,
@@ -257,7 +257,9 @@ fn run_health_checks_in_shared_job(
                 match WaitForSingleObject(process.0, 20) {
                     WAIT_OBJECT_0 => {
                         let mut code = 0;
-                        GetExitCodeProcess(process.0, &mut code).map_err(err)?;
+                        if let Err(error) = GetExitCodeProcess(process.0, &mut code) {
+                            break Err(err(error));
+                        }
                         break if code == 0 {
                             Ok(())
                         } else {
@@ -270,10 +272,25 @@ fn run_health_checks_in_shared_job(
             };
             if let Err(error) = outcome {
                 let _ = TerminateJobObject(job.0, 1);
-                let _ = output.join();
                 return Err(error);
             }
-            let bytes = match output.join().map_err(|_| "健康检查输出线程异常。".to_owned())? {
+            // A child can keep the inherited output handle open after the probe exits.
+            // Include pipe draining in the common deadline and cancellation budget.
+            while !output.is_finished() {
+                if cancel.is_cancelled() || Instant::now() >= deadline {
+                    let _ = TerminateJobObject(job.0, 1);
+                    return Err(if cancel.is_cancelled() {
+                        "健康检查已取消。".into()
+                    } else {
+                        "健康检查输出读取超时。".into()
+                    });
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let bytes = match output
+                .join()
+                .map_err(|_| "健康检查输出线程异常。".to_owned())?
+            {
                 Ok(b) => b,
                 Err(e) => {
                     let _ = TerminateJobObject(job.0, 1);
@@ -290,6 +307,10 @@ fn run_health_checks_in_shared_job(
             }
         }
         let _ = TerminateJobObject(job.0, 1);
+        crate::io::cancelled(cancel)?;
+        if Instant::now() >= deadline {
+            return Err("健康检查超时。".into());
+        }
         Ok(())
     }
 }

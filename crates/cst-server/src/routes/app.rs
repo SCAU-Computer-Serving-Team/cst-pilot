@@ -2,7 +2,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use cst_kit::update::service::UpdateControlError;
-use cst_os::{ProcessIdentity, RestartUi, normalize_canonical_path_for_hash, query_process_image_path};
+use cst_os::{
+    ProcessIdentity, RestartUi, normalize_canonical_path_for_hash, query_process_image_path,
+};
 use http::{HeaderMap, Method, Response, StatusCode};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -234,7 +236,9 @@ pub async fn handle_app_route(
             ));
         }
 
-        if pathname == "/api/app/update/status" && (*method == Method::GET || *method == Method::HEAD) {
+        if pathname == "/api/app/update/status"
+            && (*method == Method::GET || *method == Method::HEAD)
+        {
             let status = state.host.updates().status();
             let last_report = state.host.updates().last_report().ok().flatten();
             return Ok(Some(json_response(
@@ -342,18 +346,6 @@ pub async fn handle_app_route(
                     "升级包尚未准备就绪",
                 ));
             }
-            let sessions = state.pool.lifecycle_snapshot(false).await;
-            if state.exports.active_count() > 0
-                || sessions
-                    .iter()
-                    .any(|s| s.running || s.pending_inbox_count > 0)
-            {
-                return Err(ApiError::new(
-                    StatusCode::CONFLICT,
-                    "session_busy_for_update",
-                    "仍有运行中会话、未决收件箱或活动导出任务，请结束后重试升级",
-                ));
-            }
             let server_proc = ProcessIdentity::current().map_err(|msg| {
                 ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "server_error", msg)
             })?;
@@ -361,10 +353,29 @@ pub async fn handle_app_route(
             if parents[0].pid != server_proc.pid {
                 parents.push(server_proc);
             }
+            let validation_state = Arc::clone(state);
             let receipt = state
                 .host
                 .updates()
-                .launch(parents, restart_ui, CancellationToken::new())
+                .launch_after_validation(
+                    parents,
+                    restart_ui,
+                    CancellationToken::new(),
+                    move || async move {
+                        let sessions = validation_state.pool.lifecycle_snapshot(false).await;
+                        if validation_state.exports.active_count() > 0
+                            || sessions
+                                .iter()
+                                .any(|s| s.running || s.pending_inbox_count > 0)
+                        {
+                            return Err(
+                                "仍有运行中会话、未决收件箱或活动导出任务，请结束后重试升级。"
+                                    .into(),
+                            );
+                        }
+                        Ok(())
+                    },
+                )
                 .await
                 .map_err(|msg| {
                     if msg.contains("会话") {

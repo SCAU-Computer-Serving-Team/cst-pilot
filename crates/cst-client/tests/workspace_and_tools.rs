@@ -50,7 +50,9 @@ fn shared_workspace_switches_views_and_enforces_48mib_image_budget_with_drop_rec
 
     // 3. Duplicate image bytes deduplicate by SHA-256 without double-charging budget
     let png_a = encode_png(512, 512, 7); // decoded RGBA = 1 MiB
-    let h1 = pool.admit_image(png_a.clone(), Some("a.png".into())).unwrap();
+    let h1 = pool
+        .admit_image(png_a.clone(), Some("a.png".into()))
+        .unwrap();
     let used_after_h1 = pool.used_bytes();
     assert!(used_after_h1 > 1024 * 1024);
     let h1_dup = pool.admit_image(png_a, Some("a-copy.png".into())).unwrap();
@@ -129,7 +131,9 @@ fn all_seventeen_open_tools_project_identically_to_shared_web_fixtures() {
         (
             "disk",
             json!({ "scope": "usage" }),
-            Some(json!({ "usage": { "root": "E:\\logs", "topDirs": [{ "path": "E:\\logs", "sizeGB": 10 }] } })),
+            Some(
+                json!({ "usage": { "root": "E:\\logs", "topDirs": [{ "path": "E:\\logs", "sizeGB": 10 }] } }),
+            ),
             "扫描根",
         ),
         (
@@ -165,19 +169,25 @@ fn all_seventeen_open_tools_project_identically_to_shared_web_fixtures() {
         (
             "eventlog",
             json!({ "scope": "recent" }),
-            Some(json!({ "recent": { "truncated": true, "total": 12315, "events": [{ "provider": "WHEA", "id": 17 }] } })),
+            Some(
+                json!({ "recent": { "truncated": true, "total": 12315, "events": [{ "provider": "WHEA", "id": 17 }] } }),
+            ),
             "事件 ID",
         ),
         (
             "startup",
             json!({}),
-            Some(json!({ "startup": { "regItems": [{ "name": "SecurityHealth", "disabled": null }] } })),
+            Some(
+                json!({ "startup": { "regItems": [{ "name": "SecurityHealth", "disabled": null }] } }),
+            ),
             "注册表自启",
         ),
         (
             "ls",
             json!({}),
-            Some(json!({ "totalChildren": 1, "entries": [{ "name": "cards.md", "size": "11 KB" }] })),
+            Some(
+                json!({ "totalChildren": 1, "entries": [{ "name": "cards.md", "size": "11 KB" }] }),
+            ),
             "直接子项",
         ),
         (
@@ -189,7 +199,9 @@ fn all_seventeen_open_tools_project_identically_to_shared_web_fixtures() {
         (
             "source_check",
             json!({}),
-            Some(json!({ "artifact": { "claims": [{ "status": "unclear" }], "sources": [{ "title": "RFC", "rank": 1 }] } })),
+            Some(
+                json!({ "artifact": { "claims": [{ "status": "unclear" }], "sources": [{ "title": "RFC", "rank": 1 }] } }),
+            ),
             "主张判断",
         ),
         (
@@ -238,7 +250,9 @@ fn all_seventeen_open_tools_project_identically_to_shared_web_fixtures() {
     // Read image places image block ahead of absolute path field block
     let read_img_call = make_call("read", json!({ "path": "E:\\tmp\\image.png" }));
     let mut read_img_res = make_result(None, "Read image file [image/png]", false);
-    read_img_res.images.push(("image/png".into(), "AA==".into()));
+    read_img_res
+        .images
+        .push(("image/png".into(), "AA==".into()));
     let read_img_view = map_tool(&read_img_call, &read_img_res);
     assert!(matches!(read_img_view.blocks[0], ToolBlock::Image { .. }));
     assert!(matches!(read_img_view.blocks[1], ToolBlock::Fields { .. }));
@@ -246,7 +260,11 @@ fn all_seventeen_open_tools_project_identically_to_shared_web_fixtures() {
     // Error suppresses structured data; degraded preserves data + warnings
     let err_view = map_tool(
         &make_call("disk", json!({ "scope": "health" })),
-        &make_result(Some(json!({ "smart": [{ "Wear": 10 }] })), "SMART denied", true),
+        &make_result(
+            Some(json!({ "smart": [{ "Wear": 10 }] })),
+            "SMART denied",
+            true,
+        ),
     );
     assert_eq!(err_view.status, CardStatus::Error);
     assert_eq!(err_view.blocks.len(), 1);

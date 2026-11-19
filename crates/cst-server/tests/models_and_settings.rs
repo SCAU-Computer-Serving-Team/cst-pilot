@@ -221,7 +221,13 @@ async fn three_end_theme_isolation_and_activity_gate_exemptions() {
     assert_eq!(app_json["defaultView"], "tui");
     assert_eq!(app_json["windowWidth"], 1440);
     assert!(host.kit().agent_dir().join("desktop.json").exists());
-    assert!(!host.kit().agent_dir().join("desktop-settings.json").exists());
+    assert!(
+        !host
+            .kit()
+            .agent_dir()
+            .join("desktop-settings.json")
+            .exists()
+    );
 
     // 3. Verify all three themes remain strictly isolated on disk
     let tui_settings_json: Value =
@@ -679,10 +685,7 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
             .await
             .unwrap();
         assert_eq!(status_resp["status"]["phase"], "unavailable");
-        assert_eq!(
-            status_resp["status"]["message"],
-            "当前构建未启用在线更新。"
-        );
+        assert_eq!(status_resp["status"]["message"], "当前构建未启用在线更新。");
 
         let check_resp = client
             .post(format!("{}/api/app/update/check", server.base_url()))
@@ -767,7 +770,10 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
         .unwrap();
     let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::from([
         ("VERSION".into(), b"cst-pilot v0.9.0\n".to_vec()),
-        ("BUILD-INFO.json".into(), br#"{"version":"v0.9.0"}"#.to_vec()),
+        (
+            "BUILD-INFO.json".into(),
+            br#"{"version":"v0.9.0"}"#.to_vec(),
+        ),
         ("LICENSE".into(), b"MIT".to_vec()),
         ("THIRD-PARTY-NOTICES.md".into(), b"notices".to_vec()),
         ("licenses/mock.txt".into(), b"mock notice".to_vec()),
@@ -973,6 +979,19 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
     assert_eq!(ready_resp.status(), 200);
     let ready_val: Value = ready_resp.json().await.unwrap();
     assert_eq!(ready_val["phase"], "ready");
+    assert!(ready_val["operationId"].is_string());
+
+    let stale_cancel = client
+        .post(format!("{}/api/app/update/cancel", server.base_url()))
+        .header("Host", &host_header)
+        .header("X-CST-Client", "app")
+        .header("Authorization", format!("Bearer {}", server.app_token()))
+        .json(&json!({ "operationId": "previous-download" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(stale_cancel.status(), 409);
+    assert!(host.updates().is_ready());
 
     // `launch` with wrong executable path (current test runner PID != `<kit_root>/cst-pilot.exe`) -> 400 invalid_parent_process
     let self_id = ProcessIdentity::current().unwrap();
@@ -1001,10 +1020,7 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
         .arg("--standalone-web")
         .arg("--port")
         .arg("0")
-        .env(
-            "PI_CODING_AGENT_DIR",
-            dummy_agent_kit.0.join("agent/home"),
-        )
+        .env("PI_CODING_AGENT_DIR", dummy_agent_kit.0.join("agent/home"))
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()

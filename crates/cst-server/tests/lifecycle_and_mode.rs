@@ -430,13 +430,8 @@ fn release_browser_policy_ignores_runtime_environment_overrides() {
     let injected_exe = "E:/untrusted/fake-chrome.exe";
     let injected_local = "E:/untrusted/localappdata";
 
-    let debug_candidates = collect_browser_candidate_paths(
-        None,
-        true,
-        Some(injected_exe),
-        None,
-        Some(injected_local),
-    );
+    let debug_candidates =
+        collect_browser_candidate_paths(None, true, Some(injected_exe), None, Some(injected_local));
     assert_eq!(debug_candidates, vec![PathBuf::from(injected_exe)]);
 
     let release_candidates = collect_browser_candidate_paths(
@@ -503,7 +498,11 @@ fn cst_server_health_check_cli_validates_kit_fonts_and_version_without_taking_lo
     );
 
     // Corrupt a bundled font file -> `--health-check` must reject
-    fs::write(dir.join("assets/fonts/JetBrainsMono-Regular.ttf"), b"bad-font").unwrap();
+    fs::write(
+        dir.join("assets/fonts/JetBrainsMono-Regular.ttf"),
+        b"bad-font",
+    )
+    .unwrap();
     let bad_out = Command::new(exe)
         .arg("--health-check")
         .env("PI_CODING_AGENT_DIR", dir.join("agent/home"))

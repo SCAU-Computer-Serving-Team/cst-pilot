@@ -403,8 +403,7 @@ pub fn query_process_token_info(pid: u32) -> Result<Option<ProcessTokenInfo>, St
 
 /// Queries the access token of the current process.
 pub fn current_process_token_info() -> Result<ProcessTokenInfo, String> {
-    query_process_token_info(std::process::id())?
-        .ok_or_else(|| "当前进程访问令牌无法读取。".into())
+    query_process_token_info(std::process::id())?.ok_or_else(|| "当前进程访问令牌无法读取。".into())
 }
 
 #[cfg(all(test, windows))]

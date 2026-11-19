@@ -1207,8 +1207,7 @@ impl SessionPool {
                 };
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if !path.is_file()
-                        || path.extension().and_then(|e| e.to_str()) != Some("json")
+                    if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("json")
                     {
                         continue;
                     }

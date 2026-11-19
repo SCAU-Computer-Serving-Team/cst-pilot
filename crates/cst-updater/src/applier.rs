@@ -30,12 +30,13 @@ pub fn read_last_report(root: &Path) -> Result<Option<UpdateReport>, String> {
         return Ok(None);
     }
     let _pin = storage.pin_directory(Path::new(".state/update"), false)?;
-    let Some(bytes) = storage.read_limited(&storage.root.join(".state/update/result.json"), 4096)?
+    let Some(bytes) =
+        storage.read_limited(&storage.root.join(".state/update/result.json"), 4096)?
     else {
         return Ok(None);
     };
-    let report: UpdateReport = serde_json::from_value(crate::json::parse(&bytes)?)
-        .map_err(|_| "升级结果格式无效。")?;
+    let report: UpdateReport =
+        serde_json::from_value(crate::json::parse(&bytes)?).map_err(|_| "升级结果格式无效。")?;
     crate::manifest::version(&report.version)?;
     if report.rolled_back != report.reason.is_some() {
         return Err("升级结果字段无效。".into());

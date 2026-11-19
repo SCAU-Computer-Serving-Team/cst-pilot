@@ -1,10 +1,11 @@
 use std::ffi::OsString;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+#[cfg(windows)]
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use cst_os::{
@@ -99,8 +100,6 @@ impl Drop for DesktopInstanceGuard {
         self.stop.store(true, Ordering::SeqCst);
         #[cfg(windows)]
         {
-            // Poke the accept pipe once so a blocked `ConnectNamedPipe` returns promptly.
-            let _ = poke_pipe_for_shutdown(&self.pipe_address);
             if let Some(handle) = self.listener_thread.take() {
                 let _ = handle.join();
             }
@@ -136,17 +135,11 @@ pub fn acquire_or_activate_desktop_instance(
             Ok(first_pipe) => {
                 let stop = Arc::new(AtomicBool::new(false));
                 let (wakeup_tx, wakeup_rx) = watch::channel(0u64);
-                let thread_addr = address.clone();
                 let thread_stop = stop.clone();
                 let listener_thread = std::thread::Builder::new()
                     .name("cst-desktop-wakeup".into())
                     .spawn(move || {
-                        run_desktop_wakeup_listener(
-                            thread_addr,
-                            first_pipe,
-                            thread_stop,
-                            wakeup_tx,
-                        );
+                        run_desktop_wakeup_listener(first_pipe, thread_stop, wakeup_tx);
                     })
                     .map_err(|e| {
                         ClientError::BootstrapFailed(format!("无法启动单实例唤醒监听线程：{e}"))
@@ -159,14 +152,12 @@ pub fn acquire_or_activate_desktop_instance(
                     listener_thread: Some(listener_thread),
                 }))
             }
-            Err(Some(5 | 183 | 231)) => {
-                activate_existing_windows_desktop_instance(
-                    &canonical_root,
-                    &address,
-                    &self_token,
-                    options,
-                )
-            }
+            Err(Some(5 | 183 | 231)) => activate_existing_windows_desktop_instance(
+                &canonical_root,
+                &address,
+                &self_token,
+                options,
+            ),
             Err(code) => Err(ClientError::BootstrapFailed(format!(
                 "无法建立桌面端单实例命名管道锁（错误码 {code:?}）。"
             ))),
@@ -295,9 +286,7 @@ pub async fn ensure_server_running(
     }
 
     if !options.spawn_server_if_missing {
-        return Err(ClientError::Disconnected(
-            "本机后台服务未运行。".into(),
-        ));
+        return Err(ClientError::Disconnected("本机后台服务未运行。".into()));
     }
 
     // Step 2: Spawn `<kit_root>/cst-server.exe` with `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`
@@ -450,7 +439,10 @@ async fn probe_existing_server(
         Err(_) => return ProbeOutcome::AbsentOrStale,
     };
 
-    if health.pid != Some(record.pid) || health.process_created != Some(proc_identity.created) {
+    if !health.connected
+        || health.pid != Some(record.pid)
+        || health.process_created != Some(proc_identity.created)
+    {
         return ProbeOutcome::Fatal(ClientError::InvalidServerIdentity(
             "后台服务进程身份与健康检查回执不一致，拒绝复用连接。".into(),
         ));
@@ -470,7 +462,7 @@ async fn probe_existing_server(
         ));
     }
 
-    if options.require_elevation && health.elevated != Some(true) {
+    if health.elevated != Some(server_token_info.elevated) {
         return ProbeOutcome::Fatal(ClientError::PrivilegeMismatch(
             "后台服务报告的管理员提权状态不满足桌面端要求，请关闭旧后台后重开。".into(),
         ));
@@ -479,13 +471,26 @@ async fn probe_existing_server(
     if health.stopping {
         return ProbeOutcome::Stopping(record.pid);
     }
+    let expected_version = fs::read_to_string(canonical_root.join("VERSION"))
+        .ok()
+        .and_then(|text| text.trim().strip_prefix("cst-pilot ").map(str::to_owned));
+    let Some(version) = health.version.filter(|reported| {
+        !reported.is_empty()
+            && expected_version
+                .as_ref()
+                .is_none_or(|expected| reported == expected)
+    }) else {
+        return ProbeOutcome::Fatal(ClientError::InvalidServerIdentity(
+            "后台服务版本与工具包 VERSION 不一致，拒绝复用连接。".into(),
+        ));
+    };
 
     ProbeOutcome::Verified(VerifiedServerEndpoint {
         kit_root: strip_windows_verbatim_prefix(canonical_root),
         pid: record.pid,
         process_created: proc_identity.created,
         port: record.port,
-        version: health.version.unwrap_or_default(),
+        version,
         http,
         spawned_by_client: false,
     })
@@ -503,7 +508,10 @@ pub fn apply_portable_sanitized_env(
     let clean_root = strip_windows_verbatim_prefix(canonical_kit_root);
     let tmp_dir = clean_root.join(".state").join("tmp");
     fs::create_dir_all(&tmp_dir).map_err(|e| {
-        ClientError::BootstrapFailed(format!("无法创建便携运行临时目录 {}：{e}", tmp_dir.display()))
+        ClientError::BootstrapFailed(format!(
+            "无法创建便携运行临时目录 {}：{e}",
+            tmp_dir.display()
+        ))
     })?;
 
     let win_dir = windows_directory().map_err(ClientError::BootstrapFailed)?;
@@ -610,8 +618,8 @@ fn try_create_first_desktop_pipe(
             Foundation::INVALID_HANDLE_VALUE,
             Storage::FileSystem::{FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX},
             System::Pipes::{
-                CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE,
-                PIPE_WAIT,
+                CreateNamedPipeW, PIPE_NOWAIT, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
+                PIPE_TYPE_BYTE,
             },
         },
         core::PCWSTR,
@@ -622,7 +630,7 @@ fn try_create_first_desktop_pipe(
         CreateNamedPipeW(
             PCWSTR(wide.as_ptr()),
             PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
-            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT | PIPE_REJECT_REMOTE_CLIENTS,
             1,
             256,
             256,
@@ -638,7 +646,6 @@ fn try_create_first_desktop_pipe(
 
 #[cfg(windows)]
 fn run_desktop_wakeup_listener(
-    _address: String,
     accept_handle: std::os::windows::io::OwnedHandle,
     stop: Arc<AtomicBool>,
     wakeup_tx: watch::Sender<u64>,
@@ -646,7 +653,7 @@ fn run_desktop_wakeup_listener(
     use std::os::windows::io::AsRawHandle;
     use windows::Win32::{
         Foundation::HANDLE,
-        Storage::FileSystem::{FlushFileBuffers, ReadFile, WriteFile},
+        Storage::FileSystem::{ReadFile, WriteFile},
         System::Pipes::{ConnectNamedPipe, DisconnectNamedPipe},
     };
 
@@ -673,49 +680,40 @@ fn run_desktop_wakeup_listener(
             break;
         }
 
-        let mut buf = [0u8; 64];
-        let mut bytes_read = 0u32;
-        let read_ok = unsafe { ReadFile(raw, Some(&mut buf), Some(&mut bytes_read), None) }.is_ok();
-        if read_ok && bytes_read > 0 {
-            let msg = std::str::from_utf8(&buf[..bytes_read as usize]).unwrap_or("");
-            if msg.trim() == "ACTIVATE" {
-                seq = seq.wrapping_add(1);
-                let _ = wakeup_tx.send(seq);
-                let mut written = 0u32;
-                let _ = unsafe { WriteFile(raw, Some(b"OK\n"), Some(&mut written), None) };
-                let _ = unsafe { FlushFileBuffers(raw) };
+        let deadline = Instant::now() + Duration::from_secs(1);
+        let mut buf = [0u8; 9];
+        let mut offset = 0;
+        while !stop.load(Ordering::SeqCst) && Instant::now() < deadline && offset < buf.len() {
+            let mut read = 0;
+            match unsafe { ReadFile(raw, Some(&mut buf[offset..]), Some(&mut read), None) } {
+                Ok(()) if read > 0 => offset += read as usize,
+                Ok(()) => break,
+                // ERROR_NO_DATA: the nonblocking pipe has no bytes to read yet.
+                Err(e) if e.code().0 as u32 == 0x8007_00E8 => {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(_) => break,
+            }
+        }
+        if &buf == b"ACTIVATE\n" && !stop.load(Ordering::SeqCst) {
+            seq = seq.wrapping_add(1);
+            wakeup_tx.send_replace(seq);
+            let mut written = 0;
+            let _ = unsafe { WriteFile(raw, Some(b"OK\n"), Some(&mut written), None) };
+            // Give the client a bounded chance to read the acknowledgement before disconnecting.
+            while !stop.load(Ordering::SeqCst) && Instant::now() < deadline {
+                let mut byte = [0];
+                let mut read = 0;
+                match unsafe { ReadFile(raw, Some(&mut byte), Some(&mut read), None) } {
+                    Err(e) if e.code().0 as u32 == 0x8007_00E8 => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    _ => break,
+                }
             }
         }
         let _ = unsafe { DisconnectNamedPipe(raw) };
     }
-}
-
-#[cfg(windows)]
-fn poke_pipe_for_shutdown(address: &str) -> Result<(), ()> {
-    use windows::{
-        Win32::{
-            Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE},
-            Storage::FileSystem::{CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_NONE, OPEN_EXISTING},
-        },
-        core::PCWSTR,
-    };
-    let wide: Vec<u16> = address.encode_utf16().chain([0]).collect();
-    if let Ok(h) = unsafe {
-        CreateFileW(
-            PCWSTR(wide.as_ptr()),
-            (GENERIC_READ | GENERIC_WRITE).0,
-            FILE_SHARE_NONE,
-            None,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
-            None,
-        )
-    } {
-        unsafe {
-            let _ = CloseHandle(h);
-        }
-    }
-    Ok(())
 }
 
 #[cfg(windows)]
@@ -732,7 +730,7 @@ fn activate_existing_windows_desktop_instance(
             Storage::FileSystem::{
                 CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_NONE, OPEN_EXISTING,
             },
-            System::Pipes::{GetNamedPipeServerProcessId, WaitNamedPipeW},
+            System::Pipes::{GetNamedPipeServerProcessId, PeekNamedPipe, WaitNamedPipeW},
         },
         core::PCWSTR,
     };
@@ -777,9 +775,7 @@ fn activate_existing_windows_desktop_instance(
 
     let mut owner_pid = 0u32;
     unsafe { GetNamedPipeServerProcessId(HANDLE(client_handle.as_raw_handle()), &mut owner_pid) }
-        .map_err(|_| {
-            ClientError::BootstrapFailed("无法查询已有桌面实例进程标识。".into())
-        })?;
+        .map_err(|_| ClientError::BootstrapFailed("无法查询已有桌面实例进程标识。".into()))?;
 
     if ProcessIdentity::capture(owner_pid)
         .map_err(ClientError::BootstrapFailed)?
@@ -793,9 +789,7 @@ fn activate_existing_windows_desktop_instance(
     let expected_exe = options.desktop_exe_for(canonical_root);
     let actual_exe = query_process_image_path(owner_pid)
         .map_err(ClientError::InvalidServerIdentity)?
-        .ok_or_else(|| {
-            ClientError::BootstrapFailed("已有桌面实例已退出，请重新启动。".into())
-        })?;
+        .ok_or_else(|| ClientError::BootstrapFailed("已有桌面实例已退出，请重新启动。".into()))?;
     if !paths_equal_windows_ci(&actual_exe, &expected_exe) {
         return Err(ClientError::InvalidServerIdentity(
             "持有单实例锁的进程路径与当前工具包不符，拒绝发送唤醒请求。".into(),
@@ -819,9 +813,33 @@ fn activate_existing_windows_desktop_instance(
     file.write_all(b"ACTIVATE\n")
         .and_then(|_| file.flush())
         .map_err(|e| ClientError::BootstrapFailed(format!("发送窗口置前唤醒指令失败：{e}")))?;
-    let mut reader = BufReader::new(file);
-    let mut reply = String::new();
-    let _ = reader.read_line(&mut reply);
-
-    Ok(DesktopInstanceOutcome::ActivatedExisting { owner_pid })
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        let mut available = 0;
+        if unsafe {
+            PeekNamedPipe(
+                HANDLE(file.as_raw_handle()),
+                None,
+                0,
+                None,
+                Some(&mut available),
+                None,
+            )
+        }
+        .is_err()
+        {
+            break;
+        }
+        if available >= 3 {
+            let mut reply = [0; 3];
+            if file.read_exact(&mut reply).is_ok() && &reply == b"OK\n" {
+                return Ok(DesktopInstanceOutcome::ActivatedExisting { owner_pid });
+            }
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    Err(ClientError::BootstrapFailed(
+        "已有桌面实例未确认唤醒请求。".into(),
+    ))
 }

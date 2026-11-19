@@ -18,7 +18,8 @@ pub mod workspace;
 
 pub use bootstrap::{
     BootstrapOptions, DesktopInstanceGuard, DesktopInstanceOutcome, VerifiedServerEndpoint,
-    acquire_or_activate_desktop_instance, ensure_server_running, recover_pending_update_transaction,
+    acquire_or_activate_desktop_instance, ensure_server_running,
+    recover_pending_update_transaction,
 };
 pub use error::ClientError;
 pub use http::AppHttpClient;
@@ -39,6 +40,6 @@ pub use tool_presenter::{
 };
 pub use workspace::{
     ComposerDraft, DEFAULT_GLOBAL_IMAGE_BUDGET_BYTES, DraftKey, ImageBudgetPool, InlineToken,
-    MAX_IMAGE_DIMENSION_PX, MAX_SUBMISSION_IMAGE_BYTES, SendMode, SharedImageHandle, WorkspaceState,
-    WorkspaceView,
+    MAX_IMAGE_DIMENSION_PX, MAX_SUBMISSION_IMAGE_BYTES, SendMode, SharedImageHandle,
+    WorkspaceState, WorkspaceView,
 };

@@ -111,7 +111,9 @@ async fn privilege_mismatch_cross_session_and_path_spoofing_are_intercepted_with
         }),
         ..BootstrapOptions::default()
     };
-    let not_elev = ensure_server_running(&kit.0, &unpriv_opts).await.unwrap_err();
+    let not_elev = ensure_server_running(&kit.0, &unpriv_opts)
+        .await
+        .unwrap_err();
     assert!(matches!(not_elev, ClientError::NotElevated(_)));
 
     // 2. Residual un-elevated `cst-server.exe` holding `ServerInstanceLock` -> `PrivilegeMismatch`!
@@ -195,7 +197,8 @@ async fn privilege_mismatch_cross_session_and_path_spoofing_are_intercepted_with
     // Pending `transaction.json` with missing `cst-updater.exe` -> `UpgradeRecoveryFailed`
     fs::create_dir_all(kit.0.join(".state/update")).unwrap();
     fs::write(kit.0.join(".state/update/transaction.json"), b"{}").unwrap();
-    let rec_err = recover_pending_update_transaction(&kit.0, &test_bootstrap_options()).unwrap_err();
+    let rec_err =
+        recover_pending_update_transaction(&kit.0, &test_bootstrap_options()).unwrap_err();
     assert!(matches!(rec_err, ClientError::UpgradeRecoveryFailed(_)));
 }
 

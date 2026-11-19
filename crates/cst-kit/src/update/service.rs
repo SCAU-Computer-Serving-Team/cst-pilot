@@ -144,11 +144,7 @@ impl UpdateService {
                     Arc::new(NativeLauncher),
                     "尚未检查更新。",
                 ),
-                Err(_) => (
-                    None,
-                    Arc::new(NativeLauncher),
-                    "当前构建未启用在线更新。",
-                ),
+                Err(_) => (None, Arc::new(NativeLauncher), "当前构建未启用在线更新。"),
             },
         };
         let service = Arc::new(Self {
@@ -268,7 +264,10 @@ impl UpdateService {
     /// Control-plane `check` used by `POST /api/app/update/check`:
     /// returns `200 UpdateStatus` when `Phase::Unavailable` or after completing check,
     /// and rejects concurrent check/download/handoff with `UpdateControlError::Busy`.
-    pub async fn check_for_app(&self, cancel: CancellationToken) -> Result<UpdateStatus, UpdateControlError> {
+    pub async fn check_for_app(
+        &self,
+        cancel: CancellationToken,
+    ) -> Result<UpdateStatus, UpdateControlError> {
         if self.client.is_none() {
             return Ok(self.status());
         }
@@ -283,7 +282,9 @@ impl UpdateService {
             self.status().phase,
             Phase::Preparing | Phase::Launching | Phase::ExitRequired
         ) {
-            return Err(UpdateControlError::Busy("升级下载或交接正在进行中。".into()));
+            return Err(UpdateControlError::Busy(
+                "升级下载或交接正在进行中。".into(),
+            ));
         }
         if self.state.lock().expect("update state").package.is_some() {
             return Ok(self.status());
@@ -329,8 +330,7 @@ impl UpdateService {
                 {
                     let mut state = self.state.lock().expect("update state");
                     state.status.version = release.as_ref().map(|r| r.info().version.clone());
-                    state.status.archive_bytes =
-                        release.as_ref().map(|r| r.info().archive.size);
+                    state.status.archive_bytes = release.as_ref().map(|r| r.info().archive.size);
                     state.status.release_notes =
                         release.as_ref().map(|r| r.info().release_notes.clone());
                     state.status.operation_id = None;
@@ -372,7 +372,15 @@ impl UpdateService {
     /// Control-plane `prepare` used by `POST /api/app/update/prepare`:
     /// assigns a fresh `operationId` and cancellable token, rejecting concurrent operations
     /// with `UpdateControlError::Busy` and missing available releases with `NotAvailable`.
-    pub async fn prepare_for_app(&self) -> Result<UpdateStatus, UpdateControlError> {
+    pub async fn prepare_for_app(self: &Arc<Self>) -> Result<UpdateStatus, UpdateControlError> {
+        // Once admitted, only the explicit cancel endpoint should interrupt preparation.
+        let service = Arc::clone(self);
+        tokio::spawn(async move { service.prepare_for_app_inner().await })
+            .await
+            .map_err(|_| UpdateControlError::Failed("升级准备任务异常结束。".into()))?
+    }
+
+    async fn prepare_for_app_inner(&self) -> Result<UpdateStatus, UpdateControlError> {
         let _serial = self
             .operation
             .try_lock()
@@ -388,7 +396,9 @@ impl UpdateService {
                     Phase::Preparing | Phase::Launching | Phase::ExitRequired
                 )
             {
-                return Err(UpdateControlError::Busy("升级包已就绪或正在准备中。".into()));
+                return Err(UpdateControlError::Busy(
+                    "升级包已就绪或正在准备中。".into(),
+                ));
             }
             if state.release.is_none() {
                 return Err(UpdateControlError::NotAvailable(
@@ -444,7 +454,6 @@ impl UpdateService {
                 {
                     let mut state = self.state.lock().expect("update state");
                     state.active_prepare = None;
-                    state.status.operation_id = None;
                     state.package = Some(package);
                 }
                 self.publish(Phase::Ready, "升级包已验证，可开始交接。");
@@ -483,26 +492,38 @@ impl UpdateService {
         &self,
         expected_operation_id: Option<&str>,
     ) -> Result<UpdateStatus, UpdateControlError> {
-        {
+        let operation_id = {
             let state = self.state.lock().expect("update state");
             if matches!(state.status.phase, Phase::Launching | Phase::ExitRequired) {
-                return Err(UpdateControlError::Busy("升级交接已开始，无法取消。".into()));
+                return Err(UpdateControlError::Busy(
+                    "升级交接已开始，无法取消。".into(),
+                ));
             }
-            if let Some(expected) = expected_operation_id
-                && let Some(ref active) = state.active_prepare
-                && active.operation_id != expected
-            {
+            let current_id = state
+                .active_prepare
+                .as_ref()
+                .map(|active| active.operation_id.as_str())
+                .or(state.status.operation_id.as_deref());
+            if expected_operation_id.is_some() && expected_operation_id != current_id {
                 return Err(UpdateControlError::Conflict("取消操作标识不匹配。".into()));
             }
             if let Some(ref active) = state.active_prepare {
                 active.cancel.cancel();
             }
-        }
+            current_id.map(str::to_owned)
+        };
         let _serial = self.operation.lock().await;
         let (has_release, was_preparing_or_staged) = {
             let mut state = self.state.lock().expect("update state");
             if matches!(state.status.phase, Phase::Launching | Phase::ExitRequired) {
-                return Err(UpdateControlError::Busy("升级交接已开始，无法取消。".into()));
+                return Err(UpdateControlError::Busy(
+                    "升级交接已开始，无法取消。".into(),
+                ));
+            }
+            if let Some(current) = state.status.operation_id.as_ref()
+                && Some(current) != operation_id.as_ref()
+            {
+                return Err(UpdateControlError::Conflict("取消操作标识不匹配。".into()));
             }
             let had_stage = state.package.take().is_some();
             let had_active = state.active_prepare.take().is_some();
@@ -531,23 +552,45 @@ impl UpdateService {
         ui: RestartUi,
         cancel: CancellationToken,
     ) -> Result<LaunchReceipt, String> {
-        let service = self.clone();
-        tokio::spawn(async move { service.launch_inner(parents, ui, cancel).await })
+        self.launch_after_validation(parents, ui, cancel, || async { Ok(()) })
             .await
-            .map_err(|_| "升级交接任务异常结束。".to_owned())?
     }
 
-    async fn launch_inner(
+    /// Check host-specific busy state after the shared write gate has closed.
+    pub async fn launch_after_validation<F, Fut>(
         self: &Arc<Self>,
         parents: Vec<ProcessIdentity>,
         ui: RestartUi,
         cancel: CancellationToken,
-    ) -> Result<LaunchReceipt, String> {
+        validate: F,
+    ) -> Result<LaunchReceipt, String>
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(), String>> + Send,
+    {
+        let service = self.clone();
+        tokio::spawn(async move { service.launch_inner(parents, ui, cancel, validate).await })
+            .await
+            .map_err(|_| "升级交接任务异常结束。".to_owned())?
+    }
+
+    async fn launch_inner<F, Fut>(
+        self: &Arc<Self>,
+        parents: Vec<ProcessIdentity>,
+        ui: RestartUi,
+        cancel: CancellationToken,
+        validate: F,
+    ) -> Result<LaunchReceipt, String>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<(), String>>,
+    {
         let _serial = self.operation.lock().await;
         if cancel.is_cancelled() {
             return Err("升级交接已取消。".into());
         }
         let gate = self.gate.close()?;
+        validate().await?;
         let participants = self.participants();
         if participants
             .iter()
