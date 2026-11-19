@@ -200,7 +200,7 @@ export default function CustomModelService() {
 									placeholder="例如：team-gateway"
 									onChange={(event) => setForm({ ...form, id: event.target.value })}
 								/>
-								<small>Pi 中以此 ID 引用模型。保存后不可修改。</small>
+								<small>系统以此 ID 引用模型。保存后不可修改。</small>
 							</label>
 							<div className="settings-custom-field settings-custom-protocol">
 								<span>接口协议</span>

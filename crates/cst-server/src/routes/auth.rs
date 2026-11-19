@@ -345,6 +345,14 @@ pub async fn handle_auth_route(
 
                     let pid_owned = provider_id.to_owned();
                     let state_for_login = state.clone();
+                    let has_inline_key = key_opt.is_some();
+                    // Keep lock order identical to `PUT /api/auth/<provider>/api-key`:
+                    // `auth-config:all` -> `auth:<provider>` whenever inline key + baseUrl run together.
+                    let inline_cfg_guard = if base_url_opt.is_some() && has_inline_key {
+                        Some(state.locks.lock("auth-config:all").await)
+                    } else {
+                        None
+                    };
                     let result = state
                         .write_once_keyed(
                             caller,
@@ -354,6 +362,7 @@ pub async fn handle_auth_route(
                             headers,
                             format!("auth:{pid_owned}"),
                             || async move {
+                                let mut inline_cfg_guard = inline_cfg_guard;
                                 let prev =
                                     state_for_login.oauth_flows.status(&pid_owned, None);
                                 if prev.get("state").and_then(Value::as_str) == Some("pending")
@@ -374,8 +383,120 @@ pub async fn handle_auth_route(
                                     auth_type,
                                     key_opt,
                                     move |interaction| {
+                                        let held_cfg_guard = inline_cfg_guard.take();
                                         Box::pin(async move {
-                                            let do_login = || async {
+                                            if let Some(ref base) = base_url_opt {
+                                                if let Some(_cfg_guard) = held_cfg_guard {
+                                                    if st
+                                                        .pool
+                                                        .has_running_session_for_provider(&pid_task)
+                                                        .await
+                                                    {
+                                                        return Err("此 Provider 的会话正在执行，请完成后再修改 BaseURL".to_owned());
+                                                    }
+                                                    let do_login = || async {
+                                                        st.host
+                                                            .auth()
+                                                            .login_provider(
+                                                                &pid_task,
+                                                                auth_type,
+                                                                interaction,
+                                                            )
+                                                            .await
+                                                            .map(|_| ())
+                                                    };
+                                                    st.host
+                                                        .auth()
+                                                        .with_provider_endpoint(
+                                                            &pid_task,
+                                                            base,
+                                                            do_login,
+                                                        )
+                                                        .await
+                                                } else {
+                                                    st.host
+                                                        .auth()
+                                                        .validate_provider_endpoint(&pid_task, base)
+                                                        .map_err(|e| e.message)?;
+                                                    let Some(api_auth) = st
+                                                        .host
+                                                        .auth()
+                                                        .runtime()
+                                                        .models()
+                                                        .get_provider(&pid_task)
+                                                        .and_then(|p| p.auth().api_key.clone())
+                                                    else {
+                                                        return Err(
+                                                            "该模型服务不支持 API Key 登录"
+                                                                .to_owned(),
+                                                        );
+                                                    };
+                                                    // Wait for user secret with zero config/session locks held;
+                                                    // `wait_until_ready` returns as soon as this prompt registers.
+                                                    let collected = Zeroizing::new(
+                                                        interaction
+                                                            .prompt_user(AuthPrompt::Secret {
+                                                                message: format!(
+                                                                    "Enter {}",
+                                                                    api_auth.name
+                                                                ),
+                                                                placeholder: None,
+                                                            })
+                                                            .await?,
+                                                    );
+                                                    let replay_interaction = AuthInteraction {
+                                                        cancel_token: interaction
+                                                            .cancel_token
+                                                            .clone(),
+                                                        prompt: Arc::new(move |q| {
+                                                            let secret = collected.clone();
+                                                            Box::pin(async move {
+                                                                if matches!(
+                                                                    q,
+                                                                    AuthPrompt::Secret { .. }
+                                                                ) {
+                                                                    Ok(secret.as_str().to_owned())
+                                                                } else {
+                                                                    Err("该模型服务需要其他登录信息"
+                                                                        .to_owned())
+                                                                }
+                                                            })
+                                                        }),
+                                                        notify: interaction.notify.clone(),
+                                                    };
+                                                    st.locks
+                                                        .serialize("auth-config:all", || async {
+                                                            if st
+                                                                .pool
+                                                                .has_running_session_for_provider(
+                                                                    &pid_task,
+                                                                )
+                                                                .await
+                                                            {
+                                                                return Err("此 Provider 的会话正在执行，请完成后再修改 BaseURL".to_owned());
+                                                            }
+                                                            st.host
+                                                                .auth()
+                                                                .with_provider_endpoint(
+                                                                    &pid_task,
+                                                                    base,
+                                                                    || async {
+                                                                        st.host
+                                                                            .auth()
+                                                                            .login_provider(
+                                                                                &pid_task,
+                                                                                auth_type,
+                                                                                replay_interaction,
+                                                                            )
+                                                                            .await
+                                                                            .map(|_| ())
+                                                                    },
+                                                                )
+                                                                .await
+                                                        })
+                                                        .await
+                                                }
+                                            } else {
                                                 st.host
                                                     .auth()
                                                     .login_provider(
@@ -385,31 +506,6 @@ pub async fn handle_auth_route(
                                                     )
                                                     .await
                                                     .map(|_| ())
-                                            };
-                                            if let Some(ref base) = base_url_opt {
-                                                st.locks
-                                                    .serialize("auth-config:all", || async {
-                                                        if st
-                                                            .pool
-                                                            .has_running_session_for_provider(
-                                                                &pid_task,
-                                                            )
-                                                            .await
-                                                        {
-                                                            return Err("此 Provider 的会话正在执行，请完成后再修改 BaseURL".to_owned());
-                                                        }
-                                                        st.host
-                                                            .auth()
-                                                            .with_provider_endpoint(
-                                                                &pid_task,
-                                                                base,
-                                                                do_login,
-                                                            )
-                                                            .await
-                                                    })
-                                                    .await
-                                            } else {
-                                                do_login().await
                                             }
                                         })
                                     },

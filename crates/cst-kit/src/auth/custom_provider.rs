@@ -387,15 +387,11 @@ impl AuthRuntime {
             .await
             .map_err(legacy_error_string)
     }
-    pub async fn with_provider_endpoint_checked<T, Fut>(
+    pub fn validate_provider_endpoint(
         &self,
         provider_id: &str,
         base_url: &str,
-        login: impl FnOnce() -> Fut,
-    ) -> Result<T, CustomProviderError>
-    where
-        Fut: std::future::Future<Output = Result<T, String>>,
-    {
+    ) -> Result<String, CustomProviderError> {
         if provider_id == "cstoa" {
             return Err(CustomProviderError::invalid(
                 "CSTOA 使用固定服务地址，无需自定义 Provider。",
@@ -421,6 +417,19 @@ impl AuthRuntime {
                 "请求的 Provider 没有可用模型，请先在 Pi 中配置模型",
             ));
         }
+        Ok(endpoint)
+    }
+
+    pub async fn with_provider_endpoint_checked<T, Fut>(
+        &self,
+        provider_id: &str,
+        base_url: &str,
+        login: impl FnOnce() -> Fut,
+    ) -> Result<T, CustomProviderError>
+    where
+        Fut: std::future::Future<Output = Result<T, String>>,
+    {
+        let endpoint = self.validate_provider_endpoint(provider_id, base_url)?;
         let _serial = self.config_writes.lock().await;
         let tx = self
             .files

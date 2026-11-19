@@ -1027,3 +1027,29 @@ fn artifact_sessions_dir_rejects_ntfs_junction_escape() {
         assert_eq!(err.code, "export_directory_invalid");
     }
 }
+
+#[tokio::test]
+async fn cancelled_create_futures_release_reservations_and_allow_clean_close() {
+    let dir = TempDirGuard::new("export-cancel-create");
+    let artifacts = dir.path().join("artifacts");
+    let metadata = dir.path().join("meta");
+    let (renderer, _) = MockRenderer::new(|_s, emit, _c| {
+        Box::pin(async move { emit("html", b"<!DOCTYPE html>ok".to_vec()).await })
+    });
+    let store = SessionExportStore::new(&artifacts, &metadata, renderer);
+    let snap = fixture_snapshot("html");
+
+    // Poll `create` once and immediately drop 12 times; neither reservations (limit 8) nor creating_count may leak.
+    for _ in 0..12 {
+        let mut fut = Box::pin(store.create(&snap));
+        let waker = futures_util::task::noop_waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+        let _ = fut.as_mut().poll(&mut cx);
+        drop(fut);
+    }
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    tokio::time::timeout(Duration::from_secs(3), store.close())
+        .await
+        .expect("store.close() must not hang after cancelled create() futures");
+}

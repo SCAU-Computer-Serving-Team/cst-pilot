@@ -102,6 +102,13 @@ pub async fn handle_sessions_route(
         };
 
         let body = read_json_body(raw_body, 128 * 1024)?;
+        if !body.is_object() {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "请求的新会话配置无效",
+            ));
+        }
         let req: CreateSessionRequest = serde_json::from_value(body.clone()).map_err(|_| {
             ApiError::new(
                 StatusCode::BAD_REQUEST,
@@ -318,14 +325,16 @@ pub async fn handle_sessions_route(
                 "BitLocker 请求 ID 无效",
             ));
         }
-        // Check mode + ActivityGate without persisting to MutationReceipts!
-        let _admission = state
+        let body = read_json_body(raw_body, 4096)?;
+        // Check mode + ActivityGate without persisting to MutationReceipts, then release ModeController read lock.
+        let (mode_guard, _activity_lease) = state
             .mode
             .admit_write(caller, Some(state.host.kit().activity_gate()))
             .await
-            .map_err(ApiError::from)?;
+            .map_err(ApiError::from)?
+            .into_parts();
+        drop(mode_guard);
         let slot = state.pool.open_saved(id).await.map_err(ApiError::from)?;
-        let body = read_json_body(raw_body, 4096)?;
         slot.bitlocker
             .respond(request_id, &body)
             .map_err(ApiError::from)?;
@@ -852,11 +861,13 @@ pub async fn handle_sessions_route(
         let item = state
             .locks
             .serialize(format!("session:{id_owned}"), || async move {
-                let _admission = state
+                let (mode_guard, _activity_lease) = state
                     .mode
                     .admit_write(caller, Some(state.host.kit().activity_gate()))
                     .await
-                    .map_err(ApiError::from)?;
+                    .map_err(ApiError::from)?
+                    .into_parts();
+                drop(mode_guard);
                 state
                     .pool
                     .refresh_services()

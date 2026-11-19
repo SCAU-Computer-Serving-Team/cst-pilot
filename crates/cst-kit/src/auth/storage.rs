@@ -22,10 +22,10 @@ use crate::runbook::{
 pub(crate) struct JsonFiles(Storage, Arc<crate::kit::KitRootState>);
 pub(crate) struct Transaction {
     files: JsonFiles,
-    _activity: crate::update::activity::ActivityLease,
-    _queue: OwnedMutexGuard<()>,
-    _paths: DirectoryLease,
     _lock: DirectoryLock,
+    _paths: DirectoryLease,
+    _queue: OwnedMutexGuard<()>,
+    _activity: crate::update::activity::ActivityLease,
 }
 impl JsonFiles {
     pub fn new(root: &Path) -> Result<Self, String> {

@@ -244,15 +244,37 @@ impl SessionExportStore {
     }
 
     pub async fn create(&self, snapshot: &Value) -> Result<ExportJobRecord, ServiceError> {
-        self.creating_count.fetch_add(1, Ordering::SeqCst);
-        let res = self.enqueue(snapshot).await;
-        if self.creating_count.fetch_sub(1, Ordering::SeqCst) == 1 {
-            self.creating_done.notify_waiters();
+        struct CreatingGuard<'a>(&'a SessionExportStore);
+        impl Drop for CreatingGuard<'_> {
+            fn drop(&mut self) {
+                if self.0.creating_count.fetch_sub(1, Ordering::SeqCst) == 1 {
+                    self.0.creating_done.notify_waiters();
+                }
+            }
         }
-        res
+
+        self.creating_count.fetch_add(1, Ordering::SeqCst);
+        let _creating = CreatingGuard(self);
+        self.enqueue(snapshot).await
     }
 
     async fn enqueue(&self, snapshot: &Value) -> Result<ExportJobRecord, ServiceError> {
+        struct ReservationGuard<'a> {
+            store: &'a SessionExportStore,
+            armed: bool,
+        }
+        impl Drop for ReservationGuard<'_> {
+            fn drop(&mut self) {
+                if self.armed {
+                    self.store
+                        .inner
+                        .lock()
+                        .expect("export queue lock")
+                        .reservations -= 1;
+                }
+            }
+        }
+
         if self.closing.load(Ordering::SeqCst) {
             return Err(ServiceError::new(
                 ServiceErrorKind::Unavailable,
@@ -275,87 +297,87 @@ impl SessionExportStore {
             }
             guard.reservations += 1;
         }
+        let mut reservation = ReservationGuard {
+            store: self,
+            armed: true,
+        };
 
-        let res = async {
-            let id = Uuid::new_v4().to_string();
-            let session_id = snapshot
-                .get("sessionId")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_owned();
-            let title = snapshot
-                .get("title")
-                .and_then(Value::as_str)
-                .unwrap_or("会话")
-                .to_owned();
-            let captured_at = snapshot
-                .get("capturedAt")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_owned();
-            let options = snapshot.get("options").cloned().unwrap_or(Value::Null);
-            let date_str = options
-                .get("date")
-                .and_then(Value::as_str)
-                .unwrap_or("1970-01-01")
-                .to_owned();
-            let root = self.root.clone();
-            let display_dir = Self::run_blocking(move || {
-                artifact_sessions_display_path(&root, &date_str)
-                    .map(|p| p.to_string_lossy().into_owned())
+        let id = Uuid::new_v4().to_string();
+        let session_id = snapshot
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let title = snapshot
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("会话")
+            .to_owned();
+        let captured_at = snapshot
+            .get("capturedAt")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let options = snapshot.get("options").cloned().unwrap_or(Value::Null);
+        let date_str = options
+            .get("date")
+            .and_then(Value::as_str)
+            .unwrap_or("1970-01-01")
+            .to_owned();
+        let root = self.root.clone();
+        let display_dir = Self::run_blocking(move || {
+            artifact_sessions_display_path(&root, &date_str)
+                .map(|p| p.to_string_lossy().into_owned())
+        })
+        .await?;
+
+        let result = ExportJobRecord {
+            id: id.clone(),
+            session_id,
+            title,
+            captured_at,
+            options,
+            status: "queued".to_owned(),
+            directory: Some(display_dir),
+            files: Vec::new(),
+            error: None,
+        };
+        let record = ExportRecord {
+            result: result.clone(),
+            stored: Vec::new(),
+        };
+        let store_for_save = self.clone();
+        let record_to_save = record.clone();
+        Self::run_blocking(move || store_for_save.save_record_sync(&record_to_save)).await?;
+
+        if self.closing.load(Ordering::SeqCst) {
+            let stale = self.metadata.join(format!("{id}.json"));
+            let _ = tokio::task::spawn_blocking(move || {
+                let _ = fs::remove_file(stale);
             })
-            .await?;
-
-            let result = ExportJobRecord {
-                id: id.clone(),
-                session_id,
-                title,
-                captured_at,
-                options,
-                status: "queued".to_owned(),
-                directory: Some(display_dir),
-                files: Vec::new(),
-                error: None,
-            };
-            let record = ExportRecord {
-                result: result.clone(),
-                stored: Vec::new(),
-            };
-            let store_for_save = self.clone();
-            let record_to_save = record.clone();
-            Self::run_blocking(move || store_for_save.save_record_sync(&record_to_save)).await?;
-
-            if self.closing.load(Ordering::SeqCst) {
-                let stale = self.metadata.join(format!("{id}.json"));
-                let _ = tokio::task::spawn_blocking(move || {
-                    let _ = fs::remove_file(stale);
-                })
-                .await;
-                return Err(ServiceError::new(
-                    ServiceErrorKind::Unavailable,
-                    "export_stopping",
-                    "程序正在退出，请稍后导出",
-                ));
-            }
-
-            let work = Arc::new(WorkItem {
-                id,
-                snapshot: snapshot.clone(),
-                state: Mutex::new((record, result.clone())),
-            });
-
-            {
-                let mut guard = self.inner.lock().expect("export queue lock");
-                guard.queue.push_back(work);
-                self.revision.fetch_add(1, Ordering::SeqCst);
-                self.ensure_pumping_locked(&mut guard);
-            }
-            Ok(result)
+            .await;
+            return Err(ServiceError::new(
+                ServiceErrorKind::Unavailable,
+                "export_stopping",
+                "程序正在退出，请稍后导出",
+            ));
         }
-        .await;
 
-        self.inner.lock().expect("export queue lock").reservations -= 1;
-        res
+        let work = Arc::new(WorkItem {
+            id,
+            snapshot: snapshot.clone(),
+            state: Mutex::new((record, result.clone())),
+        });
+
+        {
+            let mut guard = self.inner.lock().expect("export queue lock");
+            reservation.armed = false;
+            guard.reservations -= 1;
+            guard.queue.push_back(work);
+            self.revision.fetch_add(1, Ordering::SeqCst);
+            self.ensure_pumping_locked(&mut guard);
+        }
+        Ok(result)
     }
 
     fn ensure_pumping_locked(&self, guard: &mut QueueState) {

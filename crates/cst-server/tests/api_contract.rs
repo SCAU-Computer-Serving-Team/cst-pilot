@@ -1786,8 +1786,9 @@ async fn create_session_distinguishes_omitted_fields_from_explicit_null_and_stat
         ])
     );
 
-    // 2. Explicit `null` fields and mismatched pairs are strictly rejected with `400 invalid_request`.
+    // 2. Explicit `null` fields, non-object bodies, and mismatched pairs are strictly rejected with `400 invalid_request`.
     for (idx, bad_body) in [
+        json!([]),
         json!({ "provider": null }),
         json!({ "provider": null, "modelId": null }),
         json!({ "thinkingLevel": null }),
@@ -1832,6 +1833,55 @@ async fn create_session_distinguishes_omitted_fields_from_explicit_null_and_stat
     assert_eq!(ok_resp.status().as_u16(), 201);
     let ok_json: Value = ok_resp.json().await.unwrap();
     assert!(ok_json["id"].as_str().is_some());
+
+    // 4. Interactive `api-key/start` with `baseUrl` waits for secret without blocking custom provider config writes.
+    let start_resp = client
+        .post(format!(
+            "{}/api/auth/deepseek/api-key/start",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "deepseek-interactive-start")
+        .json(&json!({ "baseUrl": "https://api.deepseek.com/v1" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(start_resp.status().as_u16(), 202);
+    let start_json: Value = start_resp.json().await.unwrap();
+    assert_eq!(start_json["state"], "pending");
+    assert!(start_json["prompt"]["id"].as_str().is_some());
+
+    let custom_resp = tokio::time::timeout(
+        Duration::from_secs(3),
+        client
+            .post(format!("{}/api/auth/custom", server.base_url()))
+            .header("Host", &host_header)
+            .header("Origin", &origin_header)
+            .header("X-CST-Web-Request", "1")
+            .header("Idempotency-Key", "custom-save-while-prompt-open")
+            .json(&json!({
+                "id": "team-gw",
+                "name": "Team Gateway",
+                "baseUrl": "https://gw.example.com/v1",
+                "api": "openai-completions",
+                "apiKey": "sk-team-secret",
+                "models": [{
+                    "id": "m1",
+                    "name": "Model 1",
+                    "contextWindow": 64000,
+                    "maxTokens": 8192,
+                    "reasoning": false,
+                    "image": false
+                }]
+            }))
+            .send(),
+    )
+    .await
+    .expect("custom provider save must not block on interactive api-key prompt")
+    .unwrap();
+    assert_eq!(custom_resp.status().as_u16(), 200);
 
     server.shutdown().await;
 }
