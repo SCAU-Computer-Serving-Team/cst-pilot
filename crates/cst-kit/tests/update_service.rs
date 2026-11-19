@@ -166,10 +166,27 @@ struct Network {
     block: AtomicBool,
     fail: AtomicBool,
 }
+fn mock_sfnt(magic: &[u8; 4]) -> Vec<u8> {
+    let tables = [*b"cmap", *b"name"];
+    let header_len = 12 + tables.len() * 16;
+    let mut buf = vec![0u8; header_len + 8];
+    buf[..4].copy_from_slice(magic);
+    buf[4..6].copy_from_slice(&(tables.len() as u16).to_be_bytes());
+    for (idx, tag) in tables.iter().enumerate() {
+        let entry = 12 + idx * 16;
+        buf[entry..entry + 4].copy_from_slice(tag);
+        let offset = (header_len + idx * 4) as u32;
+        buf[entry + 8..entry + 12].copy_from_slice(&offset.to_be_bytes());
+        buf[entry + 12..entry + 16].copy_from_slice(&4u32.to_be_bytes());
+    }
+    buf
+}
+
 impl Network {
     fn new() -> Arc<Self> {
         let mut files = BTreeMap::from([
             ("cst-pilot.exe".to_owned(), b"new synthetic main".to_vec()),
+            ("cst-server.exe".into(), b"new synthetic server".to_vec()),
             ("cst-updater.exe".into(), b"not a real executable".to_vec()),
             ("VERSION".into(), b"cst-pilot v0.7.0\n".to_vec()),
             (
@@ -179,6 +196,23 @@ impl Network {
             ("LICENSE".into(), b"MIT".to_vec()),
             ("THIRD-PARTY-NOTICES.md".into(), b"notices".to_vec()),
             ("licenses/mock.txt".into(), b"mock notice".to_vec()),
+            (
+                "assets/fonts/SourceHanSansCN-VF.otf".into(),
+                mock_sfnt(b"OTTO"),
+            ),
+            ("assets/fonts/LICENSE.txt".into(), b"SIL OFL 1.1".to_vec()),
+            (
+                "assets/fonts/JetBrainsMono-Regular.ttf".into(),
+                mock_sfnt(&[0, 1, 0, 0]),
+            ),
+            (
+                "assets/fonts/JetBrainsMono-Medium.ttf".into(),
+                mock_sfnt(&[0, 1, 0, 0]),
+            ),
+            (
+                "assets/fonts/JetBrainsMono-OFL.txt".into(),
+                b"SIL OFL 1.1".to_vec(),
+            ),
             (
                 "agent/home/APPEND_SYSTEM.md".into(),
                 b"Synthetic instructions".to_vec(),
@@ -487,7 +521,9 @@ async fn launched_handoff_rejects_future_prompts_tools_configuration_and_new_ses
 }
 #[tokio::test]
 async fn missing_compiled_key_keeps_sdk_usable_and_has_no_update_storage() {
-    if option_env!("CST_UPDATE_PUBLIC_KEY").is_some() {
+    if option_env!("CST_UPDATE_PUBLIC_KEY").is_some()
+        && option_env!("CST_UPDATE_MANIFEST_URL").is_some()
+    {
         return;
     }
     let f = Fixture::new();
@@ -500,6 +536,15 @@ async fn missing_compiled_key_keeps_sdk_usable_and_has_no_update_storage() {
     )
     .unwrap();
     assert_eq!(service.status().phase, Phase::Unavailable);
+    assert_eq!(service.status().message, "当前构建未启用在线更新。");
+    assert_eq!(
+        service
+            .check_for_app(CancellationToken::new())
+            .await
+            .unwrap()
+            .phase,
+        Phase::Unavailable
+    );
     assert!(service.check(CancellationToken::new()).await.is_err());
     assert!(!f.0.join(".state/update").exists());
     let sdk = f

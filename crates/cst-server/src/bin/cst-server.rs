@@ -9,6 +9,7 @@ use cst_server::{RunningServer, ServerConfig};
 
 #[derive(Debug, PartialEq, Eq)]
 struct CliArgs {
+    health_check: bool,
     standalone_web: bool,
     open_browser: bool,
     port: Option<u16>,
@@ -24,6 +25,7 @@ fn parse_args_from<I>(args: I) -> Result<CliArgs, String>
 where
     I: IntoIterator<Item = String>,
 {
+    let mut health_check = false;
     let mut standalone_web = false;
     let mut open_browser = false;
     let mut port = None;
@@ -33,6 +35,7 @@ where
     let mut iter = args.into_iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
+            "--health-check" => health_check = true,
             "--standalone-web" => standalone_web = true,
             "--open-browser" => open_browser = true,
             "--port" => {
@@ -56,6 +59,7 @@ where
     }
 
     Ok(CliArgs {
+        health_check,
         standalone_web,
         open_browser,
         port,
@@ -67,9 +71,10 @@ where
 fn open_default_browser(url: &str) {
     #[cfg(windows)]
     {
-        let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
-        let explorer = PathBuf::from(system_root).join("explorer.exe");
-        let _ = std::process::Command::new(explorer).arg(url).spawn();
+        if let Ok(win_dir) = cst_os::windows_directory() {
+            let explorer = win_dir.join("explorer.exe");
+            let _ = std::process::Command::new(explorer).arg(url).spawn();
+        }
     }
     #[cfg(not(windows))]
     {
@@ -102,6 +107,19 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+
+    if args.health_check {
+        return match cst_kit::update::handoff::run_cli_health_check(&kit_root) {
+            Ok(version) => {
+                println!("cst-pilot {version}");
+                ExitCode::SUCCESS
+            }
+            Err(msg) => {
+                eprintln!("{msg}");
+                ExitCode::FAILURE
+            }
+        };
+    }
 
     let kit = match Kit::new(&kit_root) {
         Ok(k) => k,

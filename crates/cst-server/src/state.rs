@@ -26,7 +26,7 @@ use crate::project_files::ProjectFileCache;
 use crate::runbook::{RunbookOpenerFn, default_runbook_opener};
 use crate::session::receipts::{ReceiptError, compute_request_signature};
 use crate::session::{DEFAULT_MAX_IDLE_SESSIONS, SessionPool};
-use crate::settings::{DesktopSettingsStore, WebSettingsStore};
+use crate::settings::{DesktopSettingsStore, UiHintsStore, WebSettingsStore};
 
 pub const DEFAULT_SERVER_PORT: u16 = 52831;
 
@@ -72,6 +72,8 @@ pub struct ServerState {
     static_dir: PathBuf,
     artifacts_root: PathBuf,
     kit_version: String,
+    process_created: u64,
+    elevated: bool,
     port: AtomicU16,
     app_token: String,
     pub mode: ModeController,
@@ -79,6 +81,7 @@ pub struct ServerState {
     pub pool: SessionPool,
     pub web_settings: WebSettingsStore,
     pub desktop_settings: DesktopSettingsStore,
+    pub ui_hints: UiHintsStore,
     pub oauth_flows: OAuthFlowManager,
     pub file_cache: ProjectFileCache,
     pub exports: SessionExportStore,
@@ -102,6 +105,10 @@ impl ServerState {
             .clone()
             .unwrap_or_else(|| kit_root.join("artifacts"));
         let kit_version = read_kit_version(&kit_root);
+        let process_created = cst_os::ProcessIdentity::current()
+            .map(|id| id.created)
+            .unwrap_or(0);
+        let elevated = cst_os::is_elevated().unwrap_or(false);
         let initial_port = config.port.unwrap_or(DEFAULT_SERVER_PORT);
         let app_token = config
             .app_token
@@ -113,6 +120,18 @@ impl ServerState {
         let pool = SessionPool::with_max_idle(host.clone(), cwd, config.max_idle_sessions);
         let web_settings = WebSettingsStore::new(&agent_dir);
         let desktop_settings = DesktopSettingsStore::new(&agent_dir);
+        let ui_hints = UiHintsStore::new(&kit_root);
+
+        let global_for_updates = pool.global_events.clone();
+        host.updates().subscribe_status(Arc::new(move |status| {
+            global_for_updates.publish(
+                "state",
+                &json!({
+                    "type": "update_changed",
+                    "status": status,
+                }),
+            );
+        }));
 
         let global_for_oauth = pool.global_events.clone();
         let invalid_for_oauth = pool.invalid_auth.clone();
@@ -177,6 +196,8 @@ impl ServerState {
             static_dir,
             artifacts_root,
             kit_version,
+            process_created,
+            elevated,
             port: AtomicU16::new(initial_port),
             app_token,
             mode,
@@ -184,6 +205,7 @@ impl ServerState {
             pool,
             web_settings,
             desktop_settings,
+            ui_hints,
             oauth_flows,
             file_cache: ProjectFileCache::new(),
             exports,
@@ -218,6 +240,14 @@ impl ServerState {
 
     pub fn kit_version(&self) -> &str {
         &self.kit_version
+    }
+
+    pub fn process_created(&self) -> u64 {
+        self.process_created
+    }
+
+    pub fn is_elevated(&self) -> bool {
+        self.elevated
     }
 
     pub fn port(&self) -> u16 {
@@ -351,18 +381,23 @@ impl ServerState {
 
     /// Pauses all session inboxes, stops running generations, finalizes telemetry (5s budget),
     /// removes `.state/server.json`, and signals server stop.
+    /// If `pool.shutdown()` conflicts with a concurrently busy session, `stopping` is rolled back.
     pub async fn execute_shutdown(&self) -> Result<(), ServiceError> {
         let mut guard = self.shutdown_mutex.lock().await;
         if *guard {
             return Ok(());
         }
         self.mode.begin_shutdown();
+        if let Err(msg) = self.pool.shutdown().await {
+            self.mode.cancel_shutdown();
+            return Err(ServiceError::new(
+                ServiceErrorKind::Conflict,
+                "conflict",
+                msg,
+            ));
+        }
         self.oauth_flows.close_all().await;
         self.exports.close().await;
-        self.pool
-            .shutdown()
-            .await
-            .map_err(|msg| ServiceError::new(ServiceErrorKind::Conflict, "conflict", msg))?;
         cleanup_discovery_file(&self.kit_root, std::process::id(), self.port());
         *guard = true;
         let stop = self.server_stop.clone();
@@ -375,6 +410,9 @@ impl ServerState {
 }
 
 fn read_kit_version(kit_root: &Path) -> String {
+    if let Ok(ver) = cst_kit::update::layout::read_version(kit_root) {
+        return ver;
+    }
     let pkg_path = kit_root.join("package.json");
     if let Ok(bytes) = fs::read(pkg_path)
         && let Ok(val) = serde_json::from_slice::<Value>(&bytes)

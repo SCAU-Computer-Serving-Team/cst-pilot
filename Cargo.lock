@@ -473,6 +473,7 @@ dependencies = [
  "chrono",
  "cst-kit",
  "cst-os",
+ "ed25519-dalek",
  "futures-core",
  "futures-util",
  "http",
@@ -499,6 +500,7 @@ dependencies = [
  "uuid",
  "windows",
  "zeroize",
+ "zip",
 ]
 
 [[package]]

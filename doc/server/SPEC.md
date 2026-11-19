@@ -15,7 +15,7 @@
 | 状态或场景 | 行为要求 |
 |---|---|
 | 默认软件端模式（`AppActive`） | 软件端（桌面端与内置 TUI）拥有完整读写权限。浏览器仅可访问静态资源与基础状态，访问会话详情或写接口返回 `403 web_mode_inactive` |
-| 开启 Web 模式（`WebActive`） | 软件端请求打开 Web 后签发 30 秒单次票据并拉起浏览器兑换会话 Cookie。Web 获得完整读写权限，软件端锁定会话写操作（返回 `409 web_mode_active`）并保持配置与状态同步 |
+| 开启 Web 模式（`WebActive`） | 软件端请求打开 Web 后签发 30 秒单次票据并拉起浏览器兑换会话 Cookie。Web 获得完整读写权限，软件端锁定会话写操作（返回 `409 web_mode_active`），仅保留配置、只读会话列表（携带 `X-CST-Client: app` 的 `GET /api/sessions`）与状态同步 |
 | 退出 Web 模式 | 仅在软件端确认退出 Web 时切回 `AppActive`，立即作废浏览器会话 Cookie 并主动断开所有 Web SSE 连接。已在后台执行或排队的任务继续完成 |
 | 软件端断线与退出 | 常规启动等待首次软件端连接 15 秒，最后一条存活连接断开后进入 6 秒宽限期，重连则恢复且不改变当前 `ChannelMode`。宽限期届满或收到显式退出请求时，暂停收件箱、停止运行任务并在共享 5 秒预算内定稿遥测后退出 |
 | 独立 Web 启动模式 | 通过 `--standalone-web` 启动时初始固定为 `WebActive`，关闭软件端连接超时，响应安全退出接口或进程终止信号退出 |
@@ -36,7 +36,8 @@
 | 自定义服务、模型目录与认证凭据 | `models.json`、`models-store.json`、`auth.json` | 三端共用。单服务退出仅清除该服务凭据，不影响其他服务或正在进行的请求 |
 | TUI 外观主题 | `agent/home/settings.json` | 内置 TUI 独占 |
 | Web 外观主题与空模型范围标记 | `agent/home/web-settings.json` | Web 独占，默认浅色 `light` |
-| 桌面端主题、默认视图与窗口位置尺寸 | `agent/home/desktop-settings.json` | 软件端独占 |
+| 桌面端主题、默认视图、侧栏折叠与窗口位置尺寸 | `agent/home/desktop.json` | 软件端独占，按顶层对象局部合并并保留未知扩展字段 |
+| 缺密钥首次自动提示 24 小时冷却记录 | `.state/ui-hints.json` | 三端共用，原子申领占用 |
 
 发行默认模型固定为 `deepseek/deepseek-flash`。缺少有效凭据时保留指定模型身份并返回 `409 credentials_required`，禁止静默切换至其他服务。任何配置文件语法损坏时保留原文件不变，返回 `503 configuration_unavailable` 中文修复提示，不输出配置原文或密钥。
 

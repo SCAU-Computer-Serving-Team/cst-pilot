@@ -70,7 +70,7 @@ flowchart TB
 | `agent/home/skills/` | 8 份诊断与交付技能说明 | 随包只读分发，供模型按需读取或通过 `/skill:<name>` 展开 |
 | `agent/home/settings.json` | 默认模型、启用范围、思考强度、TUI 主题 | 三端共用模型配置，TUI 独占其中的主题字段。按字段合并原子更新 |
 | `agent/home/web-settings.json` | Web 主题与空模型范围标记 | Web 独占，默认 `light`，串行原子替换 |
-| `agent/home/desktop-settings.json` | 桌面端主题、默认视图与窗口位置尺寸 | 软件端独占（阶段 9 升级为包含侧栏状态与局部合并的 `agent/home/desktop.json`） |
+| `agent/home/desktop.json` | 桌面端主题、默认视图、侧栏状态与窗口位置尺寸 | 软件端独占，按顶层 JSON 对象局部合并更新 |
 | `agent/home/models.json` | 自定义兼容模型服务与模型覆盖配置 | 三端共用，带 `revision` 防并发覆盖，严禁进入发行包 |
 | `agent/home/models-store.json` | 内置离线模型与动态目录缓存 | 发行包预置默认目录。CSTOA 动态条目按凭据摘要隔离，损坏时备份重建 |
 | `agent/home/auth.json` | 各模型服务的 OAuth 令牌与 APIKEY | `FileAuthStorage` 加锁原子读写，严禁进入客户端存储、日志或发行包 |
@@ -83,7 +83,7 @@ flowchart TB
 | `artifacts/<YYYY-MM-DD>/runbook/` | 手动修复命令清单 TXT（UTF-8 BOM + CRLF） | `runbook_deliver` 与 `runbook` 排他或按序号原子写入 |
 | `artifacts/<YYYY-MM-DD>/sessions/` | 导出的会话长图 PNG 与离线 HTML | 导出引擎排他发布，读取时核验 SHA-256 |
 | `wiztree/tmp/` | WizTree 扫描导出的临时 CSV | 扫描期间持有目录句柄并拒绝链接，读取结束或取消时立即删除 |
-| `.state/` | `server.json` 服务凭证、`update/` 升级事务与 `tmp/` 临时目录（阶段 9 纳入 `ui-hints.json` 共享冷却） | 启动器与后台服务维护，`PathGuard` 全面封锁模型工具访问 |
+| `.state/` | `server.json` 服务凭证、`ui-hints.json` 三端共享冷却提示、`update/` 升级事务与 `tmp/` 临时目录 | 启动器与后台服务维护，`PathGuard` 全面封锁模型工具访问 |
 
 ### 上下文、文件与网络隔离
 

@@ -37,9 +37,26 @@ fn envelope(info: &ReleaseManifest) -> Vec<u8> {
     })
     .unwrap()
 }
+fn mock_sfnt(magic: &[u8; 4]) -> Vec<u8> {
+    let tables = [*b"cmap", *b"name"];
+    let header_len = 12 + tables.len() * 16;
+    let mut buf = vec![0u8; header_len + 8];
+    buf[..4].copy_from_slice(magic);
+    buf[4..6].copy_from_slice(&(tables.len() as u16).to_be_bytes());
+    for (idx, tag) in tables.iter().enumerate() {
+        let entry = 12 + idx * 16;
+        buf[entry..entry + 4].copy_from_slice(tag);
+        let offset = (header_len + idx * 4) as u32;
+        buf[entry + 8..entry + 12].copy_from_slice(&offset.to_be_bytes());
+        buf[entry + 12..entry + 16].copy_from_slice(&4u32.to_be_bytes());
+    }
+    buf
+}
+
 fn defaults() -> BTreeMap<String, Vec<u8>> {
     let mut files = BTreeMap::from([
         ("cst-pilot.exe".into(), b"mock main binary".to_vec()),
+        ("cst-server.exe".into(), b"mock server binary".to_vec()),
         ("cst-updater.exe".into(), b"mock updater binary".to_vec()),
         ("VERSION".into(), b"cst-pilot v0.7.0\npi rust\n".to_vec()),
         (
@@ -49,6 +66,23 @@ fn defaults() -> BTreeMap<String, Vec<u8>> {
         ("LICENSE".into(), b"mock MIT license".to_vec()),
         ("THIRD-PARTY-NOTICES.md".into(), b"mock notices".to_vec()),
         ("licenses/example.txt".into(), b"mock license".to_vec()),
+        (
+            "assets/fonts/SourceHanSansCN-VF.otf".into(),
+            mock_sfnt(b"OTTO"),
+        ),
+        ("assets/fonts/LICENSE.txt".into(), b"SIL OFL 1.1".to_vec()),
+        (
+            "assets/fonts/JetBrainsMono-Regular.ttf".into(),
+            mock_sfnt(&[0, 1, 0, 0]),
+        ),
+        (
+            "assets/fonts/JetBrainsMono-Medium.ttf".into(),
+            mock_sfnt(&[0, 1, 0, 0]),
+        ),
+        (
+            "assets/fonts/JetBrainsMono-OFL.txt".into(),
+            b"SIL OFL 1.1".to_vec(),
+        ),
         (
             "agent/home/APPEND_SYSTEM.md".into(),
             b"mock system instructions".to_vec(),
@@ -271,6 +305,9 @@ fn signed_manifest_limits_duplicate_fields_and_windows_path_policy() {
         "assets//x",
         "agent/home/auth.json",
         "agent/home/device.json",
+        "agent/home/desktop.json",
+        "agent/home/desktop-settings.json",
+        "cst-pilot-desktop.exe",
         ".state/x",
         "wiztree/tmp/a.csv",
         "lhm/test/x",
@@ -281,8 +318,13 @@ fn signed_manifest_limits_duplicate_fields_and_windows_path_policy() {
     ] {
         assert!(layout::classify(bad).is_err(), "{bad}");
     }
+    assert_eq!(layout::classify("cst-server.exe").unwrap(), Area::Program);
     assert_eq!(
         layout::classify("assets/fonts/SourceHanSansCN-VF.otf").unwrap(),
+        Area::Program
+    );
+    assert_eq!(
+        layout::classify("assets/fonts/JetBrainsMono-Regular.ttf").unwrap(),
         Area::Program
     );
     assert_eq!(
@@ -766,5 +808,58 @@ mod windows_tests {
             .unwrap();
         assert!(error.contains("10 秒"));
         assert!(at.elapsed() < Duration::from_secs(13));
+    }
+
+    #[tokio::test]
+    async fn staging_rejects_missing_server_exe_missing_fonts_or_corrupt_sfnt() {
+        for missing in [
+            "cst-server.exe",
+            "assets/fonts/SourceHanSansCN-VF.otf",
+            "assets/fonts/JetBrainsMono-Regular.ttf",
+            "assets/fonts/JetBrainsMono-Medium.ttf",
+            "assets/fonts/JetBrainsMono-OFL.txt",
+        ] {
+            let f = Fixture::new();
+            let mut files = defaults();
+            files.remove(missing);
+            let (info, zip) = bundle(&files, &[]);
+            let mock = Mock::new(&info, zip);
+            let client = mock.client();
+            let release = client
+                .check("v0.6.2", CancellationToken::new())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                client
+                    .prepare(&f.0, &release, CancellationToken::new())
+                    .await
+                    .is_err(),
+                "must reject archive missing {missing}"
+            );
+            assert_eq!(f.stages(), 0);
+        }
+
+        let f = Fixture::new();
+        let mut corrupt = defaults();
+        corrupt.insert(
+            "assets/fonts/JetBrainsMono-Regular.ttf".into(),
+            b"not-a-valid-ttf".to_vec(),
+        );
+        let (info, zip) = bundle(&corrupt, &[]);
+        let mock = Mock::new(&info, zip);
+        let client = mock.client();
+        let release = client
+            .check("v0.6.2", CancellationToken::new())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            client
+                .prepare(&f.0, &release, CancellationToken::new())
+                .await
+                .is_err()
+        );
+        assert_eq!(f.stages(), 0);
     }
 }

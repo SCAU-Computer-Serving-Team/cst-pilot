@@ -13,7 +13,7 @@ flowchart TD
         Mode["ModeController: AppPresence 计数 + RwLock(ChannelMode, web_cookie_epoch)"]
         Locks["KeyedLocks: 细粒度按键异步互斥表"]
         Host["KitHost: 共享 AuthRuntime + TelemetryService + UpdateService"]
-        Settings["SettingsStores (web-settings / desktop-settings)"]
+        Settings["SettingsStores (web-settings / desktop / ui-hints)"]
         subgraph Pool["SessionPool (跨子目录发现 + 10 空闲槽位 LRU)"]
             Shared["MutationReceipts + ImageStore + global_events(SessionEvents) + MultiplexHub"]
         end

@@ -30,6 +30,27 @@ test('完整 OTF 字体不得进入 Web 发行树', () => {
   assert.throws(() => checkReleaseTree('.', ['agent/home/extensions/web/static/fonts/SourceHanSansCN-Regular.otf']), /完整 OTF 不得进入 Web 分发包/);
 });
 
+test('桌面端运行态配置文件不得进入发行树', () => {
+  for (const file of ['agent/home/desktop.json', 'agent/home/desktop-settings.json']) {
+    assert.throws(() => checkReleaseTree('.', [file]), /运行状态或凭据路径/);
+  }
+});
+
+function makeMockSfnt(magicHex) {
+  const tables = ['cmap', 'name'];
+  const headerSize = 12 + tables.length * 16;
+  const buf = Buffer.alloc(headerSize + 8);
+  Buffer.from(magicHex, 'hex').copy(buf, 0);
+  buf.writeUInt16BE(tables.length, 4);
+  tables.forEach((tag, index) => {
+    const entryOffset = 12 + index * 16;
+    buf.write(tag, entryOffset, 4, 'ascii');
+    buf.writeUInt32BE(headerSize + index * 4, entryOffset + 8);
+    buf.writeUInt32BE(4, entryOffset + 12);
+  });
+  return buf;
+}
+
 // 造一棵最小发行树：必需文件全部就位，入口页与样式表各自引用一个真实产物。
 function makeTree() {
   const base = process.env.CST_WEB_TEST_TMPDIR ? path.join(process.env.CST_WEB_TEST_TMPDIR, new Date().toISOString().slice(0, 10)) : os.tmpdir();
@@ -41,6 +62,9 @@ function makeTree() {
     fs.writeFileSync(file, body);
   };
   for (const rel of REQUIRED_RELEASE_FILES) write(rel, 'x');
+  write('assets/fonts/SourceHanSansCN-VF.otf', makeMockSfnt('4f54544f'));
+  write('assets/fonts/JetBrainsMono-Regular.ttf', makeMockSfnt('00010000'));
+  write('assets/fonts/JetBrainsMono-Medium.ttf', makeMockSfnt('00010000'));
   write(
     'agent/home/extensions/web/static/index.html',
     '<link rel="stylesheet" href="/assets/styles-abc.css" /><script src="/assets/extra.js"></script>',
@@ -150,4 +174,22 @@ test('a referenced asset missing from the tree is rejected', () => {
   fs.rmSync(path.join(root, 'agent/home/extensions/web/static/assets/extra.js'));
   assert.throws(() => checkReleaseContent(root, filesOf(root)), /引用的资源不在发行树中/);
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('随包可变字体与桌面等宽字体缺失或损坏时拒绝打包', () => {
+  for (const fontFile of [
+    'assets/fonts/SourceHanSansCN-VF.otf',
+    'assets/fonts/JetBrainsMono-Regular.ttf',
+    'assets/fonts/JetBrainsMono-Medium.ttf',
+  ]) {
+    const root = makeTree();
+    try {
+      fs.writeFileSync(path.join(root, fontFile), 'corrupt-font-bytes');
+      assert.throws(() => checkReleaseContent(root, filesOf(root)), /随包字体/);
+      fs.rmSync(path.join(root, fontFile));
+      assert.throws(() => checkReleaseContent(root, filesOf(root)), /缺少必需文件/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
 });

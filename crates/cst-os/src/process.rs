@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -141,4 +141,166 @@ pub fn launch_detached(exe: &Path, args: &[OsString], cwd: &Path) -> Result<u32,
         .spawn()
         .map(|child| child.id())
         .map_err(|_| "升级辅助进程无法启动。".into())
+}
+
+/// Queries the Win32 executable image path of `pid` (`None` if the process has exited).
+pub fn query_process_image_path(pid: u32) -> Result<Option<PathBuf>, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+        use windows::Win32::{
+            Foundation::HANDLE,
+            System::Threading::{
+                OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
+                QueryFullProcessImageNameW,
+            },
+        };
+        use windows::core::PWSTR;
+
+        if pid == 0 {
+            return Err("进程标识无效。".into());
+        }
+        let handle = match unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) } {
+            Ok(handle) => unsafe { OwnedHandle::from_raw_handle(handle.0) },
+            Err(error) if error.code().0 as u32 == 0x8007_0057 => return Ok(None),
+            Err(_) => return Err("进程路径无法核验。".into()),
+        };
+        let mut buffer = vec![0u16; 32768];
+        let mut len = buffer.len() as u32;
+        unsafe {
+            QueryFullProcessImageNameW(
+                HANDLE(handle.as_raw_handle()),
+                PROCESS_NAME_WIN32,
+                PWSTR(buffer.as_mut_ptr()),
+                &mut len,
+            )
+        }
+        .map_err(|_| "进程可执行文件路径无法读取。")?;
+        Ok(Some(PathBuf::from(OsString::from_wide(
+            &buffer[..len as usize],
+        ))))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        Err("进程路径核验仅支持 Windows。".into())
+    }
+}
+
+/// Resolves the trusted Windows directory (e.g. `C:\Windows`) via `GetWindowsDirectoryW`,
+/// ignoring untrusted runtime `SystemRoot` / `WINDIR` environment variables.
+pub fn windows_directory() -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        use windows::Win32::System::SystemInformation::GetWindowsDirectoryW;
+
+        let mut buffer = vec![0u16; 4096];
+        let len = unsafe { GetWindowsDirectoryW(Some(&mut buffer)) } as usize;
+        if len == 0 || len >= buffer.len() {
+            return Err("无法读取系统 Windows 目录。".into());
+        }
+        Ok(PathBuf::from(OsString::from_wide(&buffer[..len])))
+    }
+    #[cfg(not(windows))]
+    {
+        Err("系统目录解析仅支持 Windows。".into())
+    }
+}
+
+/// Resolves the trusted System32 directory (e.g. `C:\Windows\System32`) via `GetSystemDirectoryW`,
+/// ignoring untrusted runtime `SystemRoot` / `PATH` environment variables.
+pub fn system_directory() -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
+
+        let mut buffer = vec![0u16; 4096];
+        let len = unsafe { GetSystemDirectoryW(Some(&mut buffer)) } as usize;
+        if len == 0 || len >= buffer.len() {
+            return Err("无法读取系统 System32 目录。".into());
+        }
+        Ok(PathBuf::from(OsString::from_wide(&buffer[..len])))
+    }
+    #[cfg(not(windows))]
+    {
+        Err("系统目录解析仅支持 Windows。".into())
+    }
+}
+
+/// Queries `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\<exe_name>` for a machine-installed executable.
+pub fn query_machine_app_path(exe_name: &str) -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
+        use windows::core::PCWSTR;
+
+        if exe_name.is_empty() || exe_name.contains(['\\', '/', '\0']) {
+            return None;
+        }
+        let subkey = format!(r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{exe_name}");
+        let subkey_wide: Vec<u16> = std::ffi::OsStr::new(&subkey)
+            .encode_wide()
+            .chain([0])
+            .collect();
+        let mut buffer = vec![0u16; 4096];
+        let mut byte_len = (buffer.len() * std::mem::size_of::<u16>()) as u32;
+        let status = unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                PCWSTR(subkey_wide.as_ptr()),
+                PCWSTR::null(),
+                RRF_RT_REG_SZ,
+                None,
+                Some(buffer.as_mut_ptr().cast()),
+                Some(&mut byte_len),
+            )
+        };
+        if status.is_err() || byte_len < 2 {
+            return None;
+        }
+        let u16_len = (byte_len as usize) / 2;
+        let trimmed = buffer[..u16_len]
+            .iter()
+            .position(|&c| c == 0)
+            .map_or(&buffer[..u16_len], |nul| &buffer[..nul]);
+        let raw = OsString::from_wide(trimmed);
+        let cleaned = raw.to_string_lossy();
+        let cleaned = cleaned.trim().trim_matches('"');
+        if cleaned.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(cleaned))
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = exe_name;
+        None
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trusted_windows_and_process_image_queries_succeed() {
+        let win_dir = windows_directory().unwrap();
+        let sys_dir = system_directory().unwrap();
+        assert!(win_dir.join("explorer.exe").exists());
+        assert!(sys_dir.join("notepad.exe").exists());
+
+        let current_img = query_process_image_path(std::process::id())
+            .unwrap()
+            .unwrap();
+        let expected_img = std::env::current_exe().unwrap().canonicalize().unwrap();
+        assert_eq!(
+            crate::strip_windows_verbatim_prefix(&current_img.canonicalize().unwrap()),
+            crate::strip_windows_verbatim_prefix(&expected_img)
+        );
+    }
 }

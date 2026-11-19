@@ -20,11 +20,7 @@ pub fn default_runbook_opener() -> RunbookOpenerFn {
         Box::pin(async move {
             #[cfg(windows)]
             {
-                let system_root =
-                    std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
-                let notepad = PathBuf::from(system_root)
-                    .join("System32")
-                    .join("notepad.exe");
+                let notepad = cst_os::system_directory()?.join("notepad.exe");
                 tokio::process::Command::new(notepad)
                     .arg(&file)
                     .spawn()

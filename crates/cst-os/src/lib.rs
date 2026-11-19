@@ -22,5 +22,8 @@ pub use layout::{
     KitLayout, normalize_canonical_path_for_hash, resolve_kit_root, strip_windows_verbatim_prefix,
 };
 pub use locks::{RunbookDirectoryLock, ServerInstanceLock, SessionOwnerLock, UpdateLock};
-pub use process::{ProcessIdentity, is_elevated, is_process_alive, launch_detached};
+pub use process::{
+    ProcessIdentity, is_elevated, is_process_alive, launch_detached, query_machine_app_path,
+    query_process_image_path, system_directory, windows_directory,
+};
 pub use update_types::{HandoffRequest, LaunchReceipt, RestartUi, RollbackReason, UpdateReport};

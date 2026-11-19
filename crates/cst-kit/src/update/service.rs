@@ -71,15 +71,34 @@ pub enum Phase {
 pub struct UpdateStatus {
     pub phase: Phase,
     pub version: Option<String>,
+    pub archive_bytes: Option<u64>,
     pub release_notes: Option<String>,
+    pub operation_id: Option<String>,
     pub message: String,
     pub launch: Option<LaunchReceipt>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UpdateControlError {
+    Busy(String),
+    NotAvailable(String),
+    NotReady(String),
+    Conflict(String),
+    Failed(String),
+}
+
+struct ActivePrepare {
+    operation_id: String,
+    cancel: CancellationToken,
+}
+
+type StatusListener = Arc<dyn Fn(&UpdateStatus) + Send + Sync>;
 
 struct State {
     status: UpdateStatus,
     release: Option<VerifiedRelease>,
     package: Option<VerifiedPackage>,
+    active_prepare: Option<ActivePrepare>,
     handoff_gate: Option<UpgradeLease>,
 }
 
@@ -97,6 +116,7 @@ pub struct UpdateService {
     client: Option<Arc<UpdateClient>>,
     launcher: Arc<dyn HandoffLauncher>,
     state: Mutex<State>,
+    listeners: Mutex<Vec<StatusListener>>,
     operation: tokio::sync::Mutex<()>,
     sessions: Arc<Mutex<Vec<Weak<SessionRegistration>>>>,
     stop: CancellationToken,
@@ -107,7 +127,7 @@ impl UpdateService {
     /// Session registrations are shared across all hosts targeting the same canonical kit root.
     pub fn new(
         root: &Path,
-        oa_host: &str,
+        _oa_host: &str,
         gate: Arc<ActivityGate>,
         options: UpdateOptions,
     ) -> Result<Arc<Self>, String> {
@@ -118,7 +138,7 @@ impl UpdateService {
             UpdateOptions::Trusted { client, launcher } => {
                 (Some(client), launcher, "尚未检查更新。")
             }
-            UpdateOptions::Compiled => match compiled_client(&root, oa_host) {
+            UpdateOptions::Compiled => match compiled_client(&root) {
                 Ok(client) => (
                     Some(Arc::new(client)),
                     Arc::new(NativeLauncher),
@@ -127,7 +147,7 @@ impl UpdateService {
                 Err(_) => (
                     None,
                     Arc::new(NativeLauncher),
-                    "此构建未配置可用的官方升级公钥或发布源。",
+                    "当前构建未启用在线更新。",
                 ),
             },
         };
@@ -143,14 +163,18 @@ impl UpdateService {
                         Phase::Unavailable
                     },
                     version: None,
+                    archive_bytes: None,
                     release_notes: None,
+                    operation_id: None,
                     message: message.into(),
                     launch: None,
                 },
                 release: None,
                 package: None,
+                active_prepare: None,
                 handoff_gate: None,
             }),
+            listeners: Mutex::new(Vec::new()),
             client,
             operation: tokio::sync::Mutex::new(()),
             sessions: root_state.update_sessions.clone(),
@@ -169,6 +193,17 @@ impl UpdateService {
         self.state.lock().expect("update state").status.clone()
     }
 
+    pub fn last_report(&self) -> Result<Option<cst_os::UpdateReport>, String> {
+        cst_updater::applier::read_last_report(&self.root)
+    }
+
+    pub fn subscribe_status(&self, listener: StatusListener) {
+        self.listeners
+            .lock()
+            .expect("update status listeners")
+            .push(listener);
+    }
+
     fn publish(&self, phase: Phase, message: &str) {
         {
             let mut state = self.state.lock().expect("update state");
@@ -184,6 +219,14 @@ impl UpdateService {
                     _ => None,
                 },
             );
+        }
+        let listeners = self
+            .listeners
+            .lock()
+            .expect("update status listeners")
+            .clone();
+        for listener in listeners {
+            listener(&status);
         }
     }
 
@@ -222,6 +265,33 @@ impl UpdateService {
         self.check_inner(cancel, false).await
     }
 
+    /// Control-plane `check` used by `POST /api/app/update/check`:
+    /// returns `200 UpdateStatus` when `Phase::Unavailable` or after completing check,
+    /// and rejects concurrent check/download/handoff with `UpdateControlError::Busy`.
+    pub async fn check_for_app(&self, cancel: CancellationToken) -> Result<UpdateStatus, UpdateControlError> {
+        if self.client.is_none() {
+            return Ok(self.status());
+        }
+        let _serial = self
+            .operation
+            .try_lock()
+            .map_err(|_| UpdateControlError::Busy("升级检查、下载或交接正在进行中。".into()))?;
+        if self.gate.check().is_err() {
+            return Err(UpdateControlError::Busy("升级交接正在进行中。".into()));
+        }
+        if matches!(
+            self.status().phase,
+            Phase::Preparing | Phase::Launching | Phase::ExitRequired
+        ) {
+            return Err(UpdateControlError::Busy("升级下载或交接正在进行中。".into()));
+        }
+        if self.state.lock().expect("update state").package.is_some() {
+            return Ok(self.status());
+        }
+        let _ = self.run_check_locked(cancel).await;
+        Ok(self.status())
+    }
+
     async fn check_inner(
         &self,
         cancel: CancellationToken,
@@ -236,10 +306,17 @@ impl UpdateService {
             return Ok(self.status());
         }
         self.gate.check()?;
-        let client = self.client.as_ref().ok_or_else(|| self.status().message)?;
+        if self.client.is_none() {
+            return Err(self.status().message);
+        }
         if self.state.lock().expect("update state").package.is_some() {
             return Ok(self.status());
         }
+        self.run_check_locked(cancel).await
+    }
+
+    async fn run_check_locked(&self, cancel: CancellationToken) -> Result<UpdateStatus, String> {
+        let client = self.client.as_ref().ok_or_else(|| self.status().message)?;
         self.publish(Phase::Checking, "正在检查更新。");
         let result = async {
             let current = layout::read_version(&self.root)?;
@@ -252,8 +329,11 @@ impl UpdateService {
                 {
                     let mut state = self.state.lock().expect("update state");
                     state.status.version = release.as_ref().map(|r| r.info().version.clone());
+                    state.status.archive_bytes =
+                        release.as_ref().map(|r| r.info().archive.size);
                     state.status.release_notes =
                         release.as_ref().map(|r| r.info().release_notes.clone());
+                    state.status.operation_id = None;
                     state.release = release;
                 }
                 self.publish(
@@ -286,6 +366,61 @@ impl UpdateService {
             _ = cancel.cancelled() => return Err("升级准备已取消。".into()),
             guard = self.operation.lock() => guard
         };
+        self.prepare_locked(None, cancel).await
+    }
+
+    /// Control-plane `prepare` used by `POST /api/app/update/prepare`:
+    /// assigns a fresh `operationId` and cancellable token, rejecting concurrent operations
+    /// with `UpdateControlError::Busy` and missing available releases with `NotAvailable`.
+    pub async fn prepare_for_app(&self) -> Result<UpdateStatus, UpdateControlError> {
+        let _serial = self
+            .operation
+            .try_lock()
+            .map_err(|_| UpdateControlError::Busy("升级下载或交接正在进行中。".into()))?;
+        if self.client.is_none() {
+            return Err(UpdateControlError::NotAvailable(self.status().message));
+        }
+        {
+            let state = self.state.lock().expect("update state");
+            if state.package.is_some()
+                || matches!(
+                    state.status.phase,
+                    Phase::Preparing | Phase::Launching | Phase::ExitRequired
+                )
+            {
+                return Err(UpdateControlError::Busy("升级包已就绪或正在准备中。".into()));
+            }
+            if state.release.is_none() {
+                return Err(UpdateControlError::NotAvailable(
+                    "请先检查并确认存在新版本。".into(),
+                ));
+            }
+        }
+        let op_id = uuid::Uuid::new_v4().to_string();
+        let op_cancel = CancellationToken::new();
+        {
+            let mut state = self.state.lock().expect("update state");
+            state.active_prepare = Some(ActivePrepare {
+                operation_id: op_id.clone(),
+                cancel: op_cancel.clone(),
+            });
+        }
+        self.prepare_locked(Some(op_id), op_cancel.clone())
+            .await
+            .map_err(|msg| {
+                if op_cancel.is_cancelled() {
+                    UpdateControlError::Conflict("升级准备已取消。".into())
+                } else {
+                    UpdateControlError::Failed(msg)
+                }
+            })
+    }
+
+    async fn prepare_locked(
+        &self,
+        operation_id: Option<String>,
+        cancel: CancellationToken,
+    ) -> Result<UpdateStatus, String> {
         let _activity = self.gate.enter()?;
         let client = self.client.as_ref().ok_or_else(|| self.status().message)?;
         if self.state.lock().expect("update state").package.is_some() {
@@ -298,14 +433,41 @@ impl UpdateService {
             .release
             .clone()
             .ok_or("请先检查并确认存在新版本。")?;
+        {
+            let mut state = self.state.lock().expect("update state");
+            state.status.operation_id = operation_id.clone();
+        }
         self.publish(Phase::Preparing, "正在下载并验证升级包。");
-        match client.prepare(&self.root, &release, cancel).await {
+        let res = client.prepare(&self.root, &release, cancel.clone()).await;
+        match res {
             Ok(package) => {
-                self.state.lock().expect("update state").package = Some(package);
+                {
+                    let mut state = self.state.lock().expect("update state");
+                    state.active_prepare = None;
+                    state.status.operation_id = None;
+                    state.package = Some(package);
+                }
                 self.publish(Phase::Ready, "升级包已验证，可开始交接。");
                 Ok(self.status())
             }
+            Err(_) if cancel.is_cancelled() => {
+                let has_release = {
+                    let mut state = self.state.lock().expect("update state");
+                    state.active_prepare = None;
+                    state.status.operation_id = None;
+                    state.release.is_some()
+                };
+                if has_release {
+                    self.publish(Phase::Available, "已取消下载，可重新升级。");
+                }
+                Err("升级准备已取消。".into())
+            }
             Err(_) => {
+                {
+                    let mut state = self.state.lock().expect("update state");
+                    state.active_prepare = None;
+                    state.status.operation_id = None;
+                }
                 self.publish(
                     Phase::Failed,
                     "升级包准备失败，当前程序与用户数据保持不变。",
@@ -313,6 +475,52 @@ impl UpdateService {
                 Err(self.status().message)
             }
         }
+    }
+
+    /// Cancels an active or staged `prepare`, waits for download/extraction cleanup,
+    /// and restores `Phase::Available` when a verified release is present.
+    pub async fn cancel_prepare(
+        &self,
+        expected_operation_id: Option<&str>,
+    ) -> Result<UpdateStatus, UpdateControlError> {
+        {
+            let state = self.state.lock().expect("update state");
+            if matches!(state.status.phase, Phase::Launching | Phase::ExitRequired) {
+                return Err(UpdateControlError::Busy("升级交接已开始，无法取消。".into()));
+            }
+            if let Some(expected) = expected_operation_id
+                && let Some(ref active) = state.active_prepare
+                && active.operation_id != expected
+            {
+                return Err(UpdateControlError::Conflict("取消操作标识不匹配。".into()));
+            }
+            if let Some(ref active) = state.active_prepare {
+                active.cancel.cancel();
+            }
+        }
+        let _serial = self.operation.lock().await;
+        let (has_release, was_preparing_or_staged) = {
+            let mut state = self.state.lock().expect("update state");
+            if matches!(state.status.phase, Phase::Launching | Phase::ExitRequired) {
+                return Err(UpdateControlError::Busy("升级交接已开始，无法取消。".into()));
+            }
+            let had_stage = state.package.take().is_some();
+            let had_active = state.active_prepare.take().is_some();
+            state.status.operation_id = None;
+            (
+                state.release.is_some(),
+                had_stage || had_active || state.status.phase == Phase::Available,
+            )
+        };
+        if has_release && was_preparing_or_staged {
+            self.publish(Phase::Available, "已取消下载，可重新升级。");
+        }
+        Ok(self.status())
+    }
+
+    pub fn is_ready(&self) -> bool {
+        let state = self.state.lock().expect("update state");
+        state.status.phase == Phase::Ready && state.package.is_some()
     }
 
     /// Capture every relevant desktop/host identity in the trusted launcher. The library never exits them.
@@ -491,11 +699,13 @@ pub fn startup_check(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn compiled_client(root: &Path, oa_host: &str) -> Result<UpdateClient, String> {
+fn compiled_client(root: &Path) -> Result<UpdateClient, String> {
+    let raw_url = option_env!("CST_UPDATE_MANIFEST_URL")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("当前构建未启用在线更新。")?;
+    let source = cst_updater::manifest::validate_release_url(raw_url)?;
     let key = super::manifest::ReleaseKey::compiled()?;
-    let source = super::network::release_url(oa_host)?
-        .join("/api/agent/releases/latest")
-        .map_err(|_| "升级源无效。")?;
     let storage = Storage::new(root)?;
     let _home = storage.pin_directory(Path::new("agent/home"), false)?;
     let allow_tun = storage

@@ -1,16 +1,22 @@
+import { apiJson } from "../data/api.ts";
 import type { ModelChoice } from "../data/model-selection";
 
-/** 自动提示记录写在 localStorage，跨标签页、刷新与新会话共用。 */
+/** 旧版 Web 本地冷却键，首次接入服务端共享冷却后单向合并并清理。 */
 export const modelKeyPromptStorageKey = "cst-model-key-prompt-at";
 export const modelKeyPromptInterval = 24 * 60 * 60 * 1000;
 
-type PromptStorage = Pick<Storage, "getItem" | "setItem">;
+export type MissingKeyPromptClaimResponse = {
+	claimed: boolean;
+	missingKeyPromptedAtMs: number | null;
+};
+
+type PromptStorage = Pick<Storage, "getItem" | "setItem"> & Partial<Pick<Storage, "removeItem">>;
 
 function defaultStorage(): PromptStorage | null {
 	try {
 		return typeof window === "undefined" ? null : window.localStorage;
 	} catch {
-		// 隐私模式下 localStorage 不可用，退化为本次页面内提示。
+		// 隐私模式下 localStorage 不可用。
 		return null;
 	}
 }
@@ -34,6 +40,14 @@ export function writeModelKeyPromptTime(storage: PromptStorage | null = defaultS
 	}
 }
 
+export function clearModelKeyPromptTime(storage: PromptStorage | null = defaultStorage()): void {
+	try {
+		storage?.removeItem?.(modelKeyPromptStorageKey);
+	} catch {
+		// 清理失败不影响主流程。
+	}
+}
+
 /** 任一服务已配置凭据即视为已配置模型，不再自动提示。 */
 export function anyModelConfigured(catalog: ModelChoice[]): boolean {
 	return catalog.some((model) => model.credentialReady);
@@ -47,4 +61,48 @@ export function shouldAutoPrompt(options: {
 	if (anyModelConfigured(options.catalog)) return false;
 	const elapsed = options.lastPromptAt === null ? Number.NaN : options.now - options.lastPromptAt;
 	return !(elapsed >= 0 && elapsed < modelKeyPromptInterval);
+}
+
+/**
+ * 向服务端原子申领三端共享的 24 小时缺密钥提示窗口。
+ * 若本地存有旧时间戳，随首次请求单向合并上报并清理本地键。
+ */
+export async function claimMissingKeyPrompt(options: {
+	catalog: ModelChoice[];
+	storage?: PromptStorage | null;
+	signal?: AbortSignal;
+	now?: number;
+	requestClaim?: (
+		body: { clientLastPromptedAtMs?: number },
+		signal?: AbortSignal,
+	) => Promise<MissingKeyPromptClaimResponse>;
+}): Promise<boolean> {
+	if (anyModelConfigured(options.catalog)) return false;
+	const storage = options.storage === undefined ? defaultStorage() : options.storage;
+	const legacyPromptAt = readModelKeyPromptTime(storage);
+	const body =
+		legacyPromptAt !== null && legacyPromptAt > 0 ? { clientLastPromptedAtMs: Math.floor(legacyPromptAt) } : {};
+	const requestClaim =
+		options.requestClaim ??
+		((payload, signal) =>
+			apiJson<MissingKeyPromptClaimResponse>("/api/ui-hints/missing-key-prompt/claim", {
+				method: "POST",
+				body: payload,
+				signal,
+			}));
+	try {
+		const response = await requestClaim(body, options.signal);
+		if (legacyPromptAt !== null) {
+			clearModelKeyPromptTime(storage);
+		}
+		return Boolean(response.claimed);
+	} catch {
+		if (options.signal?.aborted) return false;
+		const now = options.now ?? Date.now();
+		if (!shouldAutoPrompt({ catalog: options.catalog, lastPromptAt: legacyPromptAt, now })) {
+			return false;
+		}
+		writeModelKeyPromptTime(storage, now);
+		return true;
+	}
 }

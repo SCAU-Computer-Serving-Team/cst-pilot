@@ -69,10 +69,13 @@ pub async fn handle_settings_route(
                             .save_theme(theme)
                             .await
                             .map_err(ApiError::from)?;
-                        state
-                            .pool
-                            .global_events
-                            .publish("state", &json!({ "type": "settings_changed" }));
+                        state.pool.global_events.publish(
+                            "state",
+                            &json!({
+                                "type": "settings_changed",
+                                "scope": "web",
+                            }),
+                        );
                         Ok(json!({ "theme": saved.theme }))
                     },
                 )
@@ -87,6 +90,77 @@ pub async fn handle_settings_route(
             }
             return Ok(Some(resp));
         }
+    }
+
+    if pathname == "/api/ui-hints" && (*method == Method::GET || *method == Method::HEAD) {
+        let hints = state.ui_hints.read().await;
+        return Ok(Some(json_response(
+            StatusCode::OK,
+            &serde_json::to_value(hints).unwrap_or(Value::Null),
+            method,
+        )));
+    }
+
+    if pathname == "/api/ui-hints/missing-key-prompt/claim" && *method == Method::POST {
+        let body = read_json_body(raw_body, 128 * 1024)?;
+        let Some(obj) = body.as_object() else {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "请求的界面提示参数无效",
+            ));
+        };
+        if obj.keys().any(|k| k != "clientLastPromptedAtMs") {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "请求的界面提示参数无效",
+            ));
+        }
+        let client_last = match obj.get("clientLastPromptedAtMs") {
+            None => None,
+            Some(v) => Some(v.as_u64().ok_or_else(|| {
+                ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "请求的界面提示时间戳无效",
+                )
+            })?),
+        };
+        let (_web_admission, _app_lease) = match caller {
+            CallerIdentity::Web { .. } => (
+                Some(
+                    state
+                        .mode
+                        .admit_write(caller, Some(state.host.kit().activity_gate()))
+                        .await
+                        .map_err(ApiError::from)?,
+                ),
+                None,
+            ),
+            CallerIdentity::App => {
+                if state.mode.is_stopping() {
+                    return Err(ApiError::from(crate::mode::ModeRejection::Stopping));
+                }
+                let lease = state
+                    .host
+                    .kit()
+                    .activity_gate()
+                    .enter()
+                    .map_err(|msg| ApiError::from(crate::mode::ModeRejection::Updating(msg)))?;
+                (None, Some(lease))
+            }
+        };
+        let claimed = state
+            .ui_hints
+            .claim_missing_key_prompt(client_last, pi_ai::now_ms())
+            .await
+            .map_err(ApiError::from)?;
+        return Ok(Some(json_response(
+            StatusCode::OK,
+            &serde_json::to_value(claimed).unwrap_or(Value::Null),
+            method,
+        )));
     }
 
     if pathname == "/api/files" && *method == Method::GET {

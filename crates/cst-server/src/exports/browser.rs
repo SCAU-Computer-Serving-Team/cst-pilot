@@ -40,51 +40,88 @@ impl ExportBrowserOptions {
 }
 
 pub fn resolve_browser_candidates(explicit: Option<&Path>) -> Result<Vec<PathBuf>, ServiceError> {
-    let configured = explicit
-        .map(Path::to_path_buf)
-        .or_else(|| {
-            std::env::var("CST_EXPORT_BROWSER")
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-                .map(PathBuf::from)
-        })
-        .or_else(|| {
-            std::env::var("CHROME_PATH")
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-                .map(PathBuf::from)
-        });
+    resolve_browser_candidates_with_policy(explicit, cfg!(debug_assertions))
+}
 
-    let candidates: Vec<PathBuf> = if let Some(cfg) = configured {
-        vec![cfg]
-    } else {
-        let mut list = vec![
-            PathBuf::from("C:/Program Files/Google/Chrome/Application/chrome.exe"),
-            PathBuf::from("C:/Program Files (x86)/Google/Chrome/Application/chrome.exe"),
-        ];
-        if let Ok(local_app) = std::env::var("LOCALAPPDATA")
-            && !local_app.trim().is_empty()
-        {
-            list.push(PathBuf::from(local_app).join("Google/Chrome/Application/chrome.exe"));
-        }
-        list.push(PathBuf::from(
-            "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
-        ));
-        list.push(PathBuf::from(
-            "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
-        ));
-        list
-    };
+pub fn resolve_browser_candidates_with_policy(
+    explicit: Option<&Path>,
+    allow_env_override: bool,
+) -> Result<Vec<PathBuf>, ServiceError> {
+    let cst_export_browser = std::env::var("CST_EXPORT_BROWSER").ok();
+    let chrome_path = std::env::var("CHROME_PATH").ok();
+    let local_appdata = std::env::var("LOCALAPPDATA").ok();
+    let candidates = collect_browser_candidate_paths(
+        explicit,
+        allow_env_override,
+        cst_export_browser.as_deref(),
+        chrome_path.as_deref(),
+        local_appdata.as_deref(),
+    );
 
     let found: Vec<PathBuf> = candidates.into_iter().filter(|p| p.exists()).collect();
     if found.is_empty() {
         return Err(ServiceError::new(
             ServiceErrorKind::Unavailable,
             "export_browser_missing",
-            "导出需要已安装的 Edge 或 Chrome，可用 CST_EXPORT_BROWSER 指定浏览器路径。",
+            "导出需要本机已安装的 Microsoft Edge 或 Google Chrome。",
         ));
     }
     Ok(found)
+}
+
+pub fn collect_browser_candidate_paths(
+    explicit: Option<&Path>,
+    allow_env_override: bool,
+    cst_export_browser: Option<&str>,
+    chrome_path: Option<&str>,
+    local_appdata: Option<&str>,
+) -> Vec<PathBuf> {
+    let configured = explicit.map(Path::to_path_buf).or_else(|| {
+        if !allow_env_override {
+            return None;
+        }
+        cst_export_browser
+            .filter(|s| !s.trim().is_empty())
+            .map(PathBuf::from)
+            .or_else(|| {
+                chrome_path
+                    .filter(|s| !s.trim().is_empty())
+                    .map(PathBuf::from)
+            })
+    });
+
+    if let Some(cfg) = configured {
+        vec![cfg]
+    } else {
+        let mut list = Vec::new();
+        for reg_exe in ["chrome.exe", "msedge.exe"] {
+            if let Some(reg_path) = cst_os::query_machine_app_path(reg_exe)
+                && !list.contains(&reg_path)
+            {
+                list.push(reg_path);
+            }
+        }
+        for fixed in [
+            "C:/Program Files/Google/Chrome/Application/chrome.exe",
+            "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+            "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+            "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
+        ] {
+            let p = PathBuf::from(fixed);
+            if !list.contains(&p) {
+                list.push(p);
+            }
+        }
+        if allow_env_override
+            && let Some(local_app) = local_appdata.filter(|s| !s.trim().is_empty())
+        {
+            let local_chrome = PathBuf::from(local_app).join("Google/Chrome/Application/chrome.exe");
+            if !list.contains(&local_chrome) {
+                list.push(local_chrome);
+            }
+        }
+        list
+    }
 }
 
 pub fn resolve_browser_executable(explicit: Option<&Path>) -> Result<PathBuf, ServiceError> {
@@ -103,7 +140,10 @@ async fn kill_process_tree(pid: Option<u32>) {
     #[cfg(windows)]
     if let Some(pid) = pid {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let _ = tokio::process::Command::new("taskkill")
+        let taskkill = cst_os::system_directory()
+            .map(|d| d.join("taskkill.exe"))
+            .unwrap_or_else(|_| PathBuf::from("taskkill.exe"));
+        let _ = tokio::process::Command::new(taskkill)
             .args(["/pid", &pid.to_string(), "/t", "/f"])
             .creation_flags(CREATE_NO_WINDOW)
             .output()
