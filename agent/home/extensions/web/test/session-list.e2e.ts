@@ -171,7 +171,7 @@ test("最近二十项、16px 字号、四组全部会话与共享批量管理", 
 			await probe.evaluate<string>(
 				"getComputedStyle(document.querySelector('.session-list .sidebar-session')).fontFamily",
 			),
-			/CST UI Sans/,
+			/Source Han Sans CN/,
 			"全部会话沿用工作区字体",
 		);
 		await screenshot("all-light.png");

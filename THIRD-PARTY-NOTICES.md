@@ -37,11 +37,11 @@ CST Pilot 发行版包含以下第三方组件。各组件以其原有许可证�
 
 ## 字体
 
-四者均为 SIL Open Font License 1.1。字体文件不存于开发仓库（`design/fonts/` 已忽略），发行时随 Web 通道打包。OFL-1.1 允许再分发，条件是保留版权声明与许可证原文，且不得使用其保留字体名。
+四者均为 SIL Open Font License 1.1。字体文件不存于开发仓库（`design/fonts/` 与 `assets/fonts/` 已忽略），发行时随包分发原版可变字体与许可证。OFL-1.1 允许再分发，条件是保留版权声明与许可证原文。
 
 | 字体 | 版本 | 许可证 | 来源 | 用途 |
 |---|---|---|---|---|
-| Source Han Sans CN（思源黑体） | 以随包文件为准 | OFL-1.1 | https://github.com/adobe-fonts/source-han-sans | 界面正文与中文控件（Regular / Medium / Bold 三档字重） |
+| Source Han Sans CN（思源黑体可变字体） | 以随包 `SourceHanSansCN-VF.otf` 为准 | OFL-1.1 | https://github.com/adobe-fonts/source-han-sans | 界面正文与中文控件（桌面端与 Web 端共用 `250–900` 字重轴） |
 | Inter | 以随包文件为准 | OFL-1.1 | https://github.com/rsms/inter | 产品名、模型名、页脚 |
 | JetBrains Mono | 以随包文件为准 | OFL-1.1 | https://github.com/JetBrains/JetBrainsMono | 聊天页行内工具名 |
 | Noto Sans SC | 以随包文件为准 | OFL-1.1 | https://github.com/notofonts/noto-cjk | 仅设计画布说明文字，不进界面 |

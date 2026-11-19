@@ -11,7 +11,7 @@
 | 原生主程序 | 当前提供 `cst-updater.exe` 独立升级程序。阶段 9–11 统一切换为根目录提供 `cst-pilot.exe`（桌面与内置 TUI 主程序）、`cst-server.exe`（本机后台服务）与 `cst-updater.exe` |
 | 随包诊断组件 | `wiztree/`（排除运行期 `WizTree3.ini`、`WizTree3.ini.bad` 与 `tmp/`，保留 `license.txt`）、`lhm/`（`LibreHardwareMonitorLib.dll` 0.9.6 及其依赖）与 `lhm/host/cst-lhm-host.exe`（自包含 .NET 10 隔离采集器及运行时许可） |
 | 业务提示词与技能 | `agent/home/APPEND_SYSTEM.md`、`agent/home/skills/`（8 份维护技能说明），以及 `agent/home/extensions/telemetry/` 下的专用证书 `timserver_1.crt` 与币种映射 `currency.json` |
-| 界面与字体资产 | `agent/home/extensions/web/static/` 预构建静态产物（含三档 `CSTUISans-*.woff2` 子集字体与 `subset.json`）。阶段 9 补充随包桌面子集字体 `assets/fonts/CSTUISans-*.otf`、`JetBrainsMono-*.ttf` 及对应字体许可证 |
+| 界面与字体资产 | `agent/home/extensions/web/static/` 预构建静态产物，以及双端共用的 `assets/fonts/SourceHanSansCN-VF.otf` 与 `assets/fonts/LICENSE.txt`。阶段 9 补充随包桌面等宽字体 `assets/fonts/JetBrainsMono-*.ttf` 及其许可证 |
 | 预置标准配置 | 生成干净 `settings.json`、双端 `telemetry.json`、默认免费 Exa MCP 且仅放行 `198.18.0.0/15` 的 `web-search.json`，以及补齐默认模型 `deepseek/deepseek-flash` 的离线 `models-store.json` |
 | 文档、许可与校验 | `README.md`、`CHANGELOG.md`、`LICENSE`、`THIRD-PARTY-NOTICES.md`、`licenses/`、`doc/`，以及根目录生成的 `VERSION`、`BUILD-INFO.json` 与全树 `SHA256SUMS` |
 

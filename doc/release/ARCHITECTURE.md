@@ -1,18 +1,17 @@
 # 便携发行与构建架构
 
-本页说明字体子集构建、LHM 隔离采集器发布与 Rust 在线升级事务管线，并列出随包外部组件的维护约束。发行要求与红线见 [SPEC.md](SPEC.md)。
+本页说明共享可变字体同步、LHM 隔离采集器发布与 Rust 在线升级事务管线，并列出随包外部组件的维护约束。发行要求与红线见 [SPEC.md](SPEC.md)。
 
 ## 字体构建与分发
 
-Web 界面分发三档 WOFF2 子集字体（派生名 `CST UI Sans`），设计画布使用 `design/fonts/SourceHanSansCN-*.otf` 完整源字体，桌面端计划于阶段 9 扩展产出同源子集 `assets/fonts/CSTUISans-{Regular,Medium,Bold}.otf`。子集构建仅在开发机与 CI 执行（`src/web/frontend/scripts/prepare-fonts.mjs` 调用 `subset-fonts.py`，依赖锁见 `font-requirements.txt`），现场运行无需安装 Python。
+桌面端与本机 Web 界面共用同一份官方原版可变字体 `assets/fonts/SourceHanSansCN-VF.otf`（遵循 SIL OFL 1.1 原版再分发规则，保留随包 `assets/fonts/LICENSE.txt`）。准备流程由纯 Node 脚本 `src/web/frontend/scripts/prepare-fonts.mjs` 完成，开发机、CI 与现场运行均无需安装 Python。
 
 | 项目 | 规则 |
 |---|---|
-| 上游来源 | Adobe Source Han Sans 固定提交 `a4f7cf94edfb9d7ffbdfc4841de276358bd7e0f2` 的 `SourceHanSansCN-Regular/Medium/Bold.otf` 及许可证，逐文件校验 SHA-256 |
-| 字符集范围 | GB2312 全部 6,763 个常用汉字，叠加前端源码（`src/web/frontend/app`）与静态补充字表（`src/web/frontend/scripts/font-extra-chars.txt`）中的字符，以及 Latin 和常用中西文标点 |
-| 子集化与重命名 | 通过 `CST_WEB_FONT_PYTHON` 或系统 Python 3 运行固定版本 `fonttools==4.62.1` 与 `brotli==1.0.9` 裁剪字形，将内部 `name` 表与 CFF 字体名重命名为 `CST UI Sans`（遵循 SIL OFL 1.1 保留名规则） |
-| 缓存与产物 | 输出至 `src/web/frontend/public/fonts/CSTUISans-{Regular,Medium,Bold}.woff2`、`LICENSE.txt`、`NOTICE.txt` 与 `subset.json`，再由 `scripts/publish.mjs` 同步至 `agent/home/extensions/web/static/fonts/`。输入配方与字符集未变时直接复用缓存，体积由约 24.2 MiB 压缩至约 4.1 MiB |
-| 缺字回退 | 生僻字、繁体字与 Emoji 在浏览器与桌面端分别通过 CSS 字体栈或 DirectWrite 系统回退链回退至 `Microsoft YaHei` 与系统无衬线字体 |
+| 上游来源 | Adobe Source Han Sans 固定提交 `a4f7cf94edfb9d7ffbdfc4841de276358bd7e0f2` 的 `Variable/OTF/Subset/SourceHanSansCN-VF.otf` 及许可证，逐文件校验 SHA-256 |
+| 字符集与字重 | 保留原版全部 30,926 个 Unicode 码位与 `wght 250–900` 连续字重轴，覆盖常用与生僻汉字、简繁字符及中西文符号 |
+| 双端共享托管 | 统一落盘至 `assets/fonts/`（ZIP 压缩后约 `8.6 MB`）。GPUI 桌面端直接加载该文件，`cst-server` 将 `/fonts/*` 映射至 `assets/fonts/*` 供本机浏览器读取，`agent/home/extensions/web/static/` 不重复存放字体副本 |
+| 导出与回退 | PNG 导出由本机浏览器加载内置可变字体渲染截图；离线 HTML 导出仅内嵌轻量等宽字体 `JetBrains Mono`，正文字体回退本机字体栈。罕见扩展字符与彩色 Emoji 交由系统回退链渲染 |
 
 ## Rust LHM 辅助程序发布
 

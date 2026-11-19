@@ -97,7 +97,7 @@ pub fn classify(path: &str) -> Result<Area, String> {
                 | "identity.json"
         ) || p.starts_with(".env.")
             || *p == "agents.md"
-    }) || lower.ends_with(".otf")
+    }) || (lower.ends_with(".otf") && path != "assets/fonts/SourceHanSansCN-VF.otf")
         || lower.starts_with("wiztree/tmp/")
         || matches!(
             lower.as_str(),

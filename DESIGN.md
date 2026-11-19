@@ -40,8 +40,8 @@
 静态基础变量（颜色、圆角、间距、固定盒高、字号）的定义以 `.pen` 设计稿为更高优先级，[storybook.html](design/storybook.html) 严格对应 `.pen` 变量与母版并不得新增 `.pen` 未定义的静态变量。交互瞬态色、动效参数与 CSS 渲染适配变量归属交互侧，以 [storybook.html](design/storybook.html) 为参考最高规范并与静态变量分域管理。
 
 1. **用色硬约束**：正文与交互控件前背景对比度满足 WCAG AA（`≥ 4.5:1`）。成功、警告、危险语义色仅赋给状态图标或浅底徽标，边框与底面保持中性。同一局部视图内最多存在一个 `$accent-solid` 实心主操作。
-2. **字体与编码回退**：界面正文与常规西文统一使用思源黑体（`Source Han Sans CN`），命令行、路径与耗时使用 `JetBrains Mono`。发行包按 SIL OFL 1.1 生成 GB2312 加界面词表子集（桌面 `CSTUISans-*.otf`，Web `WOFF2`，见[字体构建与分发](doc/release/ARCHITECTURE.md#字体构建与分发)）。
-3. **缺字回退与等宽数字**：GB2312 外生僻字、繁体字、日韩字符与彩色 Emoji 交由系统字体回退链渲染，保留可复制文本。字体损坏或缺失时回退系统默认字体并弹出非阻塞提示。倒计时、计时秒数、百分比与页码固定启用 `tabular-nums`。
+2. **字体与编码回退**：界面正文与常规西文统一使用思源黑体（`Source Han Sans CN`），命令行、路径与耗时使用 `JetBrains Mono`。发行包按 SIL OFL 1.1 随包分发单文件原版可变字体 `assets/fonts/SourceHanSansCN-VF.otf`（桌面端与本机 Web 端共用，覆盖 30,926 个 Unicode 码位与 `250–900` 字重，见[字体构建与分发](doc/release/ARCHITECTURE.md#字体构建与分发)）。
+3. **缺字回退与等宽数字**：超出字库范围的罕见扩展汉字与彩色 Emoji 交由系统字体回退链渲染，保留可复制文本。字体损坏或缺失时回退系统默认字体并弹出非阻塞提示。倒计时、计时秒数、百分比与页码固定启用 `tabular-nums`。
 4. **汉字光学对齐与嵌套圆角**：与图标同行水平居中的中文按钮及导航文字底部增加 `2px` 光学偏移，展开箭头紧随标题右侧 `8px`（[cst-pilot-desktop.pen](design/cst-pilot-desktop.pen)「设计规范」区域 `np3Ew`）。嵌套容器圆角按 `max(4px, 外层圆角 - 内边距)` 递进，分组内连续列表行与表格内部单元格取 `0px`。
 
 ## 静态结构与着色器保护

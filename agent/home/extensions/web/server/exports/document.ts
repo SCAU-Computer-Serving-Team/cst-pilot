@@ -38,17 +38,21 @@ export function captureExportDocument(): ExportDocumentSource {
 	function serialize(rules: CSSRuleList): string {
 		return [...rules]
 			.map((rule) => {
-				if (
-					rule instanceof CSSFontFaceRule &&
-					!loaded.has(
-						key(
-							rule.style.getPropertyValue("font-family"),
-							rule.style.getPropertyValue("font-weight") || "normal",
-							rule.style.getPropertyValue("font-style") || "normal",
-						),
+				if (rule instanceof CSSFontFaceRule) {
+					const family = rule.style.getPropertyValue("font-family");
+					const normalizedFamily = family.replace(/["']/g, "").trim().toLowerCase();
+					if (
+						normalizedFamily === "source han sans cn" ||
+						!loaded.has(
+							key(
+								family,
+								rule.style.getPropertyValue("font-weight") || "normal",
+								rule.style.getPropertyValue("font-style") || "normal",
+							),
+						)
 					)
-				)
-					return "";
+						return "";
+				}
 				const nested = Reflect.get(rule, "cssRules") as CSSRuleList | undefined;
 				if (nested && rule.type !== CSSRule.STYLE_RULE)
 					return `${rule.cssText.slice(0, rule.cssText.indexOf("{") + 1)}${serialize(nested)}}`;

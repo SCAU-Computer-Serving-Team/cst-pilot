@@ -4,17 +4,16 @@
 
 ## 环境
 
-Windows 上开发，命令用 PowerShell 执行。需要 Node 22.19.0 以上，仓库自带 `node/`（不入库）时可以改用它。字体生成使用 Python 3.11，与完整验收 CI 保持一致。Rust 模型核心使用 Rust 1.99.1。
+Windows 上开发，命令用 PowerShell 执行。需要 Node 22.19.0 以上，仓库自带 `node/`（不入库）时可以改用它。Rust 模型核心使用 Rust 1.99.1。
 
 首次准备依赖：
 
 ```powershell
 npm ci --prefix agent --ignore-scripts
 npm ci --prefix src/web/frontend --ignore-scripts
-python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 ```
 
-`crates/` 与 `pi-web-rust.cmd` 属于 Rust 主线（对齐上游 Pi `1.5.0`，子包定位见 [doc/rust/CRATES.md](doc/rust/CRATES.md)）。`agent/`、`pi.cmd`、`pi-web.cmd` 与 `pack/` 属于 `v0.6.2` 过渡轨（对齐上游 Pi `0.85.1`），`src/web/frontend` 为两轨共用的 Web 前端源码。`agent` 与 `src/web/frontend` 依赖各自独立。Python 与 FontTools 仅用于开发和 CI 的字体生成，不进入现场运行链；详见[字体构建与分发](doc/release/ARCHITECTURE.md#字体构建与分发)。
+`crates/` 与 `pi-web-rust.cmd` 属于 Rust 主线（对齐上游 Pi `1.5.0`，子包定位见 [doc/rust/CRATES.md](doc/rust/CRATES.md)）。`agent/`、`pi.cmd`、`pi-web.cmd` 与 `pack/` 属于 `v0.6.2` 过渡轨（对齐上游 Pi `0.85.1`），`src/web/frontend` 为两轨共用的 Web 前端源码。`agent` 与 `src/web/frontend` 依赖各自独立。共享可变字体由 `prepare-fonts.mjs` 按固定 SHA-256 同步至 `assets/fonts/`，详见[字体构建与分发](doc/release/ARCHITECTURE.md#字体构建与分发)。
 
 ## 代码规范
 

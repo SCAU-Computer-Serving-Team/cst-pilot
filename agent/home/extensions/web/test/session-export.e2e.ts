@@ -206,8 +206,11 @@ test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、当前分支
 					assert.equal(bytes.subarray(1, 4).toString(), "PNG");
 					await writeFile(join(root, `actual-${theme}.png`), bytes);
 				} else {
-					assert.ok(bytes.length > 1024 * 1024, "内嵌字体的大文档可完整读取");
 					const html = bytes.toString("utf8");
+					assert.ok(
+						bytes.length < 1024 * 1024 && !html.includes("data:font/otf;base64,"),
+						"离线 HTML 跳过中文字体 Base64 内嵌，保持轻量体积",
+					);
 					assert.equal(html.includes("<script"), false);
 					assert.equal(html.includes("data:font/woff2;base64,"), true);
 					assert.equal(html.includes("data:image/png;base64,"), true);
@@ -229,7 +232,7 @@ test("会话导出 API 与网页：实际浅深 PNG、离线 HTML、当前分支
 					await browser.evaluate("document.fonts.ready");
 					assert.equal(
 						await browser.evaluate(
-							"(()=>{const fonts=[...document.fonts].filter(f=>f.family==='CST UI Sans');return fonts.length>0 && fonts.every(f=>f.status==='loaded')})()",
+							"(()=>{const fonts=[...document.fonts].filter(f=>f.family==='JetBrains Mono');return fonts.length>0 && fonts.every(f=>f.status==='loaded')})()",
 						),
 						true,
 					);

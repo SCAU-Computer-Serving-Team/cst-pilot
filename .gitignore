@@ -6,6 +6,7 @@ src/web/frontend/build/
 src/web/frontend/public/fonts/
 src/web/frontend/.react-router/
 agent/home/extensions/web/static/
+assets/fonts/
 agent/home/bin/
 agent/home/npm/
 agent/home/fff/

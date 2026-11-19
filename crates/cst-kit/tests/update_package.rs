@@ -276,9 +276,15 @@ fn signed_manifest_limits_duplicate_fields_and_windows_path_policy() {
         "lhm/test/x",
         "doc/AGENTS.md",
         "assets/.env.local",
+        "assets/fonts/SourceHanSansCN-Regular.otf",
+        "agent/home/extensions/web/static/fonts/SourceHanSansCN-VF.otf",
     ] {
         assert!(layout::classify(bad).is_err(), "{bad}");
     }
+    assert_eq!(
+        layout::classify("assets/fonts/SourceHanSansCN-VF.otf").unwrap(),
+        Area::Program
+    );
     assert_eq!(
         layout::classify("agent/home/telemetry.json").unwrap(),
         Area::Merge

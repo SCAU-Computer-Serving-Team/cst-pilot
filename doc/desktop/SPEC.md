@@ -23,7 +23,7 @@
 ## 视觉、字体与着色器规范
 
 1. **设计变量与主题**：静态组件、Shader 与基础变量定义以 [cst-pilot-desktop.pen](../../design/cst-pilot-desktop.pen) 为更高优先级；[storybook.html](../../design/storybook.html) 严格对应画布组件与变量（不得新增画布未定义的静态组件与变量），并规范动效与交互行为。支持跟随系统、浅色、深色三档切换，与 Web 主题和 TUI 主题独立保存。
-2. **随包字体与回退**：界面正文加载 `CSTUISans-{Regular,Medium,Bold}.otf`，代码与等宽数值加载 `JetBrainsMono-{Regular,Medium}.ttf`。生僻字与符号走 DirectWrite 系统回退链。字体文件缺失或损坏时回退系统默认无衬线与等宽字体，不阻塞启动。
+2. **随包字体与回退**：界面正文加载双端共用的 `assets/fonts/SourceHanSansCN-VF.otf`（`Source Han Sans CN VF`），代码与等宽数值加载 `JetBrainsMono-{Regular,Medium}.ttf`。罕见扩展字符与符号走 DirectWrite 系统回退链。字体文件缺失或损坏时回退系统默认无衬线与等宽字体，不阻塞启动。
 3. **动态背景与浮层材质分层**：
    - 主页与登录页支持三款预编译 D3D11 天空背景着色器（`blue-sky.glsl`、`night-sky.glsl`、`blue-hour.glsl`），帧率同步显示器原生刷新率。
    - 表面与浮层采用三档材质：普通按钮与特殊工具卡片使用实底多层合成（无背景模糊），悬浮菜单与通知使用无遮罩毛玻璃（`frosted-glass.glsl` 档 2），模态弹窗与快捷面板使用带模糊遮罩的毛玻璃（档 3）。

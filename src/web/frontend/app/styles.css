@@ -11,26 +11,15 @@
 @import "@fontsource/jetbrains-mono/latin-400.css";
 
 @font-face {
-  font-family: "CST UI Sans";
-  src: url("/fonts/CSTUISans-Regular.woff2") format("woff2");
-  font-weight: 400;
-  font-display: swap;
-}
-@font-face {
-  font-family: "CST UI Sans";
-  src: url("/fonts/CSTUISans-Medium.woff2") format("woff2");
-  font-weight: 500 600;
-  font-display: swap;
-}
-@font-face {
-  font-family: "CST UI Sans";
-  src: url("/fonts/CSTUISans-Bold.woff2") format("woff2");
-  font-weight: 700;
+  font-family: "Source Han Sans CN";
+  src: url("/fonts/SourceHanSansCN-VF.otf") format("opentype");
+  font-weight: 250 900;
+  font-style: normal;
   font-display: swap;
 }
 
 :root {
-  font-family: "CST UI Sans", "Microsoft YaHei", sans-serif;
+  font-family: "Source Han Sans CN", "Source Han Sans CN VF", "Microsoft YaHei", sans-serif;
   --login-unit: min(.9px, calc(90vh / 1080), calc((100vw - 48px) / 1080));
   --app-ink: #1a2024;
   --app-muted: #5f676c;
@@ -265,7 +254,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .sidebar-new, .sidebar-recent, .sidebar-session-row { width: 100%; }
 .sidebar-brand, .sidebar-new, .sidebar-recent, .sidebar-all, .sidebar-empty, .sidebar-error { position: relative; z-index: 1; }
 .sidebar-brand { display: flex; align-items: center; gap: var(--space-component); padding: var(--space-tight) var(--space-inline) var(--space-section); }
-.product-name { flex: 1; min-width: 0; font: 600 20px "CST UI Sans", "Microsoft YaHei", sans-serif; color: var(--app-ink); }
+.product-name { flex: 1; min-width: 0; font: 600 20px "Source Han Sans CN", "Source Han Sans CN VF", "Microsoft YaHei", sans-serif; color: var(--app-ink); }
 .sidebar-icon { width: var(--control-lg); height: var(--control-lg); min-width: var(--control-lg); padding: 0; color: var(--app-muted); transition: opacity var(--duration-quick) var(--ease-smooth-out); }
 .app-layout.sidebar-collapsed .sidebar-icon { opacity: 0; }
 .sidebar-new { display: flex; align-items: center; gap: var(--space-inline); height: var(--control-field); padding: 0 var(--space-inline); border-radius: var(--radius-row); font-size: var(--font-body); color: var(--app-ink); border: 0; background: transparent; text-align: left; line-height: var(--line-body); }
@@ -340,7 +329,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .home-greeting { position: absolute; left: 20px; top: 0; width: calc(100% - 40px); height: 400px; }
 .brand-arcs { position: absolute; width: 400px; height: 400px; left: 173px; top: 0; }
 .home-greeting h1 { position: absolute; left: 0; right: 0; top: 182px; margin: 0; color: white; text-align: center; font-size: 56px; font-weight: 600; text-shadow: 0 2px 12px #1a202440; }
-.home-footnote { position: absolute; z-index: 1; left: 0; right: 0; bottom: 31px; font: 400 16px "CST UI Sans", "Microsoft YaHei", sans-serif; text-align: center; color: #5f676c; }
+.home-footnote { position: absolute; z-index: 1; left: 0; right: 0; bottom: 31px; font: 400 16px "Source Han Sans CN", "Source Han Sans CN VF", "Microsoft YaHei", sans-serif; text-align: center; color: #5f676c; }
 :root[data-theme="dark"] .home-footnote { color: #060b0e; }
 @media (prefers-color-scheme: dark) { :root[data-theme="system"] .home-footnote { color: #060b0e; } }
 .composer { background: var(--app-composer); border-radius: var(--radius-composer); display: flex; flex-direction: column; }
@@ -396,12 +385,12 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .context-more:hover { color: var(--app-ink); }
 .context-more:focus-visible { outline: none; box-shadow: var(--focus-shadow); }
 .context-more:disabled { opacity: .45; cursor: not-allowed; }
-.context-balance { color: var(--app-ink); font: 500 20px "CST UI Sans", "Microsoft YaHei", sans-serif; font-variant-numeric: tabular-nums; }
+.context-balance { color: var(--app-ink); font: 500 20px "Source Han Sans CN", "Source Han Sans CN VF", "Microsoft YaHei", sans-serif; font-variant-numeric: tabular-nums; }
 .context-balance[data-unit="credit"] { font-family: inherit; }
 .context-quota-notice { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-inline); color: var(--app-muted); font-size: var(--font-ui); line-height: var(--line-ui); }
 .context-progress { height: 6px; border-radius: var(--radius-full); overflow: hidden; background: var(--app-track); }
 .context-progress > span { border-radius: inherit; display: block; height: 100%; background: var(--app-send); }
-.composer--home .composer-model { font: 400 14px/20px "CST UI Sans", "Microsoft YaHei", sans-serif; }
+.composer--home .composer-model { font: 400 14px/20px "Source Han Sans CN", "Source Han Sans CN VF", "Microsoft YaHei", sans-serif; }
 .model-chevron { display: inline-flex; align-items: center; justify-content: center; }
 .model-chevron { flex-shrink: 0; width: 14px; height: 18px; padding-top: var(--space-tight); color: var(--app-muted); }
 .composer-actions .composer-send { display: grid; place-items: center; width: 32px; height: var(--control-lg); min-width: 32px; padding: 0; border-radius: var(--radius-control); background: var(--app-send); color: var(--app-send-icon); opacity: 1; }
@@ -489,7 +478,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .composer--chat .composer-actions { min-height: var(--control); }
 .composer--chat .composer-actions .composer-icon { width: var(--control); height: var(--control); min-width: var(--control); min-height: var(--control); padding: 0; }
 .composer--chat .composer-actions .composer-model { height: var(--control); min-height: var(--control); padding: 0; border-radius: var(--radius-control); font-size: var(--font-ui); line-height: var(--line-ui); }
-.composer--chat .composer-actions .composer-model { gap: var(--space-detail); color: var(--chat-ink); font-family: "CST UI Sans", "Microsoft YaHei", sans-serif; }
+.composer--chat .composer-actions .composer-model { gap: var(--space-detail); color: var(--chat-ink); font-family: "Source Han Sans CN", "Source Han Sans CN VF", "Microsoft YaHei", sans-serif; }
 /* React Aria 的空 template 是 DOM 占位，不参与操作栏间距。 */
 .composer-actions > template, .composer-model-controls > template { display: none; }
 .composer--chat .composer-actions .composer-icon > svg { width: var(--icon-body); height: var(--icon-body); }
@@ -885,10 +874,10 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .settings-badge { display: inline-flex; align-items: center; height: var(--control-inline); padding: 0 var(--space-inline); border-radius: var(--radius-control); font-size: var(--font-caption); line-height: var(--line-caption); }
 .settings-badge-success { background: var(--settings-ok-bg); color: var(--settings-ok-tx); }
 .settings-badge-warning { background: var(--settings-warn-bg); color: var(--settings-warn-tx); }
-.settings-provider-name { font: 400 14px "CST UI Sans", "Microsoft YaHei", sans-serif; color: var(--chat-ink); min-width: 0; overflow-wrap: anywhere; }
+.settings-provider-name { font: 400 14px "Source Han Sans CN", "Source Han Sans CN VF", "Microsoft YaHei", sans-serif; color: var(--chat-ink); min-width: 0; overflow-wrap: anywhere; }
 .settings-provider { gap: var(--space-component); height: 56px; min-height: 56px; padding: 0 var(--space-section); }
 .provider-methods { display: inline-flex; align-items: center; gap: var(--space-tight); flex-shrink: 0; }
-.provider-method-tag { display: inline-flex; align-items: center; height: var(--control-inline); padding: 0 var(--space-inline); border-radius: var(--radius-control); background: var(--app-hover); color: var(--chat-muted); font: 400 12px/16px "CST UI Sans", "Microsoft YaHei", sans-serif; white-space: nowrap; }
+.provider-method-tag { display: inline-flex; align-items: center; height: var(--control-inline); padding: 0 var(--space-inline); border-radius: var(--radius-control); background: var(--app-hover); color: var(--chat-muted); font: 400 12px/16px "Source Han Sans CN", "Source Han Sans CN VF", "Microsoft YaHei", sans-serif; white-space: nowrap; }
 .provider-method-tag[data-active="true"] { background: var(--app-selected); color: var(--chat-ink); font-weight: 500; }
 .settings-provider-actions { display: flex; align-items: center; gap: var(--space-component); flex-shrink: 0; }
 .settings-status-icon { flex: 0 0 22px; width: 22px; padding: 0; justify-content: center; }
@@ -1051,7 +1040,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
   mask-composite: exclude;
 }
 .login-bottom-gradient { position: absolute; inset: 0; z-index: 0; background: linear-gradient(to bottom, transparent 70%, #ddecff 93%); pointer-events: none; }
-.login-brand { position: absolute; z-index: 1; left: calc(64 * var(--login-unit)); top: calc(44 * var(--login-unit)); color: #fff; font: 600 calc(20 * var(--login-unit)) "CST UI Sans", "Microsoft YaHei", sans-serif; }
+.login-brand { position: absolute; z-index: 1; left: calc(64 * var(--login-unit)); top: calc(44 * var(--login-unit)); color: #fff; font: 600 calc(20 * var(--login-unit)) "Source Han Sans CN", "Source Han Sans CN VF", "Microsoft YaHei", sans-serif; }
 .login-heading { position: absolute; z-index: 1; left: 0; right: 0; top: calc(116 * var(--login-unit)); text-align: center; color: #fff; }
 .login-heading h1 { margin: 0; font-size: calc(56 * var(--login-unit)); font-weight: 600; }
 .login-heading p { margin: calc(14 * var(--login-unit)) 0 0; color: #ffffffcc; font-size: calc(16 * var(--login-unit)); }
@@ -1107,7 +1096,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .login-submit[data-disabled] { cursor: not-allowed; opacity: .45; }
 .login-api-form { display: flex; flex-direction: column; width: 100%; flex: 1; min-height: 0; }
 .login-fields--oauth { height: auto; flex: 1; min-height: 0; overflow-y: auto; gap: var(--space-section); }
-.oauth-provider-name { margin: 0; color: var(--chat-ink); font: 500 calc(16 * var(--login-unit))/1.5 "CST UI Sans", "Microsoft YaHei", sans-serif; }
+.oauth-provider-name { margin: 0; color: var(--chat-ink); font: 500 calc(16 * var(--login-unit))/1.5 "Source Han Sans CN", "Source Han Sans CN VF", "Microsoft YaHei", sans-serif; }
 .oauth-authorization { display: flex; flex-direction: column; gap: var(--space-component); width: 100%; }
 .oauth-manual { width: 100%; color: var(--chat-muted); font-size: calc(13 * var(--login-unit)); }
 .oauth-manual > summary { cursor: pointer; width: fit-content; }
@@ -1215,7 +1204,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .login-provider-option[data-selected] .login-provider-check { visibility: visible; }
 :root[data-theme="dark"] .login-provider-option[data-selected], :root[data-theme="dark"] .login-provider-option[data-focused] { background: #242c2f; }
 @media (prefers-color-scheme: dark) { :root[data-theme="system"] .login-provider-option[data-selected], :root[data-theme="system"] .login-provider-option[data-focused] { background: #242c2f; } }
-.login-footnote { position: absolute; z-index: 1; left: 0; right: 0; bottom: calc(60 * var(--login-unit)); color: #5f676c; text-align: center; font: 400 calc(16 * var(--login-unit)) "CST UI Sans", "Microsoft YaHei", sans-serif; }
+.login-footnote { position: absolute; z-index: 1; left: 0; right: 0; bottom: calc(60 * var(--login-unit)); color: #5f676c; text-align: center; font: 400 calc(16 * var(--login-unit)) "Source Han Sans CN", "Source Han Sans CN VF", "Microsoft YaHei", sans-serif; }
 /* Interaction states stay in the canvas palette; HeroUI owns keyboard and overlay lifecycles. */
 /* 图标与文字按项目的内边距和 gap 对齐，取消按钮图标的额外水平外边距。 */
 .button svg { margin-inline: 0; }
@@ -1421,7 +1410,7 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .code-copy-button:hover { background:var(--app-hover); color:var(--chat-ink); }
 .code-copy-button:focus-visible { outline:none; box-shadow:var(--focus-shadow); }
 .code-copy-button[data-copied] { color:var(--chat-tool); }
-.code-copy-feedback { position:absolute; top:6px; right:42px; z-index:1; display:inline-flex; align-items:center; min-height:var(--control-lg); max-width:calc(100% - 48px); margin:0; padding:0 var(--space-inline); border:1px solid var(--chat-border); border-radius:var(--radius-control); background:var(--notice-bg); color:var(--tool-danger); font:12px/16px "CST UI Sans",sans-serif; pointer-events:none; }
+.code-copy-feedback { position:absolute; top:6px; right:42px; z-index:1; display:inline-flex; align-items:center; min-height:var(--control-lg); max-width:calc(100% - 48px); margin:0; padding:0 var(--space-inline); border:1px solid var(--chat-border); border-radius:var(--radius-control); background:var(--notice-bg); color:var(--tool-danger); font:12px/16px "Source Han Sans CN","Source Han Sans CN VF","Microsoft YaHei",sans-serif; pointer-events:none; }
 .code-copy-feedback:not([data-error]) { width:1px; height:1px; min-height:0; padding:0; margin:-1px; border:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .notice-action { flex:none; display:inline-flex; align-items:center; min-height: var(--control-lg); padding: 0 var(--space-component); border:0; border-radius:var(--radius-control); background:transparent; color:var(--chat-tool); text-decoration:none; cursor:pointer; }
 .exit-dialog { position:fixed; inset:0; margin:auto; width:min(520px, calc(100vw - 48px)); max-height:calc(100vh - 48px); overflow:auto; padding: var(--space-group); border:1px solid var(--chat-border); border-radius:var(--radius-composer); background:var(--notice-bg); color:var(--chat-ink); animation:exit-modal-in var(--duration-fast) var(--ease-smooth-out); }

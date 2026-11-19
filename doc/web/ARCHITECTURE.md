@@ -42,7 +42,7 @@ src/web/frontend/app/
 | `exports/snapshot.rs` | 单一时刻采样固定 `capturedAt` 与归档日期，投影当前分支可见条目与未闭合 BitLocker 强杀复查结果，执行 `browser_json` 脱敏与 `32 MiB` 体积检查 |
 | `exports/store.rs`、`open.rs` | 维护 8 任务有界串行队列与 `session-exports/<id>.json` 原子登记。重启时清理 `work/` 并将中断任务标为失败。排他发布至 `artifacts/<日期>/sessions/`（同名分图整组追加 `-2`、`-3`），校验 SHA-256 与目录边界后拉起 `explorer.exe` |
 | `exports/browser.rs` | 基于 `Chromiumoxide` 探测本机 Edge / Chrome（核验主版本 ≥111），单实例按需复用并为每任务创建隔离 `BrowserContext`，空闲 30 秒自动关闭清理 |
-| `exports/render.rs`、`pagination.rs`、`html.rs` | CDP 拦截非同源静态请求，注入快照等待字体与图片就绪。PNG 按 `1240×3200` CSS 像素（2 倍密度）规划切点逐段截图。离线 HTML 提取已加载字体样式并以 4 路并发（配 `24 MiB` 跨任务缓存）将 `/fonts/*` 与 `/assets/*` 内嵌为 `data:` URL，封装严格 CSP |
+| `exports/render.rs`、`pagination.rs`、`html.rs` | CDP 拦截非同源静态请求，注入快照等待字体与图片就绪。PNG 按 `1240×3200` CSS 像素（2 倍密度）规划切点逐段截图。离线 HTML 跳过中文字体 Base64 内嵌，仅提取轻量等宽字体与 `/assets/*` 静态资源并以 4 路并发（配 `24 MiB` 跨任务缓存）内嵌为 `data:` URL，封装严格 CSP |
 | `app/exports/` | 预览切换保留已呈现 iframe，新快照在隐藏 iframe 内加载完字体与图片后以 250ms 淡入覆盖并沿用滚动位置。聊天与导出共用 `AssistantContent` 与 `TranscriptDisclosure`（离线 HTML 使用原生 `<details>`） |
 
 ## 会话预载、乐观发送与客户端存储

@@ -436,6 +436,7 @@ pub async fn handle_http_request(
             query.as_deref(),
             &headers,
             state.static_dir(),
+            &state.kit_root().join("assets").join("fonts"),
             &state.mode,
         )
         .await);
