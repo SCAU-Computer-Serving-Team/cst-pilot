@@ -772,6 +772,62 @@ impl ClientHandle {
         .await
     }
 
+    pub async fn open_session_runbook(
+        &self,
+        session_id: String,
+        entry_id: String,
+        tool_call_id: String,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.open_session_runbook(&session_id, &entry_id, &tool_call_id)
+                .await
+        })
+        .await
+    }
+
+    pub async fn respond_bitlocker_password(
+        &self,
+        session_id: String,
+        request_id: String,
+        password_buf: zeroize::Zeroizing<[u8; 55]>,
+        password_len: usize,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.respond_bitlocker_password(&session_id, &request_id, password_buf, password_len)
+                .await
+        })
+        .await
+    }
+
+    pub async fn respond_bitlocker_confirm(
+        &self,
+        session_id: String,
+        request_id: String,
+        confirm: bool,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.respond_bitlocker_confirm(&session_id, &request_id, confirm)
+                .await
+        })
+        .await
+    }
+
+    pub async fn cancel_bitlocker_request(
+        &self,
+        session_id: String,
+        request_id: String,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.cancel_bitlocker_request(&session_id, &request_id)
+                .await
+        })
+        .await
+    }
+
     pub async fn claim_missing_key_prompt(&self) -> Result<MissingKeyClaimDto, ClientError> {
         let http = self.core.http.clone();
         self.spawn_tokio(async move { http.claim_missing_key_prompt(None).await })

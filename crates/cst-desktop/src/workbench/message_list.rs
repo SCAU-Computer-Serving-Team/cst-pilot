@@ -1,11 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
-use cst_client::tool_presenter::{
-    SpecialToolView, ToolCallInput, ToolExecutionMeta, ToolResultInput,
-};
+use cst_client::tool_presenter::{ToolCallInput, ToolExecutionMeta, ToolResultInput};
 use cst_client::{
     ClientError, ClientHandle, ComposerDraft, DraftKey, OutboxItem, OutboxItemState,
     SessionViewSnapshot,
@@ -14,9 +13,9 @@ use gpui::{Image, ImageSource, ObjectFit, ScrollEvent, ScrollHandle, StyledImage
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::{
-    App, ClipboardItem, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, TestSupportExt,
-    Window, div, img, px,
+    App, AppContext as _, ClipboardItem, Context, Entity, EventEmitter, InteractiveElement,
+    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, TestSupportExt, Window, div, img, px,
 };
 use serde_json::Value;
 
@@ -25,6 +24,9 @@ use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
     scale, space,
 };
+use crate::tools::bitlocker_card::{SecretInput, SecretInputEvent, find_pending_bitlocker_request};
+use crate::tools::normal_card::render_normal_tool_card;
+use crate::tools::{SpecialToolDispatchProps, render_special_tool_component};
 use crate::workbench::image_viewer::{
     LightboxImageTarget, gpui_image_from_bytes, gpui_image_from_handle,
 };
@@ -62,6 +64,10 @@ pub struct MessageListView {
     expanded_error_details: BTreeSet<String>,
     expanded_tool_cards: BTreeSet<String>,
     expanded_tool_raw: BTreeSet<String>,
+    expanded_special_details: BTreeSet<String>,
+    hovered_warnings: BTreeSet<String>,
+    secret_inputs: BTreeMap<String, Entity<SecretInput>>,
+    secret_input_subs: Vec<Subscription>,
     markdown_store: MarkdownStreamStore,
     copy_tracker: CopyFeedbackTracker,
     turn_started_instants: BTreeMap<String, Instant>,
@@ -85,6 +91,10 @@ impl MessageListView {
             expanded_error_details: BTreeSet::new(),
             expanded_tool_cards: BTreeSet::new(),
             expanded_tool_raw: BTreeSet::new(),
+            expanded_special_details: BTreeSet::new(),
+            hovered_warnings: BTreeSet::new(),
+            secret_inputs: BTreeMap::new(),
+            secret_input_subs: Vec::new(),
             markdown_store: MarkdownStreamStore::default(),
             copy_tracker: CopyFeedbackTracker::default(),
             turn_started_instants: BTreeMap::new(),
@@ -106,10 +116,20 @@ impl MessageListView {
         self.expanded_error_details.clear();
         self.expanded_tool_cards.clear();
         self.expanded_tool_raw.clear();
+        self.expanded_special_details.clear();
+        self.hovered_warnings.clear();
+        for (_, si) in std::mem::take(&mut self.secret_inputs) {
+            si.update(cx, |s, cx| s.clear(cx));
+        }
+        self.secret_input_subs.clear();
         self.markdown_store.clear();
         self.turn_started_instants.clear();
         self.scroll_handle.scroll_to_bottom();
         cx.notify();
+    }
+
+    pub fn secret_input_for_call(&self, call_id: &str) -> Option<&Entity<SecretInput>> {
+        self.secret_inputs.get(call_id)
     }
 
     pub fn is_auto_following(&self) -> bool {
@@ -119,6 +139,12 @@ impl MessageListView {
     pub fn scroll_to_bottom_and_follow(&mut self, cx: &mut Context<Self>) {
         self.auto_follow_bottom = true;
         self.scroll_handle.scroll_to_bottom();
+        cx.notify();
+    }
+
+    pub fn scroll_to_top(&mut self, cx: &mut Context<Self>) {
+        self.auto_follow_bottom = false;
+        self.scroll_handle.set_offset(gpui::point(px(0.0), px(0.0)));
         cx.notify();
     }
 
@@ -693,229 +719,272 @@ impl MessageListView {
             )
         });
 
+        let duration_ms = tool_result_val
+            .and_then(|v| {
+                v.get("durationMs")
+                    .or_else(|| v.get("details").and_then(|d| d.get("durationMs")))
+            })
+            .and_then(Value::as_u64);
+
         let card_key = format!("tool-card-{}", call.id);
         let is_open = self.expanded_tool_cards.contains(&card_key);
         let raw_key = format!("tool-raw-{}", call.id);
         let is_raw_open = self.expanded_tool_raw.contains(&raw_key);
 
-        let status_color = if parsed_res.is_none() {
-            if live {
-                palette.accent_solid
-            } else {
-                palette.status_warning
-            }
-        } else if parsed_res.as_ref().is_some_and(|r| r.is_error) {
-            palette.status_danger
-        } else {
-            palette.status_success
-        };
+        let ent_card = entity.clone();
+        let ent_raw = entity.clone();
+        let ent_lb = entity.clone();
+        let copy_ref = &self.copy_tracker;
 
-        let ent_toggle = entity.clone();
-        let key_toggle = card_key.clone();
-        let header = apply_scale(div(), scale::UI)
-            .id(SharedString::from(format!("normal-tool-hdr-{}", call.id)))
-            .test_support()
-            .h(height::COMPACT)
-            .px(space::SM)
-            .rounded(radius::CONTROL)
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(space::SM)
-            .hover(|s| s.bg(palette.bg_item_hover))
-            .on_click(move |_, _, cx| {
-                let k = key_toggle.clone();
-                ent_toggle.update(cx, |this, cx| {
-                    if !this.expanded_tool_cards.remove(&k) {
-                        this.expanded_tool_cards.insert(k);
+        render_normal_tool_card(
+            &call.id,
+            &call.name,
+            duration_ms,
+            parsed_res.is_some(),
+            parsed_res.as_ref().is_some_and(|r| r.is_error),
+            live,
+            &card_view,
+            is_open,
+            is_raw_open,
+            mono_family,
+            palette,
+            &|cid| copy_ref.is_copied(cid),
+            Rc::new(move |key, _, cx| {
+                ent_card.update(cx, |this, cx| {
+                    if !this.expanded_tool_cards.remove(&key) {
+                        this.expanded_tool_cards.insert(key);
                     }
                     cx.notify();
                 });
-            })
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::SM)
-                    .child(
-                        div()
-                            .w(px(7.0))
-                            .h(px(7.0))
-                            .rounded(radius::FULL)
-                            .bg(status_color),
-                    )
-                    .child(
-                        apply_scale(div(), scale::UI_MEDIUM)
-                            .text_color(palette.text_primary)
-                            .child(SharedString::from(call.name.clone())),
-                    ),
-            )
-            .child(
-                Icon::new(if is_open {
-                    IconName::ChevronDown
-                } else {
-                    IconName::ChevronRight
-                })
-                .size(px(12.0))
-                .text_color(palette.text_muted),
-            );
-
-        let mut container = div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(space::XS)
-            .child(header);
-
-        if is_open {
-            let mut body = div()
-                .pl(space::GROUP)
-                .border_l_1()
-                .border_color(palette.border_subtle)
-                .flex()
-                .flex_col()
-                .gap(space::SM);
-
-            for block in &card_view.blocks {
-                match block {
-                    cst_client::tool_presenter::ToolBlock::Fields { rows, .. } => {
-                        for row in rows {
-                            body = body.child(
-                                div()
-                                    .flex()
-                                    .items_start()
-                                    .gap(space::MD)
-                                    .child(
-                                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                                            .w(px(96.0))
-                                            .flex_shrink_0()
-                                            .text_color(palette.text_secondary)
-                                            .child(SharedString::from(row.label.clone())),
-                                    )
-                                    .child(
-                                        apply_scale(div(), scale::CAPTION)
-                                            .flex_1()
-                                            .min_w_0()
-                                            .text_color(palette.text_primary)
-                                            .child(SharedString::from(row.value.clone())),
-                                    ),
-                            );
-                        }
+            }),
+            Rc::new(move |key, _, cx| {
+                ent_raw.update(cx, |this, cx| {
+                    if !this.expanded_tool_raw.remove(&key) {
+                        this.expanded_tool_raw.insert(key);
                     }
-                    cst_client::tool_presenter::ToolBlock::Text { text, .. }
-                    | cst_client::tool_presenter::ToolBlock::Notice { text, .. } => {
-                        body = body.child(
-                            apply_scale(div(), scale::CAPTION)
-                                .text_color(palette.text_secondary)
-                                .child(SharedString::from(text.clone())),
-                        );
-                    }
-                    _ => {}
-                }
-            }
-
-            if !card_view.raw.trim().is_empty() {
-                let ent_raw = entity.clone();
-                let rk = raw_key.clone();
-                body = body.child(
-                    apply_scale(div(), scale::CAPTION_MEDIUM)
-                        .id(SharedString::from(format!(
-                            "normal-tool-raw-toggle-{}",
-                            call.id
-                        )))
-                        .test_support()
-                        .text_color(palette.text_muted)
-                        .on_click(move |_, _, cx| {
-                            let k = rk.clone();
-                            ent_raw.update(cx, |this, cx| {
-                                if !this.expanded_tool_raw.remove(&k) {
-                                    this.expanded_tool_raw.insert(k);
-                                }
-                                cx.notify();
-                            });
-                        })
-                        .child(if is_raw_open {
-                            "收起原始数据"
-                        } else {
-                            "原始数据"
-                        }),
-                );
-                if is_raw_open {
-                    let blk_id = SharedString::from(format!("tool-raw-block-{}", call.id));
-                    let copied = self.copy_tracker.is_copied(blk_id.as_ref());
-                    body = body.child(render_copyable_text_block(
-                        blk_id,
-                        card_view.raw.clone(),
-                        true,
-                        mono_family,
-                        copied,
-                        palette,
-                        |cid, _, cx| {
-                            cx.entity().update(cx, |this: &mut Self, cx| {
-                                this.copy_tracker
-                                    .mark_copied(cid, |v| &mut v.copy_tracker, cx);
-                            });
-                        },
-                        cx,
-                    ));
-                }
-            }
-
-            container = container.child(body);
-        }
-
-        container.into_any_element()
+                    cx.notify();
+                });
+            }),
+            Rc::new(move |target, _, cx| {
+                ent_lb.update(cx, |_, cx| {
+                    cx.emit(MessageListEvent::OpenLightbox(target));
+                });
+            }),
+            |cid, _, cx| {
+                cx.entity().update(cx, |this: &mut Self, cx| {
+                    this.copy_tracker
+                        .mark_copied(cid, |v| &mut v.copy_tracker, cx);
+                });
+            },
+            cx,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
     fn render_special_tool_surface(
         &mut self,
-        _kind: SpecialToolKind,
+        session: &SessionViewSnapshot,
+        entry_id: &str,
+        kind: SpecialToolKind,
         call: &ToolCallPart,
         tool_result_val: Option<&Value>,
         result_revision: u64,
         live: bool,
+        mono_family: SharedString,
+        transparency_enabled: bool,
+        scale_factor: f32,
         palette: &DesktopPalette,
+        entity: &Entity<Self>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
         let input = to_tool_call_input(call);
         let parsed_res = tool_result_val.map(ToolResultInput::from_message_json);
-        let special = self.client.with_presenter_cache(|cache| {
+        let Some(special) = self.client.with_presenter_cache(|cache| {
             cache.get_or_map_special(&input, parsed_res.as_ref(), result_revision, live)
-        });
-
-        let (title, summary) = match special.as_deref() {
-            Some(SpecialToolView::SysOverview { title, summary, .. })
-            | Some(SpecialToolView::Runbook { title, summary, .. })
-            | Some(SpecialToolView::WebSearch { title, summary, .. })
-            | Some(SpecialToolView::BitLocker { title, summary, .. }) => {
-                (title.clone(), summary.clone())
-            }
-            None => (call.name.clone(), String::new()),
+        }) else {
+            return div().into_any_element();
         };
 
-        div()
-            .id(SharedString::from(format!("special-tool-card-{}", call.id)))
-            .test_support()
-            .w_full()
-            .p(space::LG)
-            .rounded(radius::SPECIAL)
-            .border_1()
-            .border_color(palette.border_subtle)
-            .bg(palette.bg_special)
-            .flex()
-            .flex_col()
-            .gap(space::XS)
-            .child(
-                apply_scale(div(), scale::UI_MEDIUM)
-                    .text_color(palette.text_primary)
-                    .child(SharedString::from(title)),
-            )
-            .children((!summary.trim().is_empty()).then(|| {
-                apply_scale(div(), scale::CAPTION)
-                    .text_color(palette.text_secondary)
-                    .child(SharedString::from(summary))
-            }))
-            .into_any_element()
+        let has_result = tool_result_val.is_some();
+        let secret_input = if kind == SpecialToolKind::BitLocker {
+            let pending_opt =
+                find_pending_bitlocker_request(session.bitlocker.as_ref(), &call.id, has_result);
+            if let Some(ref p) = pending_opt
+                && p.kind == "password"
+            {
+                let call_id_owned = call.id.clone();
+                let sid_owned = session.id.clone();
+                let rid_owned = p.request_id.clone();
+                Some(
+                    self.secret_inputs
+                        .entry(call.id.clone())
+                        .or_insert_with(|| {
+                            let si = cx.new(SecretInput::new);
+                            let sub = cx.subscribe(&si, move |this, si_ent, ev, cx| {
+                                match ev {
+                                    SecretInputEvent::SubmitRequested => {
+                                        let (buf, len) =
+                                            si_ent.read(cx).snapshot_zeroizing_payload();
+                                        if len == 0 {
+                                            si_ent.update(cx, |s, cx| {
+                                                s.set_error_message(
+                                                    Some("请输入八组六位数字恢复密码。"),
+                                                    cx,
+                                                );
+                                            });
+                                            return;
+                                        }
+                                        let c = this.client.clone();
+                                        let s_id = sid_owned.clone();
+                                        let r_id = rid_owned.clone();
+                                        let si_done = si_ent.clone();
+                                        cx.spawn(async move |weak, cx| {
+                                            let res = c
+                                                .respond_bitlocker_password(s_id, r_id, buf, len)
+                                                .await;
+                                            let _ = weak.update(cx, |_, cx| match res {
+                                                Ok(_) => {
+                                                    si_done.update(cx, |s, cx| s.clear(cx));
+                                                }
+                                                Err(ClientError::BadRequest {
+                                                    ref code,
+                                                    ref message,
+                                                }) if code == "invalid_bitlocker_input" => {
+                                                    let msg = message.clone();
+                                                    si_done.update(cx, |s, cx| {
+                                                        s.set_error_message(Some(msg), cx);
+                                                    });
+                                                }
+                                                Err(err) => {
+                                                    si_done.update(cx, |s, cx| s.clear(cx));
+                                                    cx.emit(MessageListEvent::ErrorMessage(
+                                                        err.to_string(),
+                                                    ));
+                                                }
+                                            });
+                                        })
+                                        .detach();
+                                    }
+                                    SecretInputEvent::CancelRequested => {
+                                        let c = this.client.clone();
+                                        let s_id = sid_owned.clone();
+                                        let r_id = rid_owned.clone();
+                                        cx.spawn(async move |weak, cx| {
+                                            if let Err(err) =
+                                                c.cancel_bitlocker_request(s_id, r_id).await
+                                            {
+                                                let _ = weak.update(cx, |_, cx| {
+                                                    cx.emit(MessageListEvent::ErrorMessage(
+                                                        err.to_string(),
+                                                    ));
+                                                });
+                                            }
+                                        })
+                                        .detach();
+                                    }
+                                }
+                                let _ = &call_id_owned;
+                            });
+                            self.secret_input_subs.push(sub);
+                            si
+                        })
+                        .clone(),
+                )
+            } else {
+                if let Some(removed) = self.secret_inputs.remove(&call.id) {
+                    removed.update(cx, |s, cx| s.clear(cx));
+                }
+                None
+            }
+        } else {
+            None
+        };
+
+        let details_expanded = match kind {
+            SpecialToolKind::SysOverview => self
+                .expanded_special_details
+                .contains(&format!("sys-overview-details-{}", call.id)),
+            SpecialToolKind::WebSearch => self
+                .expanded_special_details
+                .contains(&format!("web-search-expand-{}", call.id)),
+            SpecialToolKind::BitLocker => self
+                .expanded_special_details
+                .contains(&format!("bitlocker-details-{}", call.id)),
+            SpecialToolKind::Runbook => false,
+        };
+        let warning_hovered = self
+            .hovered_warnings
+            .contains(&format!("web-search-warn-{}", call.id));
+
+        let ent_toggle = entity.clone();
+        let ent_hover = entity.clone();
+        let ent_runbook = entity.clone();
+        let sid_runbook = session.id.clone();
+        let copy_ref = &self.copy_tracker;
+
+        render_special_tool_component(
+            SpecialToolDispatchProps {
+                session_id: &session.id,
+                entry_id,
+                call_id: &call.id,
+                has_result,
+                view: &special,
+                bitlocker_snapshot: session.bitlocker.as_ref(),
+                secret_input,
+                details_expanded,
+                warning_hovered,
+                transparency_enabled,
+                scale_factor,
+            },
+            self.client.clone(),
+            mono_family,
+            palette,
+            &|cid| copy_ref.is_copied(cid),
+            Rc::new(move |key, _, cx| {
+                ent_toggle.update(cx, |this, cx| {
+                    if !this.expanded_special_details.remove(&key) {
+                        this.expanded_special_details.insert(key);
+                    }
+                    cx.notify();
+                });
+            }),
+            Rc::new(move |key, hovered, _, cx| {
+                ent_hover.update(cx, |this, cx| {
+                    if hovered {
+                        this.hovered_warnings.insert(key);
+                    } else {
+                        this.hovered_warnings.remove(&key);
+                    }
+                    cx.notify();
+                });
+            }),
+            Rc::new(move |e_id, c_id, _, cx| {
+                let s_id = sid_runbook.clone();
+                ent_runbook.update(cx, |this, cx| {
+                    let c = this.client.clone();
+                    cx.spawn(async move |weak, cx| {
+                        if let Err(err) = c.open_session_runbook(s_id, e_id, c_id).await {
+                            let _ = weak.update(cx, |_, cx| {
+                                cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
+                            });
+                        }
+                    })
+                    .detach();
+                });
+            }),
+            |cid, _, cx| {
+                cx.entity().update(cx, |this: &mut Self, cx| {
+                    this.copy_tracker
+                        .mark_copied(cid, |v| &mut v.copy_tracker, cx);
+                });
+            },
+            |msg, cx| {
+                cx.emit(MessageListEvent::ErrorMessage(msg));
+            },
+            window,
+            cx,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -929,6 +998,8 @@ impl MessageListView {
         is_live_turn: bool,
         mono_family: SharedString,
         reduce_motion: bool,
+        transparency_enabled: bool,
+        scale_factor: f32,
         palette: &DesktopPalette,
         entity: &Entity<Self>,
         window: &mut Window,
@@ -1139,12 +1210,20 @@ impl MessageListView {
                             ConversationPart::Special { kind, call } => {
                                 assistant_stack =
                                     assistant_stack.child(self.render_special_tool_surface(
+                                        session,
+                                        &tp.entry_key,
                                         *kind,
                                         call,
                                         tool_results.get(&call.id),
                                         session.revision,
                                         is_live_turn,
+                                        mono_family.clone(),
+                                        transparency_enabled,
+                                        scale_factor,
                                         palette,
+                                        entity,
+                                        window,
+                                        cx,
                                     ));
                             }
                             ConversationPart::Image(img_part) => {
@@ -1655,6 +1734,8 @@ impl Render for MessageListView {
                 is_live,
                 mono_family.clone(),
                 reduce_motion,
+                transparency_enabled,
+                scale_factor,
                 &palette,
                 &entity,
                 window,

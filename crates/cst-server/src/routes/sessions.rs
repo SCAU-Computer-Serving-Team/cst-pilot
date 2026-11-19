@@ -325,7 +325,19 @@ pub async fn handle_sessions_route(
                 "BitLocker 请求 ID 无效",
             ));
         }
-        let body = read_json_body(raw_body, 4096)?;
+        let mut body = read_json_body(raw_body, 4096)?;
+        struct ZeroizeBitLockerBody<'a>(&'a mut Value);
+        impl Drop for ZeroizeBitLockerBody<'_> {
+            fn drop(&mut self) {
+                use zeroize::Zeroize as _;
+                if let Some(obj) = self.0.as_object_mut()
+                    && let Some(Value::String(pw)) = obj.get_mut("password")
+                {
+                    pw.zeroize();
+                }
+            }
+        }
+        let body_guard = ZeroizeBitLockerBody(&mut body);
         // Check mode + ActivityGate without persisting to MutationReceipts, then release ModeController read lock.
         let (mode_guard, _activity_lease) = state
             .mode
@@ -337,9 +349,9 @@ pub async fn handle_sessions_route(
         let slot = state.pool.open_saved(id).await.map_err(ApiError::from)?;
         // There is no durable receipt for a sensitive response; consume it under channel admission.
         let _acceptance = state.mode.admit_write(caller, None).await?;
-        slot.bitlocker
-            .respond(request_id, &body)
-            .map_err(ApiError::from)?;
+        let respond_res = slot.bitlocker.respond(request_id, body_guard.0);
+        drop(body_guard);
+        respond_res.map_err(ApiError::from)?;
         return Ok(Some(json_response(
             StatusCode::OK,
             &json!({ "answered": true }),

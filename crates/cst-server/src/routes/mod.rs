@@ -385,8 +385,11 @@ pub fn parse_query_params(query: Option<&str>) -> HashMap<String, String> {
         .collect()
 }
 
-async fn collect_request_body(mut body: Incoming, max_bytes: usize) -> Result<Bytes, ApiError> {
-    let mut buf = Vec::new();
+async fn collect_request_body(
+    mut body: Incoming,
+    max_bytes: usize,
+) -> Result<zeroize::Zeroizing<Vec<u8>>, ApiError> {
+    let mut buf = zeroize::Zeroizing::new(Vec::new());
     while let Some(frame_res) = body.frame().await {
         let frame = frame_res.map_err(|_| {
             ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", "请求体读取失败")
@@ -402,7 +405,7 @@ async fn collect_request_body(mut body: Incoming, max_bytes: usize) -> Result<By
             buf.extend_from_slice(&data);
         }
     }
-    Ok(Bytes::from(buf))
+    Ok(buf)
 }
 
 pub async fn handle_http_request(

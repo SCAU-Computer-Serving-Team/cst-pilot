@@ -1,6 +1,7 @@
 pub mod background;
 pub mod shell;
 pub mod theme;
+pub mod tools;
 pub mod workbench;
 
 pub mod shaders {

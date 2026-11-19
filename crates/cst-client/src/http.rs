@@ -846,6 +846,146 @@ impl AppHttpClient {
         self.request_bytes(&format!("/api/sessions/{sid}/attachments/{aid}"), None)
             .await
     }
+
+    pub async fn open_session_runbook(
+        &self,
+        session_id: &str,
+        entry_id: &str,
+        tool_call_id: &str,
+    ) -> Result<Value, ClientError> {
+        let sid = encode_segment(session_id);
+        self.request_value(
+            Method::POST,
+            &format!("/api/sessions/{sid}/runbook/open"),
+            Some(&json!({
+                "entryId": entry_id,
+                "toolCallId": tool_call_id
+            })),
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
+
+    /// Submits a BitLocker recovery password directly over a short-lived loopback TCP socket using
+    /// stack-backed `Zeroizing` buffers — skipping `SessionOutbox`, `reqwest::Body` `Bytes` clones,
+    /// and automatic disconnect retries.
+    pub async fn respond_bitlocker_password(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        password_buf: zeroize::Zeroizing<[u8; 55]>,
+        password_len: usize,
+    ) -> Result<Value, ClientError> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let len = password_len.min(55);
+        let pw_slice = &password_buf[..len];
+        if pw_slice.is_empty() || !pw_slice.iter().all(|b| b.is_ascii_digit() || *b == b'-') {
+            return Err(ClientError::BadRequest {
+                code: "invalid_bitlocker_input".into(),
+                message: "恢复密码必须为八组六位数字，用连字符分隔".into(),
+            });
+        }
+
+        let sid = encode_segment(session_id);
+        let rid = encode_segment(request_id);
+        let path = format!("/api/sessions/{sid}/bitlocker/{rid}");
+
+        let mut json_buf = zeroize::Zeroizing::new([0u8; 96]);
+        let prefix = b"{\"password\":\"";
+        let suffix = b"\"}";
+        let body_len = prefix.len() + len + suffix.len();
+        json_buf[..prefix.len()].copy_from_slice(prefix);
+        json_buf[prefix.len()..prefix.len() + len].copy_from_slice(pw_slice);
+        json_buf[prefix.len() + len..body_len].copy_from_slice(suffix);
+        drop(password_buf);
+
+        let auth_hdr = zeroize::Zeroizing::new(self.auth_header_value());
+        let head = zeroize::Zeroizing::new(format!(
+            "POST {path} HTTP/1.1\r\nHost: {}\r\nX-CST-Client: app\r\nAuthorization: {}\r\nContent-Type: application/json\r\nContent-Length: {body_len}\r\nConnection: close\r\n\r\n",
+            self.host_header,
+            auth_hdr.as_str()
+        ));
+
+        let addr = format!("127.0.0.1:{}", self.port);
+        let io_fut = async {
+            let mut stream = tokio::net::TcpStream::connect(&addr)
+                .await
+                .map_err(|e| ClientError::Disconnected(format!("无法连接本机后台服务：{e}")))?;
+            stream.write_all(head.as_bytes()).await.map_err(|e| {
+                ClientError::Disconnected(format!("提交 BitLocker 请求头失败：{e}"))
+            })?;
+            stream.write_all(&json_buf[..body_len]).await.map_err(|e| {
+                ClientError::Disconnected(format!("提交 BitLocker 请求体失败：{e}"))
+            })?;
+            drop(json_buf);
+
+            let mut resp_buf = Vec::with_capacity(1024);
+            stream
+                .read_to_end(&mut resp_buf)
+                .await
+                .map_err(|e| ClientError::Disconnected(format!("读取 BitLocker 响应中断：{e}")))?;
+            Ok::<Vec<u8>, ClientError>(resp_buf)
+        };
+
+        let raw_resp = tokio::time::timeout(Duration::from_secs(10), io_fut)
+            .await
+            .map_err(|_| ClientError::Disconnected("BitLocker 响应超时。".into()))??;
+
+        let split_pos = raw_resp
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .map(|p| p + 4)
+            .unwrap_or(raw_resp.len());
+        let status_line = std::str::from_utf8(&raw_resp[..split_pos]).unwrap_or("");
+        let status = status_line
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|s| s.parse::<u16>().ok())
+            .unwrap_or(500);
+        let parsed: Option<Value> = serde_json::from_slice(&raw_resp[split_pos..]).ok();
+        if !(200..300).contains(&status) {
+            return Err(ClientError::from_http_response(status, parsed.as_ref()));
+        }
+        Ok(parsed.unwrap_or(Value::Null))
+    }
+
+    pub async fn respond_bitlocker_confirm(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        confirm: bool,
+    ) -> Result<Value, ClientError> {
+        let sid = encode_segment(session_id);
+        let rid = encode_segment(request_id);
+        self.request_value(
+            Method::POST,
+            &format!("/api/sessions/{sid}/bitlocker/{rid}"),
+            Some(&json!({ "confirm": confirm })),
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
+
+    pub async fn cancel_bitlocker_request(
+        &self,
+        session_id: &str,
+        request_id: &str,
+    ) -> Result<Value, ClientError> {
+        let sid = encode_segment(session_id);
+        let rid = encode_segment(request_id);
+        self.request_value(
+            Method::POST,
+            &format!("/api/sessions/{sid}/bitlocker/{rid}"),
+            Some(&json!({ "cancel": true })),
+            None,
+            Some(Duration::from_secs(10)),
+        )
+        .await
+    }
 }
 
 fn encode_segment(raw: &str) -> String {
