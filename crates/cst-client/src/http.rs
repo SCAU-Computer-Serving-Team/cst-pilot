@@ -256,6 +256,32 @@ impl AppHttpClient {
             })
     }
 
+    pub async fn rename_session(&self, session_id: &str, name: &str) -> Result<Value, ClientError> {
+        let encoded = encode_segment(session_id);
+        let key = uuid::Uuid::new_v4().to_string();
+        self.request_value(
+            Method::PATCH,
+            &format!("/api/sessions/{encoded}"),
+            Some(&json!({ "name": name })),
+            Some(&key),
+            Some(Duration::from_secs(5)),
+        )
+        .await
+    }
+
+    pub async fn delete_session(&self, session_id: &str) -> Result<Value, ClientError> {
+        let encoded = encode_segment(session_id);
+        let key = uuid::Uuid::new_v4().to_string();
+        self.request_value(
+            Method::DELETE,
+            &format!("/api/sessions/{encoded}"),
+            None,
+            Some(&key),
+            Some(Duration::from_secs(5)),
+        )
+        .await
+    }
+
     pub async fn check_session_creation(
         &self,
         request_key: &str,

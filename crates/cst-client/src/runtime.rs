@@ -151,6 +151,7 @@ struct OpWatermarks {
 struct SharedClientCore {
     kit_root: PathBuf,
     app_identity: ProcessIdentity,
+    rt_handle: tokio::runtime::Handle,
     http: AppHttpClient,
     next_op_revision: AtomicU64,
     op_watermarks: Mutex<OpWatermarks>,
@@ -280,6 +281,24 @@ impl ClientHandle {
         &self.core.http
     }
 
+    pub fn runtime_handle(&self) -> &tokio::runtime::Handle {
+        &self.core.rt_handle
+    }
+
+    /// Runs a Tokio/reqwest future on the client's dedicated Tokio runtime so non-Tokio UI executors
+    /// (such as GPUI's foreground/background executors) never panic on missing Tokio reactor context.
+    pub async fn spawn_tokio<F, T>(&self, fut: F) -> Result<T, ClientError>
+    where
+        F: std::future::Future<Output = Result<T, ClientError>> + Send + 'static,
+        T: Send + 'static,
+    {
+        self.core
+            .rt_handle
+            .spawn(fut)
+            .await
+            .map_err(|e| ClientError::Disconnected(format!("客户端异步任务异常中止：{e}")))?
+    }
+
     /// Lock-free (nanosecond `Arc::clone`) read of the latest immutable `ClientSnapshot`.
     pub fn snapshot(&self) -> Arc<ClientSnapshot> {
         Arc::clone(&self.core.snapshot.lock().expect("snapshot lock"))
@@ -329,7 +348,10 @@ impl ClientHandle {
     }
 
     pub async fn check_exit(&self) -> Result<ExitCheckReport, ClientError> {
-        let lifecycle = self.core.http.lifecycle().await?;
+        let http = self.core.http.clone();
+        let lifecycle = self
+            .spawn_tokio(async move { http.lifecycle().await })
+            .await?;
         let unresolved_local_outbox = self.with_outbox(SessionOutbox::total_unresolved_count);
         let unsent_drafts = self.with_workspace(WorkspaceState::unsent_draft_count);
         Ok(ExitCheckReport::from_sources(
@@ -567,41 +589,68 @@ impl ClientHandle {
             .map_err(|_| ClientError::Disconnected("客户端后台响应中断。".into()))?
     }
 
+    pub async fn rename_session(
+        &self,
+        session_id: String,
+        name: String,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.rename_session(&session_id, &name).await })
+            .await
+    }
+
+    pub async fn delete_session(&self, session_id: String) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.delete_session(&session_id).await })
+            .await
+    }
+
     pub async fn claim_missing_key_prompt(&self) -> Result<MissingKeyClaimDto, ClientError> {
-        self.core.http.claim_missing_key_prompt(None).await
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.claim_missing_key_prompt(None).await })
+            .await
     }
 
     pub async fn get_ui_hints(&self) -> Result<UiHintsDto, ClientError> {
-        self.core.http.get_ui_hints().await
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.get_ui_hints().await })
+            .await
     }
 
     pub async fn get_update_status(&self) -> Result<UpdateStateDto, ClientError> {
-        self.core.http.get_update_status().await
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.get_update_status().await })
+            .await
     }
 
     pub async fn check_update(&self) -> Result<UpdateStatusDto, ClientError> {
-        self.core.http.check_update().await
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.check_update().await })
+            .await
     }
 
     pub async fn prepare_update(&self) -> Result<UpdateStatusDto, ClientError> {
-        self.core.http.prepare_update().await
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.prepare_update().await })
+            .await
     }
 
     pub async fn cancel_update(
         &self,
         operation_id: Option<&str>,
     ) -> Result<UpdateStatusDto, ClientError> {
-        self.core.http.cancel_update(operation_id).await
+        let http = self.core.http.clone();
+        let op = operation_id.map(str::to_owned);
+        self.spawn_tokio(async move { http.cancel_update(op.as_deref()).await })
+            .await
     }
 
     pub async fn launch_update(&self, ui: &str) -> Result<Value, ClientError> {
-        self.core
-            .http
-            .launch_update(
-                self.core.app_identity.pid,
-                self.core.app_identity.created,
-                ui,
-            )
+        let http = self.core.http.clone();
+        let pid = self.core.app_identity.pid;
+        let created = self.core.app_identity.created;
+        let ui_owned = ui.to_owned();
+        self.spawn_tokio(async move { http.launch_update(pid, created, &ui_owned).await })
             .await
     }
 
@@ -649,6 +698,7 @@ fn spawn_client_workers(
     let core = Arc::new(SharedClientCore {
         kit_root: endpoint.kit_root.clone(),
         app_identity,
+        rt_handle: rt_handle.clone(),
         http: endpoint.http.clone(),
         next_op_revision: AtomicU64::new(1),
         op_watermarks: Mutex::new(OpWatermarks::default()),

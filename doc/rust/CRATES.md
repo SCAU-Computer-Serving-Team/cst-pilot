@@ -20,5 +20,5 @@
 | `crates/cst-kit` | 库 | 后台服务（经 `cst-server`） | 17 个诊断工具、BitLocker、Runbook、CSTOA 认证、双端遥测、联网升级检查与拉起编排 |
 | `crates/cst-server` | 库 + `cst-server.exe` | 公用后台服务进程 | 服务发现、通道门禁、HTTP/SSE 路由、会话池、收件箱、会话导出 |
 | `crates/cst-client` | 库 | 软件端进程 | 桌面单实例唤醒锁、进程令牌双向核验、双路 SSE 状态归并、共享工作区草稿（`48 MiB` 图片预算）、乐观发件箱与 17 工具无 UI 投影 |
-| `crates/cst-desktop`（阶段 9 规划） | `cst-pilot.exe` | 软件端进程 | GPUI 桌面界面、D3D11 背景与窗口控制 |
+| `crates/cst-desktop` | 库 + `cst-pilot.exe` | 软件端进程 | GPUI 桌面窗口外壳、同设备 D3D11 天空与毛玻璃着色器表面、多屏几何记忆与退出控制 |
 | `crates/cst-tui`（阶段 10 规划） | 库 | 软件端进程 | 桌面窗口内置 TUI 视图 |

@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-exclude = ["vendor/regress", "vendor/rquickjs-sys"]
+exclude = [
+    "vendor/regress",
+    "vendor/rquickjs-sys",
+    "vendor/gpui-pre",
+    "vendor/gpui-pre-windows",
+]
 members = [
     "crates/pi-ai",
     "crates/pi-agent",
@@ -11,6 +16,7 @@ members = [
     "crates/cst-kit",
     "crates/cst-server",
     "crates/cst-client",
+    "crates/cst-desktop",
 ]
 
 [workspace.package]
@@ -44,6 +50,8 @@ uuid = { version = "1", features = ["v4", "v7"] }
 
 [patch.crates-io]
 rquickjs-sys = { path = "vendor/rquickjs-sys" }
+gpui-pre = { path = "vendor/gpui-pre" }
+gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
 
 [profile.dev]
 debug = 0
