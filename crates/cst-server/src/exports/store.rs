@@ -137,6 +137,39 @@ pub struct SessionExportStore {
     close_lock: Arc<AsyncMutex<bool>>,
 }
 
+struct CreatingGuard(SessionExportStore);
+
+impl Drop for CreatingGuard {
+    fn drop(&mut self) {
+        if self.0.creating_count.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.0.creating_done.notify_waiters();
+        }
+    }
+}
+
+/// Keeps a persisted job invisible until its caller resumes and commits it to the queue.
+struct PendingExport {
+    id: String,
+    creating: Option<CreatingGuard>,
+    runtime: tokio::runtime::Handle,
+}
+
+impl Drop for PendingExport {
+    fn drop(&mut self) {
+        let Some(creating) = self.creating.take() else {
+            return;
+        };
+        let id = std::mem::take(&mut self.id);
+        self.runtime.spawn_blocking(move || {
+            let store = &creating.0;
+            let _ = fs::remove_file(store.metadata.join(format!("{id}.json")));
+            let mut guard = store.inner.lock().expect("export queue lock");
+            guard.publishing.remove(&id);
+            store.revision.fetch_add(1, Ordering::SeqCst);
+        });
+    }
+}
+
 impl SessionExportStore {
     pub fn new(
         root: impl Into<PathBuf>,
@@ -244,47 +277,8 @@ impl SessionExportStore {
     }
 
     pub async fn create(&self, snapshot: &Value) -> Result<ExportJobRecord, ServiceError> {
-        struct CreatingGuard(SessionExportStore);
-        impl Drop for CreatingGuard {
-            fn drop(&mut self) {
-                if self.0.creating_count.fetch_sub(1, Ordering::SeqCst) == 1 {
-                    self.0.creating_done.notify_waiters();
-                }
-            }
-        }
-
-        struct CallerCancelGuard {
-            flag: Arc<AtomicBool>,
-            armed: bool,
-        }
-        impl Drop for CallerCancelGuard {
-            fn drop(&mut self) {
-                if self.armed {
-                    self.flag.store(true, Ordering::SeqCst);
-                }
-            }
-        }
-
         self.creating_count.fetch_add(1, Ordering::SeqCst);
         let creating = CreatingGuard(self.clone());
-        let caller_cancelled = Arc::new(AtomicBool::new(false));
-        let mut cancel_guard = CallerCancelGuard {
-            flag: caller_cancelled.clone(),
-            armed: true,
-        };
-        let res = self.enqueue(snapshot, creating, caller_cancelled).await;
-        if res.is_ok() {
-            cancel_guard.armed = false;
-        }
-        res
-    }
-
-    async fn enqueue(
-        &self,
-        snapshot: &Value,
-        creating: impl Send + 'static,
-        caller_cancelled: Arc<AtomicBool>,
-    ) -> Result<ExportJobRecord, ServiceError> {
         if self.closing.load(Ordering::SeqCst) {
             return Err(ServiceError::new(
                 ServiceErrorKind::Unavailable,
@@ -362,76 +356,38 @@ impl SessionExportStore {
             stored: Vec::new(),
         };
         let snapshot_owned = snapshot.clone();
-        let store_for_publish = self.clone();
-
-        // Execute record persistence + queue insertion as one owned blocking transition so:
-        // 1. Concurrent `list()`/`get()` sees `id` in `publishing` and never marks it `export_interrupted`.
-        // 2. If the caller cancels or `close()` begins mid-write, the worker removes `<id>.json` before releasing `publishing`/`creating`.
-        Self::run_blocking(move || {
-            let _creating = creating;
-            struct PublishingGuard<'a> {
-                store: &'a SessionExportStore,
-                id: String,
-                armed: bool,
-            }
-            impl Drop for PublishingGuard<'_> {
-                fn drop(&mut self) {
-                    if self.armed {
-                        let mut guard = self.store.inner.lock().expect("export queue lock");
-                        guard.publishing.remove(&self.id);
-                        self.store.revision.fetch_add(1, Ordering::SeqCst);
-                    }
-                }
-            }
-            let mut pub_guard = PublishingGuard {
-                store: &store_for_publish,
-                id: id.clone(),
-                armed: true,
-            };
-
-            store_for_publish.save_record_sync(&record)?;
-
-            if store_for_publish.closing.load(Ordering::SeqCst)
-                || caller_cancelled.load(Ordering::SeqCst)
-            {
-                let stale = store_for_publish.metadata.join(format!("{id}.json"));
-                let _ = fs::remove_file(stale);
-                return Err(ServiceError::new(
-                    ServiceErrorKind::Unavailable,
-                    "export_stopping",
-                    "程序正在退出，请稍后导出",
-                ));
-            }
-
-            let work = Arc::new(WorkItem {
-                id: id.clone(),
-                snapshot: snapshot_owned,
-                state: Mutex::new((record, result.clone())),
-            });
-
-            {
-                let mut guard = store_for_publish.inner.lock().expect("export queue lock");
-                if store_for_publish.closing.load(Ordering::SeqCst)
-                    || caller_cancelled.load(Ordering::SeqCst)
-                {
-                    drop(guard);
-                    let stale = store_for_publish.metadata.join(format!("{id}.json"));
-                    let _ = fs::remove_file(stale);
-                    return Err(ServiceError::new(
-                        ServiceErrorKind::Unavailable,
-                        "export_stopping",
-                        "程序正在退出，请稍后导出",
-                    ));
-                }
-                pub_guard.armed = false;
-                guard.publishing.remove(&id);
-                guard.queue.push_back(work);
-                store_for_publish.revision.fetch_add(1, Ordering::SeqCst);
-                store_for_publish.ensure_pumping_locked(&mut guard);
-            }
-            Ok(result)
+        let pending = PendingExport {
+            id: id.clone(),
+            creating: Some(creating),
+            runtime: tokio::runtime::Handle::current(),
+        };
+        let store = self.clone();
+        let (record, mut pending) = Self::run_blocking(move || {
+            store.save_record_sync(&record)?;
+            Ok((record, pending))
         })
-        .await
+        .await?;
+
+        // No suspension between publishing the job and returning its ID. Dropping the future
+        // before this point drops PendingExport, including when the worker finishes after cancellation.
+        let mut guard = self.inner.lock().expect("export queue lock");
+        if self.closing.load(Ordering::SeqCst) {
+            return Err(ServiceError::new(
+                ServiceErrorKind::Unavailable,
+                "export_stopping",
+                "程序正在退出，请稍后导出",
+            ));
+        }
+        guard.publishing.remove(&id);
+        guard.queue.push_back(Arc::new(WorkItem {
+            id,
+            snapshot: snapshot_owned,
+            state: Mutex::new((record, result.clone())),
+        }));
+        self.revision.fetch_add(1, Ordering::SeqCst);
+        self.ensure_pumping_locked(&mut guard);
+        pending.creating.take();
+        Ok(result)
     }
 
     fn ensure_pumping_locked(&self, guard: &mut QueueState) {
@@ -1128,9 +1084,9 @@ impl SessionExportStore {
     }
 
     pub async fn close(&self) {
-        self.closing.store(true, Ordering::SeqCst);
         {
             let mut guard = self.inner.lock().expect("export queue lock");
+            self.closing.store(true, Ordering::SeqCst);
             if guard.active_cancel_error.is_none() {
                 guard.active_cancel_error = Some(ServiceError::new(
                     ServiceErrorKind::Unavailable,

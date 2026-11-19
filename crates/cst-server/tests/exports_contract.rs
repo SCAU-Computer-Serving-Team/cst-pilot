@@ -1029,6 +1029,51 @@ fn artifact_sessions_dir_rejects_ntfs_junction_escape() {
 }
 
 #[tokio::test]
+async fn cancelled_create_does_not_queue_a_persisted_job_before_the_caller_resumes() {
+    struct WakeOnProgress(tokio::sync::Notify);
+    impl std::task::Wake for WakeOnProgress {
+        fn wake(self: Arc<Self>) {
+            self.0.notify_one();
+        }
+    }
+
+    let dir = TempDirGuard::new("export-cancel-persisted");
+    let metadata = dir.path().join("meta");
+    let (renderer, _) = MockRenderer::new(|_, emit, _| {
+        Box::pin(async move { emit("html", b"<!DOCTYPE html>ok".to_vec()).await })
+    });
+    let store = SessionExportStore::new(dir.path().join("artifacts"), &metadata, renderer);
+    let snap = fixture_snapshot("html");
+    let session_id = snap["sessionId"].as_str().unwrap();
+    let mut create = Box::pin(store.create(&snap));
+    let progress = Arc::new(WakeOnProgress(tokio::sync::Notify::new()));
+    let waker = std::task::Waker::from(progress.clone());
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            {
+                let mut cx = std::task::Context::from_waker(&waker);
+                assert!(create.as_mut().poll(&mut cx).is_pending());
+            }
+            progress.0.notified().await;
+            if fs::read_dir(&metadata).is_ok_and(|entries| {
+                entries.filter_map(Result::ok).any(|entry| {
+                    entry.path().extension().and_then(|ext| ext.to_str()) == Some("json")
+                })
+            }) {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("the worker persists the job while the caller is suspended");
+    drop(create);
+
+    store.close().await;
+    assert!(store.list(session_id).await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn cancelled_create_futures_and_concurrent_lists_never_corrupt_or_leak_jobs() {
     let dir = TempDirGuard::new("export-cancel-create");
     let artifacts = dir.path().join("artifacts");

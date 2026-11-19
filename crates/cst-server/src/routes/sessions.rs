@@ -335,6 +335,8 @@ pub async fn handle_sessions_route(
             .into_parts();
         drop(mode_guard);
         let slot = state.pool.open_saved(id).await.map_err(ApiError::from)?;
+        // There is no durable receipt for a sensitive response; consume it under channel admission.
+        let _acceptance = state.mode.admit_write(caller, None).await?;
         slot.bitlocker
             .respond(request_id, &body)
             .map_err(ApiError::from)?;
@@ -887,6 +889,9 @@ pub async fn handle_sessions_route(
                 )
                 .await
                 .map_err(ApiError::from)?;
+                // Preparation can outlast the caller's channel. Keep admission through the
+                // durable inbox write, which serves as the acceptance point for this route.
+                let _acceptance = state.mode.admit_write(caller, None).await?;
                 let refs = state
                     .pool
                     .images
