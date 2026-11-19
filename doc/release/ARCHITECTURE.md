@@ -9,20 +9,20 @@ Web 界面分发三档 WOFF2 子集字体（派生名 `CST UI Sans`），设计�
 | 项目 | 规则 |
 |---|---|
 | 上游来源 | Adobe Source Han Sans 固定提交 `a4f7cf94edfb9d7ffbdfc4841de276358bd7e0f2` 的 `SourceHanSansCN-Regular/Medium/Bold.otf` 及许可证，逐文件校验 SHA-256 |
-| 字符集范围 | GB2312 全部 6,763 个常用汉字，叠加前端（`src/web/frontend/app`）与诊断代码实际出现的字符，以及 Latin 和常用中西文标点 |
+| 字符集范围 | GB2312 全部 6,763 个常用汉字，叠加前端源码（`src/web/frontend/app`）与静态补充字表（`src/web/frontend/scripts/font-extra-chars.txt`）中的字符，以及 Latin 和常用中西文标点 |
 | 子集化与重命名 | 通过 `CST_WEB_FONT_PYTHON` 或系统 Python 3 运行固定版本 `fonttools==4.62.1` 与 `brotli==1.0.9` 裁剪字形，将内部 `name` 表与 CFF 字体名重命名为 `CST UI Sans`（遵循 SIL OFL 1.1 保留名规则） |
 | 缓存与产物 | 输出至 `src/web/frontend/public/fonts/CSTUISans-{Regular,Medium,Bold}.woff2`、`LICENSE.txt`、`NOTICE.txt` 与 `subset.json`，再由 `scripts/publish.mjs` 同步至 `agent/home/extensions/web/static/fonts/`。输入配方与字符集未变时直接复用缓存，体积由约 24.2 MiB 压缩至约 4.1 MiB |
 | 缺字回退 | 生僻字、繁体字与 Emoji 在浏览器与桌面端分别通过 CSS 字体栈或 DirectWrite 系统回退链回退至 `Microsoft YaHei` 与系统无衬线字体 |
 
 ## Rust LHM 辅助程序发布
 
-`crates/cst-pilot/lhm-host/publish.ps1` 将 C# 采集源码发布为 `win-x64` 自包含 .NET 10.0.14 程序，输出可执行文件、运行时与许可证至 `lhm/host/`。中间编译产物与 NuGet 缓存写入仓库外显式指定的 `WorkDirectory`，构建期间关闭 .NET CLI 遥测与开发证书生成。
+`crates/cst-kit/lhm-host/publish.ps1` 将 C# 采集源码发布为 `win-x64` 自包含 .NET 10.0.14 程序，输出可执行文件、运行时与许可证至 `lhm/host/`。中间编译产物与 NuGet 缓存写入仓库外显式指定的 `WorkDirectory`，构建期间关闭 .NET CLI 遥测与开发证书生成。
 
 辅助程序在独立加载上下文中解析上级目录 `lhm/` 中的 `LibreHardwareMonitorLib.dll` 及其依赖，由 Rust 诊断模块挂起启动并绑定 Job Object 控制。
 
 ## Rust 升级包准备
 
-`crates/cst-pilot/src/update/` 实现从远端清单检查、流式安全下载到独立进程原子替换的完整闭环：
+`crates/cst-kit/src/update/` 与 `crates/cst-updater/` 分工完成从远端清单检查、流式安全下载到独立进程原子替换的完整闭环：
 
 | 模块 | 职责 |
 |---|---|

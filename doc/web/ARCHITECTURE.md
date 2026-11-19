@@ -51,8 +51,8 @@ src/web/frontend/app/
 2. **乐观发送对账（`message-outbox.ts`、`use-message-outbox.tsx`）**：发送前先写入当前标签页 `sessionStorage`，断线或刷新后仅按原消息 ID 查询回执对账，不自动重发。后端确认接收或进入可见队列后移除本地备份。
 3. **浏览器存储与草稿图片回收**：
    - `sessionStorage` 保存草稿正文与消息 ID（`cst-draft:<sessionId|new>`、`:id`、`:images`，以及编辑待发或失败项时暂存原草稿的 `:saved`）。
-   - `IndexedDB` 按 SHA-256 保存未发送图片原始字节，配合 `localStorage` 引用表 `cst-draft-image-refs:<ownerId>`、`Web Locks API` 标签页存活锁与 60 秒刷新宽限期回收孤儿字节。
-   - `localStorage` 同步保存侧栏折叠态 `cst-sidebar-collapsed`、分支树过滤档位 `cst-tree-view` 与首次缺密钥 24 小时提示时间戳 `cst-model-key-prompt-at`。
+   - `IndexedDB` 按 SHA-256 保存未发送图片原始字节，配合 `localStorage` 引用表 `cst-draft-images:<ownerId>`、`Web Locks API` 标签页存活锁与 60 秒刷新宽限期回收孤儿字节。
+   - `localStorage` 同步保存侧栏折叠态 `cst-ui-sidebar`、分支树过滤档位 `cst-tree-view` 与首次缺密钥 24 小时提示时间戳 `cst-model-key-prompt-at`。
 4. **第三方 OAuth 弹窗隔离（`app/auth/`）**：打开第三方 OAuth 授权链接时先在点击同步上下文创建空白窗口并立即断开 `opener`，本机回环回调与手动粘贴授权码并行等待，先完成者生效。
 
 ## 分支树几何与过程分段

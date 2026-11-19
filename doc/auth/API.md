@@ -23,7 +23,7 @@
 
 ## Rust 宿主接口（`AuthRuntime`）
 
-`crates/cst-pilot` 导出 `AuthRuntime`，已由 `crates/cst-server/src/routes/{auth,models}.rs` 挂载至本机 HTTP 路由。`runtime()`、`login()` 与内部 Provider 实例仅供可信宿主进程调用，对外响应统一使用下表中的掩码结构：
+`crates/cst-kit` 导出 `AuthRuntime`，已由 `crates/cst-server/src/routes/{auth,models}.rs` 挂载至本机 HTTP 路由。`runtime()`、`login()` 与内部 Provider 实例仅供可信宿主进程调用，对外响应统一使用下表中的掩码结构：
 
 | 方法 | 参数与返回契约 |
 |---|---|

@@ -1,12 +1,12 @@
 # 遥测系统架构
 
-本页说明 `crates/cst-pilot/src/telemetry/` 发送端与双端 Go 接收端（`cst-pilot-server`）的内部组成，涵盖目录锁并发、草稿存活核验、队列确认与数据库存储结构。行为规则见 [SPEC.md](SPEC.md)，协议格式见 [API.md](API.md)。
+本页说明 `crates/cst-kit/src/telemetry/` 发送端与双端 Go 接收端（`cst-pilot-server`）的内部组成，涵盖目录锁并发、草稿存活核验、队列确认与数据库存储结构。行为规则见 [SPEC.md](SPEC.md)，协议格式见 [API.md](API.md)。
 
 ## 数据流与组成
 
 ```mermaid
 flowchart LR
-    subgraph Client["客户端宿主进程 (crates/cst-pilot)"]
+    subgraph Client["客户端宿主进程 (crates/cst-kit)"]
         Events["会话事件与响应头钩子"] --> Collect["collect.rs 内存累加 + billing.rs 请求 ID"]
         Collect --> Draft["draft.rs 原子恢复草稿 (绑定双命名管道)"]
         Triggers["agent_settled / 查账更新 / 30s 调度 / 关闭 / 恢复"] --> Submit["submission.rs 冻结与递增 revision"]

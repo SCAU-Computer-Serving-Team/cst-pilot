@@ -19,7 +19,7 @@
 
 ## Rust 软件内升级
 
-软件内升级引擎（`crates/cst-pilot/src/update/` 与 `cst-updater.exe`）满足以下安全与可靠性要求（双进程更新控制接口 `/api/app/update/*` 与双进程自检归属阶段 9 落地）：
+软件内升级引擎（`crates/cst-kit/src/update/`、`crates/cst-updater/` 与 `cst-updater.exe`）满足以下安全与可靠性要求（双进程更新控制接口 `/api/app/update/*` 与双进程自检归属阶段 9 落地）：
 
 1. **受控联网发现**：当前库层默认读取 `<oaHost>/api/agent/releases/latest` 获取签名版本清单（阶段 9 收敛为编译期显式注入 `CST_UPDATE_MANIFEST_URL`），启动后后台非阻塞检查一次并支持手动检查。仅在远端版本高于本机且本机不低于 `minUpgradableVersion` 时提示可升级，下载与安装须经本地确认。
 2. **编译期信任根与双重验签**：发布构建通过 `CST_UPDATE_PUBLIC_KEY` 编译注入官方 Ed25519 公钥。缺少编译期升级参数时关闭升级入口，普通会话保持可用，不从远端清单动态读取信任根。升级包安装前必须通过清单签名、`SHA256SUMS` 独立签名、归档哈希及解压后全树逐文件 SHA-256 校验。

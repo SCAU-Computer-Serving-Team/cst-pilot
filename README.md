@@ -55,28 +55,32 @@
 
 具体用法与权限、硬件限制见 [诊断工具规格](doc/diagnostics/SPEC.md) 与 [工具接口](doc/diagnostics/API.md)。
 
-## 未来计划
+## 开发轨道与目录结构
 
-1. 根据用户反馈不断迭代
-2. 使用 Rust 重写本项目，提供 Web、TUI 和桌面端支持，见 [Rust 重写计划](doc/rust/plan/0.PLAN.md)。
+当前仓库并行维护两条轨道，阶段 11 完成发行打包切换后移除旧 TypeScript 扩展目录：
 
-## 目录结构
+| 轨道 | 代码与入口 | 对齐基线 | 用途 |
+|---|---|---|---|
+| Rust 主线 | `crates/`、`pi-web-rust.cmd`、`src/web/frontend/` | 上游 Pi `1.5.0` | 核心服务、原生诊断工具链、Web/桌面/TUI 新架构，子包分工见 [CRATES.md](doc/rust/CRATES.md) |
+| `v0.6.2` 过渡轨 | `agent/home/extensions/`、`pi.cmd`、`pi-web.cmd`、`pack/` | 上游 Pi `0.85.1` | 现行便携发行版维护与跨端回归对照 |
 
 ### 开发版（本仓库）
 
 ```text
 cst-pilot/
-|-- pi.cmd                     TUI 启动入口
-|-- pi-web.cmd                 启动 TUI 宿主并打开 Web
+|-- pi-web-rust.cmd            Rust 独立 Web 服务调试入口（主线）
+|-- pi.cmd                     TUI 启动入口（v0.6.2 过渡轨）
+|-- pi-web.cmd                 启动 TUI 宿主并打开 Web（v0.6.2 过渡轨）
 |-- launcher.ps1               管理员授权与便携运行环境
+|-- crates/                    Rust 工作区（pi-* 核心、业务库、cst-server）
 |-- assets/                    品牌资源
-|-- design/                    界面设计稿与资源
+|-- design/                    设计核心文件（storybook.html、.pen 画布）与着色器资源
 |-- agent/home/
-|   |-- extensions/            诊断、Web、认证等扩展
+|   |-- extensions/            v0.6.2 过渡期 TypeScript 扩展
 |   `-- skills/                诊断工具的使用说明
 |-- src/web/frontend/          Web 前端源码
 |-- doc/                       产品、设计、工具与测试文档
-`-- pack/                      发行版构建脚本
+`-- pack/                      v0.6.2 发行版构建脚本
 ```
 
 ### 发行版

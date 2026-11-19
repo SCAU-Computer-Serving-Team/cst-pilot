@@ -8,9 +8,9 @@
 
 | 阶段 | 模块 | 待完成内容 | 设计依据 |
 |---|---|---|---|
-| 阶段 9 | `desktop` / `server` / `diagnostics` | 将 `crates/cst-pilot` 更名为 `crates/cst-kit`，实现 `crates/cst-client` 与 GPUI 桌面端 `crates/cst-desktop`（产出 `cst-pilot.exe`），将 `desktop-settings.json` 升级为 `desktop.json` 并接入 `.state/ui-hints.json` 与 `/api/app/update/*` | [9.desktop.md](rust/plan/9.desktop.md) |
-| 阶段 10 | `desktop` | 在 `cst-pilot.exe` 同一窗口内集成基于 `Ratatui` 的内置 TUI 视图 `crates/cst-tui`，与图形视图共享 `cst-client` 状态层与草稿 | [0.PLAN.md](rust/plan/0.PLAN.md#10-内置-tui-终端适配) |
-| 阶段 11 | `release` | 实现纯 Rust 便携发行装配与签名发布管线，接入生产升级公钥 `CST_UPDATE_PUBLIC_KEY`，移除过渡期 TypeScript 扩展与旧版 `pack/` 运行时装配 | [0.PLAN.md](rust/plan/0.PLAN.md#11-便携打包与三端验收) |
+| 阶段 9 | `desktop` / `server` / `diagnostics` | 基于阶段 8.5 产出的 `crates/cst-os`、`crates/cst-updater` 与 `crates/cst-kit` 实现 `crates/cst-client` 与 GPUI 桌面端 `crates/cst-desktop`（产出 `cst-pilot.exe`），将 `desktop-settings.json` 升级为 `desktop.json` 并接入 `.state/ui-hints.json` 与 `/api/app/update/*` | [9.desktop.md](rust/plan/9.desktop.md) |
+| 阶段 10 | `desktop` | 在 `cst-pilot.exe` 同一窗口内集成基于 `Ratatui` 的内置 TUI 视图 `crates/cst-tui`，与图形视图共享 `cst-client` 状态层与草稿。评估以 `cst-tui` 替代 `tree-parity.test.ts` 的旧 Pi 对照基准（无可靠新参照前保留当前对照基准） | [0.PLAN.md](rust/plan/0.PLAN.md#10-内置-tui-终端适配) |
+| 阶段 11 | `release` | 实现纯 Rust 便携发行装配与签名发布管线，接入生产升级公钥 `CST_UPDATE_PUBLIC_KEY`，迁移唯一 Biome 安装点与 Web 静态资源目录，移除过渡期 TypeScript 扩展与旧版 `pack/` 运行时装配 | [0.PLAN.md](rust/plan/0.PLAN.md#11-便携打包与三端验收) · [ADR.md](ADR.md) |
 
 ## 功能迭代
 
@@ -22,6 +22,8 @@
 | `web` | 会话内全文搜索与侧栏会话列表搜索 | [web/SPEC.md](web/SPEC.md#聊天工作台) |
 | `web` | 视觉令牌微调（`P2`）：将 `.composer-chip .chip-remove` 热区放大至 `≥ 20×20px`，校准 `/sessions` 会话行高至 `40px`，对齐 `/login` 缩放标签与 `special-tool` 附属图标最小尺寸 | [ux-e2e.md](web/test/ux-e2e.md) |
 | `telemetry` / `release` | 生产服务部署：上线 OA 请求级扣点接口 `/api/agent/llm/billing` 与版本升级签名清单接口 `/api/agent/releases/latest` | [telemetry/OPERATIONS.md](telemetry/OPERATIONS.md#发布与回退)、[release/SPEC.md](release/SPEC.md#rust-软件内升级) |
+| `pi-core` | 内部结构优化（非阶段 9 阻塞）：将 `pi-session` 38 个闭包袋收敛为 `SessionHost` Trait，将 `AgentSessionInner` 80 个字段分组管理 | [8.5.pre-desktop-cleanup.md](rust/plan/8.5.pre-desktop-cleanup.md#明确不做) |
+| `web` | 前端结构优化（非阶段 9 阻塞）：收敛 6 处重复全局事件订阅至 `WorkspaceStore`，拆分 `composer.tsx`、`shell.tsx` 与 `routes/tree.tsx` 大组件 | [8.5.pre-desktop-cleanup.md](rust/plan/8.5.pre-desktop-cleanup.md#明确不做) |
 
 ## 文档与设计规范待办
 

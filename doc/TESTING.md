@@ -12,10 +12,10 @@
 | Rust 静态检查 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | 全部 Rust 编译目标零警告 |
 | Rust 核心与全局回归 | `cargo test --workspace --locked` | 模型协议（`pi-ai`）、Agent 循环（`pi-agent`）、会话存储与扩展（`pi-session`）、运行时 SDK（`pi-runtime`）、业务包与后台服务全量隔离测试 |
 | Rust 存储故障注入 | `cargo test --workspace --locked --features test-support`、`cargo clippy --workspace --all-targets --locked --features test-support -- -D warnings` | 开启故障注入特性，验证部分写入、同步失败与尾部恢复保护 |
-| Rust 业务与安全专项 | `cargo test -p cst-pilot --locked` | 17 工具白名单、凭据与硬链接拦截、SSRF 与 Exa 检索、原生诊断字段与 50 KiB 裁剪、方案版本与 BOM+CRLF 清单、卷身份缓存、GPU/I/O/传感器采集、CSTOA 双路由登录与额度缓存 |
-| Rust 遥测专项 | `cargo test -p cst-pilot --test telemetry_collect --test telemetry_storage --test telemetry_network --test telemetry_session --locked` | 静默开关、Ed25519 签名、请求扣点有界查询、双命名管道存活证明、目录锁、草稿封存恢复、双端独立队列与共享 5 秒关闭预算 |
-| Rust BitLocker 专项 | `cargo test -p cst-pilot --test bitlocker_privacy --test bitlocker_execution --locked`、`cargo test -p pi-session --test data_policy --locked` | 恢复密码三条隐私边界、BSTR 清零、本地隐藏输入与确认、同卷命名管道互斥、超时与崩溃后实时状态复查 |
-| Rust 软件内升级专项 | `cargo test -p cst-pilot --test update_package --test update_applier --test update_service --locked` | 双重签名与 ZIP 边界校验、配置合并、逐文件中断恢复、真实 Windows Job Object 15 秒健康检查、失败回滚与升级门禁协调 |
+| Rust 业务与安全专项 | `cargo test -p cst-kit --locked` | 17 工具白名单、凭据与硬链接拦截、SSRF 与 Exa 检索、原生诊断字段与 50 KiB 裁剪、方案版本与 BOM+CRLF 清单、卷身份缓存、GPU/I/O/传感器采集、CSTOA 双路由登录与额度缓存 |
+| Rust 遥测专项 | `cargo test -p cst-kit --test telemetry_collect --test telemetry_storage --test telemetry_network --test telemetry_session --locked` | 静默开关、Ed25519 签名、请求扣点有界查询、双命名管道存活证明、目录锁、草稿封存恢复、双端独立队列与共享 5 秒关闭预算 |
+| Rust BitLocker 专项 | `cargo test -p cst-kit --test bitlocker_privacy --test bitlocker_execution --locked`、`cargo test -p pi-session --test data_policy --locked` | 恢复密码三条隐私边界、BSTR 清零、本地隐藏输入与确认、同卷命名管道互斥、超时与崩溃后实时状态复查 |
+| Rust 软件内升级专项 | `cargo test -p cst-updater --locked`、`cargo test -p cst-kit --test update_package --test update_health_check --test update_service --locked` | 双重签名与 ZIP 边界校验、配置合并、逐文件中断恢复、真实 Windows Job Object 15 秒健康检查、独立更新器进程恢复、失败回滚与升级门禁协调 |
 | Rust 后台服务与导出 | `cargo test -p cst-server --locked` | 单实例管道锁、`AppPresence × ChannelMode` 正交门禁与 Cookie 世代作废、10 空闲会话 LRU 与 `unflushed` 快照恢复、安全 `fork`、持久化收件箱、8 MiB 慢连接取消、32 会话向量游标聚合流及 `Chromiumoxide` PNG/HTML 导出契约 |
 | 前端静态检查与单测 | `npm run lint --prefix src/web/frontend`、`npm run typecheck --prefix src/web/frontend`、`npm test --prefix src/web/frontend` | 复用 `agent` 目录已安装的 Biome 检查规则，执行路由类型生成、TypeScript 严格检查，以及工具卡片映射、分支树几何、聚合流状态机与乐观发送单测 |
 | 前端构建与字体子集 | `npm run build --prefix src/web/frontend`、`npm run test:fonts --prefix src/web/frontend` | 静态资源构建至 `agent/home/extensions/web/static/`，核验三档 WOFF2 子集字符覆盖、哈希与许可证 |
@@ -50,7 +50,7 @@ cargo test -p pi-ai live_deepseek_responses_roundtrip_with_tools --locked -- --i
 LHM 隔离采集辅助程序需在安装 .NET 10 SDK 的构建机上验证，命令如下：
 
 ```powershell
-./crates/cst-pilot/lhm-host/test.ps1 -WorkDirectory E:/tmp/<YYYY-MM-DD>/lhm-tests
+./crates/cst-kit/lhm-host/test.ps1 -WorkDirectory E:/tmp/<YYYY-MM-DD>/lhm-tests
 ```
 
 该脚本构建自包含辅助程序与模拟 DLL，在真实 Windows Job Object 中验证 `gpu` / `sensor` 双模式、非有限值过滤、200 项上限与异常关闭路径，不读取真实硬件。

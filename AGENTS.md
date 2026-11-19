@@ -4,7 +4,7 @@
 
 1. 若从未阅读过项目文档，按以下顺序阅读：
    1. 基本情况：`doc\SPEC.md`、`README.md`、`doc\README.md`。
-   2. 架构、待办与测试：`doc\ARCHITECTURE.md`、`doc\TASKS.md`、`doc\TESTING.md`。
+   2. 架构、待办与测试：`doc\ARCHITECTURE.md`、`doc\rust\CRATES.md`、`doc\TASKS.md`、`doc\TESTING.md`。
    3. 按任务阅读对应模块目录（`pi-core`、`server`、`diagnostics`、`auth`、`telemetry`、`web`、`desktop`、`release`）及 `doc\rust\` 下的子包设计文档。
 2. 了解 `earendil-works/pi`。本项目 Rust 核心对齐上游 Pi `1.5.0`，遵循 Pi 工程规范。
 3. 遵循 Rust 社区与大型工作区工程实践。

@@ -14,11 +14,11 @@ npm ci --prefix src/web/frontend --ignore-scripts
 python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 ```
 
-`agent` 是扩展与工具的后端，`src/web/frontend` 是 Web 前端源码。两处依赖各自独立。Python 与 FontTools 仅用于开发和 CI 的字体生成，不进入现场运行链；详见[字体构建与分发](doc/release/ARCHITECTURE.md#字体构建与分发)。
+`crates/` 与 `pi-web-rust.cmd` 属于 Rust 主线（对齐上游 Pi `1.5.0`，子包定位见 [doc/rust/CRATES.md](doc/rust/CRATES.md)）。`agent/`、`pi.cmd`、`pi-web.cmd` 与 `pack/` 属于 `v0.6.2` 过渡轨（对齐上游 Pi `0.85.1`），`src/web/frontend` 为两轨共用的 Web 前端源码。`agent` 与 `src/web/frontend` 依赖各自独立。Python 与 FontTools 仅用于开发和 CI 的字体生成，不进入现场运行链；详见[字体构建与分发](doc/release/ARCHITECTURE.md#字体构建与分发)。
 
 ## 代码规范
 
-项目沿用 [Pi 0.85.1 的工程规范](https://github.com/earendil-works/pi/blob/v0.85.1/AGENTS.md)，检查命令与目录以本仓库为准。
+Rust 主线（`crates/`）对齐上游 Pi `1.5.0` 工程规范并遵循 Rust 社区工作区实践。`v0.6.2` 过渡轨（`agent/home/extensions/`）与前端 TypeScript 沿用 [Pi 0.85.1 的工程规范](https://github.com/earendil-works/pi/blob/v0.85.1/AGENTS.md)，检查命令与目录以本仓库为准。
 
 - TypeScript 使用严格模式与可擦除语法，不使用 `any`；外部接口类型从已安装依赖确认。
 - 模块依赖放在顶层导入，不使用动态导入或行内类型导入。

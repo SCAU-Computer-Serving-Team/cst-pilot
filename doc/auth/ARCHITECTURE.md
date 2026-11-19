@@ -1,6 +1,6 @@
 # 认证与模型服务架构
 
-本页说明 `crates/cst-pilot/src/auth/` 与 `crates/cst-server` 认证路由的模块划分与缓存机制，涵盖动态目录隔离、异步授权流及防串号额度缓存。业务规则见 [SPEC.md](SPEC.md)，接口定义见 [API.md](API.md)。
+本页说明 `crates/cst-kit/src/auth/` 与 `crates/cst-server` 认证路由的模块划分与缓存机制，涵盖动态目录隔离、异步授权流及防串号额度缓存。业务规则见 [SPEC.md](SPEC.md)，接口定义见 [API.md](API.md)。
 
 ## 模块组成
 

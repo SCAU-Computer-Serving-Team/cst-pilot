@@ -1,6 +1,6 @@
 # 诊断与受控工具架构
 
-本页说明 `crates/cst-pilot` 中安全守卫与 Windows 原生采集模块的实现结构，涵盖共享卷缓存、命令清单存储与 BitLocker 原生执行机制。行为约束见 [SPEC.md](SPEC.md)，接口定义见 [API.md](API.md)，完整目录映射见 [6.cst-pilot.md](../rust/plan/6.cst-pilot.md)。
+本页说明 `crates/cst-kit` 中安全守卫与 Windows 原生采集模块的实现结构，涵盖共享卷缓存、命令清单存储与 BitLocker 原生执行机制。行为约束见 [SPEC.md](SPEC.md)，接口定义见 [API.md](API.md)，完整目录映射见 [6.cst-pilot.md](../rust/plan/6.cst-pilot.md)。
 
 ## 模块组成与挂载管线
 
@@ -28,7 +28,7 @@ flowchart LR
 
 1. **有界阻塞与无泄漏槽位**：COM/WMI、Win32 与 Event Log 调用运行在隔离阻塞线程中，逐批检查取消令牌与时间预算。超时返回后未退出的底层系统调用继续持有工作槽位直至自然返回，防止后台线程无限堆积。SMART 单次最多查询 256 块物理盘。事件日志单通道扫描上限为 100,000 条，超限标记 `scanTruncated`。
 2. **Job Object 受控子进程（`native_job.rs`）**：调用 `WizTree64.exe`（32 位系统回退 `WizTree.exe`，上限 180 秒）或 `lhm/host/cst-lhm-host.exe`（上限 20 秒）时，统一以无 Shell 挂起方式创建进程，绑定 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 后恢复运行。取消、超时或主进程崩溃时由内核立即终止整个子进程树。
-3. **自包含 LHM 隔离采集**：`crates/cst-pilot/lhm-host/` 编译为携带 .NET 10 运行时的独立辅助程序，仅接受 `gpu` 或 `sensor` 模式并从上级目录加载 `LibreHardwareMonitorLib.dll`，将硬件探针异常与主服务内存隔离。
+3. **自包含 LHM 隔离采集**：`crates/cst-kit/lhm-host/` 编译为携带 .NET 10 运行时的独立辅助程序，仅接受 `gpu` 或 `sensor` 模式并从上级目录加载 `LibreHardwareMonitorLib.dll`，将硬件探针异常与主服务内存隔离。
 
 ## 共享目录大小缓存（`WzIndex`）
 
