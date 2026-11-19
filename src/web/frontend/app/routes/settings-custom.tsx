@@ -267,7 +267,7 @@ export default function CustomModelService() {
 										{showKey ? <EyeOff size={16} /> : <Eye size={16} />}
 									</button>
 								</span>
-								<small>密钥写入 Pi 的 models.json；界面不会回显。</small>
+								<small>密钥保存在本地模型配置中，界面不会回显。</small>
 							</label>
 						</div>
 					</SettingsSection>
@@ -388,7 +388,7 @@ export default function CustomModelService() {
 					{editing && (
 						<SettingsSection title="移除服务">
 							<div className="settings-card settings-custom-remove">
-								<span>从 Pi 的 models.json 移除此服务和模型。</span>
+								<span>从本地模型配置移除此服务和模型。</span>
 								{confirming ? (
 									<div className="settings-custom-confirm">
 										<Button type="button" variant="ghost" onPress={() => setConfirming(false)}>

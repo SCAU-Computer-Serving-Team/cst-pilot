@@ -366,7 +366,7 @@ export function Sidebar({
 					<Monitor size={18} />
 				</div>
 				<div className="device-copy">
-					<span>{preview ? "Tim2354" : teamSignedIn ? "CSTOA 账号" : "当前电脑"}</span>
+					<span>{preview ? "示例账号" : teamSignedIn ? "CSTOA 账号" : "当前电脑"}</span>
 					<small>
 						{preview
 							? "24宣传指导 · 设计预览"
@@ -442,7 +442,7 @@ export function Sidebar({
 							</Button>
 							<a
 								className="sidebar-account-item"
-								href="https://github.com/SCAU-CST/cst-pilot/issues/new"
+								href="https://github.com/SCAU-Computer-Serving-Team/cst-pilot/issues/new"
 								onClick={closeAccountMenu}
 								target="_blank"
 								rel="noopener noreferrer"

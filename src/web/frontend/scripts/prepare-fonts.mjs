@@ -52,7 +52,7 @@ for (const [name, checksum] of files) {
   if (downloaded) await save(file, bytes);
   if (name === "LICENSE.txt") await save(resolve(publicFonts, name), bytes);
 }
-// 界面与诊断标签纳入字符集；用户消息不用作构建输入。
+// 界面源码与静态补充字表纳入字符集；用户消息不用作构建输入。
 async function collect(directory) {
   const chunks = [];
   for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
@@ -62,7 +62,15 @@ async function collect(directory) {
   }
   return chunks;
 }
-const text = [...await collect(resolve(frontend, "app")), ...await collect(resolve(frontend, "../../../agent/home/extensions/diagnostics"))].join("\n");
+function parseExtraChars(raw) {
+  return raw
+    .split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("")
+    .replace(/\s+/g, "");
+}
+const extraChars = parseExtraChars(await readFile(resolve(frontend, "scripts/font-extra-chars.txt"), "utf8"));
+const text = [...await collect(resolve(frontend, "app")), extraChars].join("\n");
 const corpus = [...new Set(text)].sort().join("");
 const recipe = createHash("sha256").update(await readFile(resolve(frontend, "scripts/subset-fonts.py"))).update(await readFile(resolve(frontend, "scripts/font-requirements.txt"))).update(corpus).update(revision).digest("hex");
 let cached = false;

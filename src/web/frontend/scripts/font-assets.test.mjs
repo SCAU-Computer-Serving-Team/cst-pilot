@@ -22,6 +22,14 @@ test('分发 WOFF2、OFL 许可与校验清单，不含完整 OTF', async () => 
   assert.ok(subsetBytes < sourceBytes, `${subsetBytes} / ${sourceBytes}`);
 });
 
-test('常用中文、诊断字与界面标记有覆盖', () => {
+test('常用中文、诊断字、补充字表与界面标记有覆盖', async () => {
   for (const character of '计算机维护队磁盘网络蓝屏诊断授权龟驱动') assert.ok(includes(character), character);
+  const raw = await readFile(new URL('font-extra-chars.txt', import.meta.url), 'utf8');
+  const extraChars = raw
+    .split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith('#'))
+    .join('')
+    .replace(/\s+/g, '');
+  assert.ok(extraChars.length > 0, 'font-extra-chars.txt 不应为空');
+  for (const character of extraChars) assert.ok(includes(character), character);
 });
