@@ -101,6 +101,7 @@ pub struct DefaultResourceLoaderOptions {
     pub no_skills: bool,
     pub no_prompt_templates: bool,
     pub no_context_files: bool,
+    pub no_system_prompt_file: bool,
     pub system_prompt: Option<String>,
     pub append_system_prompt: Vec<String>,
     pub skills_override: Option<SkillsOverrideFn>,
@@ -141,6 +142,7 @@ pub struct DefaultResourceLoader {
     no_skills: bool,
     no_prompt_templates: bool,
     no_context_files: bool,
+    no_system_prompt_file: bool,
     system_prompt_input: Option<String>,
     append_system_prompt_input: Vec<String>,
     skills_override: Option<SkillsOverrideFn>,
@@ -185,6 +187,7 @@ impl DefaultResourceLoader {
             no_skills: options.no_skills,
             no_prompt_templates: options.no_prompt_templates,
             no_context_files: options.no_context_files,
+            no_system_prompt_file: options.no_system_prompt_file,
             system_prompt_input: options.system_prompt,
             append_system_prompt_input: options.append_system_prompt,
             skills_override: options.skills_override,
@@ -530,6 +533,7 @@ impl DefaultResourceLoader {
                 let (content, src) = self.resolve_prompt_input(inp);
                 (Some(content), src)
             }
+            None if self.no_system_prompt_file => (None, None),
             None => match self.discover_system_prompt_file() {
                 Some((content, src)) => (Some(content), Some(src)),
                 None => (None, None),

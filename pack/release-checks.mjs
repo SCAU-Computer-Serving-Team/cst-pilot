@@ -79,13 +79,9 @@ export const REQUIRED_RELEASE_FILES = [
   'licenses/MPL-2.0.txt',
   'pwsh/LICENSE.txt',
   'wiztree/license.txt',
+  'assets/fonts/SourceHanSansCN-VF.otf',
+  'assets/fonts/LICENSE.txt',
   `${WEB_STATIC}/index.html`,
-  `${WEB_STATIC}/fonts/LICENSE.txt`,
-  `${WEB_STATIC}/fonts/NOTICE.txt`,
-  `${WEB_STATIC}/fonts/subset.json`,
-  `${WEB_STATIC}/fonts/CSTUISans-Regular.woff2`,
-  `${WEB_STATIC}/fonts/CSTUISans-Medium.woff2`,
-  `${WEB_STATIC}/fonts/CSTUISans-Bold.woff2`,
   'agent/home/packages/pi-open-tui/LICENSE',
   'agent/home/packages/pi-web-access/LICENSE',
 ];
@@ -110,6 +106,13 @@ export function checkReleaseContent(root, files) {
   const assertRefs = (rel, refs) => {
     for (const ref of refs) {
       const local = decodeURIComponent(ref.split(/[?#]/)[0]);
+      if (local.startsWith('/fonts/')) {
+        const sharedTarget = path.posix.normalize(`assets${local}`);
+        if (!sharedTarget.startsWith('assets/fonts/') || !present.has(sharedTarget)) {
+          throw new Error(`${rel} 引用的资源不在发行树中: ${ref}`);
+        }
+        continue;
+      }
       const target = path.posix.normalize(local.startsWith('/') ? `${WEB_STATIC}${local}` : path.posix.join(path.posix.dirname(rel), local));
       if (!target.startsWith(`${WEB_STATIC}/`) || !present.has(target)) throw new Error(`${rel} 引用的资源不在发行树中: ${ref}`);
     }

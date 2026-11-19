@@ -127,12 +127,6 @@ jobs:
       # biome 由 agent 侧安装，前端的 lint 脚本直接调用它，保证格式规则只有一份。
       - run: npm ci --prefix agent --ignore-scripts
       - run: npm ci --prefix src/web/frontend --ignore-scripts
-      - uses: actions/setup-python@v5
-        if: inputs.full
-        with:
-          python-version: '3.11'
-      - run: python -m pip install -r src/web/frontend/scripts/font-requirements.txt
-        if: inputs.full
       - run: npm run lint --prefix src/web/frontend
       - run: npm run typecheck --prefix src/web/frontend
       - run: npm run test --prefix src/web/frontend

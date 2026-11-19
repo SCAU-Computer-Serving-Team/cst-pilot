@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use cst_pilot::auth::{AuthRuntime, Channel, oa::OaClient};
-use cst_pilot::telemetry::TelemetryOptions;
-use cst_pilot::update::service::UpdateOptions;
-use cst_pilot::{Kit, KitHost};
+use cst_kit::auth::{AuthRuntime, Channel, oa::OaClient};
+use cst_kit::telemetry::TelemetryOptions;
+use cst_kit::update::service::UpdateOptions;
+use cst_kit::{Kit, KitHost};
 use cst_server::{RunningServer, ServerConfig};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -78,21 +78,7 @@ fn open_default_browser(url: &str) {
 }
 
 fn resolve_default_kit_root() -> Result<PathBuf, String> {
-    if let Ok(agent_dir) = std::env::var("PI_CODING_AGENT_DIR")
-        && !agent_dir.trim().is_empty()
-    {
-        let p = PathBuf::from(agent_dir.trim());
-        if let Some(kit_root) = p.parent().and_then(|parent| parent.parent())
-            && kit_root.join("agent/home").exists()
-        {
-            return Ok(kit_root.to_path_buf());
-        }
-    }
-    let current = std::env::current_dir().map_err(|_| "无法读取当前工作目录".to_owned())?;
-    if current.join("agent/home").exists() {
-        return Ok(current);
-    }
-    Err("无法定位工具包根目录（缺少 agent/home）。".to_owned())
+    cst_os::resolve_kit_root()
 }
 
 #[tokio::main]

@@ -1,194 +1,70 @@
 # Web 前后端架构
 
-本页说明 Web 前后端目录组织、流式渲染与状态同步、草稿图片存储回收、分支树几何算法及工具卡片的数据转换管线。行为要求见 [SPEC.md](SPEC.md)，接口定义见 [API.md](API.md)。
+本页说明 React Web 前端（`src/web/frontend/`）与 `cst-server` 导出渲染管线的目录结构，覆盖聚合 SSE 同步、流式渲染、客户端草稿存储及工具卡片映射架构。行为要求见 [SPEC.md](SPEC.md)，接口定义见 [API.md](API.md)，阶段适配细节见 [8.web.md](../rust/plan/8.web.md)。
 
-## 工程边界与静态服务
+## 前端工程边界与静态托管
 
-前端源码位于 `src/web/frontend/`（包名 `@cst-pilot/web`，React 19 + Vite + Tailwind v4 + react-router 框架模式 `ssr: false`），构建产物输出至 `agent/home/extensions/web/static/`。后端位于 `agent/home/extensions/web/server/`。
+前端源码位于 `src/web/frontend/`（包名 `@cst-pilot/web`，React 19 + Vite + Tailwind v4 + React Router `ssr: false`），构建产物输出至 `agent/home/extensions/web/static/`，由 `crates/cst-server/src/routes/static_files.rs` 托管。
 
 ```text
 src/web/frontend/app/
-├── routes/         路由页面装配（主页、全部会话、工作台、树、设置、登录、账号）
-├── cards/          开放工具的结果转换（map-tool.ts / special-tool-data.ts）与渲染组件
-├── conversation/   对话流、过程分段、Markdown 安全切分、排队面板与扩展提问
-├── composer/       输入框行内标记编辑器、补全面板、草稿与 IndexedDB 图片引用、上下文额度
-├── images/         消息、工具与草稿共用的图片预览入口与原位缩放
-├── tree/           分支树可见重挂、几何列计算（branch-tree.ts）与分支总结参数编解码
-├── settings/       设置资源并发缓存、高度过渡钩子、模型范围排序与自定义服务表单
-├── auth/ & account/ OAuth 弹窗隔离、多步授权面板与 CSTOA 账号资料展示
-├── shell/          最近会话、共享列表状态、乐观批量删除、全局通知栈、断线提示、Blue hour / AIR WebGL 背景
-└── data/           HTTP/SSE 客户端、24ms 流式播放器、连接健康检查与错误格式化
+├── routes/         路由页面装配（主页、全部会话、工作台、分支树、导出、设置、登录、账号）
+├── cards/          17 个开放工具的结果转换（map-tool.ts / special-tool-data.ts）与卡片组件
+├── conversation/   对话流、过程分段、流式 Markdown、排队面板与扩展提问
+├── composer/       行内标记编辑器、补全面板、草稿与 IndexedDB 图片引用、上下文额度面板
+├── exports/        聊天与导出共用的只读文档呈现、双 iframe 后台预览交接与保存结果栏
+├── images/         消息、工具与草稿共用的原位缩放图片预览
+├── tree/           分支树五档过滤重挂、几何列计算（branch-tree.ts）与总结参数编解码
+├── settings/       设置资源并发缓存、分类横向快照转场、模型范围排序与自定义服务表单
+├── auth/ & account/ OAuth 无 opener 弹窗隔离、设备码二维码面板与 CSTOA 账号页
+├── shell/          全局外壳、最近会话滑动选区、批量删除、顶部通知栈、Blue hour / AIR WebGL 背景
+└── data/           共享类型（types.ts）、SharedWorker 聚合流客户端、乐观发送箱、24ms 流式播放器
 ```
 
-依赖方向固定为 `routes -> 功能域 -> data`；浏览器代码严禁引入 Node 原生模块或直接读取凭据文件。
-
-后端 API 按职责拆分；同源检查与写入去重由入口统一执行。
-
-| 文件 | 职责 |
-|---|---|
-| `server/api.ts` | 同源检查、生命周期、会话操作、写入串行化与去重；访问日志归当前实例所有 |
-| `server/api/models.ts` | 模型清单、选择、思考强度与启用范围 |
-| `server/api/auth.ts` | 登录、凭据与自定义服务配置，管理授权流程的释放 |
-| `server/api/http.ts` | JSON 正文校验、字节上限与响应格式 |
-| `server/api/errors.ts` | 将业务错误和任意抛出值映射为统一错误响应 |
-
-静态服务（`web/server/http.ts`）路由规则：
-
-- `/api/*` 交由 API 路由处理，未命中返回结构化 404 JSON。
-- 命中 `static/` 下真实存在的文件时按 MIME 类型返回；带内容哈希的 `/assets/*` 资源配长缓存，`index.html` 每次重验证。
-- 未命中文件但 `Accept` 包含 `text/html`、路径不属于资源目录且无文件扩展名时，返回 `index.html` 供前端路由解析（并按主题 Cookie 写入 `data-theme`）。
+依赖方向固定为 `routes -> 功能域 -> data`，浏览器代码不引入任何服务端运行时模块。静态托管路由对 `/assets/*` 哈希产物启用长缓存，对 HTML 页面导航请求读取 `cst-theme` Cookie（缺省为 `light`）注入 `<html data-theme>` 并返回 `index.html`，挂载后再由前端读取 `/api/settings` 同步。
 
 ## 流式渲染与 SSE 状态同步
 
-1. **Markdown 连续更新（`markdown.tsx`）**：流式与完成态共用同一组件、容器和文本包装结构，按块序号更新；追加段落不移动已读段落。高亮只在定稿时处理代码块，逐词节点按词序保持身份；历史正文不播放逐词动画。块级代码与原文共用 `shell/code-block.tsx`，复制时读取正文节点的当前 `textContent`，排除按钮与反馈；复制状态按块隔离，卸载时清理反馈计时器。
-2. **平滑步进播放（`stream-player.ts`）**：按 24ms 步进消费接收缓冲，每步输出 1–12 个字符（随积压动态加速）并吸附词边界，消息结束时立即刷出全部剩余文本。
-3. **SSE 背压与断流恢复**：服务端对单连接未发送积压允许至多 8 MiB 缓冲（容纳大体积思考或工具结果），每 20 秒发送一次 `heartbeat` 事件，心跳不占用业务回放序号；前端连续 45 秒未收到业务帧或心跳时判定断流。服务端在进程内保留最近 256 条业务事件，重连携带 `Last-Event-ID`；序号超出保留窗口或进程重启时收到 `reset` 信号并全量重取会话快照。
-4. **结束事件与快照衔接（`session-stream.ts`）**：`message_end` 直接合并完整的用户、助手和工具结果消息，助手结束时清除该消息的播放态；新一轮用户消息先进入展示，快速回复不会短暂归入上一轮。延迟快照不得覆盖更新。轮次、过程与工具组件按消息时间戳保持身份，HTTP 返回持久化条目 ID 时不重新挂载。连接重置保留正文，等待新快照接替；滚动跟随在绘制前完成。
-5. **轮次耗时持久化**：助手回复完成时，后端向会话写入 `cst-web-work-duration` 自定义条目（不进入模型上下文），在 HTTP 快照的 `message.work` 中返回精确起止耗时，保证刷新或重开后过程头耗时不变。
+1. **`SharedWorker` 32 会话分片聚合流（`event-stream.ts`、`event-stream-worker.ts`）**：
+   - 同源多标签页通过 `SharedWorker` 共享后台 SSE 连接，规避浏览器 HTTP/1.1 同源 6 条并发连接上限。
+   - Worker 启动先请求只读 `GET /api/state` 协商能力：`stage === "app_active"` 时直接进入通道待机锁定态。支持聚合流时按每 32 个活跃会话分配一个 `MultiplexShard` 连接 `/api/events/stream?clientId=<uuid>`，收到 `stream_ready` 后以单在途请求状态机调用 `PUT .../subscriptions` 同步订阅集合。
+   - Worker 解析每帧完整向量游标用于断线 256 帧增量回放，收到定向 `reset` 时仅通知对应标签页重取快照。遇到已删会话 `404 session_not_found` 时剔除失效 ID 并继续同步其余会话。不支持 `SharedWorker` 的环境自动退回页内分片复用。
+2. **平滑步进与流式连续性（`stream-player.ts`、`markdown.tsx`、`session-stream.ts`）**：
+   - 流式增量按 24ms 步进消费缓冲（随积压加速并吸附词边界），流式与定稿共用同一套容器与逐词节点，代码高亮仅在定稿时执行。
+   - `message_end` 原位承接完整消息，按消息时间戳保持轮次、过程与工具卡片组件身份不变，防止 HTTP 快照返回后组件重新挂载闪烁。
 
-## 会话导出与产物保存
+## 会话导出与离线文档管线
 
-| 模块 | 职责 |
-|---|---|
-| `shared/conversation.ts`、`shared/exports.ts` | 前后端共用消息、导出选项、快照与任务契约；仅包含类型 |
-| `server/exports/snapshot.ts` | 当前分支投影、参数校验、统一快照时间与归档日期、过程筛选与导出副本脱敏 |
-| `server/exports/store.ts` | 有界串行队列、后台任务、文件原子登记、失败回收与完整性核验 |
-| `server/exports/browser.ts` | 通过 `puppeteer-core` 管理专用浏览器、每任务隔离环境、取消、崩溃重建与空闲回收 |
-| `server/exports/render.ts`、`document.ts`、`pagination.ts` | 注入快照、限制页面网络请求、等待字体和附图、提取正文与排版、规划连续分图并截图 |
-| `server/exports/html.ts` | 后端离线 HTML 组装、资源并行读取、有界缓存与内容安全策略 |
-| `server/api/exports.ts`、`server/exports/open.ts` | 同源创建、预览、查询、文件读取与打开已校验目录；启动系统文件管理器，与入口写入去重共用 |
-| `app/routes/export.tsx`、`export-render.tsx` | 导出工作区与独立只读文档；预览主题不改变工作区主题 |
-| `app/exports/` | 共用文档呈现、后台预览交接、HeroUI 导出下拉与页面布局 |
-| `app/conversation/assistant-content.tsx`、`process-segment.tsx` | 聊天与导出共用的整轮回答和过程分段，保留相同的间距、缩进与引导线结构 |
-| `app/conversation/user-message.tsx`、`message-image.tsx`、`summary-entry.tsx` | 共用提问、附图和分支总结；导出移除动作并设置初始折叠状态 |
-| `app/conversation/transcript-disclosure.tsx` | 共用折叠入口；聊天使用 HeroUI，导出使用原生 `details` 保留离线交互 |
-
-预览保留已呈现的 iframe，新快照在隐藏 iframe 内准备。只读页完成字体和附图加载后发送同源就绪消息，新文档沿用原滚动位置并覆盖淡入；动画完成后移除旧文档。新选项取消未完成请求并移除待加载文档，失败保留完成态与重试入口；减少动态时直接交接。
-
-导出与聊天共用 `groupTurns`、`splitTurn`、`turnSegments` 和 `AssistantContent`，同一轮的助手消息合并呈现。文档样式只调整页面宽度、分页和动作可见性，内部间距与引导线沿用聊天样式。HTML 全部折叠，PNG 展开过程、思考与工具列表。
-
-HTML 就绪前加载折叠正文使用的字体，完整挂载详情与列表。原生 `details` 通过 `::details-content` 和 `interpolate-size` 实现 250ms 高度与透明度过渡，箭头沿用聊天样式；缺少支持时保留原生折叠，减少动态时直接切换。预览使用 `/_export?preview=1`，PNG 与 HTML 预览均保留折叠动效。生成 PNG 使用 `/_export`，截图时关闭动效；离线 HTML 保留折叠动效。
-
-创建任务先固定快照并写入内部登记，随后释放会话写锁，渲染过程不调用模型。Puppeteer 打开只读页并通过页面消息直接注入脱敏快照；页面仅允许同源静态资源 GET 和内嵌数据，不访问会话、账号或外部接口。
-
-浏览器通过管道通信，按需启动并复用；每个任务创建独立 BrowserContext，结束或取消后关闭，清除页面、Cookie 与本地存储。空闲 30 秒后释放进程及临时配置；崩溃后下个任务重建浏览器，程序退出时等待任务和浏览器回收。
-
-登记与渲染临时文件位于 `agent/home/session-exports/`，最终产物位于 `artifacts/<日期>/sessions/`。全部页面生成后才发布文件与完成状态；失败回收已发布文件。活跃任务提供已提交状态的内存副本，登记写入成功后才推进可见状态；读取磁盘登记时按队列版本重检，避免迟到读取覆盖新状态。
-
-文件按“标题-快照日期-本机时间-分页号”命名，HTML 省略分页号。发布使用排他复制；任一分页重名时只撤回本次尝试创建的文件，整组追加递增组号重试。读取时校验目录真实路径与 SHA-256，分享使用同一份已登记产物。
-
-保存结果组件只展示数量和目录按钮。打开操作由后端从已完成登记推导目录，校验真实路径和边界后以参数数组启动 Explorer；不接收网页路径，也不使用 Shell。打开请求有独立的禁用、取消与错误重试状态，组件卸载后忽略迟到响应。
-
-PNG 以固定的 1240 × 3200 CSS 像素视口逐段滚动截图，保留两倍像素密度。分页切点排序后单次遍历，每张图生成后立即写入暂存目录，内存中只保留当前图；浏览器拒绝快速编码参数时退回普通无损编码。
-
-离线文档复用 Markdown、代码、工具块、特殊工具与聊天主题。浏览器只返回清理后的正文、样式和已使用字体的引用，后端完成资源内嵌与文件组装；资源四路并行读取，同任务 URL 去重，跨任务复用 24 MiB 有界缓存。任一读取失败时取消同批读取并等待回收；取消信号直接关闭响应流读取器，结束后释放锁与监听器。单个资源上限 16 MiB、数量上限 128。
-
-附图保留内嵌数据，动作控件、脚本和事件属性移除，内容安全策略关闭脚本、表单及外部资源加载。HTML 使用原生 `details` 保留折叠，不依赖现场服务。
-
-## 会话预载与缓存
-
-`WorkspaceLayout` 的高度固定为可见窗口高度，页面根节点继承外壳高度并内部滚动。侧栏铺满窗口，路由切换复用同一实例，独立快照不播放切页动画；右侧长内容不会推动外层页面。
-
-外壳每次挂载时启动一次入场，刷新后重新播放。首页复用侧栏、标识、欢迎语、输入框与页脚的分层入场，背景保持静止；其他页面保留各自的局部入场。切换路径后取消本次启动标记，返回时不补播；侧栏折叠偏好保持不变，减少动态时直接呈现。
-
-侧栏底面始终保持不透明和静止，导航内容等待首次列表结果后整组入场；等待期间隐藏内容并暂停交互，空列表与读取失败也会结束等待。入场计时从列表就绪开始，独立于首页入场计时。会话行框不做入场位移，选中背景按稳定行框定位。
-
-涉及 `/s/:sessionId/export` 的原生转场将整个 `.workspace-content` 提取为 `export-page` 快照，同时取消其内部独立快照。旧页面用 80ms、4px 上移退场，新页面随后用 150ms、4px 上移入场，底色跟随工作区主题。路由入场标记保证直达及缺少快照时仅播放一次局部入场，快照结束后不补播；减少动态时跳过动效。
-
-`WorkspaceLayout` 挂载唯一的 `SessionsProvider`，共用列表请求、全局事件订阅与乐观删除状态。侧栏显示排序后的前 20 项，`/sessions` 按本地自然日分四组显示完整列表；`session-list.ts` 共用排序与互斥分组逻辑，页面在本地下一个零点重新分组，缺失或无效时间归入“更早”；`SessionEntry` 共用会话行，`useSessionActions` 与 `SessionActionsOverlay` 共用菜单、重命名、删除确认及失败恢复。管理模式使用原生复选框，焦点回到对应会话或管理入口。
-
-侧栏取得会话列表后，用 React Router 的 `PrefetchPageLinks` 预载共用的聊天路由入口及其依赖，只为一个会话插入预载声明。特殊工具样式并入全局样式，首次进入聊天无需再请求样式文件。
-
-会话行按下时仅淡化行内内容，选中背景由单个滑动选区绘制。点击处理时启动选区移动，选区跟随待提交路径，导航结束或取消后按路由状态校正；修饰键点击和取消的点击不改变当前选区。尺寸变化但目标位置未变时保留正在播放的滑动。
-
-正文保留淡入与线性颜色动画。首次读取的历史 Markdown 不创建逐字节点；流式正文及其定稿保留逐字节点。历史折叠过程首次展开时挂载内容，运行中立即挂载；挂载后收起保留节点、工具展开状态和排行分页。
-
-`session-cache.ts` 维护当前标签页的会话详情内存缓存，上限 20 项，按最近使用淘汰。`SessionsProvider` 首次取得真实会话列表后，按更新时间倒序选取最新 10 项，不限制日期跨度。详情请求分两批发起，每批最多 5 路并发，使用 `Promise.allSettled` 等待本批结束后启动下一批。
-
-预载独立于侧栏的显示和折叠状态，与打开会话共用在途请求，单项失败不阻断其余项，列表刷新不重复预载。
-
-聊天页同步读取命中项，并在后台重新获取快照与连接 SSE。列表与删除事务清除已删除项，版本标记阻止旧响应覆盖事件更新；被事件作废的在途响应不能代替下一次强制刷新。缓存不写入 `localStorage`、`sessionStorage` 或 `IndexedDB`。
-
-## 模型选择与凭据提示
-
-`server/api/models.ts` 分开提供会话选择与默认模型保存，模型清单同时返回目录、默认值和凭据就绪状态。服务端在创建会话与接受消息前预检凭据，拒绝时不写入收件箱或附件。
-
-前端 `composer/model-picker.tsx` 共用合并入口、双行主菜单、模型列表与思考强度列表。弹层固定宽 224px，按行数计算目标高度，以 transitions.dev 的 card resize 连续调整。主菜单与列表保留为两个页面，同时使用 page side-by-side 左右滑动与淡化过渡；隐藏页设为 inert 并移出辅助技术读取范围，保留上次列表内容供返回退场。列表超高时内部滚动，减少动态时立即切换。选择成功或列表内按 Esc 返回主菜单并恢复对应行焦点；点击外部直接关闭，主菜单内按 Esc 关闭。提交期间禁止重复写入，失败保留列表与已确认值，过期响应不改变当前视图。首页只保留本次模型和强度，创建时一并传入；会话内调用思考强度接口。后端会话档位取 Pi SDK，首页按模型档位映射与默认设置计算。
-
-前端 `data/model-selection.ts` 保留用户选择并只刷新其状态；`settings/default-model-picker.tsx` 提供可搜索的独立默认选择器；`auth/model-key-dialog.tsx` 使用原生对话框提醒配置，`auth/model-key-prompt.ts` 判定自动提示条件：完全没有凭据且距上次提示满 24 小时，记录写在 localStorage。配置成功只返回受限的本机来源路由，草稿由原有存储恢复，不自动发送。
-
-## 设置资源与自动保存
-
-`settings-resource-cache.ts` 按接口共享读取与缓存，通过版本号使服务变更前的请求失效。`use-settings-resource.ts` 对写入加锁，失败恢复已确认值；保存期间缓存版本变化时，局部保存结果不覆盖目录，结束后重新读取。
-
-模型范围的保存与读取共用 `null`（默认全启用）、`[]`（明确清空）和具体 ID 数组的语义。“刷新”仅重取列表与启用范围，不提交范围写入。提供商移除后清除失效筛选。
-
-## 设置分类导航
-
-`routes/settings.tsx` 按四分类的菜单序号判定滑动方向，服务配置子页归入“模型服务”。路径变化时同步记录方向，分类内部的子页导航保留独立入退场，资源预载沿用 `SettingsLink`。
-
-分类正文使用 `settings-page` 原生视图快照，按 transitions.dev 的 page-side-by-side 规则执行 250ms 横向位移与淡化。选中下划线使用独立的共享快照插值位置与宽度；跨出设置区时并入整页快照。不支持原生快照时新内容横向入场，减少动态时直接切换。
-
-## 运行中光影
-
-`running-light.tsx` 按字素分割状态文字，每个字位使用浏览器动画改变颜色混合强度；`running-light-timing.ts` 生成中心、相邻、隔一字的三档权重。浅色向白色混合，深色向暗色混合；周期为 2000ms，状态数字变化时保留当前进度。
-
-特殊组件使用按整体尺寸归一化的 SVG 线性遮罩，形成约占 40% 面积的右下角柔边三角形；反光层采用 `soft-light` 混合，越向内越淡。交叉观察器与页面可见性事件暂停离屏和隐藏页动效，减少动态时取消动画并恢复原色；反光层不接收点击。
-
-## 图片预览
-
-`images/image-preview.tsx` 提供 `PreviewableImage`，供消息附图、工具图片与草稿缩略图复用。点击时才挂载原生模态 `dialog`，通过 Portal 放到页面根部，避开气泡和工具卡片的布局及样式限制。
-
-预览复用已加载图片，以原图与居中大图的位置及尺寸差执行 Web Animations 缩放，背景同步淡入淡出。关闭从当前呈现值收回；窗口变化时关闭，减少动态偏好下直接呈现或收起。组件卸载时取消动画和监听，恢复原图可见性及页面滚动；样式并入全局样式，打开预览无需补载 CSS。
-
-## 输入队列调度
-
-`server/session/inbox.ts` 将条目选择与模型执行分开。普通输入每轮投递一条，执行期间仍可将立即插话或转为插话的排队项交给 Pi 的 steering 队列；SDK 在后续模型调用边界消费插话。
-
-首条输入的附件准备完成并进入执行状态后才允许插话投递，保证消息关联顺序。`agent_start` 与 `agent_settled` 唤醒调度器；退出时等待调度与在途投递全部结束。暂停、队列版本校验与失败条目的重试规则共用同一份持久化状态。
-
-## 乐观发送与回执核对
-
-`app/data/message-outbox.ts` 保存独立于路由的发送记录。`sessionStorage` 的 `cst-message-outbox:v1` 记录固定消息 ID、目标会话、模型配置、序列化输入、图片哈希与提交状态；发送备份持有图片引用，编辑器清空不回收图片字节。
+导出由前端预览工作区（`app/routes/export.tsx`、`/_export`）与后端 `crates/cst-server/src/exports/` 协同完成：
 
 | 模块 | 职责 |
 |---|---|
-| `message-outbox.ts` | 本地先保存再提交、同会话顺序、重试去重、未知结果核对与迟到响应保护；恢复时将未完成提交转为待确认，不自动发送 |
-| `use-message-outbox.tsx` | HTTP 与图片编码适配、15 秒请求超时、连接恢复核对、首页创建分阶段接管；新草稿与页面去向不被后台完成覆盖 |
-| `conversation/user-message.tsx`、`outgoing-message.tsx` | 乐观与正式气泡共用身份、一次入场、状态与恢复操作；待发送内容独立于运行中的助手轮次 |
-| `composer/drafts.ts` | 保存编辑失败消息时暂存的新草稿，文本与图片引用一同恢复 |
-| `server/session/input-messages.ts` | 将收件箱 ID 关联到实际用户消息，写入 `cst-web-input-message` 自定义条目；HTTP 与 SSE 仅向浏览器增加 `clientMessageId`，不改模型消息 |
+| `exports/snapshot.rs` | 单一时刻采样固定 `capturedAt` 与归档日期，投影当前分支可见条目与未闭合 BitLocker 强杀复查结果，执行 `browser_json` 脱敏与 `32 MiB` 体积检查 |
+| `exports/store.rs`、`open.rs` | 维护 8 任务有界串行队列与 `session-exports/<id>.json` 原子登记。重启时清理 `work/` 并将中断任务标为失败。排他发布至 `artifacts/<日期>/sessions/`（同名分图整组追加 `-2`、`-3`），校验 SHA-256 与目录边界后拉起 `explorer.exe` |
+| `exports/browser.rs` | 基于 `Chromiumoxide` 探测本机 Edge / Chrome（核验主版本 ≥111），单实例按需复用并为每任务创建隔离 `BrowserContext`，空闲 30 秒自动关闭清理 |
+| `exports/render.rs`、`pagination.rs`、`html.rs` | CDP 拦截非同源静态请求，注入快照等待字体与图片就绪。PNG 按 `1240×3200` CSS 像素（2 倍密度）规划切点逐段截图。离线 HTML 跳过中文字体 Base64 内嵌，仅提取轻量等宽字体与 `/assets/*` 静态资源并以 4 路并发（配 `24 MiB` 跨任务缓存）内嵌为 `data:` URL，封装严格 CSP |
+| `app/exports/` | 预览切换保留已呈现 iframe，新快照在隐藏 iframe 内加载完字体与图片后以 250ms 淡入覆盖并沿用滚动位置。聊天与导出共用 `AssistantContent` 与 `TranscriptDisclosure`（离线 HTML 使用原生 `<details>`） |
 
-本地备份在正式消息或可见后端队列承接后移除。首次明确拒绝可以编辑；已有未知请求时继续核对，后续拒绝不覆盖其不确定性。状态保存失败仍保留先前备份，恢复后使用原 ID 核对。后端加载遗留的 `delivering` 条目时附 `uncertain: true`，前端在队列中保留待核对内容，不将它重新投递。
+## 会话预载、乐观发送与客户端存储
 
-## 草稿图片存储与跨页回收
+1. **两批预载与外壳边界**：`WorkspaceLayout` 锁定窗口高度并保持侧栏实例常驻。`SessionsProvider` 首次取得列表后分两批（每批最多 5 路）预载最新 10 个会话存入内存 LRU 缓存（上限 20 项），并通过 `PrefetchPageLinks` 预热聊天路由代码。
+2. **乐观发送对账（`message-outbox.ts`、`use-message-outbox.tsx`）**：发送前先写入当前标签页 `sessionStorage`，断线或刷新后仅按原消息 ID 查询回执对账，不自动重发。后端确认接收或进入可见队列后移除本地备份。
+3. **浏览器存储与草稿图片回收**：
+   - `sessionStorage` 保存草稿正文与消息 ID（`cst-draft:<sessionId|new>`、`:id`、`:images`，以及编辑待发或失败项时暂存原草稿的 `:saved`）。
+   - `IndexedDB` 按 SHA-256 保存未发送图片原始字节，配合 `localStorage` 引用表 `cst-draft-images:<ownerId>`、`Web Locks API` 标签页存活锁与 60 秒刷新宽限期回收孤儿字节。
+   - `localStorage` 同步保存侧栏折叠态 `cst-ui-sidebar`、分支树过滤档位 `cst-tree-view` 与首次缺密钥 24 小时提示时间戳 `cst-model-key-prompt-at`。
+4. **第三方 OAuth 弹窗隔离（`app/auth/`）**：打开第三方 OAuth 授权链接时先在点击同步上下文创建空白窗口并立即断开 `opener`，本机回环回调与手动粘贴授权码并行等待，先完成者生效。
 
-未发送草稿保存在当前标签页 `sessionStorage`；未发送图片的原始字节按 SHA-256 存入浏览器 `IndexedDB`：
+## 分支树几何与过程分段
 
-- 引用扫描同时包含当前草稿、待发送记录和编辑时保留的草稿；任一引用存在时保留图片字节。
-- `localStorage` 仅发布各标签页持有的图片哈希引用表与心跳时间戳。
-- 配合浏览器 `Web Locks API` 存活锁与 60 秒页面刷新宽限期：仅当图片未被任何存活标签页、正在进行的异步读取或宽限期内的刷新页引用时，才在删除、发送成功或启动检查时清理 `IndexedDB` 孤儿字节。
-- 消息被后端 `POST /api/sessions/:id/messages` 接受后，图片字节按 SHA-256 写入服务端会话附件目录，后续通过 `/api/sessions/:id/attachments/:attachmentId` 读取，删除会话时同步清理附件目录。
-
-## 分支树几何算法
-
-`app/tree/branch-tree.ts` 将后端 `getTree()` 转换为与 Pi TUI `TreeList` 几何语义完全一致的展示行（由 `tree-parity.test.ts` 与真实 Pi 对照验证）：
-
-1. 在原始树上按“当前叶所在路径优先、其余兄弟按时间”执行深度优先遍历，固定每条目的 `activePath` 与 `traversalOrder`。
-2. 应用五档过滤，将隐藏条目的可见子条目重挂到最近的可见祖先，保持原始 `traversalOrder` 不重排。
-3. 计算每行几何属性：根节点 `indent = 0`；真实分叉的子条目 `indent + 1` 且标记 `showConnector = true`（绘制方框，位于 `connectorColumn = indent - 1`）；段首的第一代后代 `indent + 1`；非末位兄弟的子树在对应列延续竖线 `gutters`。有后代的连接符行在槽位后额外预留 `32px`，使分支起始行图标与后续单链内容对齐。
-
-## 工具分类与过程计数
-
-`app/cards/tool-kind.ts` 统一判断特殊组件与独立展示工具，供内容分段、工具分组与过程计数共用。`sys overview`（含缺省 scope）、`web_search`、命令方案与交付，以及 BitLocker 解锁／解密独立呈现；BitLocker 状态查询和其他 sys 查询保持普通工具，读取图片保留独立图片卡片。
-
-`turn-segments.ts` 根据普通调用的实际结果生成后续过程标题。思考、正文和图片保留内容入口，空段省略；首段工作时长入口保持稳定，流式结束和刷新不会因计数变化而移除。
+1. **分支树几何算法（`app/tree/branch-tree.ts`）**：对齐 `pi-session::tree` 规则，先在原始树上按活跃路径优先完成深度优先定序，再将五档过滤隐藏节点的可见后代重挂至最近可见祖先，计算每行缩进、分叉方框列与非末位兄弟延续竖线。
+2. **过程分段计数（`app/cards/tool-kind.ts`、`turn-segments.ts`）**：将 `sys overview`、`web_search`、三个命令清单工具及 `bitlocker unlock/decrypt` 划分为独立常驻段，其余工具归入可折叠过程段并按实际完成数更新进度计数。
 
 ## 工具卡片转换
 
 ### 通用骨架与 Block 联合类型
 
-`app/cards/map-tool.ts` 将工具原始返回（优先读未裁剪的 `details`，缺失时读 `content`）转换为统一的 `CardView`，交由 `tool-card.tsx`（基于 HeroUI `Card`、`Disclosure`、`Alert`、`Button`）渲染：
+`app/cards/map-tool.ts` 优先读取未裁剪的 `details`（缺失时回退 `content`）转换为统一的 `CardView` 结构：
 
 ```ts
 type Block =
@@ -202,26 +78,23 @@ type Block =
 
 ### 工具主模板与字段来源
 
-整次 `isError: true` 统一使用错误**原文块**；正常或降级返回按下表映射：
+整次 `isError: true` 统一渲染为错误原文块。正常或部分降级返回按下表映射：
 
 | 工具 | 渲染形态／主模板 | 核心字段来源与转换规则 |
 |---|---|---|
-| `disk` | 概览组（`space/info/health/all`）<br>排行组（`usage`） | `space[]`、`volumes[]`、`physicalDisks[]`、`smart[]` 每项生成字段组；`usage` 将 `topDirs`、`topFiles`、`extAgg`、`staleFiles` 生成排行组；保留 `infoNotice`、`smartErrors`、`degradedFrom` |
-| `ls` | 排行组 | `path/totalChildren/totalSize/method` 生成目录概况字段组；`entries[]` 生成大小排行组；`omitted` 生成截断提示；任一子项不完整时 `pct` 保持为空 |
-| `sys` | 特殊组件（`overview`）<br>排行组（`proc/gpu/io`）<br>概览组（`sensor`） | `overview` 走内嵌组件（内存 MB 转 GB）；`proc` 生成 CPU／内存双排行；`gpu` 生成进程排行 + 适配器／NVIDIA／LHM 字段组；`io` 生成磁盘与进程排行；`sensor` 生成硬件读数、热区与频率字段组 |
-| `startup` | 概览组 | 依次生成自启概况、`regItems[]`（`disabled` 映射为已禁用／未禁用／状态未知）、`startupFolders[]`、`services[]` 字段组 |
-| `eventlog` | 概览组（列表类）<br>原文块（`detail`） | 列表类将 `events[]` 生成事件字段组，`counts[]` 生成来源排行组，附范围统计与 `security` 权限降级提示；`detail` 生成事件头字段组 + `msg` 原文块 |
-| `driver` | 概览组 | `problem/find` 生成匹配设备与汇总字段组；`core` 按网卡、蓝牙、音频、显示、服务、驱动分组；`external` 按外设与可移动存储分组 |
-| `command_plan` / `runbook_deliver` / `runbook` | 特殊组件 | 标题、命令、风险档与版本优先取 `details.runbook`；缺失 `details` 时读取结果 JSON；缺少结构化命令时回退调用参数。方案与导出共用卡片，只有交付成功显示文件链接 |
-| `bitlocker` | 概览组（`status`）<br>特殊组件（`unlock/decrypt`） | `status` 按卷生成状态字段组；`unlock/decrypt` 走特殊组件，合并 `details.bitlocker.volumes[]`、每卷 `operation` 与会话待处理交互请求 |
-| `web_search` | 特殊组件 | 行内展示检索状态，展开调用参数 `queries / query`，状态比对 `successfulQueries` 与 `queryCount` |
-| `source_check` | 概览组 | 依次展示主张判断（`claims[]`）、来源排行（`sources[]`）、引文原文块（`passages[]`）与续读标识 |
-| `fetch_content` | 原文块 | 抓取概况字段组（`urls/successful/mode/totalChars`）+ `content` 文本原文块或图片组 + 截断续读提示 |
-| `get_search_content` | 原文块 | 按搜索、研究（JSON 片段）或网页抓取来源生成元数据字段组 + `content` 原文块 |
-| `fffind` / `ffgrep` | 原文块 | `details.totalMatched/totalFiles` 统计字段组 + `content[].text` 路径或代码匹配原文块（不将 `totalFiles` 误作命中数） |
-| `read` | 原文块 / 图片例外 | 文本读取展示绝对路径字段组 + 正文原文块；图片读取优先展示图片块，再展示绝对路径，忽略 `Read image file [...]` 标注文本 |
+| `disk` | 概览组（`space/info/health/all`）<br>排行组（`usage`） | `space[]`、`volumes[]`、`physicalDisks[]`、`smart[]` 生成字段组。`usage` 将 `topDirs`、`topFiles`、`extAgg`、`staleFiles` 生成排行组，保留 `infoNotice`、`smartErrors`、`degradedFrom` |
+| `ls` | 排行组 | `path/totalChildren/totalSize/method` 生成概况字段组，`entries[]` 生成大小排行组。任一子项不完整时 `pct` 保持为空 |
+| `sys` | 特殊组件（`overview`）<br>排行组（`proc/gpu/io`）<br>概览组（`sensor`） | `overview` 走常驻组件（内存 MiB 换算 GiB）。`proc` 生成双排行，`gpu` 生成进程排行与适配器／NVIDIA／LHM 字段组，`io` 生成磁盘与进程排行，`sensor` 生成传感器、热区与频率字段组 |
+| `startup` | 概览组 | 生成自启概况、`regItems[]`（映射禁用三态）、`startupFolders[]` 与 `services[]` 字段组 |
+| `eventlog` | 概览组（列表类）<br>原文块（`detail`） | 列表类将 `events[]` 与 `counts[]` 分别转为字段组和来源排行组，附权限降级提示。`detail` 生成事件头字段组加 `msg` 原文块 |
+| `driver` | 概览组 | `problem/find` 生成设备与汇总字段组。`core` 按网卡、蓝牙、音频、显示、服务、驱动分组。`external` 按外设与可移动盘分组 |
+| `command_plan` / `runbook_deliver` / `runbook` | 特殊组件 | 优先取 `details.runbook`，展示风险档、版本号与命令列表。仅交付成功项展示可点击文件名链接 |
+| `bitlocker` | 概览组（`status`）<br>特殊组件（`unlock/decrypt`） | `status` 按卷生成状态字段组。`unlock/decrypt` 合并卷实时状态、单卷 `operation`、顶层异常中断 `unknown` 复查原因及会话挂起交互请求 |
+| `web_search` | 特殊组件 | 单行展示检索状态并比对 `successfulQueries` 与 `queryCount`，展开展示查询词列表 |
+| `source_check` / `fetch_content` / `get_search_content` | 概览组 / 原文块 | 展示主张核验与来源排行，或抓取概况字段组加正文原文块／图片组与续读标识 |
+| `fffind` / `ffgrep` / `read` | 原文块 / 图片例外 | `fffind` 与 `ffgrep` 展示命中正文文本块与截断提示。`read` 图片形态优先展示可预览图片，再附绝对路径 |
 
 ### 特殊工具交互
 
-- **BitLocker 本地输入与确认**：Web 后端在内存中维护绑定 `sessionId + entryId + toolCallId + requestId` 的待处理请求（3 分钟有效期，带递增版本），随会话快照与 SSE 下发。前端 `bitlocker-input.tsx` 通过 `POST /api/sessions/:id/bitlocker/:requestId` 一次性提交恢复密码或确认解密，绕过持久化幂等日志，确保恢复密码永不落盘。
-- **Runbook 文件打开**：点击卡片文件名调用 `POST /api/sessions/:id/runbook/open`，后端按助手条目和调用 ID 匹配 `runbook` 或 `runbook_deliver` 的结果，从结果读取路径，校验文件属于 `artifacts/` 后启动系统记事本，并对重复点击做去重保护。
+- **BitLocker 本地输入与确认**：`cst-server` 的 `BitLockerSessionBridge` 在会话内存中维护 3 分钟有效期的挂起请求，随快照与 SSE 下发。前端通过 `POST /api/sessions/:id/bitlocker/:requestId` 单次提交恢复密码或确认解密，绕过持久化幂等日志，格式错误返回 `400` 可原地修正重提。
+- **Runbook 文件打开**：点击已交付文件名调用 `POST /api/sessions/:id/runbook/open`（仅传 `{ entryId, toolCallId }`），后端核对分支结果路径位于 `artifacts/` 内后直接调用系统 `notepad.exe` 打开。

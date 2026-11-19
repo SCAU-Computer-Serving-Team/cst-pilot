@@ -82,6 +82,12 @@ export async function startRustWebServer(options: {
 		await mkdir(dirname(staticTarget), { recursive: true });
 		await symlink(join(repoRoot, "agent/home/extensions/web/static"), staticTarget, "junction");
 	}
+	const sharedFontsSource = join(repoRoot, "assets/fonts");
+	const sharedFontsTarget = join(kitRoot, "assets/fonts");
+	if (existsSync(sharedFontsSource) && !existsSync(sharedFontsTarget)) {
+		await mkdir(dirname(sharedFontsTarget), { recursive: true });
+		await symlink(sharedFontsSource, sharedFontsTarget, "junction");
+	}
 	if (!existsSync(join(home, "settings.json")) && !existsSync(join(home, "models.json"))) {
 		await configureTestModel(home, options.modelBaseUrl);
 	}

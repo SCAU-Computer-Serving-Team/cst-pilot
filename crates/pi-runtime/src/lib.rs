@@ -1,20 +1,26 @@
 pub mod auth_storage;
 pub mod cache_warmer;
+#[cfg(feature = "clipboard")]
 pub mod clipboard;
+#[cfg(feature = "clipboard")]
 mod clipboard_native;
+#[cfg(feature = "codemode")]
 pub mod codemode;
 pub mod config_value;
 pub mod context_files;
 pub mod extensions;
 pub mod image_process;
+#[cfg(feature = "mcp")]
 pub mod mcp;
 pub mod model_config;
 pub mod model_resolver;
 pub mod model_runtime;
 mod models_store;
+#[cfg(feature = "cli-modes")]
 pub mod modes;
 pub mod prompt_templates;
 pub mod resource_loader;
+#[cfg(feature = "cli-modes")]
 pub mod runtime;
 pub mod sdk;
 pub mod settings_manager;
@@ -23,20 +29,25 @@ pub mod tools;
 
 pub use auth_storage::*;
 pub use cache_warmer::*;
+#[cfg(feature = "clipboard")]
 pub use clipboard::*;
+#[cfg(feature = "codemode")]
 pub use codemode::*;
 pub use config_value::*;
 pub use context_files::*;
 pub use extensions::*;
 pub use image_process::*;
+#[cfg(feature = "mcp")]
 pub use mcp::*;
 pub use model_config::*;
 pub use model_resolver::*;
 pub use model_runtime::*;
+#[cfg(feature = "cli-modes")]
 pub use modes::*;
 pub use pi_session::parse_model_thinking_level as parse_model_thinking_level_cli;
 pub use prompt_templates::*;
 pub use resource_loader::*;
+#[cfg(feature = "cli-modes")]
 pub use runtime::*;
 pub use sdk::*;
 pub use settings_manager::*;

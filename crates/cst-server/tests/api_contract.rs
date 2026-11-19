@@ -3,16 +3,16 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use cst_pilot::auth::{AuthRuntime, Channel, oa::OaClient};
-use cst_pilot::bitlocker::{
+use cst_kit::auth::{AuthRuntime, Channel, oa::OaClient};
+use cst_kit::bitlocker::{
     BitLockerPendingKind,
     core::{BitLockerSource, Executor},
     model::{Protector, Scope, Snapshot, Volume},
 };
-use cst_pilot::diagnostics::win_native::{Control, NativeError};
-use cst_pilot::telemetry::TelemetryOptions;
-use cst_pilot::update::service::UpdateOptions;
-use cst_pilot::{Kit, KitHost, SKILL_NAMES};
+use cst_kit::diagnostics::win_native::{Control, NativeError};
+use cst_kit::telemetry::TelemetryOptions;
+use cst_kit::update::service::UpdateOptions;
+use cst_kit::{Kit, KitHost, SKILL_NAMES};
 use cst_server::mode::CallerIdentity;
 use cst_server::session::events::SessionEvents;
 use cst_server::{RunningServer, ServerConfig};
@@ -235,7 +235,7 @@ async fn bitlocker_wakeup_settlement_validates_before_consuming_and_redacts_pass
     // 2. Spawn the BitLocker password request on `slot.bitlocker` (simulating the `bitlocker` tool waiting for local password)
     let bridge = slot.bitlocker.clone();
     let wait_handle = tokio::spawn(async move {
-        use cst_pilot::bitlocker::BitLockerHostChannel;
+        use cst_kit::bitlocker::BitLockerHostChannel;
         bridge
             .request(
                 "tc-bitlocker-1",
@@ -344,7 +344,7 @@ async fn bitlocker_wakeup_settlement_validates_before_consuming_and_redacts_pass
     let answer = wait_handle.await.unwrap();
     assert!(matches!(
         answer,
-        Some(cst_pilot::bitlocker::BitLockerAnswer::Password(_))
+        Some(cst_kit::bitlocker::BitLockerAnswer::Password(_))
     ));
 
     // 7. Verify `GET /api/sessions/:id` redacts any 48-digit recovery password in messages
@@ -1747,5 +1747,219 @@ async fn browser_sse_single_and_multiplex_streams_filter_system_messages_across_
     }
 
     drop(slot);
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn create_session_distinguishes_omitted_fields_from_explicit_null_and_state_commands_match_skills()
+ {
+    let fixture = ContractFixture::new();
+    let server = fixture.start_server(true).await;
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let host_header = format!("127.0.0.1:{}", server.port());
+    let origin_header = format!("http://127.0.0.1:{}", server.port());
+
+    // 1. `/api/state` commands are dynamically derived from `cst_kit::SKILL_NAMES`.
+    let state_json: Value = client
+        .get(format!("{}/api/state", server.base_url()))
+        .header("Host", &host_header)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        state_json["commands"],
+        json!([
+            "/compact",
+            "/fork",
+            "/tree",
+            "/skill:bitlocker",
+            "/skill:disk",
+            "/skill:driver",
+            "/skill:eventlog",
+            "/skill:ls",
+            "/skill:runbook",
+            "/skill:startup",
+            "/skill:sys",
+        ])
+    );
+
+    // 2. Explicit `null` fields, non-object bodies, and mismatched pairs are strictly rejected with `400 invalid_request`.
+    for (idx, bad_body) in [
+        json!([]),
+        json!({ "provider": null }),
+        json!({ "provider": null, "modelId": null }),
+        json!({ "thinkingLevel": null }),
+        json!({ "provider": "deepseek" }),
+        json!({ "modelId": "deepseek-flash" }),
+        json!({ "unexpected": true }),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let resp = client
+            .post(format!("{}/api/sessions", server.base_url()))
+            .header("Host", &host_header)
+            .header("Origin", &origin_header)
+            .header("X-CST-Web-Request", "1")
+            .header("Idempotency-Key", format!("bad-create-{idx}"))
+            .json(&bad_body)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status().as_u16(),
+            400,
+            "body {bad_body} should be rejected"
+        );
+        let err_json: Value = resp.json().await.unwrap();
+        assert_eq!(err_json["error"]["code"], "invalid_request");
+        assert_eq!(err_json["error"]["message"], "请求的新会话配置无效");
+    }
+
+    // 3. Omitted optional fields (`{}`) succeed with `201 Created`.
+    let ok_resp = client
+        .post(format!("{}/api/sessions", server.base_url()))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "ok-create-omitted")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok_resp.status().as_u16(), 201);
+    let ok_json: Value = ok_resp.json().await.unwrap();
+    assert!(ok_json["id"].as_str().is_some());
+
+    // 4. Interactive `api-key/start` with `baseUrl` waits for secret without blocking custom provider config writes.
+    let start_resp = client
+        .post(format!(
+            "{}/api/auth/deepseek/api-key/start",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "deepseek-interactive-start")
+        .json(&json!({ "baseUrl": "https://api.deepseek.com/v1" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(start_resp.status().as_u16(), 202);
+    let start_json: Value = start_resp.json().await.unwrap();
+    assert_eq!(start_json["state"], "pending");
+    assert!(start_json["prompt"]["id"].as_str().is_some());
+
+    let custom_resp = tokio::time::timeout(
+        Duration::from_secs(3),
+        client
+            .post(format!("{}/api/auth/custom", server.base_url()))
+            .header("Host", &host_header)
+            .header("Origin", &origin_header)
+            .header("X-CST-Web-Request", "1")
+            .header("Idempotency-Key", "custom-save-while-prompt-open")
+            .json(&json!({
+                "id": "team-gw",
+                "name": "Team Gateway",
+                "baseUrl": "https://gw.example.com/v1",
+                "api": "openai-completions",
+                "apiKey": "sk-team-secret",
+                "models": [{
+                    "id": "m1",
+                    "name": "Model 1",
+                    "contextWindow": 64000,
+                    "maxTokens": 8192,
+                    "reasoning": false,
+                    "image": false
+                }]
+            }))
+            .send(),
+    )
+    .await
+    .expect("custom provider save must not block on interactive api-key prompt")
+    .unwrap();
+    assert_eq!(custom_resp.status().as_u16(), 200);
+
+    // 5. Even after answering the interactive prompt so the background login task enters the
+    //    `auth-config:all` wait queue, a concurrent `PUT /api/auth/deepseek/api-key` with `baseUrl`
+    //    cancels the waiting flow immediately without deadlocking behind `auth-config:all`.
+    let held_cfg = server.state.locks.lock("auth-config:all").await;
+    let flow_id = start_json["flowId"].as_str().unwrap().to_owned();
+    let prompt_id = start_json["prompt"]["id"].as_str().unwrap().to_owned();
+    let respond_resp = client
+        .post(format!(
+            "{}/api/auth/deepseek/api-key/respond",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .header("Origin", &origin_header)
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "deepseek-interactive-respond")
+        .json(&json!({
+            "flowId": flow_id,
+            "promptId": prompt_id,
+            "value": "sk-old-interactive-key"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(respond_resp.status().as_u16(), 200);
+    // Give the spawned task a moment to park on `st.locks.lock("auth-config:all")`.
+    tokio::time::sleep(Duration::from_millis(40)).await;
+
+    let put_client = client.clone();
+    let put_url = format!("{}/api/auth/deepseek/api-key", server.base_url());
+    let put_host = host_header.clone();
+    let put_origin = origin_header.clone();
+    let put_handle = tokio::spawn(async move {
+        put_client
+            .put(put_url)
+            .header("Host", put_host)
+            .header("Origin", put_origin)
+            .header("X-CST-Web-Request", "1")
+            .header("Idempotency-Key", "deepseek-put-override")
+            .json(&json!({
+                "key": "sk-new-override-key",
+                "baseUrl": "https://api.deepseek.com/v1"
+            }))
+            .send()
+            .await
+            .unwrap()
+    });
+
+    // While `held_cfg` is STILL held, `PUT` must cancel the parked flow via `cancel_and_wait` without deadlocking!
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let st_json: Value = client
+                .get(format!(
+                    "{}/api/auth/deepseek/api-key/status",
+                    server.base_url()
+                ))
+                .header("Host", &host_header)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            if st_json["state"] == "cancelled" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("PUT must cancel interactive flow waiting on auth-config:all before acquiring auth-config:all");
+
+    drop(held_cfg);
+    let put_resp = tokio::time::timeout(Duration::from_secs(3), put_handle)
+        .await
+        .expect("PUT must finish promptly once auth-config:all is released")
+        .unwrap();
+    assert_eq!(put_resp.status().as_u16(), 200);
+
     server.shutdown().await;
 }

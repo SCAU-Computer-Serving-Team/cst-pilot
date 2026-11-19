@@ -1,3 +1,5 @@
+#![cfg(feature = "cli-modes")]
+
 #[path = "sdk_and_runtime/image_filtering.rs"]
 mod image_filtering;
 

@@ -6,7 +6,9 @@ members = [
     "crates/pi-agent",
     "crates/pi-session",
     "crates/pi-runtime",
-    "crates/cst-pilot",
+    "crates/cst-os",
+    "crates/cst-updater",
+    "crates/cst-kit",
     "crates/cst-server",
 ]
 

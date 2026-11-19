@@ -1,3 +1,5 @@
+#![cfg(feature = "mcp")]
+
 #[path = "support/mcp_http.rs"]
 mod fixture;
 

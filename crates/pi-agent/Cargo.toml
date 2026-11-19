@@ -22,3 +22,6 @@ tokio.workspace = true
 tokio-util.workspace = true
 url.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+pi-ai = { path = "../pi-ai", features = ["test-support"] }

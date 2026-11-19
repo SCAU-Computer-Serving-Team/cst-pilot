@@ -4,21 +4,20 @@
 
 ## 环境
 
-Windows 上开发，命令用 PowerShell 执行。需要 Node 22.19.0 以上，仓库自带 `node/`（不入库）时可以改用它。字体生成使用 Python 3.11，与完整验收 CI 保持一致。Rust 模型核心使用 Rust 1.99.1。
+Windows 上开发，命令用 PowerShell 执行。需要 Node 22.19.0 以上，仓库自带 `node/`（不入库）时可以改用它。Rust 模型核心使用 Rust 1.99.1。
 
 首次准备依赖：
 
 ```powershell
 npm ci --prefix agent --ignore-scripts
 npm ci --prefix src/web/frontend --ignore-scripts
-python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 ```
 
-`agent` 是扩展与工具的后端，`src/web/frontend` 是 Web 前端源码。两处依赖各自独立。Python 与 FontTools 仅用于开发和 CI 的字体生成，不进入现场运行链；详见[字体构建与分发](doc/release/ARCHITECTURE.md#字体构建与分发)。
+`crates/` 与 `pi-web-rust.cmd` 属于 Rust 主线（对齐上游 Pi `1.5.0`，子包定位见 [doc/rust/CRATES.md](doc/rust/CRATES.md)）。`agent/`、`pi.cmd`、`pi-web.cmd` 与 `pack/` 属于 `v0.6.2` 过渡轨（对齐上游 Pi `0.85.1`），`src/web/frontend` 为两轨共用的 Web 前端源码。`agent` 与 `src/web/frontend` 依赖各自独立。共享可变字体由 `prepare-fonts.mjs` 按固定 SHA-256 同步至 `assets/fonts/`，详见[字体构建与分发](doc/release/ARCHITECTURE.md#字体构建与分发)。
 
 ## 代码规范
 
-项目沿用 [Pi 0.85.1 的工程规范](https://github.com/earendil-works/pi/blob/v0.85.1/AGENTS.md)，检查命令与目录以本仓库为准。
+Rust 主线（`crates/`）对齐上游 Pi `1.5.0` 工程规范并遵循 Rust 社区工作区实践。`v0.6.2` 过渡轨（`agent/home/extensions/`）与前端 TypeScript 沿用 [Pi 0.85.1 的工程规范](https://github.com/earendil-works/pi/blob/v0.85.1/AGENTS.md)，检查命令与目录以本仓库为准。
 
 - TypeScript 使用严格模式与可擦除语法，不使用 `any`；外部接口类型从已安装依赖确认。
 - 模块依赖放在顶层导入，不使用动态导入或行内类型导入。
@@ -44,7 +43,7 @@ python -m pip install -r src/web/frontend/scripts/font-requirements.txt
 | 前端测试 | `npm run test --prefix src/web/frontend` | 工具卡片映射、分支树与流式渲染的纯函数测试 |
 | 工具与文档约束 | `node --test src/test/*.test.mjs` | 诊断工具、凭据边界、画布颜色与节点完整性、本地文档链接 |
 | 前端构建 | `npm run build --prefix src/web/frontend` | 产物写入 `agent/home/extensions/web/static/` |
-| 分发字体 | `npm run test:fonts --prefix src/web/frontend` | 构建后检查覆盖、hash、回退与体积 |
+| 分发字体 | `npm run test:fonts --prefix src/web/frontend` | 构建后校验共享可变字体的哈希、OpenType 表和许可证，确认 Web 静态目录没有字体副本 |
 | 端到端验收 | `npm run test:web:e2e --prefix agent` | 先构建；真实浏览器、HTTP、Pi、持久化与重启，链路见[测试规范](doc/TESTING.md#web-端到端核心链路) |
 
 前端 lint 必须从 `src/web/frontend` 目录发起：biome 按运行目录识别 React 项目，换目录会漏掉 React 相关规则。`npm --prefix` 已经处理，直接照表执行即可。

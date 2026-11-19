@@ -48,7 +48,7 @@ function makeTree() {
   write('agent/home/extensions/web/static/assets/extra.js', 'x');
   write(
     'agent/home/extensions/web/static/assets/styles-abc.css',
-    '@font-face{src:url(/fonts/CSTUISans-Regular.woff2)}',
+    '@font-face{src:url(/fonts/SourceHanSansCN-VF.otf)}',
   );
   return root;
 }
@@ -134,9 +134,9 @@ test('样式相对资源必须存在且不能越出 Web 静态目录', () => {
   const root = makeTree();
   const stylesheet = path.join(root, 'agent/home/extensions/web/static/assets/styles-abc.css');
   try {
-    fs.writeFileSync(stylesheet, '@font-face{src:url("../fonts/CSTUISans-Regular.woff2?v=1#face")}');
+    fs.writeFileSync(stylesheet, '@font-face{src:url("/fonts/SourceHanSansCN-VF.otf?v=1#face")}.x{background:url("./extra.js?v=1")}');
     assert.doesNotThrow(() => checkReleaseContent(root, filesOf(root)));
-    for (const reference of ['missing.woff2', '../../../../../../E:/build/node_modules/font.woff2', 'file:///E:/build/font.woff2', 'E:/build/font.woff2']) {
+    for (const reference of ['missing.woff2', '/fonts/missing.otf', '../../../../../../E:/build/node_modules/font.woff2', 'file:///E:/build/font.woff2', 'E:/build/font.woff2']) {
       fs.writeFileSync(stylesheet, `@font-face{src:url(${reference})}`);
       assert.throws(() => checkReleaseContent(root, filesOf(root)), /引用的资源不在发行树中/);
     }

@@ -18,7 +18,7 @@ Rust 诊断模块使用 `host/cst-lhm-host.exe` 加载本目录的 DLL，采集�
 构建机需提供 .NET 10 SDK，在仓库根目录执行：
 
 ```powershell
-./crates/cst-pilot/lhm-host/publish.ps1 -OutputDirectory ./lhm/host -WorkDirectory E:/tmp/<YYYY-MM-DD>/lhm-build
+./crates/cst-kit/lhm-host/publish.ps1 -OutputDirectory ./lhm/host -WorkDirectory E:/tmp/<YYYY-MM-DD>/lhm-build
 ```
 
 发布目录包含程序、运行时及 .NET 许可，整目录随包分发；编译缓存保留在 `WorkDirectory`。辅助程序固定从上级读取 `LibreHardwareMonitorLib.dll` 及其依赖，只接受 `gpu` / `sensor` 两种模式。读取错误按来源返回，传感器仅保留有限值，最多 200 项；库的 `Close()` 在正常返回与异常处理时执行。

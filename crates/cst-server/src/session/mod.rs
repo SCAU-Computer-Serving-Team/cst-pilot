@@ -2,18 +2,18 @@ pub mod attachments;
 pub mod decorators;
 pub mod events;
 pub mod inbox;
+pub mod index;
 pub mod interactions;
 pub mod receipts;
 pub mod slot;
 
 use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use cst_pilot::{HostedSessionOptions, KitHost};
+use cst_kit::{HostedSessionOptions, KitHost};
 use pi_agent::AgentMessage;
 use pi_ai::{Model, ModelCost, ModelInputModality, ModelThinkingLevel, uuid_v7};
 use pi_runtime::{
@@ -21,21 +21,21 @@ use pi_runtime::{
 };
 use pi_session::{
     ExtensionMode, NewSessionOptions, SessionEntry, SessionInfo, SessionManager, SessionStoreError,
-    build_session_info_sync, format_iso_timestamp, list_sessions_from_dir, now_iso_timestamp,
-    parse_iso_timestamp_ms,
+    build_session_info_sync, format_iso_timestamp, now_iso_timestamp, parse_iso_timestamp_ms,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::discovery::{SessionOwnerLock, strip_windows_verbatim_prefix};
-use crate::locks::{KeyedLocks, StorageError, atomic_write_json, atomic_write_json_sync};
+use crate::locks::{KeyedLocks, StorageError};
 use crate::mode::CallerIdentity;
 use crate::session::attachments::{ImageStore, is_valid_session_id_key};
 use crate::session::events::{
     MAX_MULTIPLEX_SUBSCRIPTIONS, MultiplexHub, MultiplexSubscriptionUpdate, SessionEvents,
     SessionEventsResolver,
 };
+use crate::session::index::SessionIndexStore;
 use crate::session::interactions::{BitLockerSessionBridge, ServerUiBridge};
 use crate::session::receipts::MutationReceipts;
 use crate::session::slot::{SessionLease, SessionSlot};
@@ -220,10 +220,9 @@ pub struct SessionPool {
     touch_seq: Arc<AtomicU64>,
     closed: Arc<AtomicBool>,
     slots: Arc<AsyncMutex<BTreeMap<String, Arc<SessionSlot>>>>,
-    created_lock: Arc<AsyncMutex<()>>,
+    index: SessionIndexStore,
     load_locks: KeyedLocks,
     eviction_lock: Arc<AsyncMutex<()>>,
-    removed: Arc<Mutex<BTreeSet<String>>>,
     scoped_models: Arc<Mutex<Vec<pi_runtime::ScopedModel>>>,
     pub invalid_auth: Arc<Mutex<BTreeSet<String>>>,
     pub images: ImageStore,
@@ -255,6 +254,8 @@ impl SessionPool {
         let global_events = SessionEvents::new();
         let multiplex_hub = MultiplexHub::new(global_events.clone());
 
+        let index = SessionIndexStore::new(agent_dir.clone(), inbox_root.clone());
+
         Self {
             host,
             default_cwd: canonical_cwd,
@@ -265,10 +266,9 @@ impl SessionPool {
             touch_seq: Arc::new(AtomicU64::new(1)),
             closed: Arc::new(AtomicBool::new(false)),
             slots: Arc::new(AsyncMutex::new(BTreeMap::new())),
-            created_lock: Arc::new(AsyncMutex::new(())),
+            index,
             load_locks: KeyedLocks::new(),
             eviction_lock: Arc::new(AsyncMutex::new(())),
-            removed: Arc::new(Mutex::new(BTreeSet::new())),
             scoped_models: Arc::new(Mutex::new(Vec::new())),
             invalid_auth: Arc::new(Mutex::new(BTreeSet::new())),
             images,
@@ -298,131 +298,44 @@ impl SessionPool {
         self.touch_seq.fetch_add(1, Ordering::SeqCst)
     }
 
-    fn created_file(&self) -> PathBuf {
-        self.inbox_root.join("created.json")
-    }
-
-    fn legacy_created_times_file(&self) -> PathBuf {
-        self.inbox_root.join("created-times.json")
-    }
-
     fn unflushed_dir(&self) -> PathBuf {
-        self.inbox_root.join("unflushed")
-    }
-
-    fn unflushed_file(&self, id: &str) -> PathBuf {
-        self.unflushed_dir().join(format!("{id}.json"))
-    }
-
-    fn deleted_file(&self, id: &str) -> Result<PathBuf, SessionPoolError> {
-        if !is_valid_session_id_key(id) {
-            return Err(SessionPoolError::InvalidInput("会话 ID 无效".to_owned()));
-        }
-        Ok(self.inbox_root.join("deleted").join(id))
+        self.index.unflushed_dir()
     }
 
     pub fn is_deleted_sync(&self, id: &str) -> Result<bool, SessionPoolError> {
-        if self.removed.lock().expect("removed lock").contains(id) {
-            return Ok(true);
-        }
-        let path = self.deleted_file(id)?;
-        Ok(path.exists())
+        self.index.is_deleted_sync(id)
     }
 
     fn read_created_sync(&self) -> Result<BTreeMap<String, Option<String>>, SessionPoolError> {
-        let path = self.created_file();
-        match fs::read(&path) {
-            Ok(bytes) => {
-                let map: BTreeMap<String, Option<String>> = serde_json::from_slice(&bytes)
-                    .map_err(|_| {
-                        SessionPoolError::ConfigurationUnavailable("会话索引损坏".to_owned())
-                    })?;
-                if !map.iter().all(|(k, v)| {
-                    is_valid_session_id_key(k)
-                        && v.as_ref().is_none_or(|id| is_valid_session_id_key(id))
-                }) {
-                    return Err(SessionPoolError::ConfigurationUnavailable(
-                        "会话索引损坏".to_owned(),
-                    ));
-                }
-                Ok(map)
-            }
-            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(BTreeMap::new()),
-            Err(err) => Err(SessionPoolError::Storage(StorageError::from_io(
-                &err,
-                "读取会话创建索引",
-            ))),
-        }
+        self.index.read_created_sync()
     }
 
     fn read_legacy_created_times_sync(&self) -> BTreeMap<String, String> {
-        let path = self.legacy_created_times_file();
-        fs::read(&path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+        self.index.read_legacy_created_times_sync()
     }
 
     pub fn read_unflushed_sync(&self, id: &str) -> Option<UnflushedSessionSnapshot> {
-        let path = self.unflushed_file(id);
-        let bytes = fs::read(path).ok()?;
-        serde_json::from_slice(&bytes).ok()
+        self.index.read_unflushed_sync(id)
     }
 
     pub fn list_all_unflushed_sync(&self) -> Vec<UnflushedSessionSnapshot> {
-        let dir = self.unflushed_dir();
-        let Ok(entries) = fs::read_dir(dir) else {
-            return Vec::new();
-        };
-        let mut out = Vec::new();
-        for entry in entries.filter_map(Result::ok) {
-            let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) != Some("json") {
-                continue;
-            }
-            if let Ok(bytes) = fs::read(&path)
-                && let Ok(snap) = serde_json::from_slice::<UnflushedSessionSnapshot>(&bytes)
-            {
-                out.push(snap);
-            }
-        }
-        out
+        self.index.list_all_unflushed_sync()
     }
 
     pub fn write_unflushed_sync(
         &self,
         snapshot: &UnflushedSessionSnapshot,
     ) -> Result<(), SessionPoolError> {
-        let path = self.unflushed_file(&snapshot.id);
-        atomic_write_json_sync(&path, snapshot, "保存未落盘会话快照")
-            .map_err(SessionPoolError::Storage)
+        self.index.write_unflushed_sync(snapshot)
     }
 
     pub fn remove_unflushed_sync(&self, id: &str) {
-        let _ = fs::remove_file(self.unflushed_file(id));
+        self.index.remove_unflushed_sync(id);
     }
 
     /// Scans `agent/home/sessions/*.jsonl` and all `agent/home/sessions/--*--/*.jsonl` workspace subdirectories.
     pub async fn list_all_project_sessions(&self) -> Vec<SessionInfo> {
-        let root = self.agent_dir.join("sessions");
-        if !root.exists() {
-            return Vec::new();
-        }
-        let mut dirs = vec![root.clone()];
-        if let Ok(entries) = fs::read_dir(&root) {
-            for entry in entries.filter_map(Result::ok) {
-                let path = entry.path();
-                if path.is_dir() && !dirs.contains(&path) {
-                    dirs.push(path);
-                }
-            }
-        }
-        let mut all = Vec::new();
-        for dir in dirs {
-            let mut items = list_sessions_from_dir(&dir, None, None).await;
-            all.append(&mut items);
-        }
-        all
+        self.index.list_all_project_sessions().await
     }
 
     pub async fn active_slot_count(&self) -> usize {
@@ -765,27 +678,17 @@ impl SessionPool {
             return Err(SessionPoolError::InvalidInput("创建请求无效".to_owned()));
         }
 
-        let (session_id, is_new) = {
-            let _serial = self.created_lock.lock().await;
-            let mut entries = self.read_created_sync()?;
-            if let Some(existing) = entries.get(request_key) {
-                match existing {
-                    Some(id) => (id.clone(), false),
-                    None => {
-                        return Err(SessionPoolError::Conflict(
-                            "创建请求对应的会话已删除".to_owned(),
-                        ));
-                    }
-                }
-            } else {
+        let (session_id, is_new) = self
+            .index
+            .get_or_create_registration(request_key, || {
                 let id = uuid_v7();
                 let created_at = now_iso_timestamp();
                 let settings = self.settings_manager();
                 let (def_prov, def_mid) = initial_model
                     .clone()
                     .unwrap_or_else(|| default_model_reference(&settings));
-                let unflushed = UnflushedSessionSnapshot {
-                    id: id.clone(),
+                UnflushedSessionSnapshot {
+                    id,
                     created_at,
                     cwd: self.default_cwd.to_string_lossy().into_owned(),
                     session_dir: self.default_session_dir.to_string_lossy().into_owned(),
@@ -796,15 +699,9 @@ impl SessionPool {
                         model_id: def_mid,
                     }),
                     thinking_level: initial_thinking.map(|t| t.as_str().to_owned()),
-                };
-                self.write_unflushed_sync(&unflushed)?;
-                entries.insert(request_key.to_owned(), Some(id.clone()));
-                atomic_write_json(&self.created_file(), &entries, "保存会话创建索引")
-                    .await
-                    .map_err(SessionPoolError::Storage)?;
-                (id, true)
-            }
-        };
+                }
+            })
+            .await?;
 
         let slot = self.open_saved(&session_id).await?;
         if is_new {
@@ -1110,31 +1007,7 @@ impl SessionPool {
             return Err(SessionPoolError::Conflict("会话 ID 不唯一".to_owned()));
         }
 
-        let tombstone_path = self.deleted_file(id)?;
-        if let Some(parent) = tombstone_path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                SessionPoolError::Storage(StorageError::from_io(&e, "创建会话删除墓碑目录"))
-            })?;
-        }
-        {
-            let mut f = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&tombstone_path)
-                .map_err(|e| {
-                    if e.kind() == io::ErrorKind::AlreadyExists {
-                        SessionPoolError::NotFound("会话不存在".to_owned())
-                    } else {
-                        SessionPoolError::Storage(StorageError::from_io(&e, "写入会话删除墓碑"))
-                    }
-                })?;
-            let _ = f.write_all(b"deleted");
-            let _ = f.sync_all();
-        }
-        self.removed
-            .lock()
-            .expect("removed lock")
-            .insert(id.to_owned());
+        self.index.mark_deleted_sync(id)?;
 
         slot.hosted.finalize_telemetry("delete").await;
         {
@@ -1149,23 +1022,7 @@ impl SessionPool {
         self.remove_unflushed_sync(id);
         let _ = fs::remove_file(self.inbox_root.join(format!("{id}.json")));
         self.images.delete_session_attachments(id).await;
-
-        {
-            let _serial = self.created_lock.lock().await;
-            if let Ok(mut created) = self.read_created_sync() {
-                let mut changed = false;
-                for val in created.values_mut() {
-                    if val.as_deref() == Some(id) {
-                        *val = None;
-                        changed = true;
-                    }
-                }
-                if changed {
-                    let _ =
-                        atomic_write_json(&self.created_file(), &created, "更新会话创建索引").await;
-                }
-            }
-        }
+        self.index.clear_created_for_deleted(id).await;
 
         self.global_events
             .publish("state", &json!({"type": "sessions_changed"}));

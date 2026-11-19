@@ -22,6 +22,7 @@ fn content_type_for_extension(ext: &str) -> &'static str {
         "otf" => "font/otf",
         "png" => "image/png",
         "svg" => "image/svg+xml",
+        "txt" => "text/plain; charset=utf-8",
         "webp" => "image/webp",
         "woff2" => "font/woff2",
         _ => "application/octet-stream",
@@ -48,6 +49,7 @@ pub async fn serve_static_or_spa(
     query: Option<&str>,
     headers: &HeaderMap,
     static_dir: &Path,
+    shared_fonts_dir: &Path,
     mode_controller: &ModeController,
 ) -> Response<SseOrBytesBody> {
     if *method != Method::GET && *method != Method::HEAD {
@@ -139,19 +141,35 @@ pub async fn serve_static_or_spa(
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.contains("text/html"));
 
-    let resolved_file = match fs::canonicalize(&candidate) {
-        Ok(real) => {
+    let shared_font_file = pathname
+        .strip_prefix("/fonts/")
+        .filter(|rel| !rel.is_empty())
+        .and_then(|rel| {
+            let canonical_fonts_root = fs::canonicalize(shared_fonts_dir)
+                .map(|p| strip_windows_verbatim_prefix(&p))
+                .ok()?;
+            let real = fs::canonicalize(canonical_fonts_root.join(rel)).ok()?;
             let clean = strip_windows_verbatim_prefix(&real);
-            if !clean.starts_with(&canonical_root) {
-                return error_response(&ApiError::new(
-                    StatusCode::NOT_FOUND,
-                    "not_found",
-                    "页面不存在。",
-                ));
+            (clean.starts_with(&canonical_fonts_root) && clean.is_file()).then_some(clean)
+        });
+
+    let resolved_file = if let Some(shared) = shared_font_file {
+        Some(shared)
+    } else {
+        match fs::canonicalize(&candidate) {
+            Ok(real) => {
+                let clean = strip_windows_verbatim_prefix(&real);
+                if !clean.starts_with(&canonical_root) {
+                    return error_response(&ApiError::new(
+                        StatusCode::NOT_FOUND,
+                        "not_found",
+                        "页面不存在。",
+                    ));
+                }
+                if clean.is_file() { Some(clean) } else { None }
             }
-            if clean.is_file() { Some(clean) } else { None }
+            Err(_) => None,
         }
-        Err(_) => None,
     };
 
     let target_file = match resolved_file {

@@ -1,3 +1,5 @@
+#![cfg(feature = "clipboard")]
+
 use std::io::Cursor;
 
 use base64::Engine;

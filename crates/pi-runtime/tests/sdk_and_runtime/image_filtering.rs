@@ -243,14 +243,17 @@ async fn image_pipeline_handles_bmp_conversion_exif_orientation_resize_and_tool_
     assert!(note.text.contains("original 2400x4800"));
 
     // 4. Clipboard MIME preference and OSC 52 encoding
-    assert_eq!(
-        select_preferred_image_mime_type(&[
-            "text/plain".into(),
-            "image/webp".into(),
-            "image/png".into()
-        ]),
-        Some("image/png".into())
-    );
-    let osc = encode_osc52_clipboard_sequence("hello");
-    assert_eq!(osc, "\x1b]52;c;aGVsbG8=\x07");
+    #[cfg(feature = "clipboard")]
+    {
+        assert_eq!(
+            select_preferred_image_mime_type(&[
+                "text/plain".into(),
+                "image/webp".into(),
+                "image/png".into()
+            ]),
+            Some("image/png".into())
+        );
+        let osc = encode_osc52_clipboard_sequence("hello");
+        assert_eq!(osc, "\x1b]52;c;aGVsbG8=\x07");
+    }
 }

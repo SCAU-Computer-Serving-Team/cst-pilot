@@ -1,3 +1,5 @@
+#![cfg(feature = "coding-tools")]
+
 #[path = "builtin_tools/session_executor.rs"]
 mod session_executor;
 

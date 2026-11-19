@@ -1,10 +1,10 @@
 use std::fs;
 use std::path::PathBuf;
 
-use cst_pilot::auth::{AuthRuntime, Channel, oa::OaClient};
-use cst_pilot::telemetry::TelemetryOptions;
-use cst_pilot::update::service::UpdateOptions;
-use cst_pilot::{Kit, KitHost, SKILL_NAMES};
+use cst_kit::auth::{AuthRuntime, Channel, oa::OaClient};
+use cst_kit::telemetry::TelemetryOptions;
+use cst_kit::update::service::UpdateOptions;
+use cst_kit::{Kit, KitHost, SKILL_NAMES};
 use cst_server::discovery::SessionOwnerLock;
 use cst_server::mode::CallerIdentity;
 use cst_server::session::SessionPool;

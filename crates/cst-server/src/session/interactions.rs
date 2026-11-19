@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use cst_pilot::bitlocker::{
+use cst_kit::bitlocker::{
     BitLockerAnswer, BitLockerHostChannel, BitLockerPendingKind,
     credentials::validate as validate_recovery_password, model::Volume,
 };

@@ -1,3 +1,5 @@
+#![cfg(feature = "cli-modes")]
+
 #[path = "modes_and_cli_e2e/acceptance.rs"]
 mod acceptance;
 

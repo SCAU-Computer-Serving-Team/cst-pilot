@@ -1,6 +1,7 @@
 pub mod ant_ling;
 pub mod anthropic;
 pub mod deepseek;
+#[cfg(any(test, feature = "test-support"))]
 pub mod faux;
 pub mod github_copilot;
 pub mod google;

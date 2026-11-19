@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pi_agent::{
-    Agent, AgentContext, AgentEvent, AgentMessage, AgentOptions, AgentTool, AgentToolResult,
-    BeforeToolCallResult, CompileOptions, RunToolCallOptions, StreamFn, compile_schema,
+    Agent, AgentContext, AgentEvent, AgentMessage, AgentOptions, AgentStreamFn, AgentTool,
+    AgentToolResult, BeforeToolCallResult, CompileOptions, RunToolCallOptions, compile_schema,
     default_agent_model, run_agent_loop, run_tool_call, try_compile_schema,
     validate_tool_arguments,
 };
@@ -65,7 +65,7 @@ fn make_tool(schema: JsonValue) -> AgentTool {
     )
 }
 
-fn cooperative_pending_stream() -> StreamFn {
+fn cooperative_pending_stream() -> AgentStreamFn {
     Arc::new(|model, _, opts| {
         Box::pin(async move {
             if let Some(token) = opts.base.cancel_token {
@@ -594,7 +594,7 @@ async fn dropping_prompt_and_continue_futures_settle_cleanly_and_permit_reuse() 
 #[tokio::test]
 async fn panicking_stream_and_panicking_tool_with_active_updates_settle_cleanly() {
     // 1. Panicking stream_fn settles lifecycle and records error
-    let stream_fn: StreamFn =
+    let stream_fn: AgentStreamFn =
         Arc::new(|_, _, _| Box::pin(async { panic!("review injected provider panic") }));
     let agent = Agent::new(AgentOptions::new(stream_fn));
     let runner = agent.clone();
@@ -646,7 +646,7 @@ async fn panicking_stream_and_panicking_tool_with_active_updates_settle_cleanly(
         assistant_with_boom,
         final_reply,
     ])));
-    let scripted_stream: StreamFn = Arc::new(move |model, _, _| {
+    let scripted_stream: AgentStreamFn = Arc::new(move |model, _, _| {
         let queue = queue.clone();
         Box::pin(async move {
             let stream = create_assistant_message_event_stream();
@@ -754,7 +754,7 @@ async fn agent_end_listener_settlement_barrier_holds_during_abort_and_isolates_r
 #[tokio::test]
 async fn cancellation_enforces_single_shared_deadline_and_preserves_accumulated_partial_content() {
     // 1. Forced cancellation after Start + TextDelta + ThinkingDelta + ToolCallStart preserves all partial blocks
-    let stream_fn_partial: StreamFn = Arc::new(|model, _, _| {
+    let stream_fn_partial: AgentStreamFn = Arc::new(|model, _, _| {
         Box::pin(async move {
             let stream = create_assistant_message_event_stream();
             let pending = AssistantMessage::new_pending(&model);
@@ -836,7 +836,7 @@ async fn cancellation_enforces_single_shared_deadline_and_preserves_accumulated_
     // 2. Non-cooperative provider emitting deltas every 2ms must be cut off by the single 50ms grace deadline
     let stop_flag = Arc::new(AtomicBool::new(false));
     let provider_stop = stop_flag.clone();
-    let stream_fn_spam: StreamFn = Arc::new(move |model, _, _| {
+    let stream_fn_spam: AgentStreamFn = Arc::new(move |model, _, _| {
         let stop = provider_stop.clone();
         Box::pin(async move {
             let stream = create_assistant_message_event_stream();

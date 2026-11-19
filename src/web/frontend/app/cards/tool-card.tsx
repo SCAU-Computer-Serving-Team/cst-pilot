@@ -7,7 +7,6 @@ import {
 	CircleX,
 	Clock3,
 	Copy,
-	Globe,
 	Info,
 	LoaderCircle,
 	TriangleAlert,
@@ -18,12 +17,10 @@ import { TranscriptDisclosure, type TranscriptFormat } from "../conversation/tra
 import type { ContentPart, Message } from "../data/web-state";
 import { PreviewableImage } from "../images/image-preview";
 import { CodeBlock } from "../shell/code-block";
-import { type Block, mapTool } from "./map-tool";
+import { type Block, type CardView, mapTool } from "./map-tool";
 import { isStandaloneTool, splitToolCalls, type ToolState, toolState } from "./tool-state";
 
 type Call = Extract<ContentPart, { type: "toolCall" }>;
-const summary = (args: unknown) =>
-	typeof args === "string" ? args : Array.isArray(args) ? args.join(" · ") : "未提供关键词";
 const stateLabels: Record<ToolState, string> = {
 	pending: "等待执行",
 	running: "执行中",
@@ -156,70 +153,16 @@ export function ToolBlocks({ blocks, all = false }: { blocks: Block[]; all?: boo
 	return blocks.map((block) => <div key={block.id}>{renderBlock(block, all)}</div>);
 }
 
-function SearchRow({
-	call,
-	result,
-	state,
-	failed,
-	format,
-}: {
-	call: Call;
-	result?: Message;
-	state: ToolState;
-	failed: boolean;
-	format?: TranscriptFormat;
-}) {
-	const [open, setOpen] = useState(false);
-	const details = result && "details" in result ? (result as Message & { details?: unknown }).details : undefined;
-	const data = details && typeof details === "object" ? (details as Record<string, unknown>) : {};
-	const status = failed ? "error" : state;
-	const label =
-		status === "pending"
-			? "等待联网检索"
-			: status === "running"
-				? "正在联网检索…"
-				: status === "interrupted"
-					? "联网检索未完成"
-					: status === "error"
-						? "联网检索失败"
-						: status === "degraded"
-							? "部分检索结果"
-							: "已联网检索";
-	return (
-		<TranscriptDisclosure
-			format={format}
-			className="search-tool"
-			triggerClassName="search-trigger"
-			isExpanded={open}
-			onExpandedChange={setOpen}
-			heading={
-				<>
-					<Globe className="search-tool-icon" size={18} aria-hidden="true" />
-					<span className={`search-status search-status--${status}`}>{label}</span>
-					{status === "running" ? (
-						<LoaderCircle className="tool-status-icon tool-status-icon--running" size={16} aria-hidden="true" />
-					) : (
-						status !== "interrupted" && <StatusIcon state={status} />
-					)}
-				</>
-			}
-		>
-			<small className={failed ? "search-query search-query--error" : "search-query"}>
-				{summary(call.arguments.query ?? call.arguments.queries)}
-				{failed && ` · ${String(data.error ?? "请检查网络或检索配置")}`}
-			</small>
-		</TranscriptDisclosure>
-	);
-}
-
 export const ToolCard = memo(function ToolCard({
 	call,
 	result,
+	precomputedView,
 	live,
 	format,
 }: {
 	call: Call;
 	result?: Message;
+	precomputedView?: CardView;
 	live?: boolean;
 	format?: TranscriptFormat;
 }) {
@@ -239,7 +182,7 @@ export const ToolCard = memo(function ToolCard({
 		const timer = window.setInterval(() => setNow(Date.now()), 1000);
 		return () => window.clearInterval(timer);
 	}, [result, live, startedAt, endedAt]);
-	const view = result ? mapTool(call, result) : undefined;
+	const view = precomputedView ?? (result ? mapTool(call, result) : undefined);
 	const fieldContainer = useRef<HTMLDivElement>(null);
 	useLayoutEffect(() => {
 		if (!open || !result) return;
@@ -266,13 +209,6 @@ export const ToolCard = memo(function ToolCard({
 	}, [open, result]);
 	const details = result && "details" in result ? (result as Message & { details?: unknown }).details : undefined;
 	const state = toolState(result, view?.status, live && endedAt === undefined, startedAt !== undefined);
-	if (call.name === "web_search") {
-		const data = details && typeof details === "object" ? (details as Record<string, unknown>) : {};
-		const failed =
-			!!result &&
-			(view?.status === "error" || (typeof data.successfulQueries === "number" && data.successfulQueries === 0));
-		return <SearchRow call={call} result={result} state={state} failed={failed} format={format} />;
-	}
 	const status = stateLabels[state];
 	const scope = typeof call.arguments.scope === "string" ? call.arguments.scope : undefined;
 	const invocation = `${call.name}${scope ? `(${scope})` : ""}`;
@@ -377,10 +313,11 @@ function CollapsedToolGroup({
 	format?: TranscriptFormat;
 }) {
 	const [open, setOpen] = useState(format === "png");
-	const states = calls.map((call) => {
+	const entries = calls.map((call) => {
 		const result = results.get(call.id);
-		return result ? mapTool(call, result).status : undefined;
+		return { call, result, view: result ? mapTool(call, result) : undefined };
 	});
+	const states = entries.map((entry) => entry.view?.status);
 	const failed = states.includes("error");
 	const degraded = states.includes("degraded");
 	const finished = states.every((state) => state != null);
@@ -417,8 +354,8 @@ function CollapsedToolGroup({
 				</>
 			}
 		>
-			{calls.map((call) => (
-				<ToolCard key={call.id} call={call} result={results.get(call.id)} live={live} format={format} />
+			{entries.map(({ call, result, view }) => (
+				<ToolCard key={call.id} call={call} result={result} precomputedView={view} live={live} format={format} />
 			))}
 		</TranscriptDisclosure>
 	);

@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use chrono::{Local, TimeZone};
-use cst_pilot::auth::{AuthRuntime, Channel, oa::OaClient};
-use cst_pilot::telemetry::TelemetryOptions;
-use cst_pilot::update::service::UpdateOptions;
-use cst_pilot::{Kit, KitHost, SKILL_NAMES};
+use cst_kit::auth::{AuthRuntime, Channel, oa::OaClient};
+use cst_kit::telemetry::TelemetryOptions;
+use cst_kit::update::service::UpdateOptions;
+use cst_kit::{Kit, KitHost, SKILL_NAMES};
 use cst_server::exports::{
     AssetResponse, ExportDocumentSource, ExportRenderer, ExportStyleSheet, OfflineHtml,
     SessionExportStore, artifact_name, build_export_snapshot_from_entries,
@@ -1026,4 +1026,150 @@ fn artifact_sessions_dir_rejects_ntfs_junction_escape() {
             .expect_err("NTFS junction escaping artifacts root must be rejected");
         assert_eq!(err.code, "export_directory_invalid");
     }
+}
+
+#[tokio::test]
+async fn cancelled_create_does_not_queue_a_persisted_job_before_the_caller_resumes() {
+    struct WakeOnProgress(tokio::sync::Notify);
+    impl std::task::Wake for WakeOnProgress {
+        fn wake(self: Arc<Self>) {
+            self.0.notify_one();
+        }
+    }
+
+    let dir = TempDirGuard::new("export-cancel-persisted");
+    let metadata = dir.path().join("meta");
+    let (renderer, _) = MockRenderer::new(|_, emit, _| {
+        Box::pin(async move { emit("html", b"<!DOCTYPE html>ok".to_vec()).await })
+    });
+    let store = SessionExportStore::new(dir.path().join("artifacts"), &metadata, renderer);
+    let snap = fixture_snapshot("html");
+    let session_id = snap["sessionId"].as_str().unwrap();
+    let mut create = Box::pin(store.create(&snap));
+    let progress = Arc::new(WakeOnProgress(tokio::sync::Notify::new()));
+    let waker = std::task::Waker::from(progress.clone());
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            {
+                let mut cx = std::task::Context::from_waker(&waker);
+                assert!(create.as_mut().poll(&mut cx).is_pending());
+            }
+            progress.0.notified().await;
+            if fs::read_dir(&metadata).is_ok_and(|entries| {
+                entries.filter_map(Result::ok).any(|entry| {
+                    entry.path().extension().and_then(|ext| ext.to_str()) == Some("json")
+                })
+            }) {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("the worker persists the job while the caller is suspended");
+    drop(create);
+
+    store.close().await;
+    assert!(store.list(session_id).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn cancelled_create_futures_and_concurrent_lists_never_corrupt_or_leak_jobs() {
+    let dir = TempDirGuard::new("export-cancel-create");
+    let artifacts = dir.path().join("artifacts");
+    let metadata = dir.path().join("meta");
+    let (gate_tx, gate_rx) = tokio::sync::watch::channel(false);
+    let (renderer, _) = MockRenderer::new(move |_s, emit, cancel| {
+        let mut rx = gate_rx.clone();
+        Box::pin(async move {
+            while !*rx.borrow_and_update() {
+                tokio::select! {
+                    _ = cancel.cancelled() => return Err(cst_server::error::ServiceError::new(
+                        cst_server::error::ServiceErrorKind::Unavailable,
+                        "export_interrupted",
+                        "导出已取消",
+                    )),
+                    res = rx.changed() => {
+                        if res.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+            emit("html", b"<!DOCTYPE html>ok".to_vec()).await
+        })
+    });
+    let store = SessionExportStore::new(&artifacts, &metadata, renderer);
+    let snap = fixture_snapshot("html");
+    let session_id = snap["sessionId"].as_str().unwrap().to_owned();
+
+    // Continuously poll `list()` while concurrent `create()` and cancelled `create()` run.
+    let stop_list = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop_list_reader = stop_list.clone();
+    let store_reader = store.clone();
+    let sid_reader = session_id.clone();
+    let reader_task = tokio::spawn(async move {
+        while !stop_list_reader.load(Ordering::SeqCst) {
+            let items = store_reader.list(&sid_reader).await.unwrap();
+            for item in items {
+                assert_ne!(
+                    item.status, "failed",
+                    "concurrent list() must never misclassify an in-flight publish as export_interrupted: {item:?}"
+                );
+            }
+            tokio::task::yield_now().await;
+        }
+    });
+
+    // Drop 12 mid-flight `create` futures.
+    for _ in 0..12 {
+        let mut fut = Box::pin(store.create(&snap));
+        let waker = futures_util::task::noop_waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+        let _ = fut.as_mut().poll(&mut cx);
+        drop(fut);
+    }
+
+    // Create 6 real jobs concurrently while `reader_task` hammers `list()`.
+    let mut handles = Vec::new();
+    for _ in 0..6 {
+        let s = store.clone();
+        let sn = snap.clone();
+        handles.push(tokio::spawn(async move { s.create(&sn).await.unwrap() }));
+    }
+    let mut created_ids = Vec::new();
+    for h in handles {
+        created_ids.push(h.await.unwrap().id);
+    }
+
+    let _ = gate_tx.send(true);
+    for id in &created_ids {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let rec = store.get(id).await.unwrap();
+                assert_ne!(rec.status, "failed", "{rec:?}");
+                if rec.status == "completed" {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("real export job must complete without corruption");
+    }
+
+    stop_list.store(true, Ordering::SeqCst);
+    reader_task.await.unwrap();
+
+    tokio::time::timeout(Duration::from_secs(3), store.close())
+        .await
+        .expect("store.close() must not hang after cancelled create() futures");
+
+    // Only the 6 real jobs may exist as `.json` metadata records on disk (no orphan records from cancelled creates).
+    let json_files: Vec<_> = fs::read_dir(&metadata)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("json"))
+        .collect();
+    assert_eq!(json_files.len(), 6);
 }

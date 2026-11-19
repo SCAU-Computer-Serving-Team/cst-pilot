@@ -31,6 +31,7 @@ const contentTypes: Record<string, string> = {
 	".otf": "font/otf",
 	".png": "image/png",
 	".svg": "image/svg+xml",
+	".txt": "text/plain; charset=utf-8",
 	".webp": "image/webp",
 	".woff2": "font/woff2",
 };
@@ -138,14 +139,31 @@ export function createWebServer(
 		}
 		try {
 			const rootReal = await realpath(root);
+			const sharedFontsRoot = resolve(root, "../../../../../assets/fonts");
+			let allowedRootReal = rootReal;
 			let path = resolve(root, `.${pathname}`);
 			if (!isInside(root, path)) {
 				fail(response, 404, "not_found", "页面不存在。");
 				return;
 			}
-			let file = await stat(path)
-				.then((info) => (info.isFile() ? path : undefined))
-				.catch(() => undefined);
+			let file: string | undefined;
+			if (pathname.startsWith("/fonts/") && pathname.length > "/fonts/".length) {
+				const sharedCandidate = resolve(sharedFontsRoot, `.${pathname.slice("/fonts".length)}`);
+				if (isInside(sharedFontsRoot, sharedCandidate)) {
+					const sharedRootReal = await realpath(sharedFontsRoot).catch(() => undefined);
+					if (sharedRootReal) {
+						file = await stat(sharedCandidate)
+							.then((info) => (info.isFile() ? sharedCandidate : undefined))
+							.catch(() => undefined);
+						if (file) allowedRootReal = sharedRootReal;
+					}
+				}
+			}
+			if (!file) {
+				file = await stat(path)
+					.then((info) => (info.isFile() ? path : undefined))
+					.catch(() => undefined);
+			}
 			const reservedAssetPath = ["/assets", "/fonts"].some(
 				(directory) => pathname === directory || pathname.startsWith(`${directory}/`),
 			);
@@ -164,7 +182,7 @@ export function createWebServer(
 				fail(response, 404, "not_found", "页面不存在。");
 				return;
 			}
-			if (!isInside(rootReal, await realpath(file)) || !(await stat(file)).isFile()) {
+			if (!isInside(allowedRootReal, await realpath(file)) || !(await stat(file)).isFile()) {
 				fail(response, 404, "not_found", "页面不存在。");
 				return;
 			}

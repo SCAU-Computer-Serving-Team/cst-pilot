@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use pi_agent::{AgentMessage, StreamFn, get_agent_current_system_message};
+use pi_agent::{AgentMessage, AgentStreamFn, get_agent_current_system_message};
 use pi_ai::{
     AssistantMessage, CacheRetention, ContentBlock, Context, JsonObject, JsonValue, Message, Model,
     ProviderHeaders, RetryCallbacks, RetryPolicy, SimpleStreamOptions, StopReason, StreamOptions,
@@ -972,7 +972,7 @@ pub async fn complete_summarization(
     model: &Model,
     context: TranscriptContext,
     mut options: SimpleStreamOptions,
-    stream_fn: Option<&StreamFn>,
+    stream_fn: Option<&AgentStreamFn>,
     retry: Option<&RetryPolicy>,
     callbacks: Option<&RetryCallbacks>,
 ) -> AssistantMessage {
@@ -1021,7 +1021,7 @@ pub struct SummarizationCallOptions {
     pub cancel_token: Option<CancellationToken>,
     pub custom_instructions: Option<String>,
     pub thinking_level: Option<ThinkingLevel>,
-    pub stream_fn: Option<StreamFn>,
+    pub stream_fn: Option<AgentStreamFn>,
     pub retry: Option<RetryPolicy>,
     pub callbacks: Option<RetryCallbacks>,
     pub session_id: Option<String>,

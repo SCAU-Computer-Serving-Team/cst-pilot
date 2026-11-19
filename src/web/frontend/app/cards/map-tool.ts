@@ -51,8 +51,6 @@ const measure = (key: string, value: unknown): string => {
 	const suffix = exactSuffixes[key] ?? endSuffixes.find(([end]) => key.endsWith(end))?.[1] ?? "";
 	return `${words(value)}${suffix}`;
 };
-// 容量换算为 GB，一位小数，整数不写 .0。
-const gb = (mb: unknown) => (Number(mb) / 1024).toFixed(1).replace(/\.0$/, "");
 
 // 数组以排行组呈现；其余对象数组按每项一组概览组呈现。
 const rankings = new Set([
@@ -431,33 +429,7 @@ export function mapTool(call: Call, result: Message): CardView {
 		notice("error", words(detail?.error ?? source?.error ?? raw), "danger");
 		return { status, blocks, raw };
 	}
-	if (call.name === "runbook") {
-		const runbook = record(detail?.runbook);
-		if (runbook)
-			push({
-				kind: "fields",
-				id: "runbook-file",
-				rows: (["file", "sequence", "levelLabel", "items", "encoding"] as const)
-					.filter((key) => runbook[key] != null || key === "file")
-					.map((key) => ({ label: label(key), value: measure(key, runbook[key]) })),
-			});
-		const items = Array.isArray(call.arguments.items)
-			? call.arguments.items.map((item) => record(item)).filter((item): item is Record<string, unknown> => !!item)
-			: [];
-		if (items.length)
-			push({
-				kind: "commands",
-				id: "runbook-commands",
-				items: items.map((item) => ({
-					shell: words(item.shell),
-					summary: words(item.summary),
-					command: words(item.command),
-					admin: item.admin === true,
-				})),
-			});
-		pushNotices(runbook);
-		pushNotices(detail);
-	} else if (call.name === "source_check") {
+	if (call.name === "source_check") {
 		const artifact = record(detail?.artifact);
 		const claims = Array.isArray(artifact?.claims) ? artifact.claims : [];
 		if (claims.length)
@@ -502,25 +474,6 @@ export function mapTool(call: Call, result: Message): CardView {
 		if (call.name === "get_search_content" && detail?.truncated)
 			notice("continue", `JSON 字符片段，非完整结论 · 已截断，续读 offset=${words(detail.nextOffset)}`, "warning");
 		pushNotices(detail);
-	} else if (call.name === "sys" && scope === "overview" && source) {
-		const mem = record(source.mem);
-		const machine = record(source.machine);
-		const uptime = record(source.uptime);
-		const pagefile = Array.isArray(source.pagefile) ? record(source.pagefile[0]) : undefined;
-		const load = [
-			source.cpuTotalPct == null ? null : { label: "CPU 总占用", value: measure("pct", source.cpuTotalPct) },
-			mem?.usedPct == null ? null : { label: "内存占用", value: measure("pct", mem.usedPct) },
-			uptime?.totalHours == null ? null : { label: "已开机", value: measure("hours", uptime.totalHours) },
-		].filter((row): row is { label: string; value: string } => !!row);
-		if (load.length) push({ kind: "fields", id: "overview-load", rows: load });
-		const system = [
-			machine ? { label: "机型", value: `${words(machine.vendor)} ${words(machine.model)}`.trim() } : null,
-			machine?.cpu == null ? null : { label: "处理器", value: words(machine.cpu) },
-			pagefile ? { label: "页面文件", value: `${gb(pagefile.usedMB)} / ${gb(pagefile.allocMB)} GB` } : null,
-		].filter((row): row is { label: string; value: string } => !!row);
-		if (system.length) push({ kind: "fields", id: "overview-system", title: "系统", rows: system });
-		pushNotices(source);
-		if (source !== detail) pushNotices(detail);
 	} else if (diagnostics.has(call.name)) {
 		if (call.name === "startup" && record(detail?.startup)) {
 			const startup = record(detail?.startup)!;

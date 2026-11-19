@@ -17,9 +17,9 @@ use crate::agent_loop::{
 };
 use crate::types::{
     AfterToolCallFn, AgentContext, AgentEvent, AgentInitialState, AgentLoopConfig, AgentMessage,
-    AgentState, AgentTool, BeforeToolCallFn, BoxFuture, ConvertToLlmFn, FinalizeMessageFn,
-    FinishTurnFn, GetApiKeyFn, PrepareNextTurnFn, PrepareRequestFn, PromptInput, QueueMode,
-    StreamFn, ToolExecutionMode, TransformContextFn, create_error_assistant_message,
+    AgentState, AgentStreamFn, AgentTool, BeforeToolCallFn, BoxFuture, ConvertToLlmFn,
+    FinalizeMessageFn, FinishTurnFn, GetApiKeyFn, PrepareNextTurnFn, PrepareRequestFn, PromptInput,
+    QueueMode, ToolExecutionMode, TransformContextFn, create_error_assistant_message,
     default_agent_model, default_convert_to_llm, get_agent_current_system_message,
     get_agent_current_system_prompt,
 };
@@ -78,7 +78,7 @@ pub struct AgentOptions {
     pub initial_state: Option<AgentInitialState>,
     pub convert_to_llm: Option<ConvertToLlmFn>,
     pub transform_context: Option<TransformContextFn>,
-    pub stream_fn: StreamFn,
+    pub stream_fn: AgentStreamFn,
     pub get_api_key: Option<GetApiKeyFn>,
     pub on_headers: Option<OnHeadersFn>,
     pub on_payload: Option<OnPayloadFn>,
@@ -107,7 +107,7 @@ pub struct AgentOptions {
 }
 
 impl AgentOptions {
-    pub fn new(stream_fn: StreamFn) -> Self {
+    pub fn new(stream_fn: AgentStreamFn) -> Self {
         Self {
             initial_state: None,
             convert_to_llm: None,
@@ -185,7 +185,7 @@ impl Drop for PromptWaitGuard {
 struct AgentConfigFields {
     convert_to_llm: ConvertToLlmFn,
     transform_context: Option<TransformContextFn>,
-    stream_fn: StreamFn,
+    stream_fn: AgentStreamFn,
     get_api_key: Option<GetApiKeyFn>,
     on_headers: Option<OnHeadersFn>,
     on_payload: Option<OnPayloadFn>,
@@ -403,12 +403,12 @@ impl Agent {
         guard.transform_context = hook;
     }
 
-    pub fn set_stream_fn(&self, stream_fn: StreamFn) {
+    pub fn set_stream_fn(&self, stream_fn: AgentStreamFn) {
         let mut guard = self.inner.config.write().expect("config lock poisoned");
         guard.stream_fn = stream_fn;
     }
 
-    pub fn stream_fn(&self) -> StreamFn {
+    pub fn stream_fn(&self) -> AgentStreamFn {
         self.inner
             .config
             .read()
@@ -823,7 +823,10 @@ impl Agent {
         }
     }
 
-    fn create_loop_config(&self, skip_initial_steering_poll: bool) -> (AgentLoopConfig, StreamFn) {
+    fn create_loop_config(
+        &self,
+        skip_initial_steering_poll: bool,
+    ) -> (AgentLoopConfig, AgentStreamFn) {
         let (model, thinking_level) = {
             let s = self.inner.state.read().expect("state lock poisoned");
             (s.model.clone(), s.thinking_level)

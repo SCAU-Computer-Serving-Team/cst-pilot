@@ -77,6 +77,10 @@ const EXCEPTIONS = {
   "161C4A": "登录深色 AIR 底色（asset/blue-hour-air-dark-palette.png 色表）",
   // 既有帧 context 记录的深色体系取值
   "E0E0E0": "聊天工作台 HeroUI 表格行描边（主画布既有元件）",
+  // doc/rust/plan/9.desktop.md「设计变量与主题」：cst-pilot-desktop.pen 浮层玻璃与遮罩变量
+  "18181C": "桌面端浮层玻璃与弹窗底色 $bg-glass / $bg-modal（dark）",
+  "111114": "桌面端模态遮罩底色 $bg-scrim（light）",
+  "040406": "桌面端模态遮罩底色 $bg-scrim（dark）",
 };
 
 test("界面画布的颜色常量是色阶画布定义色与登记例外的子集", () => {

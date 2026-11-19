@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use cst_pilot::auth::custom_provider::CustomProviderInput;
+use cst_kit::auth::custom_provider::CustomProviderInput;
 use http::{HeaderMap, Method, Response, StatusCode};
 use pi_ai::{AuthInteraction, AuthPrompt, AuthType, CredentialStore};
 use serde_json::{Value, json};
@@ -10,26 +10,8 @@ use zeroize::Zeroizing;
 use crate::mode::CallerIdentity;
 use crate::oauth::auth_type_str;
 use crate::routes::{ApiError, SseOrBytesBody, json_response, parse_query_params, read_json_body};
-use crate::session::attachments::is_valid_session_id_key;
+use crate::session::attachments::is_valid_provider_id_key;
 use crate::state::ServerState;
-
-fn map_custom_provider_error(err: String) -> ApiError {
-    if err.starts_with("config_conflict:") {
-        ApiError::new(
-            StatusCode::CONFLICT,
-            "config_conflict",
-            err.trim_start_matches("config_conflict:").trim(),
-        )
-    } else if err.contains("models.json") && err.contains("原文件已保留") {
-        ApiError::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "configuration_unavailable",
-            err,
-        )
-    } else {
-        ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", err)
-    }
-}
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_auth_route(
@@ -110,41 +92,37 @@ pub async fn handle_auth_route(
             )
         })?;
         let result = state
-            .write_once(
+            .write_once_keyed(
                 caller,
                 method.as_str(),
                 pathname,
                 &body,
-                Some(headers),
+                headers,
+                "auth-config:all",
                 || async move {
-                    state
-                        .locks
-                        .serialize("auth-config:all", || async move {
-                            if state.pool.has_running_session_for_provider(&input.id).await {
-                                return Err(ApiError::new(
-                                    StatusCode::CONFLICT,
-                                    "conflict",
-                                    "此模型服务的会话正在执行，请完成后再修改配置",
-                                ));
-                            }
-                            let saved = state
-                                .host
-                                .auth()
-                                .save_custom_provider(input)
-                                .await
-                                .map_err(map_custom_provider_error)?;
-                            let pid = saved.get("id").and_then(Value::as_str).unwrap_or("");
-                            state.pool.global_events.publish(
-                                "state",
-                                &json!({ "type": "auth_changed", "providerId": pid }),
-                            );
-                            state.pool.global_events.publish(
-                                "state",
-                                &json!({ "type": "models_changed", "providerId": pid }),
-                            );
-                            Ok(saved)
-                        })
+                    if state.pool.has_running_session_for_provider(&input.id).await {
+                        return Err(ApiError::new(
+                            StatusCode::CONFLICT,
+                            "conflict",
+                            "此模型服务的会话正在执行，请完成后再修改配置",
+                        ));
+                    }
+                    let saved = state
+                        .host
+                        .auth()
+                        .save_custom_provider_checked(input)
                         .await
+                        .map_err(ApiError::from)?;
+                    let pid = saved.get("id").and_then(Value::as_str).unwrap_or("");
+                    state.pool.global_events.publish(
+                        "state",
+                        &json!({ "type": "auth_changed", "providerId": pid }),
+                    );
+                    state.pool.global_events.publish(
+                        "state",
+                        &json!({ "type": "models_changed", "providerId": pid }),
+                    );
+                    Ok(saved)
                 },
             )
             .await?;
@@ -156,8 +134,8 @@ pub async fn handle_auth_route(
             let found = state
                 .host
                 .auth()
-                .custom_provider(provider_id)
-                .map_err(map_custom_provider_error)?;
+                .custom_provider_checked(provider_id)
+                .map_err(ApiError::from)?;
             let Some(val) = found else {
                 return Err(ApiError::new(
                     StatusCode::NOT_FOUND,
@@ -196,44 +174,40 @@ pub async fn handle_auth_route(
             }
             let pid_owned = provider_id.to_owned();
             let result = state
-                .write_once(
+                .write_once_keyed(
                     caller,
                     method.as_str(),
                     pathname,
                     &body,
-                    Some(headers),
+                    headers,
+                    "auth-config:all",
                     || async move {
-                        state
-                            .locks
-                            .serialize("auth-config:all", || async move {
-                                if state
-                                    .pool
-                                    .has_running_session_for_provider(&pid_owned)
-                                    .await
-                                {
-                                    return Err(ApiError::new(
-                                        StatusCode::CONFLICT,
-                                        "conflict",
-                                        "此模型服务的会话正在执行，请完成后再移除",
-                                    ));
-                                }
-                                let deleted = state
-                                    .host
-                                    .auth()
-                                    .delete_custom_provider(&pid_owned, &revision)
-                                    .await
-                                    .map_err(map_custom_provider_error)?;
-                                state.pool.global_events.publish(
-                                    "state",
-                                    &json!({ "type": "auth_changed", "providerId": pid_owned }),
-                                );
-                                state.pool.global_events.publish(
-                                    "state",
-                                    &json!({ "type": "models_changed", "providerId": pid_owned }),
-                                );
-                                Ok(deleted)
-                            })
+                        if state
+                            .pool
+                            .has_running_session_for_provider(&pid_owned)
                             .await
+                        {
+                            return Err(ApiError::new(
+                                StatusCode::CONFLICT,
+                                "conflict",
+                                "此模型服务的会话正在执行，请完成后再移除",
+                            ));
+                        }
+                        let deleted = state
+                            .host
+                            .auth()
+                            .delete_custom_provider_checked(&pid_owned, &revision)
+                            .await
+                            .map_err(ApiError::from)?;
+                        state.pool.global_events.publish(
+                            "state",
+                            &json!({ "type": "auth_changed", "providerId": pid_owned }),
+                        );
+                        state.pool.global_events.publish(
+                            "state",
+                            &json!({ "type": "models_changed", "providerId": pid_owned }),
+                        );
+                        Ok(deleted)
                     },
                 )
                 .await?;
@@ -268,8 +242,8 @@ pub async fn handle_auth_route(
             .map_err(ApiError::from)?;
         let params = parse_query_params(query);
         let provider_id = params.get("provider").map(String::as_str).unwrap_or("");
-        if provider_id == "cstoa" && params.get("refresh").map(String::as_str) == Some("1") {
-            state.host.auth().invalidate_account();
+        if params.get("refresh").map(String::as_str) == Some("1") {
+            state.host.auth().invalidate_provider_account(provider_id);
         }
         let quota = state
             .host
@@ -288,7 +262,7 @@ pub async fn handle_auth_route(
             let provider_id = segments[0];
             let channel = segments[1];
             let action = segments[2];
-            if is_valid_session_id_key(provider_id)
+            if is_valid_provider_id_key(provider_id)
                 && matches!(channel, "oauth" | "api-key")
                 && matches!(action, "start" | "status" | "cancel" | "respond")
             {
@@ -371,100 +345,155 @@ pub async fn handle_auth_route(
 
                     let pid_owned = provider_id.to_owned();
                     let state_for_login = state.clone();
+                    let has_inline_key = key_opt.is_some();
                     let result = state
-                        .write_once(
+                        .write_once_keyed(
                             caller,
                             method.as_str(),
                             pathname,
                             &body,
-                            Some(headers),
+                            headers,
+                            format!("auth:{pid_owned}"),
                             || async move {
-                                state
-                                    .locks
-                                    .serialize(format!("auth:{pid_owned}"), || async move {
-                                        let prev = state_for_login
-                                            .oauth_flows
-                                            .status(&pid_owned, None);
-                                        if prev.get("state").and_then(Value::as_str)
-                                            == Some("pending")
-                                            && prev.get("authType").and_then(Value::as_str)
-                                                != Some(auth_type_str(auth_type))
-                                        {
-                                            state_for_login
-                                                .oauth_flows
-                                                .cancel_and_wait(&pid_owned)
-                                                .await;
-                                        }
+                                let prev =
+                                    state_for_login.oauth_flows.status(&pid_owned, None);
+                                if prev.get("state").and_then(Value::as_str) == Some("pending")
+                                    && prev.get("authType").and_then(Value::as_str)
+                                        != Some(auth_type_str(auth_type))
+                                {
+                                    // ModeController read lock is already dropped; `auth-config:all` is not held here.
+                                    state_for_login
+                                        .oauth_flows
+                                        .cancel_and_wait(&pid_owned)
+                                        .await;
+                                }
 
-                                        let st = state_for_login.clone();
-                                        let pid_task = pid_owned.clone();
-                                        let flow = state_for_login.oauth_flows.start_or_reuse(
-                                            &pid_owned,
-                                            auth_type,
-                                            key_opt,
-                                            move |interaction| {
-                                                Box::pin(async move {
-                                                    let do_login = || async {
-                                                        if pid_task == "cstoa" {
+                                let st = state_for_login.clone();
+                                let pid_task = pid_owned.clone();
+                                let flow = state_for_login.oauth_flows.start_or_reuse(
+                                    &pid_owned,
+                                    auth_type,
+                                    key_opt,
+                                    move |interaction| {
+                                        Box::pin(async move {
+                                            let cancel_tok = interaction
+                                                .cancel_token
+                                                .clone()
+                                                .unwrap_or_default();
+                                            if let Some(ref base) = base_url_opt {
+                                                let login_interaction = if has_inline_key {
+                                                    interaction
+                                                } else {
+                                                    st.host
+                                                        .auth()
+                                                        .validate_provider_endpoint(&pid_task, base)
+                                                        .map_err(|e| e.message)?;
+                                                    let Some(api_auth) = st
+                                                        .host
+                                                        .auth()
+                                                        .runtime()
+                                                        .models()
+                                                        .get_provider(&pid_task)
+                                                        .and_then(|p| p.auth().api_key.clone())
+                                                    else {
+                                                        return Err(
+                                                            "该模型服务不支持 API Key 登录"
+                                                                .to_owned(),
+                                                        );
+                                                    };
+                                                    // Wait for user secret with zero config locks or ActivityLease held;
+                                                    // `wait_until_ready` returns as soon as this prompt registers.
+                                                    let collected = Zeroizing::new(
+                                                        interaction
+                                                            .prompt_user(AuthPrompt::Secret {
+                                                                message: format!(
+                                                                    "Enter {}",
+                                                                    api_auth.name
+                                                                ),
+                                                                placeholder: None,
+                                                            })
+                                                            .await?,
+                                                    );
+                                                    AuthInteraction {
+                                                        cancel_token: Some(cancel_tok.clone()),
+                                                        prompt: Arc::new(move |q| {
+                                                            let secret = collected.clone();
+                                                            Box::pin(async move {
+                                                                if matches!(
+                                                                    q,
+                                                                    AuthPrompt::Secret { .. }
+                                                                ) {
+                                                                    Ok(secret.as_str().to_owned())
+                                                                } else {
+                                                                    Err("该模型服务需要其他登录信息"
+                                                                        .to_owned())
+                                                                }
+                                                            })
+                                                        }),
+                                                        notify: interaction.notify.clone(),
+                                                    }
+                                                };
+
+                                                // Cancel-aware wait on `auth-config:all` so cancelling this flow never blocks
+                                                // behind another provider's custom config edit.
+                                                let _cfg_guard = tokio::select! {
+                                                    biased;
+                                                    _ = cancel_tok.cancelled() => {
+                                                        return Err("登录已取消".to_owned());
+                                                    }
+                                                    guard = st.locks.lock("auth-config:all") => guard,
+                                                };
+                                                if cancel_tok.is_cancelled() {
+                                                    return Err("登录已取消".to_owned());
+                                                }
+                                                if st
+                                                    .pool
+                                                    .has_running_session_for_provider(&pid_task)
+                                                    .await
+                                                {
+                                                    return Err("此 Provider 的会话正在执行，请完成后再修改 BaseURL".to_owned());
+                                                }
+                                                st.host
+                                                    .auth()
+                                                    .with_provider_endpoint(
+                                                        &pid_task,
+                                                        base,
+                                                        || async {
                                                             st.host
                                                                 .auth()
-                                                                .login(auth_type, interaction)
-                                                                .await
-                                                                .map(|_| ())
-                                                        } else {
-                                                            st.host
-                                                                .auth()
-                                                                .runtime()
-                                                                .login(
+                                                                .login_provider(
                                                                     &pid_task,
                                                                     auth_type,
-                                                                    interaction,
-                                                                    None,
+                                                                    login_interaction,
                                                                 )
                                                                 .await
                                                                 .map(|_| ())
-                                                        }
-                                                    };
-                                                    if let Some(ref base) = base_url_opt {
-                                                        st.locks
-                                                            .serialize(
-                                                                "auth-config:all",
-                                                                || async {
-                                                                    if st
-                                                                        .pool
-                                                                        .has_running_session_for_provider(&pid_task)
-                                                                        .await
-                                                                    {
-                                                                        return Err("此 Provider 的会话正在执行，请完成后再修改 BaseURL".to_owned());
-                                                                    }
-                                                                    st.host
-                                                                        .auth()
-                                                                        .with_provider_endpoint(
-                                                                            &pid_task,
-                                                                            base,
-                                                                            do_login,
-                                                                        )
-                                                                        .await
-                                                                },
-                                                            )
-                                                            .await
-                                                    } else {
-                                                        do_login().await
-                                                    }
-                                                })
-                                            },
-                                        );
+                                                        },
+                                                    )
+                                                    .await
+                                            } else {
+                                                st.host
+                                                    .auth()
+                                                    .login_provider(
+                                                        &pid_task,
+                                                        auth_type,
+                                                        interaction,
+                                                    )
+                                                    .await
+                                                    .map(|_| ())
+                                            }
+                                        })
+                                    },
+                                );
 
-                                        let mut ready = state_for_login
-                                            .oauth_flows
-                                            .wait_until_ready(&pid_owned, &flow)
-                                            .await?;
-                                        if let Some(m) = ready.as_object_mut() {
-                                            m.insert("started".to_owned(), json!(true));
-                                        }
-                                        Ok(ready)
-                                    })
-                                    .await
+                                let mut ready = state_for_login
+                                    .oauth_flows
+                                    .wait_until_ready(&pid_owned, &flow)
+                                    .await?;
+                                if let Some(m) = ready.as_object_mut() {
+                                    m.insert("started".to_owned(), json!(true));
+                                }
+                                Ok(ready)
                             },
                         )
                         .await?;
@@ -493,22 +522,17 @@ pub async fn handle_auth_route(
                     };
                     let pid_owned = provider_id.to_owned();
                     let result = state
-                        .write_once(
+                        .write_once_keyed(
                             caller,
                             method.as_str(),
                             pathname,
                             &body,
-                            Some(headers),
+                            headers,
+                            format!("auth:{pid_owned}"),
                             || async move {
-                                state
-                                    .locks
-                                    .serialize(format!("auth:{pid_owned}"), || async move {
-                                        let cancelled = state
-                                            .oauth_flows
-                                            .cancel(&pid_owned, flow_id.as_deref());
-                                        Ok(json!({ "cancelled": cancelled }))
-                                    })
-                                    .await
+                                let cancelled =
+                                    state.oauth_flows.cancel(&pid_owned, flow_id.as_deref());
+                                Ok::<_, ApiError>(json!({ "cancelled": cancelled }))
                             },
                         )
                         .await?;
@@ -556,22 +580,18 @@ pub async fn handle_auth_route(
                     };
                     let pid_owned = provider_id.to_owned();
                     let result = state
-                        .write_once(
+                        .write_once_keyed(
                             caller,
                             method.as_str(),
                             pathname,
                             &body,
-                            Some(headers),
+                            headers,
+                            format!("auth:{pid_owned}"),
                             || async move {
                                 state
-                                    .locks
-                                    .serialize(format!("auth:{pid_owned}"), || async move {
-                                        state
-                                            .oauth_flows
-                                            .respond(&pid_owned, &flow_id, &prompt_id, &val)?;
-                                        Ok(json!({ "accepted": true }))
-                                    })
-                                    .await
+                                    .oauth_flows
+                                    .respond(&pid_owned, &flow_id, &prompt_id, &val)?;
+                                Ok::<_, ApiError>(json!({ "accepted": true }))
                             },
                         )
                         .await?;
@@ -581,7 +601,7 @@ pub async fn handle_auth_route(
         } else if segments.len() == 2 {
             let provider_id = segments[0];
             let action = segments[1];
-            if is_valid_session_id_key(provider_id) && matches!(action, "api-key" | "logout") {
+            if is_valid_provider_id_key(provider_id) && matches!(action, "api-key" | "logout") {
                 let runtime = state.host.auth().runtime().clone();
                 let Some(provider_meta) = runtime.models().get_provider(provider_id) else {
                     return Err(ApiError::new(
@@ -641,119 +661,95 @@ pub async fn handle_auth_route(
                     let pid_owned = provider_id.to_owned();
                     let st = state.clone();
                     let result = state
-                        .write_once(
+                        .write_once_keyed(
                             caller,
                             method.as_str(),
                             pathname,
                             &body,
-                            Some(headers),
+                            headers,
+                            format!("auth:{pid_owned}"),
                             || async move {
-                                state
-                                    .locks
-                                    .serialize(format!("auth:{pid_owned}"), || async move {
-                                        let login_action = || async {
-                                            st.oauth_flows.cancel_and_wait(&pid_owned).await;
-                                            let prompts = Arc::new(Mutex::new(0usize));
-                                            let secret = key_secret.clone();
-                                            let interaction = AuthInteraction::new(
-                                                Arc::new(move |question| {
-                                                    let mut count =
-                                                        prompts.lock().expect("prompts lock");
-                                                    *count += 1;
-                                                    let n = *count;
-                                                    let secret = secret.clone();
-                                                    Box::pin(async move {
-                                                        if n != 1
-                                                            || !matches!(
-                                                                question,
-                                                                AuthPrompt::Secret { .. }
-                                                            )
-                                                        {
-                                                            return Err("该模型服务需要其他登录信息".to_owned());
-                                                        }
-                                                        Ok(secret.as_str().to_owned())
-                                                    })
-                                                }),
-                                                Arc::new(|_| {}),
-                                            );
-                                            if pid_owned == "cstoa" {
-                                                st.host
-                                                    .auth()
-                                                    .login(AuthType::ApiKey, interaction)
-                                                    .await?;
-                                            } else {
-                                                st.host
-                                                    .auth()
-                                                    .runtime()
-                                                    .login(
-                                                        &pid_owned,
-                                                        AuthType::ApiKey,
-                                                        interaction,
-                                                        None,
+                                // Cancel and await any pending interactive/OAuth flow BEFORE acquiring `auth-config:all`,
+                                // keeping consistent lock hierarchy (`auth:<provider>` -> `auth-config:all`).
+                                st.oauth_flows.cancel_and_wait(&pid_owned).await;
+
+                                let login_action = || async {
+                                    let prompts = Arc::new(Mutex::new(0usize));
+                                    let secret = key_secret.clone();
+                                    let interaction = AuthInteraction::new(
+                                        Arc::new(move |question| {
+                                            let mut count = prompts.lock().expect("prompts lock");
+                                            *count += 1;
+                                            let n = *count;
+                                            let secret = secret.clone();
+                                            Box::pin(async move {
+                                                if n != 1
+                                                    || !matches!(
+                                                        question,
+                                                        AuthPrompt::Secret { .. }
                                                     )
-                                                    .await?;
-                                            }
-                                            Ok(json!({
-                                                "providerId": pid_owned,
-                                                "type": "api_key",
-                                            }))
-                                        };
+                                                {
+                                                    return Err(
+                                                        "该模型服务需要其他登录信息".to_owned()
+                                                    );
+                                                }
+                                                Ok(secret.as_str().to_owned())
+                                            })
+                                        }),
+                                        Arc::new(|_| {}),
+                                    );
+                                    st.host
+                                        .auth()
+                                        .login_provider(&pid_owned, AuthType::ApiKey, interaction)
+                                        .await?;
+                                    Ok(json!({
+                                        "providerId": pid_owned,
+                                        "type": "api_key",
+                                    }))
+                                };
 
-                                        let resp_val = if let Some(ref base) = base_url_opt {
-                                            st.locks
-                                                .serialize("auth-config:all", || async {
-                                                    if st
-                                                        .pool
-                                                        .has_running_session_for_provider(
-                                                            &pid_owned,
-                                                        )
-                                                        .await
-                                                    {
-                                                        return Err(ApiError::new(
-                                                            StatusCode::CONFLICT,
-                                                            "conflict",
-                                                            "此 Provider 的会话正在执行，请完成后再修改 BaseURL",
-                                                        ));
-                                                    }
-                                                    st.host
-                                                        .auth()
-                                                        .with_provider_endpoint(
-                                                            &pid_owned,
-                                                            base,
-                                                            login_action,
-                                                        )
-                                                        .await
-                                                        .map_err(map_custom_provider_error)
-                                                })
-                                                .await?
-                                        } else {
-                                            login_action().await.map_err(|msg| {
-                                                ApiError::new(
-                                                    StatusCode::BAD_REQUEST,
-                                                    "invalid_request",
-                                                    msg,
-                                                )
-                                            })?
-                                        };
+                                let resp_val = if let Some(ref base) = base_url_opt {
+                                    let _cfg_guard = st.locks.lock("auth-config:all").await;
+                                    if st.pool.has_running_session_for_provider(&pid_owned).await {
+                                        return Err(ApiError::new(
+                                            StatusCode::CONFLICT,
+                                            "conflict",
+                                            "此 Provider 的会话正在执行，请完成后再修改 BaseURL",
+                                        ));
+                                    }
+                                    st.host
+                                        .auth()
+                                        .with_provider_endpoint_checked(
+                                            &pid_owned,
+                                            base,
+                                            login_action,
+                                        )
+                                        .await
+                                        .map_err(ApiError::from)?
+                                } else {
+                                    login_action().await.map_err(|msg| {
+                                        ApiError::new(
+                                            StatusCode::BAD_REQUEST,
+                                            "invalid_request",
+                                            msg,
+                                        )
+                                    })?
+                                };
 
-                                        st.pool
-                                            .invalid_auth
-                                            .lock()
-                                            .expect("invalid_auth lock")
-                                            .remove(&pid_owned);
-                                        if pid_owned == "cstoa" {
-                                            st.host.auth().invalidate_account();
-                                        }
-                                        st.pool.global_events.publish(
-                                            "state",
-                                            &json!({
-                                                "type": "auth_changed",
-                                                "providerId": pid_owned,
-                                            }),
-                                        );
-                                        Ok(resp_val)
-                                    })
-                                    .await
+                                st.pool
+                                    .invalid_auth
+                                    .lock()
+                                    .expect("invalid_auth lock")
+                                    .remove(&pid_owned);
+                                st.host.auth().invalidate_provider_account(&pid_owned);
+                                st.pool.global_events.publish(
+                                    "state",
+                                    &json!({
+                                        "type": "auth_changed",
+                                        "providerId": pid_owned,
+                                    }),
+                                );
+                                Ok(resp_val)
                             },
                         )
                         .await?;
@@ -772,42 +768,34 @@ pub async fn handle_auth_route(
                     let pid_owned = provider_id.to_owned();
                     let st = state.clone();
                     let result = state
-                        .write_once(
+                        .write_once_keyed(
                             caller,
                             method.as_str(),
                             pathname,
                             &body,
-                            Some(headers),
+                            headers,
+                            format!("auth:{pid_owned}"),
                             || async move {
-                                state
-                                    .locks
-                                    .serialize(format!("auth:{pid_owned}"), || async move {
-                                        st.oauth_flows.cancel_and_wait(&pid_owned).await;
-                                        st.host.auth().logout(&pid_owned).await.map_err(|msg| {
-                                            ApiError::new(
-                                                StatusCode::BAD_REQUEST,
-                                                "invalid_request",
-                                                msg,
-                                            )
-                                        })?;
-                                        st.pool
-                                            .invalid_auth
-                                            .lock()
-                                            .expect("invalid_auth lock")
-                                            .remove(&pid_owned);
-                                        st.pool.global_events.publish(
-                                            "state",
-                                            &json!({
-                                                "type": "auth_changed",
-                                                "providerId": pid_owned,
-                                            }),
-                                        );
-                                        Ok(json!({
-                                            "providerId": pid_owned,
-                                            "type": Value::Null,
-                                        }))
-                                    })
-                                    .await
+                                st.oauth_flows.cancel_and_wait(&pid_owned).await;
+                                st.host.auth().logout(&pid_owned).await.map_err(|msg| {
+                                    ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", msg)
+                                })?;
+                                st.pool
+                                    .invalid_auth
+                                    .lock()
+                                    .expect("invalid_auth lock")
+                                    .remove(&pid_owned);
+                                st.pool.global_events.publish(
+                                    "state",
+                                    &json!({
+                                        "type": "auth_changed",
+                                        "providerId": pid_owned,
+                                    }),
+                                );
+                                Ok(json!({
+                                    "providerId": pid_owned,
+                                    "type": Value::Null,
+                                }))
                             },
                         )
                         .await?;

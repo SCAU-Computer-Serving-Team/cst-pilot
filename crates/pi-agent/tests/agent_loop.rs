@@ -4,9 +4,9 @@ use std::time::Duration;
 
 use pi_agent::{
     AfterToolCallResult, AgentContext, AgentEvent, AgentLoopConfig, AgentLoopTurnUpdate,
-    AgentMessage, AgentRequestUpdate, AgentTool, AgentToolCallOutcome, AgentToolResult,
-    AgentTurnDecision, BeforeToolCallResult, CustomAgentMessage, RunToolCallOptions, StreamFn,
-    ToolExecutionMode, declare_tool_changes, run_agent_loop, run_tool_call,
+    AgentMessage, AgentRequestUpdate, AgentStreamFn, AgentTool, AgentToolCallOutcome,
+    AgentToolResult, AgentTurnDecision, BeforeToolCallResult, CustomAgentMessage,
+    RunToolCallOptions, ToolExecutionMode, declare_tool_changes, run_agent_loop, run_tool_call,
 };
 use pi_ai::faux::{faux_assistant_message, faux_text, faux_text_message, faux_tool_call};
 use pi_ai::{
@@ -16,12 +16,12 @@ use pi_ai::{
 };
 use serde_json::json;
 
-fn scripted_stream_fn(steps: Vec<AssistantMessage>) -> (StreamFn, Arc<AtomicUsize>) {
+fn scripted_stream_fn(steps: Vec<AssistantMessage>) -> (AgentStreamFn, Arc<AtomicUsize>) {
     let queue = Arc::new(Mutex::new(std::collections::VecDeque::from(steps)));
     let calls = Arc::new(AtomicUsize::new(0));
     let calls_clone = calls.clone();
 
-    let stream_fn: StreamFn = Arc::new(move |model, _ctx, _opts| {
+    let stream_fn: AgentStreamFn = Arc::new(move |model, _ctx, _opts| {
         let queue = queue.clone();
         let calls_clone = calls_clone.clone();
         Box::pin(async move {

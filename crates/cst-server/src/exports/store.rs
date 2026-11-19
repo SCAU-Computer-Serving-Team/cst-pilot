@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -100,7 +100,7 @@ fn export_base_stem(snapshot: &Value) -> String {
 }
 
 fn is_enospc(err: &io::Error) -> bool {
-    err.raw_os_error() == Some(112) || err.raw_os_error() == Some(28)
+    cst_os::is_storage_full_io(err)
 }
 
 fn copy_file_exclusive(src: &Path, dst: &Path) -> io::Result<()> {
@@ -119,7 +119,7 @@ struct QueueState {
     active: Option<Arc<WorkItem>>,
     active_cancel: Option<CancellationToken>,
     active_cancel_error: Option<ServiceError>,
-    reservations: usize,
+    publishing: HashSet<String>,
     pumping: Option<JoinHandle<()>>,
 }
 
@@ -135,6 +135,39 @@ pub struct SessionExportStore {
     creating_count: Arc<AtomicUsize>,
     creating_done: Arc<Notify>,
     close_lock: Arc<AsyncMutex<bool>>,
+}
+
+struct CreatingGuard(SessionExportStore);
+
+impl Drop for CreatingGuard {
+    fn drop(&mut self) {
+        if self.0.creating_count.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.0.creating_done.notify_waiters();
+        }
+    }
+}
+
+/// Keeps a persisted job invisible until its caller resumes and commits it to the queue.
+struct PendingExport {
+    id: String,
+    creating: Option<CreatingGuard>,
+    runtime: tokio::runtime::Handle,
+}
+
+impl Drop for PendingExport {
+    fn drop(&mut self) {
+        let Some(creating) = self.creating.take() else {
+            return;
+        };
+        let id = std::mem::take(&mut self.id);
+        self.runtime.spawn_blocking(move || {
+            let store = &creating.0;
+            let _ = fs::remove_file(store.metadata.join(format!("{id}.json")));
+            let mut guard = store.inner.lock().expect("export queue lock");
+            guard.publishing.remove(&id);
+            store.revision.fetch_add(1, Ordering::SeqCst);
+        });
+    }
 }
 
 impl SessionExportStore {
@@ -153,7 +186,7 @@ impl SessionExportStore {
                 active: None,
                 active_cancel: None,
                 active_cancel_error: None,
-                reservations: 0,
+                publishing: HashSet::new(),
                 pumping: None,
             })),
             revision: Arc::new(AtomicU64::new(0)),
@@ -193,29 +226,6 @@ impl SessionExportStore {
     }
 
     fn save_record_sync(&self, record: &ExportRecord) -> Result<(), ServiceError> {
-        fs::create_dir_all(&self.metadata).map_err(|err| {
-            let full = is_enospc(&err);
-            ServiceError::new(
-                if full {
-                    ServiceErrorKind::StorageFull
-                } else {
-                    ServiceErrorKind::Internal
-                },
-                if full {
-                    "storage_full"
-                } else {
-                    "export_record_unavailable"
-                },
-                if full {
-                    "工具包存储空间不足，请清理后重试"
-                } else {
-                    "导出任务无法保存，请检查工具包写入权限"
-                },
-            )
-        })?;
-        let tmp = self
-            .metadata
-            .join(format!("{}.{}.tmp", record.result.id, Uuid::new_v4()));
         let target = self.metadata.join(format!("{}.json", record.result.id));
         let encoded = serde_json::to_vec(record).map_err(|_| {
             ServiceError::new(
@@ -224,34 +234,35 @@ impl SessionExportStore {
                 "导出任务无法保存，请检查工具包写入权限",
             )
         })?;
-        let write_res = (|| -> io::Result<()> {
-            let mut f = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
-            f.write_all(&encoded)?;
-            f.sync_all()?;
-            drop(f);
-            fs::rename(&tmp, &target)
-        })();
-        let _ = fs::remove_file(&tmp);
-        write_res.map_err(|err| {
-            let full = is_enospc(&err);
-            ServiceError::new(
-                if full {
-                    ServiceErrorKind::StorageFull
-                } else {
-                    ServiceErrorKind::Internal
-                },
-                if full {
-                    "storage_full"
-                } else {
-                    "export_record_unavailable"
-                },
-                if full {
-                    "工具包存储空间不足，请清理后重试"
-                } else {
-                    "导出任务无法保存，请检查工具包写入权限"
-                },
-            )
+        cst_os::atomic_write_bytes_sync(&target, &encoded, "导出任务无法保存").map_err(|err| {
+            if err.code() == "storage_full" {
+                ServiceError::new(
+                    ServiceErrorKind::StorageFull,
+                    "storage_full",
+                    "工具包存储空间不足，请清理后重试",
+                )
+            } else {
+                ServiceError::new(
+                    ServiceErrorKind::Internal,
+                    "export_record_unavailable",
+                    "导出任务无法保存，请检查工具包写入权限",
+                )
+            }
         })
+    }
+
+    async fn run_blocking<T, F>(task: F) -> Result<T, ServiceError>
+    where
+        T: Send + 'static,
+        F: FnOnce() -> Result<T, ServiceError> + Send + 'static,
+    {
+        tokio::task::spawn_blocking(task).await.map_err(|_| {
+            ServiceError::new(
+                ServiceErrorKind::Internal,
+                "export_failed",
+                "导出任务后台线程异常退出",
+            )
+        })?
     }
 
     fn commit_work_sync(&self, work: &WorkItem) -> Result<(), ServiceError> {
@@ -267,14 +278,7 @@ impl SessionExportStore {
 
     pub async fn create(&self, snapshot: &Value) -> Result<ExportJobRecord, ServiceError> {
         self.creating_count.fetch_add(1, Ordering::SeqCst);
-        let res = self.enqueue(snapshot).await;
-        if self.creating_count.fetch_sub(1, Ordering::SeqCst) == 1 {
-            self.creating_done.notify_waiters();
-        }
-        res
-    }
-
-    async fn enqueue(&self, snapshot: &Value) -> Result<ExportJobRecord, ServiceError> {
+        let creating = CreatingGuard(self.clone());
         if self.closing.load(Ordering::SeqCst) {
             return Err(ServiceError::new(
                 ServiceErrorKind::Unavailable,
@@ -282,11 +286,49 @@ impl SessionExportStore {
                 "程序正在退出，请稍后导出",
             ));
         }
-        self.initialize_work_dir_sync()?;
+        let store_for_init = self.clone();
+        Self::run_blocking(move || store_for_init.initialize_work_dir_sync()).await?;
+
+        let id = Uuid::new_v4().to_string();
+        let session_id = snapshot
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let title = snapshot
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("会话")
+            .to_owned();
+        let captured_at = snapshot
+            .get("capturedAt")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let options = snapshot.get("options").cloned().unwrap_or(Value::Null);
+        let date_str = options
+            .get("date")
+            .and_then(Value::as_str)
+            .unwrap_or("1970-01-01")
+            .to_owned();
+        let root = self.root.clone();
+        let display_dir = Self::run_blocking(move || {
+            artifact_sessions_display_path(&root, &date_str)
+                .map(|p| p.to_string_lossy().into_owned())
+        })
+        .await?;
+
         {
             let mut guard = self.inner.lock().expect("export queue lock");
+            if self.closing.load(Ordering::SeqCst) {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::Unavailable,
+                    "export_stopping",
+                    "程序正在退出，请稍后导出",
+                ));
+            }
             let total =
-                guard.queue.len() + guard.reservations + usize::from(guard.active.is_some());
+                guard.queue.len() + guard.publishing.len() + usize::from(guard.active.is_some());
             if total >= 8 {
                 return Err(ServiceError::new(
                     ServiceErrorKind::Busy,
@@ -294,78 +336,58 @@ impl SessionExportStore {
                     "导出任务较多，请等待已有任务完成",
                 ));
             }
-            guard.reservations += 1;
+            guard.publishing.insert(id.clone());
+            self.revision.fetch_add(1, Ordering::SeqCst);
         }
 
-        let res = (|| -> Result<ExportJobRecord, ServiceError> {
-            let id = Uuid::new_v4().to_string();
-            let session_id = snapshot
-                .get("sessionId")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_owned();
-            let title = snapshot
-                .get("title")
-                .and_then(Value::as_str)
-                .unwrap_or("会话")
-                .to_owned();
-            let captured_at = snapshot
-                .get("capturedAt")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_owned();
-            let options = snapshot.get("options").cloned().unwrap_or(Value::Null);
-            let date_str = options
-                .get("date")
-                .and_then(Value::as_str)
-                .unwrap_or("1970-01-01");
-            let display_dir = artifact_sessions_display_path(&self.root, date_str)?
-                .to_string_lossy()
-                .into_owned();
+        let result = ExportJobRecord {
+            id: id.clone(),
+            session_id,
+            title,
+            captured_at,
+            options,
+            status: "queued".to_owned(),
+            directory: Some(display_dir),
+            files: Vec::new(),
+            error: None,
+        };
+        let record = ExportRecord {
+            result: result.clone(),
+            stored: Vec::new(),
+        };
+        let snapshot_owned = snapshot.clone();
+        let pending = PendingExport {
+            id: id.clone(),
+            creating: Some(creating),
+            runtime: tokio::runtime::Handle::current(),
+        };
+        let store = self.clone();
+        let (record, mut pending) = Self::run_blocking(move || {
+            store.save_record_sync(&record)?;
+            Ok((record, pending))
+        })
+        .await?;
 
-            let result = ExportJobRecord {
-                id: id.clone(),
-                session_id,
-                title,
-                captured_at,
-                options,
-                status: "queued".to_owned(),
-                directory: Some(display_dir),
-                files: Vec::new(),
-                error: None,
-            };
-            let record = ExportRecord {
-                result: result.clone(),
-                stored: Vec::new(),
-            };
-            self.save_record_sync(&record)?;
-
-            if self.closing.load(Ordering::SeqCst) {
-                let _ = fs::remove_file(self.metadata.join(format!("{id}.json")));
-                return Err(ServiceError::new(
-                    ServiceErrorKind::Unavailable,
-                    "export_stopping",
-                    "程序正在退出，请稍后导出",
-                ));
-            }
-
-            let work = Arc::new(WorkItem {
-                id,
-                snapshot: snapshot.clone(),
-                state: Mutex::new((record, result.clone())),
-            });
-
-            {
-                let mut guard = self.inner.lock().expect("export queue lock");
-                guard.queue.push_back(work);
-                self.revision.fetch_add(1, Ordering::SeqCst);
-                self.ensure_pumping_locked(&mut guard);
-            }
-            Ok(result)
-        })();
-
-        self.inner.lock().expect("export queue lock").reservations -= 1;
-        res
+        // No suspension between publishing the job and returning its ID. Dropping the future
+        // before this point drops PendingExport, including when the worker finishes after cancellation.
+        let mut guard = self.inner.lock().expect("export queue lock");
+        if self.closing.load(Ordering::SeqCst) {
+            return Err(ServiceError::new(
+                ServiceErrorKind::Unavailable,
+                "export_stopping",
+                "程序正在退出，请稍后导出",
+            ));
+        }
+        guard.publishing.remove(&id);
+        guard.queue.push_back(Arc::new(WorkItem {
+            id,
+            snapshot: snapshot_owned,
+            state: Mutex::new((record, result.clone())),
+        }));
+        self.revision.fetch_add(1, Ordering::SeqCst);
+        self.ensure_pumping_locked(&mut guard);
+        pending.creating.take();
+        Ok(result)
     }
 
     fn ensure_pumping_locked(&self, guard: &mut QueueState) {
@@ -766,6 +788,14 @@ impl SessionExportStore {
             .map(|item| item.visible_record())
     }
 
+    fn is_publishing(&self, id: &str) -> bool {
+        self.inner
+            .lock()
+            .expect("export queue lock")
+            .publishing
+            .contains(id)
+    }
+
     fn read_record_sync(&self, id: &str) -> Result<ExportRecord, ServiceError> {
         if !is_valid_export_id(id) {
             return Err(ServiceError::new(
@@ -779,6 +809,13 @@ impl SessionExportStore {
         loop {
             if let Some(live) = self.live_record(id) {
                 return Ok(live);
+            }
+            if self.is_publishing(id) {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::NotFound,
+                    "export_not_found",
+                    "导出记录不存在",
+                ));
             }
             let rev = self.revision.load(Ordering::SeqCst);
             let file_path = self.metadata.join(format!("{id}.json"));
@@ -802,6 +839,13 @@ impl SessionExportStore {
 
             if let Some(live) = self.live_record(id) {
                 return Ok(live);
+            }
+            if self.is_publishing(id) {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::NotFound,
+                    "export_not_found",
+                    "导出记录不存在",
+                ));
             }
             if self.revision.load(Ordering::SeqCst) != rev {
                 continue;
@@ -875,156 +919,174 @@ impl SessionExportStore {
     }
 
     pub async fn get(&self, id: &str) -> Result<ExportJobRecord, ServiceError> {
-        Ok(self.read_record_sync(id)?.result)
+        let store = self.clone();
+        let id = id.to_owned();
+        Self::run_blocking(move || Ok(store.read_record_sync(&id)?.result)).await
     }
 
     pub async fn list(&self, session_id: &str) -> Result<Vec<ExportJobRecord>, ServiceError> {
-        self.initialize_work_dir_sync()?;
-        let entries = match fs::read_dir(&self.metadata) {
-            Ok(rd) => rd,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(_) => {
-                return Err(ServiceError::new(
-                    ServiceErrorKind::Unavailable,
-                    "export_record_unavailable",
-                    "导出记录无法读取，请检查工具包所在介质",
-                ));
-            }
-        };
+        let store = self.clone();
+        let session_id = session_id.to_owned();
+        Self::run_blocking(move || {
+            store.initialize_work_dir_sync()?;
+            let entries = match fs::read_dir(&store.metadata) {
+                Ok(rd) => rd,
+                Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+                Err(_) => {
+                    return Err(ServiceError::new(
+                        ServiceErrorKind::Unavailable,
+                        "export_record_unavailable",
+                        "导出记录无法读取，请检查工具包所在介质",
+                    ));
+                }
+            };
 
-        let mut results = Vec::new();
-        for entry in entries.filter_map(Result::ok) {
-            let file_name = entry.file_name();
-            let Some(name_str) = file_name.to_str() else {
-                continue;
-            };
-            let Some(id_part) = name_str.strip_suffix(".json") else {
-                continue;
-            };
-            if !is_valid_export_id(id_part) {
-                continue;
+            let mut results = Vec::new();
+            for entry in entries.filter_map(Result::ok) {
+                let file_name = entry.file_name();
+                let Some(name_str) = file_name.to_str() else {
+                    continue;
+                };
+                let Some(id_part) = name_str.strip_suffix(".json") else {
+                    continue;
+                };
+                if !is_valid_export_id(id_part) {
+                    continue;
+                }
+                if let Ok(rec) = store.read_record_sync(id_part)
+                    && rec.result.session_id == session_id
+                {
+                    results.push(rec.result);
+                }
             }
-            if let Ok(rec) = self.read_record_sync(id_part)
-                && rec.result.session_id == session_id
-            {
-                results.push(rec.result);
-            }
-        }
-        results.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
-        results.truncate(50);
-        Ok(results)
+            results.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+            results.truncate(50);
+            Ok(results)
+        })
+        .await
     }
 
     pub async fn directory(&self, id: &str) -> Result<PathBuf, ServiceError> {
-        let record = self.read_record_sync(id)?;
-        if record.result.status != "completed" {
-            return Err(ServiceError::new(
-                ServiceErrorKind::Conflict,
-                "export_not_completed",
-                "导出尚未保存完成，请完成后打开目录",
-            ));
-        }
-        let date_str = record
-            .result
-            .options
-            .get("date")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        existing_artifact_sessions_dir(&self.root, date_str)
+        let store = self.clone();
+        let id = id.to_owned();
+        Self::run_blocking(move || {
+            let record = store.read_record_sync(&id)?;
+            if record.result.status != "completed" {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::Conflict,
+                    "export_not_completed",
+                    "导出尚未保存完成，请完成后打开目录",
+                ));
+            }
+            let date_str = record
+                .result
+                .options
+                .get("date")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            existing_artifact_sessions_dir(&store.root, date_str)
+        })
+        .await
     }
 
     pub async fn file(&self, id: &str, index: usize) -> Result<ExportDownloadedFile, ServiceError> {
-        let record = self.read_record_sync(id)?;
-        let Some(stored_entry) = record.stored.get(index) else {
-            return Err(ServiceError::new(
-                ServiceErrorKind::NotFound,
-                "export_file_missing",
-                "导出文件不存在",
-            ));
-        };
-        let is_single_filename = Path::new(&stored_entry.name)
-            .file_name()
-            .and_then(|n| n.to_str())
-            == Some(stored_entry.name.as_str())
-            && !stored_entry.name.contains('/')
-            && !stored_entry.name.contains('\\');
-        if record.result.status != "completed" || !is_single_filename {
-            return Err(ServiceError::new(
-                ServiceErrorKind::NotFound,
-                "export_file_missing",
-                "导出文件不存在",
-            ));
-        }
+        let store = self.clone();
+        let id = id.to_owned();
+        Self::run_blocking(move || {
+            let record = store.read_record_sync(&id)?;
+            let Some(stored_entry) = record.stored.get(index) else {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::NotFound,
+                    "export_file_missing",
+                    "导出文件不存在",
+                ));
+            };
+            let is_single_filename = Path::new(&stored_entry.name)
+                .file_name()
+                .and_then(|n| n.to_str())
+                == Some(stored_entry.name.as_str())
+                && !stored_entry.name.contains('/')
+                && !stored_entry.name.contains('\\');
+            if record.result.status != "completed" || !is_single_filename {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::NotFound,
+                    "export_file_missing",
+                    "导出文件不存在",
+                ));
+            }
 
-        let date_str = record
-            .result
-            .options
-            .get("date")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        let directory = existing_artifact_sessions_dir(&self.root, date_str).map_err(|_| {
-            ServiceError::new(
-                ServiceErrorKind::NotFound,
-                "export_file_missing",
-                "导出文件已移走或无法读取，请重新导出",
-            )
-        })?;
-        let target = fs::canonicalize(directory.join(&stored_entry.name))
-            .map(|p| strip_windows_verbatim_prefix(&p))
-            .map_err(|_| {
+            let date_str = record
+                .result
+                .options
+                .get("date")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let directory =
+                existing_artifact_sessions_dir(&store.root, date_str).map_err(|_| {
+                    ServiceError::new(
+                        ServiceErrorKind::NotFound,
+                        "export_file_missing",
+                        "导出文件已移走或无法读取，请重新导出",
+                    )
+                })?;
+            let target = fs::canonicalize(directory.join(&stored_entry.name))
+                .map(|p| strip_windows_verbatim_prefix(&p))
+                .map_err(|_| {
+                    ServiceError::new(
+                        ServiceErrorKind::NotFound,
+                        "export_file_missing",
+                        "导出文件已移走或无法读取，请重新导出",
+                    )
+                })?;
+            if !target.starts_with(&directory) || target == directory {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::NotFound,
+                    "export_file_missing",
+                    "导出文件已移走或无法读取，请重新导出",
+                ));
+            }
+
+            let data = fs::read(&target).map_err(|_| {
                 ServiceError::new(
                     ServiceErrorKind::NotFound,
                     "export_file_missing",
                     "导出文件已移走或无法读取，请重新导出",
                 )
             })?;
-        if !target.starts_with(&directory) || target == directory {
-            return Err(ServiceError::new(
-                ServiceErrorKind::NotFound,
-                "export_file_missing",
-                "导出文件已移走或无法读取，请重新导出",
-            ));
-        }
+            let actual_hash = format!("{:x}", Sha256::digest(&data));
+            if actual_hash != stored_entry.hash {
+                return Err(ServiceError::new(
+                    ServiceErrorKind::Conflict,
+                    "export_file_changed",
+                    "导出文件已被修改，请重新导出后分享",
+                ));
+            }
 
-        let data = fs::read(&target).map_err(|_| {
-            ServiceError::new(
-                ServiceErrorKind::NotFound,
-                "export_file_missing",
-                "导出文件已移走或无法读取，请重新导出",
-            )
-        })?;
-        let actual_hash = format!("{:x}", Sha256::digest(&data));
-        if actual_hash != stored_entry.hash {
-            return Err(ServiceError::new(
-                ServiceErrorKind::Conflict,
-                "export_file_changed",
-                "导出文件已被修改，请重新导出后分享",
-            ));
-        }
+            let format = record
+                .result
+                .options
+                .get("format")
+                .and_then(Value::as_str)
+                .unwrap_or("png");
+            let content_type = if format == "html" {
+                "text/html; charset=utf-8"
+            } else {
+                "image/png"
+            };
 
-        let format = record
-            .result
-            .options
-            .get("format")
-            .and_then(Value::as_str)
-            .unwrap_or("png");
-        let content_type = if format == "html" {
-            "text/html; charset=utf-8"
-        } else {
-            "image/png"
-        };
-
-        Ok(ExportDownloadedFile {
-            name: stored_entry.name.clone(),
-            data,
-            content_type,
+            Ok(ExportDownloadedFile {
+                name: stored_entry.name.clone(),
+                data,
+                content_type,
+            })
         })
+        .await
     }
 
     pub async fn close(&self) {
-        self.closing.store(true, Ordering::SeqCst);
         {
             let mut guard = self.inner.lock().expect("export queue lock");
+            self.closing.store(true, Ordering::SeqCst);
             if guard.active_cancel_error.is_none() {
                 guard.active_cancel_error = Some(ServiceError::new(
                     ServiceErrorKind::Unavailable,
@@ -1056,7 +1118,11 @@ impl SessionExportStore {
         }
 
         self.renderer.close().await;
-        let _ = self.clear_work_dir_sync();
+        let store_for_clean = self.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            let _ = store_for_clean.clear_work_dir_sync();
+        })
+        .await;
         *close_guard = true;
     }
 }

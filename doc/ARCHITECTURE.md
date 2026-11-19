@@ -1,82 +1,92 @@
 # 系统架构
 
-CST Pilot 基于 Pi（`0.85.1`）扩展机制构建。现场运行保持单一 Pi 宿主进程，同时承载终端界面（TUI）、本机 Web 服务、诊断工具链、认证扩展与双端遥测。
+CST Pilot 基于自研 Rust Pi 核心构建。运行期采用「软件端进程 + 本机公用后台服务进程」的双进程架构，承载原生诊断工具链、CSTOA 认证与遥测，同时支撑三端交互与软件内升级。
 
 ## 系统组成
 
 ```mermaid
 flowchart TB
-    subgraph Kit[便携工具包]
-        Launcher[pi.cmd / launcher.ps1]
-        subgraph Host[单一 Pi 宿主进程]
-            TUI[TUI 终端界面]
-            RuntimeExt[runtime 运行协调扩展]
-            WebExt[web 扩展 HTTP / SSE + 会话池]
-            DiagExt[diagnostics 诊断扩展]
-            OAuthExt[oauth 认证扩展]
-            TeleExt[telemetry 遥测扩展]
+    subgraph Kit["便携工具包 (Windows 10/11 x64)"]
+        subgraph AppProc["软件端进程 cst-pilot.exe (阶段 9-10 规划)"]
+            Desktop["GPUI 桌面视图 (cst-desktop)"]
+            TUI["内置 TUI 视图 (cst-tui)"]
+            Client["客户端状态层 (cst-client)"]
+            Desktop & TUI --> Client
         end
-        Bin[随包组件: pwsh / wiztree / lhm]
-        State[(agent/home · .state · artifacts · wiztree/tmp)]
+
+        subgraph ServerProc["公用后台服务进程 (cst-server.exe)"]
+            Gate["通道与鉴权门禁 (AppPresence × ChannelMode)"]
+            Routes["Hyper HTTP 路由 + 聚合 SSE 广播"]
+            Pool["会话池 (10 空闲 LRU) + 持久化收件箱"]
+            Core["KitHost: pi-runtime + cst-pilot 业务扩展"]
+            Export["Chromiumoxide 会话导出引擎"]
+            Gate --> Routes --> Pool & Export
+            Pool --> Core
+        end
+
+        Updater["独立更新器 (cst-updater.exe)"]
+        Bin["随包组件: WizTree64.exe / cst-lhm-host.exe"]
+        State[("agent/home · .state · artifacts · wiztree/tmp")]
     end
-    Browser[机主本机浏览器] <-->|127.0.0.1 HTTP / SSE| WebExt
-    Launcher -->|UAC 提权与环境隔离| Host
-    RuntimeExt --> TUI
-    RuntimeExt --> WebExt
-    DiagExt --> Bin
-    Host --> State
-    OAuthExt <-->|HTTPS| CSTOA[CSTOA 认证与模型网关]
-    TeleExt -->|HTTPS 双队列| Receivers[CSTOA 接收端 + timserver_1 接收端]
+
+    Browser["机主浏览器 (React 19 + SharedWorker)"] <-->|"127.0.0.1 HTTP / 聚合 SSE"| Gate
+    Client <-->|"127.0.0.1 HTTP / 双路 SSE"| Gate
+    Core -->|"原生 Win32 / COM / WMI / PDH / EvtQuery"| WinOS["Windows 系统内核与服务"]
+    Core -->|"Job Object 受控子进程"| Bin
+    Export <-->|"CDP 隔离上下文"| Edge["本机 Edge / Chrome"]
+    ServerProc & Updater --> State
+    Core <-->|"HTTPS"| CSTOA["CSTOA 认证、模型网关与发布源"]
+    Core -->|"HTTPS 双独立队列"| Receivers["CSTOA 接收端 + timserver_1 接收端"]
 ```
 
 ## 模块划分
 
-| 模块 | 代码路径 | 核心职责 | 模块文档 |
+| 模块 | 代码与资源路径 | 核心职责 | 模块文档 |
 |---|---|---|---|
-| `runtime` | `pi.cmd`、`launcher.ps1`、`agent/home/extensions/runtime/`、`branding/` | UAC 提权启动、便携环境隔离、TUI/Web 接管、跨进程会话写权、共享配置重读 | [SPEC](runtime/SPEC.md) · [ARCHITECTURE](runtime/ARCHITECTURE.md) |
-| `diagnostics` | `agent/home/extensions/diagnostics/`、`agent/home/skills/`、`pwsh/`、`wiztree/`、`lhm/` | 10 个注册工具、命令方案版本存储、共享目录大小缓存、PowerShell 安全调用、BitLocker 双端交互与跨进程卷锁 | [SPEC](diagnostics/SPEC.md) · [ARCHITECTURE](diagnostics/ARCHITECTURE.md) · [API](diagnostics/API.md) |
-| `web` | `agent/home/extensions/web/`、`src/web/frontend/`、`design/` | 本机 HTTP/SSE 服务、多会话池、持久化输入收件箱、React 19 静态 SPA、流式渲染与工具卡片 | [SPEC](web/SPEC.md) · [ARCHITECTURE](web/ARCHITECTURE.md) · [API](web/API.md) |
-| `auth` | `agent/home/extensions/oauth/`、`agent/home/extensions/web/server/api/` | `cstoa` 原生 Provider（设备码 OAuth 与 APIKEY）、动态模型目录、Pi 原生多服务登录与自定义服务 | [SPEC](auth/SPEC.md) · [ARCHITECTURE](auth/ARCHITECTURE.md) · [API](auth/API.md) |
-| `telemetry` | `agent/home/extensions/telemetry/`、`cst-pilot-server` | 会话统计采集、恢复草稿、回答结束/心跳/关闭统一提交、双端独立队列与 Go 接收端 | [SPEC](telemetry/SPEC.md) · [ARCHITECTURE](telemetry/ARCHITECTURE.md) · [API](telemetry/API.md) · [OPERATIONS](telemetry/OPERATIONS.md) |
-| `release` | `pack/`、`src/web/frontend/scripts/` | 官方二进制锁定、扩展 esbuild 预打包、WOFF2 字体子集构建、干净发行树校验与自动冒烟 | [SPEC](release/SPEC.md) · [ARCHITECTURE](release/ARCHITECTURE.md) |
+| `pi-core` | `crates/pi-{ai,agent,session,runtime}` | 多协议模型流、三阶段参数校验与 Agent 循环、JSONL v3 会话树与压缩、静态扩展接口、MCP/Codemode 及公开 SDK | [SPEC](pi-core/SPEC.md) · [ARCHITECTURE](pi-core/ARCHITECTURE.md) · [API](pi-core/API.md) |
+| `server` | `crates/cst-server`、`pi-web-rust.cmd` | 单实例服务发现、正交存活与通道状态机、本机 HTTP/SSE 路由、10 空闲会话 LRU 池、持久化收件箱与交互桥接 | [SPEC](server/SPEC.md) · [ARCHITECTURE](server/ARCHITECTURE.md) · [API](server/API.md) |
+| `diagnostics` | `crates/cst-kit/src/{kit,tools,diagnostics,runbook,bitlocker}`、`agent/home/skills/`、`wiztree/`、`lhm/` | 17 个开放工具白名单、凭据与 SSRF 拦截、Windows 原生软硬件采集、共享卷缓存、命令方案交付及原生加密 WMI BitLocker | [SPEC](diagnostics/SPEC.md) · [ARCHITECTURE](diagnostics/ARCHITECTURE.md) · [API](diagnostics/API.md) |
+| `auth` | `crates/cst-kit/src/auth/`、`crates/cst-server/src/routes/{auth,models}.rs` | `cstoa` 设备码 OAuth 与 APIKEY 双路由、官方模型能力对齐、多服务异步授权流、自定义服务与 60 秒额度缓存 | [SPEC](auth/SPEC.md) · [ARCHITECTURE](auth/ARCHITECTURE.md) · [API](auth/API.md) |
+| `telemetry` | `crates/cst-kit/src/telemetry/`、`cst-pilot-server` | 会话统计累加、CSTOA 请求扣点核对、命名管道草稿存活证明、双端独立发送队列与 Go + SQLite 接收端 | [SPEC](telemetry/SPEC.md) · [ARCHITECTURE](telemetry/ARCHITECTURE.md) · [API](telemetry/API.md) · [OPERATIONS](telemetry/OPERATIONS.md) |
+| `web` | `src/web/frontend/`、`crates/cst-server/src/exports/`、`design/cst-pilot-web.pen` | React 19 单页应用、`SharedWorker` 32 会话分片聚合流、乐观发送状态机、工具卡片渲染及 PNG/离线 HTML 导出 | [SPEC](web/SPEC.md) · [ARCHITECTURE](web/ARCHITECTURE.md) · [API](web/API.md) |
+| `desktop` | `design/cst-pilot-desktop.pen`、阶段 9–10 规划 `crates/{cst-client,cst-desktop,cst-tui}` | 原生 GPUI 桌面工作台、单窗口 D3D11 着色器背景与毛玻璃、清零密码框及窗口内置 TUI 视图 | [SPEC](desktop/SPEC.md) · [ARCHITECTURE](desktop/ARCHITECTURE.md) |
+| `release` | `crates/cst-updater/`、`crates/cst-kit/src/update/`、`src/web/frontend/scripts/`、`pack/` | Ed25519 双重签名在线升级与独立更新器回滚、共享可变字体分发、LHM 自包含辅助程序发布及干净发行树校验 | [SPEC](release/SPEC.md) · [ARCHITECTURE](release/ARCHITECTURE.md) |
+
+注：跨进程基础原语位于 `crates/cst-os`，独立更新器位于 `crates/cst-updater`，业务核心位于 `crates/cst-kit`；阶段 9 由 `crates/cst-desktop` 编译产出主程序 `cst-pilot.exe`。阶段 11 打包切换前，仓库同时保留 `agent/home/extensions/` 与 `pack/` 用于 `v0.6.2` 维护及双入口回归对照。
 
 ## 全局运行边界
 
-### 进程与宿主边界
+### 进程与通道边界
 
-1. 现场始终只运行一个 Pi 进程，不增设独立后端守护进程，不修改 Pi 源码或官方可执行文件。
-2. 执行 `/web` 后，TUI 释放原会话并切入内存待机会话；Web 扩展在同一进程内通过 Pi SDK 创建并管理多个独立的 `AgentSession` 实例。
-3. Pi 扩展由 jiti 在 `moduleCache: false` 下加载，TUI 切换会话会重跑扩展工厂函数；跨会话长驻资源（Web 服务器、会话池、写权登记、遥测调度器）统一挂载在进程级 `globalThis` 容器上。
+1. **单实例后台服务**：同一工具包数据目录仅运行一个 `cst-server` 进程，通过 Windows 命名管道锁互斥，并将监听端口与随机 `app_token` 原子写入 `.state/server.json`。
+2. **存活与通道正交分离**：`AppPresence` 跟踪软件端长连接数量（首次连接等待 15 秒），断线满 6 秒宽限期后安全收尾退出。`ChannelMode` 独立控制 `AppActive` 与 `WebActive` 读写门禁，避免软件端断线重连意外覆盖 Web 操作权。独立调试模式通过 `--standalone-web` 直接进入 `WebActive`。
+3. **会话单写权与空闲回收**：每场会话由操作系统命名管道与文件锁保证跨进程单写权。会话池对空闲会话按 LRU 最多保留 10 个内存实例。会话处于运行、排队、待答交互或挂载活跃 SSE 订阅期间固定常驻内存。
 
 ### 存储与状态归属
 
 | 路径 | 内容 | 读写规则 |
 |---|---|---|
-| `agent/home/APPEND_SYSTEM.md` | 项目级 Agent 提示词 | 随包只读分发，由 Pi 自动附加到系统提示词末尾 |
-| `agent/home/settings.json` | 默认模型、启用范围、思考强度、TUI 主题 | TUI 与 Web 共用；按字段合并写入，操作前重读 |
-| `agent/home/web-settings.json` | Web 主题与空模型范围标记 | Web 独占；默认 `light`，串行原子替换 |
-| `agent/home/models.json` | 自定义模型服务、服务地址覆盖及可选 API key | TUI 与 Web 共用；原子替换后刷新 `ModelRuntime`，不得进入发行包 |
-| `agent/home/models-store.json` | 离线与动态模型目录缓存 | 发行包预置上游目录与默认模型；已配置供应商后台更新，CSTOA 目录按凭据隔离 |
-| `agent/home/auth.json` | 各模型服务的 OAuth 令牌与 APIKEY | Pi `AuthStorage` 管理；严禁进入浏览器存储、日志或发行包 |
-| `agent/home/device.json` | CSTOA 设备标识 | 首次登录生成，随 U 盘保留 |
-| `agent/home/sessions/` | 会话历史 JSONL | TUI 与 Web 共用；按会话 ID 跨进程互斥持有写权 |
-| `agent/home/web-inbox/` | Web 已接受输入队列、回执、创建时间与会话图片附件 | Web 后端按会话维护；先落盘确认再投递给模型 |
-| `agent/home/web-access.log` | Web HTTP 与 API 访问诊断日志 | 追加请求方法、路径、响应状态与耗时；不记录查询参数或请求正文，当前无自动清理 |
-| `agent/home/telemetry/` | 匿名安装身份、会话恢复草稿、双端待发队列与诊断状态 | 遥测扩展维护；通过跨进程目录锁保护 |
-| `artifacts/<YYYY-MM-DD>/runbook/` | 修复命令清单 TXT；版本化方案按 ID 分目录 | `runbook_deliver` 与 `runbook` 写入；同版本文件保持不变 |
-| `artifacts/<YYYY-MM-DD>/sessions/` | 会话 PNG 与离线 HTML | 后端导出 API 保存，分享复用；目录内直接存放文件 |
-| `agent/home/session-exports/` | 导出任务登记与渲染临时文件 | 完成后仅保留文件登记；中断任务重开时标记失败 |
-| `agent/home/command-plans/<ID>/` | 每个方案版本的完整 JSON | `command_plan` 原子保存；共享目录锁核对修订版本 |
-| `wiztree/tmp/` | WizTree 扫描导出的临时 CSV | 扫描期间写入，结束后清理 |
-| `.state/` | 启动器与运行期临时目录 | 启动器初始化，重定向 `TEMP`/`TMP` 至工具包内 |
+| `agent/home/APPEND_SYSTEM.md` | 项目级诊断提示词 | 随包只读分发，自动附加到系统提示词末尾 |
+| `agent/home/skills/` | 8 份诊断与交付技能说明 | 随包只读分发，供模型按需读取或通过 `/skill:<name>` 展开 |
+| `agent/home/settings.json` | 默认模型、启用范围、思考强度、TUI 主题 | 三端共用模型配置，TUI 独占其中的主题字段。按字段合并原子更新 |
+| `agent/home/web-settings.json` | Web 主题与空模型范围标记 | Web 独占，默认 `light`，串行原子替换 |
+| `agent/home/desktop-settings.json` | 桌面端主题、默认视图与窗口位置尺寸 | 软件端独占（阶段 9 升级为包含侧栏状态与局部合并的 `agent/home/desktop.json`） |
+| `agent/home/models.json` | 自定义兼容模型服务与模型覆盖配置 | 三端共用，带 `revision` 防并发覆盖，严禁进入发行包 |
+| `agent/home/models-store.json` | 内置离线模型与动态目录缓存 | 发行包预置默认目录。CSTOA 动态条目按凭据摘要隔离，损坏时备份重建 |
+| `agent/home/auth.json` | 各模型服务的 OAuth 令牌与 APIKEY | `FileAuthStorage` 加锁原子读写，严禁进入客户端存储、日志或发行包 |
+| `agent/home/device.json` | CSTOA 工具包设备标识 | 首次登录生成，跨机移动复用 |
+| `agent/home/sessions/` | 会话历史 JSONL v3（含工作目录分类子目录） | 三端共用，惰性创建，单写权互斥，末行半截 JSON 自动修复 |
+| `agent/home/web-inbox/` | 持久化输入队列、幂等回执（`receipts/`）、未落盘空会话快照（`unflushed/`）、已删除会话标记（`deleted/`）与图片附件（`attachments/`） | `cst-server` 管理。输入先落盘再投递，重启后遗留 `delivering` 标为 `uncertain` |
+| `agent/home/session-exports/` | 会话导出任务登记与渲染临时目录（`work/`） | `SessionExportStore` 管理。重启时清理 `work/` 并将未完成任务标为中断失败 |
+| `agent/home/command-plans/<ID>/` | 多轮命令方案各版本 JSON | `command_plan` 持有命名管道目录锁校验 `baseVersion` 后原子保存 |
+| `agent/home/telemetry/` | 匿名安装密钥、会话恢复草稿（`drafts/`）、双端发送队列与状态摘要 | 遥测服务通过目录锁与命名管道存活证明维护 |
+| `artifacts/<YYYY-MM-DD>/runbook/` | 手动修复命令清单 TXT（UTF-8 BOM + CRLF） | `runbook_deliver` 与 `runbook` 排他或按序号原子写入 |
+| `artifacts/<YYYY-MM-DD>/sessions/` | 导出的会话长图 PNG 与离线 HTML | 导出引擎排他发布，读取时核验 SHA-256 |
+| `wiztree/tmp/` | WizTree 扫描导出的临时 CSV | 扫描期间持有目录句柄并拒绝链接，读取结束或取消时立即删除 |
+| `.state/` | `server.json` 服务凭证、`update/` 升级事务与 `tmp/` 临时目录（阶段 9 纳入 `ui-hints.json` 共享冷却） | 启动器与后台服务维护，`PathGuard` 全面封锁模型工具访问 |
 
-### 上下文与项目信任隔离
+### 上下文、文件与网络隔离
 
-- 启动参数固定包含 `--no-context-files`，关闭工作目录及全局的 `AGENTS.md` 加载；开发仓库的 `AGENTS.md` 在打包时强制剔除。
-- `settings.json` 固定设置 `defaultProjectTrust: "never"`，防止在机主电脑任意目录启动时加载陌生目录中的 `.pi/` 扩展或配置。
-
-### 网络与代理边界
-
-- 启动器设置 `PI_OFFLINE=1` 并配置 `enableInstallTelemetry: false`，关闭 Pi 默认的版本检查、包更新与官方遥测。模型目录由项目协调器显式传入 `allowNetwork: true` 后台更新，环境变量保持不变。
-- `PI_OFFLINE=1` 不拦截扩展发起的请求：模型推理、联网检索工具、CSTOA 认证与动态目录、项目双端遥测按各自配置访问网络。
-- 发行包生成 `agent/home/web-search.json`，设置 `searchProvider: "exa"` 与 `workflow: "none"`，默认直接返回检索结果，不打开浏览器审核窗口。网络策略配置 `ssrf.allowRanges: ["198.18.0.0/15"]` 与 `trustEnvProxy: false`，支持 TUN 假 IP 代理，同时继续拦截回环地址、其他私网网段与私网重定向。
+- **项目上下文隔离**：`DefaultResourceLoader` 固定开启 `no_context_files = true`、`no_skills = true` 与 `no_prompt_templates = true`。会话创建固定传入 `project_trusted = Some(false)` 并在设置层锁定 `defaultProjectTrust = "never"`，忽略机主工作目录中的 `AGENTS.md`、`CLAUDE.md` 与 `.pi/` 配置。项目仓库自身的 `AGENTS.md` 严禁进入发行包。
+- **本地敏感路径拦截**：`PathGuard` 在 `read`、`fffind` 与 `ffgrep` 入口解析真实路径并核对文件身份，阻断 `agent/home/{auth,models,mcp-auth,web-search}.json`、`agent/home/telemetry/identity.json` 与 `.state/` 目录，同时拦截目录外硬链接、Windows 设备路径与 NTFS 备用数据流。
+- **离线基线与 SSRF 防护**：启动器与测试环境设置 `PI_OFFLINE=1`（阶段 9–10 由原生启动器承接注入），关闭通用核心的默认版本检查与官方遥测。模型目录刷新与软件内签名升级由业务服务显式发起。联网检索与外部下载通过 `reqwest::ClientBuilder::no_proxy()` 关闭环境代理，每次请求与重定向前解析 DNS 并阻断回环与私网地址，仅按 `agent/home/web-search.json` 放行 `198.18.0.0/15` TUN 假 IP 网段。

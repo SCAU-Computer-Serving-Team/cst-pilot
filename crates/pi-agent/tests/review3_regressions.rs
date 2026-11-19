@@ -12,7 +12,8 @@ fn model() -> Model {
 
 #[tokio::test]
 async fn stateful_agent_settles_provider_panic() {
-    let stream_fn: StreamFn = Arc::new(|_, _, _| Box::pin(async { panic!("provider failure") }));
+    let stream_fn: AgentStreamFn =
+        Arc::new(|_, _, _| Box::pin(async { panic!("provider failure") }));
     let agent = Agent::new(AgentOptions::new(stream_fn));
     let result = tokio::time::timeout(Duration::from_secs(1), agent.prompt("hello")).await;
     assert!(result.unwrap().is_err());
@@ -26,7 +27,7 @@ async fn stateless_agent_provider_panics_close_events_and_result() {
             for cancelled in [false, true] {
                 let token = CancellationToken::new();
                 let callback_token = token.clone();
-                let stream_fn: StreamFn = Arc::new(move |_, _, _| {
+                let stream_fn: AgentStreamFn = Arc::new(move |_, _, _| {
                     if cancelled {
                         callback_token.cancel();
                     }

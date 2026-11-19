@@ -1,27 +1,28 @@
-use http::{HeaderMap, HeaderValue, Method, Response, StatusCode};
+use http::{Method, Response, StatusCode};
 use serde_json::{Value, json};
-use tokio_util::sync::CancellationToken;
 
-use crate::auth_guard::WEB_THEME_COOKIE_NAME;
 use crate::mode::{CallerIdentity, ChannelMode};
-use crate::routes::{
-    ApiError, SseOrBytesBody, json_response, parse_query_params, read_json_body, sse_response,
-};
-use crate::session::attachments::is_valid_session_id_key;
-use crate::session::events::MultiplexSubscriptionUpdate;
-use crate::settings::ThemeMode;
+use crate::routes::{ApiError, SseOrBytesBody, json_response, read_json_body};
 use crate::state::ServerState;
 
-#[allow(clippy::too_many_arguments)]
+fn state_commands() -> Vec<String> {
+    let mut skills: Vec<&str> = cst_kit::SKILL_NAMES.to_vec();
+    skills.sort_unstable();
+    let mut commands = vec![
+        "/compact".to_owned(),
+        "/fork".to_owned(),
+        "/tree".to_owned(),
+    ];
+    commands.extend(skills.into_iter().map(|skill| format!("/skill:{skill}")));
+    commands
+}
+
 pub async fn handle_lifecycle_route(
     state: &ServerState,
     caller: CallerIdentity,
     method: &Method,
     pathname: &str,
-    query: Option<&str>,
-    headers: &HeaderMap,
     raw_body: &[u8],
-    conn_cancel: CancellationToken,
 ) -> Result<Option<Response<SseOrBytesBody>>, ApiError> {
     if pathname == "/api/health" && (*method == Method::GET || *method == Method::HEAD) {
         return Ok(Some(json_response(
@@ -53,19 +54,7 @@ pub async fn handle_lifecycle_route(
                 "channelMode": mode_snap.mode.as_str(),
                 "multiplexStream": true,
                 "connected": true,
-                "commands": [
-                    "/compact",
-                    "/fork",
-                    "/tree",
-                    "/skill:bitlocker",
-                    "/skill:disk",
-                    "/skill:driver",
-                    "/skill:eventlog",
-                    "/skill:ls",
-                    "/skill:runbook",
-                    "/skill:startup",
-                    "/skill:sys",
-                ],
+                "commands": state_commands(),
             }),
             method,
         )));
@@ -129,224 +118,6 @@ pub async fn handle_lifecycle_route(
             "stopping",
             "程序正在退出，请勿继续提交操作",
         ));
-    }
-
-    if pathname == "/api/events" && *method == Method::GET {
-        let _admission = state
-            .mode
-            .admit_events(caller, true)
-            .await
-            .map_err(ApiError::from)?;
-        let last_event_id = headers.get("last-event-id").and_then(|v| v.to_str().ok());
-        let sse_body =
-            state
-                .pool
-                .global_events
-                .subscribe_single(caller, last_event_id, conn_cancel, None);
-        return Ok(Some(sse_response(sse_body)));
-    }
-
-    if pathname == "/api/events/stream" && *method == Method::GET {
-        let params = parse_query_params(query);
-        let Some(client_id) = params
-            .get("clientId")
-            .filter(|id| is_valid_session_id_key(id))
-        else {
-            return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "invalid_request",
-                "缺少有效的聚合流 clientId",
-            ));
-        };
-        let _admission = state
-            .mode
-            .admit_events(caller, false)
-            .await
-            .map_err(ApiError::from)?;
-        let last_event_id = headers.get("last-event-id").and_then(|v| v.to_str().ok());
-        let sse_body =
-            state
-                .pool
-                .multiplex_hub
-                .connect(caller, client_id, last_event_id, conn_cancel);
-        return Ok(Some(sse_response(sse_body)));
-    }
-
-    if let Some(rest) = pathname.strip_prefix("/api/events/stream/")
-        && let Some(client_id) = rest.strip_suffix("/subscriptions")
-        && *method == Method::PUT
-    {
-        if !is_valid_session_id_key(client_id) {
-            return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "invalid_request",
-                "聚合流 clientId 无效",
-            ));
-        }
-        let body = read_json_body(raw_body, 128 * 1024)?;
-        let update: MultiplexSubscriptionUpdate =
-            serde_json::from_value(body.clone()).map_err(|_| {
-                ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_request",
-                    "请求的聚合流订阅参数无效",
-                )
-            })?;
-        for sid in &update.sessions {
-            if !is_valid_session_id_key(sid) {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_request",
-                    "订阅的会话 ID 格式无效",
-                ));
-            }
-        }
-        let client_id_owned = client_id.to_owned();
-        let result = state
-            .write_once(
-                caller,
-                method.as_str(),
-                pathname,
-                &body,
-                Some(headers),
-                || async move {
-                    let subscribed = state
-                        .pool
-                        .update_multiplex_subscriptions(caller, &client_id_owned, update)
-                        .await
-                        .map_err(|(missing_sid, err)| match (missing_sid, err) {
-                            (Some(sid), crate::session::SessionPoolError::NotFound(msg)) => {
-                                ApiError::new(StatusCode::NOT_FOUND, "session_not_found", msg)
-                                    .with_session_id(sid)
-                            }
-                            (_, other) => ApiError::from(other),
-                        })?;
-                    Ok(json!({ "subscribedSessions": subscribed }))
-                },
-            )
-            .await?;
-        return Ok(Some(json_response(StatusCode::OK, &result, method)));
-    }
-
-    if pathname == "/api/settings" {
-        if *method == Method::GET {
-            let settings = state.web_settings.read().await.map_err(ApiError::from)?;
-            return Ok(Some(json_response(
-                StatusCode::OK,
-                &json!({ "theme": settings.theme }),
-                method,
-            )));
-        }
-        if *method == Method::PATCH {
-            let body = read_json_body(raw_body, 128 * 1024)?;
-            let Some(obj) = body.as_object() else {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_request",
-                    "请求的主题设置无效",
-                ));
-            };
-            let Some(theme_str) = obj.get("theme").and_then(Value::as_str) else {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_request",
-                    "请求的主题设置无效",
-                ));
-            };
-            let Some(theme) = ThemeMode::parse(theme_str) else {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_request",
-                    "请求的主题设置无效",
-                ));
-            };
-            if obj.len() != 1 {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_request",
-                    "请求的主题设置无效",
-                ));
-            }
-            let result = state
-                .write_once(
-                    caller,
-                    method.as_str(),
-                    pathname,
-                    &body,
-                    Some(headers),
-                    || async move {
-                        let saved = state
-                            .web_settings
-                            .save_theme(theme)
-                            .await
-                            .map_err(ApiError::from)?;
-                        state
-                            .pool
-                            .global_events
-                            .publish("state", &json!({ "type": "settings_changed" }));
-                        Ok(json!({ "theme": saved.theme }))
-                    },
-                )
-                .await?;
-            let mut resp = json_response(StatusCode::OK, &result, method);
-            let cookie = format!(
-                "{WEB_THEME_COOKIE_NAME}={}; Path=/; SameSite=Strict",
-                theme.as_str()
-            );
-            if let Ok(val) = HeaderValue::from_str(&cookie) {
-                resp.headers_mut().insert(http::header::SET_COOKIE, val);
-            }
-            return Ok(Some(resp));
-        }
-    }
-
-    if pathname == "/api/files" && *method == Method::GET {
-        let params = parse_query_params(query);
-        let q = params
-            .get("query")
-            .map(|s| s.to_lowercase())
-            .unwrap_or_default();
-        let target_cwd = if let Some(sid) = params.get("sessionId") {
-            if !is_valid_session_id_key(sid) {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_request",
-                    "请求的会话ID无效",
-                ));
-            }
-            let slot = state.pool.open_saved(sid).await.map_err(ApiError::from)?;
-            let raw = slot
-                .session()
-                .with_session_manager(|sm| sm.get_cwd().to_owned());
-            std::path::PathBuf::from(raw)
-        } else {
-            state.pool.default_cwd().to_path_buf()
-        };
-        let all = state.file_cache.list(&target_cwd);
-        let total = all.len();
-        let matches: Vec<Value> = all
-            .into_iter()
-            .filter(|p| q.is_empty() || p.to_lowercase().contains(&q))
-            .take(50)
-            .map(|path| {
-                let dir = path
-                    .rfind('/')
-                    .map(|idx| path[..idx].to_owned())
-                    .unwrap_or_default();
-                json!({
-                    "path": path,
-                    "dir": dir,
-                })
-            })
-            .collect();
-        return Ok(Some(json_response(
-            StatusCode::OK,
-            &json!({
-                "total": total,
-                "files": matches,
-            }),
-            method,
-        )));
     }
 
     Ok(None)

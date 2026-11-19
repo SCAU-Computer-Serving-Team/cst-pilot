@@ -8,9 +8,20 @@ publish.workspace = true
 [[bin]]
 name = "pi"
 path = "src/bin/pi.rs"
+required-features = ["cli-modes"]
+
+[[example]]
+name = "release_notes_and_workflow_agent"
+required-features = ["cli-modes"]
 
 [features]
-test-support = ["pi-session/test-support"]
+default = ["codemode", "mcp", "cli-modes", "coding-tools", "clipboard"]
+codemode = ["dep:rquickjs"]
+mcp = []
+cli-modes = []
+coding-tools = ["dep:similar", "dep:globset", "dep:regex-automata"]
+clipboard = []
+test-support = ["pi-ai/test-support", "pi-session/test-support"]
 
 [dependencies]
 pi-ai = { path = "../pi-ai" }
@@ -22,13 +33,13 @@ bytes.workspace = true
 futures-core.workspace = true
 futures-util.workspace = true
 image.workspace = true
-rquickjs.workspace = true
+rquickjs = { workspace = true, optional = true }
 unicode-segmentation.workspace = true
 regex.workspace = true
-regex-automata = "0.4"
+regex-automata = { version = "0.4", optional = true }
 ignore = "0.4"
-globset = "0.4"
-similar = "2.7"
+globset = { version = "0.4", optional = true }
+similar = { version = "2.7", optional = true }
 icu_normalizer = { version = "2.4", default-features = false, features = ["compiled_data"] }
 regress.workspace = true
 reqwest.workspace = true
@@ -41,6 +52,9 @@ tokio.workspace = true
 tokio-util.workspace = true
 url.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+pi-ai = { path = "../pi-ai", features = ["test-support"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

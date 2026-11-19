@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pi_agent::{
-    Agent, AgentEvent, AgentInitialState, AgentMessage, AgentOptions, AgentTool, AgentToolResult,
-    QueueMode, StreamFn,
+    Agent, AgentEvent, AgentInitialState, AgentMessage, AgentOptions, AgentStreamFn, AgentTool,
+    AgentToolResult, QueueMode,
 };
 use pi_ai::faux::{faux_assistant_message, faux_text_message, faux_tool_call};
 use pi_ai::{
@@ -14,12 +14,12 @@ use pi_ai::{
 };
 use serde_json::json;
 
-fn make_scripted_stream(steps: Vec<AssistantMessage>) -> (StreamFn, Arc<AtomicUsize>) {
+fn make_scripted_stream(steps: Vec<AssistantMessage>) -> (AgentStreamFn, Arc<AtomicUsize>) {
     let queue = Arc::new(Mutex::new(std::collections::VecDeque::from(steps)));
     let count = Arc::new(AtomicUsize::new(0));
     let count_clone = count.clone();
 
-    let stream_fn: StreamFn = Arc::new(move |model, _ctx, _opts| {
+    let stream_fn: AgentStreamFn = Arc::new(move |model, _ctx, _opts| {
         let queue = queue.clone();
         let count_clone = count_clone.clone();
         Box::pin(async move {

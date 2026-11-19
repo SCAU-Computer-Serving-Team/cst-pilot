@@ -1,27 +1,41 @@
-import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
-import { readFile, readdir } from 'node:fs/promises';
-import { test } from 'node:test';
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { access, readFile } from "node:fs/promises";
+import { test } from "node:test";
 
-const directory = new URL('../public/fonts/', import.meta.url);
-const manifest = JSON.parse(await readFile(new URL('subset.json', directory), 'utf8'));
-const includes = (character) => manifest.ranges.some(([first, last]) => character.codePointAt(0) >= first && character.codePointAt(0) <= last);
+const sharedFonts = new URL("../../../../assets/fonts/", import.meta.url);
+const webStaticFonts = new URL("../../../../agent/home/extensions/web/static/fonts/", import.meta.url);
 
-test('分发 WOFF2、OFL 许可与校验清单，不含完整 OTF', async () => {
-  assert.ok(manifest.faces.length > 0);
-  for (const face of manifest.faces) {
-    const bytes = await readFile(new URL(face.file, directory));
-    assert.equal(bytes.subarray(0, 4).toString(), 'wOF2');
-    assert.equal(bytes.length, face.bytes);
-    assert.equal(createHash('sha256').update(bytes).digest('hex'), face.sha256);
+const EXPECTED_VF_SHA256 = "ad10f878ea1af97d66ec8bd10eb39798784f3a1ee3d5987a570ef6083f941ef3";
+const EXPECTED_VF_BYTES = 15_636_088;
+
+function readOpenTypeTableTags(buffer) {
+  assert.equal(buffer.subarray(0, 4).toString("ascii"), "OTTO");
+  const numTables = buffer.readUInt16BE(4);
+  const tags = new Set();
+  for (let index = 0; index < numTables; index += 1) {
+    const offset = 12 + index * 16;
+    tags.add(buffer.subarray(offset, offset + 4).toString("ascii"));
   }
-  assert.equal((await readdir(directory)).some(name => name.endsWith('.otf')), false);
-  assert.match(await readFile(new URL('LICENSE.txt', directory), 'utf8'), /SIL OPEN FONT LICENSE/);
-  const sourceBytes = manifest.faces.reduce((sum, face) => sum + face.sourceBytes, 0);
-  const subsetBytes = manifest.faces.reduce((sum, face) => sum + face.bytes, 0);
-  assert.ok(subsetBytes < sourceBytes, `${subsetBytes} / ${sourceBytes}`);
-});
+  return tags;
+}
 
-test('常用中文、诊断字与界面标记有覆盖', () => {
-  for (const character of '计算机维护队磁盘网络蓝屏诊断授权龟驱动') assert.ok(includes(character), character);
+test("桌面与 Web 共用单文件原版可变字体与 OFL 许可，Web 静态目录不重复拷贝", async () => {
+  const bytes = await readFile(new URL("SourceHanSansCN-VF.otf", sharedFonts));
+  assert.equal(bytes.length, EXPECTED_VF_BYTES);
+  assert.equal(createHash("sha256").update(bytes).digest("hex"), EXPECTED_VF_SHA256);
+
+  const tags = readOpenTypeTableTags(bytes);
+  for (const required of ["CFF2", "fvar", "STAT", "cmap", "name"]) {
+    assert.equal(tags.has(required), true, `缺少 OpenType 表 ${required}`);
+  }
+
+  const license = await readFile(new URL("LICENSE.txt", sharedFonts), "utf8");
+  assert.match(license, /SIL OPEN FONT LICENSE/);
+
+  await assert.rejects(
+    access(webStaticFonts),
+    { code: "ENOENT" },
+    "Web 静态目录不应重复存放字体副本",
+  );
 });

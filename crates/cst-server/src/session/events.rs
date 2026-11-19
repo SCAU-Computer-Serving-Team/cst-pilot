@@ -7,7 +7,7 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 use bytes::Bytes;
-use cst_pilot::bitlocker::credentials::redact;
+use cst_kit::bitlocker::credentials::redact;
 use http_body::{Body, Frame};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};

@@ -2,17 +2,15 @@ use bytes::Bytes;
 use http::{HeaderMap, Method, Response, StatusCode};
 use pi_runtime::parse_model_thinking_level_cli;
 use pi_session::NavigateTreeOptions;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use http::HeaderValue;
-use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
-
-use crate::exports::{EXPORT_CSP, build_export_preview_snapshot, parse_export_options};
 use crate::mode::CallerIdentity;
 use crate::routes::models::get_supported_thinking_levels;
 use crate::routes::{
-    ApiError, SseOrBytesBody, bytes_response, json_response, read_json_body, sse_response,
+    ApiError, MaybeOmitted, SseOrBytesBody, bytes_response, json_response, read_json_body,
+    sse_response,
 };
 use crate::runbook::{resolve_runbook_file_from_slot, validate_and_open_runbook};
 use crate::session::attachments::{is_valid_session_id_key, is_valid_sha256_hex};
@@ -23,7 +21,18 @@ use crate::session::receipts::{ReceiptStatus, is_valid_idempotency_key};
 use crate::session::{SessionPoolError, default_model_reference, require_model_credentials};
 use crate::state::ServerState;
 
-pub async fn handle_sessions_and_exports_route(
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateSessionRequest {
+    #[serde(default)]
+    provider: MaybeOmitted<String>,
+    #[serde(default)]
+    model_id: MaybeOmitted<String>,
+    #[serde(default)]
+    thinking_level: MaybeOmitted<String>,
+}
+
+pub async fn handle_sessions_route(
     state: &ServerState,
     caller: CallerIdentity,
     method: &Method,
@@ -32,103 +41,7 @@ pub async fn handle_sessions_and_exports_route(
     raw_body: &[u8],
     conn_cancel: CancellationToken,
 ) -> Result<Option<Response<SseOrBytesBody>>, ApiError> {
-    // 1. `/api/exports/:exportId` routes
-    if let Some(rest) = pathname.strip_prefix("/api/exports/") {
-        let parts: Vec<&str> = rest.split('/').collect();
-        let export_id = parts[0];
-        if export_id.is_empty() {
-            return Ok(None);
-        }
-        if parts.len() == 1 && (*method == Method::GET || *method == Method::HEAD) {
-            let job = state.exports.get(export_id).await.map_err(ApiError::from)?;
-            return Ok(Some(json_response(
-                StatusCode::OK,
-                &serde_json::to_value(job).unwrap_or(Value::Null),
-                method,
-            )));
-        }
-        if parts.len() == 2 && parts[1] == "open" && *method == Method::POST {
-            let body = read_json_body(raw_body, 4096)?;
-            if !body.as_object().is_some_and(|o| o.is_empty()) {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_request",
-                    "请求只需导出 ID，不接受目录路径",
-                ));
-            }
-            let eid = export_id.to_owned();
-            let result = state
-                .write_once(
-                    caller,
-                    method.as_str(),
-                    pathname,
-                    &body,
-                    Some(headers),
-                    || async move {
-                        let dir = state
-                            .exports
-                            .directory(&eid)
-                            .await
-                            .map_err(ApiError::from)?;
-                        (state.open_export_directory)(dir).await.map_err(|_| {
-                            ApiError::new(
-                                StatusCode::SERVICE_UNAVAILABLE,
-                                "export_launch_failed",
-                                "无法启动文件管理器，请重试或按显示路径手动打开",
-                            )
-                        })?;
-                        Ok(json!({ "launched": true }))
-                    },
-                )
-                .await?;
-            return Ok(Some(json_response(StatusCode::OK, &result, method)));
-        }
-        if parts.len() == 3
-            && parts[1] == "files"
-            && (*method == Method::GET || *method == Method::HEAD)
-        {
-            let index: usize = parts[2].parse().map_err(|_| {
-                ApiError::new(
-                    StatusCode::NOT_FOUND,
-                    "export_file_missing",
-                    "导出文件不存在",
-                )
-            })?;
-            let file = state
-                .exports
-                .file(export_id, index)
-                .await
-                .map_err(ApiError::from)?;
-            let len = file.data.len();
-            let body_bytes = if *method == Method::HEAD {
-                Bytes::new()
-            } else {
-                Bytes::from(file.data)
-            };
-            let mut resp = bytes_response(
-                StatusCode::OK,
-                file.content_type,
-                "no-store",
-                len,
-                body_bytes,
-            );
-            let encoded_name = utf8_percent_encode(&file.name, NON_ALPHANUMERIC);
-            if let Ok(cd) =
-                HeaderValue::from_str(&format!("attachment; filename*=UTF-8''{encoded_name}"))
-            {
-                resp.headers_mut()
-                    .insert(http::header::CONTENT_DISPOSITION, cd);
-            }
-            resp.headers_mut().insert(
-                "content-security-policy",
-                HeaderValue::from_static(EXPORT_CSP),
-            );
-            return Ok(Some(resp));
-        }
-        return Ok(None);
-    }
-
-    // 2. `/api/sessions` & `/api/sessions/creation/:requestKey`
+    // 1. `/api/sessions` & `/api/sessions/creation/:requestKey`
     if pathname == "/api/sessions" && (*method == Method::GET || *method == Method::HEAD) {
         let rows = state.pool.list().await.map_err(ApiError::from)?;
         return Ok(Some(json_response(
@@ -189,54 +102,33 @@ pub async fn handle_sessions_and_exports_route(
         };
 
         let body = read_json_body(raw_body, 128 * 1024)?;
-        let Some(obj) = body.as_object() else {
-            return Err(ApiError::new(
-                StatusCode::BAD_REQUEST,
-                "invalid_request",
-                "请求的新会话配置无效",
-            ));
-        };
-        if obj
-            .keys()
-            .any(|k| !matches!(k.as_str(), "provider" | "modelId" | "thinkingLevel"))
-        {
+        if !body.is_object() {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
                 "请求的新会话配置无效",
             ));
         }
-        let prov_opt = obj.get("provider");
-        let mid_opt = obj.get("modelId");
-        if prov_opt.is_some() != mid_opt.is_some() {
+        let req: CreateSessionRequest = serde_json::from_value(body.clone()).map_err(|_| {
+            ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "请求的新会话配置无效",
+            )
+        })?;
+        if req.provider.is_present() != req.model_id.is_present() {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
                 "invalid_request",
                 "请求的新会话配置无效",
             ));
         }
-        let initial_model = match (prov_opt, mid_opt) {
+        let initial_model = match (req.provider.into_option(), req.model_id.into_option()) {
             (None, None) => None,
-            (Some(Value::String(p)), Some(Value::String(m))) => Some((p.clone(), m.clone())),
-            _ => {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_request",
-                    "请求的新会话配置无效",
-                ));
-            }
+            (Some(p), Some(m)) => Some((p, m)),
+            _ => unreachable!("checked pair presence"),
         };
-        let initial_thinking_str = match obj.get("thinkingLevel") {
-            None => None,
-            Some(Value::String(s)) => Some(s.clone()),
-            _ => {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_request",
-                    "请求的新会话配置无效",
-                ));
-            }
-        };
+        let initial_thinking_str = req.thinking_level.into_option();
 
         let settings = state
             .pool
@@ -433,78 +325,24 @@ pub async fn handle_sessions_and_exports_route(
                 "BitLocker 请求 ID 无效",
             ));
         }
-        // Check mode + ActivityGate without persisting to MutationReceipts!
-        let _admission = state
+        let body = read_json_body(raw_body, 4096)?;
+        // Check mode + ActivityGate without persisting to MutationReceipts, then release ModeController read lock.
+        let (mode_guard, _activity_lease) = state
             .mode
             .admit_write(caller, Some(state.host.kit().activity_gate()))
             .await
-            .map_err(ApiError::from)?;
+            .map_err(ApiError::from)?
+            .into_parts();
+        drop(mode_guard);
         let slot = state.pool.open_saved(id).await.map_err(ApiError::from)?;
-        let body = read_json_body(raw_body, 4096)?;
+        // There is no durable receipt for a sensitive response; consume it under channel admission.
+        let _acceptance = state.mode.admit_write(caller, None).await?;
         slot.bitlocker
             .respond(request_id, &body)
             .map_err(ApiError::from)?;
         return Ok(Some(json_response(
             StatusCode::OK,
             &json!({ "answered": true }),
-            method,
-        )));
-    }
-
-    if (suffix == "exports" || suffix == "exports/preview") && *method == Method::POST {
-        let is_preview = suffix == "exports/preview";
-        let body = read_json_body(raw_body, 128 * 1024)?;
-        let options = parse_export_options(&body)?;
-        let id_owned = id.to_owned();
-        if is_preview {
-            let slot = state
-                .pool
-                .open_saved(&id_owned)
-                .await
-                .map_err(ApiError::from)?;
-            let rows = state.pool.list().await.map_err(ApiError::from)?;
-            let title = rows
-                .into_iter()
-                .find(|r| r.id == id_owned)
-                .map(|r| r.title)
-                .unwrap_or_else(|| "会话".to_owned());
-            let snap = build_export_preview_snapshot(&slot, &title, &options)?;
-            return Ok(Some(json_response(StatusCode::OK, &snap, method)));
-        }
-        let result = state
-            .write_once_for_session(
-                caller,
-                method.as_str(),
-                pathname,
-                &body,
-                headers,
-                id,
-                || async move {
-                    let slot = state
-                        .pool
-                        .open_saved(&id_owned)
-                        .await
-                        .map_err(ApiError::from)?;
-                    let rows = state.pool.list().await.map_err(ApiError::from)?;
-                    let title = rows
-                        .into_iter()
-                        .find(|r| r.id == id_owned)
-                        .map(|r| r.title)
-                        .unwrap_or_else(|| "会话".to_owned());
-                    let snap = build_export_preview_snapshot(&slot, &title, &options)?;
-                    let job = state.exports.create(&snap).await.map_err(ApiError::from)?;
-                    Ok(serde_json::to_value(job).unwrap_or(Value::Null))
-                },
-            )
-            .await?;
-        return Ok(Some(json_response(StatusCode::ACCEPTED, &result, method)));
-    }
-
-    if suffix == "exports" && (*method == Method::GET || *method == Method::HEAD) {
-        let list = state.exports.list(id).await.map_err(ApiError::from)?;
-        return Ok(Some(json_response(
-            StatusCode::OK,
-            &json!({ "exports": list }),
             method,
         )));
     }
@@ -1025,11 +863,13 @@ pub async fn handle_sessions_and_exports_route(
         let item = state
             .locks
             .serialize(format!("session:{id_owned}"), || async move {
-                let _admission = state
+                let (mode_guard, _activity_lease) = state
                     .mode
                     .admit_write(caller, Some(state.host.kit().activity_gate()))
                     .await
-                    .map_err(ApiError::from)?;
+                    .map_err(ApiError::from)?
+                    .into_parts();
+                drop(mode_guard);
                 state
                     .pool
                     .refresh_services()
@@ -1049,6 +889,9 @@ pub async fn handle_sessions_and_exports_route(
                 )
                 .await
                 .map_err(ApiError::from)?;
+                // Preparation can outlast the caller's channel. Keep admission through the
+                // durable inbox write, which serves as the acceptance point for this route.
+                let _acceptance = state.mode.admit_write(caller, None).await?;
                 let refs = state
                     .pool
                     .images

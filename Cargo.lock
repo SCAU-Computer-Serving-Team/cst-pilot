@@ -413,11 +413,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "cst-pilot"
+name = "cst-kit"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "cst-os",
+ "cst-updater",
  "csv",
  "ed25519-dalek",
  "futures-util",
@@ -449,6 +451,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cst-os"
+version = "0.1.0"
+dependencies = [
+ "same-file",
+ "serde",
+ "serde_json",
+ "sha2",
+ "uuid",
+ "windows",
+]
+
+[[package]]
 name = "cst-server"
 version = "0.1.0"
 dependencies = [
@@ -457,7 +471,8 @@ dependencies = [
  "bytes",
  "chromiumoxide",
  "chrono",
- "cst-pilot",
+ "cst-kit",
+ "cst-os",
  "futures-core",
  "futures-util",
  "http",
@@ -484,6 +499,26 @@ dependencies = [
  "uuid",
  "windows",
  "zeroize",
+]
+
+[[package]]
+name = "cst-updater"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "cst-os",
+ "ed25519-dalek",
+ "regex",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio-util",
+ "url",
+ "uuid",
+ "windows",
+ "zip",
 ]
 
 [[package]]
@@ -1407,6 +1442,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
+ "pi-ai",
  "regex",
  "reqwest",
  "serde",

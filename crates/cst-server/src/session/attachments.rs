@@ -38,11 +38,24 @@ impl std::fmt::Display for AttachmentError {
 
 impl std::error::Error for AttachmentError {}
 
+/// Shared character allowlist (`[A-Za-z0-9_-]`) for identifier validators.
+/// Each domain validator retains its own length and semantic rules.
+pub fn is_safe_ascii_id_chars(value: &str) -> bool {
+    value
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
 pub fn is_valid_session_id_key(session_id: &str) -> bool {
-    (1..=128).contains(&session_id.len())
-        && session_id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    (1..=128).contains(&session_id.len()) && is_safe_ascii_id_chars(session_id)
+}
+
+pub fn is_valid_provider_id_key(provider_id: &str) -> bool {
+    (1..=128).contains(&provider_id.len()) && is_safe_ascii_id_chars(provider_id)
+}
+
+pub fn is_valid_client_id_key(client_id: &str) -> bool {
+    (1..=128).contains(&client_id.len()) && is_safe_ascii_id_chars(client_id)
 }
 
 pub fn is_valid_sha256_hex(id: &str) -> bool {

@@ -58,10 +58,7 @@ impl std::fmt::Display for ReceiptError {
 impl std::error::Error for ReceiptError {}
 
 pub fn is_valid_idempotency_key(key: &str) -> bool {
-    (1..=128).contains(&key.len())
-        && key
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    (1..=128).contains(&key.len()) && crate::session::attachments::is_safe_ascii_id_chars(key)
 }
 
 pub fn compute_request_signature(method: &str, pathname: &str, body: &Value) -> String {

@@ -99,6 +99,35 @@ export default function SessionTree() {
 		},
 		[preview, leafId],
 	);
+	const jump = useCallback(
+		async (entryId: string) => {
+			if (!sessionId || preview) return;
+			setActionError("");
+			try {
+				const result = await apiJson<{ editorText?: string }>(sessionPath(sessionId, "/tree/navigate"), {
+					method: "POST",
+					body: { entryId },
+				});
+				if (result.editorText) sessionStorage.setItem(draftKey(sessionId), result.editorText);
+				navigate(`/s/${sessionId}`, { viewTransition: true });
+			} catch (cause) {
+				setActionError(cause instanceof Error ? cause.message : "分支导航未完成");
+				await refresh();
+			}
+		},
+		[sessionId, preview, navigate, refresh],
+	);
+	/** 三种选择：不总结在这里直接导航；总结与自定义提示词把目标条目交给聊天页，导航与总结必须同一次调用。 */
+	const choose = useCallback(
+		async (mode: "none" | "summarize" | "custom") => {
+			if (!sessionId || !choice) return;
+			const entryId = choice;
+			setChoice("");
+			if (mode === "none") await jump(entryId);
+			else navigate(branchSummaryHref(sessionId, entryId, mode), { viewTransition: true });
+		},
+		[sessionId, choice, jump, navigate],
+	);
 	useEffect(() => {
 		if (choice) setChoiceIndex(0);
 	}, [choice]);
@@ -123,7 +152,7 @@ export default function SessionTree() {
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	});
+	}, [choice, choiceIndex, choose]);
 	const toolCalls = useMemo(() => collectToolCalls(tree ?? []), [tree]);
 	const allRows = useMemo(
 		() => layoutTree(buildVisibleTree(tree ?? [], leafId, filter), leafId),
@@ -197,29 +226,6 @@ export default function SessionTree() {
 		rowRefs.current.get(rows[cursorIndex].node.entry.id)?.scrollIntoView({ block: "nearest" });
 	}, [cursorIndex, rows]);
 
-	async function jump(entryId: string) {
-		if (!sessionId || preview) return;
-		setActionError("");
-		try {
-			const result = await apiJson<{ editorText?: string }>(sessionPath(sessionId, "/tree/navigate"), {
-				method: "POST",
-				body: { entryId },
-			});
-			if (result.editorText) sessionStorage.setItem(draftKey(sessionId), result.editorText);
-			navigate(`/s/${sessionId}`, { viewTransition: true });
-		} catch (cause) {
-			setActionError(cause instanceof Error ? cause.message : "分支导航未完成");
-			await refresh();
-		}
-	}
-	/** 三种选择：不总结在这里直接导航；总结与自定义提示词把目标条目交给聊天页，导航与总结必须同一次调用。 */
-	async function choose(mode: "none" | "summarize" | "custom") {
-		if (!sessionId || !choice) return;
-		const entryId = choice;
-		setChoice("");
-		if (mode === "none") await jump(entryId);
-		else navigate(branchSummaryHref(sessionId, entryId, mode), { viewTransition: true });
-	}
 	function toggleFold(row: TreeRow) {
 		const id = row.node.entry.id;
 		setFolded((current) => {

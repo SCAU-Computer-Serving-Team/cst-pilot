@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use pi_agent::{AgentMessage, StreamFn, ToolExecutionMode};
+use pi_agent::{AgentMessage, AgentStreamFn, ToolExecutionMode};
 use pi_ai::ModelThinkingLevel;
 use pi_ai::{Model, SimpleStreamOptions, TranscriptContext};
 use pi_session::{
@@ -32,9 +32,10 @@ use crate::settings_manager::{
     is_tool_modifier,
 };
 use crate::skills::glob_fragment_to_regex;
+use crate::tools::{ALL_BUILTIN_TOOL_NAMES, ToolsOptions, create_all_tool_definitions};
+#[cfg(feature = "coding-tools")]
 use crate::tools::{
-    ALL_BUILTIN_TOOL_NAMES, ToolsOptions, create_all_tool_definitions, create_bash_executor,
-    create_local_bash_operations, create_local_powershell_operations,
+    create_bash_executor, create_local_bash_operations, create_local_powershell_operations,
 };
 
 pub fn get_default_agent_dir() -> PathBuf {
@@ -595,38 +596,42 @@ pub async fn create_agent_session(
     if read_options.auto_resize_images.is_none() {
         read_options.auto_resize_images = Some(settings_manager.get_image_auto_resize());
     }
-    let expose_session_env = settings_manager.get_expose_session_environment();
-    let shell_command_prefix = settings_manager.get_shell_command_prefix();
+    #[cfg(feature = "coding-tools")]
+    let bash_executor = {
+        let expose_session_env = settings_manager.get_expose_session_environment();
+        let shell_command_prefix = settings_manager.get_shell_command_prefix();
 
-    let bash_options = tools_options.bash.get_or_insert_with(Default::default);
-    if bash_options.shell_path.is_none() {
-        bash_options.shell_path = settings_manager.get_shell_path();
-    }
-    if bash_options.command_prefix.is_none() {
-        bash_options.command_prefix = shell_command_prefix.clone();
-    }
-    if bash_options.expose_session_environment.is_none() {
-        bash_options.expose_session_environment = Some(expose_session_env);
-    }
-    if bash_options.operations.is_none() {
-        bash_options.operations = Some(create_local_bash_operations(
-            bash_options.shell_path.clone(),
-        ));
-    }
-    let bash_executor = create_bash_executor(bash_options.clone());
+        let bash_options = tools_options.bash.get_or_insert_with(Default::default);
+        if bash_options.shell_path.is_none() {
+            bash_options.shell_path = settings_manager.get_shell_path();
+        }
+        if bash_options.command_prefix.is_none() {
+            bash_options.command_prefix = shell_command_prefix.clone();
+        }
+        if bash_options.expose_session_environment.is_none() {
+            bash_options.expose_session_environment = Some(expose_session_env);
+        }
+        if bash_options.operations.is_none() {
+            bash_options.operations = Some(create_local_bash_operations(
+                bash_options.shell_path.clone(),
+            ));
+        }
+        let bash_executor = create_bash_executor(bash_options.clone());
 
-    let powershell_options = tools_options
-        .powershell
-        .get_or_insert_with(Default::default);
-    if powershell_options.command_prefix.is_none() {
-        powershell_options.command_prefix = shell_command_prefix;
-    }
-    if powershell_options.expose_session_environment.is_none() {
-        powershell_options.expose_session_environment = Some(expose_session_env);
-    }
-    if powershell_options.operations.is_none() {
-        powershell_options.operations = Some(create_local_powershell_operations());
-    }
+        let powershell_options = tools_options
+            .powershell
+            .get_or_insert_with(Default::default);
+        if powershell_options.command_prefix.is_none() {
+            powershell_options.command_prefix = shell_command_prefix;
+        }
+        if powershell_options.expose_session_environment.is_none() {
+            powershell_options.expose_session_environment = Some(expose_session_env);
+        }
+        if powershell_options.operations.is_none() {
+            powershell_options.operations = Some(create_local_powershell_operations());
+        }
+        bash_executor
+    };
     let builtin_defs_map = create_all_tool_definitions(&cwd_str, Some(&tools_options));
     let mut all_known_tool_names: Vec<String> = ALL_BUILTIN_TOOL_NAMES
         .iter()
@@ -760,25 +765,18 @@ pub async fn create_agent_session(
 
     let rt_for_stream = model_runtime.clone();
     let settings_for_stream = settings_manager.clone();
-    let stream_fn: StreamFn = Arc::new(
+    let stream_fn: AgentStreamFn = Arc::new(
         move |req_model: Model, transcript: TranscriptContext, mut opts: SimpleStreamOptions| {
             let rt = rt_for_stream.clone();
             let sm = settings_for_stream.clone();
             Box::pin(async move {
                 let prov_retry = sm.get_provider_retry_settings();
-                let idle_timeout = sm.get_http_idle_timeout_ms();
-                let effective_timeout = if idle_timeout == 0 {
-                    u64::from(i32::MAX as u32)
-                } else {
-                    idle_timeout
-                };
                 if opts.base.max_retries.is_none() {
                     opts.base.max_retries = prov_retry.max_retries;
                 }
                 if opts.base.max_retry_delay_ms.is_none() {
                     opts.base.max_retry_delay_ms = prov_retry.max_retry_delay_ms;
                 }
-                let _ = effective_timeout;
                 rt.stream_simple(req_model, transcript, opts).await
             })
         },
@@ -839,7 +837,10 @@ pub async fn create_agent_session(
         .unwrap_or(ToolExecutionMode::Parallel);
     session_opts.ui_context = options.ui_context;
     session_opts.mode = options.mode.unwrap_or(ExtensionMode::Print);
-    session_opts.default_bash_executor = Some(bash_executor);
+    #[cfg(feature = "coding-tools")]
+    {
+        session_opts.default_bash_executor = Some(bash_executor);
+    }
     session_opts.block_images = Some(block_images_fn);
     session_opts.normalize_tool_result_content = Some(normalize_tool_result_fn);
     session_opts.skills = skills_entries;

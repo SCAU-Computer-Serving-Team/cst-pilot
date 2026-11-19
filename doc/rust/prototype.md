@@ -1,71 +1,68 @@
-# Rust 重写推荐技术栈
+# Rust 技术栈选型
 
-整体方案是先用 Rust 编写通用的 Pi 核心，再接入 CST Pilot 的诊断、认证和遥测业务。运行后启动一个本机后台服务，同时供终端（TUI）、GPUI 桌面端和网页端（Web）连接使用。
+CST Pilot 基于自研通用 Rust Pi 核心构建，在其上通过公开扩展接口挂载现场诊断、认证、遥测与在线升级业务，并由单一本机后台服务统一支撑软件端（GPUI 桌面端及窗口内置 TUI）与 Web 网页端。
 
-本文介绍各模块的推荐技术选型、库的作用与采用条件。所列方案尚待原型验证。开发阶段安排见 [plan/0.PLAN.md](plan/0.PLAN.md)，产品功能与安全要求见[产品规格](../SPEC.md)。
+阶段路线见 [plan/0.PLAN.md](plan/0.PLAN.md)，产品需求与安全边界见 [../SPEC.md](../SPEC.md)。
 
 ## 整体运行结构
 
-单个 Rust 核心服务统一管理会话执行、数据存储和后台任务，三端只负责界面展示与操作输入。关闭或刷新任意界面，后台正在运行的诊断和对话任务都会继续执行。
+目标架构将软件端与公用后台服务分为两个独立进程运行（软件端 `cst-pilot.exe` 属阶段 9–10 待实施项）。关闭或刷新浏览器标签页不会中断后台正在运行的会话与诊断任务。关闭桌面窗口时联动后台服务有序收尾退出。
 
 ```mermaid
 flowchart LR
-    TUI["TUI 终端"] --> Core["Rust 核心服务"]
-    Desktop["GPUI 桌面端"] --> Core
-    Web["React 网页端"] --> Core
-    Core --> Model["模型调用与工具调度"]
-    Core --> DB["SQLite 本地数据库"]
-    Core --> Tools["Windows 诊断与采集子进程"]
+    subgraph App["软件端进程 cst-pilot.exe (阶段 9-10 接入)"]
+        Desktop["GPUI 桌面视图"]
+        TUI["窗口内置 TUI 视图"]
+        Client["cst-client 状态层"]
+        Desktop & TUI --> Client
+    end
+
+    Web["React 网页端 (SharedWorker)"]
+    Server["cst-server 本机后台服务"]
+    Model["多协议模型流与工具编排"]
+    Store["JSONL v3 会话树 + 原子 JSON 状态表"]
+    Diag["Windows 原生接口 + 受控采集子进程"]
+
+    Client --> Server
+    Web --> Server
+    Server --> Model
+    Server --> Store
+    Server --> Diag
 ```
 
-核心服务与 GPUI 桌面端分为两个独立进程运行。即使机主电脑缺少图形环境或桌面端意外退出，核心服务、TUI 和网页端依然正常工作。三端通过本机 HTTP 接口发送操作指令，通过 SSE（服务端事件推送）实时接收流式输出，断线重连后直接拉取最新会话快照恢复画面。
+各端通过回环 HTTP 接口提交控制与写入请求，通过 SSE（含 32 会话向量游标聚合流）实时同步状态，断线恢复后按游标增量回放或重拉完整快照。
 
-## 核心服务技术栈
+## 核心与服务技术栈
 
-| 用途 | 推荐选型 | 库说明与选型理由 |
+| 用途 | 采用选型 | 选型依据 |
 |---|---|---|
-| 开发语言与原生编译 | Rust | 直接编译为单机原生程序，无需在机主电脑携带庞大的脚本运行时。支持直接调用 Windows 系统接口和管理子进程，编译期的类型与内存检查也能减少跨模块传参出错和资源泄漏。 |
-| 异步与并发运行 | Tokio + tokio-util | `Tokio` 是 Rust 常用的异步运行时，负责并发处理模型流式输出、网络请求、定时器和后台工具任务。配合 `tokio-util` 的取消令牌（CancellationToken），用户点击停止时能统一中断正在执行的请求与子任务。 |
-| 本机通信服务 | Axum + Tower + tower-http | `Axum` 是 Tokio 团队维护的 Web 服务端框架，`Tower` 提供通用中间件能力。用来承载三端共用的本机 HTTP 接口、SSE 实时事件流、请求鉴权以及 Web 前端的静态文件服务。 |
-| 大模型协议接入 | Rust Pi 模型接口 + reqwest + SSE 增量解析 | 核心统一定义消息、模型服务商（Provider）和流事件接口，通过 `reqwest` 发送请求并逐步解析服务端事件。协议层保留思考签名、工具调用 ID、Token 用量与响应头。 |
-| 本地数据存储 | SQLite + [SQLx](https://github.com/launchbadge/sqlx) | 会话历史、输入回执和任务状态需要放在同一个数据库事务中保存，防止进程强杀或断电导致数据只写了一半。`SQLite` 单文件易于随 U 盘携带，`SQLx` 是异步 SQL 访问库，自带后台数据库线程，读写磁盘时不会阻塞网络请求。 |
-| 数据序列化与前后端类型 | serde + schemars + ts-rs | `serde` 负责 Rust 数据结构与 JSON 互转；`schemars` 根据代码结构自动生成工具参数的 JSON Schema；`ts-rs` 直接从 Rust 类型导出前端的 TypeScript 类型定义，保证三端接口字段一致。 |
-| 外部 HTTP 请求 | reqwest | Rust 常用的 HTTP 客户端库。用于发送 CSTOA 登录认证、联网检索和遥测上报请求，方便集中配置代理规则、TLS 证书、超时时间和重定向限制。 |
-| 工具编排沙箱与检索 | rquickjs + unicode-segmentation | `rquickjs` 提供轻量 QuickJS 虚拟机，复用官方 `PRELUDE_SOURCE` 引导脚本运行 `codemode` 异步工具编排，支持内存上限与中断轮询预算，确定性模式通过本地 `rquickjs-sys` 线程级时区补丁固定为 UTC；`unicode-segmentation` 提供 Unicode 词边界切分，支撑 `tool_search` 与 `searchTools()` 的 BM25 排序，中文分词粒度与上游 `Intl.Segmenter` 有差异。 |
-| 图片缩放与多模态剪贴板 | image + 原生剪贴板接口 | 使用 `image` 在后台线程完成 EXIF 方向修正、非标格式转 PNG 及 2000×2000 / 4.5 MiB 自适应压缩；配合系统剪贴板接口支持截图粘贴、文件路径读取与远程 `OSC 52` 复制。 |
-| 日志与错误处理 | tracing + thiserror + anyhow | `tracing` 记录带任务上下文的结构化日志，方便排查跨模块问题；`thiserror` 定义需要程序分支处理的业务错误码；`anyhow` 包装和向上传递意外的系统错误。敏感凭据在日志层统一过滤。 |
-
-模型接入层支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 和 Gemini 四种对话协议，以及 `typesafe-system-one` 分类器协议，具体设计见 [plan/1.model-core.md](plan/1.model-core.md)。Rust Pi 核心自身保持通用，提供会话、模型调用、工具调度和 SDK；CST Pilot 通过公开扩展接口接入诊断、认证和遥测业务。
+| 原生编译语言 | Rust（Edition 2024） | 直接编译为无脚本运行时的原生单机程序，利用强类型与所有权机制约束并发写权、流事件序列与敏感凭据生命周期 |
+| 异步与取消传递 | `tokio` + `tokio-util` | 并发驱动模型流式读取、阻塞系统采集与后台定时任务，通过 `CancellationToken` 将取消信号贯通至网络请求与子进程 |
+| 本机 HTTP 与 SSE 服务 | `hyper` + `http` + 自定义路由 | 直接控制底层 TCP 连接生命周期，配独立连接取消句柄实现 `8 MiB` 慢连接背压主动切断，零多余框架抽象层 |
+| 大模型协议与外部请求 | `reqwest`（`rustls`）+ 轻量增量 SSE 解析 | 统一对接四大对话协议、分类器协议与 Exa 检索。同步承载 CSTOA 认证、双端遥测（含专用 CA 校验）与签名升级包流式下载 |
+| 会话与状态存储 | `JsonlSessionStore`（JSONL v3）+ 同目录临时文件原子替换 JSON | 直接兼容既有会话记录与便携 U 盘文件系统（FAT32 / exFAT / NTFS），通过追加同步与原子重命名保障崩溃恢复，免除外部数据库引擎开销 |
+| 序列化与参数校验 | `serde` + `serde_json`（`float_roundtrip`）+ `schemars` + `pi-agent::validation` | 编译期生成工具 JSON Schema，运行期执行三阶段宽松类型转换与预编译快路径校验。Web 共享类型集中维护于 `src/web/frontend/app/data/types.ts` |
+| 代码编排沙箱与检索 | `rquickjs` + `unicode-segmentation` + `regress` | 隔离运行 `codemode` 异步工具编排脚本（256 MiB 内存上限、超时取消与可选步数中断预算），提供中英文分词 BM25 工具检索与带回溯预算的 ECMAScript 正则校验 |
+| 密码学与内存安全 | `ed25519-dalek` + `hmac` + `sha2` + `subtle` + `zeroize` | 支撑遥测安装签名、升级清单双重验签、常量时间令牌比对，以及 BitLocker 恢复密码离开作用域自动清零 |
+| 图片归一化与错误定义 | `image` + `thiserror` | 在后台线程执行 EXIF 方向修正与自适应压缩。通过强类型枚举定义各层可分支处理的业务错误码 |
 
 ## 三端界面选型
 
-TUI、GPUI 桌面端和 Web 端共用同一套业务接口与视觉规范（颜色、间距、字体、动效参数），各自采用适合当前环境的界面库渲染。会话数据与任务状态统一从核心服务获取。
+三端共享同一套后端业务契约与设计语义，按各自运行环境采用原生渲染方案：
 
-| 界面端 | 推荐选型 | 库说明与选型理由 |
+| 界面端 | 采用选型 | 选型依据 |
 |---|---|---|
-| TUI 终端 | Ratatui + Crossterm + ratatui-textarea + tui-markdown | `Crossterm` 处理跨平台键鼠输入与终端控制，`Ratatui` 负责终端界面布局与组件绘制。配合现成的多行输入框（`ratatui-textarea`）和 Markdown 渲染库（`tui-markdown`），只需组合会话界面、工具结果和确认弹窗。 |
-| GPUI 桌面端 | [GPUI Kit](https://github.com/longbridge/gpui-kit) | `GPUI` 是 Zed 编辑器开源的 GPU 加速桌面界面框架，`GPUI Kit` 是基于它的现成组件库。可直接复用输入框、列表、主题、流式 Markdown 和动画过渡接口，专用诊断卡片则用基础组件拼装。 |
-| Web 网页端 | 现有 React 前端与设计系统 | 现有的页面、组件、样式和浏览器端到端测试已经成型。后端换成 Rust 核心服务后，前端代码直接保留，仅对接由 Rust 自动生成的 TypeScript 接口类型。 |
+| GPUI 桌面端（阶段 9 接入） | `gpui-kit`（`0.10.0`）+ 同窗口 D3D11 自定义着色器表面 | 基于 GPU 加速渲染桌面工作台。构建期通过 `naga` 与 `D3DCompile` 将 GLSL 预编译为 DXBC 字节码，原生输出动态背景与两档毛玻璃浮层 |
+| 窗口内置 TUI（阶段 10 接入） | `Ratatui` + `ratatui-textarea` + `tui-markdown` | 集成在 `cst-pilot.exe` 同一窗口内，与图形视图共享同一个 `cst-client` 实例、激活会话与未发送草稿 |
+| Web 网页端 | React 19 + Tailwind v4 + HeroUI v3 + `SharedWorker` | 复用网页交互组件，与桌面端共用可变字体，支持多标签页聚合事件流 |
 
 ## Windows 诊断与会话导出
 
-常规系统信息由 Rust 直接调用系统接口获取，需要硬件厂商适配或文件系统底层加速的任务则调用随包工具。
+常规系统指标直接通过原生系统接口读取，硬件传感器与高速文件表扫描在隔离的 Job Object 子进程中执行：
 
-| 诊断与导出需求 | 推荐选型 | 库说明与选型理由 |
+| 场景 | 采用选型 | 选型依据 |
 |---|---|---|
-| 常规系统指标 | sysinfo | Rust 的系统信息采集库，自带 CPU、内存、进程列表和磁盘读写的采样与差值计算。采集后按项目统一口径转换单位并处理报错。 |
-| Windows 专属查询 | 微软 windows 官方库 + [wmi](https://github.com/ohadravid/wmi-rs) | `windows` 库由微软官方维护，可直接调用 Win32 API、注册表、事件日志和 PDH 性能计数器（如读取 GPU 引擎负载）。`wmi` 库简化了 WMI 查询结果的解析，省去繁琐的底层类型转换。 |
-| 磁盘空间扫描 | WizTree + csv，降级用 walkdir | 继续调用随包的 WizTree 高速扫描磁盘，由 Rust 的 `csv` 库解析导出文件并维护目录缓存。若 WizTree 在特殊环境下不可用，改用 `walkdir` 在时间预算内遍历目录。 |
-| 硬件传感器 | LibreHardwareMonitor + 独立 .NET 采集程序 | 主板、风扇、温度和电压传感器依赖大量硬件厂商适配，继续复用现有的 .NET 采集程序。放在独立子进程中运行，也能把采集异常与主服务隔离开。 |
-| 会话导出（PNG / HTML） | [Chromiumoxide](https://github.com/mattsse/chromiumoxide) + 本机 Edge/Chrome | `Chromiumoxide` 是 Rust 的浏览器自动化库（类似 Node.js 的 Puppeteer）。直接驱动机主电脑已有的 Edge 或 Chrome 渲染只读网页并截图，无需另写排版渲染引擎。 |
-
-Windows 底层的部分 COM/WMI 调用一旦卡死，无法靠 Rust 异步超时直接中断。这类需要严格限时返回的采集会放在受控子进程中执行，超时可直接终止子进程。BitLocker 操作通过加密的 WMI 通道执行，解锁和解密前必须在本地界面完成确认；若执行中途中断导致结果未知，先重新查询卷状态再决定后续提示。
-
-## 采用条件
-
-以下原型验证全部通过后，正式采用上述技术栈：
-
-1. **模型协议**：四种模型协议均通过工具调用续答、图片输入、思考签名保留、Token 用量统计、请求 ID 读取，以及断流重连测试。
-2. **数据库可靠性**：SQLite 在进程强杀、磁盘写满和 U 盘拔插测试中能正常恢复数据；用户输入的接收回执在数据库事务提交后才返回，执行结果未知的操作不自动重复执行。
-3. **GPUI 桌面端**：固定 `GPUI Kit` 与配套 `GPUI` 的版本并成组升级；在 Windows 实机上验证中文输入法、文本选区、长会话滚动、多显示器缩放（DPI）、远程桌面，以及缺少显卡驱动时的降级表现。
-4. **外部组件与导出**：核对随包工具的开源许可、硬件传感器覆盖范围和最终安装包体积；会话导出使用独立隔离的浏览器临时目录，确保不改动机主浏览器数据，且导出的离线文件包含完整字体与图片。
+| 原生系统与加密卷查询 | 微软官方 `windows`（`0.62.2`）+ `wmi`（`0.18.4`） | 直接调用 Win32、注册表、PDH 性能计数器、Event Log（`EvtQuery`）与 `PacketPrivacy` 加密 WMI（`Win32_EncryptableVolume`），消除外部脚本拼接开销与注入风险 |
+| 磁盘空间与文件检索 | 随包 `WizTree64.exe` + `csv` + `ignore` | 使用 `csv` 恒定内存流式维护 Top-N 最小堆并建立进程内卷缓存。WizTree 不可用时回退标准库与 `ignore` 有界遍历 |
+| 硬件传感器隔离采集 | `LibreHardwareMonitorLib` + `.NET 10` 自包含 `cst-lhm-host.exe` | 将依赖硬件厂商适配的传感器探针隔离在受 Job Object 管控的辅助子进程内，保护主服务稳定性 |
+| 会话导出（PNG / HTML） | `chromiumoxide`（`0.9.1`）+ 本机 Edge / Chrome | 通过 CDP 复用机主已有浏览器与独立 `BrowserContext` 渲染 `/_export` 只读页面，完成高清分图截图与离线资源内嵌 |

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use cst_pilot::SKILL_NAMES;
+use cst_kit::SKILL_NAMES;
 use pi_agent::BoxFuture;
 use pi_ai::now_ms;
 use serde::{Deserialize, Serialize};

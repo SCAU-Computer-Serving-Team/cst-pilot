@@ -1,8 +1,11 @@
 pub mod app;
 pub mod auth;
+pub mod events;
+pub mod exports;
 pub mod lifecycle;
 pub mod models;
 pub mod sessions;
+pub mod settings;
 pub mod static_files;
 
 use std::collections::HashMap;
@@ -12,13 +15,43 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
+use cst_kit::auth::custom_provider::{CustomProviderError, CustomProviderErrorKind};
 use http::{HeaderMap, HeaderValue, Method, Request, Response, StatusCode};
 use http_body::{Body, Frame};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
 use percent_encoding::percent_decode_str;
+use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
+
+/// Deserializes optional request DTO fields while strictly rejecting explicit `null`.
+/// Combine with `#[serde(default)]` so omitted keys become `MaybeOmitted::Omitted`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum MaybeOmitted<T> {
+    #[default]
+    Omitted,
+    Present(T),
+}
+
+impl<T> MaybeOmitted<T> {
+    pub fn is_present(&self) -> bool {
+        matches!(self, Self::Present(_))
+    }
+
+    pub fn into_option(self) -> Option<T> {
+        match self {
+            Self::Omitted => None,
+            Self::Present(v) => Some(v),
+        }
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for MaybeOmitted<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        T::deserialize(deserializer).map(Self::Present)
+    }
+}
 
 use crate::auth_guard::{AuthGuardError, authenticate_api_request, validate_host_and_origin};
 use crate::error::{MutationError, ServiceError, ServiceErrorKind};
@@ -224,6 +257,24 @@ impl From<BitLockerRespondError> for ApiError {
     }
 }
 
+impl From<CustomProviderError> for ApiError {
+    fn from(err: CustomProviderError) -> Self {
+        match err.kind {
+            CustomProviderErrorKind::Conflict => {
+                Self::new(StatusCode::CONFLICT, "config_conflict", err.message)
+            }
+            CustomProviderErrorKind::ConfigurationUnavailable => Self::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "configuration_unavailable",
+                err.message,
+            ),
+            CustomProviderErrorKind::InvalidInput => {
+                Self::new(StatusCode::BAD_REQUEST, "invalid_request", err.message)
+            }
+        }
+    }
+}
+
 pub fn json_response(
     status: StatusCode,
     value: &Value,
@@ -385,6 +436,7 @@ pub async fn handle_http_request(
             query.as_deref(),
             &headers,
             state.static_dir(),
+            &state.kit_root().join("assets").join("fonts"),
             &state.mode,
         )
         .await);
@@ -465,6 +517,14 @@ async fn dispatch_api_route(
     }
 
     if let Some(resp) = Box::pin(lifecycle::handle_lifecycle_route(
+        state, caller, method, pathname, raw_body,
+    ))
+    .await?
+    {
+        return Ok(Some(resp));
+    }
+
+    if let Some(resp) = Box::pin(events::handle_events_route(
         state,
         caller,
         method,
@@ -473,6 +533,14 @@ async fn dispatch_api_route(
         headers,
         raw_body,
         conn_cancel.clone(),
+    ))
+    .await?
+    {
+        return Ok(Some(resp));
+    }
+
+    if let Some(resp) = Box::pin(settings::handle_settings_route(
+        state, caller, method, pathname, query, headers, raw_body,
     ))
     .await?
     {
@@ -502,7 +570,15 @@ async fn dispatch_api_route(
         return Ok(Some(resp));
     }
 
-    if let Some(resp) = Box::pin(sessions::handle_sessions_and_exports_route(
+    if let Some(resp) = Box::pin(exports::handle_exports_route(
+        state, caller, method, pathname, headers, raw_body,
+    ))
+    .await?
+    {
+        return Ok(Some(resp));
+    }
+
+    if let Some(resp) = Box::pin(sessions::handle_sessions_route(
         state,
         caller,
         method,
