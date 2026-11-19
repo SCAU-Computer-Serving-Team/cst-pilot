@@ -54,7 +54,7 @@ flowchart LR
 |---|---|---|
 | GPUI 桌面端（阶段 9 接入） | `gpui-kit`（`0.10.0`）+ 同窗口 D3D11 自定义着色器表面 | 基于 GPU 加速渲染桌面工作台。构建期通过 `naga` 与 `D3DCompile` 将 GLSL 预编译为 DXBC 字节码，原生输出动态背景与两档毛玻璃浮层 |
 | 窗口内置 TUI（阶段 10 接入） | `Ratatui` + `ratatui-textarea` + `tui-markdown` | 集成在 `cst-pilot.exe` 同一窗口内，与图形视图共享同一个 `cst-client` 实例、激活会话与未发送草稿 |
-| Web 网页端 | React 19 + Tailwind v4 + HeroUI v3 + `SharedWorker` | 复用成熟的网页交互组件、WOFF2 字体子集与多标签页聚合事件流 |
+| Web 网页端 | React 19 + Tailwind v4 + HeroUI v3 + `SharedWorker` | 复用网页交互组件，与桌面端共用可变字体，支持多标签页聚合事件流 |
 
 ## Windows 诊断与会话导出
 

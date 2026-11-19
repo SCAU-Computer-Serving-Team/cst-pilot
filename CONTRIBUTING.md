@@ -43,7 +43,7 @@ Rust 主线（`crates/`）对齐上游 Pi `1.5.0` 工程规范并遵循 Rust 社
 | 前端测试 | `npm run test --prefix src/web/frontend` | 工具卡片映射、分支树与流式渲染的纯函数测试 |
 | 工具与文档约束 | `node --test src/test/*.test.mjs` | 诊断工具、凭据边界、画布颜色与节点完整性、本地文档链接 |
 | 前端构建 | `npm run build --prefix src/web/frontend` | 产物写入 `agent/home/extensions/web/static/` |
-| 分发字体 | `npm run test:fonts --prefix src/web/frontend` | 构建后检查覆盖、hash、回退与体积 |
+| 分发字体 | `npm run test:fonts --prefix src/web/frontend` | 构建后校验共享可变字体的哈希、OpenType 表和许可证，确认 Web 静态目录没有字体副本 |
 | 端到端验收 | `npm run test:web:e2e --prefix agent` | 先构建；真实浏览器、HTTP、Pi、持久化与重启，链路见[测试规范](doc/TESTING.md#web-端到端核心链路) |
 
 前端 lint 必须从 `src/web/frontend` 目录发起：biome 按运行目录识别 React 项目，换目录会漏掉 React 相关规则。`npm --prefix` 已经处理，直接照表执行即可。

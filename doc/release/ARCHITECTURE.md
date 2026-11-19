@@ -67,4 +67,4 @@
 |---|---|
 | `wiztree/` | NTFS MFT 高速空间扫描与 CSV 导出。个人使用免费，商业使用需授权。打包排除 `WizTree3.ini`、`.bad` 与 `tmp/` |
 | `lhm/` 与 `lhm/host/` | `LibreHardwareMonitorLib.dll`（MPL-2.0）及 .NET 10 自包含隔离采集宿主。遵循零安装约束不附带 PawnIO 驱动，保留 `DiskInfoToolkit.dll` 等依赖便于后续扩展 |
-| `pack/pack.mjs`（阶段 11 前过渡） | 校验锁文件、构建 Web 前端与 WOFF2 字体、执行 `checkReleaseTree` / `checkReleaseContent` 红线扫描及 `_smoke` 隔离冒烟，最后生成 ZIP 并复核 `SHA256SUMS` |
+| `pack/pack.mjs`（阶段 11 前过渡） | 校验锁文件、构建 Web 前端并同步共享可变字体、执行 `checkReleaseTree` / `checkReleaseContent` 红线扫描及 `_smoke` 隔离冒烟，最后生成 ZIP 并复核 `SHA256SUMS` |

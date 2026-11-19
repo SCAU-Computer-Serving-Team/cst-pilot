@@ -18,7 +18,7 @@
 | Rust 软件内升级专项 | `cargo test -p cst-updater --locked`、`cargo test -p cst-kit --test update_package --test update_health_check --test update_service --locked` | 双重签名与 ZIP 边界校验、配置合并、逐文件中断恢复、真实 Windows Job Object 15 秒健康检查、独立更新器进程恢复、失败回滚与升级门禁协调 |
 | Rust 后台服务与导出 | `cargo test -p cst-server --locked` | 单实例管道锁、`AppPresence × ChannelMode` 正交门禁与 Cookie 世代作废、10 空闲会话 LRU 与 `unflushed` 快照恢复、安全 `fork`、持久化收件箱、8 MiB 慢连接取消、32 会话向量游标聚合流及 `Chromiumoxide` PNG/HTML 导出契约 |
 | 前端静态检查与单测 | `npm run lint --prefix src/web/frontend`、`npm run typecheck --prefix src/web/frontend`、`npm test --prefix src/web/frontend` | 复用 `agent` 目录已安装的 Biome 检查规则，执行路由类型生成、TypeScript 严格检查，以及工具卡片映射、分支树几何、聚合流状态机与乐观发送单测 |
-| 前端构建与字体子集 | `npm run build --prefix src/web/frontend`、`npm run test:fonts --prefix src/web/frontend` | 静态资源构建至 `agent/home/extensions/web/static/`，核验三档 WOFF2 子集字符覆盖、哈希与许可证 |
+| 前端构建与共享字体 | `npm run build --prefix src/web/frontend`、`npm run test:fonts --prefix src/web/frontend` | 构建 Web 静态资源；校验共享思源黑体可变字体的 SHA-256、OpenType 表和许可证，确认静态目录没有字体副本 |
 | Rust Web 浏览器端到端 | `cargo build -p cst-server --bin cst-server --locked`、`npm run test:web:rust-e2e --prefix agent` | 在 Windows 隔离 Chrome 中驱动 `cst-server --standalone-web`，验证乐观发送、33 会话分片聚合流、BitLocker 复查卡片及 PNG/HTML 导出 |
 | 设计与文档契约 | `node --test src/test/*.test.mjs` | 画布节点唯一性与颜色令牌子集校验、全仓本地 Markdown 链接与标题锚点校验，以及过渡期工具契约回归 |
 | 工程与发行树检查 | `npm run check:engineering --prefix agent`、`npm run check --prefix agent`、`node --test pack/test/launcher.test.mjs pack/test/release-checks.test.mjs` | MJS/JSON/CSS 静态规则、PowerShell PSScriptAnalyzer 1.24.0 检查、启动器与干净发行树红线校验（按 `ci.yml` 初始化 `agent/home/npm` 后可运行全量 `pack/test/*.test.mjs`） |
@@ -31,7 +31,7 @@
 | 模式 | 检查范围 |
 |---|---|
 | 日常 | Rust 格式、Clippy（含 `test-support`）与全工作区测试。前端格式、类型、单测与设计文档契约。工程静态检查、过渡期后端类型、OAuth/遥测测试与启动器及干净发行树回归 |
-| 完整验收 | 在日常范围上增加前端构建、字体子集校验、`cst-server` Windows 构建与导出测试、过渡期 `test:web` 与 `test:web:shared-audit`、全量 `pack/test/*.test.mjs`、隔离浏览器启停预检，以及 Rust / TS 双入口浏览器 E2E。通过 `gh workflow run ci.yml -f full=true` 手动触发 |
+| 完整验收 | 在日常范围上增加前端构建、共享字体校验、`cst-server` Windows 构建与导出测试、过渡期 `test:web` 与 `test:web:shared-audit`、全量 `pack/test/*.test.mjs`、隔离浏览器启停预检，以及 Rust / TS 双入口浏览器 E2E。通过 `gh workflow run ci.yml -f full=true` 手动触发 |
 
 完整验收先单独验证隔离 Chrome 的启动与退出，启动失败时写出 `browser-startup.json` 记录退出码与标准错误，并在超时或失败后回收测试进程。
 

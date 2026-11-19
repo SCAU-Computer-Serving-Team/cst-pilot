@@ -50,7 +50,7 @@ flowchart TB
 | `telemetry` | `crates/cst-kit/src/telemetry/`、`cst-pilot-server` | 会话统计累加、CSTOA 请求扣点核对、命名管道草稿存活证明、双端独立发送队列与 Go + SQLite 接收端 | [SPEC](telemetry/SPEC.md) · [ARCHITECTURE](telemetry/ARCHITECTURE.md) · [API](telemetry/API.md) · [OPERATIONS](telemetry/OPERATIONS.md) |
 | `web` | `src/web/frontend/`、`crates/cst-server/src/exports/`、`design/cst-pilot-web.pen` | React 19 单页应用、`SharedWorker` 32 会话分片聚合流、乐观发送状态机、工具卡片渲染及 PNG/离线 HTML 导出 | [SPEC](web/SPEC.md) · [ARCHITECTURE](web/ARCHITECTURE.md) · [API](web/API.md) |
 | `desktop` | `design/cst-pilot-desktop.pen`、阶段 9–10 规划 `crates/{cst-client,cst-desktop,cst-tui}` | 原生 GPUI 桌面工作台、单窗口 D3D11 着色器背景与毛玻璃、清零密码框及窗口内置 TUI 视图 | [SPEC](desktop/SPEC.md) · [ARCHITECTURE](desktop/ARCHITECTURE.md) |
-| `release` | `crates/cst-updater/`、`crates/cst-kit/src/update/`、`src/web/frontend/scripts/`、`pack/` | Ed25519 双重签名在线升级与独立更新器回滚、WOFF2/OTF 字体子集构建、LHM 自包含辅助程序发布及干净发行树校验 | [SPEC](release/SPEC.md) · [ARCHITECTURE](release/ARCHITECTURE.md) |
+| `release` | `crates/cst-updater/`、`crates/cst-kit/src/update/`、`src/web/frontend/scripts/`、`pack/` | Ed25519 双重签名在线升级与独立更新器回滚、共享可变字体分发、LHM 自包含辅助程序发布及干净发行树校验 | [SPEC](release/SPEC.md) · [ARCHITECTURE](release/ARCHITECTURE.md) |
 
 注：跨进程基础原语位于 `crates/cst-os`，独立更新器位于 `crates/cst-updater`，业务核心位于 `crates/cst-kit`；阶段 9 由 `crates/cst-desktop` 编译产出主程序 `cst-pilot.exe`。阶段 11 打包切换前，仓库同时保留 `agent/home/extensions/` 与 `pack/` 用于 `v0.6.2` 维护及双入口回归对照。
 
