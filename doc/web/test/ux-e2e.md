@@ -2,7 +2,7 @@
 
 本文定义基于 `bsk`（Browser Skill）与 CDP 原生协议的 Web 用户体验（UX）端到端测试方案，运行宿主为 `cst-server --standalone-web`。[bsk-e2e.md](bsk-e2e.md) 验证 15 个叶路由与 28 个静态分支的功能连通性，[bsk-deep-e2e.md](bsk-deep-e2e.md) 验证长会话压缩与前后端状态机恢复。
 
-本文聚焦布局几何精度与输入焦点交互，覆盖动画连续性和流式阅读稳定性，通过极限数据夹具将体验判断转化为可复现的量化断言。视觉规范见 [DESIGN.md](../../../DESIGN.md)，交互要求见 [web/SPEC.md](../SPEC.md)，接口契约见 [web/API.md](../API.md)。
+本文聚焦布局几何精度与输入焦点交互，覆盖动画连续性和流式阅读稳定性，通过极限数据夹具将体验判断转化为可复现的量化断言。动效、令牌与交互行为规范见 [storybook.html](../../../design/storybook.html)，静态与整体设计见对应 `.pen` 画布，文本规范见 [DESIGN.md](../../../DESIGN.md)，功能交互见 [web/SPEC.md](../SPEC.md)，接口契约见 [web/API.md](../API.md)。
 
 ## 1. 测试组成与页面探针架构
 

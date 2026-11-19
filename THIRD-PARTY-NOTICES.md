@@ -46,13 +46,13 @@ CST Pilot 发行版包含以下第三方组件。各组件以其原有许可证�
 | JetBrains Mono | 以随包文件为准 | OFL-1.1 | https://github.com/JetBrains/JetBrainsMono | 聊天页行内工具名 |
 | Noto Sans SC | 以随包文件为准 | OFL-1.1 | https://github.com/notofonts/noto-cjk | 仅设计画布说明文字，不进界面 |
 
-字体用法见 [DESIGN.md · 字体分工](DESIGN.md#字体分工)，文件清单见 [DESIGN.md · 字体](DESIGN.md#字体)。
+字体用法与分发边界见 [DESIGN.md · 令牌、用色与字体约束](DESIGN.md#令牌用色与字体约束)。
 
 ## 设计资源
 
 | 资源 | 版本 | 许可证 | 来源 | 用途与条款 |
 |---|---|---|---|---|
-| transitions.dev 动效片段与开发工具 | 条款更新于 2026-10-10 | 动效片段：站点使用条款；CLI：MIT | https://transitions.dev/terms.html | 已取得访问权限的动效允许修改并随个人或商业产品分发，禁止将动效库本身重新打包分发；开发工具不进入发行包。用法见 [DESIGN.md · 动效](DESIGN.md#动效) |
+| transitions.dev 动效片段与开发工具 | 条款更新于 2026-10-10 | 动效片段：站点使用条款；CLI：MIT | https://transitions.dev/terms.html | 已取得访问权限的动效允许修改并随个人或商业产品分发，禁止将动效库本身重新打包分发；开发工具不进入发行包。用法见 [storybook.html](design/storybook.html) 与 [DESIGN.md · 动效与跨端交互契约](DESIGN.md#动效与跨端交互契约) |
 
 ## 说明
 

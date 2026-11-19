@@ -25,9 +25,9 @@
 
 ## 文档与设计规范待办
 
-| 文档 | 待办项 | 依据 |
+| 文档 / 资产 | 待办项 | 依据 |
 |---|---|---|
-| [DESIGN.md](../DESIGN.md) | 大规模重构与更新：突破当前仅覆盖 Web 端的范围，统一纳入 GPUI 桌面端设计体系（[cst-pilot-desktop.pen](../design/cst-pilot-desktop.pen) 44 项语义令牌、组件母版、D3D11 天空与毛玻璃着色器、字体规范）及三端视觉边界 | [desktop/SPEC.md](desktop/SPEC.md#视觉字体与着色器规范)、[9.desktop.md](rust/plan/9.desktop.md) |
+| [cst-pilot-web.pen](../design/cst-pilot-web.pen) / [cst-pilot-tools.pen](../design/cst-pilot-tools.pen) | Web 设计规范对齐：按设计核心文件体系对齐静态画布、Shader 绑定、令牌与交互行为，导入 `mode: [light, dark]` 变量轴与 `00A–00F` 可复用母版，重排主区为 `y = 0` 单行线性流并同步迁移 Web 前端样式与契约测试 | [DESIGN.md](../DESIGN.md) · [storybook.html](../design/storybook.html) · [cst-pilot-desktop.pen](../design/cst-pilot-desktop.pen) |
 
 ## 待决议题
 

@@ -1,6 +1,6 @@
 # 桌面端与内置 TUI 规格
 
-`desktop` 模块定义统一软件端主程序 `cst-pilot.exe` 的目标规格（`crates/cst-client` 与 `crates/cst-desktop` 属阶段 9 待实施项，`crates/cst-tui` 属阶段 10 待实施项），通过本机客户端库连接公用后台服务 `cst-server`。视觉基准对应 [桌面端画布](../../design/cst-pilot-desktop.pen)，客户端与窗口架构见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段实施细则见 [9.desktop.md](../rust/plan/9.desktop.md)。
+`desktop` 模块定义统一软件端主程序 `cst-pilot.exe` 的目标规格（`crates/cst-client` 与 `crates/cst-desktop` 属阶段 9 待实施项，`crates/cst-tui` 属阶段 10 待实施项），通过本机客户端库连接公用后台服务 `cst-server`。静态设计、Shader 与整体设计以 [桌面端画布](../../design/cst-pilot-desktop.pen) 为最高规范，动效、令牌与交互行为以 [storybook.html](../../design/storybook.html) 为最高规范，文本规范见 [DESIGN.md](../../DESIGN.md)。客户端与窗口架构见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段实施细则见 [9.desktop.md](../rust/plan/9.desktop.md)。
 
 ## 窗口基线与启动约束
 
@@ -22,7 +22,7 @@
 
 ## 视觉、字体与着色器规范
 
-1. **设计变量与主题**：严格绑定画布定义的 44 项语义令牌（29 项颜色与 15 项数值），支持跟随系统、浅色、深色三档切换，与 Web 主题和 TUI 主题独立保存。
+1. **设计变量与主题**：静态组件、Shader 与基础变量定义以 [cst-pilot-desktop.pen](../../design/cst-pilot-desktop.pen) 为更高优先级；[storybook.html](../../design/storybook.html) 严格对应画布组件与变量（不得新增画布未定义的静态组件与变量），并规范动效与交互行为。支持跟随系统、浅色、深色三档切换，与 Web 主题和 TUI 主题独立保存。
 2. **随包字体与回退**：界面正文加载 `CSTUISans-{Regular,Medium,Bold}.otf`，代码与等宽数值加载 `JetBrainsMono-{Regular,Medium}.ttf`。生僻字与符号走 DirectWrite 系统回退链。字体文件缺失或损坏时回退系统默认无衬线与等宽字体，不阻塞启动。
 3. **动态背景与浮层材质分层**：
    - 主页与登录页支持三款预编译 D3D11 天空背景着色器（`blue-sky.glsl`、`night-sky.glsl`、`blue-hour.glsl`），帧率同步显示器原生刷新率。

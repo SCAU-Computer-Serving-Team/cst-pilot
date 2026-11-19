@@ -9,7 +9,8 @@
 2. 了解 `earendil-works/pi`。本项目 Rust 核心对齐上游 Pi `1.5.0`，遵循 Pi 工程规范。
 3. 遵循 Rust 社区与大型工作区工程实践。
 4. 优先使用 `pi-context` 提供的工具标注 checkpoint。仅在明确切换任务且上下文超过 400K 时执行 compact。
-5. 执行 `Pen.dev` 等前端设计任务前，阅读 `emil` 系与 `gpui` 系 SKILLS，并通过 MCP 获取 `pen.dev` 操作方式。
+5. 执行前端与设计任务时，遵循三项设计核心文件：[storybook.html](design/storybook.html)（动效、令牌与交互行为参考最高规范）、`design\*.pen` 画布（静态设计、Shader 与整体设计最高规范，以 [cst-pilot-desktop.pen](design/cst-pilot-desktop.pen) 为主流基准）及 [DESIGN.md](DESIGN.md)（文本最高规范）。[storybook.html](design/storybook.html) 的静态组件与静态基础变量严格对应各 `.pen` 设计稿，`.pen` 内容优先级更高；`storybook.html` 不得出现 `.pen` 未定义的静态组件和静态基础变量；交互瞬态与动效归属交互侧，不属于 `.pen` 静态范围。
+6. 执行 `Pen.dev` 等前端设计任务前，阅读 `emil` 系与 `gpui` 系 SKILLS，并通过 MCP 获取 `pen.dev` 操作方式。
 
 ## 文档规范
 

@@ -1,6 +1,6 @@
 # Web 界面规格
 
-`web` 模块提供本机回环浏览器操作界面，连接 `cst-server` 后台服务，覆盖会话管理、对话与工具展示、分支树导航、会话导出及模型与凭据配置。前后端实现结构见 [ARCHITECTURE.md](ARCHITECTURE.md)，页面路由与 HTTP/SSE 契约见 [API.md](API.md)，视觉令牌见 [../../DESIGN.md](../../DESIGN.md)，认证规则见 [../auth/SPEC.md](../auth/SPEC.md)，通道门禁与单写权见 [../server/SPEC.md](../server/SPEC.md)。
+`web` 模块提供本机回环浏览器操作界面，连接 `cst-server` 后台服务，覆盖会话管理、对话与工具展示、分支树导航、会话导出及模型与凭据配置。前后端实现结构见 [ARCHITECTURE.md](ARCHITECTURE.md)，页面路由与 HTTP/SSE 契约见 [API.md](API.md)，动效、令牌与交互行为见 [storybook.html](../../design/storybook.html)（其静态组件与变量严格对应 `.pen` 设计稿且 `.pen` 优先级更高），静态设计见对应 `.pen` 画布，文本规范见 [DESIGN.md](../../DESIGN.md)，认证规则见 [../auth/SPEC.md](../auth/SPEC.md)，通道门禁与单写权见 [../server/SPEC.md](../server/SPEC.md)。
 
 ## 浏览器基线与分发
 

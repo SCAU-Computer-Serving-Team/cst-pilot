@@ -12,7 +12,7 @@
 | [TASKS.md](TASKS.md) | 主线阶段待办、功能迭代、设计规范重构、分类待决议题与实机生产验收清单 |
 | [contract.md](contract.md) | 使用情况遥测的字段定义、匿名身份算法与隐私不采集边界 |
 
-根目录配套文档涵盖项目介绍与使用（[README.md](../README.md)）、视觉系统规范（[DESIGN.md](../DESIGN.md)），以及开发提交流程（[CONTRIBUTING.md](../CONTRIBUTING.md)）与版本记录（[CHANGELOG.md](../CHANGELOG.md)）。
+根目录配套文档涵盖项目介绍与使用（[README.md](../README.md)）、开发提交流程（[CONTRIBUTING.md](../CONTRIBUTING.md)）与版本记录（[CHANGELOG.md](../CHANGELOG.md)）。设计规范由三项核心文件协同确立：[storybook.html](../design/storybook.html)（动效、令牌与交互行为参考最高规范）、[cst-pilot-desktop.pen](../design/cst-pilot-desktop.pen) 等 `.pen` 画布（静态设计、Shader 与整体设计最高规范）及 [DESIGN.md](../DESIGN.md)（文本最高规范）。[storybook.html](../design/storybook.html) 的静态组件与静态基础变量严格对应各 `.pen` 设计稿（`.pen` 优先级更高，不得出现 `.pen` 未定义的静态组件与静态变量）；交互瞬态与动效归属交互侧。
 
 ## 功能模块
 
