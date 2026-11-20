@@ -1,7 +1,7 @@
 use cst_client::ClientHandle;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::{Input, InputContentType, InputState};
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ParentElement,
     Render, SharedString, StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
@@ -9,9 +9,9 @@ use gpui_kit::{
 use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
+use crate::accessibility::A11yElementExt as _;
 use crate::theme::{
-    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height,
-    radius, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -944,6 +944,7 @@ impl ProvidersTabView {
             .child(
                 Input::new(&self.api_key_input)
                     .accessibility_id("providers-apikey-input")
+                    .content_type(InputContentType::Password)
                     .aria_label("服务 API Key")
                     .h(height::FIELD)
                     .mask_toggle(),
@@ -1192,6 +1193,7 @@ impl Render for ProvidersTabView {
                             div().flex_1().child(
                                 Input::new(&self.api_key_input)
                                     .accessibility_id("providers-apikey-input")
+                                    .content_type(InputContentType::Password)
                                     .aria_label("服务 API Key")
                                     .h(height::FIELD)
                                     .mask_toggle(),

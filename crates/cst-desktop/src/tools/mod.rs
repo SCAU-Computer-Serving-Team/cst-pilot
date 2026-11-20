@@ -1,6 +1,7 @@
 pub mod bitlocker_card;
 pub mod normal_card;
 pub mod runbook_card;
+mod secret_input;
 pub mod sys_overview;
 pub mod web_search_bar;
 

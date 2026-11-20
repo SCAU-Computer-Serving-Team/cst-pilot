@@ -16,13 +16,14 @@ use gpui_kit::{
     div, px,
 };
 
+use crate::accessibility::A11yElementExt as _;
 use crate::settings::general_tab::render_general_tab;
 use crate::settings::preferences_tab::{PreferencesTabEvent, PreferencesTabView};
 use crate::settings::providers_tab::{ProvidersTabEvent, ProvidersTabView};
 use crate::settings::shortcuts_tab::render_shortcuts_tab;
 use crate::theme::{
-    A11yElementExt as _, DesktopThemeGlobal, apply_desktop_theme, apply_scale, cjk_inline_label,
-    height, layout, render_subpage_header_xwjof, scale, space,
+    DesktopThemeGlobal, apply_desktop_theme, apply_scale, cjk_inline_label, height, layout,
+    render_subpage_header_xwjof, scale, space,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

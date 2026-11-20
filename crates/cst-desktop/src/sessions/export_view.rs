@@ -11,9 +11,9 @@ use gpui_kit::{
 };
 use serde_json::Value;
 
+use crate::accessibility::A11yElementExt as _;
 use crate::theme::{
-    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height,
-    radius, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
 };
 use crate::tools::normal_card::render_normal_tool_card;
 use crate::tools::{SpecialToolDispatchProps, render_special_tool_component};

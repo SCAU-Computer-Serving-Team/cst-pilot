@@ -71,9 +71,12 @@ $env:PI_OFFLINE = '1'
 
 ```powershell
 $env:WINAPP_CLI_TELEMETRY_OPTOUT = '1'
-$hwnd = (@(winapp ui list-windows -a cst-pilot --json | ConvertFrom-Json) | Where-Object { $_.width -ge 400 -and $_.className -ne '#32770' } | Select-Object -First 1).hwnd
+# $proc 与 $outDir 来自手册中的隔离启动步骤。
+$hwnd = (winapp ui list-windows -a $proc.Id --json | ConvertFrom-Json | Where-Object { $_.width -ge 400 -and $_.className -eq 'Zed::Window' } | Select-Object -First 1).hwnd
+if (-not $hwnd) { throw '未找到隔离桌面端主窗口。' }
 $null = winapp ui inspect -w $hwnd --interactive; Start-Sleep -Milliseconds 150; winapp ui inspect -w $hwnd --interactive
-pwsh -NoProfile -File scripts/dev/desktop-secret.ps1 -WindowHandle $hwnd -AutomationId login-apikey-input -FromEnv DEEPSEEK_API_KEY
-winapp ui screenshot -w $hwnd -o 'E:/tmp/<YYYY-MM-DD>/shot.png' --json
-pwsh -NoProfile -File scripts/dev/desktop-record.ps1 -WindowHandle $hwnd -OutputPath 'E:/tmp/<YYYY-MM-DD>/demo.mp4' -DurationSec 5 -Frames
+# 使用隔离实例。手动将窗口置于前台，并确认目标密码框为空、掩码已开启。
+pwsh -NoProfile -File scripts/dev/desktop-secret.ps1 -WindowHandle $hwnd -AutomationId login-apikey-input -FromEnv CST_DESKTOP_TEST_KEY
+winapp ui screenshot -w $hwnd -o "$outDir/shot.png" --json
+pwsh -NoProfile -File scripts/dev/desktop-record.ps1 -WindowHandle $hwnd -OutputPath "$outDir/demo.mp4" -DurationSec 5 -Frames
 ```

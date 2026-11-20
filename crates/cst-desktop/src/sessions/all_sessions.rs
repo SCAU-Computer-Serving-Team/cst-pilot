@@ -13,10 +13,11 @@ use gpui_kit::{
     Render, SharedString, StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
 };
 
+use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height,
-    layout, radius, render_subpage_header_xwjof, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
+    render_subpage_header_xwjof, scale, space,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

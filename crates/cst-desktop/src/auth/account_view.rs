@@ -6,8 +6,9 @@ use gpui_kit::{
     StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
 };
 
+use crate::accessibility::A11yElementExt as _;
 use crate::theme::{
-    A11yElementExt as _, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
+    DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
     render_subpage_header_xwjof, scale, space,
 };
 use crate::workbench::model_picker::format_quota_balance;

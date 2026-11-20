@@ -6,7 +6,7 @@
 
 ## 环境准备
 
-通过 WinGet 安装微软官方 `winapp` 工具（要求 `v0.8.0` 及以上），并在当前终端关闭工具遥测：
+脚本要求 PowerShell 7；PrintWindow 录屏回退需要 PATH 中有支持 `libx264` 的 FFmpeg。通过 WinGet 安装 `winapp` 0.8.0 或更高版本，并关闭遥测：
 
 ```powershell
 winget install Microsoft.winappcli --source winget
@@ -20,34 +20,40 @@ winapp --version
 
 调试时在 `E:/tmp/<YYYY-MM-DD>/` 或 `F:/tmp/<YYYY-MM-DD>/` 下构造独立工具包目录，避免污染本机真实配置，且支持与正在运行的开发版实例并存：
 
-1. 创建当日临时工具包目录与输出目录，拷入随包字体、系统提示词、内置技能、版本文件以及编译产物 `cst-pilot.exe` 和 `cst-server.exe`。
-2. 设置 `PI_CODING_AGENT_DIR`、`PI_OFFLINE=1` 与 `CST_ALLOW_UNELEVATED=1`（免弹 UAC 对话框），先以 `--port 0` 启动隔离后台服务（避免占用默认端口 `52831`），再传入 `--kit-root` 启动独立桌面端。
+1. 创建当日临时工具包目录与输出目录，复制字体、系统提示词、内置技能、版本文件和三个编译产物：`cst-pilot.exe`、`cst-server.exe`、`cst-updater.exe`。
+2. 设置 `PI_CODING_AGENT_DIR`、`PI_OFFLINE=1` 与 `CST_ALLOW_UNELEVATED=1`（免弹 UAC 对话框），先用 `--port 0` 启动隔离后台服务，避免与其他实例争用端口。桌面端随后连接同一工具包的服务。
 3. 按桌面进程 PID 调用 `winapp ui list-windows` 过滤主窗口句柄 `$hwnd`（排除系统 `100x100` 输入指示浮窗），首次执行一次 `inspect` 唤醒 GPUI 惰性无障碍树，后续命令统一携带 `-w $hwnd`。
 
 ```powershell
-$dayDir = 'F:/tmp/2026-11-20'
-$kitDir = "$dayDir/kit"
-$outDir = "$dayDir/winapp"
+$dayDir = Join-Path 'F:/tmp' (Get-Date -Format 'yyyy-MM-dd')
+$runDir = Join-Path $dayDir ('desktop-' + (Get-Date -Format 'HHmmssfff'))
+$kitDir = "$runDir/kit"
+$outDir = "$runDir/winapp"
 New-Item -ItemType Directory -Force "$kitDir/assets/fonts", "$kitDir/agent/home/skills", $outDir | Out-Null
 
 Copy-Item -Path 'assets/fonts/*' -Destination "$kitDir/assets/fonts/" -Recurse -Force
 Copy-Item -Path 'agent/home/APPEND_SYSTEM.md' -Destination "$kitDir/agent/home/APPEND_SYSTEM.md" -Force
 Copy-Item -Path 'agent/home/skills/*' -Destination "$kitDir/agent/home/skills/" -Recurse -Force
 Set-Content -Path "$kitDir/VERSION" -Value 'cst-pilot 0.1.0' -Encoding utf8NoBOM
-Copy-Item -Path 'target/debug/cst-pilot.exe', 'target/debug/cst-server.exe' -Destination "$kitDir/" -Force
+Copy-Item -Path 'target/debug/cst-pilot.exe', 'target/debug/cst-server.exe', 'target/debug/cst-updater.exe' -Destination "$kitDir/" -Force
 
 $env:PI_CODING_AGENT_DIR = "$kitDir/agent/home"
 $env:PI_OFFLINE = '1'
 $env:CST_ALLOW_UNELEVATED = '1'
 $env:WINAPP_CLI_TELEMETRY_OPTOUT = '1'
 
-$srv = Start-Process -FilePath "$kitDir/cst-server.exe" -ArgumentList @('--port', '0', '--kit-root', $kitDir) -WindowStyle Hidden -PassThru
-Start-Sleep -Milliseconds 600
-$proc = Start-Process -FilePath "$kitDir/cst-pilot.exe" -ArgumentList @('--kit-root', $kitDir) -PassThru
-Start-Sleep -Seconds 2
-
-$wins = @(winapp ui list-windows -a $proc.Id --json | ConvertFrom-Json)
-$hwnd = ($wins | Where-Object { $_.width -ge 400 -and $_.className -ne '#32770' } | Select-Object -First 1).hwnd
+$kitArg = '"{0}"' -f $kitDir
+$srv = Start-Process -FilePath "$kitDir/cst-server.exe" -ArgumentList @('--port', '0', '--kit-root', $kitArg) -WindowStyle Hidden -PassThru
+Start-Sleep -Seconds 1
+if ($srv.HasExited) { throw '隔离后台服务启动失败。' }
+$proc = Start-Process -FilePath "$kitDir/cst-pilot.exe" -ArgumentList @('--kit-root', $kitArg) -PassThru
+$hwnd = $null
+for ($i = 0; $i -lt 15 -and -not $hwnd -and -not $proc.HasExited; $i++) {
+    $wins = winapp ui list-windows -a $proc.Id --json | ConvertFrom-Json
+    $hwnd = ($wins | Where-Object { $_.width -ge 400 -and $_.className -eq 'Zed::Window' } | Select-Object -First 1).hwnd
+    if (-not $hwnd) { Start-Sleep -Milliseconds 500 }
+}
+if (-not $hwnd) { throw '未找到隔离桌面端主窗口。' }
 $null = winapp ui inspect -w $hwnd --interactive
 Start-Sleep -Milliseconds 150
 ```
@@ -76,20 +82,22 @@ PowerShell 中串联多条命令统一使用 `;` 分隔。常规点击与文本�
 
 ## 无回显凭据输入
 
-登录页 APIKey（`login-apikey-input`）、设置页自定义服务密钥（`providers-apikey-input`）与 BitLocker 恢复密码框（`bitlocker-pwd-input-<call_id>`）均开启掩码隐私保护，不支持外部读回。填写凭据统一使用 [desktop-secret.ps1](../../../scripts/dev/desktop-secret.ps1)：
+登录页 APIKey（`login-apikey-input`）、设置页自定义服务密钥（`providers-apikey-input`）与 BitLocker 恢复密码框（`bitlocker-pwd-input-<call_id>`）默认显示掩码，且不向 UI Automation 返回明文。填写前请清空输入框并保持掩码开启。脚本运行时，目标窗口必须在前台。若从前台终端启动，可在命令前加 `Start-Sleep -Seconds 3;`，随后手动切到目标窗口。
 
 | 传参方式 | 命令示例 |
 |---|---|
 | 从环境变量读取（推荐） | `pwsh -NoProfile -File scripts/dev/desktop-secret.ps1 -WindowHandle $hwnd -AutomationId login-apikey-input -FromEnv DEEPSEEK_API_KEY` |
 | 从标准输入管道读取 | `$rawKey \| pwsh -NoProfile -File scripts/dev/desktop-secret.ps1 -WindowHandle $hwnd -AutomationId providers-apikey-input -FromStdin` |
 
-脚本成功后仅输出脱敏摘要，例如 `{"ok":true,"automationId":"login-apikey-input","charCount":35,"redacted":true}`。
+脚本接受 1 至 4096 个不含空格的可打印 ASCII 字符。BitLocker 恢复密码使用 48 位数字，可用连字符分成八组。投递过程中请勿切换焦点。脚本因焦点变化中止时，请清空输入再试。
+
+成功后仅输出脱敏摘要，例如 `{"ok":true,"automationId":"login-apikey-input","charCount":35,"redacted":true}`。
 
 ---
 
 ## 单窗口截图与并发录屏
 
-`winapp ui screenshot` 与 `winapp ui record` 默认采用 `Windows.Graphics.Capture` 抓取目标窗口合成表面。即使终端窗口遮挡桌面端，导出的画面仍保持完整无遮挡。
+默认以目标窗口为捕获对象。录制前保持密码输入框处于掩码状态；手动显示凭据后，明文可能出现在截图和视频中，也可被手动复制。
 
 ### 1. 整窗截图与局部控件裁剪
 
@@ -103,13 +111,13 @@ winapp ui screenshot composer-card-zwas1 -w $hwnd -o "$outDir/composer.png" --js
 
 ### 2. 边操作边录制 MP4 与毫秒帧序列
 
-统一调用 [desktop-record.ps1](../../../scripts/dev/desktop-record.ps1) 启动后台录屏：在常规交互桌面自动调用 `winapp ui record`（`Windows.Graphics.Capture`），在 Agent 隔离桌面（如 `exebox-*` 非输入桌面）自动回退至 `PrintWindow` + `ffmpeg` 管道编码，输出标准 H.264 `.mp4` 与 `<文件名>.frames/frames.ndjson` 变化帧序列：
+统一调用 [desktop-record.ps1](../../../scripts/dev/desktop-record.ps1) 启动后台录屏：交互桌面优先使用 `winapp ui record`。无法使用 winapp 且尚未生成产物时，尝试 `PrintWindow` 和 FFmpeg。请指定新的 `.mp4` 路径；脚本不会覆盖已有录屏或帧目录。启用 `-Frames` 时，`-MaxEdge` 取 64 至 4096。
 
 ```powershell
 $rec = Start-Process -FilePath 'pwsh' -ArgumentList @(
   '-NoProfile', '-NonInteractive', '-File', 'scripts/dev/desktop-record.ps1',
   '-WindowHandle', "$hwnd",
-  '-OutputPath', "$outDir/interaction.mp4",
+  '-OutputPath', ('"{0}"' -f "$outDir/interaction.mp4"),
   '-DurationSec', '6', '-Fps', '15', '-MaxEdge', '1280', '-Frames'
 ) -NoNewWindow -PassThru
 
@@ -121,18 +129,14 @@ winapp ui invoke sidebar-settings-btn -w $hwnd --json; `
 winapp ui wait-for settings-tab-providers -w $hwnd --timeout 2000 --json
 
 $rec.WaitForExit()
+if ($rec.ExitCode -ne 0) { throw '录屏失败，请检查脚本报错。' }
 ```
 
-录制结束后同级生成的 `interaction.frames/` 目录与 `frames.ndjson` 记录每次画面变化的 PNG 帧及 `elapsedMs` 毫秒偏移，供核验过渡时长与布局对齐。
+`-Frames` 会生成同名 `.frames/` 目录，包含 JPEG 帧和 `frames.ndjson`。Winapp 还会生成 `manifest.json`；PrintWindow 回退从视频中提取变化帧，`elapsedMs` 表示帧在视频时间轴上的毫秒偏移。回退抓取的画面取决于窗口对 PrintWindow 的支持。
 
 ### 3. 清理隔离进程
 
-验证完成后关闭隔离桌面进程与隔离后台服务（切勿误杀开发机其他目录实例）：
-
-```powershell
-Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue
-```
+通过桌面端的「退出 CST Pilot」关闭隔离实例。若之前手动启动的后台服务仍在运行，可用 `if (-not $srv.HasExited) { Stop-Process -InputObject $srv }` 关闭该进程。
 
 ---
 

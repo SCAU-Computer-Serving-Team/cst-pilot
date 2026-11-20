@@ -12,10 +12,11 @@ use gpui_kit::{
 };
 use serde_json::Value;
 
+use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height,
-    layout, radius, render_subpage_header_xwjof, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
+    render_subpage_header_xwjof, scale, space,
 };
 use crate::workbench::turn_segments::extract_message_text;
 

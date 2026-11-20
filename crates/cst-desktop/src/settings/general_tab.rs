@@ -10,11 +10,9 @@ use gpui_kit::{
     Styled, TestSupportExt, Window, div, px, relative,
 };
 
+use crate::accessibility::A11yElementExt as _;
 use crate::settings::update_dialog::{compute_update_progress_ratio, format_megabytes};
-use crate::theme::{
-    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale,
-    space,
-};
+use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
 
 pub type SelectThemeFn = Rc<dyn Fn(ThemeModeDto, &mut Window, &mut App)>;
 pub type SelectDefaultViewFn = Rc<dyn Fn(DefaultViewDto, &mut Window, &mut App)>;

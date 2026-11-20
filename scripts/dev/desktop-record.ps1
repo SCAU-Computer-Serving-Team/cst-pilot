@@ -1,4 +1,5 @@
-﻿[CmdletBinding(PositionalBinding = $false)]
+﻿#Requires -Version 7.0
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [Parameter(Mandatory = $true)]
     [ValidateRange(1, [int64]::MaxValue)]
@@ -27,332 +28,121 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if (-not ('CstDesktopRecordWin32' -as [type])) {
-    Add-Type -TypeDefinition @'
-using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Runtime.InteropServices;
-using System.Threading;
+    Add-Type -Path (Join-Path $PSScriptRoot 'desktop-record-win32.cs')
+}
 
-public static class CstDesktopRecordWin32
-{
-    public const uint PW_RENDERFULLCONTENT = 0x00000002;
-    public const uint BI_RGB = 0;
-    public const uint DIB_RGB_COLORS = 0;
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct RECT
-    {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
+function Export-DesktopFrameIndex {
+    param(
+        [string]$EncoderPath,
+        [string]$VideoPath,
+        [string]$FrameDirectory
+    )
+    $PSNativeCommandUseErrorActionPreference = $false
+    New-Item -ItemType Directory -Path $FrameDirectory | Out-Null
+    $framePattern = Join-Path $FrameDirectory 'frame-%04d.jpg'
+    # Use timestamps from the same frames that mpdecimate sends to the JPEG encoder.
+    $frameLog = & $EncoderPath -nostdin -n -hide_banner -loglevel info -i $VideoPath -vf 'mpdecimate,showinfo' -fps_mode passthrough $framePattern 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw 'ffmpeg 抽帧失败，未生成帧索引。'
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct BITMAPINFOHEADER
-    {
-        public uint biSize;
-        public int biWidth;
-        public int biHeight;
-        public ushort biPlanes;
-        public ushort biBitCount;
-        public uint biCompression;
-        public uint biSizeImage;
-        public int biXPelsPerMeter;
-        public int biYPelsPerMeter;
-        public uint biClrUsed;
-        public uint biClrImportant;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct BITMAPINFO
-    {
-        public BITMAPINFOHEADER bmiHeader;
-        public uint bmiColors;
-    }
-
-    [DllImport("user32.dll", ExactSpelling = true)]
-    public static extern IntPtr SetProcessDpiAwarenessContext(IntPtr value);
-
-    [DllImport("user32.dll", ExactSpelling = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool IsWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll", ExactSpelling = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-
-    [DllImport("user32.dll", ExactSpelling = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, uint nFlags);
-
-    [DllImport("user32.dll", ExactSpelling = true)]
-    public static extern IntPtr GetDC(IntPtr hWnd);
-
-    [DllImport("user32.dll", ExactSpelling = true)]
-    public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
-
-    [DllImport("gdi32.dll", ExactSpelling = true)]
-    public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
-
-    [DllImport("gdi32.dll", ExactSpelling = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool DeleteDC(IntPtr hdc);
-
-    [DllImport("gdi32.dll", ExactSpelling = true)]
-    public static extern IntPtr CreateDIBSection(
-        IntPtr hdc,
-        ref BITMAPINFO pbmi,
-        uint usage,
-        out IntPtr ppvBits,
-        IntPtr hSection,
-        uint offset);
-
-    [DllImport("gdi32.dll", ExactSpelling = true)]
-    public static extern IntPtr SelectObject(IntPtr hdc, IntPtr h);
-
-    [DllImport("gdi32.dll", ExactSpelling = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool DeleteObject(IntPtr ho);
-
-    [DllImport("user32.dll", ExactSpelling = true)]
-    public static extern IntPtr OpenInputDesktop(uint dwFlags, [MarshalAs(UnmanagedType.Bool)] bool fInherit, uint dwDesiredAccess);
-
-    [DllImport("user32.dll", ExactSpelling = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool CloseDesktop(IntPtr hDesktop);
-
-    public static bool HasInteractiveInputDesktop()
-    {
-        IntPtr desk = OpenInputDesktop(0, false, 0x0001);
-        if (desk == IntPtr.Zero)
-        {
-            return false;
-        }
-        CloseDesktop(desk);
-        return true;
-    }
-
-    private static ulong ComputeSampleHash(byte[] buffer)
-    {
-        ulong hash = 14695981039346656037UL;
-        int step = Math.Max(64, buffer.Length / 4096);
-        for (int i = 0; i < buffer.Length; i += step)
-        {
-            hash ^= buffer[i];
-            hash *= 1099511628211UL;
-        }
-        return hash;
-    }
-
-    public static long[] RecordPrintWindowToFfmpeg(
-        IntPtr hWnd,
-        string ffmpegExe,
-        string outputMp4,
-        int durationSec,
-        int fps,
-        int maxEdge)
-    {
-        try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch { }
-
-        if (!IsWindow(hWnd))
-        {
-            throw new InvalidOperationException("Target HWND is invalid.");
-        }
-
-        RECT rc;
-        if (!GetWindowRect(hWnd, out rc))
-        {
-            throw new InvalidOperationException("GetWindowRect failed.");
-        }
-
-        int srcW = Math.Max(2, (rc.Right - rc.Left) & ~1);
-        int srcH = Math.Max(2, (rc.Bottom - rc.Top) & ~1);
-        int outW = srcW;
-        int outH = srcH;
-        if (maxEdge > 0 && (srcW > maxEdge || srcH > maxEdge))
-        {
-            double scale = (double)maxEdge / Math.Max(srcW, srcH);
-            outW = Math.Max(2, ((int)Math.Round(srcW * scale)) & ~1);
-            outH = Math.Max(2, ((int)Math.Round(srcH * scale)) & ~1);
-        }
-
-        BITMAPINFO bmi = new BITMAPINFO();
-        bmi.bmiHeader.biSize = (uint)Marshal.SizeOf(typeof(BITMAPINFOHEADER));
-        bmi.bmiHeader.biWidth = srcW;
-        bmi.bmiHeader.biHeight = -srcH;
-        bmi.bmiHeader.biPlanes = 1;
-        bmi.bmiHeader.biBitCount = 32;
-        bmi.bmiHeader.biCompression = BI_RGB;
-
-        IntPtr screenDc = GetDC(IntPtr.Zero);
-        IntPtr memDc = CreateCompatibleDC(screenDc);
-        ReleaseDC(IntPtr.Zero, screenDc);
-
-        IntPtr bitsPtr;
-        IntPtr dib = CreateDIBSection(memDc, ref bmi, DIB_RGB_COLORS, out bitsPtr, IntPtr.Zero, 0);
-        if (dib == IntPtr.Zero)
-        {
-            DeleteDC(memDc);
-            throw new InvalidOperationException("CreateDIBSection failed.");
-        }
-        IntPtr oldObj = SelectObject(memDc, dib);
-
-        string vfArg = (outW != srcW || outH != srcH)
-            ? string.Format("-vf scale={0}:{1} ", outW, outH)
-            : string.Empty;
-        string ffArgs = string.Format(
-            "-loglevel error -f rawvideo -pix_fmt bgra -s {0}x{1} -r {2} -i pipe:0 {3}-c:v libx264 -preset ultrafast -crf 22 -pix_fmt yuv420p -movflags +faststart -y \"{4}\"",
-            srcW, srcH, fps, vfArg, outputMp4);
-
-        ProcessStartInfo psi = new ProcessStartInfo
-        {
-            FileName = ffmpegExe,
-            Arguments = ffArgs,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-
-        int totalFrames = Math.Max(1, durationSec * fps);
-        List<long> changedTimestampsMs = new List<long>();
-        ulong lastHash = 0;
-        int frameBytes = srcW * srcH * 4;
-        byte[] rawBuf = new byte[frameBytes];
-
-        try
-        {
-            using (Process ff = Process.Start(psi))
-            {
-                Stream stdin = ff.StandardInput.BaseStream;
-                Stopwatch sw = Stopwatch.StartNew();
-                double frameIntervalMs = 1000.0 / fps;
-
-                for (int idx = 0; idx < totalFrames; idx++)
-                {
-                    if (!IsWindow(hWnd))
-                    {
-                        break;
-                    }
-                    long captureMs = sw.ElapsedMilliseconds;
-                    PrintWindow(hWnd, memDc, PW_RENDERFULLCONTENT);
-                    Marshal.Copy(bitsPtr, rawBuf, 0, frameBytes);
-                    stdin.Write(rawBuf, 0, frameBytes);
-
-                    ulong h = ComputeSampleHash(rawBuf);
-                    if (idx == 0 || h != lastHash)
-                    {
-                        lastHash = h;
-                        changedTimestampsMs.Add(captureMs);
-                    }
-
-                    double targetNextMs = (idx + 1) * frameIntervalMs;
-                    double sleepMs = targetNextMs - sw.Elapsed.TotalMilliseconds;
-                    if (sleepMs > 1.0)
-                    {
-                        Thread.Sleep((int)sleepMs);
-                    }
-                }
-
-                stdin.Flush();
-                stdin.Close();
-                string errText = ff.StandardError.ReadToEnd();
-                ff.WaitForExit();
-                if (ff.ExitCode != 0)
-                {
-                    throw new InvalidOperationException("ffmpeg exited with code " + ff.ExitCode + ": " + errText);
-                }
+    $frames = @(Get-ChildItem -LiteralPath $FrameDirectory -Filter 'frame-*.jpg' | Sort-Object Name)
+    $timestamps = @(
+        foreach ($logLine in $frameLog) {
+            if ($logLine.ToString() -match '\[Parsed_showinfo_\d+ @ [^\]]+\]\s+n:\s*\d+\s+pts:\s*-?\d+\s+pts_time:\s*([0-9.eE+-]+)') {
+                [long][Math]::Round(1000 * [double]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture))
             }
-
-            return changedTimestampsMs.ToArray();
         }
-        finally
-        {
-            SelectObject(memDc, oldObj);
-            DeleteObject(dib);
-            DeleteDC(memDc);
-        }
+    )
+    if ($frames.Count -eq 0 -or $frames.Count -ne $timestamps.Count) {
+        throw '变化帧与时间戳数量不一致，未生成帧索引。'
     }
-}
-'@
+
+    $frameCount = $frames.Count
+    $ndjson = for ($index = 0; $index -lt $frameCount; $index++) {
+        [pscustomobject]@{
+            frame = $index + 1
+            file = $frames[$index].Name
+            elapsedMs = $timestamps[$index]
+        } | ConvertTo-Json -Compress
+    }
+    Set-Content -LiteralPath (Join-Path $FrameDirectory 'frames.ndjson') -Value $ndjson -Encoding utf8NoBOM
+    return $frameCount
 }
 
-$resolvedOut = [IO.Path]::GetFullPath($OutputPath)
+$resolvedOut = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath)
+if ([IO.Path]::GetExtension($resolvedOut) -ne '.mp4') {
+    throw '输出路径必须以 .mp4 结尾。'
+}
+if ($MaxEdge -ne 0 -and $MaxEdge -lt 2) {
+    throw '-MaxEdge 必须为 0（原始尺寸）或至少为 2。'
+}
+if ($Frames -and $MaxEdge -lt 64) {
+    throw '启用 -Frames 时，-MaxEdge 必须为 64 至 4096。'
+}
+if (-not [CstDesktopRecordWin32]::IsWindow([intptr]$WindowHandle)) {
+    throw '指定的窗口句柄无效或已关闭。'
+}
+if ([CstDesktopRecordWin32]::IsIconic([intptr]$WindowHandle)) {
+    throw '目标窗口已最小化。请恢复窗口后再录制。'
+}
 $parentDir = [IO.Path]::GetDirectoryName($resolvedOut)
-if (-not [string]::IsNullOrEmpty($parentDir)) {
-    New-Item -ItemType Directory -Force -Path $parentDir | Out-Null
+$framesDir = Join-Path $parentDir ([IO.Path]::GetFileNameWithoutExtension($resolvedOut) + '.frames')
+if ((Test-Path -LiteralPath $resolvedOut) -or ($Frames -and (Test-Path -LiteralPath $framesDir))) {
+    throw '输出文件或帧目录已存在。请选择新的输出路径。'
 }
+$null = [IO.Directory]::CreateDirectory($parentDir)
 
-if ([CstDesktopRecordWin32]::HasInteractiveInputDesktop()) {
+$winappCmd = Get-Command winapp -CommandType Application -ErrorAction SilentlyContinue
+if ($winappCmd -and [CstDesktopRecordWin32]::HasInteractiveInputDesktop()) {
     $winappArgs = @(
         'ui', 'record', '-w', "$WindowHandle",
         '--duration-sec', "$DurationSec",
         '--fps', "$Fps",
         '--max-edge', "$MaxEdge",
-        '--overwrite',
         '--output', $resolvedOut,
         '--json'
     )
     if ($Frames) {
-        $winappArgs += @('--frames', '--cursor')
+        $winappArgs += '--frames'
     }
-    $winappOut = & winapp @winappArgs 2>$null
-    if ($LASTEXITCODE -eq 0 -and (Test-Path $resolvedOut)) {
+
+    $PSNativeCommandUseErrorActionPreference = $false
+    $winappOut = & $winappCmd.Source @winappArgs
+    if ($LASTEXITCODE -eq 0 -and [IO.File]::Exists($resolvedOut) -and
+        (-not $Frames -or [IO.File]::Exists((Join-Path $framesDir 'frames.ndjson')))) {
         Write-Output ($winappOut -join "`n")
-        exit 0
+        return
+    }
+    if ((Test-Path -LiteralPath $resolvedOut) -or ($Frames -and (Test-Path -LiteralPath $framesDir))) {
+        throw 'winapp 未完成录屏，已保留输出文件或帧目录。请检查产物并改用新路径重试。'
     }
 }
 
-$ffmpegCmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
+$ffmpegCmd = Get-Command ffmpeg -CommandType Application -ErrorAction SilentlyContinue
 if (-not $ffmpegCmd) {
-    throw '当前处于非交互沙盒桌面（WGC 不可用），且未找到 ffmpeg 用于 PrintWindow 录屏回退。'
+    throw '当前无法使用 winapp 录屏，且未找到 PrintWindow 录屏所需的 ffmpeg。'
 }
 
-$changedMs = [CstDesktopRecordWin32]::RecordPrintWindowToFfmpeg(
-    [intptr]$WindowHandle,
-    $ffmpegCmd.Source,
-    $resolvedOut,
-    $DurationSec,
-    $Fps,
-    $MaxEdge
+[CstDesktopRecordWin32]::RecordToMp4(
+    [intptr]$WindowHandle, $ffmpegCmd.Source, $resolvedOut, $DurationSec, $Fps, $MaxEdge
 )
-
-$framesDir = $null
-$savedFrames = 0
-if ($Frames) {
-    $baseNoExt = [IO.Path]::Combine($parentDir, [IO.Path]::GetFileNameWithoutExtension($resolvedOut))
-    $framesDir = "${baseNoExt}.frames"
-    if (Test-Path $framesDir) {
-        Remove-Item -Path $framesDir -Recurse -Force
-    }
-    New-Item -ItemType Directory -Force -Path $framesDir | Out-Null
-
-    & $ffmpegCmd.Source -loglevel error -i $resolvedOut -vf 'mpdecimate' -vsync vfr "$framesDir\frame-%04d.jpg"
-    $jpgFiles = @(Get-ChildItem -Path $framesDir -Filter 'frame-*.jpg' | Sort-Object Name)
-    $savedFrames = $jpgFiles.Count
-    $ndjsonLines = [Collections.Generic.List[string]]::new()
-    for ($i = 0; $i -lt $jpgFiles.Count; $i++) {
-        $ms = if ($i -lt $changedMs.Length) { $changedMs[$i] } else { [long]($i * (1000.0 / $Fps)) }
-        $lineObj = [pscustomobject]@{
-            frame = $i + 1
-            file = $jpgFiles[$i].Name
-            elapsedMs = $ms
-        } | ConvertTo-Json -Compress
-        $ndjsonLines.Add($lineObj)
-    }
-    Set-Content -Path "$framesDir\frames.ndjson" -Value ($ndjsonLines -join "`n") -Encoding utf8NoBOM
+if (-not [IO.File]::Exists($resolvedOut) -or [IO.FileInfo]::new($resolvedOut).Length -eq 0) {
+    throw 'ffmpeg 未生成有效的视频文件。'
 }
 
-$summary = [pscustomobject]@{
+$savedFrames = if ($Frames) {
+    Export-DesktopFrameIndex -EncoderPath $ffmpegCmd.Source -VideoPath $resolvedOut -FrameDirectory $framesDir
+} else {
+    0
+}
+
+[pscustomobject]@{
     ok = $true
     backend = 'printwindow-ffmpeg'
     output = $resolvedOut
     durationSec = $DurationSec
     fps = $Fps
     savedKeyframes = $savedFrames
-    framesDir = $framesDir
+    framesDir = if ($Frames) { $framesDir } else { $null }
 } | ConvertTo-Json -Compress
-Write-Output $summary

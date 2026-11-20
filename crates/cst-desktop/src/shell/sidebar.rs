@@ -11,9 +11,9 @@ use gpui_kit::{
     Window, WindowControlArea, div, px,
 };
 
+use crate::accessibility::A11yElementExt as _;
 use crate::theme::{
-    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius,
-    scale, space,
+    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
 };
 
 pub const MAX_RECENT_SIDEBAR_SESSIONS: usize = 20;

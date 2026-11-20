@@ -41,8 +41,8 @@ fn main() {
     compile_all_shaders(&design_asset_dir, &out_dir);
 
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
-        // Align Windows main-thread stack reserve to 8 MiB (matching Linux/macOS defaults)
-        // so unoptimized dev builds never overflow MSVC's 1 MiB default during deep UI + AccessKit passes.
+        // Reserve 8 MiB for the Windows main thread to give debug builds
+        // more stack space during deep GPUI and AccessKit traversals.
         match std::env::var("CARGO_CFG_TARGET_ENV").as_deref() {
             Ok("msvc") => println!("cargo:rustc-link-arg-bin=cst-pilot=/STACK:8388608"),
             Ok("gnu") => println!("cargo:rustc-link-arg-bin=cst-pilot=-Wl,--stack,8388608"),

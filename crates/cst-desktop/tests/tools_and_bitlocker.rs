@@ -46,10 +46,14 @@ async fn secret_input_55_byte_zeroize_accessibility_copy_block_and_paste_validat
     let win = cx.add_window(|_, cx| SecretInput::new(cx));
     let secret = win.root(cx).unwrap();
 
-    // 1. Accessibility contract: `Role::PasswordInput` + `value_exposed == false`
+    // The standalone field keeps its default ID and never exposes its value.
     cx.update(|cx| {
         let s = secret.read(cx);
         assert_eq!(s.accessibility().role(), Some(Role::PasswordInput));
+        assert_eq!(
+            s.accessibility().accessibility_id().map(|id| id.as_ref()),
+            Some("bitlocker-secret-input"),
+        );
         assert!(
             !s.accessibility().value_exposed(),
             "SecretInput must strictly suppress accessibility value exposure"

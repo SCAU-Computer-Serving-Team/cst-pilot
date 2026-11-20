@@ -7,10 +7,10 @@ use gpui_kit::{
     IntoElement, ParentElement, Render, SharedString, Styled, TestSupportExt, Window, div, px,
 };
 
+use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    A11yElementExt as _, DesktopThemeGlobal, apply_scale, cjk_inline_label, layout, radius, scale,
-    space,
+    DesktopThemeGlobal, apply_scale, cjk_inline_label, layout, radius, scale, space,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -11,12 +11,10 @@ use gpui_kit::{
 };
 use serde_json::Value;
 
+use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::shell::open_url_in_trusted_browser;
-use crate::theme::{
-    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale,
-    space,
-};
+use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelPickerPage {

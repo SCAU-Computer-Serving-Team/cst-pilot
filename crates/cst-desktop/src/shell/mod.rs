@@ -21,6 +21,7 @@ use gpui_kit::{
     Styled, Subscription, Task, TestSupportExt, Window, WindowControlArea, div, px,
 };
 
+use crate::accessibility::A11yElementExt as _;
 use crate::auth::account_view::{AccountView, AccountViewEvent};
 use crate::auth::login_view::{LoginView, LoginViewEvent};
 use crate::auth::missing_key::{MissingKeyModalState, render_missing_key_dialog};
@@ -46,8 +47,8 @@ use crate::shell::window_bounds::{
     GEOMETRY_DEBOUNCE_MS, NormalBoundsTracker, ResolvedWindowGeometry, collect_app_displays,
 };
 use crate::theme::{
-    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, FontLoadReport, apply_desktop_theme,
-    apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    DesktopPalette, DesktopThemeGlobal, FontLoadReport, apply_desktop_theme, apply_scale,
+    cjk_inline_label, height, layout, radius, scale, space,
 };
 use crate::workbench::composer::SlashNavigationTarget;
 use crate::workbench::{WorkbenchEvent, WorkbenchView};

@@ -9,9 +9,9 @@ use gpui_kit::{
     TestSupportExt, Window, div, px,
 };
 
+use crate::accessibility::A11yElementExt as _;
 use crate::theme::{
-    A11yElementExt as _, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale,
-    space,
+    DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
 };
 
 #[derive(Debug, Clone)]

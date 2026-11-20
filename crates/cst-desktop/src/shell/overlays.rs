@@ -8,10 +8,10 @@ use gpui_kit::{
     StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
 };
 
+use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius,
-    scale, space,
+    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
 };
 
 /// `WebActive` takeover lock overlay (`cst-pilot-desktop.pen` 「01 · 工作台」 frame `sYHwZ`, card `WO6NQ`, `384px` wide).

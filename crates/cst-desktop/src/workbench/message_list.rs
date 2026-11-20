@@ -20,9 +20,10 @@ use gpui_kit::{
 };
 use serde_json::Value;
 
+use crate::accessibility::A11yElementExt as _;
 use crate::theme::{
-    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height,
-    layout, radius, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
+    scale, space,
 };
 use crate::tools::bitlocker_card::{SecretInput, SecretInputEvent, find_pending_bitlocker_request};
 use crate::tools::normal_card::render_normal_tool_card_with_args;
@@ -107,6 +108,17 @@ impl MessageListView {
             turn_started_instants: BTreeMap::new(),
             attachment_cache: BTreeMap::new(),
             attachment_loading: BTreeSet::new(),
+        }
+    }
+
+    fn set_process_segment_expanded(&mut self, key: &str, expanded: bool, cx: &mut Context<Self>) {
+        let changed = if expanded {
+            self.expanded_segments.insert(key.to_owned())
+        } else {
+            self.expanded_segments.remove(key)
+        };
+        if changed {
+            cx.notify();
         }
     }
 
@@ -1168,11 +1180,9 @@ impl MessageListView {
                         sub_label.unwrap_or_else(|| "处理过程".to_owned())
                     };
 
-                    let ent_seg = entity.clone();
-                    let k_seg = seg_state_key.clone();
-                    let seg_hdr_id = SharedString::from(format!("process-hdr-{seg_state_key}"));
-                    let mut seg_hdr = div()
-                        .id(seg_hdr_id.clone())
+                    let header_id = SharedString::from(format!("process-hdr-{seg_state_key}"));
+                    let mut header = div()
+                        .id(header_id.clone())
                         .test_support()
                         .h(height::COMPACT)
                         .flex()
@@ -1182,37 +1192,31 @@ impl MessageListView {
                         .hover(|s| s.text_color(palette.text_primary));
 
                     if has_expandable_parts {
-                        let ent_exp = ent_seg.clone();
-                        let k_exp = k_seg.clone();
-                        seg_hdr = seg_hdr
-                            .a11y_expandable(
-                                seg_hdr_id,
-                                header_text.clone(),
-                                seg_expanded,
-                                move |want_open, _, cx| {
-                                    let k = k_exp.clone();
-                                    ent_exp.update(cx, |this, cx| {
-                                        if want_open {
-                                            this.expanded_segments.insert(k);
-                                        } else {
-                                            this.expanded_segments.remove(&k);
-                                        }
-                                        cx.notify();
-                                    });
-                                },
-                            )
-                            .on_click(move |_, _, cx| {
-                                let k = k_seg.clone();
-                                ent_seg.update(cx, |this, cx| {
-                                    if !this.expanded_segments.remove(&k) {
-                                        this.expanded_segments.insert(k);
-                                    }
-                                    cx.notify();
+                        let expand_key = seg_state_key.clone();
+                        let collapse_key = seg_state_key.clone();
+                        let click_key = seg_state_key.clone();
+                        let expand_view = entity.clone();
+                        let collapse_view = entity.clone();
+                        header = header
+                            .a11y_toggle_button(header_id, header_text.clone(), seg_expanded)
+                            .aria_expanded(seg_expanded)
+                            .on_a11y_action(gpui::AccessibleAction::Expand, move |_, _, cx| {
+                                expand_view.update(cx, |this, cx| {
+                                    this.set_process_segment_expanded(&expand_key, true, cx);
                                 });
-                            });
+                            })
+                            .on_a11y_action(gpui::AccessibleAction::Collapse, move |_, _, cx| {
+                                collapse_view.update(cx, |this, cx| {
+                                    this.set_process_segment_expanded(&collapse_key, false, cx);
+                                });
+                            })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                let expanded = this.expanded_segments.contains(&click_key);
+                                this.set_process_segment_expanded(&click_key, !expanded, cx);
+                            }));
                     }
 
-                    seg_hdr = seg_hdr.child(render_running_light_label(
+                    header = header.child(render_running_light_label(
                         &header_text,
                         is_live_turn && seg_idx == 0,
                         started_instant,
@@ -1222,7 +1226,7 @@ impl MessageListView {
                     ));
 
                     if has_expandable_parts {
-                        seg_hdr = seg_hdr.child(
+                        header = header.child(
                             Icon::new(if seg_expanded {
                                 IconName::ChevronDown
                             } else {
@@ -1238,7 +1242,7 @@ impl MessageListView {
                         .flex()
                         .flex_col()
                         .gap(space::SM)
-                        .child(seg_hdr);
+                        .child(header);
 
                     if seg_expanded && has_expandable_parts {
                         let mut expanded_col = div().w_full().flex().flex_col().gap(space::SM);

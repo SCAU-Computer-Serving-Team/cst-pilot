@@ -2,9 +2,9 @@ use gpui_kit::{
     InteractiveElement, IntoElement, ParentElement, SharedString, Styled, TestSupportExt, div, px,
 };
 
+use crate::accessibility::A11yElementExt as _;
 use crate::theme::{
-    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, radius, render_kbd_zcgs3,
-    scale, space,
+    DesktopPalette, apply_scale, cjk_inline_label, radius, render_kbd_zcgs3, scale, space,
 };
 
 pub fn render_shortcuts_tab(

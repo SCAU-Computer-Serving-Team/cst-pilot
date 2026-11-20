@@ -14,10 +14,8 @@ use gpui_kit::{
 };
 use serde_json::Value;
 
-use crate::theme::{
-    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale,
-    space,
-};
+use crate::accessibility::A11yElementExt as _;
+use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
 use crate::workbench::image_viewer::{LightboxImageTarget, gpui_image_from_bytes};
 use crate::workbench::markdown_view::render_copyable_text_block;
 

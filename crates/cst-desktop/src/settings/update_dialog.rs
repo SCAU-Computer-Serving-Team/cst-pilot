@@ -6,10 +6,10 @@ use gpui_kit::{
     StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px, relative,
 };
 
+use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius,
-    scale, space,
+    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
 };
 
 #[derive(Debug, Clone, Default)]

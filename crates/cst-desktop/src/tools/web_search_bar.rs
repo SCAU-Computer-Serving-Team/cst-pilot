@@ -8,11 +8,9 @@ use gpui_kit::{
     Styled, TestSupportExt, div, px,
 };
 
+use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
-use crate::theme::{
-    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale,
-    space,
-};
+use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
 
 pub struct WebSearchBarProps<'a> {
     pub call_id: &'a str,

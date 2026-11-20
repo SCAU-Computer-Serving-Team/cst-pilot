@@ -16,12 +16,12 @@ use gpui_kit::{
     TestSupportExt, Window, div, px, rgba,
 };
 
+use crate::accessibility::A11yElementExt as _;
 use crate::background::{
     FrostedGlassSpec, SkyPreset, render_frosted_surface, render_sky_background_rounded,
 };
 use crate::theme::{
-    A11yElementExt as _, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
-    scale, space,
+    DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
 };
 use crate::workbench::composer::{ComposerHostEvent, ComposerView, SlashNavigationTarget};
 use crate::workbench::image_viewer::{LightboxImageTarget, render_image_lightbox_modal};

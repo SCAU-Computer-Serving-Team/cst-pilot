@@ -1,11 +1,13 @@
-﻿[CmdletBinding(DefaultParameterSetName = 'FromEnv', PositionalBinding = $false)]
+﻿#Requires -Version 7.0
+[CmdletBinding(DefaultParameterSetName = 'FromEnv', PositionalBinding = $false)]
 param(
     [Parameter()]
     [ValidateNotNullOrEmpty()]
     [string]$TargetApp = 'cst-pilot',
 
     [Parameter()]
-    [int64]$WindowHandle = 0,
+    [ValidateRange(1, [int64]::MaxValue)]
+    [int64]$WindowHandle,
 
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
@@ -30,221 +32,142 @@ using System.Runtime.InteropServices;
 
 public static class CstDesktopSecretWin32
 {
-    public const uint WM_KEYDOWN = 0x0100;
-    public const uint WM_KEYUP = 0x0101;
-    public const uint WM_CHAR = 0x0102;
-    public const uint VK_BACK = 0x08;
-    public const uint VK_END = 0x23;
-    public const uint SMTO_ABORTIFHUNG = 0x0002;
-
-    [DllImport("user32.dll", ExactSpelling = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool IsWindow(IntPtr hWnd);
-
     [DllImport("user32.dll", ExactSpelling = true)]
     public static extern IntPtr GetForegroundWindow();
 
-    [DllImport("user32.dll", ExactSpelling = true, SetLastError = true)]
-    public static extern IntPtr SendMessageTimeoutW(
-        IntPtr hWnd,
-        uint Msg,
-        UIntPtr wParam,
-        IntPtr lParam,
-        uint fuFlags,
-        uint uTimeout,
-        out UIntPtr lpdwResult);
+    [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
-    public static bool SendVirtualKeyTap(IntPtr hWnd, uint virtualKey)
+    [DllImport("user32.dll", ExactSpelling = true)]
+    private static extern IntPtr SendMessageTimeoutW(
+        IntPtr hWnd, uint message, UIntPtr wParam, IntPtr lParam,
+        uint flags, uint timeoutMs, out UIntPtr result);
+
+    public static uint WindowProcessId(IntPtr hWnd)
     {
-        UIntPtr res;
-        IntPtr downLParam = new IntPtr(1);
-        if (SendMessageTimeoutW(hWnd, WM_KEYDOWN, new UIntPtr(virtualKey), downLParam, SMTO_ABORTIFHUNG, 2000, out res) == IntPtr.Zero)
-        {
-            return false;
-        }
-        IntPtr upLParam = new IntPtr(unchecked((int)0xC0000001));
-        SendMessageTimeoutW(hWnd, WM_KEYUP, new UIntPtr(virtualKey), upLParam, SMTO_ABORTIFHUNG, 2000, out res);
-        return true;
+        uint processId;
+        return GetWindowThreadProcessId(hWnd, out processId) == 0 ? 0 : processId;
     }
 
     public static bool SendCharUnit(IntPtr hWnd, ushort utf16Unit)
     {
-        UIntPtr res;
+        UIntPtr result;
         return SendMessageTimeoutW(
-            hWnd,
-            WM_CHAR,
-            new UIntPtr(utf16Unit),
-            new IntPtr(1),
-            SMTO_ABORTIFHUNG,
-            2000,
-            out res) != IntPtr.Zero;
+            hWnd, 0x0102 /* WM_CHAR */, new UIntPtr(utf16Unit), new IntPtr(1),
+            0x0002 /* SMTO_ABORTIFHUNG */, 2000, out result) != IntPtr.Zero;
     }
 }
 '@
 }
 
-function Resolve-TargetWindow {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$AppSelector,
+function Get-DesktopWindowHandle {
+    param([string]$AppSelector)
 
-        [Parameter(Mandatory = $true)]
-        [int64]$ExplicitHwnd
+    $processId = 0
+    $processes = if ([int]::TryParse($AppSelector, [ref]$processId)) {
+        Get-Process -Id $processId -ErrorAction SilentlyContinue
+    } else {
+        $processName = [WildcardPattern]::Escape(($AppSelector -replace '\.exe$', ''))
+        Get-Process -Name $processName -ErrorAction SilentlyContinue
+    }
+    $windows = @($processes | Where-Object { $_ -and $_.MainWindowHandle -ne [intptr]::Zero })
+    if ($windows.Count -ne 1) {
+        throw "具有主窗口的目标进程匹配到 $($windows.Count) 个，请用 -WindowHandle 或 PID 精确指定。"
+    }
+    return $windows[0].MainWindowHandle
+}
+
+$hwnd = if ($PSBoundParameters.ContainsKey('WindowHandle')) {
+    [intptr]$WindowHandle
+} else {
+    Get-DesktopWindowHandle -AppSelector $TargetApp
+}
+
+$targetPid = [CstDesktopSecretWin32]::WindowProcessId($hwnd)
+if ($targetPid -eq 0) {
+    throw '指定的窗口句柄无效或已关闭。'
+}
+
+$window = [Windows.Automation.AutomationElement]::FromHandle($hwnd)
+$condition = [Windows.Automation.PropertyCondition]::new(
+    [Windows.Automation.AutomationElement]::AutomationIdProperty, $AutomationId
+)
+$found = $window.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
+if ($found.Count -ne 1) {
+    throw "目标窗口中的 AutomationId '$AutomationId' 匹配到 $($found.Count) 个控件，已中止输入。"
+}
+$edit = $found[0]
+
+function Assert-DesktopPasswordField {
+    param(
+        [Windows.Automation.AutomationElement]$Field,
+        [uint32]$TargetProcessId
     )
 
-    if ($ExplicitHwnd -gt 0) {
-        $ptr = [intptr]$ExplicitHwnd
-        if (-not [CstDesktopSecretWin32]::IsWindow($ptr)) {
-            throw "指定的窗口句柄无效或已关闭：$ExplicitHwnd"
-        }
-        $element = [Windows.Automation.AutomationElement]::FromHandle($ptr)
-        return @{
-            Hwnd = $ptr
-            Element = $element
-        }
+    $current = $Field.Current
+    if ($current.ProcessId -ne $TargetProcessId -or
+        $current.ControlType -ne [Windows.Automation.ControlType]::Edit -or
+        -not $current.IsPassword -or -not $current.IsEnabled -or $current.IsOffscreen) {
+        throw "目标不是可见、可用的密码输入框：$($current.AutomationId)"
     }
+    $pattern = $null
+    if ($Field.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$pattern) -or
+        $Field.TryGetCurrentPattern([Windows.Automation.TextPattern]::Pattern, [ref]$pattern)) {
+        throw "目标密码框公开了文本读取模式，已中止输入：$($current.AutomationId)"
+    }
+}
 
-    $parsedPid = 0
-    if ([int]::TryParse($AppSelector, [ref]$parsedPid)) {
-        $procs = @(Get-Process -Id $parsedPid -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne [intptr]::Zero })
-    } else {
-        $cleanName = $AppSelector -replace '\.exe$', ''
-        $procs = @(Get-Process -Name $cleanName -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne [intptr]::Zero })
-    }
-
-    if ($procs.Count -eq 0) {
-        throw "未找到具有主窗口的目标进程：$AppSelector"
-    }
-    if ($procs.Count -gt 1) {
-        $pids = ($procs | ForEach-Object { "$($_.Id)(hwnd=$($_.MainWindowHandle.ToInt64()))" }) -join ', '
-        throw "匹配到多个目标窗口（$pids），请通过 -WindowHandle 或进程 PID 精确指定。"
-    }
-
-    $hwndPtr = $procs[0].MainWindowHandle
-    return @{
-        Hwnd = $hwndPtr
-        Element = [Windows.Automation.AutomationElement]::FromHandle($hwndPtr)
-    }
+Assert-DesktopPasswordField -Field $edit -TargetProcessId $targetPid
+if ([CstDesktopSecretWin32]::GetForegroundWindow() -ne $hwnd) {
+    throw '请手动将目标窗口置于前台。脚本无法核实后台密码框的焦点。'
 }
 
 $secret = $null
 $chars = $null
-$charCount = 0
-
 try {
-    if ($PSCmdlet.ParameterSetName -eq 'FromEnv') {
+    if ($FromStdin) {
+        if (-not [Console]::IsInputRedirected) {
+            throw '请通过管道提供标准输入；脚本不接受会回显的手动输入。'
+        }
+        $secret = [Console]::In.ReadLine()
+    } elseif ($PSCmdlet.ParameterSetName -eq 'FromEnv') {
         $secret = [Environment]::GetEnvironmentVariable($FromEnv)
-        if ([string]::IsNullOrEmpty($secret)) {
-            throw "环境变量未设置或为空：$FromEnv"
-        }
     } else {
-        $line = [Console]::In.ReadLine()
-        if ($null -ne $line) {
-            $secret = $line.TrimEnd("`r", "`n")
-        }
-        if ([string]::IsNullOrEmpty($secret)) {
-            throw '标准输入未提供有效凭据内容。'
-        }
+        throw '请指定 -FromEnv 或启用 -FromStdin。'
     }
-
+    if (-not [regex]::IsMatch([string]$secret, '\A[\x21-\x7e]{1,4096}\z')) {
+        throw '凭据必须包含 1 至 4096 个不含空格的可打印 ASCII 字符。'
+    }
+    if ($AutomationId -clike 'bitlocker-pwd-input-*' -and
+        -not [regex]::IsMatch($secret, '\A(?:[0-9]{48}|[0-9]{6}(?:-[0-9]{6}){7})\z')) {
+        throw 'BitLocker 恢复密码必须由 48 位数字组成，可用连字符分成八组。'
+    }
     $chars = $secret.ToCharArray()
-    $charCount = $chars.Length
 
-    $target = Resolve-TargetWindow -AppSelector $TargetApp -ExplicitHwnd $WindowHandle
-    $hwnd = [intptr]$target.Hwnd
-    $winElement = [Windows.Automation.AutomationElement]$target.Element
-
-    $condition = [Windows.Automation.PropertyCondition]::new(
-        [Windows.Automation.AutomationElement]::AutomationIdProperty,
-        $AutomationId
-    )
-    $found = $winElement.FindAll([Windows.Automation.TreeScope]::Descendants, $condition)
-    if ($found.Count -eq 0) {
-        throw "未在目标窗口中找到 AutomationId 为 '$AutomationId' 的控件。"
-    }
-    if ($found.Count -gt 1) {
-        throw "在目标窗口中匹配到 $($found.Count) 个同名控件 '$AutomationId'，已中止输入。"
+    $edit.SetFocus()
+    for ($attempt = 0; $attempt -lt 30 -and -not $edit.Current.HasKeyboardFocus; $attempt++) {
+        Start-Sleep -Milliseconds 20
     }
 
-    $editEl = $found[0]
-    if (-not $editEl.Current.IsEnabled) {
-        throw "目标输入控件处于禁用状态：$AutomationId"
-    }
-    if ($editEl.Current.ControlType -ne [Windows.Automation.ControlType]::Edit) {
-        throw "目标控件类型非法（实际为 $($editEl.Current.ControlType.ProgrammaticName)），仅允许输入控件。"
-    }
-
-    $patternObj = $null
-    $usedValuePattern = $false
-    if ($editEl.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$patternObj)) {
-        $valPattern = [Windows.Automation.ValuePattern]$patternObj
-        if (-not $valPattern.Current.IsReadOnly) {
-            $valPattern.SetValue($secret)
-            $usedValuePattern = $true
+    # The password field has no readable value. The caller must clear it before running this script.
+    foreach ($char in $chars) {
+        Assert-DesktopPasswordField -Field $edit -TargetProcessId $targetPid
+        if ([CstDesktopSecretWin32]::WindowProcessId($hwnd) -ne $targetPid -or
+            [CstDesktopSecretWin32]::GetForegroundWindow() -ne $hwnd -or
+            -not $edit.Current.HasKeyboardFocus) {
+            throw "目标密码框失去焦点，已中止。请先清空输入再重试：$AutomationId"
+        }
+        if (-not [CstDesktopSecretWin32]::SendCharUnit($hwnd, [uint16]$char)) {
+            throw "向密码框投递字符失败。请先清空输入再重试：$AutomationId"
         }
     }
 
-    if (-not $usedValuePattern) {
-        if ($editEl.Current.IsOffscreen) {
-            throw "目标密码框当前不在可视区域内：$AutomationId"
-        }
-
-        # 通过 UIA Action::Focus 在 GPUI 窗口内部聚焦密码框（无需抢占宿主机前台窗口）
-        $editEl.SetFocus()
-        $isWindowForeground = ([CstDesktopSecretWin32]::GetForegroundWindow() -eq $hwnd)
-        if ($isWindowForeground) {
-            $focused = $false
-            for ($attempt = 0; $attempt -lt 30; $attempt++) {
-                if ($editEl.Current.HasKeyboardFocus) {
-                    $focused = $true
-                    break
-                }
-                Start-Sleep -Milliseconds 20
-            }
-            if (-not $focused) {
-                throw "前台窗口内的目标密码框未能获取键盘焦点：$AutomationId"
-            }
-        }
-
-        # 等待重绘帧完成 GPUI ElementInputHandler 挂载
-        Start-Sleep -Milliseconds 60
-
-        if (-not [CstDesktopSecretWin32]::SendVirtualKeyTap($hwnd, [CstDesktopSecretWin32]::VK_END)) {
-            throw "向窗口投递行尾定位消息超时：$AutomationId"
-        }
-        for ($clearIdx = 0; $clearIdx -lt 256; $clearIdx++) {
-            if (-not [CstDesktopSecretWin32]::IsWindow($hwnd) -or (-not $editEl.Current.IsEnabled) -or $editEl.Current.IsOffscreen) {
-                throw "清空旧内容期间控件失效，已中止：$AutomationId"
-            }
-            if (([CstDesktopSecretWin32]::GetForegroundWindow() -eq $hwnd) -and (-not $editEl.Current.HasKeyboardFocus)) {
-                throw "清空旧内容期间焦点转移，已中止：$AutomationId"
-            }
-            if (-not [CstDesktopSecretWin32]::SendVirtualKeyTap($hwnd, [CstDesktopSecretWin32]::VK_BACK)) {
-                throw "向密码框投递退格消息超时：$AutomationId"
-            }
-        }
-
-        for ($idx = 0; $idx -lt $chars.Length; $idx++) {
-            if (-not [CstDesktopSecretWin32]::IsWindow($hwnd) -or (-not $editEl.Current.IsEnabled) -or $editEl.Current.IsOffscreen) {
-                throw "逐字符投递期间控件失效，已在第 $idx 个字符处中止：$AutomationId"
-            }
-            if (([CstDesktopSecretWin32]::GetForegroundWindow() -eq $hwnd) -and (-not $editEl.Current.HasKeyboardFocus)) {
-                throw "逐字符投递期间焦点转移，已在第 $idx 个字符处中止：$AutomationId"
-            }
-            $codeUnit = [uint16]$chars[$idx]
-            if (-not [CstDesktopSecretWin32]::SendCharUnit($hwnd, $codeUnit)) {
-                throw "向密码框投递字符消息超时：$AutomationId"
-            }
-        }
-    }
-
-    $outputJson = [pscustomobject]@{
+    [pscustomobject]@{
         ok = $true
         automationId = $AutomationId
-        charCount = $charCount
+        charCount = $chars.Length
         redacted = $true
     } | ConvertTo-Json -Compress
-    Write-Output $outputJson
 } finally {
     if ($null -ne $chars) {
         [Array]::Clear($chars, 0, $chars.Length)

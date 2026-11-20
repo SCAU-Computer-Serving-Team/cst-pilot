@@ -20,10 +20,10 @@ use gpui_kit::{
 };
 use serde_json::Value;
 
+use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height,
-    radius, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
 };
 use crate::workbench::image_viewer::{LightboxImageTarget, gpui_image_from_handle};
 use crate::workbench::model_picker::{

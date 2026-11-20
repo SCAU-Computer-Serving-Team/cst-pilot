@@ -4,7 +4,7 @@ use cst_client::ClientHandle;
 use gpui::{Image, StyledImage as _};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::{Input, InputContentType, InputState};
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ObjectFit,
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, TestSupportExt,
@@ -13,12 +13,13 @@ use gpui_kit::{
 use serde_json::Value;
 use zeroize::Zeroizing;
 
+use crate::accessibility::A11yElementExt as _;
 use crate::auth::cstoa_qr::{now_epoch_ms, parse_cstoa_oauth_payload, rasterize_qr_image_offline};
 use crate::background::{SkyPreset, render_login_9_stop_fade, render_sky_background_rounded};
 use crate::shell::open_url_in_trusted_browser;
 use crate::theme::{
-    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height,
-    layout, radius, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
+    scale, space,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -559,6 +560,7 @@ impl Render for LoginView {
                     .child(
                         Input::new(&self.api_key_input)
                             .accessibility_id("login-apikey-input")
+                            .content_type(InputContentType::Password)
                             .aria_label("API Key 密钥")
                             .h(height::FIELD)
                             .mask_toggle(),

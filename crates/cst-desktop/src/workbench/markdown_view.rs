@@ -15,8 +15,9 @@ use gpui_kit::{
     Window, div, px,
 };
 
+use crate::accessibility::A11yElementExt as _;
 use crate::shell::open_url_in_trusted_browser;
-use crate::theme::{A11yElementExt as _, DesktopPalette, apply_scale, radius, scale, space};
+use crate::theme::{DesktopPalette, apply_scale, radius, scale, space};
 
 /// Maintains stable `Entity<TextViewState>` instances keyed by message/entry ID so streaming
 /// incremental deltas (`push_str`) and snapshot replacements (`set_text`) never recreate the view
