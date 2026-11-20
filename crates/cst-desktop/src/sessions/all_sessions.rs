@@ -3,14 +3,17 @@ use std::rc::Rc;
 
 use chrono::{DateTime, Local, NaiveDate};
 use cst_client::{ClientError, ClientHandle, SessionSummary};
+use gpui::KeyDownEvent;
 use gpui::{MouseButton, Pixels, Size, size};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::base::{VirtualListScrollHandle, v_virtual_list};
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::{
-    AppContext as _, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
+    AppContext as _, Context, Entity, EventEmitter, FocusHandle, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, TestSupportExt,
+    Window, div, px,
 };
 
 use crate::accessibility::A11yElementExt as _;
@@ -125,6 +128,7 @@ pub struct AllSessionsView {
     context_menu: Option<ContextMenuTarget>,
     renaming_session_id: Option<String>,
     rename_input: Option<Entity<InputState>>,
+    rename_trap_focus: Option<FocusHandle>,
     renaming_saving: bool,
     cached_rows: Vec<VirtualSessionRow>,
     cached_sizes: Rc<Vec<Size<Pixels>>>,
@@ -144,6 +148,7 @@ impl AllSessionsView {
             context_menu: None,
             renaming_session_id: None,
             rename_input: None,
+            rename_trap_focus: None,
             renaming_saving: false,
             cached_rows: Vec::new(),
             cached_sizes: Rc::new(Vec::new()),
@@ -282,6 +287,9 @@ impl AllSessionsView {
     ) {
         self.context_menu = None;
         self.renaming_session_id = Some(session_id);
+        if self.rename_trap_focus.is_none() {
+            self.rename_trap_focus = Some(cx.focus_handle());
+        }
         if let Some(ref inp) = self.rename_input {
             inp.update(cx, |state, cx| {
                 state.set_value(current_title, window, cx);
@@ -444,7 +452,7 @@ impl AllSessionsView {
                                 .flex_shrink_0()
                                 .children(is_checked.then(|| {
                                     Icon::new(IconName::Check)
-                                        .size(px(11.0))
+                                        .size(px(12.0))
                                         .text_color(palette.text_on_accent)
                                 })),
                         );
@@ -629,13 +637,14 @@ impl AllSessionsView {
                         .p(space::XS)
                         .rounded(radius::ROW)
                         .border_1()
-                        .border_color(palette.border_subtle)
+                        .border_color(palette.border_hairline)
                         .occlude()
                         .on_mouse_down(MouseButton::Left, |_, _, cx| {
                             cx.stop_propagation();
                         })
                         .flex()
                         .flex_col()
+                        .gap(space::MICRO)
                         .child(
                             apply_scale(div(), scale::UI)
                                 .id("all-sessions-ctx-rename")
@@ -649,7 +658,7 @@ impl AllSessionsView {
                                 .flex()
                                 .items_center()
                                 .gap(space::SM)
-                                .hover(|s| s.bg(palette.bg_item_hover))
+                                .hover(|s| s.bg(palette.bg_item_active))
                                 .on_click(cx.listener(move |this, _, w, cx| {
                                     this.open_rename_modal(
                                         sid_rename.clone(),
@@ -659,8 +668,8 @@ impl AllSessionsView {
                                     );
                                 }))
                                 .child(
-                                    Icon::new(IconName::SquarePen)
-                                        .size(px(14.0))
+                                    Icon::new(IconName::Pencil)
+                                        .size(px(16.0))
                                         .text_color(palette.text_secondary),
                                 )
                                 .child(cjk_inline_label("重命名")),
@@ -678,7 +687,7 @@ impl AllSessionsView {
                                 .flex()
                                 .items_center()
                                 .gap(space::SM)
-                                .hover(|s| s.bg(palette.bg_item_hover))
+                                .hover(|s| s.bg(palette.bg_item_active))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.context_menu = None;
                                     this.batch_mode = true;
@@ -687,8 +696,8 @@ impl AllSessionsView {
                                     cx.notify();
                                 }))
                                 .child(
-                                    Icon::new(IconName::Check)
-                                        .size(px(14.0))
+                                    Icon::new(IconName::ListChecks)
+                                        .size(px(16.0))
                                         .text_color(palette.text_secondary),
                                 )
                                 .child(cjk_inline_label("管理")),
@@ -696,13 +705,12 @@ impl AllSessionsView {
                         .child(
                             div()
                                 .relative()
-                                .w_full()
-                                .h(px(1.0))
-                                .my(space::XS)
-                                .bg(palette.border_subtle),
+                                .px(space::XS)
+                                .py(space::MICRO)
+                                .child(div().w_full().h(px(1.0)).bg(palette.border_subtle)),
                         )
                         .child(
-                            apply_scale(div(), scale::UI)
+                            apply_scale(div(), scale::UI_MEDIUM)
                                 .id("all-sessions-ctx-delete")
                                 .test_support()
                                 .a11y_menuitem("all-sessions-ctx-delete", "删除")
@@ -720,7 +728,7 @@ impl AllSessionsView {
                                 }))
                                 .child(
                                     Icon::new(IconName::Trash)
-                                        .size(px(14.0))
+                                        .size(px(16.0))
                                         .text_color(palette.status_danger),
                                 )
                                 .child(cjk_inline_label("删除")),
@@ -738,6 +746,103 @@ impl AllSessionsView {
         scale_factor: f32,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
+        let modal_card = render_frosted_surface(
+            "all-sessions-rename-modal",
+            FrostedGlassSpec::modal_k3x72(palette, 8.0),
+            palette.bg_modal,
+            transparency_enabled,
+            scale_factor,
+        )
+        .test_support()
+        .a11y_dialog("all-sessions-rename-modal", "重命名会话")
+        .w(px(400.0))
+        .p(px(20.0))
+        .rounded(radius::ROW)
+        .border_1()
+        .border_color(palette.border_subtle)
+        .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
+            if ev.keystroke.key == "enter" && !ev.is_held {
+                this.submit_rename(cx);
+                cx.stop_propagation();
+            }
+        }))
+        .flex()
+        .flex_col()
+        .gap(space::LG)
+        .child(
+            apply_scale(div(), scale::BODY_SEMIBOLD)
+                .relative()
+                .text_color(palette.text_primary)
+                .child(cjk_inline_label("重命名会话")),
+        )
+        .child(
+            div().relative().child(
+                Input::new(inp)
+                    .accessibility_id("all-sessions-rename-input")
+                    .aria_label("会话标题")
+                    .h(height::FIELD)
+                    .cleanable(true),
+            ),
+        )
+        .child(
+            div()
+                .relative()
+                .flex()
+                .justify_end()
+                .gap(space::SM)
+                .child(
+                    apply_scale(div(), scale::UI_MEDIUM)
+                        .id("all-sessions-rename-cancel-btn")
+                        .test_support()
+                        .tab_index(0)
+                        .a11y_button("all-sessions-rename-cancel-btn", "取消")
+                        .h(height::CONTROL)
+                        .px(space::MD)
+                        .rounded(radius::CONTROL)
+                        .border_1()
+                        .border_color(palette.border_strong)
+                        .bg(palette.bg_workspace)
+                        .text_color(palette.text_primary)
+                        .flex()
+                        .items_center()
+                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.renaming_session_id = None;
+                            cx.notify();
+                        }))
+                        .child(cjk_inline_label("取消")),
+                )
+                .child(
+                    apply_scale(div(), scale::UI_MEDIUM)
+                        .id("all-sessions-rename-save-btn")
+                        .test_support()
+                        .tab_index(0)
+                        .a11y_button("all-sessions-rename-save-btn", "保存")
+                        .h(height::CONTROL)
+                        .px(space::LG)
+                        .rounded(radius::CONTROL)
+                        .bg(palette.accent_solid)
+                        .text_color(palette.text_on_accent)
+                        .flex()
+                        .items_center()
+                        .hover(|s| s.bg(palette.accent_hover))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.submit_rename(cx);
+                        }))
+                        .child(cjk_inline_label("保存")),
+                ),
+        );
+
+        let wrapped_modal = if let Some(ref trap) = self.rename_trap_focus {
+            div()
+                .tab_stop(false)
+                .focus_trap("all-sessions-rename-trap", trap)
+                .child(modal_card)
+                .into_any_element()
+        } else {
+            modal_card.into_any_element()
+        };
+
         render_frosted_surface(
             "all-sessions-rename-scrim",
             FrostedGlassSpec::scrim_dz0fp(palette),
@@ -755,86 +860,7 @@ impl AllSessionsView {
         .items_center()
         .justify_center()
         .occlude()
-        .child(
-            render_frosted_surface(
-                "all-sessions-rename-modal",
-                FrostedGlassSpec::modal_k3x72(palette, 8.0),
-                palette.bg_modal,
-                transparency_enabled,
-                scale_factor,
-            )
-            .test_support()
-            .a11y_dialog("all-sessions-rename-modal", "重命名会话")
-            .w(layout::MODAL_STANDARD_WIDTH)
-            .p(px(20.0))
-            .rounded(radius::ROW)
-            .border_1()
-            .border_color(palette.border_subtle)
-            .flex()
-            .flex_col()
-            .gap(space::MD)
-            .child(
-                apply_scale(div(), scale::BODY_SEMIBOLD)
-                    .relative()
-                    .text_color(palette.text_primary)
-                    .child(cjk_inline_label("重命名会话")),
-            )
-            .child(
-                div().relative().child(
-                    Input::new(inp)
-                        .accessibility_id("all-sessions-rename-input")
-                        .aria_label("会话标题")
-                        .h(height::FIELD)
-                        .cleanable(true),
-                ),
-            )
-            .child(
-                div()
-                    .relative()
-                    .flex()
-                    .justify_end()
-                    .gap(space::SM)
-                    .child(
-                        apply_scale(div(), scale::UI_MEDIUM)
-                            .id("all-sessions-rename-cancel-btn")
-                            .test_support()
-                            .a11y_button("all-sessions-rename-cancel-btn", "取消")
-                            .h(height::CONTROL)
-                            .px(space::MD)
-                            .rounded(radius::CONTROL)
-                            .border_1()
-                            .border_color(palette.border_strong)
-                            .bg(palette.bg_workspace)
-                            .text_color(palette.text_primary)
-                            .flex()
-                            .items_center()
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.renaming_session_id = None;
-                                cx.notify();
-                            }))
-                            .child(cjk_inline_label("取消")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::UI_MEDIUM)
-                            .id("all-sessions-rename-save-btn")
-                            .test_support()
-                            .a11y_button("all-sessions-rename-save-btn", "保存")
-                            .h(height::CONTROL)
-                            .px(space::LG)
-                            .rounded(radius::CONTROL)
-                            .bg(palette.accent_solid)
-                            .text_color(palette.text_on_accent)
-                            .flex()
-                            .items_center()
-                            .hover(|s| s.bg(palette.accent_hover))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.submit_rename(cx);
-                            }))
-                            .child(cjk_inline_label("保存")),
-                    ),
-            ),
-        )
+        .child(wrapped_modal)
         .into_any_element()
     }
 }
@@ -872,10 +898,11 @@ impl Render for AllSessionsView {
                 .h(height::CONTROL)
                 .px(space::MD)
                 .rounded(radius::CONTROL)
-                .text_color(palette.text_secondary)
+                .bg(palette.bg_item_active)
+                .text_color(palette.text_primary)
                 .flex()
                 .items_center()
-                .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                .hover(|s| s.bg(palette.bg_item_active))
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.batch_mode = false;
                     this.selected_ids.clear();
@@ -918,7 +945,7 @@ impl Render for AllSessionsView {
                 .child(
                     apply_scale(div(), scale::UI)
                         .text_color(palette.text_secondary)
-                        .child(SharedString::from(format!("已选择 {selected_count} 个"))),
+                        .child(cjk_inline_label(format!("已选择 {selected_count} 个"))),
                 )
                 .child(
                     div()

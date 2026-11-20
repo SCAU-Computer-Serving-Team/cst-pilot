@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use cst_client::{ClientHandle, DraftKey};
 use gpui::KeyDownEvent;
 use gpui_kit::assets::IconName;
+use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::{
@@ -317,6 +318,7 @@ pub struct BranchTreeView {
     custom_prompt_mode: bool,
     custom_prompt_input: Entity<InputState>,
     focus_handle: FocusHandle,
+    modal_trap_focus: FocusHandle,
 }
 
 impl EventEmitter<BranchTreeEvent> for BranchTreeView {}
@@ -349,6 +351,7 @@ impl BranchTreeView {
             custom_prompt_mode: false,
             custom_prompt_input,
             focus_handle: cx.focus_handle(),
+            modal_trap_focus: cx.focus_handle(),
         }
     }
 
@@ -597,42 +600,31 @@ impl BranchTreeView {
         let t3 = target_id.to_owned();
         let in_custom = self.custom_prompt_mode;
 
-        let summary_btn = if in_custom {
-            apply_scale(div(), scale::UI_MEDIUM)
+        let summary_btn = {
+            let label = if in_custom { "直接总结" } else { "总结" };
+            apply_scale(div(), scale::UI)
                 .id("branch-mode-summary-btn")
                 .test_support()
-                .a11y_button("branch-mode-summary-btn", "直接总结")
-                .h(height::CONTROL)
+                .tab_index(0)
+                .a11y_button("branch-mode-summary-btn", label)
+                .w_full()
+                .h(height::FIELD)
                 .px(space::MD)
                 .rounded(radius::CONTROL)
-                .border_1()
-                .border_color(palette.border_strong)
-                .bg(palette.bg_workspace)
                 .text_color(palette.text_primary)
                 .flex()
                 .items_center()
-                .hover(|s| s.bg(palette.bg_item_hover))
+                .gap(space::MD)
+                .hover(|s| s.bg(palette.bg_track_recess))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.execute_navigate(t2.clone(), true, None, cx);
                 }))
-                .child(cjk_inline_label("直接总结"))
-        } else {
-            apply_scale(div(), scale::UI_MEDIUM)
-                .id("branch-mode-summary-btn")
-                .test_support()
-                .a11y_button("branch-mode-summary-btn", "总结")
-                .h(height::CONTROL)
-                .px(space::LG)
-                .rounded(radius::CONTROL)
-                .bg(palette.accent_solid)
-                .text_color(palette.text_on_accent)
-                .flex()
-                .items_center()
-                .hover(|s| s.bg(palette.accent_hover))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.execute_navigate(t2.clone(), true, None, cx);
-                }))
-                .child(cjk_inline_label("总结"))
+                .child(
+                    Icon::new(IconName::Sparkles)
+                        .size(px(16.0))
+                        .text_color(palette.text_secondary),
+                )
+                .child(cjk_inline_label(label))
         };
 
         let mut card = render_frosted_surface(
@@ -678,6 +670,7 @@ impl BranchTreeView {
                     div()
                         .id("branch-summary-cancel-btn")
                         .test_support()
+                        .tab_index(0)
                         .a11y_button("branch-summary-cancel-btn", "取消切换分支")
                         .w(height::COMPACT)
                         .h(height::COMPACT)
@@ -707,57 +700,61 @@ impl BranchTreeView {
         .child(
             div()
                 .relative()
+                .w_full()
                 .flex()
-                .flex_wrap()
-                .justify_end()
-                .gap(space::SM)
+                .flex_col()
+                .gap(space::MICRO)
                 .child(
-                    apply_scale(div(), scale::UI_MEDIUM)
+                    apply_scale(div(), scale::UI)
                         .id("branch-mode-no-summary-btn")
                         .test_support()
+                        .tab_index(0)
                         .a11y_button("branch-mode-no-summary-btn", "不总结")
-                        .h(height::CONTROL)
+                        .w_full()
+                        .h(height::FIELD)
                         .px(space::MD)
                         .rounded(radius::CONTROL)
-                        .border_1()
-                        .border_color(palette.border_strong)
-                        .bg(palette.bg_workspace)
+                        .bg(palette.bg_track_recess)
                         .text_color(palette.text_primary)
                         .flex()
                         .items_center()
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .gap(space::MD)
+                        .hover(|s| s.bg(palette.bg_item_active))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.execute_navigate(t1.clone(), false, None, cx);
                         }))
+                        .child(
+                            Icon::new(IconName::ArrowRight)
+                                .size(px(16.0))
+                                .text_color(palette.text_secondary),
+                        )
                         .child(cjk_inline_label("不总结")),
                 )
+                .child(summary_btn)
                 .child(
-                    apply_scale(div(), scale::UI_MEDIUM)
+                    apply_scale(div(), scale::UI)
                         .id("branch-mode-custom-summary-btn")
                         .test_support()
+                        .tab_index(0)
                         .a11y_toggle_button(
                             "branch-mode-custom-summary-btn",
-                            "自定义提示词总结",
+                            "用自定义提示词总结",
                             in_custom,
                         )
-                        .h(height::CONTROL)
+                        .w_full()
+                        .h(height::FIELD)
                         .px(space::MD)
                         .rounded(radius::CONTROL)
-                        .border_1()
-                        .border_color(if in_custom {
-                            palette.border_focus
-                        } else {
-                            palette.border_strong
-                        })
                         .bg(if in_custom {
                             palette.bg_item_active
                         } else {
-                            palette.bg_workspace
+                            gpui_kit::transparent_black()
                         })
                         .text_color(palette.text_primary)
                         .flex()
                         .items_center()
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .gap(space::MD)
+                        .hover(|s| s.bg(palette.bg_track_recess))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.custom_prompt_mode = true;
                             this.custom_prompt_input.update(cx, |inp, cx| {
@@ -765,9 +762,13 @@ impl BranchTreeView {
                             });
                             cx.notify();
                         }))
-                        .child(cjk_inline_label("自定义提示词总结")),
-                )
-                .child(summary_btn),
+                        .child(
+                            Icon::new(IconName::Pencil)
+                                .size(px(16.0))
+                                .text_color(palette.text_secondary),
+                        )
+                        .child(cjk_inline_label("用自定义提示词总结")),
+                ),
         );
 
         if in_custom {
@@ -825,7 +826,12 @@ impl BranchTreeView {
         .items_center()
         .justify_center()
         .occlude()
-        .child(card)
+        .child(
+            div()
+                .tab_stop(false)
+                .focus_trap("branch-summary-focus-trap", &self.modal_trap_focus)
+                .child(card),
+        )
         .into_any_element()
     }
 }
@@ -1006,7 +1012,7 @@ impl Render for BranchTreeView {
                         .flex()
                         .justify_center()
                         .flex_shrink_0()
-                        .child(div().w(px(1.0)).h_full().bg(line_col)),
+                        .child(div().w(px(2.0)).h_full().bg(line_col)),
                 );
             }
 
@@ -1030,7 +1036,7 @@ impl Render for BranchTreeView {
                 .flex_col()
                 .items_center()
                 .flex_shrink_0()
-                .child(div().w(px(1.0)).h(px(15.0)).bg(upper_col))
+                .child(div().w(px(2.0)).h(px(15.0)).bg(upper_col))
                 .child(
                     div()
                         .w(px(10.0))
@@ -1044,7 +1050,7 @@ impl Render for BranchTreeView {
                             palette.bg_workspace
                         }),
                 )
-                .child(div().w(px(1.0)).h(px(15.0)).bg(lower_col));
+                .child(div().w(px(2.0)).h(px(15.0)).bg(lower_col));
             guides_row = guides_row.child(self_guide_cell);
 
             let role_badge = match node.role.as_str() {
@@ -1246,6 +1252,31 @@ impl Render for BranchTreeView {
                     .flex_col()
                     .items_center()
                     .child(tree_col),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .px(space::GROUP)
+                    .pb(space::MD)
+                    .flex()
+                    .justify_center()
+                    .child(
+                        apply_scale(div(), scale::CAPTION)
+                            .id("branch-tree-kbd-hint-na2qi")
+                            .test_support()
+                            .h(height::COMPACT)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(palette.border_subtle)
+                            .bg(palette.bg_surface)
+                            .text_color(palette.text_secondary)
+                            .flex()
+                            .items_center()
+                            .child(cjk_inline_label(
+                                "Ctrl+O 切换过滤 · ↑↓ 跳转条目 · Enter 选择节点",
+                            )),
+                    ),
             )
             .children(summary_modal_opt)
     }

@@ -319,21 +319,43 @@ impl ExportView {
                 .gap(space::GROUP)
                 .child(
                     div()
-                        .pb(space::MD)
+                        .pb(space::LG)
                         .border_b_1()
                         .border_color(doc_palette.border_subtle)
                         .flex()
                         .items_center()
                         .justify_between()
+                        .gap(space::SM)
                         .child(
-                            apply_scale(div(), scale::TITLE)
-                                .text_color(doc_palette.text_primary)
-                                .child(SharedString::from(title.to_owned())),
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .flex()
+                                .items_center()
+                                .gap(space::SM)
+                                .child(
+                                    apply_scale(div(), scale::CAPTION_MEDIUM)
+                                        .font_family(mono_family.clone())
+                                        .px(space::SM)
+                                        .py(space::MICRO)
+                                        .rounded(radius::CONTROL)
+                                        .bg(doc_palette.bg_surface)
+                                        .text_color(doc_palette.text_secondary)
+                                        .flex_shrink_0()
+                                        .child("CST Pilot"),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::TITLE)
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_color(doc_palette.text_primary)
+                                        .child(cjk_inline_label(title.to_owned())),
+                                ),
                         )
                         .children(self.loading_preview.then(|| {
                             apply_scale(div(), scale::CAPTION)
                                 .text_color(doc_palette.text_muted)
-                                .child("正在更新预览…")
+                                .child(cjk_inline_label("正在更新预览…"))
                         })),
                 );
 
@@ -489,7 +511,7 @@ impl ExportView {
                 .p(space::GROUP)
                 .rounded(radius::ROW)
                 .border_1()
-                .border_color(ui_palette.border_hairline)
+                .border_color(ui_palette.border_subtle)
                 .overflow_y_scroll()
                 .bg(doc_palette.bg_workspace)
                 .child(doc_col)
@@ -504,7 +526,7 @@ impl ExportView {
                 .p(space::GROUP)
                 .rounded(radius::ROW)
                 .border_1()
-                .border_color(ui_palette.border_hairline)
+                .border_color(ui_palette.border_subtle)
                 .bg(doc_palette.bg_workspace)
                 .flex()
                 .items_center()
@@ -529,8 +551,8 @@ impl ExportView {
             .flex_col()
             .gap(space::MD)
             .child(
-                apply_scale(div(), scale::BODY_SEMIBOLD)
-                    .text_color(ui_palette.text_primary)
+                apply_scale(div(), scale::UI)
+                    .text_color(ui_palette.text_secondary)
                     .child(cjk_inline_label("预览")),
             )
             .child(viewport_el)
@@ -593,9 +615,15 @@ impl Render for ExportView {
             let eid_open = eid.clone();
             let dir_hint = self.last_completed_dir.clone();
             div()
+                .pt(space::LG)
                 .flex()
                 .flex_col()
-                .gap(space::XS)
+                .gap(space::MD)
+                .child(
+                    apply_scale(div(), scale::BODY_MEDIUM)
+                        .text_color(palette.text_primary)
+                        .child(cjk_inline_label("已保存 1 个文件")),
+                )
                 .children(dir_hint.map(|d| {
                     apply_scale(div(), scale::CAPTION)
                         .truncate()
@@ -643,7 +671,7 @@ impl Render for ExportView {
             .flex_shrink_0()
             .flex()
             .flex_col()
-            .gap(space::LG)
+            .gap(space::GROUP)
             .child(
                 apply_scale(div(), scale::BODY_SEMIBOLD)
                     .text_color(palette.text_primary)
@@ -723,12 +751,12 @@ impl Render for ExportView {
                             )),
                     ),
             )
-            // Include checkboxes
+            // Include checkboxes (`ScJjE`: `12px` gap, `24px` rows `Qwhwo`/`zkzeE`)
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap(space::SM)
+                    .gap(space::MD)
                     .child(export_check_row(
                         "export-include-thinking-chk",
                         "包含思考过程",
@@ -875,7 +903,7 @@ where
         .id(id)
         .test_support()
         .a11y_checkbox(id, label, checked)
-        .h(height::CONTROL)
+        .h(height::INLINE)
         .rounded(radius::CONTROL)
         .flex()
         .items_center()
@@ -902,7 +930,7 @@ where
                 .justify_center()
                 .children(checked.then(|| {
                     Icon::new(IconName::Check)
-                        .size(px(11.0))
+                        .size(px(12.0))
                         .text_color(palette.text_on_accent)
                 })),
         )
