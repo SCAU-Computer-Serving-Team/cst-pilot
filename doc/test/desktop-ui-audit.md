@@ -16,10 +16,10 @@
 | 区域 / Node ID | 核心核查对象 | 状态 | 进度与遗留说明 |
 |---|---|---|---|
 | `LKIQI` 设计规范 | 色彩（`AyvAS`）、字号排版（`H8sVa`）、圆角间距高度（`GYpym`）、窗口结构（`Mvvtr`）、材质透明度（`lRw5X`）、汉字 `2px` 光学对齐（`np3Ew`） | `[ ]` | 主题色、基础字号、`2/4/8/12px` 与 `np3Ew` 已用于主体页；`lRw5X` 降透明回退待随 `00C` 实测 |
-| `00A · 窗口与导航`（`FRLPg`） | `L081M1` 侧栏、`T1U1Xf` 窗控、`GElS8`/`MKlBE` 顶栏、`HUkqs` 对话标题栏、`h5AY3` 多选侧栏、`xWJOf` 子页标题栏、`VPWAF` 设置导航栏 | `[ ]` | `L081M1`、`T1U1Xf`、`GElS8`/`MKlBE`、`HUkqs`、`h5AY3`（多选侧栏）与 `xWJOf`（子页标题栏）已完成双主题 `winapp` 核查；`VPWAF` 待随 `03` 画板实测 |
-| `00B · 按钮与输入`（`Ov79F`） | `ZWAs1` 输入框、`xRNmP` 主钮、`s2CZVU` 描边钮、`U6mIVP` 危险钮、`PP59g` 文字钮、`AxUEZ` 图标钮、`XtKij`/`i3VjFz` 复选框、`ZCGS3` 快捷键、`VngaB`/`gVNCA`/`PHFud` | `[ ]` | `ZWAs1`、`ZCGS3`、`gVNCA`、`XtKij`/`i3VjFz`（会话/导出勾选）已核对；`U6mIVP`、`PHFud` 与表单校验态待随 `03`/`04` 实测 |
-| `00C · 菜单与弹窗`（`wbnNW`） | `UWt8w` 右键菜单、`UyJBj` 菜单项、`h1BufF` 顶部通知、`X2gAh` 顶部报错条、`sVucQ` 确认弹窗、`DZ0Fp` 遮罩、`H2p2z` 无遮罩浮层、`K3x72` 弹窗母版 | `[ ]` | `UWt8w`/`UyJBj`、`h1BufF`/`X2gAh`（重命名空校验真窗报错条）、`DZ0Fp` 与 `H2p2z`/`K3x72` 已完成双主题核查；`sVucQ` 待随 `04` 退出弹窗实测 |
-| `00D · 列表与消息`（`psLRr`） | `lzrMn` 会话行、`c4PWw` 信息行、`CpxAu` 用户消息、`b0aK5` 气泡栏、`VS7mw` 助手栏、`BuK2W` 工具状态行 | `[ ]` | `lzrMn` 与后四项已完成双主题 `winapp` 核对；`c4PWw`（设置信息行）待随 `03` 核对 |
+| `00A · 窗口与导航`（`FRLPg`） | `L081M1` 侧栏、`T1U1Xf` 窗控、`GElS8`/`MKlBE` 顶栏、`HUkqs` 对话标题栏、`h5AY3` 多选侧栏、`xWJOf` 子页标题栏、`VPWAF` 设置导航栏 | `[x]` | `L081M1`、`T1U1Xf`、`GElS8`/`MKlBE`、`HUkqs`、`h5AY3`（多选侧栏）、`xWJOf`（子页标题栏）与 `VPWAF`（设置导航栏与 `WzYef` 账户菜单）均已完成双主题 `winapp` 核查 |
+| `00B · 按钮与输入`（`Ov79F`） | `ZWAs1` 输入框、`xRNmP` 主钮、`s2CZVU` 描边钮、`U6mIVP` 危险钮、`PP59g` 文字钮、`AxUEZ` 图标钮、`XtKij`/`i3VjFz` 复选框、`ZCGS3` 快捷键、`VngaB`/`gVNCA`/`PHFud` | `[x]` | `ZWAs1`、`ZCGS3`、`gVNCA`、`XtKij`/`i3VjFz`、`U6mIVP`、`PHFud`（服务商/默认模型/筛选下拉）及 1 级红框标红校验态已完成双主题 `winapp` 核查；密文清零与键盘光标导航由 `settings_and_update` 与 `tools_and_bitlocker` 实测 |
+| `00C · 菜单与弹窗`（`wbnNW`） | `UWt8w` 右键菜单、`UyJBj` 菜单项、`h1BufF` 顶部通知、`X2gAh` 顶部报错条、`sVucQ` 确认弹窗、`DZ0Fp` 遮罩、`H2p2z` 无遮罩浮层、`K3x72` 弹窗母版 | `[x]` | `UWt8w`/`UyJBj`、`h1BufF`/`X2gAh`、`sVucQ`（退出确认/退出 CSTOA 弹窗）、`DZ0Fp` 与 `H2p2z`/`K3x72` 均已完成双主题 `winapp` 真窗核查，并与 `Esc`/FocusTrap 归还焦点闭环 |
+| `00D · 列表与消息`（`psLRr`） | `lzrMn` 会话行、`c4PWw` 信息行、`CpxAu` 用户消息、`b0aK5` 气泡栏、`VS7mw` 助手栏、`BuK2W` 工具状态行 | `[x]` | `lzrMn`、`c4PWw`（设置常规/快捷键/账号信息行）及消息与工具状态行均已完成双主题 `winapp` 核对 |
 | `00E · 工具与特殊工具`（`V9ohGI`） | `E9dWo9`/`VM8ko`/`VwO1J` 普通工具三卡、`wmkJw`/`JQMQZ`/`s3WzY`/`ABn8j` 特殊工具四卡 | `[x]` | 七类母版均已完成对齐与双主题验证；`ABn8j` 待决密码输入与 `400` 重试由 `tools_and_bitlocker` 无头集成测试实测，其余终态完成 `winapp` 截图核对 |
 | `00F · 背景着色器`（`gcj97`） | `jzHSt` 天空与 `k6JMV` 夜空着色器绑定与静止渲染 | `[ ]` | 静态首帧已在 `WSbcS` 验证；切换停帧与低功耗回退待结合动效阶段实测 |
 
@@ -47,16 +47,16 @@
 
 ### 03 · 设置（`Trond`）
 
-- [ ] `sxkCI` 常规（`VPWAF` 设置导航、外观浅/深/跟随系统切换、系统集成与更新状态行 `c4PWw`）
-- [ ] `t7zsNf` 模型服务（自定义服务列表、增删改弹窗、`providers-apikey-input` 无回显填密、`24px`/`28px` 图标按钮群与连通测试）
-- [ ] `b9mFa` 模型偏好（全局默认模型与思考强度、`search` / `refresh-cw` / `plus` 高密度纯图标组头、模型启用勾选与拖拽/按钮排序乐观更新与回滚）
-- [ ] `i6TeGT` 快捷键（快捷键列表与 `ZCGS3` 键位胶囊对齐）
+- [x] `sxkCI` 常规（`VPWAF` 设置导航、外观浅/深/跟随系统切换、系统集成与更新状态行 `c4PWw` 已完成双主题 `winapp` 核查）
+- [x] `t7zsNf` 模型服务（已核查列表与 `T5us8O` `已连接` 徽标、自定义网关 `q8NLwK` 增删改、`providers-apikey-input` 掩码及 1 级红框校验、凭据请求流内存清零及 `delete_custom_provider` 修复；真窗 `winapp` 与 `settings_and_update` 闭环）
+- [x] `b9mFa` 模型偏好（已核查 `H2p2z` 默认模型/筛选毛玻璃浮层及 Z 轴叠放序、`search`/`refresh-cw`/`plus` 组头、`N 个已启用` 计数、乐观排序回滚及 `cst-server` 全量重排保留顺序；真窗 `winapp` 与 `settings_and_update` 闭环）
+- [x] `i6TeGT` 快捷键（快捷键列表与 `ZCGS3` 键位胶囊已完成双主题 `winapp` 核查）
 
 ### 04 · 账号与登录（`ABJtA`）
 
-- [ ] `JN6Rt` 登录（`login-apikey-input` 无回显填密、表单聚焦态、单框 `400` 校验标红与 `blue-hour` 背景）
-- [ ] `T932X7` CSTOA 登录（二维码展示容器、轮询刷新状态、深色夜空背景着色器）
-- [ ] `uV4C7` 账号（已登录信息卡、额度点消耗明细、退出登录确认弹窗 `sVucQ`）
+- [x] `JN6Rt` 登录（已核查 `PHFud` 服务商毛玻璃下拉框、`login-apikey-input` 无回显填密、1 级 `$status-danger` 单框校验及输入清除、`Zeroizing` 序列化与 `blue-hour`/`night-sky` 渐变过渡；真窗 `winapp` 与 `settings_and_update` 闭环）
+- [x] `T932X7` CSTOA 登录（已核查 `N1Rfg` 二维码状态条、`night-sky`/`blue-sky` 背景着色器双主题真窗表现；离线二维码光栅化、`deviceCode` 解析及轮询代际取消由 `settings_and_update` 实测，离线 `winapp` 夹具无在线扫码服务端）
+- [x] `uV4C7` 账号（已通过模拟 `auth.json` 已登录夹具完成双主题 `winapp` 截图核查：`WzYef` 账户菜单、`c4PWw` 信息行、`GOWKl` 操作栏与 `sVucQ` `退出 CSTOA` 弹窗及 `DZ0Fp` 遮罩；实时额度接口由 `settings_and_update` 覆盖）
 
 ### 05 · 深色模式部分参考（`wZKdd`）与 06 · 边界情况（`S8xM0`）
 
