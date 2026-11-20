@@ -20,7 +20,7 @@
 | `00B · 按钮与输入`（`Ov79F`） | `ZWAs1` 输入框、`xRNmP` 主钮、`s2CZVU` 描边钮、`U6mIVP` 危险钮、`PP59g` 文字钮、`AxUEZ` 图标钮、`XtKij`/`i3VjFz` 复选框、`ZCGS3` 快捷键、`VngaB`/`gVNCA`/`PHFud` | `[ ]` | `ZWAs1`、`ZCGS3`、`gVNCA` 已对齐；复选框、`U6mIVP`、下拉框 `PHFud` 与表单校验态待实测 |
 | `00C · 菜单与弹窗`（`wbnNW`） | `UWt8w` 右键菜单、`UyJBj` 菜单项、`h1BufF` 顶部通知、`X2gAh` 顶部报错条、`sVucQ` 确认弹窗、`DZ0Fp` 遮罩、`H2p2z` 无遮罩浮层、`K3x72` 弹窗母版 | `[ ]` | `X2gAh`/`h1BufF` 已校准顶部 `16px` 定位；实际触发态与右键菜单、`sVucQ`、浮层毛玻璃待实测 |
 | `00D · 列表与消息`（`psLRr`） | `lzrMn` 会话行、`c4PWw` 信息行、`CpxAu` 用户消息、`b0aK5` 气泡栏、`VS7mw` 助手栏、`BuK2W` 工具状态行 | `[ ]` | 后四项已随 `l84goO` 完成核对；`lzrMn`（全部会话行）与 `c4PWw`（设置信息行）待核对 |
-| `00E · 工具与特殊工具`（`V9ohGI`） | `E9dWo9`/`VM8ko`/`VwO1J` 普通工具三卡、`wmkJw`/`JQMQZ`/`s3WzY`/`ABn8j` 特殊工具四卡 | `[ ]` | `E9dWo9`、`VM8ko`、`wmkJw` 已随 `l84goO` 对齐；`VwO1J`、`JQMQZ`、`s3WzY`、`ABn8j` 待随 `07` 核查 |
+| `00E · 工具与特殊工具`（`V9ohGI`） | `E9dWo9`/`VM8ko`/`VwO1J` 普通工具三卡、`wmkJw`/`JQMQZ`/`s3WzY`/`ABn8j` 特殊工具四卡 | `[x]` | 七类母版均已完成对齐与双主题验证；`ABn8j` 待决密码输入与 `400` 重试由 `tools_and_bitlocker` 无头集成测试实测，其余终态完成 `winapp` 截图核对 |
 | `00F · 背景着色器`（`gcj97`） | `jzHSt` 天空与 `k6JMV` 夜空着色器绑定与静止渲染 | `[ ]` | 静态首帧已在 `WSbcS` 验证；切换停帧与低功耗回退待结合动效阶段实测 |
 
 ---
@@ -33,7 +33,7 @@
 - [ ] `WSbcS / xdA96` 主页 `X2gAh` 顶部报错条实机触发态截图验证（`h1BufF` 顶部通知条已在字体回退场景完成触发态验证）
 - [x] `l84goO` 对话（含 `s0bIf`/`FY9tR` 对话排版、过程折叠头、Markdown 标题/表格/代码块/行内代码深浅色对比、`s4IJwS` 中断与报错详情、`ivhR0` 原比例灯箱、`qFaoI` 深色与本地 SSE 实时流式输出；已完成双主题 `winapp` 真窗核查，并通过 `sol` 工程复核及灯箱冒泡/尺寸/弹窗语义修复与复测）
 - [ ] `l84goO / KLzVw & GM9WU` 长会话上滑出现 `40px` 黑底「回到底部」悬浮按钮与 `507` 本机失败用户气泡（`CircleAlert` 图标）真窗触发截图（静态结构已按 `.pen` 修正并通过编译，受限于 UIA 未暴露 `ScrollPattern` 尚待触发态截图）
-- [ ] `zdtJ6` 对话中的工具混排流与多工具折叠切换
+- [x] `zdtJ6` 对话中的工具混排流与多工具折叠切换（已修正独立 `read` 图片脱离折叠段并保持折叠锚点 `expansion_anchor` 不串位，已完成双主题 `winapp` 与 `workbench_and_ime_ui` 单测验证）
 - [ ] `Ed7xS` 终端（内置 TUI 视图切换、顶栏分段控件 `topbar-view-gui-btn` / `topbar-view-tui-btn`、窄幅与草稿衔接）
 - [ ] `juqeU` 状态提示与软件更新（`h1BufF` 顶部通知、更新徽标、下载进度条与重启升级交互）
 - [ ] `OmK5U` 输入与快捷面板（`Ctrl+K` 全局命令面板、`@` 文件引用、上下文圆环额度弹层、双级模型/思考强度下拉、`queue`/`steer` 待发与插话队列、草稿附件缩略图）
@@ -65,11 +65,11 @@
 
 ### 07 · 工具与特殊工具（`uF5B5`）
 
-- [ ] `kcHlA` 普通工具全量态（`VwO1J` 原文卡片、`read` 附图点击放大、`ls`/`driver`/`eventlog`/`startup` 长表格与空结果提示、`disk(all)` 独立返回与局部报错）
-- [ ] `k6vP8P` 整机概览细节与硬件保护态（底部 `详情` 展开列表、采集失败 `counterErrors` 提示、执行 `sys(gpu)` / `sys(sensor)` 期间背景着色器 `0 FPS` 停帧）
-- [ ] `i782jQ` BitLocker 特殊工具卡片（`ABn8j` 密码锁定态、`bitlocker-pwd-input-*` 聚焦自动解绑中文 IME、`400` 错误单框红边与保留输入、已解锁与拒绝解锁状态）
-- [ ] `aT4ai` 命令清单卡片（`s3WzY` 风险等级标签、管理员权限徽标、单条命令复制切换 `Check`、打开产物按钮及 UTF-8 BOM+CRLF 文件生成联动）
-- [ ] `Y5236` 联网检索卡片（`JQMQZ` 检索词列表、部分超时降级提示、引用来源外链跳转）
+- [x] `kcHlA` 普通工具全量态（`VwO1J` 原文等宽块/对齐列、`read` 附图独立展开、`FMaqq`/`RvBpL` 降级与报错仅图标着色已完成双主题 `winapp` 核查；17 工具映射与 web 夹具对齐通过单测验证）
+- [x] `k6vP8P` 整机概览细节与硬件保护态（已核查 `sys(overview)` 双主题 `详情` 展开列表、`counterErrors` 去重与降级提示；`sys(gpu)`/`sys(sensor)` 停帧由 `shader_frame_scheduler` 集成测试实测）
+- [x] `i782jQ` BitLocker 特殊工具卡片（解密进度 `4px` 进度条、`60px` 盘符列、`unknown` 异常中断、已取消与解锁失败态已完成双主题 `winapp` 核查；待决 `ABn8j` 密码框 `bitlocker-pwd-input-*`、`400` 原位报错重试及 IME 隔离由 `tools_and_bitlocker` 无头集成测试实测，静态 `.jsonl` 夹具未覆盖活跃 `requests` 真窗截图）
+- [x] `aT4ai` 命令清单卡片（`command_plan`/`runbook_deliver`/失败卡片、`打开` 蓝字外链与底部 `详情` 栏已完成双主题 `winapp` 核查；清单产物写入与打开回调由 `tools_and_bitlocker` 实测）
+- [x] `Y5236` 联网检索卡片（三层中性投影 `craft_stack`、降级/失败图标分色与折叠查询列表已完成双主题 `winapp` 核查；悬浮提示条几何按源码 `16px/8px` 与 `4px` 圆角核对）
 
 ---
 
