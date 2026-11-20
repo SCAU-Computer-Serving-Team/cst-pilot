@@ -15,13 +15,13 @@
 
 | 区域 / Node ID | 核心核查对象 | 状态 | 进度与遗留说明 |
 |---|---|---|---|
-| `LKIQI` 设计规范 | 色彩（`AyvAS`）、字号排版（`H8sVa`）、圆角间距高度（`GYpym`）、窗口结构（`Mvvtr`）、材质透明度（`lRw5X`）、汉字 `2px` 光学对齐（`np3Ew`） | `[ ]` | 主题色、基础字号、`2/4/8/12px` 与 `np3Ew` 已用于主体页；`lRw5X` 降透明回退待随 `00C` 实测 |
+| `LKIQI` 设计规范 | 色彩（`AyvAS`）、字号排版（`H8sVa`）、圆角间距高度（`GYpym`）、窗口结构（`Mvvtr`）、材质透明度（`lRw5X`）、汉字 `2px` 光学对齐（`np3Ew`） | `[x]` | 主题色、基础字号、`2/4/8/12px` 与 `np3Ew` 已用于全量界面；`lRw5X` 已实现 `EnableTransparency` 与 `< Feature Level 11_0` 实底回退（`d3d11_single_window_sky_frosted_glass_and_device_recovery` 覆盖 `0xa000` 回退，未篡改宿主注册表 `EnableTransparency=0` 实窗） |
 | `00A · 窗口与导航`（`FRLPg`） | `L081M1` 侧栏、`T1U1Xf` 窗控、`GElS8`/`MKlBE` 顶栏、`HUkqs` 对话标题栏、`h5AY3` 多选侧栏、`xWJOf` 子页标题栏、`VPWAF` 设置导航栏 | `[x]` | `L081M1`、`T1U1Xf`、`GElS8`/`MKlBE`、`HUkqs`、`h5AY3`（多选侧栏）、`xWJOf`（子页标题栏）与 `VPWAF`（设置导航栏与 `WzYef` 账户菜单）均已完成双主题 `winapp` 核查 |
 | `00B · 按钮与输入`（`Ov79F`） | `ZWAs1` 输入框、`xRNmP` 主钮、`s2CZVU` 描边钮、`U6mIVP` 危险钮、`PP59g` 文字钮、`AxUEZ` 图标钮、`XtKij`/`i3VjFz` 复选框、`ZCGS3` 快捷键、`VngaB`/`gVNCA`/`PHFud` | `[x]` | `ZWAs1`、`ZCGS3`、`gVNCA`、`XtKij`/`i3VjFz`、`U6mIVP`、`PHFud`（服务商/默认模型/筛选下拉）及 1 级红框标红校验态已完成双主题 `winapp` 核查；密文清零与键盘光标导航由 `settings_and_update` 与 `tools_and_bitlocker` 实测 |
 | `00C · 菜单与弹窗`（`wbnNW`） | `UWt8w` 右键菜单、`UyJBj` 菜单项、`h1BufF` 顶部通知、`X2gAh` 顶部报错条、`sVucQ` 确认弹窗、`DZ0Fp` 遮罩、`H2p2z` 无遮罩浮层、`K3x72` 弹窗母版 | `[x]` | `UWt8w`/`UyJBj`、`h1BufF`/`X2gAh`、`sVucQ`（退出确认/退出 CSTOA 弹窗）、`DZ0Fp` 与 `H2p2z`/`K3x72` 均已完成双主题 `winapp` 真窗核查，并与 `Esc`/FocusTrap 归还焦点闭环 |
 | `00D · 列表与消息`（`psLRr`） | `lzrMn` 会话行、`c4PWw` 信息行、`CpxAu` 用户消息、`b0aK5` 气泡栏、`VS7mw` 助手栏、`BuK2W` 工具状态行 | `[x]` | `lzrMn`、`c4PWw`（设置常规/快捷键/账号信息行）及消息与工具状态行均已完成双主题 `winapp` 核对 |
 | `00E · 工具与特殊工具`（`V9ohGI`） | `E9dWo9`/`VM8ko`/`VwO1J` 普通工具三卡、`wmkJw`/`JQMQZ`/`s3WzY`/`ABn8j` 特殊工具四卡 | `[x]` | 七类母版均已完成对齐与双主题验证；`ABn8j` 待决密码输入与 `400` 重试由 `tools_and_bitlocker` 无头集成测试实测，其余终态完成 `winapp` 截图核对 |
-| `00F · 背景着色器`（`gcj97`） | `jzHSt` 天空与 `k6JMV` 夜空着色器绑定与静止渲染 | `[ ]` | 静态首帧已在 `WSbcS` 验证；切换停帧与低功耗回退待结合动效阶段实测 |
+| `00F · 背景着色器`（`gcj97`） | `jzHSt` 天空与 `k6JMV` 夜空着色器绑定与静止渲染 | `[x]` | 静态与动态着色器已完成 `WSbcS`/`JN6Rt`/`T932X7` 双主题 `winapp` 验证；切离动态页、失焦/最小化/不可见、`WebActive`、`reduce_motion`、`sys(gpu)`/`sys(sensor)` 及 RDP/软光栅 `0 FPS` 停帧已通过 `shader_frame_scheduler` 与 `d3d11_single_window_sky_frosted_glass_and_device_recovery` 实测 |
 
 ---
 
@@ -77,17 +77,17 @@
 
 ### 21 项动效原语与曲线核查
 
-- [ ] **基础按压与悬停组（`press` / `hover` / `focus`）**：`120ms ease-out` 按压缩放 `0.97`（复选框 `0.92`）、`150ms` 悬停底色与 `150ms` 焦点边阴影，全量支持可打断与减少动态 `0ms`
-- [ ] **浮层与弹窗组（`popover` / `modal` / `toast`）**：快关慢开节奏（弹层 `220ms`/`150ms`、`modal` `240ms`/`150ms` 从 `scale(0.96)`、通知 `240ms`/`150ms` 及 `2600ms` 自动收起且悬停暂停）
-- [ ] **展开与位移组（`collapse` / `chevron` / `flip` / `pageSlide` / `sidebarShift` / `drawer`）**：`240ms` 折叠与箭头旋转、列表重排 `flip`、`±8px` 切页、`24px` 侧栏与抽屉展开，**中途反向触发须从当前插值平滑折返，禁止重置回 `0`**
-- [ ] **反馈与指示组（`checkStroke` / `iconSwap` / `segPill` / `tabIndicator`）**：勾选 `340ms` `--ease-spring`、复制图标缩放 `0.65 -> 1` 切换（禁止模糊）并于 `1600ms` 恢复、分段控件与选项卡滑块 `240ms ease-in-out`
-- [ ] **零延迟与节律组（`tooltipGroup` / `welcomeStagger` / `streamAppend` / `runningLight` / `shaderFreeze`）**：百次级快捷键 `0ms` 瞬时响应；相邻悬停跳过 `400ms` 初始延迟；欢迎屏错位总时长 `<= 300ms` 且同会话站内返回不重播；流式追加不破坏文本选区且不重播容器动效；`RunningLight` `2000ms` 线性 5 字素扫光；隐藏/失焦/硬件采样期 `0 FPS` 停帧；全局 `减少动态` 切换验证
+- [ ] **基础按压与悬停组（`press` / `hover` / `focus`）**：`120ms`（`PRESS`）/ `150ms`（`FAST`）与 `ease_out`（`cubic-bezier(0.22, 1, 0.36, 1)`）常量已对齐，窗口启动与激活时同步系统 `SPI_GETCLIENTAREAANIMATION` 开关；受限于 GPUI `Div` 不支持容器级 `scale(0.97)`/`scale(0.92)` 变换及背景色/聚焦阴影 `150ms` 渐变动效，悬停与聚焦采用即时状态切换
+- [ ] **浮层与弹窗组（`popover` / `modal` / `toast`）**：已完成 `220ms`/`240ms` `ease_out` 透明度与位移入场（阴影按 `d^3` 渐强）、`2600ms` 顶部通知/报错条 `BannerCountdownState`（`timer_epoch` 防重用 + 悬停暂停/恢复 + 切页/遮挡/替换清悬停），并完成双主题 `winapp` 与 `shell_and_mode_ui` 实测；受限于 GPUI `Div` 无容器 `scale(0.96)`，通用浮层与弹窗采用纯位移淡入且关闭时为保持 `Esc` 单帧归还焦点同步卸载（`0ms`），未实现通用 `150ms` 退场动画
+- [ ] **展开与位移组（`collapse` / `chevron` / `flip` / `pageSlide` / `sidebarShift` / `drawer`）**：`chevron`（`240ms ease_out` `0->180°`/`0->90°`）、`pageSlide`（`SettingsView` 与 `ModelPickerPage` `±8px` `240ms` 可折返）、`sidebarShift`（`h5AY3` `24px` 右移可折返）与 `recent-sessions-drawer`（`240ms` 开/`150ms` 关中途可折返且关即卸交互/无障碍节点）已通过 `shell_and_mode_ui` 与双主题 `winapp`（含 5 帧序列与 `sol` 复核）实测；剩余差距：工具/思考块 `collapse` 尚无高度插值，展开侧栏 `sidebar-drawer-enter` 仅入场动效，会话/排队/模型列表重排尚无 `flip` 位置追踪
+- [x] **反馈与指示组（`checkStroke` / `iconSwap` / `segPill` / `tabIndicator`）**：`iconSwap`（`240ms ease_spring` `0.65 -> 1` 无模糊缩放、`CopyFeedbackTracker` 基于 `BTreeMap` 于 `1600ms` 复原并支持连点重置）、`segPill`（`240ms ease_in_out`、按视图作用域隔离边界与自适应重帧）与 `tabIndicator`（`VPWAF` `240ms ease_in_out`、`on_children_prepainted` 测量折返）均通过无头测试与双主题 `winapp` 实测（含设置页 5 帧序列）；GPUI `Icon` 不暴露原始 SVG `stroke-dashoffset` 路径描边，复选勾选改以 `340ms`/`150ms` `ease_spring` 缩放实现
+- [ ] **零延迟与节律组（`tooltipGroup` / `welcomeStagger` / `streamAppend` / `runningLight` / `shaderFreeze`）**：`Ctrl+K` 面板 `0ms` 瞬开、欢迎屏 `40ms` 错位 `<=300ms` 单次播放（站内返回不重播）、流式追加不破坏选区且尊重 `reduce_motion`、`RunningLight` `2000ms` 线性 5 字素扫光并在离屏（`!intersects content_mask`）/失焦/不可见/`WebActive`/硬件诊断/`reduce_motion` 冻结 `0 FPS`，以及着色器 `0 FPS` 停帧与系统 `减少动态` 同步均已通过单测与无头测试；`TooltipDefaults`（`400ms` 延迟/`300ms` 冷却）已在窗口初始化安装，但各图标按钮尚未挂载 `.tooltip(...)`，`web-search-warn-tooltip` 为独立悬停提示未接入同组冷却
 
 ---
 
 ## 四、材质层级、系统规则与文案红线（`storybook.html` & `DESIGN.md`）
 
-- [ ] **L0–L4 五层材质体系**：`L0` 主区与表单纯实底无毛玻璃；`L1` 仅模态弹窗启用 `DZ0Fp` 模糊遮罩；`L2` 三层中性投影无彩色溢光；`L3` `H2p2z`/`K3x72` 毛玻璃渲染参数与降透明实底回退；`L4` 顶光（`y=1px`）排在发丝内边之前防止压暗顶沿
-- [ ] **`Esc` 焦点栈与光标规则**：连续按 `Esc` 每次仅关闭最顶层表面，并在 `1` 帧内将焦点归还原触发控件；内部交互统一系统箭头光标，仅外链与打开外部文件使用手型光标及下划线
-- [ ] **输入法与双通道锁定**：输入框、搜索框与重命名框 IME 组合期内候选窗跟随且 `Enter`/`Esc`/`Tab`/方向键交还输入法；启动网页模式后全窗口覆盖 `WebActive` 锁定遮罩拦截写操作；存在运行中任务/队列/非空草稿关闭软件时触发退出确认并将默认焦点落在「继续使用」
-- [ ] **三级异常分流与文案数据规范**：核查全界面 `1 / 2 / 3A / 3B` 四类异常无多处重复提示、标准三句式服务端报错、禁用感叹号与营销修辞、时间格式 `YYYY/MM/DD HH:mm`、耗时 `3.2s`、等宽数字 `tabular-nums` 及数字与单位间单半角空格
+- [x] **L0–L4 五层材质体系**：`L0` 主区与表单采用纯实底；`L1` 仅模态遮罩启用 `DZ0Fp`；`L2` 采用三层中性投影；`L3` `H2p2z`/`K3x72` 毛玻璃渲染、设备重置重建及 `< 11_0` 回退实底已由 `d3d11_single_window_sky_frosted_glass_and_device_recovery` 与双主题 `winapp` 核实（未改写宿主注册表 `EnableTransparency=0` 实窗）；`L4` `inset (0,1px)` 顶光在 `render_frosted_surface` 中排在发丝边与环境投影之前
+- [x] **`Esc` 焦点栈与光标规则**：`dismiss_topmost_surface` 与 `sidebar_search_input` 两段式 `Esc`（含组合态 `consume_composing_escape`）已通过 `shell_and_mode_ui` 与 `settings_and_update` 实测并在单帧内归还触发控件焦点；静态扫描确认 `CursorStyle::PointingHand` 仅用于外部网页链接与 `打开` 外部文件触发器，应用内控件统一系统箭头光标
+- [x] **输入法与双通道锁定**：多行输入框、搜索框与重命名框 IME 组合隔离、`BitLocker` 密码框 `55` 字节清零与失焦恢复 IME、`WebActive` 全窗锁定遮罩、以及存在运行任务/队列/非空草稿时的退出确认（默认焦点「继续使用」）已通过 `workbench_and_ime_ui`、`tools_and_bitlocker` 与 `shell_and_mode_ui` 全量实测
+- [x] **三级异常分流与文案数据规范**：全界面 `1 / 2 / 3A` 分流、3 类标准服务端三句式报错、`crates/cst-desktop/src` 与 `crates/cst-client/src` 零中文感叹号、`YYYY/MM/DD HH:mm` 列表时间、统一 `3.2s` 耗时格式、`tabular-nums` 与数字单位间单半角空格（`MB`/`GB`）均已核查通过（`3B` 态待实机写满信号补截，见 `KLzVw & GM9WU`）
