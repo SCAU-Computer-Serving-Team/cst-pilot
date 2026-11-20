@@ -98,13 +98,12 @@ impl WorkbenchView {
         let sub_list = cx.subscribe_in(&message_list, window, Self::on_message_list_event);
 
         let welcome_stagger_done = initial_sid.is_some();
-        let welcome_stagger_start = (!welcome_stagger_done).then(Instant::now);
 
         Self {
             client,
             active_session_id: initial_sid,
             sky_time: 0.0,
-            welcome_stagger_start,
+            welcome_stagger_start: None,
             welcome_stagger_done,
             home_composer,
             session_composer,
@@ -674,8 +673,9 @@ impl Render for WorkbenchView {
                     self.welcome_stagger_done = true;
                     (1.0, 0.0, 1.0, 0.0, 1.0, 0.0)
                 } else {
-                    let started = *self.welcome_stagger_start.get_or_insert_with(Instant::now);
-                    let elapsed = started.elapsed();
+                    let now = cx.background_executor().now();
+                    let started = *self.welcome_stagger_start.get_or_insert(now);
+                    let elapsed = now.saturating_duration_since(started);
                     if elapsed >= motion::WELCOME_MAX_TOTAL {
                         self.welcome_stagger_done = true;
                         (1.0, 0.0, 1.0, 0.0, 1.0, 0.0)

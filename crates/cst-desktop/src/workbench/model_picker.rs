@@ -2,7 +2,6 @@ use std::f32::consts::{FRAC_PI_2, TAU};
 use std::rc::Rc;
 
 use cst_client::{ModelChoiceDto, ModelsSnapshot};
-use gpui::{Animation, AnimationExt as _};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::component::Icon;
@@ -523,8 +522,7 @@ pub type ChangePickerPageFn = Rc<dyn Fn(ModelPickerPage, &mut Window, &mut App)>
 #[allow(clippy::too_many_arguments)]
 pub fn render_model_picker_popover(
     page: ModelPickerPage,
-    page_epoch: u64,
-    page_slide_dir: f32,
+    (page_opacity, page_offset): (f32, gpui_kit::Pixels),
     highlighted_idx: usize,
     scroll_handle: &gpui_kit::ScrollHandle,
     scoped_models: &[ModelChoiceDto],
@@ -865,21 +863,7 @@ pub fn render_model_picker_popover(
         }
     }
 
-    card = card.child(if page_epoch > 0 {
-        page_body
-            .with_animation(
-                ("model-picker-page-slide", page_epoch),
-                Animation::new(motion::NORMAL).with_easing(motion::ease_out()),
-                move |el, d| {
-                    let t = d.clamp(0.0, 1.0);
-                    el.opacity(0.01 + 0.99 * t)
-                        .ml(px(8.0 * page_slide_dir * (1.0 - t)))
-                },
-            )
-            .into_any_element()
-    } else {
-        page_body.into_any_element()
-    });
+    card = card.child(page_body.opacity(page_opacity).ml(page_offset));
 
     motion::animate_popover_enter(
         "composer-model-pop-anim",

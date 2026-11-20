@@ -6,7 +6,7 @@ pub mod window_bounds;
 
 use std::collections::BTreeSet;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use cst_client::{
     ChannelModeDto, ClientError, ClientHandle, ClientSnapshot, DesktopSettingsPatchDto,
@@ -15,8 +15,10 @@ use cst_client::{
 use gpui::{Animation, AnimationExt as _};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement as _;
+use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
     KeyBinding, ParentElement, Pixels, Point, Render, SharedString, StatefulInteractiveElement,
@@ -38,7 +40,7 @@ use crate::settings::update_dialog::{UpdateDialogState, render_update_dialog};
 use crate::settings::{SettingsCategory, SettingsView, SettingsViewEvent};
 use crate::shell::exit_dialog::render_exit_confirm_dialog;
 use crate::shell::overlays::{
-    BannerCountdownState, render_top_notice_banner, render_web_active_lock_overlay,
+    BannerCountdownState, BannerDeadline, render_top_notice_banner, render_web_active_lock_overlay,
     render_workspace_error_bar,
 };
 use crate::shell::sidebar::{
@@ -268,6 +270,14 @@ impl AppShell {
             cx.notify();
         }));
 
+        if cx.has_global::<crate::OwnedClientGlobal>() {
+            subscriptions.push(cx.observe_window_activation(window, |_, window, cx| {
+                if window.is_window_active() {
+                    crate::sync_system_reduce_motion(cx);
+                }
+            }));
+        }
+
         // Observe window bounds changes -> 300ms debounced PATCH to `/api/app/settings`
         subscriptions.push(cx.observe_window_bounds(window, |this, window, cx| {
             this.on_window_geometry_changed(window, cx);
@@ -451,6 +461,8 @@ impl AppShell {
             self.account_menu_open = false;
             self.account_menu_prior_focus = None;
             if self.route == ShellRoute::Login || route == ShellRoute::Login {
+                self.set_banner_hovered(true, self.error_banner_timer.generation(), false, cx);
+                self.set_banner_hovered(false, self.notice_banner_timer.generation(), false, cx);
                 self.login_view.update(cx, |view, cx| {
                     view.set_active(route == ShellRoute::Login, cx)
                 });
@@ -484,6 +496,8 @@ impl AppShell {
                 }
             }
             self.rename_modal = None;
+            self.recent_drawer_open = false;
+            self.recent_drawer_prior_focus = None;
             self.sidebar_context_menu = None;
             self.sidebar_menu_prior_focus = None;
             self.sidebar_batch_mode = false;
@@ -538,6 +552,13 @@ impl AppShell {
                     .update_state
                     .as_ref()
                     .is_some_and(|update| update.status.phase == UpdatePhaseDto::Launching))
+    }
+
+    fn close_recent_drawer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.recent_drawer_open = false;
+        let prior = self.recent_drawer_prior_focus.take();
+        self.restore_surface_focus(prior, window, cx);
+        cx.notify();
     }
 
     fn close_account_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -611,55 +632,66 @@ impl AppShell {
             self.missing_key_cancel_focus.focus(window, cx);
         }
     }
-
-    fn schedule_error_dismiss_after(
+    fn schedule_banner_dismiss(
         &mut self,
-        gen_id: u64,
-        wait: Duration,
+        is_error: bool,
+        deadline: BannerDeadline,
         cx: &mut Context<Self>,
     ) {
-        self.error_dismiss_task = Some(cx.spawn(async move |weak, cx| {
-            cx.background_executor().timer(wait).await;
+        let task = cx.spawn(async move |weak, cx| {
+            let executor = cx.background_executor();
+            let wait = deadline.remaining_at(executor.now());
+            executor.timer(wait).await;
             let _ = weak.update(cx, |this, cx| {
-                if this.error_banner_timer.should_dismiss(gen_id) {
-                    this.workspace_error = None;
-                    this.error_dismiss_task = None;
+                let (timer, task, message) = if is_error {
+                    (
+                        &mut this.error_banner_timer,
+                        &mut this.error_dismiss_task,
+                        &mut this.workspace_error,
+                    )
+                } else {
+                    (
+                        &mut this.notice_banner_timer,
+                        &mut this.notice_dismiss_task,
+                        &mut this.top_notice,
+                    )
+                };
+                if timer.expire(deadline, cx.background_executor().now()) {
+                    *message = None;
+                    *task = None;
                     cx.notify();
                 }
             });
-        }));
-    }
-
-    fn schedule_notice_dismiss_after(
-        &mut self,
-        gen_id: u64,
-        wait: Duration,
-        cx: &mut Context<Self>,
-    ) {
-        self.notice_dismiss_task = Some(cx.spawn(async move |weak, cx| {
-            cx.background_executor().timer(wait).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.notice_banner_timer.should_dismiss(gen_id) {
-                    this.top_notice = None;
-                    this.notice_dismiss_task = None;
-                    cx.notify();
-                }
-            });
-        }));
-    }
-
-    fn set_banner_hovered(&mut self, is_error: bool, hovered: bool, cx: &mut Context<Self>) {
-        let now = Instant::now();
+        });
         if is_error {
-            if let Some((gen_id, wait)) = self.error_banner_timer.set_hovered(hovered, now) {
-                self.schedule_error_dismiss_after(gen_id, wait, cx);
-            } else if hovered {
-                self.error_dismiss_task = None;
-            }
-        } else if let Some((gen_id, wait)) = self.notice_banner_timer.set_hovered(hovered, now) {
-            self.schedule_notice_dismiss_after(gen_id, wait, cx);
-        } else if hovered {
-            self.notice_dismiss_task = None;
+            self.error_dismiss_task = Some(task);
+        } else {
+            self.notice_dismiss_task = Some(task);
+        }
+    }
+
+    fn set_banner_hovered(
+        &mut self,
+        is_error: bool,
+        generation: u64,
+        hovered: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !is_error && self.workspace_error.is_some() {
+            return;
+        }
+        let (timer, task) = if is_error {
+            (&mut self.error_banner_timer, &mut self.error_dismiss_task)
+        } else {
+            (&mut self.notice_banner_timer, &mut self.notice_dismiss_task)
+        };
+        if timer.generation() != generation || timer.is_hovered() == hovered {
+            return;
+        }
+        if let Some(deadline) = timer.set_hovered(hovered, cx.background_executor().now()) {
+            self.schedule_banner_dismiss(is_error, deadline, cx);
+        } else if timer.is_hovered() {
+            *task = None;
         }
     }
 
@@ -668,16 +700,22 @@ impl AppShell {
         message: impl Into<SharedString>,
         cx: &mut Context<Self>,
     ) {
+        // The error replaces the notice hitbox. Unmounting it emits no leave.
+        self.set_banner_hovered(false, self.notice_banner_timer.generation(), false, cx);
         self.workspace_error = Some(message.into());
-        let (gen_id, wait) = self.error_banner_timer.start(Instant::now());
-        self.schedule_error_dismiss_after(gen_id, wait, cx);
+        let deadline = self
+            .error_banner_timer
+            .start(cx.background_executor().now());
+        self.schedule_banner_dismiss(true, deadline, cx);
         cx.notify();
     }
 
     pub fn show_top_notice(&mut self, message: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.top_notice = Some(message.into());
-        let (gen_id, wait) = self.notice_banner_timer.start(Instant::now());
-        self.schedule_notice_dismiss_after(gen_id, wait, cx);
+        let deadline = self
+            .notice_banner_timer
+            .start(cx.background_executor().now());
+        self.schedule_banner_dismiss(false, deadline, cx);
         cx.notify();
     }
 
@@ -813,6 +851,18 @@ impl AppShell {
                     }
                     if prev_mode != this.snapshot.channel_mode {
                         if this.snapshot.channel_mode == ChannelModeDto::WebActive {
+                            this.set_banner_hovered(
+                                true,
+                                this.error_banner_timer.generation(),
+                                false,
+                                cx,
+                            );
+                            this.set_banner_hovered(
+                                false,
+                                this.notice_banner_timer.generation(),
+                                false,
+                                cx,
+                            );
                             if this.exit_dialog.is_none() {
                                 this.web_lock_prior_focus = window.focused(cx);
                                 this.web_lock_switch_focus.focus(window, cx);
@@ -1256,11 +1306,7 @@ impl AppShell {
             return true;
         }
         if self.recent_drawer_open {
-            self.recent_drawer_open = false;
-            if let Some(prev) = self.recent_drawer_prior_focus.take() {
-                prev.focus(window, cx);
-            }
-            cx.notify();
+            self.close_recent_drawer(window, cx);
             return true;
         }
         if self.dismiss_sidebar_menu(window, cx) {
@@ -1320,9 +1366,19 @@ impl AppShell {
         {
             return true;
         }
-        if !self.sidebar_collapsed && !self.sidebar_search_input.read(cx).value().is_empty() {
-            self.sidebar_search_input
-                .update(cx, |st, cx| st.set_value("", window, cx));
+        if !self.sidebar_collapsed
+            && self
+                .sidebar_search_input
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
+        {
+            if self.sidebar_search_input.read(cx).value().is_empty() {
+                self.sidebar_toggle_focus().focus(window, cx);
+            } else {
+                self.sidebar_search_input
+                    .update(cx, |st, cx| st.set_value("", window, cx));
+            }
             cx.notify();
             return true;
         }
@@ -1584,6 +1640,7 @@ impl AppShell {
     fn activate_session_by_id(&mut self, session_id: String, cx: &mut Context<Self>) {
         self.set_route(ShellRoute::Session, cx);
         self.recent_drawer_open = false;
+        self.recent_drawer_prior_focus = None;
         self.sidebar_context_menu = None;
         let client = self.client.clone();
         cx.spawn(async move |weak, cx| {
@@ -2172,6 +2229,7 @@ impl AppShell {
 
     fn render_recent_drawer_popover(
         &self,
+        progress: f32,
         active_session_id: Option<&str>,
         palette: &DesktopPalette,
         transparency_enabled: bool,
@@ -2184,11 +2242,13 @@ impl AppShell {
             sorted.truncate(MAX_RECENT_SIDEBAR_SESSIONS);
         }
 
+        let interactive = self.recent_drawer_open;
         let mut rows = div()
             .id("recent-drawer-rows")
             .relative()
             .max_h(px(320.0))
-            .overflow_y_scroll()
+            .when(interactive, |el| el.overflow_y_scroll())
+            .when(!interactive, |el| el.overflow_hidden())
             .flex()
             .flex_col()
             .gap(space::MICRO);
@@ -2223,8 +2283,6 @@ impl AppShell {
                         },
                     )
                     .id(drawer_row_id.clone())
-                    .test_support()
-                    .a11y_listitem(drawer_row_id, title.clone(), is_active)
                     .h(height::CONTROL)
                     .px(space::SM)
                     .rounded(radius::CONTROL)
@@ -2240,12 +2298,29 @@ impl AppShell {
                     })
                     .flex()
                     .items_center()
-                    .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
-                    .on_click(move |_, _, cx| {
-                        let target = sid.clone();
-                        ent.update(cx, |this, cx| this.activate_session_by_id(target, cx));
-                    })
-                    .child(div().w_full().truncate().child(cjk_inline_label(title))),
+                    .child(
+                        div()
+                            .w_full()
+                            .truncate()
+                            .child(cjk_inline_label(title.clone())),
+                    )
+                    .map(|el| {
+                        if interactive {
+                            el.test_support()
+                                .a11y_listitem(drawer_row_id, title, is_active)
+                                .hover(|s| {
+                                    s.bg(palette.bg_item_hover).text_color(palette.text_primary)
+                                })
+                                .on_click(move |_, _, cx| {
+                                    ent.update(cx, |this, cx| {
+                                        this.activate_session_by_id(sid.clone(), cx)
+                                    });
+                                })
+                                .into_any_element()
+                        } else {
+                            el.into_any_element()
+                        }
+                    }),
                 );
             }
         }
@@ -2253,22 +2328,25 @@ impl AppShell {
         let ent_all = entity.clone();
         let ent_backdrop = entity.clone();
 
+        let width = px(264.0);
         div()
             .absolute()
-            .top_0()
+            .top(layout::TOPBAR_HEIGHT)
             .left_0()
             .right_0()
             .bottom_0()
-            .on_mouse_down(gpui::MouseButton::Left, move |_, _, cx| {
-                ent_backdrop.update(cx, |this, cx| {
-                    this.recent_drawer_open = false;
-                    cx.notify();
-                });
+            .when(interactive, |el| {
+                el.occlude()
+                    .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
+                        ent_backdrop.update(cx, |this, cx| this.close_recent_drawer(window, cx));
+                    })
             })
             .child(
-                div().absolute().top(px(44.0)).left(px(148.0)).child(
-                    motion::animate_popover_enter(
-                        "recent-drawer-anim",
+                div()
+                    .absolute()
+                    .top(space::XS)
+                    .left(px(148.0) - width * (1.0 - progress))
+                    .child(
                         render_frosted_surface(
                             "recent-sessions-drawer",
                             FrostedGlassSpec::popover_h2p2z(palette),
@@ -2276,9 +2354,12 @@ impl AppShell {
                             transparency_enabled,
                             scale_factor,
                         )
-                        .test_support()
-                        .a11y_dialog("recent-sessions-drawer", "最近会话抽屉")
-                        .w(px(264.0))
+                        .opacity(0.01 + 0.99 * progress)
+                        .shadow(motion::scale_shadows(
+                            palette.craft_stack_shadows(),
+                            progress.powi(3),
+                        ))
+                        .w(width)
                         .p(space::XS)
                         .rounded(radius::ROW)
                         .border_1()
@@ -2286,7 +2367,6 @@ impl AppShell {
                         .flex()
                         .flex_col()
                         .gap(space::MICRO)
-                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .child(rows)
                         .child(
                             div()
@@ -2298,8 +2378,6 @@ impl AppShell {
                         .child(
                             apply_scale(div(), scale::UI)
                                 .id("drawer-open-all-sessions-btn")
-                                .test_support()
-                                .a11y_button("drawer-open-all-sessions-btn", "查看全部会话")
                                 .relative()
                                 .h(height::CONTROL)
                                 .px(space::SM)
@@ -2308,25 +2386,45 @@ impl AppShell {
                                 .flex()
                                 .items_center()
                                 .gap(space::SM)
-                                .hover(|s| s.bg(palette.bg_item_active))
-                                .on_click(move |_, _, cx| {
-                                    ent_all.update(cx, |this, cx| {
-                                        this.recent_drawer_open = false;
-                                        this.set_route(ShellRoute::AllSessions, cx);
-                                        cx.notify();
-                                    });
-                                })
                                 .child(
                                     Icon::new(IconName::RotateCcwClock)
                                         .size(px(16.0))
                                         .text_color(palette.text_secondary),
                                 )
-                                .child(cjk_inline_label("查看全部会话")),
-                        ),
-                        palette.craft_stack_shadows(),
-                        -6.0,
+                                .child(cjk_inline_label("查看全部会话"))
+                                .map(|el| {
+                                    if interactive {
+                                        el.test_support()
+                                            .a11y_button(
+                                                "drawer-open-all-sessions-btn",
+                                                "查看全部会话",
+                                            )
+                                            .hover(|s| s.bg(palette.bg_item_active))
+                                            .on_click(move |_, window, cx| {
+                                                ent_all.update(cx, |this, cx| {
+                                                    this.close_recent_drawer(window, cx);
+                                                    this.set_route(ShellRoute::AllSessions, cx);
+                                                });
+                                            })
+                                            .into_any_element()
+                                    } else {
+                                        el.into_any_element()
+                                    }
+                                }),
+                        )
+                        .map(|el| {
+                            if interactive {
+                                el.test_support()
+                                    .a11y_dialog("recent-sessions-drawer", "最近会话抽屉")
+                                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation()
+                                    })
+                                    .into_any_element()
+                            } else {
+                                el.into_any_element()
+                            }
+                        }),
                     ),
-                ),
             )
     }
 
@@ -2707,28 +2805,32 @@ impl Render for AppShell {
 
             if let Some(ref err_msg) = self.workspace_error {
                 let ent_hover = entity.clone();
+                let generation = self.error_banner_timer.generation();
                 login_shell = login_shell.child(render_workspace_error_bar(
                     err_msg.clone(),
-                    self.error_banner_timer.generation(),
+                    generation,
                     &palette,
                     transparency_enabled,
                     scale_factor,
                     move |hovered, _, cx| {
-                        let hov = *hovered;
-                        ent_hover.update(cx, |this, cx| this.set_banner_hovered(true, hov, cx));
+                        ent_hover.update(cx, |this, cx| {
+                            this.set_banner_hovered(true, generation, *hovered, cx)
+                        });
                     },
                 ));
             } else if let Some(ref notice) = self.top_notice {
                 let ent_hover = entity.clone();
+                let generation = self.notice_banner_timer.generation();
                 login_shell = login_shell.child(render_top_notice_banner(
                     notice.clone(),
-                    self.notice_banner_timer.generation(),
+                    generation,
                     &palette,
                     transparency_enabled,
                     scale_factor,
                     move |hovered, _, cx| {
-                        let hov = *hovered;
-                        ent_hover.update(cx, |this, cx| this.set_banner_hovered(false, hov, cx));
+                        ent_hover.update(cx, |this, cx| {
+                            this.set_banner_hovered(false, generation, *hovered, cx)
+                        });
                     },
                 ));
             }
@@ -2760,11 +2862,18 @@ impl Render for AppShell {
                         }),
                         on_toggle_recent_drawer: Rc::new(move |w, cx| {
                             e2.update(cx, |this, cx| {
-                                this.recent_drawer_open = !this.recent_drawer_open;
                                 if this.recent_drawer_open {
-                                    this.recent_drawer_prior_focus = w.focused(cx);
+                                    this.close_recent_drawer(w, cx);
+                                } else {
+                                    if this.account_menu_open {
+                                        this.close_account_menu(w, cx);
+                                    }
+                                    this.recent_drawer_open = true;
+                                    this.recent_drawer_prior_focus =
+                                        Some(this.topbar_recent_focus.clone());
+                                    this.topbar_recent_focus.focus(w, cx);
+                                    cx.notify();
                                 }
-                                cx.notify();
                             });
                         }),
                         on_new_session: Rc::new(move |_, cx| {
@@ -2842,28 +2951,32 @@ impl Render for AppShell {
 
             if let Some(ref err_msg) = self.workspace_error {
                 let ent_hover = entity.clone();
+                let generation = self.error_banner_timer.generation();
                 workspace_card = workspace_card.child(render_workspace_error_bar(
                     err_msg.clone(),
-                    self.error_banner_timer.generation(),
+                    generation,
                     &palette,
                     transparency_enabled,
                     scale_factor,
                     move |hovered, _, cx| {
-                        let hov = *hovered;
-                        ent_hover.update(cx, |this, cx| this.set_banner_hovered(true, hov, cx));
+                        ent_hover.update(cx, |this, cx| {
+                            this.set_banner_hovered(true, generation, *hovered, cx)
+                        });
                     },
                 ));
             } else if let Some(ref notice) = self.top_notice {
                 let ent_hover = entity.clone();
+                let generation = self.notice_banner_timer.generation();
                 workspace_card = workspace_card.child(render_top_notice_banner(
                     notice.clone(),
-                    self.notice_banner_timer.generation(),
+                    generation,
                     &palette,
                     transparency_enabled,
                     scale_factor,
                     move |hovered, _, cx| {
-                        let hov = *hovered;
-                        ent_hover.update(cx, |this, cx| this.set_banner_hovered(false, hov, cx));
+                        ent_hover.update(cx, |this, cx| {
+                            this.set_banner_hovered(false, generation, *hovered, cx)
+                        });
                     },
                 ));
             }
@@ -3146,6 +3259,9 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| {
                 this.toggle_command_palette(window, cx);
             }))
+            .capture_action(cx.listener(|this, _: &Escape, window, cx| {
+                crate::sessions::consume_composing_escape(&this.sidebar_search_input, window, cx);
+            }))
             .on_action(cx.listener(|this, _: &DismissTopSurface, window, cx| {
                 let _ = this.dismiss_topmost_surface(window, cx);
             }))
@@ -3167,14 +3283,30 @@ impl Render for AppShell {
                 ));
             }
 
-            if self.recent_drawer_open && self.sidebar_collapsed {
-                root = root.child(self.render_recent_drawer_popover(
-                    active_session_id.as_deref(),
-                    &palette,
-                    transparency_enabled,
-                    scale_factor,
-                    &entity,
-                ));
+            if self.sidebar_collapsed && !web_locked {
+                let open = self.recent_drawer_open;
+                let progress = transition(
+                    "shell-recent-drawer-presence",
+                    if open { 1.0_f32 } else { 0.0 },
+                    Transition::new(if open {
+                        motion::NORMAL
+                    } else {
+                        motion::SURFACE_CLOSE
+                    })
+                    .ease(motion::ease_out()),
+                    window,
+                    cx,
+                );
+                if open || progress > 0.0 {
+                    root = root.child(self.render_recent_drawer_popover(
+                        progress,
+                        active_session_id.as_deref(),
+                        &palette,
+                        transparency_enabled,
+                        scale_factor,
+                        &entity,
+                    ));
+                }
             }
 
             if self.account_menu_open {

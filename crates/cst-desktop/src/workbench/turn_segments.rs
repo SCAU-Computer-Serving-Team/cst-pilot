@@ -679,20 +679,8 @@ pub fn process_segment_label(
 }
 
 pub fn format_duration_zh(ms: u64) -> String {
-    let seconds = ((ms as f64) / 1000.0).round().max(0.0) as u64;
-    if seconds < 1 {
-        return "不足 1 秒".to_owned();
-    }
-    if seconds < 60 {
-        return format!("{seconds} 秒");
-    }
-    let minutes = seconds / 60;
-    let rest = seconds % 60;
-    if rest > 0 {
-        format!("{minutes} 分 {rest} 秒")
-    } else {
-        format!("{minutes} 分钟")
-    }
+    let tenths = ms / 100 + u64::from(ms % 100 >= 50);
+    format!("{}.{:01}s", tenths / 10, tenths % 10)
 }
 
 /// Segments `text` into extended Unicode grapheme clusters (`RunningLight` `lightGlyphs` parity).
@@ -723,15 +711,15 @@ pub fn glyph_light_strength(index: usize, count: usize, phase: f32) -> f32 {
 /// Immediately stops requesting animation frames (`0 FPS`) when `!active`, window unfocused, minimized, or `reduce_motion`.
 pub fn render_running_light_label(
     text: &str,
-    active: bool,
+    sweep_allowed: bool,
     started_at: Instant,
-    reduce_motion: bool,
     palette: &DesktopPalette,
     window: &mut Window,
 ) -> impl IntoElement {
     let vp = window.viewport_size();
     let minimized = f32::from(vp.width) <= 1.0 || f32::from(vp.height) <= 1.0;
-    let should_sweep = active && !reduce_motion && window.is_window_active() && !minimized;
+    let should_sweep =
+        sweep_allowed && window.is_window_active() && window.is_visible() && !minimized;
 
     if !should_sweep {
         return apply_scale(div(), scale::BODY)
@@ -739,9 +727,8 @@ pub fn render_running_light_label(
             .child(cjk_inline_label(text.to_owned()));
     }
 
-    window.request_animation_frame();
-    let elapsed_ms = started_at.elapsed().as_millis() as u64;
-    let phase = ((elapsed_ms % 2000) as f32) / 2000.0;
+    let cycle_ms = crate::theme::motion::RUNNING_LIGHT_CYCLE.as_millis();
+    let phase = (started_at.elapsed().as_millis() % cycle_ms) as f32 / cycle_ms as f32;
     let glyphs = light_glyphs(text);
     let count = glyphs.len();
 
@@ -750,8 +737,21 @@ pub fn render_running_light_label(
 
     let mut row = apply_scale(div(), scale::BODY)
         .pb(crate::theme::space::MICRO)
+        .relative()
         .flex()
-        .items_center();
+        .items_center()
+        .child(
+            gpui_kit::canvas(
+                |bounds, window, _| {
+                    if bounds.intersects(&window.content_mask().bounds) {
+                        window.request_animation_frame();
+                    }
+                },
+                |_, (), _, _| {},
+            )
+            .absolute()
+            .size_full(),
+        );
     for (idx, g) in glyphs.into_iter().enumerate() {
         let strength = glyph_light_strength(idx, count, phase);
         // Strength peaks at 0.48 -> normalize to [0, 1] blend toward primary highlight

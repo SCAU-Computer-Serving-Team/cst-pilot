@@ -1102,6 +1102,7 @@ impl MessageListView {
         is_live_turn: bool,
         mono_family: SharedString,
         reduce_motion: bool,
+        running_light_allowed: bool,
         transparency_enabled: bool,
         scale_factor: f32,
         palette: &DesktopPalette,
@@ -1277,9 +1278,8 @@ impl MessageListView {
 
                     header = header.child(render_running_light_label(
                         &header_text,
-                        is_live_turn && seg_idx == 0,
+                        is_live_turn && seg_idx == 0 && running_light_allowed,
                         started_instant,
-                        reduce_motion,
                         palette,
                         window,
                     ));
@@ -1855,6 +1855,9 @@ impl Render for MessageListView {
 
         let (turns, tool_results) = group_turns_and_results(&combined_entries);
         let live_turn_idx = active_turn_index(&turns, session.running);
+        let running_light_allowed = !reduce_motion
+            && snap.channel_mode != cst_client::ChannelModeDto::WebActive
+            && !crate::background::has_active_hardware_diagnostic(&snap);
 
         // Tail sliding window (`DEFAULT_VISIBLE_TURN_WINDOW = 30`)
         let total_turns = turns.len();
@@ -1927,6 +1930,7 @@ impl Render for MessageListView {
                 is_live,
                 mono_family.clone(),
                 reduce_motion,
+                running_light_allowed,
                 transparency_enabled,
                 scale_factor,
                 &palette,

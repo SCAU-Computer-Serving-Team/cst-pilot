@@ -202,8 +202,7 @@ pub struct ComposerView {
     model_change_pending: bool,
     picker_open: bool,
     picker_page: ModelPickerPage,
-    picker_page_epoch: u64,
-    picker_slide_dir: f32,
+    picker_slide: motion::PageSlide,
     picker_hi_idx: usize,
     picker_scroll: ScrollHandle,
     picker_prior_focus: Option<FocusHandle>,
@@ -277,8 +276,7 @@ impl ComposerView {
             model_change_pending: false,
             picker_open: false,
             picker_page: ModelPickerPage::Main,
-            picker_page_epoch: 0,
-            picker_slide_dir: 1.0,
+            picker_slide: motion::PageSlide::default(),
             picker_hi_idx: 0,
             picker_scroll: ScrollHandle::new(),
             picker_prior_focus: None,
@@ -370,7 +368,7 @@ impl ComposerView {
         }
         if self.picker_open {
             if self.picker_page != ModelPickerPage::Main {
-                self.set_picker_page(ModelPickerPage::Main);
+                self.set_picker_page(ModelPickerPage::Main, cx);
                 cx.notify();
                 return true;
             }
@@ -569,18 +567,18 @@ impl ComposerView {
 
     fn close_picker(&mut self) -> Option<FocusHandle> {
         self.picker_open = false;
-        self.picker_page_epoch = 0;
+        self.picker_slide = motion::PageSlide::default();
         self.picker_prior_focus.take()
     }
 
-    fn set_picker_page(&mut self, page: ModelPickerPage) {
+    fn set_picker_page(&mut self, page: ModelPickerPage, cx: &App) {
         if self.picker_page != page {
-            self.picker_slide_dir = if matches!(page, ModelPickerPage::Main) {
+            let direction = if matches!(page, ModelPickerPage::Main) {
                 -1.0
             } else {
                 1.0
             };
-            self.picker_page_epoch = self.picker_page_epoch.wrapping_add(1);
+            self.picker_slide.start(direction, cx);
         }
         self.picker_page = page;
         self.picker_hi_idx = 0;
@@ -617,11 +615,14 @@ impl ComposerView {
             "end" if count > 0 => self.picker_hi_idx = count - 1,
             "down" | "up" | "home" | "end" => {}
             "enter" if !event.is_held => match self.picker_page {
-                ModelPickerPage::Main => self.set_picker_page(if index == 0 {
-                    ModelPickerPage::Models
-                } else {
-                    ModelPickerPage::Thinking
-                }),
+                ModelPickerPage::Main => self.set_picker_page(
+                    if index == 0 {
+                        ModelPickerPage::Models
+                    } else {
+                        ModelPickerPage::Thinking
+                    },
+                    cx,
+                ),
                 ModelPickerPage::Models => {
                     if let Some(model) = scoped.get(index) {
                         self.select_model(model.provider.clone(), model.id.clone(), cx);
@@ -680,7 +681,7 @@ impl ComposerView {
             });
         })
         .detach();
-        self.set_picker_page(ModelPickerPage::Main);
+        self.set_picker_page(ModelPickerPage::Main, cx);
         cx.notify();
     }
 
@@ -1964,7 +1965,8 @@ impl Render for ComposerView {
                         this.close_picker();
                     } else {
                         this.picker_open = true;
-                        this.set_picker_page(ModelPickerPage::Main);
+                        this.picker_page = ModelPickerPage::Main;
+                        this.set_picker_page(ModelPickerPage::Main, cx);
                         this.picker_prior_focus = w.focused(cx);
                         this.model_btn_focus.focus(w, cx);
                     }
@@ -2241,8 +2243,7 @@ impl Render for ComposerView {
                     .pb(space::SM)
                     .child(render_model_picker_popover(
                         self.picker_page,
-                        self.picker_page_epoch,
-                        self.picker_slide_dir,
+                        self.picker_slide.sample(window, cx),
                         self.picker_hi_idx,
                         &self.picker_scroll,
                         &scoped_models,
@@ -2256,7 +2257,7 @@ impl Render for ComposerView {
                         scale_factor,
                         Rc::new(move |next_page, _, cx| {
                             ent_page.update(cx, |this, cx| {
-                                this.set_picker_page(next_page);
+                                this.set_picker_page(next_page, cx);
                                 cx.notify();
                             });
                         }),

@@ -10,7 +10,6 @@ use std::rc::Rc;
 use cst_client::{
     ClientHandle, DefaultViewDto, DesktopSettingsPatchDto, ThemeModeDto, UpdatePhaseDto,
 };
-use gpui::{Animation, AnimationExt as _};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::{
@@ -116,8 +115,7 @@ pub enum SettingsViewEvent {
 pub struct SettingsView {
     client: ClientHandle,
     category: SettingsCategory,
-    category_epoch: u64,
-    category_slide_dir: f32,
+    page_slide: motion::PageSlide,
     tab_rects: Rc<[Cell<(f32, f32)>; 4]>,
     providers_tab: Entity<ProvidersTabView>,
     preferences_tab: Entity<PreferencesTabView>,
@@ -160,8 +158,7 @@ impl SettingsView {
         Self {
             client,
             category: SettingsCategory::General,
-            category_epoch: 0,
-            category_slide_dir: 1.0,
+            page_slide: motion::PageSlide::default(),
             tab_rects: Rc::new(Default::default()),
             providers_tab,
             preferences_tab,
@@ -173,11 +170,11 @@ impl SettingsView {
         if self.category == category {
             return;
         }
-        self.leave(cx);
+        self.close_tab_surfaces(cx);
         let old_idx = self.category.index();
         let new_idx = category.index();
-        self.category_slide_dir = if new_idx >= old_idx { 1.0 } else { -1.0 };
-        self.category_epoch = self.category_epoch.wrapping_add(1);
+        self.page_slide
+            .start(if new_idx > old_idx { 1.0 } else { -1.0 }, cx);
         self.category = category;
         cx.notify();
     }
@@ -190,6 +187,11 @@ impl SettingsView {
     }
 
     pub fn leave(&mut self, cx: &mut Context<Self>) {
+        self.page_slide = motion::PageSlide::default();
+        self.close_tab_surfaces(cx);
+    }
+
+    fn close_tab_surfaces(&mut self, cx: &mut Context<Self>) {
         self.providers_tab.update(cx, ProvidersTabView::leave);
         self.preferences_tab.update(cx, PreferencesTabView::leave);
     }
@@ -227,16 +229,21 @@ impl Render for SettingsView {
         let rects_capture = Rc::clone(&self.tab_rects);
 
         let mut tab_bar = div()
-            .on_children_prepainted(move |bounds, _, _| {
-                if bounds.len() >= 4
-                    && let Some(first_x) = bounds.first().map(|b| b.origin.x)
-                {
-                    for i in 0..4 {
-                        rects_capture[i].set((
-                            f32::from(bounds[i].origin.x - first_x),
-                            f32::from(bounds[i].size.width),
-                        ));
-                    }
+            .on_children_prepainted(move |bounds, window, _| {
+                // Four in-flow tabs, optionally followed by the absolute indicator.
+                let [first, second, third, fourth, ..] = bounds.as_slice() else {
+                    return;
+                };
+                let mut changed = false;
+                for (rect, tab) in rects_capture.iter().zip([first, second, third, fourth]) {
+                    let next = (
+                        f32::from(tab.origin.x - first.origin.x),
+                        f32::from(tab.size.width),
+                    );
+                    changed |= rect.replace(next) != next;
+                }
+                if changed {
+                    window.request_animation_frame();
                 }
             })
             .id("settings-tabbar-vpwaf")
@@ -427,24 +434,8 @@ impl Render for SettingsView {
             }
         };
 
-        let content_wrap = if self.category_epoch > 0 {
-            let slide_dir = self.category_slide_dir;
-            div()
-                .w_full()
-                .child(content_el)
-                .with_animation(
-                    ("settings-page-slide", self.category_epoch),
-                    Animation::new(motion::NORMAL).with_easing(motion::ease_out()),
-                    move |el, d| {
-                        let t = d.clamp(0.0, 1.0);
-                        el.opacity(0.01 + 0.99 * t)
-                            .ml(px(8.0 * slide_dir * (1.0 - t)))
-                    },
-                )
-                .into_any_element()
-        } else {
-            content_el
-        };
+        let (opacity, offset) = self.page_slide.sample(window, cx);
+        let content_wrap = div().w_full().opacity(opacity).ml(offset).child(content_el);
 
         div()
             .id("settings-view-vpwaf")

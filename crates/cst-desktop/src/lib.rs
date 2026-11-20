@@ -325,6 +325,33 @@ pub fn open_desktop_shell_window(
     Ok(view)
 }
 
+/// Read the Windows accessibility preference without changing system settings.
+pub(crate) fn sync_system_reduce_motion(cx: &mut App) {
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+        };
+
+        let mut enabled = 0_i32;
+        // SPI_GETCLIENTAREAANIMATION writes one BOOL to pvParam.
+        if unsafe {
+            SystemParametersInfoW(
+                SPI_GETCLIENTAREAANIMATION,
+                0,
+                Some((&raw mut enabled).cast()),
+                SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+            )
+        }
+        .is_ok()
+        {
+            cx.set_reduce_motion(enabled == 0);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = cx;
+}
+
 /// Runs the full desktop application lifecycle (`CstClient::bootstrap` + `gpui_kit::application`).
 pub fn run_desktop_app(kit_root: PathBuf, initial_ui: RestartUi) -> Result<(), String> {
     let (desktop_exe, server_exe, updater_exe) = resolve_sibling_kit_binaries(&kit_root)?;
@@ -352,6 +379,7 @@ pub fn run_desktop_app(kit_root: PathBuf, initial_ui: RestartUi) -> Result<(), S
             gpui_kit::init(cx);
             register_shell_keys(cx);
             cx.set_global(OwnedClientGlobal(client));
+            sync_system_reduce_motion(cx);
 
             let shell = open_desktop_shell_window(handle, Some(font_report), cx)
                 .expect("failed to open CST Pilot desktop window");

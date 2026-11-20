@@ -943,7 +943,7 @@ impl Render for PreferencesTabView {
                 }))
                 .child({
                     let chk_mark = motion::animated_checkbox_mark(
-                        chk_id.clone(),
+                        format!("pref-chk-{full_id}"),
                         true,
                         px(11.0),
                         palette.text_on_accent,

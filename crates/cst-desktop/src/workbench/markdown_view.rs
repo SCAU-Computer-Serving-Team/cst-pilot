@@ -326,12 +326,12 @@ pub fn render_copyable_text_block<V: 'static>(
 /// Helper tracker that remembers recently-copied IDs for 1.6s (`iconSwap` contract).
 #[derive(Default)]
 pub struct CopyFeedbackTracker {
-    copied_ids: BTreeSet<SharedString>,
+    restore_tasks: BTreeMap<SharedString, gpui::Task<()>>,
 }
 
 impl CopyFeedbackTracker {
     pub fn is_copied(&self, id: &str) -> bool {
-        self.copied_ids.contains(id)
+        self.restore_tasks.contains_key(id)
     }
 
     pub fn mark_copied<V: 'static>(
@@ -340,18 +340,18 @@ impl CopyFeedbackTracker {
         get_mut: fn(&mut V) -> &mut Self,
         cx: &mut Context<V>,
     ) {
-        self.copied_ids.insert(id.clone());
-        cx.notify();
-        cx.spawn(async move |weak, cx| {
-            cx.background_executor()
-                .timer(motion::ICON_SWAP_RESTORE)
-                .await;
+        let key = id.clone();
+        let timer = cx.background_executor().timer(motion::ICON_SWAP_RESTORE);
+        let task = cx.spawn(async move |weak, cx| {
+            timer.await;
             let _ = weak.update(cx, |view, cx| {
-                get_mut(view).copied_ids.remove(&id);
+                get_mut(view).restore_tasks.remove(&key);
                 cx.notify();
             });
-        })
-        .detach();
+        });
+        // Dropping an existing task cancels its restore, including on session change.
+        self.restore_tasks.insert(id, task);
+        cx.notify();
     }
 }
 

@@ -107,7 +107,7 @@ impl ShaderFrameScheduler {
         window: &mut Window,
     ) -> f32 {
         let vp = window.viewport_size();
-        let minimized = vp.width <= px(1.0) || vp.height <= px(1.0);
+        let minimized = !window.is_visible() || vp.width <= px(1.0) || vp.height <= px(1.0);
         let inputs = AnimationGateInputs {
             route_has_sky_shader,
             web_active_locked,

@@ -156,7 +156,11 @@ pub fn render_topbar(
     struct SegBounds {
         rects: Rc<[Cell<(f32, f32)>; 2]>,
     }
-    let seg_bounds = window.use_keyed_state("topbar-seg-bounds", cx, |_, _| SegBounds::default());
+    let seg_key = gpui_kit::ElementId::NamedChild(
+        std::sync::Arc::new(gpui_kit::ElementId::View(window.current_view())),
+        "topbar-seg-bounds".into(),
+    );
+    let seg_bounds = window.use_keyed_state(seg_key, cx, |_, _| SegBounds::default());
     let seg_rects = seg_bounds.read(cx).rects.clone();
     let gui_rect = seg_rects[0].get();
     let tui_rect = seg_rects[1].get();
@@ -165,13 +169,20 @@ pub fn render_topbar(
     let seg_rects_capture = seg_rects;
 
     let mut view_segmented = div()
-        .on_children_prepainted(move |bounds, _, _| {
-            let start_idx = if bounds.len() >= 3 { 1 } else { 0 };
-            if let (Some(b0), Some(b1)) = (bounds.get(start_idx), bounds.get(start_idx + 1)) {
-                let x0 = f32::from(space::MICRO);
-                let x1 = x0 + f32::from(b1.origin.x - b0.origin.x);
-                seg_rects_capture[0].set((x0, f32::from(b0.size.width)));
-                seg_rects_capture[1].set((x1, f32::from(b1.size.width)));
+        .on_children_prepainted(move |bounds, window, _| {
+            // GPUI reports direct children in insertion order, including the
+            // absolute pill slot. Measure only the two buttons.
+            let [_, gui, tui] = bounds.as_slice() else {
+                return;
+            };
+            let x0 = f32::from(space::MICRO);
+            let x1 = x0 + f32::from(tui.origin.x - gui.origin.x);
+            let gui = (x0, f32::from(gui.size.width));
+            let tui = (x1, f32::from(tui.size.width));
+            let old_gui = seg_rects_capture[0].replace(gui);
+            let old_tui = seg_rects_capture[1].replace(tui);
+            if old_gui != gui || old_tui != tui {
+                window.request_animation_frame();
             }
         })
         .id("topbar-view-segmented")
@@ -213,6 +224,8 @@ pub fn render_topbar(
                 .border_1()
                 .border_color(palette.border_subtle),
         );
+    } else {
+        view_segmented = view_segmented.child(div().absolute());
     }
 
     view_segmented = view_segmented

@@ -110,9 +110,9 @@ fn turn_segments_special_isolation_and_running_light_parity() {
     let tail_label = process_segment_label(&segments[2].parts, &results, false);
     assert_eq!(tail_label.as_deref(), Some("思考过程"));
 
-    assert_eq!(format_duration_zh(400), "不足 1 秒");
-    assert_eq!(format_duration_zh(4200), "4 秒");
-    assert_eq!(format_duration_zh(125_000), "2 分 5 秒");
+    assert_eq!(format_duration_zh(400), "0.4s");
+    assert_eq!(format_duration_zh(4200), "4.2s");
+    assert_eq!(format_duration_zh(125_000), "125.0s");
 
     // Error prose formatting (`{服务名} {故障现象}，{处理指引}。`)
     let auth_err = format_assistant_error(Some("DeepSeek"), "HTTP 401 invalid api key");

@@ -1088,11 +1088,29 @@ async fn headless_gpui_shell_sidebar_drawer_escape_web_lock_and_exit_confirm(
     })
     .unwrap();
 
-    // 3. Open recent sessions drawer, then press `escape` -> single-layer close + 1-frame focus restore
+    // 3. Reverse the drawer mid-flight, without remounting it at its closed position.
     cx.update_window(win_handle, |_, window, cx| {
         window.click("topbar-recent-drawer-btn", cx);
         assert!(window.find("recent-sessions-drawer").visible());
+    })
+    .unwrap();
+    cx.executor().advance_clock(Duration::from_millis(75));
+    let opening_x = cx
+        .update_window(win_handle, |_, window, cx| {
+            window.render_frame(cx);
+            let x = window.find("recent-sessions-drawer").bounds().origin.x;
+            window.press("escape", cx);
+            assert!(window.try_find("recent-sessions-drawer").is_none());
+            x
+        })
+        .unwrap();
+    cx.executor().advance_clock(Duration::from_millis(20));
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("topbar-recent-drawer-btn", cx);
+        let reopening_x = window.find("recent-sessions-drawer").bounds().origin.x;
+        assert!(reopening_x > gpui_kit::px(-116.0) && reopening_x < opening_x);
 
+        // Escape still removes the interactive surface immediately and restores focus.
         window.press("escape", cx);
         assert!(window.try_find("recent-sessions-drawer").is_none());
         assert_eq!(
@@ -1214,23 +1232,40 @@ fn motion_primitives_timings_easings_banner_hover_pause_and_welcome_stagger_unit
 
     let t0 = Instant::now();
     let mut countdown = BannerCountdownState::new();
-    let (g1, w1) = countdown.start(t0);
-    assert_eq!(w1, Duration::from_millis(2600));
-    assert!(countdown.should_dismiss(g1));
-    assert_eq!(
-        countdown.set_hovered(true, t0 + Duration::from_millis(1000)),
-        None
-    );
-    assert!(!countdown.should_dismiss(g1));
+    let time = |ms| t0 + Duration::from_millis(ms);
+    let first = countdown.start(t0);
+    assert_eq!(first.remaining_at(t0), Duration::from_millis(2600));
+    assert!(!countdown.expire(first, time(1000)));
+    assert!(countdown.set_hovered(true, time(1000)).is_none());
+    assert!(!countdown.expire(first, time(2600)));
     assert_eq!(countdown.remaining(), Duration::from_millis(1600));
+    let resumed = countdown.set_hovered(false, time(4000)).unwrap();
     assert_eq!(
-        countdown.set_hovered(false, t0 + Duration::from_millis(4000)),
-        Some((g1, Duration::from_millis(1600)))
+        resumed.remaining_at(time(4000)),
+        Duration::from_millis(1600)
     );
-    assert!(countdown.should_dismiss(g1));
-    let (g2, _) = countdown.start(t0 + Duration::from_millis(4100));
-    assert!(!countdown.should_dismiss(g1));
-    assert!(countdown.should_dismiss(g2));
+    assert!(!countdown.expire(first, time(4000)));
+    assert!(countdown.set_hovered(true, time(4100)).is_none());
+    let resumed_again = countdown.set_hovered(false, time(4500)).unwrap();
+    assert_eq!(
+        resumed_again.remaining_at(time(4500)),
+        Duration::from_millis(1500)
+    );
+    let replacement = countdown.start(time(5000));
+    assert!(!countdown.expire(resumed, time(5600)));
+    assert!(!countdown.expire(resumed_again, time(6000)));
+    assert!(countdown.expire(replacement, time(7600)));
+    assert!(!countdown.expire(replacement, time(7601)));
+    assert!(countdown.set_hovered(true, time(7601)).is_none());
+    assert!(!countdown.is_hovered());
+
+    // Pause/resume at the same clock tick can produce the same absolute
+    // deadline; it still must not revalidate the cancelled timer.
+    let before_pause = countdown.start(time(9000));
+    countdown.set_hovered(true, time(9000));
+    let after_pause = countdown.set_hovered(false, time(9000)).unwrap();
+    assert!(!countdown.expire(before_pause, time(11600)));
+    assert!(countdown.expire(after_pause, time(11600)));
 }
 
 #[gpui_kit::test]
@@ -1417,6 +1452,28 @@ async fn headless_gpui_motion_primitives_interruptible_reversal_reduce_motion_on
     })
     .unwrap();
 
+    // A notice unmounted under the pointer does not receive a hover-leave.
+    // It must not get stuck paused when a higher-priority error replaces it.
+    shell.update(cx, |this, cx| this.show_top_notice("后台操作已完成", cx));
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.hover("top-notice-banner", cx);
+    })
+    .unwrap();
+    shell.update(cx, |this, cx| this.show_workspace_error("未能保存设置", cx));
+    cx.update_window(win_handle, |_, window, cx| {
+        window.hover("topbar-gels8", cx);
+    })
+    .unwrap();
+    cx.executor().advance_clock(Duration::from_millis(2700));
+    cx.executor().run_until_parked();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("workspace-top-error-bar").is_none());
+        assert!(window.try_find("top-notice-banner").is_none());
+    })
+    .unwrap();
+
     // CopyFeedbackTracker 1600ms iconSwap restore check
     struct CopyProbe {
         tracker: cst_desktop::workbench::markdown_view::CopyFeedbackTracker,
@@ -1446,12 +1503,15 @@ async fn headless_gpui_motion_primitives_interruptible_reversal_reduce_motion_on
             "copy icon must stay swapped before 1600ms"
         );
     });
+    copy_entity.update(cx, |p, cx| {
+        p.tracker
+            .mark_copied("block-1".into(), |v| &mut v.tracker, cx);
+    });
+    cx.executor().run_until_parked();
     cx.executor().advance_clock(Duration::from_millis(150));
     cx.executor().run_until_parked();
-    cx.read(|cx| {
-        assert!(
-            !copy_entity.read(cx).tracker.is_copied("block-1"),
-            "copy icon must restore cleanly at 1600ms (< 2000ms)"
-        );
-    });
+    cx.read(|cx| assert!(copy_entity.read(cx).tracker.is_copied("block-1")));
+    cx.executor().advance_clock(Duration::from_millis(1450));
+    cx.executor().run_until_parked();
+    cx.read(|cx| assert!(!copy_entity.read(cx).tracker.is_copied("block-1")));
 }

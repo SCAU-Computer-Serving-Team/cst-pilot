@@ -65,7 +65,7 @@ pub mod layout {
 
 /// Motion curves & durations strictly aligned with `design/storybook.html`.
 pub mod motion {
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use gpui::{Animation, AnimationExt as _, Transformation};
     use gpui_kit::assets::IconName;
@@ -107,6 +107,9 @@ pub mod motion {
         let (ax, ay) = (1.0 - cx - bx, 1.0 - cy - by);
         move |t: f32| {
             let t = t.clamp(0.0, 1.0);
+            if t == 0.0 || t == 1.0 {
+                return t;
+            }
             let sample_x = |s: f32| ((ax * s + bx) * s + cx) * s;
             let sample_y = |s: f32| ((ay * s + by) * s + cy) * s;
             let slope_x = |s: f32| (3.0 * ax * s + 2.0 * bx) * s + cx;
@@ -316,6 +319,39 @@ pub mod motion {
                 .text_color(color.opacity(p.clamp(0.0, 1.0)))
                 .transform(Transformation::scale(size(s, s)))
         })
+    }
+
+    /// The latest page replaces the content immediately. Keep any in-flight
+    /// reveal so repeated navigation cannot drop the surface back to near zero.
+    #[derive(Default)]
+    pub(crate) struct PageSlide(Option<(Instant, f32)>);
+
+    impl PageSlide {
+        pub(crate) fn start(&mut self, direction: f32, cx: &App) {
+            if cx.reduce_motion() {
+                self.0 = None;
+                return;
+            }
+            let now = cx.background_executor().now();
+            if self.0.is_none_or(|(start, _)| now - start >= NORMAL) {
+                self.0 = Some((now, direction));
+            }
+        }
+
+        pub(crate) fn sample(&mut self, window: &Window, cx: &App) -> (f32, Pixels) {
+            if let Some((start, direction)) = self.0
+                && !cx.reduce_motion()
+            {
+                let elapsed = cx.background_executor().now() - start;
+                if elapsed < NORMAL {
+                    window.request_animation_frame();
+                    let t = ease_out()(elapsed.as_secs_f32() / NORMAL.as_secs_f32());
+                    return (0.01 + 0.99 * t, px(8.0 * direction * (1.0 - t)));
+                }
+            }
+            self.0 = None;
+            (1.0, px(0.0))
+        }
     }
 
     /// Computes `(opacity, translate_y_px)` for one-shot welcome stagger (`40ms` step, `220ms` item, `<=300ms` total).

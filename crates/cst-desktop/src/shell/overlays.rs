@@ -19,9 +19,10 @@ use crate::theme::{
 #[derive(Debug, Clone)]
 pub struct BannerCountdownState {
     generation: u64,
+    timer_epoch: u64,
     remaining: Duration,
     hovered: bool,
-    last_resumed: Option<Instant>,
+    deadline: Option<Instant>,
 }
 
 impl Default for BannerCountdownState {
@@ -34,9 +35,10 @@ impl BannerCountdownState {
     pub fn new() -> Self {
         Self {
             generation: 0,
-            remaining: motion::BANNER_AUTO_DISMISS,
+            timer_epoch: 0,
+            remaining: Duration::ZERO,
             hovered: false,
-            last_resumed: None,
+            deadline: None,
         }
     }
 
@@ -52,36 +54,62 @@ impl BannerCountdownState {
         self.remaining
     }
 
-    /// Starts a fresh `2600ms` banner lifecycle and returns `(generation, wait_duration)`.
-    pub fn start(&mut self, now: Instant) -> (u64, Duration) {
+    /// A fresh banner has its own hover hitbox and full countdown.
+    pub fn start(&mut self, now: Instant) -> BannerDeadline {
         self.generation = self.generation.wrapping_add(1);
         self.remaining = motion::BANNER_AUTO_DISMISS;
         self.hovered = false;
-        self.last_resumed = Some(now);
-        (self.generation, self.remaining)
+        self.resume(now)
     }
 
-    /// Updates hover state; returns `Some((generation, remaining))` when hover ends and timer should resume.
-    pub fn set_hovered(&mut self, hovered: bool, now: Instant) -> Option<(u64, Duration)> {
-        if self.hovered == hovered {
+    fn resume(&mut self, now: Instant) -> BannerDeadline {
+        let at = now + self.remaining;
+        self.deadline = Some(at);
+        self.timer_epoch = self.timer_epoch.wrapping_add(1);
+        BannerDeadline {
+            timer_epoch: self.timer_epoch,
+            at,
+        }
+    }
+
+    /// Call only for the currently displayed banner. A pause invalidates the
+    /// current deadline; a resume starts a new timer for the unspent time.
+    pub fn set_hovered(&mut self, hovered: bool, now: Instant) -> Option<BannerDeadline> {
+        if self.hovered == hovered || (self.deadline.is_none() && !self.hovered) {
             return None;
         }
         self.hovered = hovered;
         if hovered {
-            if let Some(started) = self.last_resumed.take() {
-                let elapsed = now.saturating_duration_since(started);
-                self.remaining = self.remaining.saturating_sub(elapsed);
-            }
+            let deadline = self.deadline.take().expect("running banner has a deadline");
+            self.remaining = deadline.saturating_duration_since(now);
             None
         } else {
-            self.last_resumed = Some(now);
-            Some((self.generation, self.remaining))
+            Some(self.resume(now))
         }
     }
 
-    /// Returns `true` only if the timer matches the active generation and is not currently paused by hover.
-    pub fn should_dismiss(&self, generation: u64) -> bool {
-        self.generation == generation && !self.hovered
+    pub fn expire(&mut self, deadline: BannerDeadline, now: Instant) -> bool {
+        if self.timer_epoch != deadline.timer_epoch
+            || self.deadline != Some(deadline.at)
+            || now < deadline.at
+        {
+            return false;
+        }
+        self.deadline = None;
+        self.remaining = Duration::ZERO;
+        true
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BannerDeadline {
+    timer_epoch: u64,
+    at: Instant,
+}
+
+impl BannerDeadline {
+    pub fn remaining_at(self, now: Instant) -> Duration {
+        self.at.saturating_duration_since(now)
     }
 }
 
