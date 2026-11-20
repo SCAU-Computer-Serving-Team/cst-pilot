@@ -9,7 +9,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::base::{VirtualListScrollHandle, v_virtual_list};
 use gpui_kit::component::Icon;
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::{Escape, Input, InputState};
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, FocusHandle, InteractiveElement, IntoElement,
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, TestSupportExt,
@@ -113,7 +113,7 @@ struct ContextMenuTarget {
 #[derive(Debug, Clone)]
 pub enum AllSessionsEvent {
     OpenSession(String),
-    ActiveSessionDeletedSwitchHome,
+    SessionDeleted(String),
     Notice(String),
     ErrorMessage(String),
 }
@@ -128,8 +128,9 @@ pub struct AllSessionsView {
     context_menu: Option<ContextMenuTarget>,
     renaming_session_id: Option<String>,
     rename_input: Option<Entity<InputState>>,
-    rename_trap_focus: Option<FocusHandle>,
-    renaming_saving: bool,
+    focus: FocusHandle,
+    rename_trap_focus: FocusHandle,
+    rename_prior_focus: Option<FocusHandle>,
     cached_rows: Vec<VirtualSessionRow>,
     cached_sizes: Rc<Vec<Size<Pixels>>>,
 }
@@ -137,7 +138,7 @@ pub struct AllSessionsView {
 impl EventEmitter<AllSessionsEvent> for AllSessionsView {}
 
 impl AllSessionsView {
-    pub fn new(client: ClientHandle) -> Self {
+    pub fn new(client: ClientHandle, cx: &mut Context<Self>) -> Self {
         Self {
             client,
             scroll_handle: VirtualListScrollHandle::new(),
@@ -148,8 +149,9 @@ impl AllSessionsView {
             context_menu: None,
             renaming_session_id: None,
             rename_input: None,
-            rename_trap_focus: None,
-            renaming_saving: false,
+            focus: cx.focus_handle(),
+            rename_trap_focus: cx.focus_handle(),
+            rename_prior_focus: None,
             cached_rows: Vec::new(),
             cached_sizes: Rc::new(Vec::new()),
         }
@@ -159,34 +161,69 @@ impl AllSessionsView {
         self.batch_mode || self.context_menu.is_some() || self.renaming_session_id.is_some()
     }
 
-    pub fn dismiss_batch_mode(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.renaming_session_id.is_some() {
-            self.renaming_session_id = None;
-            cx.notify();
-            return true;
-        }
-        if self.context_menu.is_some() {
-            self.context_menu = None;
-            cx.notify();
-            return true;
-        }
-        if self.batch_mode {
-            self.batch_mode = false;
-            self.selected_ids.clear();
-            cx.notify();
-            true
-        } else {
-            false
-        }
+    pub(crate) fn focus(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus.focus(window, cx);
     }
 
-    fn visible_sessions(&self) -> Vec<SessionSummary> {
-        let snap = self.client.snapshot();
-        snap.sessions
+    pub(crate) fn has_rename_modal(&self) -> bool {
+        self.renaming_session_id.is_some()
+    }
+
+    pub(crate) fn reset_surface(&mut self, cx: &mut Context<Self>) {
+        self.batch_mode = false;
+        self.selected_ids.clear();
+        self.context_menu = None;
+        self.renaming_session_id = None;
+        self.rename_input = None;
+        self.rename_prior_focus = None;
+        cx.notify();
+    }
+
+    fn close_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.renaming_session_id = None;
+        self.rename_input = None;
+        self.rename_prior_focus
+            .take()
+            .unwrap_or_else(|| self.focus.clone())
+            .focus(window, cx);
+        cx.notify();
+    }
+
+    pub fn dismiss_batch_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.has_rename_modal() {
+            self.close_rename(window, cx);
+        } else if self.context_menu.take().is_some() {
+            self.focus.focus(window, cx);
+        } else if self.batch_mode {
+            self.batch_mode = false;
+            self.selected_ids.clear();
+            self.focus.focus(window, cx);
+        } else {
+            return false;
+        }
+        cx.notify();
+        true
+    }
+
+    pub(crate) fn visible_sessions(&self) -> Vec<SessionSummary> {
+        self.client
+            .snapshot()
+            .sessions
             .iter()
             .filter(|s| !self.optimistically_hidden_ids.contains(&s.id))
             .cloned()
+            .map(|mut s| {
+                if let Some(title) = self.optimistic_titles.get(&s.id) {
+                    s.title.clone_from(title);
+                }
+                s
+            })
             .collect()
+    }
+
+    fn prune_selection(&mut self, visible: &[SessionSummary]) {
+        let ids: BTreeSet<_> = visible.iter().map(|s| s.id.as_str()).collect();
+        self.selected_ids.retain(|id| ids.contains(id.as_str()));
     }
 
     fn toggle_select_all(&mut self, cx: &mut Context<Self>) {
@@ -202,75 +239,66 @@ impl AllSessionsView {
         cx.notify();
     }
 
-    fn execute_batch_delete(&mut self, cx: &mut Context<Self>) {
-        let targets: Vec<String> = self.selected_ids.iter().cloned().collect();
-        if targets.is_empty() {
+    fn execute_batch_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.prune_selection(&self.visible_sessions());
+        if self.selected_ids.is_empty() {
             return;
         }
-        self.selected_ids.clear();
+        let targets = std::mem::take(&mut self.selected_ids).into_iter().collect();
         self.batch_mode = false;
+        self.focus.focus(window, cx);
         self.delete_sessions_optimistic(targets, cx);
     }
 
-    fn delete_sessions_optimistic(&mut self, targets: Vec<String>, cx: &mut Context<Self>) {
+    pub(crate) fn delete_sessions_optimistic(
+        &mut self,
+        mut targets: Vec<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.context_menu = None;
+        let snap = self.client.snapshot();
+        targets.retain(|id| {
+            snap.sessions.iter().any(|s| &s.id == id)
+                && !self.optimistic_titles.contains_key(id)
+                && self.optimistically_hidden_ids.insert(id.clone())
+        });
         if targets.is_empty() {
+            cx.notify();
             return;
         }
-        self.context_menu = None;
-
-        // 1. Immediate optimistic removal; if active session is among targets, switch to Home first!
-        let active_sid = self
-            .client
-            .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
-        if let Some(ref cur) = active_sid
-            && targets.iter().any(|t| t == cur)
-        {
-            cx.emit(AllSessionsEvent::ActiveSessionDeletedSwitchHome);
-        }
-
-        for id in &targets {
-            self.optimistically_hidden_ids.insert(id.clone());
-        }
+        self.selected_ids
+            .retain(|id| !self.optimistically_hidden_ids.contains(id));
         cx.notify();
 
         let client = self.client.clone();
         cx.spawn(async move |weak, cx| {
-            let mut rolled_back_ids = Vec::new();
-            let mut conflict_msg: Option<String> = None;
-
-            for sid in targets {
+            let mut failure = None;
+            for sid in &targets {
                 match client.delete_session(sid.clone()).await {
-                    Ok(_) => {}
-                    Err(ClientError::Conflict { message, .. }) => {
-                        rolled_back_ids.push(sid);
-                        conflict_msg = Some(message);
+                    Ok(_) => {
+                        let _ = weak.update(cx, |_, cx| {
+                            cx.emit(AllSessionsEvent::SessionDeleted(sid.clone()))
+                        });
                     }
                     Err(err) => {
-                        rolled_back_ids.push(sid);
-                        if conflict_msg.is_none() {
-                            conflict_msg = Some(err.to_string());
-                        }
+                        failure = Some(match err {
+                            ClientError::Conflict { message, .. } => message,
+                            other => other.to_string(),
+                        })
                     }
                 }
             }
 
-            let _ = client.refresh_globals().await;
-
+            let refreshed = client.refresh_globals().await;
             let _ = weak.update(cx, |this, cx| {
-                let current_ids: BTreeSet<String> = this
-                    .client
-                    .snapshot()
-                    .sessions
-                    .iter()
-                    .map(|s| s.id.clone())
-                    .collect();
-                this.optimistically_hidden_ids
-                    .retain(|id| current_ids.contains(id) && !rolled_back_ids.contains(id));
-
-                if let Some(msg) = conflict_msg {
-                    cx.emit(AllSessionsEvent::Notice(format!(
-                        "部分运行中或占用的会话未能删除，已自动恢复：{msg}"
-                    )));
+                // Only settle this batch. SSE may already have removed rows belonging to another batch.
+                for id in &targets {
+                    this.optimistically_hidden_ids.remove(id);
+                }
+                if let Some(msg) = failure {
+                    cx.emit(AllSessionsEvent::Notice(format!("部分会话未能删除：{msg}")));
+                } else if let Err(err) = refreshed {
+                    cx.emit(AllSessionsEvent::ErrorMessage(err.to_string()));
                 }
                 cx.notify();
             });
@@ -286,62 +314,85 @@ impl AllSessionsView {
         cx: &mut Context<Self>,
     ) {
         self.context_menu = None;
+        if !self.can_rename(&session_id) {
+            cx.notify();
+            return;
+        }
+        self.rename_prior_focus = window
+            .focused(cx)
+            .filter(|f| self.focus.contains(f, window));
         self.renaming_session_id = Some(session_id);
-        if self.rename_trap_focus.is_none() {
-            self.rename_trap_focus = Some(cx.focus_handle());
-        }
-        if let Some(ref inp) = self.rename_input {
-            inp.update(cx, |state, cx| {
-                state.set_value(current_title, window, cx);
-                state.focus(window, cx);
-            });
-        } else {
-            let inp = cx.new(|cx| {
-                let mut s = InputState::new(window, cx).placeholder("输入会话标题…");
-                s.set_value(current_title, window, cx);
-                s.focus(window, cx);
-                s
-            });
-            self.rename_input = Some(inp);
-        }
+        let input = cx.new(|cx| {
+            let mut state = InputState::new(window, cx).placeholder("输入会话标题…");
+            state.set_value(current_title, window, cx);
+            state.focus(window, cx);
+            state
+        });
+        self.rename_input = Some(input);
         cx.notify();
     }
 
-    fn submit_rename(&mut self, cx: &mut Context<Self>) {
-        if self.renaming_saving {
+    fn submit_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(sid), Some(input)) =
+            (self.renaming_session_id.clone(), self.rename_input.as_ref())
+        else {
+            return;
+        };
+        if super::input_is_composing(input, window, cx) {
             return;
         }
-        let Some(sid) = self.renaming_session_id.clone() else {
-            return;
-        };
-        let Some(ref inp) = self.rename_input else {
-            return;
-        };
-        let new_name = inp.read(cx).value().trim().to_owned();
-        if new_name.is_empty() {
-            cx.emit(AllSessionsEvent::ErrorMessage("会话标题不能为空。".into()));
-            return;
+        let title = input.read(cx).value();
+        if self.rename_session(sid, title.trim().to_owned(), cx) {
+            self.close_rename(window, cx);
+        }
+    }
+
+    pub(crate) fn can_rename(&self, sid: &str) -> bool {
+        !self.optimistically_hidden_ids.contains(sid)
+            && !self.optimistic_titles.contains_key(sid)
+            && self.client.snapshot().sessions.iter().any(|s| s.id == sid)
+    }
+
+    pub(crate) fn rename_session(
+        &mut self,
+        sid: String,
+        name: String,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.can_rename(&sid) {
+            cx.emit(AllSessionsEvent::ErrorMessage(
+                "会话已移除或正在更新。".into(),
+            ));
+            return false;
+        }
+        if name.is_empty() || name.chars().count() > 160 {
+            let msg = if name.is_empty() {
+                "会话标题不能为空。"
+            } else {
+                "会话标题不能超过 160 个字符。"
+            };
+            cx.emit(AllSessionsEvent::ErrorMessage(msg.into()));
+            return false;
         }
 
-        self.optimistic_titles.insert(sid.clone(), new_name.clone());
-        self.renaming_session_id = None;
-        self.renaming_saving = true;
+        self.optimistic_titles.insert(sid.clone(), name.clone());
         cx.notify();
-
         let client = self.client.clone();
         cx.spawn(async move |weak, cx| {
-            let res = client.rename_session(sid.clone(), new_name).await;
-            let _ = client.refresh_globals().await;
+            let res = client.rename_session(sid.clone(), name).await;
+            let refresh = client.refresh_globals().await;
             let _ = weak.update(cx, |this, cx| {
-                this.renaming_saving = false;
-                if let Err(err) = res {
-                    this.optimistic_titles.remove(&sid);
+                // The snapshot is authoritative after refresh (including server normalization
+                // and edits made from another view). Never retain a completed title override.
+                this.optimistic_titles.remove(&sid);
+                if let Some(err) = res.err().or_else(|| refresh.err()) {
                     cx.emit(AllSessionsEvent::ErrorMessage(err.to_string()));
                 }
                 cx.notify();
             });
         })
         .detach();
+        true
     }
 
     fn row_anchor_top_px(&self, row_idx: usize) -> f32 {
@@ -391,15 +442,10 @@ impl AllSessionsView {
                 VirtualSessionRow::Session(sess) => {
                     let sid = sess.id.clone();
                     let is_checked = self.selected_ids.contains(&sid);
-                    let raw_title = self
-                        .optimistic_titles
-                        .get(&sid)
-                        .cloned()
-                        .unwrap_or_else(|| sess.title.clone());
-                    let title_str = if raw_title.trim().is_empty() {
+                    let title_str = if sess.title.trim().is_empty() {
                         "新对话".to_owned()
                     } else {
-                        raw_title
+                        sess.title.clone()
                     };
                     let updated_text = sess
                         .updated_at
@@ -760,9 +806,20 @@ impl AllSessionsView {
         .rounded(radius::ROW)
         .border_1()
         .border_color(palette.border_subtle)
-        .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-            if ev.keystroke.key == "enter" && !ev.is_held {
-                this.submit_rename(cx);
+        .capture_action(cx.listener(|this, _: &Escape, window, cx| {
+            if let Some(input) = &this.rename_input {
+                super::consume_composing_escape(input, window, cx);
+            }
+        }))
+        .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+            if ev.keystroke.key == "enter"
+                && !ev.is_held
+                && this.rename_input.as_ref().is_some_and(|input| {
+                    use gpui_kit::Focusable as _;
+                    input.read(cx).focus_handle(cx).is_focused(window)
+                })
+            {
+                this.submit_rename(window, cx);
                 cx.stop_propagation();
             }
         }))
@@ -806,9 +863,8 @@ impl AllSessionsView {
                         .flex()
                         .items_center()
                         .hover(|s| s.bg(palette.bg_item_hover))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.renaming_session_id = None;
-                            cx.notify();
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.close_rename(window, cx);
                         }))
                         .child(cjk_inline_label("取消")),
                 )
@@ -826,22 +882,17 @@ impl AllSessionsView {
                         .flex()
                         .items_center()
                         .hover(|s| s.bg(palette.accent_hover))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.submit_rename(cx);
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.submit_rename(window, cx);
                         }))
                         .child(cjk_inline_label("保存")),
                 ),
         );
 
-        let wrapped_modal = if let Some(ref trap) = self.rename_trap_focus {
-            div()
-                .tab_stop(false)
-                .focus_trap("all-sessions-rename-trap", trap)
-                .child(modal_card)
-                .into_any_element()
-        } else {
-            modal_card.into_any_element()
-        };
+        let wrapped_modal = div()
+            .tab_stop(false)
+            .focus_trap("all-sessions-rename-trap", &self.rename_trap_focus)
+            .child(modal_card);
 
         render_frosted_surface(
             "all-sessions-rename-scrim",
@@ -873,6 +924,14 @@ impl Render for AllSessionsView {
         let scale_factor = window.scale_factor();
 
         let visible = self.visible_sessions();
+        self.prune_selection(&visible);
+        if self
+            .context_menu
+            .as_ref()
+            .is_some_and(|menu| !visible.iter().any(|s| s.id == menu.session_id))
+        {
+            self.context_menu = None;
+        }
         let today = Local::now().date_naive();
         self.cached_rows = group_sessions_by_natural_day(&visible, today);
         self.cached_sizes = Rc::new(
@@ -996,9 +1055,9 @@ impl Render for AllSessionsView {
                                 .flex()
                                 .items_center()
                                 .hover(|s| s.bg(palette.bg_item_hover))
-                                .on_click(
-                                    cx.listener(|this, _, _, cx| this.execute_batch_delete(cx)),
-                                )
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.execute_batch_delete(window, cx)
+                                }))
                                 .child(cjk_inline_label("删除")),
                         ),
                 )
@@ -1046,6 +1105,7 @@ impl Render for AllSessionsView {
             .id("all-sessions-view")
             .test_support()
             .a11y_region("all-sessions-view", "全部会话")
+            .track_focus(&self.focus)
             .relative()
             .size_full()
             .flex()

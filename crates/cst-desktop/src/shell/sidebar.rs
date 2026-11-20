@@ -84,6 +84,8 @@ pub fn render_sidebar_l081m1(
     route: ShellRoute,
     active_session_id: Option<&str>,
     sessions: &[SessionSummary],
+    window: &mut Window,
+    cx: &mut App,
     search_input: &Entity<InputState>,
     search_query: &str,
     batch_mode: bool,
@@ -227,6 +229,9 @@ pub fn render_sidebar_l081m1(
 
             let menu_btn_id = SharedString::from(format!("sidebar-row-menu-btn-{sid}"));
             let menu_btn_label = SharedString::from(format!("会话操作：{title_text}"));
+            let focus = window.use_keyed_state(menu_btn_id.clone(), cx, |_, cx| {
+                cx.focus_handle().tab_stop(true)
+            });
             row = row
                 .child(
                     div()
@@ -240,6 +245,7 @@ pub fn render_sidebar_l081m1(
                         .id(menu_btn_id.clone())
                         .test_support()
                         .a11y_button(menu_btn_id, menu_btn_label)
+                        .track_focus(focus.read(cx))
                         .w(px(20.0))
                         .h(px(20.0))
                         .rounded(radius::CONTROL)

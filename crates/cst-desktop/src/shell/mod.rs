@@ -13,8 +13,9 @@ use cst_client::{
     ExitCheckReport, ThemeModeDto, UpdatePhaseDto, WorkspaceView,
 };
 use gpui_kit::assets::IconName;
+use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::Icon;
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
     KeyBinding, ParentElement, Pixels, Point, Render, SharedString, StatefulInteractiveElement,
@@ -124,12 +125,16 @@ pub struct AppShell {
     startup_missing_key_checked: bool,
     update_dialog: UpdateDialogState,
     last_prompted_update_version: Option<String>,
-    branch_summarizing_session: Option<String>,
+    branch_summarizing_sessions: BTreeSet<String>,
+    session_subview_prior_focus: Option<FocusHandle>,
     sidebar_collapsed: bool,
     sidebar_batch_mode: bool,
     sidebar_selected_ids: BTreeSet<String>,
     sidebar_context_menu: Option<(String, Point<Pixels>)>,
+    sidebar_menu_prior_focus: Option<FocusHandle>,
+    sidebar_menu_focus: FocusHandle,
     rename_modal: Option<RenameSessionModalState>,
+    rename_trap_focus: FocusHandle,
     recent_drawer_open: bool,
     recent_drawer_prior_focus: Option<FocusHandle>,
     account_menu_open: bool,
@@ -208,7 +213,7 @@ impl AppShell {
         let exit_confirm_focus = cx.focus_handle().tab_stop(true);
 
         let workbench = cx.new(|cx| WorkbenchView::new(client.clone(), window, cx));
-        let all_sessions_view = cx.new(|_| AllSessionsView::new(client.clone()));
+        let all_sessions_view = cx.new(|cx| AllSessionsView::new(client.clone(), cx));
         let branch_tree_view =
             cx.new(|cx| BranchTreeView::new(client.clone(), String::new(), window, cx));
         let export_view = cx.new(|cx| ExportView::new(client.clone(), String::new(), cx));
@@ -224,6 +229,7 @@ impl AppShell {
             window,
             Self::on_all_sessions_event,
         ));
+        subscriptions.push(cx.observe(&all_sessions_view, |_, _, cx| cx.notify()));
         subscriptions.push(cx.subscribe_in(&branch_tree_view, window, Self::on_branch_tree_event));
         subscriptions.push(cx.subscribe_in(&export_view, window, Self::on_export_view_event));
         subscriptions.push(cx.subscribe_in(&settings_view, window, Self::on_settings_view_event));
@@ -287,12 +293,16 @@ impl AppShell {
             startup_missing_key_checked: false,
             update_dialog: UpdateDialogState::default(),
             last_prompted_update_version: None,
-            branch_summarizing_session: None,
+            branch_summarizing_sessions: BTreeSet::new(),
+            session_subview_prior_focus: None,
             sidebar_collapsed,
             sidebar_batch_mode: false,
             sidebar_selected_ids: BTreeSet::new(),
             sidebar_context_menu: None,
+            sidebar_menu_prior_focus: None,
+            sidebar_menu_focus: cx.focus_handle(),
             rename_modal: None,
+            rename_trap_focus: cx.focus_handle(),
             recent_drawer_open: false,
             recent_drawer_prior_focus: None,
             account_menu_open: false,
@@ -386,8 +396,45 @@ impl AppShell {
     }
 
     pub fn set_route(&mut self, route: ShellRoute, cx: &mut Context<Self>) {
+        self.set_workspace_route(route, SessionSubView::Chat, cx);
+    }
+
+    fn set_workspace_route(
+        &mut self,
+        route: ShellRoute,
+        subview: SessionSubView,
+        cx: &mut Context<Self>,
+    ) {
+        if self.route != route || self.session_subview != subview {
+            if self.route == ShellRoute::AllSessions {
+                self.all_sessions_view
+                    .update(cx, AllSessionsView::reset_surface);
+            }
+            if self.route == ShellRoute::Session {
+                match self.session_subview {
+                    SessionSubView::Tree => self
+                        .branch_tree_view
+                        .update(cx, |view, _| view.close_view()),
+                    SessionSubView::Export => self.export_view.update(cx, |view, _| view.stop()),
+                    SessionSubView::Chat => {}
+                }
+            }
+            self.rename_modal = None;
+            self.sidebar_context_menu = None;
+            self.sidebar_menu_prior_focus = None;
+            self.sidebar_batch_mode = false;
+            self.sidebar_selected_ids.clear();
+            self.session_subview_prior_focus = None;
+        }
         self.route = route;
+        self.session_subview = subview;
         cx.notify();
+    }
+
+    fn return_to_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let prior = self.session_subview_prior_focus.take();
+        self.set_route(ShellRoute::Session, cx);
+        self.restore_surface_focus(prior, window, cx);
     }
 
     pub fn is_sidebar_collapsed(&self) -> bool {
@@ -425,7 +472,7 @@ impl AppShell {
                     .is_some_and(|update| update.status.phase == UpdatePhaseDto::Launching))
     }
 
-    fn blocks_workspace_shortcuts(&self) -> bool {
+    fn blocks_workspace_shortcuts(&self, cx: &App) -> bool {
         self.shutting_down
             || self.exit_dialog.is_some()
             || self.update_dialog.open
@@ -433,6 +480,11 @@ impl AppShell {
             || self.web_switch_confirm.is_some()
             || self.command_palette.is_some()
             || self.rename_modal.is_some()
+            || (self.route == ShellRoute::AllSessions
+                && self.all_sessions_view.read(cx).has_rename_modal())
+            || (self.route == ShellRoute::Session
+                && self.session_subview == SessionSubView::Tree
+                && self.branch_tree_view.read(cx).has_summary_modal())
             || self.snapshot.channel_mode == ChannelModeDto::WebActive
     }
 
@@ -462,7 +514,9 @@ impl AppShell {
         } else if self.missing_key_modal.is_some() {
             keep(&self.missing_key_trap_focus, &self.missing_key_cancel_focus)
         } else {
-            prior.unwrap_or_else(|| self.root_focus.clone())
+            prior
+                .filter(|focus| self.root_focus.contains(focus, window))
+                .unwrap_or_else(|| self.root_focus.clone())
         };
         focus.focus(window, cx);
     }
@@ -614,7 +668,13 @@ impl AppShell {
                     let prev_update_phase =
                         this.snapshot.update_state.as_ref().map(|u| u.status.phase);
                     this.snapshot = latest_snap;
-                    this.sidebar_collapsed = this.snapshot.desktop_settings.sidebar_collapsed;
+                    let collapsed = this.snapshot.desktop_settings.sidebar_collapsed;
+                    if collapsed && !this.sidebar_collapsed {
+                        this.dismiss_sidebar_menu(window, cx);
+                        this.sidebar_batch_mode = false;
+                        this.sidebar_selected_ids.clear();
+                    }
+                    this.sidebar_collapsed = collapsed;
                     this.theme_preference = this.snapshot.desktop_settings.theme;
 
                     if prev_theme != this.theme_preference {
@@ -711,13 +771,7 @@ impl AppShell {
     }
 
     pub fn toggle_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.exit_dialog.is_some()
-            || self.update_dialog.open
-            || self.missing_key_modal.is_some()
-            || self.web_switch_confirm.is_some()
-            || self.snapshot.channel_mode == ChannelModeDto::WebActive
-            || self.shutting_down
-        {
+        if self.command_palette.is_none() && self.blocks_workspace_shortcuts(cx) {
             return;
         }
         if let Some(palette_ent) = self.command_palette.take() {
@@ -779,7 +833,7 @@ impl AppShell {
         match target {
             PaletteCommandTarget::SlashExport => {
                 if let Some(sid) = active_sid {
-                    self.open_session_export(sid, cx);
+                    self.open_session_export(sid, window, cx);
                 } else {
                     self.show_top_notice("请先进入一个会话后再执行导出。", cx);
                 }
@@ -845,8 +899,7 @@ impl AppShell {
                 self.activate_session_by_id(sid, cx);
             }
             PaletteCommandTarget::NewSession => {
-                self.route = ShellRoute::Home;
-                self.session_subview = SessionSubView::Chat;
+                self.set_route(ShellRoute::Home, cx);
                 self.sidebar_batch_mode = false;
                 self.sidebar_selected_ids.clear();
                 let c = self.client.clone();
@@ -858,7 +911,7 @@ impl AppShell {
                 cx.notify();
             }
             PaletteCommandTarget::OpenSettings => {
-                self.route = ShellRoute::Settings;
+                self.set_route(ShellRoute::Settings, cx);
                 cx.notify();
             }
             PaletteCommandTarget::OpenWeb => {
@@ -868,21 +921,61 @@ impl AppShell {
     }
 
     fn open_session_tree(&mut self, sid: String, window: &mut Window, cx: &mut Context<Self>) {
-        self.route = ShellRoute::Session;
-        self.session_subview = SessionSubView::Tree;
+        let prior = window.focused(cx);
+        self.set_workspace_route(ShellRoute::Session, SessionSubView::Tree, cx);
+        self.session_subview_prior_focus = prior;
         self.branch_tree_view.update(cx, |tv, cx| {
-            tv.set_session_id(sid, cx);
+            tv.set_session_id(sid, window, cx);
             tv.focus_handle(cx).focus(window, cx);
         });
-        cx.notify();
     }
 
-    fn open_session_export(&mut self, sid: String, cx: &mut Context<Self>) {
-        self.route = ShellRoute::Session;
-        self.session_subview = SessionSubView::Export;
+    fn open_session_export(&mut self, sid: String, window: &mut Window, cx: &mut Context<Self>) {
+        let prior = window.focused(cx);
+        self.set_workspace_route(ShellRoute::Session, SessionSubView::Export, cx);
+        self.session_subview_prior_focus = prior;
         self.export_view
-            .update(cx, |ev, cx| ev.set_session_id(sid, cx));
+            .update(cx, |view, cx| view.set_session_id(sid, cx));
+        self.root_focus.focus(window, cx);
+    }
+
+    fn dismiss_sidebar_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.sidebar_context_menu.take().is_none() {
+            return false;
+        }
+        let prior = self
+            .sidebar_menu_prior_focus
+            .take()
+            .or_else(|| Some(self.sidebar_collapse_focus.clone()));
+        self.restore_surface_focus(prior, window, cx);
         cx.notify();
+        true
+    }
+
+    fn close_sidebar_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(modal) = self.rename_modal.take() else {
+            return false;
+        };
+        self.restore_surface_focus(modal.prior_focus, window, cx);
+        cx.notify();
+        true
+    }
+
+    fn submit_sidebar_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(modal) = &self.rename_modal else {
+            return;
+        };
+        if crate::sessions::input_is_composing(&modal.input, window, cx) {
+            return;
+        }
+        let target = modal.session_id.clone();
+        let title = modal.input.read(cx).value().trim().to_owned();
+        if self
+            .all_sessions_view
+            .update(cx, |view, cx| view.rename_session(target, title, cx))
+        {
+            self.close_sidebar_rename(window, cx);
+        }
     }
 
     pub fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -952,13 +1045,7 @@ impl AppShell {
             cx.notify();
             return true;
         }
-        if let Some(rm) = self.rename_modal.take() {
-            if let Some(prev) = rm.prior_focus {
-                prev.focus(window, cx);
-            } else {
-                self.root_focus.focus(window, cx);
-            }
-            cx.notify();
+        if self.close_sidebar_rename(window, cx) {
             return true;
         }
         if let Some(palette_ent) = self.command_palette.take() {
@@ -966,10 +1053,6 @@ impl AppShell {
             if let Some(pf) = palette_ent.read(cx).prior_focus() {
                 pf.focus(window, cx);
             }
-            cx.notify();
-            return true;
-        }
-        if self.sidebar_context_menu.take().is_some() {
             cx.notify();
             return true;
         }
@@ -989,16 +1072,33 @@ impl AppShell {
             cx.notify();
             return true;
         }
-        if self.route == ShellRoute::Session && self.session_subview != SessionSubView::Chat {
-            self.session_subview = SessionSubView::Chat;
-            cx.notify();
+        if self.dismiss_sidebar_menu(window, cx) {
             return true;
         }
         if self.route == ShellRoute::AllSessions
             && self
                 .all_sessions_view
-                .update(cx, |av, cx| av.dismiss_batch_mode(cx))
+                .update(cx, |av, cx| av.dismiss_batch_mode(window, cx))
         {
+            return true;
+        }
+        if self.route == ShellRoute::Session
+            && self.session_subview == SessionSubView::Tree
+            && self
+                .branch_tree_view
+                .update(cx, |view, cx| view.dismiss_summary(window, cx))
+        {
+            return true;
+        }
+        if self.sidebar_batch_mode {
+            self.sidebar_batch_mode = false;
+            self.sidebar_selected_ids.clear();
+            self.sidebar_collapse_focus.focus(window, cx);
+            cx.notify();
+            return true;
+        }
+        if self.route == ShellRoute::Session && self.session_subview != SessionSubView::Chat {
+            self.return_to_chat(window, cx);
             return true;
         }
         if matches!(self.route, ShellRoute::Home | ShellRoute::Session)
@@ -1006,12 +1106,6 @@ impl AppShell {
                 .workbench
                 .update(cx, |wb, cx| wb.dismiss_topmost_surface(window, cx))
         {
-            return true;
-        }
-        if self.sidebar_batch_mode {
-            self.sidebar_batch_mode = false;
-            self.sidebar_selected_ids.clear();
-            cx.notify();
             return true;
         }
         if !self.sidebar_collapsed && !self.sidebar_search_input.read(cx).value().is_empty() {
@@ -1276,8 +1370,7 @@ impl AppShell {
     }
 
     fn activate_session_by_id(&mut self, session_id: String, cx: &mut Context<Self>) {
-        self.route = ShellRoute::Session;
-        self.session_subview = SessionSubView::Chat;
+        self.set_route(ShellRoute::Session, cx);
         self.recent_drawer_open = false;
         self.sidebar_context_menu = None;
         let client = self.client.clone();
@@ -1304,7 +1397,7 @@ impl AppShell {
                     self.activate_session_by_id(sid, cx);
                 }
                 None => {
-                    self.route = ShellRoute::Home;
+                    self.set_route(ShellRoute::Home, cx);
                     cx.notify();
                 }
             }
@@ -1348,14 +1441,14 @@ impl AppShell {
                     }
                     SlashNavigationTarget::Export => {
                         if let Some(sid) = active_sid {
-                            self.open_session_export(sid, cx);
+                            self.open_session_export(sid, window, cx);
                         }
                     }
                     SlashNavigationTarget::ForkLatest => {}
                 }
             }
             WorkbenchEvent::OpenAccountPage => {
-                self.route = ShellRoute::Account;
+                self.set_route(ShellRoute::Account, cx);
                 cx.notify();
             }
             WorkbenchEvent::WorkspaceError(msg) => {
@@ -1371,20 +1464,33 @@ impl AppShell {
         &mut self,
         _av: &Entity<AllSessionsView>,
         event: &AllSessionsEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event {
             AllSessionsEvent::OpenSession(sid) => {
                 self.activate_session_by_id(sid.clone(), cx);
+                self.root_focus.focus(window, cx);
             }
-            AllSessionsEvent::ActiveSessionDeletedSwitchHome => {
-                let c = self.client.clone();
-                cx.background_executor()
-                    .spawn(async move {
-                        let _ = c.activate_session(None).await;
+            AllSessionsEvent::SessionDeleted(sid) => {
+                if self
+                    .client
+                    .with_workspace(|ws| ws.active_session_id() == Some(sid.as_str()))
+                {
+                    if self.route == ShellRoute::Session {
+                        self.set_route(ShellRoute::Home, cx);
+                        self.root_focus.focus(window, cx);
+                    }
+                    let client = self.client.clone();
+                    let sid = sid.clone();
+                    cx.spawn(async move |_, _| {
+                        if client.with_workspace(|ws| ws.active_session_id() == Some(sid.as_str()))
+                        {
+                            let _ = client.activate_session(None).await;
+                        }
                     })
                     .detach();
+                }
             }
             AllSessionsEvent::Notice(msg) => {
                 self.show_top_notice(msg.clone(), cx);
@@ -1404,23 +1510,32 @@ impl AppShell {
     ) {
         match event {
             BranchTreeEvent::BackToChat => {
-                self.session_subview = SessionSubView::Chat;
-                cx.notify();
+                if self.route == ShellRoute::Session && self.session_subview == SessionSubView::Tree
+                {
+                    self.return_to_chat(window, cx);
+                }
             }
             BranchTreeEvent::SwitchToForkedSession(sid) => {
                 self.activate_session_by_id(sid.clone(), cx);
+                self.root_focus.focus(window, cx);
             }
-            BranchTreeEvent::PrefillComposer(text) => {
-                self.workbench
-                    .update(cx, |wb, cx| wb.prefill_session_composer(text, window, cx));
+            BranchTreeEvent::PrefillComposer { session_id, text } => {
+                if self.route == ShellRoute::Session
+                    && self.session_subview == SessionSubView::Chat
+                    && self
+                        .client
+                        .with_workspace(|ws| ws.active_session_id() == Some(session_id.as_str()))
+                {
+                    self.workbench
+                        .update(cx, |wb, cx| wb.prefill_session_composer(text, window, cx));
+                }
             }
             BranchTreeEvent::SummarizingStarted { session_id } => {
-                self.branch_summarizing_session = Some(session_id.clone());
-                self.session_subview = SessionSubView::Chat;
-                cx.notify();
+                self.branch_summarizing_sessions.insert(session_id.clone());
+                self.return_to_chat(window, cx);
             }
-            BranchTreeEvent::SummarizingFinished => {
-                self.branch_summarizing_session = None;
+            BranchTreeEvent::SummarizingFinished { session_id } => {
+                self.branch_summarizing_sessions.remove(session_id);
                 cx.notify();
             }
             BranchTreeEvent::ErrorMessage(msg) => {
@@ -1433,14 +1548,11 @@ impl AppShell {
         &mut self,
         _ev: &Entity<ExportView>,
         event: &ExportViewEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event {
-            ExportViewEvent::BackToChat => {
-                self.session_subview = SessionSubView::Chat;
-                cx.notify();
-            }
+            ExportViewEvent::BackToChat => self.return_to_chat(window, cx),
             ExportViewEvent::Notice(msg) => {
                 self.show_top_notice(msg.clone(), cx);
             }
@@ -1465,11 +1577,14 @@ impl AppShell {
                 self.trigger_update_cancel(cx);
             }
             SettingsViewEvent::OpenLoginOrAccount { signed_in } => {
-                self.route = if *signed_in {
-                    ShellRoute::Account
-                } else {
-                    ShellRoute::Login
-                };
+                self.set_route(
+                    if *signed_in {
+                        ShellRoute::Account
+                    } else {
+                        ShellRoute::Login
+                    },
+                    cx,
+                );
                 cx.notify();
             }
             SettingsViewEvent::CredentialsSaved => {
@@ -1495,11 +1610,11 @@ impl AppShell {
             LoginViewEvent::NavigateToAccount => {
                 self.account_view
                     .update(cx, |av, cx| av.refresh_cstoa_quota(true, cx));
-                self.route = ShellRoute::Account;
+                self.set_route(ShellRoute::Account, cx);
                 cx.notify();
             }
             LoginViewEvent::NavigateToCustomGatewaySettings => {
-                self.route = ShellRoute::Settings;
+                self.set_route(ShellRoute::Settings, cx);
                 self.settings_view
                     .update(cx, |sv, cx| sv.open_custom_gateway_creator(window, cx));
                 cx.notify();
@@ -1508,7 +1623,7 @@ impl AppShell {
                 if self.pending_return_session_id.is_some() {
                     self.return_after_credentials_saved(cx);
                 } else {
-                    self.route = ShellRoute::Home;
+                    self.set_route(ShellRoute::Home, cx);
                     cx.notify();
                 }
             }
@@ -1528,7 +1643,7 @@ impl AppShell {
         match event {
             AccountViewEvent::LoggedOutCstoa => {
                 self.show_top_notice("已退出 CSTOA 登录，其余模型服务凭据保持不变。", cx);
-                self.route = ShellRoute::Login;
+                self.set_route(ShellRoute::Login, cx);
                 cx.notify();
             }
             AccountViewEvent::ErrorMessage(msg) => {
@@ -1548,7 +1663,12 @@ impl AppShell {
                 SessionSubView::Tree => self.branch_tree_view.clone().into_any_element(),
                 SessionSubView::Export => self.export_view.clone().into_any_element(),
                 SessionSubView::Chat => {
-                    if let Some(ref sum_sid) = self.branch_summarizing_session {
+                    let active_session_id = self
+                        .client
+                        .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
+                    if let Some(sum_sid) = active_session_id
+                        .filter(|sid| self.branch_summarizing_sessions.contains(sid))
+                    {
                         let sid_abort = sum_sid.clone();
                         let ent_abort = entity.clone();
                         div()
@@ -1594,7 +1714,7 @@ impl AppShell {
                                             .on_click(move |_, _, cx| {
                                                 let s = sid_abort.clone();
                                                 ent_abort.update(cx, |this, cx| {
-                                                    this.branch_summarizing_session = None;
+                                                    this.branch_summarizing_sessions.remove(&s);
                                                     let c = this.client.clone();
                                                     cx.spawn(async move |_, _| {
                                                         let _ = c.abort_session(s).await;
@@ -1674,6 +1794,7 @@ impl AppShell {
         .flex()
         .flex_col()
         .gap(space::MICRO)
+        .track_focus(&self.sidebar_menu_focus)
         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation());
 
         // In batch mode, right-click menu converges to single `"删除"`!
@@ -1696,22 +1817,29 @@ impl AppShell {
                         .on_click(move |_, window, cx| {
                             let target = sid_rename.clone();
                             ent_rename.update(cx, |this, cx| {
+                                let prior = this
+                                    .sidebar_menu_prior_focus
+                                    .take()
+                                    .or_else(|| Some(this.sidebar_collapse_focus.clone()));
                                 this.sidebar_context_menu = None;
-                                let existing_title = this
-                                    .snapshot
-                                    .sessions
-                                    .iter()
-                                    .find(|s| s.id == target)
-                                    .map(|s| s.title.clone())
-                                    .unwrap_or_default();
-                                let prior = window.focused(cx);
+                                let Some(session) = this
+                                    .all_sessions_view
+                                    .read(cx)
+                                    .visible_sessions()
+                                    .into_iter()
+                                    .find(|session| session.id == target)
+                                else {
+                                    this.restore_surface_focus(prior, window, cx);
+                                    cx.notify();
+                                    return;
+                                };
                                 let input = cx.new(|cx| {
                                     let mut st =
                                         InputState::new(window, cx).placeholder("输入新会话标题…");
-                                    st.set_value(existing_title, window, cx);
+                                    st.set_value(session.title, window, cx);
+                                    st.focus(window, cx);
                                     st
                                 });
-                                input.update(cx, |st, cx| st.focus(window, cx));
                                 this.rename_modal = Some(RenameSessionModalState {
                                     session_id: target,
                                     input,
@@ -1741,9 +1869,9 @@ impl AppShell {
                         .items_center()
                         .gap(space::SM)
                         .hover(|s| s.bg(palette.bg_item_active))
-                        .on_click(move |_, _, cx| {
+                        .on_click(move |_, window, cx| {
                             ent_manage.update(cx, |this, cx| {
-                                this.sidebar_context_menu = None;
+                                this.dismiss_sidebar_menu(window, cx);
                                 this.sidebar_batch_mode = true;
                                 this.sidebar_selected_ids.clear();
                                 cx.notify();
@@ -1779,28 +1907,12 @@ impl AppShell {
                 .items_center()
                 .gap(space::SM)
                 .hover(|s| s.bg(palette.status_danger_subtle))
-                .on_click(move |_, _, cx| {
-                    let target = sid_del.clone();
+                .on_click(move |_, window, cx| {
                     ent_del.update(cx, |this, cx| {
-                        this.sidebar_context_menu = None;
-                        let active_sid = this
-                            .client
-                            .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
-                        if active_sid.as_deref() == Some(target.as_str()) {
-                            this.route = ShellRoute::Home;
-                        }
-                        let c = this.client.clone();
-                        cx.spawn(async move |weak, cx| {
-                            let res = c.delete_session(target).await;
-                            let _ = c.refresh_globals().await;
-                            if let Err(err) = res {
-                                let _ = weak.update(cx, |this, cx| {
-                                    this.show_workspace_error(err.to_string(), cx);
-                                });
-                            }
-                        })
-                        .detach();
-                        cx.notify();
+                        this.dismiss_sidebar_menu(window, cx);
+                        this.all_sessions_view.update(cx, |view, cx| {
+                            view.delete_sessions_optimistic(vec![sid_del.clone()], cx)
+                        });
                     });
                 })
                 .child(
@@ -1817,10 +1929,9 @@ impl AppShell {
             .left_0()
             .right_0()
             .bottom_0()
-            .on_mouse_down(gpui::MouseButton::Left, move |_, _, cx| {
+            .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
                 ent_backdrop.update(cx, |this, cx| {
-                    this.sidebar_context_menu = None;
-                    cx.notify();
+                    this.dismiss_sidebar_menu(window, cx);
                 });
             })
             .child(
@@ -1972,7 +2083,7 @@ impl AppShell {
                             .on_click(move |_, _, cx| {
                                 ent_all.update(cx, |this, cx| {
                                     this.recent_drawer_open = false;
-                                    this.route = ShellRoute::AllSessions;
+                                    this.set_route(ShellRoute::AllSessions, cx);
                                     cx.notify();
                                 });
                             })
@@ -2071,11 +2182,14 @@ impl AppShell {
                             .on_click(move |_, _, cx| {
                                 ent_auth.update(cx, |this, cx| {
                                     this.account_menu_open = false;
-                                    this.route = if logged_in {
-                                        ShellRoute::Account
-                                    } else {
-                                        ShellRoute::Login
-                                    };
+                                    this.set_route(
+                                        if logged_in {
+                                            ShellRoute::Account
+                                        } else {
+                                            ShellRoute::Login
+                                        },
+                                        cx,
+                                    );
                                     cx.notify();
                                 });
                             })
@@ -2107,7 +2221,7 @@ impl AppShell {
                             .on_click(move |_, _, cx| {
                                 ent_set.update(cx, |this, cx| {
                                     this.account_menu_open = false;
-                                    this.route = ShellRoute::Settings;
+                                    this.set_route(ShellRoute::Settings, cx);
                                     cx.notify();
                                 });
                             })
@@ -2204,6 +2318,16 @@ impl Render for AppShell {
         let scale_factor = window.scale_factor();
         let viewport_size = window.viewport_size();
 
+        let sidebar_sessions = self.all_sessions_view.read(cx).visible_sessions();
+        self.sidebar_selected_ids
+            .retain(|id| sidebar_sessions.iter().any(|session| &session.id == id));
+        if self
+            .sidebar_context_menu
+            .as_ref()
+            .is_some_and(|(id, _)| !sidebar_sessions.iter().any(|session| &session.id == id))
+        {
+            self.dismiss_sidebar_menu(window, cx);
+        }
         let web_locked = self.snapshot.channel_mode == ChannelModeDto::WebActive;
         let hw_diag_active = has_active_hardware_diagnostic(&self.snapshot);
         let sky_time = self.shader_scheduler.sample_for_window(
@@ -2314,7 +2438,7 @@ impl Render for AppShell {
                         .hover(|s| s.bg(palette.bg_item_hover))
                         .on_click(move |_, _, cx| {
                             e_back.update(cx, |this, cx| {
-                                this.route = ShellRoute::Home;
+                                this.set_route(ShellRoute::Home, cx);
                                 cx.notify();
                             });
                         })
@@ -2374,8 +2498,7 @@ impl Render for AppShell {
                         }),
                         on_new_session: Rc::new(move |_, cx| {
                             e3.update(cx, |this, cx| {
-                                this.route = ShellRoute::Home;
-                                this.session_subview = SessionSubView::Chat;
+                                this.set_route(ShellRoute::Home, cx);
                                 this.sidebar_batch_mode = false;
                                 this.sidebar_selected_ids.clear();
                                 let c = this.client.clone();
@@ -2419,7 +2542,7 @@ impl Render for AppShell {
                         }),
                         on_open_settings: Rc::new(move |_, cx| {
                             e8.update(cx, |this, cx| {
-                                this.route = ShellRoute::Settings;
+                                this.set_route(ShellRoute::Settings, cx);
                                 cx.notify();
                             });
                         }),
@@ -2531,7 +2654,9 @@ impl Render for AppShell {
                 row_layout = row_layout.child(render_sidebar_l081m1(
                     self.route,
                     active_session_id.as_deref(),
-                    &self.snapshot.sessions,
+                    &sidebar_sessions,
+                    window,
+                    cx,
                     &self.sidebar_search_input,
                     &search_query,
                     self.sidebar_batch_mode,
@@ -2547,8 +2672,7 @@ impl Render for AppShell {
                         }),
                         on_new_session: Rc::new(move |_, cx| {
                             s2.update(cx, |this, cx| {
-                                this.route = ShellRoute::Home;
-                                this.session_subview = SessionSubView::Chat;
+                                this.set_route(ShellRoute::Home, cx);
                                 this.sidebar_batch_mode = false;
                                 this.sidebar_selected_ids.clear();
                                 let c = this.client.clone();
@@ -2572,12 +2696,13 @@ impl Render for AppShell {
                         on_open_palette: Rc::new(move |w, cx| {
                             s_pal.update(cx, |this, cx| this.toggle_command_palette(w, cx));
                         }),
-                        on_open_all_sessions: Rc::new(move |_, cx| {
+                        on_open_all_sessions: Rc::new(move |window, cx| {
                             s3.update(cx, |this, cx| {
                                 this.sidebar_batch_mode = false;
                                 this.sidebar_selected_ids.clear();
-                                this.route = ShellRoute::AllSessions;
-                                cx.notify();
+                                this.set_route(ShellRoute::AllSessions, cx);
+                                this.all_sessions_view
+                                    .update(cx, |view, cx| view.focus(window, cx));
                             });
                         }),
                         on_open_dashboard: Rc::new(move |_, cx| {
@@ -2587,23 +2712,32 @@ impl Render for AppShell {
                                 this.show_top_notice("本地用量仪表盘将在后续版本开放。", cx);
                             });
                         }),
-                        on_select_session: Rc::new(move |sid, _, cx| {
-                            s5.update(cx, |this, cx| this.activate_session_by_id(sid, cx));
+                        on_select_session: Rc::new(move |sid, window, cx| {
+                            s5.update(cx, |this, cx| {
+                                this.activate_session_by_id(sid, cx);
+                                this.root_focus.focus(window, cx);
+                            });
                         }),
-                        on_open_session_menu: Rc::new(move |sid, pos, _, cx| {
+                        on_open_session_menu: Rc::new(move |sid, pos, window, cx| {
                             s5_menu.update(cx, |this, cx| {
+                                if this.sidebar_context_menu.is_none() {
+                                    this.sidebar_menu_prior_focus = window.focused(cx);
+                                }
                                 this.sidebar_context_menu = Some((sid, pos));
+                                this.sidebar_menu_focus.focus(window, cx);
                                 cx.notify();
                             });
                         }),
                         on_toggle_select_all: Rc::new(move |_, cx| {
                             s7.update(cx, |this, cx| {
                                 let q = this.sidebar_search_input.read(cx).value().to_string();
-                                let recent_ids: Vec<String> =
-                                    filter_recent_sidebar_sessions(&this.snapshot.sessions, &q)
-                                        .into_iter()
-                                        .map(|s| s.id)
-                                        .collect();
+                                let recent_ids: Vec<String> = filter_recent_sidebar_sessions(
+                                    &this.all_sessions_view.read(cx).visible_sessions(),
+                                    &q,
+                                )
+                                .into_iter()
+                                .map(|s| s.id)
+                                .collect();
                                 if !recent_ids.is_empty()
                                     && recent_ids
                                         .iter()
@@ -2616,48 +2750,20 @@ impl Render for AppShell {
                                 cx.notify();
                             });
                         }),
-                        on_batch_delete: Rc::new(move |_, cx| {
+                        on_batch_delete: Rc::new(move |window, cx| {
                             s8.update(cx, |this, cx| {
-                                let targets: Vec<String> =
-                                    this.sidebar_selected_ids.iter().cloned().collect();
-                                if targets.is_empty() {
+                                if !this.sidebar_batch_mode || this.sidebar_selected_ids.is_empty()
+                                {
                                     return;
                                 }
-                                let active_sid = this
-                                    .client
-                                    .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
-                                if let Some(ref cur) = active_sid
-                                    && targets.contains(cur)
-                                {
-                                    this.route = ShellRoute::Home;
-                                }
-                                this.sidebar_selected_ids.clear();
+                                let targets = std::mem::take(&mut this.sidebar_selected_ids)
+                                    .into_iter()
+                                    .collect();
                                 this.sidebar_batch_mode = false;
-                                let client = this.client.clone();
-                                cx.spawn(async move |weak, cx| {
-                                    let mut failed = None;
-                                    for sid in targets {
-                                        let c = client.clone();
-                                        let res = cx
-                                            .background_executor()
-                                            .spawn(async move { c.delete_session(sid).await })
-                                            .await;
-                                        if let Err(err) = res {
-                                            failed = Some(err.to_string());
-                                        }
-                                    }
-                                    let c_ref = client.clone();
-                                    let _ = cx
-                                        .background_executor()
-                                        .spawn(async move { c_ref.refresh_globals().await })
-                                        .await;
-                                    if let Some(msg) = failed {
-                                        let _ = weak.update(cx, |this, cx| {
-                                            this.show_workspace_error(msg, cx);
-                                        });
-                                    }
-                                })
-                                .detach();
+                                this.sidebar_collapse_focus.focus(window, cx);
+                                this.all_sessions_view.update(cx, |view, cx| {
+                                    view.delete_sessions_optimistic(targets, cx)
+                                });
                                 cx.notify();
                             });
                         }),
@@ -2680,7 +2786,7 @@ impl Render for AppShell {
                         }),
                         on_open_settings: Rc::new(move |_, cx| {
                             s11.update(cx, |this, cx| {
-                                this.route = ShellRoute::Settings;
+                                this.set_route(ShellRoute::Settings, cx);
                                 cx.notify();
                             });
                         }),
@@ -2704,17 +2810,16 @@ impl Render for AppShell {
             .font_family(theme_global.ui_font_family)
             .text_color(palette.text_primary)
             .on_action(cx.listener(|this, _: &ToggleSidebar, window, cx| {
-                if this.blocks_workspace_shortcuts() {
+                if this.blocks_workspace_shortcuts(cx) {
                     return;
                 }
                 this.toggle_sidebar(window, cx);
             }))
             .on_action(cx.listener(|this, _: &NewSession, _, cx| {
-                if this.blocks_workspace_shortcuts() {
+                if this.blocks_workspace_shortcuts(cx) {
                     return;
                 }
-                this.route = ShellRoute::Home;
-                this.session_subview = SessionSubView::Chat;
+                this.set_route(ShellRoute::Home, cx);
                 this.sidebar_batch_mode = false;
                 this.sidebar_selected_ids.clear();
                 let c = this.client.clone();
@@ -2726,10 +2831,10 @@ impl Render for AppShell {
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &OpenSettings, _, cx| {
-                if this.blocks_workspace_shortcuts() {
+                if this.blocks_workspace_shortcuts(cx) {
                     return;
                 }
-                this.route = ShellRoute::Settings;
+                this.set_route(ShellRoute::Settings, cx);
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| {
@@ -2783,10 +2888,7 @@ impl Render for AppShell {
 
         // Rename Session Modal (`384px`, `r: 8px`, `p: 20px`, `gap: 12px`)
         if let Some(ref rm) = self.rename_modal {
-            let sid_save = rm.session_id.clone();
-            let inp_save = rm.input.clone();
             let ent_cancel = entity.clone();
-            let ent_save = entity.clone();
             root = root.child(
                 render_frosted_surface(
                     "rename-session-scrim",
@@ -2814,6 +2916,22 @@ impl Render for AppShell {
                     )
                     .test_support()
                     .a11y_dialog("rename-session-modal", "重命名对话")
+                    .capture_action(cx.listener(|this, _: &Escape, window, cx| {
+                        if let Some(modal) = &this.rename_modal {
+                            crate::sessions::consume_composing_escape(&modal.input, window, cx);
+                        }
+                    }))
+                    .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
+                        if event.keystroke.key == "enter"
+                            && !event.is_held
+                            && this.rename_modal.as_ref().is_some_and(|modal| {
+                                modal.input.read(cx).focus_handle(cx).is_focused(window)
+                            })
+                        {
+                            this.submit_sidebar_rename(window, cx);
+                            cx.stop_propagation();
+                        }
+                    }))
                     .w(layout::MODAL_STANDARD_WIDTH)
                     .p(px(20.0))
                     .rounded(radius::ROW)
@@ -2846,6 +2964,7 @@ impl Render for AppShell {
                                     .id("rename-session-cancel-btn")
                                     .test_support()
                                     .a11y_button("rename-session-cancel-btn", "取消")
+                                    .tab_index(0)
                                     .h(height::CONTROL)
                                     .px(space::MD)
                                     .rounded(radius::CONTROL)
@@ -2857,7 +2976,7 @@ impl Render for AppShell {
                                     .hover(|s| s.bg(palette.bg_item_hover))
                                     .on_click(move |_, w, cx| {
                                         ent_cancel.update(cx, |this, cx| {
-                                            let _ = this.dismiss_topmost_surface(w, cx);
+                                            this.close_sidebar_rename(w, cx);
                                         });
                                     })
                                     .child(cjk_inline_label("取消")),
@@ -2867,6 +2986,7 @@ impl Render for AppShell {
                                     .id("rename-session-confirm-btn")
                                     .test_support()
                                     .a11y_button("rename-session-confirm-btn", "保存")
+                                    .tab_index(0)
                                     .h(height::CONTROL)
                                     .px(space::LG)
                                     .rounded(radius::CONTROL)
@@ -2875,33 +2995,14 @@ impl Render for AppShell {
                                     .flex()
                                     .items_center()
                                     .hover(|s| s.bg(palette.accent_hover))
-                                    .on_click(move |_, w, cx| {
-                                        let new_name = inp_save.read(cx).value().trim().to_owned();
-                                        let target = sid_save.clone();
-                                        ent_save.update(cx, |this, cx| {
-                                            let _ = this.dismiss_topmost_surface(w, cx);
-                                            if !new_name.is_empty() {
-                                                let c = this.client.clone();
-                                                cx.spawn(async move |weak, cx| {
-                                                    let res =
-                                                        c.rename_session(target, new_name).await;
-                                                    let _ = c.refresh_globals().await;
-                                                    if let Err(err) = res {
-                                                        let _ = weak.update(cx, |this, cx| {
-                                                            this.show_workspace_error(
-                                                                err.to_string(),
-                                                                cx,
-                                                            );
-                                                        });
-                                                    }
-                                                })
-                                                .detach();
-                                            }
-                                        });
-                                    })
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.submit_sidebar_rename(window, cx)
+                                    }))
                                     .child(cjk_inline_label("保存")),
                             ),
-                    ),
+                    )
+                    .tab_stop(false)
+                    .focus_trap("sidebar-rename-focus-trap", &self.rename_trap_focus),
                 ),
             );
         }
@@ -2929,7 +3030,7 @@ impl Render for AppShell {
                         };
                         this.pending_return_session_id = Some(taken.return_session_id);
                         this.root_focus.focus(w, cx);
-                        this.route = ShellRoute::Settings;
+                        this.set_route(ShellRoute::Settings, cx);
                         this.settings_view.update(cx, |sv, cx| {
                             sv.set_category(SettingsCategory::Providers, cx);
                         });

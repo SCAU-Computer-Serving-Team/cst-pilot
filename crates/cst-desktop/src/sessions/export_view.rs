@@ -7,7 +7,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::{
     Context, EventEmitter, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
+    StatefulInteractiveElement, Styled, Task, TestSupportExt, Window, div, px,
 };
 use serde_json::Value;
 
@@ -82,9 +82,10 @@ pub struct ExportView {
     include_thinking: bool,
     include_tools: bool,
     preview_snapshot: Option<Value>,
-    loading_preview: bool,
-    preview_generation: u64,
-    exporting: bool,
+    preview_failed: bool,
+    preview_task: Option<Task<()>>,
+    export_task: Option<Task<()>>,
+    open_directory_task: Option<Task<()>>,
     last_completed_export_id: Option<String>,
     last_completed_dir: Option<String>,
 }
@@ -106,9 +107,10 @@ impl ExportView {
             include_thinking: true,
             include_tools: true,
             preview_snapshot: None,
-            loading_preview: false,
-            preview_generation: 0,
-            exporting: false,
+            preview_failed: false,
+            preview_task: None,
+            export_task: None,
+            open_directory_task: None,
             last_completed_export_id: None,
             last_completed_dir: None,
         };
@@ -117,24 +119,30 @@ impl ExportView {
     }
 
     pub fn set_session_id(&mut self, session_id: String, cx: &mut Context<Self>) {
-        if self.session_id != session_id {
-            self.session_id = session_id;
-            self.preview_snapshot = None;
-            self.last_completed_export_id = None;
-            self.last_completed_dir = None;
-            self.reload_preview(cx);
-        }
+        self.stop();
+        self.session_id = session_id;
+        self.reload_preview(cx);
     }
 
-    /// Fetches `/api/sessions/<id>/exports/preview` while retaining `self.preview_snapshot` until the new snapshot lands.
+    pub(crate) fn stop(&mut self) {
+        // Dropping the tasks cancels UI polling and prevents obsolete jobs from opening Explorer.
+        // An export already accepted by the service may still finish writing its files.
+        self.preview_task = None;
+        self.export_task = None;
+        self.open_directory_task = None;
+        self.preview_snapshot = None;
+        self.preview_failed = false;
+        self.last_completed_export_id = None;
+        self.last_completed_dir = None;
+    }
+
+    /// Keep the previous preview mounted until the latest request settles.
     pub fn reload_preview(&mut self, cx: &mut Context<Self>) {
+        self.preview_task = None;
+        cx.notify();
         if self.session_id.is_empty() {
             return;
         }
-        self.preview_generation = self.preview_generation.wrapping_add(1);
-        let req_gen = self.preview_generation;
-        self.loading_preview = true;
-        cx.notify();
 
         let client = self.client.clone();
         let sid = self.session_id.clone();
@@ -143,35 +151,38 @@ impl ExportView {
         let inc_think = self.include_thinking;
         let inc_tools = self.include_tools;
 
-        cx.spawn(async move |weak, cx| {
+        self.preview_task = Some(cx.spawn(async move |weak, cx| {
             let res = client
                 .preview_session_export(sid, fmt, thm, inc_think, inc_tools)
                 .await;
             let _ = weak.update(cx, |this, cx| {
-                if this.preview_generation != req_gen {
-                    return;
-                }
-                this.loading_preview = false;
-                match res {
-                    Ok(snap) => {
-                        this.preview_snapshot = Some(snap);
-                    }
+                this.preview_task = None;
+                this.preview_failed = false;
+                this.preview_snapshot = match res {
+                    Ok(snapshot) => snapshot
+                        .get("entries")
+                        .and_then(Value::as_array)
+                        .is_some_and(|entries| !entries.is_empty())
+                        .then_some(snapshot),
+                    Err(err) if err.code() == "empty_export" => None,
                     Err(err) => {
+                        this.preview_failed = true;
                         cx.emit(ExportViewEvent::ErrorMessage(err.to_string()));
+                        None
                     }
-                }
+                };
                 cx.notify();
             });
-        })
-        .detach();
+        }));
     }
 
     fn start_generate_and_save(&mut self, cx: &mut Context<Self>) {
-        if self.exporting || self.session_id.is_empty() {
+        if self.export_task.is_some()
+            || self.open_directory_task.is_some()
+            || self.session_id.is_empty()
+        {
             return;
         }
-        self.exporting = true;
-        cx.notify();
 
         let client = self.client.clone();
         let sid = self.session_id.clone();
@@ -180,112 +191,75 @@ impl ExportView {
         let inc_think = self.include_thinking;
         let inc_tools = self.include_tools;
 
-        cx.spawn(async move |weak, cx| {
-            let created = client
-                .create_session_export(sid, fmt, thm, inc_think, inc_tools)
-                .await;
-            let job_id = match created {
-                Ok(val) => val
+        self.export_task = Some(cx.spawn(async move |weak, cx| {
+            let result = async {
+                let created = client
+                    .create_session_export(sid, fmt, thm, inc_think, inc_tools)
+                    .await
+                    .map_err(|err| err.to_string())?;
+                let job_id = created
                     .get("id")
                     .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_owned(),
-                Err(err) => {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.exporting = false;
-                        cx.emit(ExportViewEvent::ErrorMessage(err.to_string()));
-                        cx.notify();
-                    });
-                    return;
-                }
-            };
-
-            if job_id.is_empty() {
-                let _ = weak.update(cx, |this, cx| {
-                    this.exporting = false;
-                    cx.emit(ExportViewEvent::ErrorMessage("导出任务 ID 无效。".into()));
-                    cx.notify();
-                });
-                return;
-            }
-
-            // Poll `GET /api/exports/<exportId>` with 200ms Tokio sleep backoff when still running
-            let poll_client = client.clone();
-            let jid = job_id.clone();
-            let mut resolved_job = poll_client.get_export_job(jid.clone()).await;
-
-            for _ in 0..120 {
-                let status = resolved_job
-                    .as_ref()
-                    .ok()
-                    .and_then(|v| v.get("status"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                if matches!(status, "completed" | "failed") {
-                    break;
-                }
-                let _ = client
-                    .spawn_tokio(async {
-                        tokio::time::sleep(Duration::from_millis(200)).await;
-                        Ok::<(), cst_client::ClientError>(())
-                    })
-                    .await;
-                let pc = client.clone();
-                let j = jid.clone();
-                resolved_job = pc.get_export_job(j).await;
-            }
-
-            match resolved_job {
-                Ok(job_val) => {
-                    let status = job_val
-                        .get("status")
-                        .and_then(Value::as_str)
-                        .unwrap_or("completed");
-                    if status == "failed" {
-                        let err_msg = job_val
-                            .get("error")
-                            .and_then(|e| e.get("message").or(Some(e)))
-                            .and_then(Value::as_str)
-                            .unwrap_or("导出任务生成失败。")
-                            .to_owned();
-                        let _ = weak.update(cx, |this, cx| {
-                            this.exporting = false;
-                            cx.emit(ExportViewEvent::ErrorMessage(err_msg));
-                            cx.notify();
-                        });
-                        return;
+                    .filter(|id| !id.is_empty())
+                    .ok_or("导出任务 ID 无效。")?;
+                let mut job = created.clone();
+                for _ in 0..120 {
+                    if let Some(dir) = completed_export(&job)? {
+                        return Ok((job_id.to_owned(), dir));
                     }
-
-                    let dir = job_val
-                        .get("directory")
-                        .and_then(Value::as_str)
-                        .map(str::to_owned);
-                    let open_res = client.open_export_directory(job_id.clone()).await;
-
-                    let _ = weak.update(cx, |this, cx| {
-                        this.exporting = false;
-                        this.last_completed_export_id = Some(job_id);
-                        this.last_completed_dir = dir;
-                        if let Err(err) = open_res {
-                            cx.emit(ExportViewEvent::ErrorMessage(err.to_string()));
-                        } else {
-                            cx.emit(ExportViewEvent::Notice(
-                                "导出已完成并在文件管理器中定位。".into(),
-                            ));
-                        }
-                        cx.notify();
-                    });
+                    cx.background_executor()
+                        .timer(Duration::from_millis(200))
+                        .await;
+                    job = client
+                        .get_export_job(job_id.to_owned())
+                        .await
+                        .map_err(|err| err.to_string())?;
                 }
-                Err(err) => {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.exporting = false;
-                        cx.emit(ExportViewEvent::ErrorMessage(err.to_string()));
-                        cx.notify();
-                    });
-                }
+                completed_export(&job)?
+                    .map(|dir| (job_id.to_owned(), dir))
+                    .ok_or_else(|| "等待导出任务超时。".into())
             }
-        })
-        .detach();
+            .await;
+
+            let _ = weak.update(cx, |this, cx| {
+                this.export_task = None;
+                match result {
+                    Ok((id, dir)) => {
+                        this.last_completed_export_id = Some(id);
+                        this.last_completed_dir = dir;
+                        this.open_export_directory(true, cx);
+                    }
+                    Err(msg) => cx.emit(ExportViewEvent::ErrorMessage(msg)),
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    fn open_export_directory(&mut self, automatic: bool, cx: &mut Context<Self>) {
+        if self.open_directory_task.is_some() || self.export_task.is_some() {
+            return;
+        }
+        let Some(id) = self.last_completed_export_id.clone() else {
+            return;
+        };
+        let client = self.client.clone();
+        self.open_directory_task = Some(cx.spawn(async move |weak, cx| {
+            let res = client.open_export_directory(id).await;
+            let _ = weak.update(cx, |this, cx| {
+                this.open_directory_task = None;
+                match res {
+                    Err(err) => cx.emit(ExportViewEvent::ErrorMessage(err.to_string())),
+                    Ok(_) if automatic => cx.emit(ExportViewEvent::Notice(
+                        "导出已完成并在文件管理器中定位。".into(),
+                    )),
+                    Ok(_) => {}
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
     }
 
     fn render_readonly_preview(
@@ -352,7 +326,7 @@ impl ExportView {
                                         .child(cjk_inline_label(title.to_owned())),
                                 ),
                         )
-                        .children(self.loading_preview.then(|| {
+                        .children(self.preview_task.is_some().then(|| {
                             apply_scale(div(), scale::CAPTION)
                                 .text_color(doc_palette.text_muted)
                                 .child(cjk_inline_label("正在更新预览…"))
@@ -534,8 +508,10 @@ impl ExportView {
                 .child(
                     apply_scale(div(), scale::UI)
                         .text_color(doc_palette.text_muted)
-                        .child(if self.loading_preview {
+                        .child(if self.preview_task.is_some() {
                             "正在加载导出预览…"
+                        } else if self.preview_failed {
+                            "导出预览加载失败，请重试"
                         } else {
                             "暂无可导出的消息内容"
                         }),
@@ -556,6 +532,24 @@ impl ExportView {
                     .child(cjk_inline_label("预览")),
             )
             .child(viewport_el)
+    }
+}
+
+// Outer Option indicates completion; the completed response may omit its directory hint.
+fn completed_export(job: &Value) -> Result<Option<Option<String>>, String> {
+    match job.get("status").and_then(Value::as_str) {
+        Some("completed") => Ok(Some(
+            job.get("directory")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        )),
+        Some("queued" | "rendering") => Ok(None),
+        Some("failed") => Err(job
+            .get("error")
+            .and_then(|e| e.get("message").unwrap_or(e).as_str())
+            .unwrap_or("导出任务生成失败。")
+            .to_owned()),
+        _ => Err("导出任务状态无效。".into()),
     }
 }
 
@@ -611,8 +605,7 @@ impl Render for ExportView {
             );
 
         // Left `264px` options column `ER02w` (no gray `bg_surface`, no right border)
-        let saved_section_opt = self.last_completed_export_id.as_ref().map(|eid| {
-            let eid_open = eid.clone();
+        let saved_section_opt = self.last_completed_export_id.as_ref().map(|_| {
             let dir_hint = self.last_completed_dir.clone();
             div()
                 .pt(space::LG)
@@ -647,18 +640,9 @@ impl Render for ExportView {
                         .items_center()
                         .justify_center()
                         .hover(|s| s.bg(palette.bg_item_hover))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            let c = this.client.clone();
-                            let id = eid_open.clone();
-                            cx.spawn(async move |weak, cx| {
-                                if let Err(err) = c.open_export_directory(id).await {
-                                    let _ = weak.update(cx, |_, cx| {
-                                        cx.emit(ExportViewEvent::ErrorMessage(err.to_string()));
-                                    });
-                                }
-                            })
-                            .detach();
-                        }))
+                        .on_click(
+                            cx.listener(|this, _, _, cx| this.open_export_directory(false, cx)),
+                        )
                         .child(cjk_inline_label("打开保存目录")),
                 )
         });
@@ -790,7 +774,7 @@ impl Render for ExportView {
                             .test_support()
                             .a11y_button(
                                 "export-save-btn",
-                                if self.exporting {
+                                if self.export_task.is_some() {
                                     "正在生成"
                                 } else {
                                     "生成并保存"
@@ -809,7 +793,7 @@ impl Render for ExportView {
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.start_generate_and_save(cx);
                             }))
-                            .child(cjk_inline_label(if self.exporting {
+                            .child(cjk_inline_label(if self.export_task.is_some() {
                                 "正在生成…"
                             } else {
                                 "生成并保存"

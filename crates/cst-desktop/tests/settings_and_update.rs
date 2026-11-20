@@ -166,6 +166,7 @@ struct Step6MockState {
     cstoa_logout_calls: usize,
     tree_navigations: Vec<Value>,
     export_previews: Vec<Value>,
+    export_creates: usize,
     export_opens: Vec<String>,
     saved_custom_providers: Vec<Value>,
     update_phase: String,
@@ -183,6 +184,7 @@ impl Default for Step6MockState {
             cstoa_logout_calls: 0,
             tree_navigations: Vec::new(),
             export_previews: Vec::new(),
+            export_creates: 0,
             export_opens: Vec::new(),
             saved_custom_providers: Vec::new(),
             update_phase: "idle".into(),
@@ -411,12 +413,24 @@ impl Step6MockBackend {
                                         }),
                                     )
                                 }
-                                ("POST", "/api/sessions/sess-busy/exports") => (
-                                    "HTTP/1.1 202 Accepted",
-                                    json!({
-                                        "id": "exp-job-1",
-                                        "status": "completed",
+                                ("POST", "/api/sessions/sess-busy/exports") => {
+                                    guard.export_creates += 1;
+                                    let (id, status) = if guard.export_creates == 1 {
+                                        ("exp-stale", "rendering")
+                                    } else {
+                                        ("exp-job-1", "completed")
+                                    };
+                                    ("HTTP/1.1 202 Accepted", json!({
+                                        "id": id,
+                                        "status": status,
                                         "directory": "artifacts/2026-11-20/sessions"
+                                    }))
+                                }
+                                ("GET", "/api/exports/exp-stale") => (
+                                    "HTTP/1.1 200 OK",
+                                    json!({
+                                        "id": "exp-stale",
+                                        "status": if guard.export_creates == 1 { "rendering" } else { "completed" }
                                     }),
                                 ),
                                 ("GET", "/api/exports/exp-job-1") => (
@@ -428,13 +442,13 @@ impl Step6MockBackend {
                                         "files": [{ "name": "report.png", "bytes": 4096, "url": "/api/exports/exp-job-1/files/0" }]
                                     }),
                                 ),
-                                ("POST", "/api/exports/exp-job-1/open") => {
+                                ("POST", p @ ("/api/exports/exp-job-1/open" | "/api/exports/exp-stale/open")) => {
                                     assert_eq!(
                                         body_str.trim(),
                                         "{}",
                                         "`POST /api/exports/<id>/open` MUST send empty JSON object body"
                                     );
-                                    guard.export_opens.push("exp-job-1".into());
+                                    guard.export_opens.push(p.to_owned());
                                     ("HTTP/1.1 200 OK", json!({ "launched": true }))
                                 }
                                 ("POST", "/api/auth/custom") => {
@@ -674,7 +688,16 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
 
         // Exit context menu & batch mode via single-layer `escape`
         window.press("escape", cx);
+        assert!(window.try_find("sidebar-ctx-delete").is_none());
         window.press("escape", cx);
+        window.click("sidebar-row-menu-btn-sess-busy", cx);
+        window.click("sidebar-ctx-rename", cx);
+        window.press("escape", cx);
+        assert!(window.try_find("rename-session-modal").is_none());
+        assert_eq!(
+            window.find("sidebar-row-menu-btn-sess-busy").focused(),
+            Some(true)
+        );
     })
     .unwrap();
 
@@ -684,6 +707,14 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         assert!(window.find("all-sessions-view").visible());
         assert!(window.find("all-sessions-row-sess-busy").visible());
         assert!(window.find("all-sessions-row-sess-idle").visible());
+
+        window.click("all-sessions-more-btn-sess-busy", cx);
+        window.click("all-sessions-ctx-rename", cx);
+        window.press("ctrl-a backspace enter", cx);
+        assert!(window.find("all-sessions-rename-modal").visible());
+        window.press("escape", cx);
+        assert!(window.try_find("all-sessions-rename-modal").is_none());
+        assert_eq!(window.find("all-sessions-view").focused(), Some(true));
 
         window.click("all-sessions-enter-batch-btn", cx);
         window.click("all-sessions-select-all-btn", cx);
@@ -729,6 +760,16 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         assert!(window.find("branch-mode-no-summary-btn").visible());
         assert!(window.find("branch-mode-summary-btn").visible());
         assert!(window.find("branch-mode-custom-summary-btn").visible());
+        window.press("tab tab tab tab tab", cx);
+        window.press("ctrl-o", cx);
+        assert_eq!(
+            shell.read(cx).branch_tree_view().read(cx).filter_mode(),
+            TreeFilterMode::NoTools
+        );
+        window.press("escape", cx);
+        assert!(window.try_find("branch-summary-mode-card").is_none());
+        assert!(window.find("branch-tree-view").visible());
+        window.click("tree-node-row-e-user-1", cx);
         window.click("branch-mode-no-summary-btn", cx);
     })
     .unwrap();
@@ -775,11 +816,38 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
     })
     .unwrap();
 
-    let st_exp = Arc::clone(&backend.state);
-    cx.wait_for(win_handle, Duration::from_secs(2), move |_, _| {
-        !st_exp.lock().unwrap().export_opens.is_empty()
+    cx.wait_for(win_handle, Duration::from_secs(2), |_, _| {
+        backend.state.lock().unwrap().export_creates == 1
     })
     .await;
+
+    cx.update_window(win_handle, |_, window, cx| {
+        window.press("escape", cx);
+        assert!(window.try_find("export-options-pane-er02w").is_none());
+    })
+    .unwrap();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.press("ctrl-k", cx);
+        window.input("/export", cx);
+        window.press("enter", cx);
+    })
+    .unwrap();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("export-generate-save-btn", cx);
+        window.click("export-generate-save-btn", cx);
+    })
+    .unwrap();
+
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window.try_find("export-open-dir-btn").is_some()
+            && !backend.state.lock().unwrap().export_opens.is_empty()
+    })
+    .await;
+    {
+        let state = backend.state.lock().unwrap();
+        assert_eq!(state.export_creates, 2);
+        assert_eq!(state.export_opens, ["/api/exports/exp-job-1/open"]);
+    }
 
     cx.update_window(win_handle, |_, window, cx| {
         window.click("export-back-btn", cx);

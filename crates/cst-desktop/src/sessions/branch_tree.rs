@@ -5,7 +5,7 @@ use gpui::KeyDownEvent;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::Icon;
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::{Escape, Input, InputState};
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
     IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
@@ -130,6 +130,7 @@ pub fn build_visible_tree_nodes(
             .map(str::to_owned)
     });
 
+    let leaf_id = resolved_leaf.as_deref();
     let mut active_chain = BTreeSet::new();
     let mut cur = resolved_leaf.clone();
     while let Some(cid) = cur {
@@ -145,21 +146,20 @@ pub fn build_visible_tree_nodes(
     }
 
     let mut out = Vec::new();
-    #[allow(clippy::too_many_arguments)]
-    fn dfs(
-        node_id: &str,
-        depth: usize,
-        is_seg_head: bool,
-        by_id: &BTreeMap<String, &Value>,
-        children_map: &BTreeMap<Option<String>, Vec<String>>,
-        active_chain: &BTreeSet<String>,
-        leaf_id: Option<&str>,
-        filter: TreeFilterMode,
-        collapsed_heads: &BTreeSet<String>,
-        out: &mut Vec<TreeNodeDisplay>,
-    ) {
+    let mut pending: Vec<_> = children_map
+        .get(&None)
+        .into_iter()
+        .flatten()
+        .rev()
+        .map(|id| (id.as_str(), 0, true))
+        .collect();
+    let mut visited = BTreeSet::new();
+    while let Some((node_id, depth, is_seg_head)) = pending.pop() {
+        if !visited.insert(node_id) {
+            continue;
+        }
         let Some(entry) = by_id.get(node_id) else {
-            return;
+            continue;
         };
         let msg = entry.get("message").unwrap_or(entry);
         let entry_type = entry
@@ -192,8 +192,7 @@ pub fn build_visible_tree_nodes(
 
         let kids = children_map
             .get(&Some(node_id.to_owned()))
-            .cloned()
-            .unwrap_or_default();
+            .map_or(&[][..], Vec::as_slice);
         let branches = kids.len() > 1;
 
         if keep {
@@ -229,45 +228,15 @@ pub fn build_visible_tree_nodes(
         }
 
         if is_seg_head && collapsed_heads.contains(node_id) && kids.len() == 1 {
-            return;
+            continue;
         }
-
-        for (idx, kid) in kids.iter().enumerate() {
-            let next_depth = if branches && idx > 0 {
-                depth + 1
-            } else {
-                depth
-            };
-            let next_head = branches;
-            dfs(
-                kid,
-                next_depth,
-                next_head,
-                by_id,
-                children_map,
-                active_chain,
-                leaf_id,
-                filter,
-                collapsed_heads,
-                out,
-            );
-        }
-    }
-
-    let roots = children_map.get(&None).cloned().unwrap_or_default();
-    for root_id in roots {
-        dfs(
-            &root_id,
-            0,
-            true,
-            &by_id,
-            &children_map,
-            &active_chain,
-            resolved_leaf.as_deref(),
-            filter,
-            collapsed_heads,
-            &mut out,
-        );
+        pending.extend(kids.iter().enumerate().rev().map(|(idx, kid)| {
+            (
+                kid.as_str(),
+                depth + usize::from(branches && idx > 0),
+                branches,
+            )
+        }));
     }
     out
 }
@@ -301,9 +270,9 @@ fn ancestor_continuation(
 pub enum BranchTreeEvent {
     BackToChat,
     SwitchToForkedSession(String),
-    PrefillComposer(String),
+    PrefillComposer { session_id: String, text: String },
     SummarizingStarted { session_id: String },
-    SummarizingFinished,
+    SummarizingFinished { session_id: String },
     ErrorMessage(String),
 }
 
@@ -319,6 +288,9 @@ pub struct BranchTreeView {
     custom_prompt_input: Entity<InputState>,
     focus_handle: FocusHandle,
     modal_trap_focus: FocusHandle,
+    modal_prior_focus: Option<FocusHandle>,
+    visit: u64,
+    pending_operations: BTreeSet<String>,
 }
 
 impl EventEmitter<BranchTreeEvent> for BranchTreeView {}
@@ -352,17 +324,66 @@ impl BranchTreeView {
             custom_prompt_input,
             focus_handle: cx.focus_handle(),
             modal_trap_focus: cx.focus_handle(),
+            modal_prior_focus: None,
+            visit: 0,
+            pending_operations: BTreeSet::new(),
         }
     }
 
-    pub fn set_session_id(&mut self, session_id: String, cx: &mut Context<Self>) {
+    pub fn set_session_id(
+        &mut self,
+        session_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_view();
         if self.session_id != session_id {
             self.session_id = session_id;
             self.selected_index = 0;
-            self.pending_target_id = None;
-            self.custom_prompt_mode = false;
-            cx.notify();
+            self.collapsed_heads.clear();
+            self.search_input
+                .update(cx, |input, cx| input.set_value("", window, cx));
         }
+        cx.notify();
+    }
+
+    pub(crate) fn close_view(&mut self) {
+        self.visit = self.visit.wrapping_add(1);
+        self.pending_target_id = None;
+        self.custom_prompt_mode = false;
+        self.modal_prior_focus = None;
+    }
+
+    pub(crate) fn has_summary_modal(&self) -> bool {
+        self.pending_target_id.is_some()
+    }
+
+    pub(crate) fn dismiss_summary(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.pending_target_id.take().is_none() {
+            return false;
+        }
+        self.custom_prompt_mode = false;
+        self.modal_prior_focus
+            .take()
+            .unwrap_or_else(|| self.focus_handle.clone())
+            .focus(window, cx);
+        cx.notify();
+        true
+    }
+
+    fn open_summary(&mut self, target: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.has_summary_modal() || self.pending_operations.contains(&self.session_id) {
+            return;
+        }
+        self.modal_prior_focus = window
+            .focused(cx)
+            .filter(|f| self.focus_handle.contains(f, window));
+        self.custom_prompt_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.pending_target_id = Some(target);
+        self.custom_prompt_mode = false;
+        self.modal_trap_focus.focus(window, cx);
+        cx.notify();
     }
 
     pub fn filter_mode(&self) -> TreeFilterMode {
@@ -456,56 +477,70 @@ impl BranchTreeView {
         target_id: String,
         summarize: bool,
         custom_instructions: Option<String>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.pending_target_id = None;
-        self.custom_prompt_mode = false;
+        if self.pending_target_id.as_deref() != Some(&target_id)
+            || super::input_is_composing(&self.custom_prompt_input, window, cx)
+        {
+            return;
+        }
         let sid = self.session_id.clone();
+        if !self.pending_operations.insert(sid.clone()) {
+            return;
+        }
+        self.dismiss_summary(window, cx);
+        let visit = self.visit;
         let client = self.client.clone();
-
+        let draft_key = DraftKey::Session(sid.clone());
+        let draft_revision = client.with_workspace(|ws| ws.draft_edit_revision(&draft_key));
         if summarize {
             cx.emit(BranchTreeEvent::SummarizingStarted {
                 session_id: sid.clone(),
             });
-            cx.emit(BranchTreeEvent::BackToChat);
         }
 
         cx.spawn(async move |weak, cx| {
             let res = client
                 .navigate_session_tree(sid.clone(), target_id, summarize, custom_instructions)
                 .await;
-            let _ = client.activate_session(Some(sid.clone())).await;
-            let _ = weak.update(cx, |_, cx| {
+            let _ = weak.update(cx, |this, cx| {
+                this.pending_operations.remove(&sid);
                 if summarize {
-                    cx.emit(BranchTreeEvent::SummarizingFinished);
+                    cx.emit(BranchTreeEvent::SummarizingFinished {
+                        session_id: sid.clone(),
+                    });
                 }
+                let still_viewing = this.visit == visit;
                 match res {
-                    Ok(val) => {
-                        let cancelled = val
-                            .get("cancelled")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(false);
-                        if !cancelled {
-                            if let Some(editor_text) = val
-                                .get("editorText")
-                                .and_then(Value::as_str)
-                                .filter(|s| !s.is_empty())
-                            {
-                                client.with_workspace_mut(|ws| {
-                                    ws.draft_mut(DraftKey::Session(sid.clone())).text =
-                                        editor_text.to_owned();
+                    Ok(val) if val.get("cancelled").and_then(Value::as_bool) != Some(true) => {
+                        if !summarize && still_viewing {
+                            cx.emit(BranchTreeEvent::BackToChat);
+                        }
+                        if let Some(text) = val
+                            .get("editorText")
+                            .and_then(Value::as_str)
+                            .filter(|s| !s.is_empty())
+                        {
+                            let applied = client.with_workspace_mut(|ws| {
+                                if ws.draft_edit_revision(&draft_key) != draft_revision {
+                                    return false;
+                                }
+                                ws.draft_mut(draft_key).text = text.to_owned();
+                                true
+                            });
+                            if applied && (summarize || still_viewing) {
+                                cx.emit(BranchTreeEvent::PrefillComposer {
+                                    session_id: sid,
+                                    text: text.to_owned(),
                                 });
-                                cx.emit(BranchTreeEvent::PrefillComposer(editor_text.to_owned()));
-                            }
-                            if !summarize {
-                                cx.emit(BranchTreeEvent::BackToChat);
                             }
                         }
                     }
-                    Err(err) => {
-                        cx.emit(BranchTreeEvent::ErrorMessage(err.to_string()));
-                    }
+                    Ok(_) => {}
+                    Err(err) => cx.emit(BranchTreeEvent::ErrorMessage(err.to_string())),
                 }
+                cx.notify();
             });
         })
         .detach();
@@ -513,47 +548,47 @@ impl BranchTreeView {
 
     fn execute_fork(&mut self, entry_id: String, cx: &mut Context<Self>) {
         let sid = self.session_id.clone();
+        if self.has_summary_modal() || !self.pending_operations.insert(sid.clone()) {
+            return;
+        }
+        let visit = self.visit;
         let client = self.client.clone();
-        cx.spawn(
-            async move |weak, cx| match client.fork_session(sid, entry_id).await {
-                Ok(new_sid) => {
-                    let _ = client.refresh_globals().await;
-                    let _ = weak.update(cx, |_, cx| {
-                        cx.emit(BranchTreeEvent::SwitchToForkedSession(new_sid));
-                    });
+        cx.spawn(async move |weak, cx| {
+            let res = client.fork_session(sid.clone(), entry_id).await;
+            if res.is_ok() {
+                let _ = client.refresh_globals().await;
+            }
+            let _ = weak.update(cx, |this, cx| {
+                this.pending_operations.remove(&sid);
+                match res {
+                    Ok(new_sid) if this.visit == visit => {
+                        cx.emit(BranchTreeEvent::SwitchToForkedSession(new_sid))
+                    }
+                    Ok(_) => {}
+                    Err(err) => cx.emit(BranchTreeEvent::ErrorMessage(err.to_string())),
                 }
-                Err(err) => {
-                    let _ = weak.update(cx, |_, cx| {
-                        cx.emit(BranchTreeEvent::ErrorMessage(err.to_string()));
-                    });
-                }
-            },
-        )
+            });
+        })
         .detach();
     }
 
-    fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let ks = &event.keystroke;
         let key = ks.key.as_str();
-        if ks.modifiers.control && key.eq_ignore_ascii_case("o") {
+        if self.has_summary_modal() || super::input_is_composing(&self.search_input, window, cx) {
+            return;
+        }
+        if ks.modifiers.control && key.eq_ignore_ascii_case("o") && !event.is_held {
             self.cycle_filter(ks.modifiers.shift, cx);
             cx.stop_propagation();
             return;
         }
-        if self.pending_target_id.is_some() {
-            if key == "escape" {
-                self.pending_target_id = None;
-                self.custom_prompt_mode = false;
-                cx.notify();
-                cx.stop_propagation();
-            }
+        // A focused input owns its editing/navigation keys.
+        if !self.focus_handle.is_focused(window) {
             return;
         }
-
         let nodes = self.current_nodes(cx);
-        if nodes.is_empty() {
-            return;
-        }
+        self.selected_index = self.selected_index.min(nodes.len().saturating_sub(1));
         match key {
             "up" => {
                 self.selected_index = self.selected_index.saturating_sub(1);
@@ -561,24 +596,19 @@ impl BranchTreeView {
                 cx.stop_propagation();
             }
             "down" => {
-                if self.selected_index + 1 < nodes.len() {
-                    self.selected_index += 1;
-                    cx.notify();
-                }
+                self.selected_index = self
+                    .selected_index
+                    .saturating_add(1)
+                    .min(nodes.len().saturating_sub(1));
+                cx.notify();
                 cx.stop_propagation();
             }
-            "enter" => {
+            "enter" if !event.is_held => {
                 if let Some(node) = nodes.get(self.selected_index)
                     && !node.is_active_leaf
                 {
-                    self.pending_target_id = Some(node.id.clone());
-                    self.custom_prompt_mode = false;
-                    cx.notify();
+                    self.open_summary(node.id.clone(), window, cx);
                 }
-                cx.stop_propagation();
-            }
-            "escape" => {
-                cx.emit(BranchTreeEvent::BackToChat);
                 cx.stop_propagation();
             }
             _ => {}
@@ -616,8 +646,8 @@ impl BranchTreeView {
                 .items_center()
                 .gap(space::MD)
                 .hover(|s| s.bg(palette.bg_track_recess))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.execute_navigate(t2.clone(), true, None, cx);
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.execute_navigate(t2.clone(), true, None, window, cx);
                 }))
                 .child(
                     Icon::new(IconName::Sparkles)
@@ -679,10 +709,8 @@ impl BranchTreeView {
                         .items_center()
                         .justify_center()
                         .hover(|s| s.bg(palette.bg_item_hover))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.pending_target_id = None;
-                            this.custom_prompt_mode = false;
-                            cx.notify();
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.dismiss_summary(window, cx);
                         }))
                         .child(
                             Icon::new(IconName::X)
@@ -720,8 +748,8 @@ impl BranchTreeView {
                         .items_center()
                         .gap(space::MD)
                         .hover(|s| s.bg(palette.bg_item_active))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.execute_navigate(t1.clone(), false, None, cx);
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.execute_navigate(t1.clone(), false, None, window, cx);
                         }))
                         .child(
                             Icon::new(IconName::ArrowRight)
@@ -800,9 +828,17 @@ impl BranchTreeView {
                             .flex()
                             .items_center()
                             .hover(|s| s.bg(palette.accent_hover))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                let prompt = this.custom_prompt_input.read(cx).value().to_string();
-                                this.execute_navigate(t3.clone(), true, Some(prompt), cx);
+                            .tab_index(0)
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                let value = this.custom_prompt_input.read(cx).value();
+                                let prompt = value.trim();
+                                this.execute_navigate(
+                                    t3.clone(),
+                                    true,
+                                    (!prompt.is_empty()).then(|| prompt.to_owned()),
+                                    window,
+                                    cx,
+                                );
                             }))
                             .child(cjk_inline_label("执行总结")),
                     ),
@@ -846,6 +882,7 @@ impl Render for BranchTreeView {
 
         let total_raw = self.raw_entry_count();
         let nodes = self.current_nodes(cx);
+        self.selected_index = self.selected_index.min(nodes.len().saturating_sub(1));
         if self.selected_index >= nodes.len() && !nodes.is_empty() {
             self.selected_index = nodes.len() - 1;
         }
@@ -1082,11 +1119,12 @@ impl Render for BranchTreeView {
                     .justify_between()
                     .gap(space::SM)
                     .hover(|s| s.bg(palette.bg_item_hover))
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .on_click(cx.listener(move |this, _, window, cx| {
                         this.selected_index = idx;
                         if !is_active_leaf {
-                            this.pending_target_id = Some(nid_click.clone());
-                            this.custom_prompt_mode = false;
+                            this.open_summary(nid_click.clone(), window, cx);
+                        } else {
+                            this.focus_handle.focus(window, cx);
                         }
                         cx.notify();
                     }))
@@ -1225,6 +1263,10 @@ impl Render for BranchTreeView {
             .test_support()
             .a11y_region("branch-tree-view", "分支树视图")
             .track_focus(&self.focus_handle)
+            .capture_action(cx.listener(|this, _: &Escape, window, cx| {
+                super::consume_composing_escape(&this.search_input, window, cx);
+                super::consume_composing_escape(&this.custom_prompt_input, window, cx);
+            }))
             .on_key_down(cx.listener(Self::on_key_down))
             .relative()
             .size_full()
