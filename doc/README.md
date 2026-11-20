@@ -8,7 +8,8 @@
 |---|---|
 | [SPEC.md](SPEC.md) | 产品定位、诊断与受控操作需求、软件内升级要求、三端通道与全局约束 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 双进程三端拓扑、八大模块边界、存储状态归属与安全隔离策略 |
-| [TESTING.md](TESTING.md) | 自动化检查命令、隔离原则、诊断公共核查组（B01–B35）与实机验收矩阵 |
+| [test/TESTING.md](test/TESTING.md) | 自动化检查命令、隔离原则、诊断公共核查组（B01–B35）与实机验收矩阵 |
+| [test/desktop-ui-audit.md](test/desktop-ui-audit.md) | 桌面端 `.pen` 节点、`storybook.html` 动效交互与 `DESIGN.md` 规范核验清单及复核流程 |
 | [TASKS.md](TASKS.md) | 主线阶段待办、功能迭代、设计规范重构、分类待决议题与实机生产验收清单 |
 | [ADR.md](ADR.md) | 跨模块架构决策记录（单条高精简，按时间增量维护） |
 | [contract.md](contract.md) | 使用情况遥测的字段定义、匿名身份算法与隐私不采集边界 |

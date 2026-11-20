@@ -23,14 +23,14 @@ Rust 诊断模块使用 `host/cst-lhm-host.exe` 加载本目录的 DLL，采集�
 
 发布目录包含程序、运行时及 .NET 许可，整目录随包分发；编译缓存保留在 `WorkDirectory`。辅助程序固定从上级读取 `LibreHardwareMonitorLib.dll` 及其依赖，只接受 `gpu` / `sensor` 两种模式。读取错误按来源返回，传感器仅保留有限值，最多 200 项；库的 `Close()` 在正常返回与异常处理时执行。
 
-模拟 DLL 与真实子进程测试见 [TESTING.md](../doc/TESTING.md#rust-测试环境)。
+模拟 DLL 与真实子进程测试见 [TESTING.md](../doc/test/TESTING.md#rust-测试环境)。
 
 ## 更新方法
 
 1. `https://www.nuget.org/api/v2/package/LibreHardwareMonitorLib/` 下载最新 nupkg（zip）
 2. 解出 `runtimes/win-x64/lib/net10.0/LibreHardwareMonitorLib.dll`
 3. 按 nuspec 依赖清单更新各依赖 DLL
-4. 按[测试规范](../doc/TESTING.md)验证 `sys gpu` 与 `sys sensor`；API 变化时同步 `sys-commands.ts` 的采集模板
+4. 按[测试规范](../doc/test/TESTING.md)验证 `sys gpu` 与 `sys sensor`；API 变化时同步 `sys-commands.ts` 的采集模板
 
 ## PawnIO 不附带（零安装约束）
 

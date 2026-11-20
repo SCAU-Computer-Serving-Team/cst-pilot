@@ -28,4 +28,4 @@ Web 导出另从 `agent/package-lock.json` 按依赖关系复制 `puppeteer-core
 
 升级依赖时一起更新锁文件并重新验收。
 
-发布输出目录中的 ZIP、VERSION 和 SHA256SUMS。不要再次压缩运行过的目录。自动冒烟覆盖启动、工具注册与 Web API 实际工具链路，实际 TUI 待机/浏览器与跨机诊断仍需按 [测试规范](../doc/TESTING.md) 验收。
+发布输出目录中的 ZIP、VERSION 和 SHA256SUMS。不要再次压缩运行过的目录。自动冒烟覆盖启动、工具注册与 Web API 实际工具链路，实际 TUI 待机/浏览器与跨机诊断仍需按 [测试规范](../doc/test/TESTING.md) 验收。

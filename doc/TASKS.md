@@ -51,7 +51,7 @@
 
 ## 实机与生产验证待办
 
-验证方法与判定标准见 [TESTING.md](TESTING.md)。
+验证方法与判定标准见 [TESTING.md](test/TESTING.md)。
 
 | 范围 | 待验证内容 |
 |---|---|
