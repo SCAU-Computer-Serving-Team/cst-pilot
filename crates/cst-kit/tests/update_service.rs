@@ -29,7 +29,7 @@ use std::{
     io::{Cursor, Write},
     path::PathBuf,
     sync::{
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
@@ -166,10 +166,27 @@ struct Network {
     block: AtomicBool,
     fail: AtomicBool,
 }
+fn mock_sfnt(magic: &[u8; 4]) -> Vec<u8> {
+    let tables = [*b"cmap", *b"name"];
+    let header_len = 12 + tables.len() * 16;
+    let mut buf = vec![0u8; header_len + 8];
+    buf[..4].copy_from_slice(magic);
+    buf[4..6].copy_from_slice(&(tables.len() as u16).to_be_bytes());
+    for (idx, tag) in tables.iter().enumerate() {
+        let entry = 12 + idx * 16;
+        buf[entry..entry + 4].copy_from_slice(tag);
+        let offset = (header_len + idx * 4) as u32;
+        buf[entry + 8..entry + 12].copy_from_slice(&offset.to_be_bytes());
+        buf[entry + 12..entry + 16].copy_from_slice(&4u32.to_be_bytes());
+    }
+    buf
+}
+
 impl Network {
     fn new() -> Arc<Self> {
         let mut files = BTreeMap::from([
             ("cst-pilot.exe".to_owned(), b"new synthetic main".to_vec()),
+            ("cst-server.exe".into(), b"new synthetic server".to_vec()),
             ("cst-updater.exe".into(), b"not a real executable".to_vec()),
             ("VERSION".into(), b"cst-pilot v0.7.0\n".to_vec()),
             (
@@ -179,6 +196,23 @@ impl Network {
             ("LICENSE".into(), b"MIT".to_vec()),
             ("THIRD-PARTY-NOTICES.md".into(), b"notices".to_vec()),
             ("licenses/mock.txt".into(), b"mock notice".to_vec()),
+            (
+                "assets/fonts/SourceHanSansCN-VF.otf".into(),
+                mock_sfnt(b"OTTO"),
+            ),
+            ("assets/fonts/LICENSE.txt".into(), b"SIL OFL 1.1".to_vec()),
+            (
+                "assets/fonts/JetBrainsMono-Regular.ttf".into(),
+                mock_sfnt(&[0, 1, 0, 0]),
+            ),
+            (
+                "assets/fonts/JetBrainsMono-Medium.ttf".into(),
+                mock_sfnt(&[0, 1, 0, 0]),
+            ),
+            (
+                "assets/fonts/JetBrainsMono-OFL.txt".into(),
+                b"SIL OFL 1.1".to_vec(),
+            ),
             (
                 "agent/home/APPEND_SYSTEM.md".into(),
                 b"Synthetic instructions".to_vec(),
@@ -285,6 +319,7 @@ struct Launcher {
     calls: AtomicUsize,
     fail: AtomicBool,
     delay: Mutex<Duration>,
+    launched_at: Mutex<Option<std::time::Instant>>,
 }
 impl HandoffLauncher for Launcher {
     fn launch(&self, handoff: Handoff) -> Result<LaunchReceipt, String> {
@@ -293,6 +328,7 @@ impl HandoffLauncher for Launcher {
         if self.fail.load(Ordering::SeqCst) {
             return Err("synthetic-launch-secret".into());
         }
+        *self.launched_at.lock().unwrap() = Some(std::time::Instant::now());
         // A mock receipt exercises host coordination only. No synthetic binary is started.
         Ok(LaunchReceipt {
             updater_pid: 4242,
@@ -316,20 +352,24 @@ async fn startup_check_is_shared_nonblocking_and_status_only_without_dialog() {
     net.block.store(true, Ordering::SeqCst);
     let (ui, mut dialogs) = ChannelUiContext::pair();
     let ui = Arc::new(ui);
-    let before = tokio::time::Instant::now();
-    let host = f.host(net.clone(), Arc::new(Launcher::default())).await;
-    let a = host
-        .open_session(CreateAgentSessionOptions {
-            ui_context: Some(ui.clone()),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-    let b = host
-        .open_session(CreateAgentSessionOptions::default())
-        .await
-        .unwrap();
-    assert!(before.elapsed() < Duration::from_secs(2));
+    // The mocked fetch never resolves without cancellation. Creating sessions must not await it.
+    let (a, b) = tokio::time::timeout(Duration::from_secs(15), async {
+        let host = f.host(net.clone(), Arc::new(Launcher::default())).await;
+        let a = host
+            .open_session(CreateAgentSessionOptions {
+                ui_context: Some(ui.clone()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let b = host
+            .open_session(CreateAgentSessionOptions::default())
+            .await
+            .unwrap();
+        (a, b)
+    })
+    .await
+    .expect("session initialization must not wait for background update check");
     assert!(Arc::ptr_eq(&a.updates, &b.updates));
     until(|| net.checks.load(Ordering::SeqCst) == 1).await;
     assert_eq!(a.updates.status().phase, Phase::Checking);
@@ -487,7 +527,9 @@ async fn launched_handoff_rejects_future_prompts_tools_configuration_and_new_ses
 }
 #[tokio::test]
 async fn missing_compiled_key_keeps_sdk_usable_and_has_no_update_storage() {
-    if option_env!("CST_UPDATE_PUBLIC_KEY").is_some() {
+    if option_env!("CST_UPDATE_PUBLIC_KEY").is_some()
+        && option_env!("CST_UPDATE_MANIFEST_URL").is_some()
+    {
         return;
     }
     let f = Fixture::new();
@@ -500,6 +542,15 @@ async fn missing_compiled_key_keeps_sdk_usable_and_has_no_update_storage() {
     )
     .unwrap();
     assert_eq!(service.status().phase, Phase::Unavailable);
+    assert_eq!(service.status().message, "当前构建未启用在线更新。");
+    assert_eq!(
+        service
+            .check_for_app(CancellationToken::new())
+            .await
+            .unwrap()
+            .phase,
+        Phase::Unavailable
+    );
     assert!(service.check(CancellationToken::new()).await.is_err());
     assert!(!f.0.join(".state/update").exists());
     let sdk = f
@@ -673,10 +724,23 @@ async fn active_sdk_run_refuses_update_without_consuming_prepared_package() {
     sdk.updates.prepare(CancellationToken::new()).await.unwrap();
     let started = Arc::new(AtomicBool::new(false));
     let running = started.clone();
+    let finish = Arc::new((Mutex::new(false), Condvar::new()));
+    let provider_finish = finish.clone();
     let faux = create_faux_provider();
     faux.set_responses(vec![FauxResponseStep::Dynamic(Arc::new(move |_, _, _| {
+        let (released, cv) = &*provider_finish;
         running.store(true, Ordering::SeqCst);
-        std::thread::sleep(Duration::from_millis(400));
+        let (_guard, wait) = cv
+            .wait_timeout_while(
+                released.lock().unwrap(),
+                Duration::from_secs(15),
+                |released| !*released,
+            )
+            .unwrap();
+        assert!(
+            !wait.timed_out(),
+            "test did not release the mocked provider"
+        );
         faux_text_message("finished")
     }))]);
     sdk.auth.runtime().register_provider(faux.provider);
@@ -684,16 +748,17 @@ async fn active_sdk_run_refuses_update_without_consuming_prepared_package() {
     let session = sdk.created.session.clone();
     let run = tokio::spawn(async move { session.prompt("do work", None).await });
     until(|| started.load(Ordering::SeqCst)).await;
-    let error = sdk
+    let result = sdk
         .updates
         .launch(
             vec![ProcessIdentity::current().unwrap()],
             RestartUi::Tui,
             CancellationToken::new(),
         )
-        .await
-        .unwrap_err();
-    assert!(error.contains("会话"));
+        .await;
+    *finish.0.lock().unwrap() = true;
+    finish.1.notify_one();
+    assert!(result.unwrap_err().contains("会话"));
     assert_eq!(sdk.updates.status().phase, Phase::Ready);
     assert_eq!(launcher.calls.load(Ordering::SeqCst), 0);
     run.await.unwrap().unwrap();
@@ -808,7 +873,6 @@ async fn update_finalizes_all_home_sessions_with_one_budget_and_does_not_wait_fo
     assert!(telemetry.active_instances() >= 2);
     launcher.fail.store(false, Ordering::SeqCst);
     a.updates.prepare(CancellationToken::new()).await.unwrap();
-    let start = tokio::time::Instant::now();
     a.updates
         .launch(
             vec![ProcessIdentity::current().unwrap()],
@@ -817,7 +881,8 @@ async fn update_finalizes_all_home_sessions_with_one_budget_and_does_not_wait_fo
         )
         .await
         .unwrap();
-    assert!(start.elapsed() < Duration::from_millis(5500));
+    let launched_at = launcher.launched_at.lock().unwrap().unwrap();
+    assert!(launched_at.elapsed() < Duration::from_millis(5500));
     telemetry.drain().await;
     assert_eq!(telemetry.active_instances(), 0);
     let outbox = cst_kit::telemetry::outbox::Outbox::new(

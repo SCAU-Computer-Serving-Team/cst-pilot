@@ -84,6 +84,7 @@ pub struct LifecycleSessionRow {
     pub id: String,
     pub title: String,
     pub running: bool,
+    pub pending_inbox_count: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -1177,22 +1178,74 @@ impl SessionPool {
             self.list().await.unwrap_or_default()
         };
         let active = self.loaded_leases().await;
-        active
-            .into_values()
-            .map(|slot| {
+        let mut seen = BTreeSet::new();
+        let mut out = Vec::with_capacity(active.len());
+
+        for slot in active.into_values() {
+            seen.insert(slot.id.clone());
+            let title = rows
+                .iter()
+                .find(|r| r.id == slot.id)
+                .map(|r| r.title.clone())
+                .or_else(|| slot.session().session_name())
+                .unwrap_or_else(|| "会话".to_owned());
+            let pending_inbox_count = slot.inbox.unresolved_count().await;
+            out.push(LifecycleSessionRow {
+                id: slot.id.clone(),
+                title,
+                running: !slot.session().is_idle(),
+                pending_inbox_count,
+            });
+        }
+
+        if !stopping {
+            let inbox_root = self.inbox_root.clone();
+            let disk_counts = tokio::task::spawn_blocking(move || {
+                let mut counts = Vec::new();
+                let Ok(entries) = fs::read_dir(&inbox_root) else {
+                    return counts;
+                };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if !path.is_file() || path.extension().and_then(|e| e.to_str()) != Some("json")
+                    {
+                        continue;
+                    }
+                    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                        continue;
+                    };
+                    if !is_valid_session_id_key(stem) {
+                        continue;
+                    }
+                    let count = inbox::read_unresolved_inbox_count_sync(&path);
+                    if count > 0 {
+                        counts.push((stem.to_owned(), count));
+                    }
+                }
+                counts
+            })
+            .await
+            .unwrap_or_default();
+
+            for (sid, count) in disk_counts {
+                if seen.contains(&sid) || self.is_deleted_sync(&sid).unwrap_or(false) {
+                    continue;
+                }
                 let title = rows
                     .iter()
-                    .find(|r| r.id == slot.id)
+                    .find(|r| r.id == sid)
                     .map(|r| r.title.clone())
-                    .or_else(|| slot.session().session_name())
                     .unwrap_or_else(|| "会话".to_owned());
-                LifecycleSessionRow {
-                    id: slot.id.clone(),
+                out.push(LifecycleSessionRow {
+                    id: sid,
                     title,
-                    running: !slot.session().is_idle(),
-                }
-            })
-            .collect()
+                    running: false,
+                    pending_inbox_count: count,
+                });
+            }
+        }
+
+        out
     }
 
     pub async fn has_running_session_for_provider(&self, provider_id: &str) -> bool {

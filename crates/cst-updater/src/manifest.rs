@@ -100,7 +100,10 @@ impl ReleaseKey {
     }
 
     pub fn compiled() -> Result<Self, String> {
-        let raw = option_env!("CST_UPDATE_PUBLIC_KEY").ok_or("当前构建未配置官方升级公钥。")?;
+        let raw = option_env!("CST_UPDATE_PUBLIC_KEY")
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or("当前构建未配置官方升级公钥。")?;
         let bytes = STANDARD.decode(raw).map_err(|_| "构建中的升级公钥无效。")?;
         Self::from_bytes(
             bytes

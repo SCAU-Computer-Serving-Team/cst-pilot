@@ -1399,6 +1399,7 @@ struct PreparedToolCall {
     args: JsonValue,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum ToolPreparation {
     Prepared(PreparedToolCall),
     Immediate {

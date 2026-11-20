@@ -1,6 +1,6 @@
 # 桌面端与内置 TUI 规格
 
-`desktop` 模块定义统一软件端主程序 `cst-pilot.exe` 的目标规格（`crates/cst-client` 与 `crates/cst-desktop` 属阶段 9 待实施项，`crates/cst-tui` 属阶段 10 待实施项），通过本机客户端库连接公用后台服务 `cst-server`。静态设计、Shader 与整体设计以 [桌面端画布](../../design/cst-pilot-desktop.pen) 为最高规范，动效、令牌与交互行为以 [storybook.html](../../design/storybook.html) 为最高规范，文本规范见 [DESIGN.md](../../DESIGN.md)。客户端与窗口架构见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段实施细则见 [9.desktop.md](../rust/plan/9.desktop.md)。
+`desktop` 模块定义统一软件端主程序 `cst-pilot.exe` 的功能与交互规格（`crates/cst-client` 已落地，`crates/cst-desktop` 归属阶段 9 实施，`crates/cst-tui` 归属阶段 10 实施），通过本机客户端库连接公用后台服务 `cst-server`。静态设计、Shader 与整体设计以 [桌面端画布](../../design/cst-pilot-desktop.pen) 为最高规范，动效、令牌与交互行为以 [storybook.html](../../design/storybook.html) 为最高规范，文本规范见 [DESIGN.md](../../DESIGN.md)。客户端与窗口架构见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段实施细则见 [9.desktop.md](../rust/plan/9.desktop.md)。
 
 ## 窗口基线与启动约束
 
@@ -8,7 +8,7 @@
 |---|---|
 | 支持环境 | Windows 10/11 x64，启用 `PerMonitorV2` 多显示器 DPI 感知 |
 | 窗口尺寸 | 默认 `1280×800` 逻辑像素，常规最小 `1024×640` 逻辑像素。启动时优先按显示器提示恢复并钳制在目标屏工作区内，越界移回该屏工作区正中，显示器未命中时回退主屏居中 |
-| 管理员提权 | 启动入口强制校验管理员令牌。未提权时触发 Windows UAC 提权，拒绝或失败立即退出 |
+| 管理员提权 | 管理员组账户下 `cst-pilot.exe` 保持普通完整性级别运行（避免 UIPI 拦截全局截图热键与资源管理器拖放），由客户端按需对后台 `cst-server.exe` 请求 UAC 提权；受限标准账户跨账号授权时整进程提权。拒绝或失败立即退出 |
 | 单实例唤醒 | 同一工具包目录仅允许运行一个 `cst-pilot.exe` 窗口实例。重复启动时唤醒已有窗口置前并直接退出新进程 |
 | 前置升级恢复 | 加载业务界面前先检查 `.state/update/`。存在未完成升级事务时交由独立更新器恢复，禁止在半替换状态下启动窗口 |
 

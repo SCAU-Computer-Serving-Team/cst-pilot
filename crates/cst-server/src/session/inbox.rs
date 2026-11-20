@@ -14,6 +14,18 @@ use tokio::sync::{Mutex as AsyncMutex, Notify};
 use crate::locks::{StorageError, atomic_write_json};
 use crate::session::attachments::{ImageRef, is_valid_session_id_key};
 
+/// Best-effort synchronous count of unresolved (`pending / delivering / failed / uncertain`)
+/// items for an unloaded session's `web-inbox/<sessionId>.json`.
+pub fn read_unresolved_inbox_count_sync(path: &Path) -> usize {
+    let Ok(bytes) = fs::read(path) else {
+        return 0;
+    };
+    let Ok(parsed) = serde_json::from_slice::<InboxSnapshot>(&bytes) else {
+        return 0;
+    };
+    parsed.unresolved_count()
+}
+
 pub const MAX_MESSAGE_TEXT_CHARS: usize = 100_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,6 +90,20 @@ pub struct InboxSnapshot {
     pub next_sequence: u64,
     pub paused: bool,
     pub items: Vec<InboxItem>,
+}
+
+impl InboxSnapshot {
+    pub fn unresolved_count(&self) -> usize {
+        self.items
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item.status,
+                    ItemStatus::Pending | ItemStatus::Delivering | ItemStatus::Failed
+                ) || item.uncertain == Some(true)
+            })
+            .count()
+    }
 }
 
 impl Default for InboxSnapshot {
@@ -201,6 +227,14 @@ impl SessionInbox {
 
     pub fn file_path(&self) -> &Path {
         &self.file
+    }
+
+    pub async fn unresolved_count(&self) -> usize {
+        let mut guard = self.serial.lock().await;
+        match self.ensure_loaded(&mut guard).await {
+            Ok(snap) => snap.unresolved_count(),
+            Err(_) => 0,
+        }
     }
 
     async fn ensure_loaded<'a>(

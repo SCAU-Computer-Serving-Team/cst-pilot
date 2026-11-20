@@ -373,10 +373,13 @@ pub async fn handle_models_route(
                                     msg,
                                 )
                             })?;
-                        state
-                            .pool
-                            .global_events
-                            .publish("state", &json!({ "type": "settings_changed" }));
+                        state.pool.global_events.publish(
+                            "state",
+                            &json!({
+                                "type": "settings_changed",
+                                "scope": "shared",
+                            }),
+                        );
                     } else if let Some(ref s) = slot {
                         require_model_credentials(
                             &runtime,
@@ -609,10 +612,13 @@ pub async fn handle_models_route(
                         .save_empty_model_scope(empty_flag)
                         .await
                         .map_err(ApiError::from)?;
-                    state
-                        .pool
-                        .global_events
-                        .publish("state", &json!({ "type": "settings_changed" }));
+                    state.pool.global_events.publish(
+                        "state",
+                        &json!({
+                            "type": "settings_changed",
+                            "scope": "shared",
+                        }),
+                    );
 
                     let enabled_out: Value = if empty_flag {
                         json!([])

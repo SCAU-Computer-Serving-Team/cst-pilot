@@ -83,7 +83,7 @@ pub fn normalize_canonical_path_for_hash(path: &Path) -> Result<String, String> 
     }
 }
 
-/// Resolve kit root from `PI_CODING_AGENT_DIR` (`<kit>/agent/home`) or current directory.
+/// Resolve kit root from `PI_CODING_AGENT_DIR` (`<kit>/agent/home`), executable parent directory, or current directory.
 pub fn resolve_kit_root() -> Result<PathBuf, String> {
     if let Ok(agent_dir) = std::env::var("PI_CODING_AGENT_DIR")
         && !agent_dir.trim().is_empty()
@@ -94,6 +94,12 @@ pub fn resolve_kit_root() -> Result<PathBuf, String> {
         {
             return Ok(kit_root.to_path_buf());
         }
+    }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(exe_dir) = exe.parent()
+        && exe_dir.join("agent").join("home").exists()
+    {
+        return Ok(exe_dir.to_path_buf());
     }
     let current = std::env::current_dir().map_err(|_| "无法读取当前工作目录".to_owned())?;
     if current.join("agent").join("home").exists() {

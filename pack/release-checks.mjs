@@ -17,7 +17,7 @@ export function checkReleaseTree(root, files) {
       const name = {oauth:'OAuth',web:'Web',telemetry:'Telemetry'}[rel.split('/')[3].toLowerCase()];
       throw new Error(`${name} 测试文件不得进入发行包: ${rel}`);
     }
-    if (/(^|\/)(\.state|\.git|sessions|\.cache)(\/|$)|^(artifacts|outbox)\/|^agent\/home\/(auth\.json|models\.json|web-settings\.json|fff\/|npm\/|telemetry\/|session-exports\/|command-plans\/)|^wiztree\/(tmp\/|WizTree3\.ini(?:\.bad)?$)|(^|\/)\.env(?:\.|$)/i.test(rel)) {
+    if (/(^|\/)(\.state|\.git|sessions|\.cache)(\/|$)|^(artifacts|outbox)\/|^agent\/home\/(auth\.json|models\.json|mcp-auth\.json|web-settings\.json|desktop\.json|desktop-settings\.json|device\.json|identity\.json|fff\/|npm\/|telemetry\/|session-exports\/|command-plans\/)|^wiztree\/(tmp\/|WizTree3\.ini(?:\.bad)?$)|(^|\/)\.env(?:\.|$)/i.test(rel)) {
       throw new Error(`发行树含运行状态或凭据路径: ${rel}`);
     }
     if (/^agent\/home\/extensions\/web\/static\/fonts\/.*\.otf$/i.test(rel)) {
@@ -81,6 +81,9 @@ export const REQUIRED_RELEASE_FILES = [
   'wiztree/license.txt',
   'assets/fonts/SourceHanSansCN-VF.otf',
   'assets/fonts/LICENSE.txt',
+  'assets/fonts/JetBrainsMono-Regular.ttf',
+  'assets/fonts/JetBrainsMono-Medium.ttf',
+  'assets/fonts/JetBrainsMono-OFL.txt',
   `${WEB_STATIC}/index.html`,
   'agent/home/packages/pi-open-tui/LICENSE',
   'agent/home/packages/pi-web-access/LICENSE',
@@ -97,11 +100,41 @@ const localRefs = (text) =>
     ],
   );
 
+function assertParseableSfntFont(root, rel, expectedMagicHex) {
+  const buf = fs.readFileSync(path.join(root, rel));
+  if (buf.length < 28 || buf.subarray(0, 4).toString('hex') !== expectedMagicHex) {
+    throw new Error(`随包字体无法解析或头部损坏: ${rel}`);
+  }
+  const numTables = buf.readUInt16BE(4);
+  if (numTables === 0 || buf.length < 12 + numTables * 16) {
+    throw new Error(`随包字体表目录损坏: ${rel}`);
+  }
+  const tags = new Set();
+  for (let i = 0; i < numTables; i += 1) {
+    const entryOffset = 12 + i * 16;
+    const tag = buf.subarray(entryOffset, entryOffset + 4).toString('ascii');
+    const tableOffset = buf.readUInt32BE(entryOffset + 8);
+    const tableLength = buf.readUInt32BE(entryOffset + 12);
+    if (tableOffset + tableLength > buf.length) {
+      throw new Error(`随包字体表越界 (${tag}): ${rel}`);
+    }
+    tags.add(tag);
+  }
+  for (const required of ['cmap', 'name']) {
+    if (!tags.has(required)) {
+      throw new Error(`随包字体缺少必需表 ${required}: ${rel}`);
+    }
+  }
+}
+
 export function checkReleaseContent(root, files) {
   const present = new Set(files);
   for (const rel of REQUIRED_RELEASE_FILES) {
     if (!present.has(rel)) throw new Error(`发行包缺少必需文件: ${rel}`);
   }
+  assertParseableSfntFont(root, 'assets/fonts/SourceHanSansCN-VF.otf', '4f54544f');
+  assertParseableSfntFont(root, 'assets/fonts/JetBrainsMono-Regular.ttf', '00010000');
+  assertParseableSfntFont(root, 'assets/fonts/JetBrainsMono-Medium.ttf', '00010000');
   const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
   const assertRefs = (rel, refs) => {
     for (const ref of refs) {

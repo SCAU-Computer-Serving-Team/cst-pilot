@@ -3,7 +3,7 @@ import { ArrowUp, Command, FileText, PencilLine, Plus, Sparkles, Square, X } fro
 import { type ClipboardEvent, type DragEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { ModelKeyDialog, type ModelKeyDialogReason } from "../auth/model-key-dialog";
-import { readModelKeyPromptTime, shouldAutoPrompt, writeModelKeyPromptTime } from "../auth/model-key-prompt";
+import { anyModelConfigured, claimMissingKeyPrompt } from "../auth/model-key-prompt";
 import { EDIT_OUTGOING_EVENT } from "../conversation/outgoing-message";
 import { ApiFailure, apiJson } from "../data/api";
 import { type ModelChoice, type ModelSelectionPayload, refreshManualSelection } from "../data/model-selection";
@@ -456,18 +456,17 @@ export function Composer({
 					setSelected((current) => refreshManualSelection(current, data, !sessionId && manualHomeModel.current));
 					if (!initialKeyPrompt.current && onSend && data.selected) {
 						initialKeyPrompt.current = true;
-						// 只在完全没有配置模型时自动提示，且 24 小时内只提示一次。
-						const now = Date.now();
-						if (
-							data.selected.catalogPresent &&
-							shouldAutoPrompt({
+						// 只在完全没有配置模型时自动提示，且通过服务端接口在三端共享 24 小时冷却窗口。
+						const candidate = data.selected;
+						if (candidate.catalogPresent && !anyModelConfigured(data.catalog)) {
+							void claimMissingKeyPrompt({
 								catalog: data.catalog,
-								lastPromptAt: readModelKeyPromptTime(),
-								now,
-							})
-						) {
-							writeModelKeyPromptTime(undefined, now);
-							setMissingKey({ model: data.selected, reason: "initial" });
+								signal: controller.signal,
+							}).then((claimed) => {
+								if (active && claimed && !anyModelConfigured(data.catalog)) {
+									setMissingKey((current) => current ?? { model: candidate, reason: "initial" });
+								}
+							});
 						}
 					}
 					setMissingKey((current) =>

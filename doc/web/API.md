@@ -30,7 +30,7 @@
 | `GET` | `/api/sessions` | 会话列表（返回 `{ id, title, updatedAt, running }[]`） |
 | `POST` | `/api/sessions` | 新建会话，可选指定初始模型与思考强度 |
 | `GET` | `/api/sessions/creation/<requestKey>` | 只读核对创建回执，返回 `status: "missing" \| "started" \| "done"`，完成时附 `sessionId` |
-| `GET` | `/api/sessions/<id>` | 会话完整快照（返回 `{ id, bitlocker, messages, entries, running, contextUsage, queue, ui }`，工作时长内嵌于 `assistant` 消息） |
+| `GET` | `/api/sessions/<id>` | 会话完整快照（返回 `{ id, eventCursor, bitlocker, messages, entries, running, contextUsage, queue, ui }`，工作时长内嵌于 `assistant` 消息） |
 | `PATCH` / `DELETE` | `/api/sessions/<id>` | 重命名会话 / 删除空闲会话及其未落盘快照、收件箱与图片附件目录 |
 | `POST` | `/api/sessions/<id>/open`、`/close` | 打开会话（由其他进程持有写权时返回 `409`）/ 关闭通知（校验 ID 后返回 `{ closed: true }`，无需 `Idempotency-Key`，槽位由空闲 LRU 自动回收） |
 | `POST` | `/api/sessions/<id>/messages` | 提交消息文本、技能标记与 Base64 图片（`delivery: "queue" \| "steer"`），持久化落盘后返回 `202 { item }` |
@@ -69,7 +69,7 @@
 
 - 创建与预览请求体为 `{ format: "png" | "html", theme: "light" | "dark", includeThinking: boolean, includeTools: boolean }`，未知字段返回 `400`。
 - 队列上限 8 个任务（超出返回 `429 export_busy`），单任务超时 120 秒（`504 export_timeout`），快照上限 `32 MiB`，产物合计上限 `200 MiB`（`413 export_too_large`）、PNG 最多 64 张。
-- 后端通过 `Chromiumoxide` 驱动本机 Edge 或 Chrome（支持 `CST_EXPORT_BROWSER` 显式路径，主版本下限 `111`）。PNG 视口宽 `1240` CSS 像素、2 倍缩放、单图高不超过 `3200` CSS 像素（文档总高上限 `100,000` CSS 像素）。离线 HTML 仅允许内嵌同源 `/fonts/*`、`/assets/*` 与 `data:` 资源（单资源上限 `16 MiB`，总数上限 128）。
+- 后端通过 `Chromiumoxide` 驱动本机 Edge 或 Chrome（开发调试构建支持 `CST_EXPORT_BROWSER` 显式路径，正式发行构建仅探测系统注册表与标准安装目录，主版本下限 `111`）。PNG 视口宽 `1240` CSS 像素、2 倍缩放、单图高不超过 `3200` CSS 像素（文档总高上限 `100,000` CSS 像素）。离线 HTML 仅允许内嵌同源 `/fonts/*`、`/assets/*` 与 `data:` 资源（单资源上限 `16 MiB`，总数上限 128）。
 
 | 任务失败码 | 含义 |
 |---|---|
@@ -105,9 +105,10 @@ CSTOA 远端网关协议见 [../auth/API.md](../auth/API.md)。本机模型与�
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` / `PATCH` | `/api/settings` | 读取或更新 `web-settings.json` 中的 Web 外观主题 |
+| `GET` / `POST` | `/api/ui-hints`、`/api/ui-hints/missing-key-prompt/claim` | 读取 `.state/ui-hints.json` 运行态提示 / 原子申领三端共用的 24 小时缺密钥自动提示窗口（返回 `{ claimed, missingKeyPromptedAtMs }`） |
 | `GET` | `/api/state` | 启动与通道协商快照（版本、`stage`、`channelMode`、`multiplexStream: true`、会话列表及命令技能清单） |
-| `GET` | `/api/health` | 返回服务存活与退出标记（`connected`、`stopping`） |
-| `GET` | `/api/lifecycle` | 返回 `{ stopping: boolean, sessions: { id, title, running }[] }` |
+| `GET` | `/api/health` | 返回服务存活与退出标记（`connected`、`stopping`；软件端 Bearer 调用额外返回 `pid`、`processCreated`、`kitRoot`、`version`、`elevated`） |
+| `GET` | `/api/lifecycle` | 返回 `{ stopping: boolean, version: string, activeExports: number, sessions: { id, title, running, pendingInboxCount }[] }` |
 | `GET` / `PUT` | `/api/events/stream?clientId=<uuid>`、`/api/events/stream/<clientId>/subscriptions` | 多会话聚合 SSE 事件流与最多 32 会话动态订阅更新（协议见 [../server/API.md](../server/API.md#sse-帧协议与多会话聚合流)） |
 | `GET` | `/api/events` | 单路全局状态 SSE 事件流 |
 | `GET` | `/api/files?sessionId=<id>&query=<text>` | 按会话 `cwd` 扫描文件（跳过隐藏项与构建目录，限深 6 层、最多 4000 条、缓存 30 秒），返回最多 50 条匹配项供 `@` 补全使用 |

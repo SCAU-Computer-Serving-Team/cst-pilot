@@ -50,13 +50,71 @@ jobs:
       - name: 格式检查
         run: cargo fmt --all --check
       - name: Clippy 检查
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --exclude cst-desktop --all-targets --locked -- -D warnings
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            design/fonts
+            assets/fonts
+          key: fonts-${{ hashFiles('src/web/frontend/scripts/prepare-fonts.mjs') }}
+      - name: 准备共享字体资产
+        run: node src/web/frontend/scripts/prepare-fonts.mjs
       - name: 隔离回归测试
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --exclude cst-desktop --locked
       - name: 故障注入静态检查
-        run: cargo clippy --workspace --all-targets --locked --features test-support -- -D warnings
+        run: cargo clippy --workspace --exclude cst-desktop --all-targets --locked --features test-support -- -D warnings
       - name: 故障恢复回归测试
-        run: cargo test --workspace --locked --features test-support
+        run: cargo test --workspace --exclude cst-desktop --locked --features test-support
+
+  rust-desktop:
+    name: Rust 桌面端
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      CARGO_TERM_COLOR: always
+      PI_OFFLINE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: 准备 Rust 隔离环境
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'cst-desktop-rust'
+          New-Item -ItemType Directory -Force "$root/agent" | Out-Null
+          "CARGO_TARGET_DIR=$root/target" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "PI_CODING_AGENT_DIR=$root/agent" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.99.1'
+          components: clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ runner.temp }}/cst-desktop-rust/target
+          key: rust-${{ runner.os }}-1.99.1-${{ hashFiles('Cargo.lock') }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            design/fonts
+            assets/fonts
+          key: fonts-${{ hashFiles('src/web/frontend/scripts/prepare-fonts.mjs') }}
+      - name: 准备共享字体资产
+        run: node src/web/frontend/scripts/prepare-fonts.mjs
+      - name: 桌面端 Clippy 检查
+        run: cargo clippy -p cst-desktop --all-targets --locked -- -D warnings
+      - name: 桌面端隔离回归测试
+        run: cargo test -p cst-desktop --locked
+      - name: 桌面端故障注入 Clippy 检查
+        run: cargo clippy -p cst-desktop --all-targets --locked --features test-support -- -D warnings
+      - name: 桌面端故障注入回归测试
+        run: cargo test -p cst-desktop --locked --features test-support
 
   agent:
     name: Agent 与发行包

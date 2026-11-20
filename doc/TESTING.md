@@ -37,7 +37,7 @@
 
 ### Rust 测试环境
 
-Rust CI 使用 `1.99.1` 工具链。日常核心任务在 Linux 运行，完整验收在 Windows 同步编译并验证 `cst-server` 与浏览器导出。测试统一将 `CARGO_TARGET_DIR` 与 `PI_CODING_AGENT_DIR` 指向隔离临时目录，并固定设置 `PI_OFFLINE=1`。
+Rust CI 使用 `1.99.1` 工具链。日常任务中，Linux 运行工作区非桌面包的静态检查与核心回归，Windows 独立运行 `cst-desktop` 编译、Clippy 与无头界面测试；完整验收在 Windows 同步编译并验证 `cst-server` 与浏览器导出。测试统一将 `CARGO_TARGET_DIR` 与 `PI_CODING_AGENT_DIR` 指向隔离临时目录，并固定设置 `PI_OFFLINE=1`。
 
 `pi-session` 与 `pi-runtime` 的 `test-support` 特性默认关闭，仅在显式启用时编译存储故障注入接口。CI 同时校验默认构建与 `test-support` 构建。
 

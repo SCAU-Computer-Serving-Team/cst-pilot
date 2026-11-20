@@ -1,6 +1,6 @@
 # 桌面端与客户端架构
 
-本页定义阶段 9 目标架构（待实施），说明本机客户端库 `crates/cst-client` 与 GPUI 桌面应用 `crates/cst-desktop` 的模块分层、跨线程状态同步及 GPU 表面管线。详细模块目录与接口设计见 [9.desktop.md](../rust/plan/9.desktop.md)。
+本页说明本机客户端库 `crates/cst-client`（已实现）与 GPUI 桌面应用 `crates/cst-desktop`（阶段 9 实施）的模块分层、跨线程状态同步及 GPU 表面管线。详细模块目录与接口设计见 [9.desktop.md](../rust/plan/9.desktop.md)。
 
 ## 双包分层结构
 
@@ -31,10 +31,10 @@ flowchart LR
 
 ## 客户端状态与通信（`cst-client`）
 
-1. **启动与双向身份核验（`bootstrap.rs`）**：获取桌面命名管道单实例锁，读取 `.state/server.json` 中的 PID、端口与令牌，经 Win32 核验目标进程映像路径、登录会话与管理员令牌，并与 `/api/health` 交叉比对。后台服务未运行时按需拉起 `cst-server.exe` 子进程。
-2. **保活流与业务流隔离（`sse.rs`、`runtime.rs`）**：在独立 Tokio 线程内分开维护 `/api/app/events` 存活长连接与 `/api/events/stream` 多会话聚合业务流。GPUI 主线程即使短暂繁忙也不会反压存活流导致后台误触发断线退出。
-3. **无锁快照订阅（`state.rs`、`session_store.rs`）**：后台线程归并 HTTP 快照与 SSE 增量事件后生成不可变共享快照句柄，通过 `watch` 版本号通知界面重绘，消除跨线程锁竞争。
-4. **内存发件箱与无 UI 工具投影（`outbox.rs`、`tool_presenter.rs`）**：`SessionOutbox` 负责新建会话与首条消息两阶段提交及断线只读回执核对。`tool_presenter` 将 17 个开放工具的原始 `details` 转换为统一的字段组、排行表与风险命令结构，供 GUI 与 TUI 共用。
+1. **启动与双向身份核验（`bootstrap.rs`）**：桌面进程保持普通完整性级别获取命名管道单实例锁，读取 `.state/server.json` 中的 PID、端口与令牌，经 Win32 核验目标进程映像路径、同一用户登录会话及后台管理员令牌，并与 `/api/health` 交叉比对。后台服务未运行时经 UAC `runas` 与 `--sanitize-env` 无窗口拉起已提权的 `cst-server.exe`。
+2. **保活流与业务流隔离（`sse.rs`、`runtime.rs`）**：在独立 Tokio 线程内分开维护 `/api/app/events` 存活长连接与 `/api/events/stream` 多会话聚合业务流。聚合业务队列实施字节上限保护，超限自动合并触发目标会话与全局快照重拉，GPUI 主线程繁忙不会反压存活流。
+3. **游标对齐与单调修订回执（`state.rs`、`session_store.rs`）**：会话快照携带服务端 `eventCursor` 水位与请求世代号，归并时跳过快照已覆盖帧并在重新订阅时透传 `lastEventIds`。模型与桌面配置请求返回带单调 `op_revision` 的 `OpReceipt<T>`，防止先发慢请求覆盖新快照。
+4. **内存发件箱与无 UI 工具投影（`outbox.rs`、`tool_presenter.rs`）**：`SessionOutbox` 负责新建会话与首条消息两阶段提交、断线只读回执核对、并发新草稿防覆盖，以及重试、编辑回填与移除操作。`tool_presenter` 将 17 个开放工具的原始 `details` 转换为统一的字段组、排行表与风险命令结构，供 GUI 与 TUI 共用。
 
 ## 桌面窗口与渲染管线（`cst-desktop`）
 

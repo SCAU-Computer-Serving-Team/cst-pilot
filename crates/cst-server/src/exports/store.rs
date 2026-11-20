@@ -201,6 +201,11 @@ impl SessionExportStore {
         self.renderer.set_origin(origin);
     }
 
+    pub fn active_count(&self) -> usize {
+        let guard = self.inner.lock().expect("export queue lock");
+        guard.queue.len() + usize::from(guard.active.is_some()) + guard.publishing.len()
+    }
+
     fn clear_work_dir_sync(&self) -> Result<(), ServiceError> {
         match fs::remove_dir_all(self.metadata.join("work")) {
             Ok(()) => Ok(()),

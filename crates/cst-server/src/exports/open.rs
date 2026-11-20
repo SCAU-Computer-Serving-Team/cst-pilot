@@ -17,9 +17,7 @@ pub fn default_export_directory_opener() -> ExportDirectoryOpenerFn {
         Box::pin(async move {
             #[cfg(windows)]
             {
-                let system_root =
-                    std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
-                let explorer = PathBuf::from(system_root).join("explorer.exe");
+                let explorer = cst_os::windows_directory()?.join("explorer.exe");
                 tokio::process::Command::new(explorer)
                     .arg(&directory)
                     .spawn()

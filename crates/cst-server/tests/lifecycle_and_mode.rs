@@ -339,6 +339,52 @@ async fn auth_guard_enforces_host_origin_and_dual_channel_permissions() {
     .await
     .unwrap();
 
+    // App client with `X-CST-Client: app` can also read `/api/sessions` and `/api/ui-hints` in WebActive
+    authenticate_api_request(
+        &Method::GET,
+        "/api/sessions",
+        &app_headers,
+        port,
+        &app_token,
+        &controller,
+    )
+    .await
+    .unwrap();
+
+    authenticate_api_request(
+        &Method::GET,
+        "/api/ui-hints",
+        &app_headers,
+        port,
+        &app_token,
+        &controller,
+    )
+    .await
+    .unwrap();
+
+    // Without `X-CST-Client: app`, `GET /api/sessions` from Bearer token is blocked in WebActive
+    let mut bearer_only_headers = HeaderMap::new();
+    bearer_only_headers.insert(
+        http::header::HOST,
+        HeaderValue::from_static("127.0.0.1:52831"),
+    );
+    bearer_only_headers.insert(
+        http::header::AUTHORIZATION,
+        HeaderValue::from_str(&format!("Bearer {app_token}")).unwrap(),
+    );
+    let missing_client_err = authenticate_api_request(
+        &Method::GET,
+        "/api/sessions",
+        &bearer_only_headers,
+        port,
+        &app_token,
+        &controller,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(missing_client_err.status, StatusCode::CONFLICT);
+    assert_eq!(missing_client_err.code, "web_mode_active");
+
     let err = authenticate_api_request(
         &Method::POST,
         "/api/sessions",
@@ -374,4 +420,96 @@ async fn auth_guard_enforces_host_origin_and_dual_channel_permissions() {
     .await
     .unwrap();
     assert_eq!(caller, CallerIdentity::Web { cookie_epoch: 1 });
+}
+
+#[test]
+fn release_browser_policy_ignores_runtime_environment_overrides() {
+    use cst_server::exports::browser::collect_browser_candidate_paths;
+    use std::path::PathBuf;
+
+    let injected_exe = "E:/untrusted/fake-chrome.exe";
+    let injected_local = "E:/untrusted/localappdata";
+
+    let debug_candidates =
+        collect_browser_candidate_paths(None, true, Some(injected_exe), None, Some(injected_local));
+    assert_eq!(debug_candidates, vec![PathBuf::from(injected_exe)]);
+
+    let release_candidates = collect_browser_candidate_paths(
+        None,
+        false,
+        Some(injected_exe),
+        Some("E:/untrusted/other-chrome.exe"),
+        Some(injected_local),
+    );
+    assert!(!release_candidates.contains(&PathBuf::from(injected_exe)));
+    assert!(
+        !release_candidates
+            .contains(&PathBuf::from(injected_local).join("Google/Chrome/Application/chrome.exe"))
+    );
+}
+
+#[test]
+fn cst_server_health_check_cli_validates_kit_fonts_and_version_without_taking_lock() {
+    use cst_kit::SKILL_NAMES;
+    use cst_kit::update::layout::REQUIRED_FONT_FILES;
+    use std::path::Path;
+    use std::process::Command;
+
+    let dir = std::env::temp_dir().join(format!("cst-server-hc-{}", Uuid::new_v4()));
+    fs::create_dir_all(dir.join("agent/home")).unwrap();
+    fs::write(dir.join("VERSION"), "cst-pilot v0.9.4\n").unwrap();
+    fs::write(dir.join("agent/home/APPEND_SYSTEM.md"), "测试系统规则。").unwrap();
+    for name in SKILL_NAMES {
+        let p = dir.join(format!("agent/home/skills/{name}/SKILL.md"));
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(
+            p,
+            format!("---\nname: {name}\ndescription: {name}\n---\n测试。"),
+        )
+        .unwrap();
+    }
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .unwrap();
+    for rel in REQUIRED_FONT_FILES {
+        let dst = dir.join(rel);
+        fs::create_dir_all(dst.parent().unwrap()).unwrap();
+        fs::copy(repo_root.join(rel), dst).unwrap();
+    }
+
+    // Hold the server single-instance lock to prove `--health-check` runs lock-free!
+    let _held_lock = ServerInstanceLock::acquire(&dir).expect("hold instance lock");
+
+    let exe = env!("CARGO_BIN_EXE_cst-server");
+    let ok_out = Command::new(exe)
+        .arg("--health-check")
+        .env("PI_CODING_AGENT_DIR", dir.join("agent/home"))
+        .output()
+        .expect("spawn cst-server --health-check");
+    assert!(
+        ok_out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&ok_out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&ok_out.stdout).trim(),
+        "cst-pilot v0.9.4"
+    );
+
+    // Corrupt a bundled font file -> `--health-check` must reject
+    fs::write(
+        dir.join("assets/fonts/JetBrainsMono-Regular.ttf"),
+        b"bad-font",
+    )
+    .unwrap();
+    let bad_out = Command::new(exe)
+        .arg("--health-check")
+        .env("PI_CODING_AGENT_DIR", dir.join("agent/home"))
+        .output()
+        .expect("spawn cst-server --health-check on corrupt font");
+    assert!(!bad_out.status.success());
+
+    drop(_held_lock);
+    let _ = fs::remove_dir_all(&dir);
 }

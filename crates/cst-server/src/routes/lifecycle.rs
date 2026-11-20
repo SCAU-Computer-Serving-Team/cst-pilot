@@ -25,14 +25,22 @@ pub async fn handle_lifecycle_route(
     raw_body: &[u8],
 ) -> Result<Option<Response<SseOrBytesBody>>, ApiError> {
     if pathname == "/api/health" && (*method == Method::GET || *method == Method::HEAD) {
-        return Ok(Some(json_response(
-            StatusCode::OK,
-            &json!({
+        let payload = match caller {
+            CallerIdentity::App => json!({
+                "connected": true,
+                "stopping": state.mode.is_stopping(),
+                "pid": std::process::id(),
+                "processCreated": state.process_created(),
+                "kitRoot": state.kit_root().to_string_lossy(),
+                "version": state.kit_version(),
+                "elevated": state.is_elevated(),
+            }),
+            CallerIdentity::Web { .. } => json!({
                 "connected": true,
                 "stopping": state.mode.is_stopping(),
             }),
-            method,
-        )));
+        };
+        return Ok(Some(json_response(StatusCode::OK, &payload, method)));
     }
 
     if pathname == "/api/state" && (*method == Method::GET || *method == Method::HEAD) {
@@ -63,10 +71,13 @@ pub async fn handle_lifecycle_route(
     if pathname == "/api/lifecycle" && (*method == Method::GET || *method == Method::HEAD) {
         let stopping = state.mode.is_stopping();
         let sessions = state.pool.lifecycle_snapshot(stopping).await;
+        let active_exports = state.exports.active_count();
         return Ok(Some(json_response(
             StatusCode::OK,
             &json!({
                 "stopping": stopping,
+                "version": state.kit_version(),
+                "activeExports": active_exports,
                 "sessions": sessions,
             }),
             method,

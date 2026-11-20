@@ -17,6 +17,47 @@ pub const REQUIRED_SKILL_NAMES: &[&str] = &[
     "bitlocker",
 ];
 
+pub const REQUIRED_FONT_FILES: &[&str] = &[
+    "assets/fonts/SourceHanSansCN-VF.otf",
+    "assets/fonts/LICENSE.txt",
+    "assets/fonts/JetBrainsMono-Regular.ttf",
+    "assets/fonts/JetBrainsMono-Medium.ttf",
+    "assets/fonts/JetBrainsMono-OFL.txt",
+];
+
+pub fn validate_sfnt_font_bytes(bytes: &[u8], expected_magic: &[u8; 4]) -> Result<(), String> {
+    if bytes.len() < 28 || &bytes[..4] != expected_magic {
+        return Err("随包字体格式无效或头部损坏。".into());
+    }
+    let num_tables = u16::from_be_bytes([bytes[4], bytes[5]]) as usize;
+    let dir_end = 12usize
+        .checked_add(num_tables.saturating_mul(16))
+        .ok_or("随包字体表目录溢出。")?;
+    if num_tables == 0 || bytes.len() < dir_end {
+        return Err("随包字体表目录损坏。".into());
+    }
+    let mut has_cmap = false;
+    let mut has_name = false;
+    for i in 0..num_tables {
+        let entry = 12 + i * 16;
+        let tag = &bytes[entry..entry + 4];
+        let offset = u32::from_be_bytes(bytes[entry + 8..entry + 12].try_into().unwrap()) as usize;
+        let len = u32::from_be_bytes(bytes[entry + 12..entry + 16].try_into().unwrap()) as usize;
+        if offset.checked_add(len).is_none_or(|end| end > bytes.len()) {
+            return Err("随包字体表数据越界。".into());
+        }
+        if tag == b"cmap" {
+            has_cmap = true;
+        } else if tag == b"name" {
+            has_name = true;
+        }
+    }
+    if !has_cmap || !has_name {
+        return Err("随包字体缺少必需字符映射或名称表。".into());
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Area {
     Program,
@@ -94,6 +135,8 @@ pub fn classify(path: &str) -> Result<Area, String> {
                 | "mcp-auth.json"
                 | "device.json"
                 | "web-settings.json"
+                | "desktop.json"
+                | "desktop-settings.json"
                 | "identity.json"
         ) || p.starts_with(".env.")
             || *p == "agents.md"
@@ -112,7 +155,7 @@ pub fn classify(path: &str) -> Result<Area, String> {
     let file = matches!(
         path,
         "cst-pilot.exe"
-            | "cst-pilot-desktop.exe"
+            | "cst-server.exe"
             | "cst-updater.exe"
             | "pi.cmd"
             | "pi-web.cmd"
@@ -250,6 +293,7 @@ pub(crate) fn validate_metadata(
 ) -> Result<(), String> {
     for path in [
         "cst-pilot.exe",
+        "cst-server.exe",
         "cst-updater.exe",
         "VERSION",
         "BUILD-INFO.json",
@@ -259,6 +303,11 @@ pub(crate) fn validate_metadata(
     ] {
         if !files.contains_key(path) {
             return Err("升级包缺少必需的程序、版本或许可文件。".into());
+        }
+    }
+    for font in REQUIRED_FONT_FILES {
+        if !files.contains_key(*font) {
+            return Err("升级包缺少必需的随包字体或许可文件。".into());
         }
     }
     for skill in REQUIRED_SKILL_NAMES {
@@ -283,6 +332,17 @@ pub(crate) fn validate_metadata(
     let value: Value = serde_json::from_slice(&bytes).map_err(|_| "升级构建信息无效。")?;
     if value.get("version").and_then(Value::as_str) != Some(target) {
         return Err("升级构建信息的版本不一致。".into());
+    }
+    let _fonts_pin = storage.pin_directory(Path::new("assets/fonts"), false)?;
+    for (rel, magic) in [
+        ("assets/fonts/SourceHanSansCN-VF.otf", b"OTTO"),
+        ("assets/fonts/JetBrainsMono-Regular.ttf", &[0, 1, 0, 0]),
+        ("assets/fonts/JetBrainsMono-Medium.ttf", &[0, 1, 0, 0]),
+    ] {
+        let font_bytes = storage
+            .read_limited(&root.join(rel), 32 * 1024 * 1024)?
+            .ok_or("升级包缺少随包字体。")?;
+        validate_sfnt_font_bytes(&font_bytes, magic)?;
     }
     Ok(())
 }

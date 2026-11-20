@@ -1,0 +1,1017 @@
+#![cfg(windows)]
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use cst_client::bootstrap::{
+    BootstrapOptions, DesktopInstanceOutcome, VerifiedServerEndpoint,
+    acquire_or_activate_desktop_instance,
+};
+use cst_client::http::AppHttpClient;
+use cst_client::runtime::CstClient;
+use cst_client::session_store::SessionViewSnapshot;
+use cst_client::state::{ChannelModeDto, ClientSnapshot, DesktopSettingsDto};
+use cst_desktop::background::{
+    AnimationGateInputs, D3D_FEATURE_LEVEL_11_0_RAW, D3d11FrostedGlassSurface, D3d11SkySurface,
+    FrostedGlassSpec, ShaderFrameScheduler, SkyPreset, d3d_sm50_supported,
+    has_active_hardware_diagnostic, reset_d3d11_pipeline_cache, surface_diagnostics,
+};
+use cst_desktop::shell::register_shell_keys;
+use cst_desktop::shell::window_bounds::{
+    DisplayWorkArea, NormalBoundsTracker, compute_display_hint, resolve_startup_window_geometry,
+};
+use cst_desktop::theme::DesktopPalette;
+use cst_desktop::{
+    open_desktop_shell_window_with_handle, parse_cli_args, run_desktop_health_check,
+};
+use cst_os::{ProcessIdentity, RestartUi};
+use gpui::{
+    AppContext as _, Bounds, ContentMask, Point, ScaledPixels, Size, WindowsSurfaceDrawContext,
+    WindowsSurfaceRenderer, px,
+};
+use gpui_kit::test::{TestAppContextExt, TestWindowExt};
+use serde_json::{Value, json};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use uuid::Uuid;
+use windows::Win32::Graphics::Direct3D::{
+    D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_11_0,
+};
+use windows::Win32::Graphics::Direct3D11::{
+    D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_BOX, D3D11_CPU_ACCESS_READ,
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
+    D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING, D3D11_VIEWPORT, D3D11CreateDevice, ID3D11Device,
+    ID3D11DeviceContext, ID3D11RenderTargetView, ID3D11Texture2D,
+};
+use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
+use windows::core::Interface;
+
+struct KitTempFixture {
+    root: PathBuf,
+}
+
+impl KitTempFixture {
+    fn create() -> Self {
+        let workspace_fonts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts");
+        let dir = std::env::temp_dir().join(format!("cst-desktop-step3-{}", Uuid::new_v4()));
+        fs::create_dir_all(dir.join("agent/home")).unwrap();
+        fs::create_dir_all(dir.join("assets/fonts")).unwrap();
+        fs::write(dir.join("VERSION"), "cst-pilot v0.1.0\n").unwrap();
+        fs::write(
+            dir.join("agent/home/APPEND_SYSTEM.md"),
+            "桌面端测试规则。\n",
+        )
+        .unwrap();
+        for skill in [
+            "disk",
+            "ls",
+            "sys",
+            "startup",
+            "eventlog",
+            "driver",
+            "runbook",
+            "bitlocker",
+        ] {
+            let p = dir.join(format!("agent/home/skills/{skill}/SKILL.md"));
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, format!("---\nname: {skill}\n---\n技能说明。\n")).unwrap();
+        }
+        for font_file in [
+            "SourceHanSansCN-VF.otf",
+            "LICENSE.txt",
+            "JetBrainsMono-Regular.ttf",
+            "JetBrainsMono-Medium.ttf",
+            "JetBrainsMono-OFL.txt",
+        ] {
+            fs::copy(
+                workspace_fonts.join(font_file),
+                dir.join("assets/fonts").join(font_file),
+            )
+            .unwrap();
+        }
+        Self {
+            root: dir.canonicalize().unwrap(),
+        }
+    }
+}
+
+impl Drop for KitTempFixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+struct OffscreenD3d11Harness {
+    device: ID3D11Device,
+    context: ID3D11DeviceContext,
+    rt_tex: ID3D11Texture2D,
+    rt_view: ID3D11RenderTargetView,
+    staging: ID3D11Texture2D,
+    width: u32,
+    height: u32,
+}
+
+impl OffscreenD3d11Harness {
+    fn create(width: u32, height: u32) -> Self {
+        unsafe {
+            let levels = [D3D_FEATURE_LEVEL_11_0];
+            let mut device = None;
+            let mut context = None;
+            let mut actual_level = D3D_FEATURE_LEVEL_11_0;
+            let hw = D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_HARDWARE,
+                windows::Win32::Foundation::HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                Some(&levels),
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                Some(&mut actual_level),
+                Some(&mut context),
+            );
+            if hw.is_err() {
+                D3D11CreateDevice(
+                    None,
+                    D3D_DRIVER_TYPE_WARP,
+                    windows::Win32::Foundation::HMODULE::default(),
+                    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                    Some(&levels),
+                    D3D11_SDK_VERSION,
+                    Some(&mut device),
+                    Some(&mut actual_level),
+                    Some(&mut context),
+                )
+                .expect("WARP D3D11 device creation must succeed");
+            }
+            let device = device.unwrap();
+            let context = context.unwrap();
+
+            let rt_desc = D3D11_TEXTURE2D_DESC {
+                Width: width,
+                Height: height,
+                MipLevels: 1,
+                ArraySize: 1,
+                Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                Usage: D3D11_USAGE_DEFAULT,
+                BindFlags: (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32,
+                CPUAccessFlags: 0,
+                MiscFlags: 0,
+            };
+            let mut rt_tex = None;
+            device
+                .CreateTexture2D(&rt_desc, None, Some(&mut rt_tex))
+                .unwrap();
+            let rt_tex = rt_tex.unwrap();
+
+            let mut rt_view = None;
+            device
+                .CreateRenderTargetView(&rt_tex, None, Some(&mut rt_view))
+                .unwrap();
+            let rt_view = rt_view.unwrap();
+
+            let staging_desc = D3D11_TEXTURE2D_DESC {
+                Width: width,
+                Height: height,
+                MipLevels: 1,
+                ArraySize: 1,
+                Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                Usage: D3D11_USAGE_STAGING,
+                BindFlags: 0,
+                CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+                MiscFlags: 0,
+            };
+            let mut staging = None;
+            device
+                .CreateTexture2D(&staging_desc, None, Some(&mut staging))
+                .unwrap();
+            let staging = staging.unwrap();
+
+            let rtv_opt = Some(rt_view.clone());
+            context.OMSetRenderTargets(Some(std::slice::from_ref(&rtv_opt)), None);
+            let vp = D3D11_VIEWPORT {
+                TopLeftX: 0.0,
+                TopLeftY: 0.0,
+                Width: width as f32,
+                Height: height as f32,
+                MinDepth: 0.0,
+                MaxDepth: 1.0,
+            };
+            context.RSSetViewports(Some(std::slice::from_ref(&vp)));
+
+            Self {
+                device,
+                context,
+                rt_tex,
+                rt_view,
+                staging,
+                width,
+                height,
+            }
+        }
+    }
+
+    fn clear_split_black_white(&self) {
+        let mut bgra = vec![0u8; (self.width * self.height * 4) as usize];
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let idx = ((y * self.width + x) * 4) as usize;
+                let v = if x < self.width / 2 { 0u8 } else { 255u8 };
+                bgra[idx] = v;
+                bgra[idx + 1] = v;
+                bgra[idx + 2] = v;
+                bgra[idx + 3] = 255;
+            }
+        }
+        let region = D3D11_BOX {
+            left: 0,
+            top: 0,
+            front: 0,
+            right: self.width,
+            bottom: self.height,
+            back: 1,
+        };
+        unsafe {
+            self.context.UpdateSubresource(
+                &self.rt_tex,
+                0,
+                Some(&region),
+                bgra.as_ptr().cast(),
+                self.width * 4,
+                0,
+            );
+        }
+    }
+
+    fn make_draw_ctx(
+        &self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        feature_level: u32,
+    ) -> WindowsSurfaceDrawContext {
+        let full = Bounds {
+            origin: Point {
+                x: ScaledPixels(0.0),
+                y: ScaledPixels(0.0),
+            },
+            size: Size {
+                width: ScaledPixels(self.width as f32),
+                height: ScaledPixels(self.height as f32),
+            },
+        };
+        WindowsSurfaceDrawContext {
+            device_raw: self.device.as_raw(),
+            device_context_raw: self.context.as_raw(),
+            render_target_raw: self.rt_tex.as_raw(),
+            render_target_view_raw: self.rt_view.as_raw(),
+            bounds: Bounds {
+                origin: Point {
+                    x: ScaledPixels(x),
+                    y: ScaledPixels(y),
+                },
+                size: Size {
+                    width: ScaledPixels(w),
+                    height: ScaledPixels(h),
+                },
+            },
+            content_mask: ContentMask { bounds: full },
+            viewport_size: [self.width as f32, self.height as f32],
+            feature_level,
+            is_software_emulated: false,
+        }
+    }
+
+    fn readback_bgra(&self) -> Vec<[u8; 4]> {
+        unsafe {
+            self.context.CopyResource(&self.staging, &self.rt_tex);
+            let mut mapped = std::mem::zeroed();
+            self.context
+                .Map(&self.staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+                .unwrap();
+            let mut pixels = Vec::with_capacity((self.width * self.height) as usize);
+            let base = mapped.pData.cast::<u8>();
+            for y in 0..self.height {
+                let row = std::slice::from_raw_parts(
+                    base.add((y * mapped.RowPitch) as usize),
+                    (self.width * 4) as usize,
+                );
+                for x in 0..self.width as usize {
+                    pixels.push([row[x * 4], row[x * 4 + 1], row[x * 4 + 2], row[x * 4 + 3]]);
+                }
+            }
+            self.context.Unmap(&self.staging, 0);
+            pixels
+        }
+    }
+}
+
+#[test]
+fn d3d11_single_window_sky_frosted_glass_and_device_recovery() {
+    reset_d3d11_pipeline_cache();
+    let before = surface_diagnostics();
+
+    let h1 = OffscreenD3d11Harness::create(256, 160);
+
+    // 1. Paint all 4 sky presets and verify non-trivial vertical gradient & rounded SDF corner clipping
+    for preset in [
+        SkyPreset::HomeLight,
+        SkyPreset::HomeDark,
+        SkyPreset::LoginLight,
+        SkyPreset::LoginDark,
+    ] {
+        h1.clear_split_black_white();
+        let sky0 = D3d11SkySurface {
+            preset,
+            time_sec: 0.0,
+            opacity: 1.0,
+            corner_radii_phys: [12.0, 12.0, 12.0, 12.0],
+        };
+        sky0.paint(&h1.make_draw_ctx(0.0, 0.0, 256.0, 160.0, D3D_FEATURE_LEVEL_11_0_RAW))
+            .unwrap();
+        let px0 = h1.readback_bgra();
+        // Top-left (0, 0) lies outside the 12px corner radius, so it stays untouched black (0, 0, 0)!
+        assert_eq!(
+            px0[0][0..3],
+            [0, 0, 0],
+            "rounded sky SDF must clip (0, 0) for {preset:?}"
+        );
+        let top = px0[16 * 256 + 128];
+        let bot = px0[144 * 256 + 128];
+        assert_ne!(
+            top, bot,
+            "sky preset {preset:?} must produce distinct vertical sky colors"
+        );
+    }
+
+    // 2. Sharp black/white split + frosted glass overlay -> Gaussian blur across x=128 inside overlay, untouched outside!
+    h1.clear_split_black_white();
+    let palette = DesktopPalette::light();
+    let mut spec = FrostedGlassSpec::popover_h2p2z(&palette);
+    spec.tint_opacity = 0.20;
+    spec.blur_px = 10.0;
+    let frosted = D3d11FrostedGlassSurface {
+        spec,
+        scale_factor: 1.0,
+    };
+    frosted
+        .paint(&h1.make_draw_ctx(64.0, 32.0, 128.0, 96.0, D3D_FEATURE_LEVEL_11_0_RAW))
+        .unwrap();
+
+    let blurred_px = h1.readback_bgra();
+    // Outside overlay (x=20, y=80) remains exact black (0, 0, 0)
+    assert_eq!(blurred_px[80 * 256 + 20][0..3], [0, 0, 0]);
+    // Outside overlay right side (x=236, y=80) remains exact white (255, 255, 255)
+    assert_eq!(blurred_px[80 * 256 + 236][0..3], [255, 255, 255]);
+    // Inside overlay across the x=128 edge (x=122 vs x=128 vs x=134): smoothly blurred intermediate values!
+    let left_inner = blurred_px[80 * 256 + 80][0];
+    let near_edge_left = blurred_px[80 * 256 + 124][0];
+    let near_edge_right = blurred_px[80 * 256 + 132][0];
+    let right_inner = blurred_px[80 * 256 + 176][0];
+    assert!(
+        left_inner < near_edge_left
+            && near_edge_left < near_edge_right
+            && near_edge_right < right_inner,
+        "frosted glass must Gaussian-blur the live render target edge: {left_inner} < {near_edge_left} < {near_edge_right} < {right_inner}"
+    );
+
+    let after_h1 = surface_diagnostics();
+    assert!(after_h1.device_build_count > before.device_build_count);
+
+    // 3. Second independent ID3D11Device simulates device-removed / adapter recreate -> automatic pipeline rebuild!
+    let h2 = OffscreenD3d11Harness::create(192, 128);
+    D3d11SkySurface {
+        preset: SkyPreset::HomeLight,
+        time_sec: 2.5,
+        opacity: 1.0,
+        corner_radii_phys: [8.0, 8.0, 8.0, 8.0],
+    }
+    .paint(&h2.make_draw_ctx(0.0, 0.0, 192.0, 128.0, D3D_FEATURE_LEVEL_11_0_RAW))
+    .unwrap();
+    let after_h2 = surface_diagnostics();
+    assert!(
+        after_h2.device_build_count > after_h1.device_build_count,
+        "switching ID3D11Device must automatically rebuild cached shaders & textures"
+    );
+
+    // 4. Below Feature Level 11_0 (`0xa000`) -> graceful fallback without crash, then restore 11_0
+    D3d11SkySurface {
+        preset: SkyPreset::HomeLight,
+        time_sec: 1.0,
+        opacity: 1.0,
+        corner_radii_phys: [0.0; 4],
+    }
+    .paint(&h2.make_draw_ctx(0.0, 0.0, 192.0, 128.0, 0xa000))
+    .unwrap();
+    assert!(!d3d_sm50_supported());
+
+    D3d11SkySurface {
+        preset: SkyPreset::HomeLight,
+        time_sec: 1.0,
+        opacity: 1.0,
+        corner_radii_phys: [0.0; 4],
+    }
+    .paint(&h2.make_draw_ctx(0.0, 0.0, 192.0, 128.0, D3D_FEATURE_LEVEL_11_0_RAW))
+    .unwrap();
+    assert!(d3d_sm50_supported());
+}
+
+#[test]
+fn shader_frame_scheduler_zero_fps_freeze_and_static_start_frame() {
+    let mut sched = ShaderFrameScheduler::new();
+    let t0 = Instant::now();
+    let active_gate = AnimationGateInputs {
+        route_has_sky_shader: true,
+        web_active_locked: false,
+        window_focused: true,
+        window_minimized: false,
+        hardware_diagnostic_active: false,
+        reduce_motion: false,
+        remote_session: false,
+        software_adapter: false,
+        sm50_supported: true,
+    };
+
+    let (u0, req0) = sched.step(active_gate, t0);
+    assert_eq!(u0, 0.0);
+    assert!(req0);
+
+    let (u1, req1) = sched.step(active_gate, t0 + Duration::from_millis(50));
+    assert!((u1 - 0.05).abs() < 1e-4);
+    assert!(req1);
+
+    // Freeze at 0 FPS when off-page, unfocused, minimized, WebActive, or sys(gpu/sensor) active
+    for frozen in [
+        AnimationGateInputs {
+            route_has_sky_shader: false,
+            ..active_gate
+        },
+        AnimationGateInputs {
+            window_focused: false,
+            ..active_gate
+        },
+        AnimationGateInputs {
+            window_minimized: true,
+            ..active_gate
+        },
+        AnimationGateInputs {
+            web_active_locked: true,
+            ..active_gate
+        },
+        AnimationGateInputs {
+            hardware_diagnostic_active: true,
+            ..active_gate
+        },
+    ] {
+        let (uf, reqf) = sched.step(frozen, t0 + Duration::from_secs(5));
+        assert!(!reqf, "frozen gate must not request next animation frame");
+        assert!(
+            (uf - u1).abs() < 1e-5,
+            "frozen gate must hold exact accumulated time {u1}, got {uf}"
+        );
+    }
+
+    // Static START_T (`0.0`) on reduce_motion, remote_session (RDP), or software adapter
+    for static_gate in [
+        AnimationGateInputs {
+            reduce_motion: true,
+            ..active_gate
+        },
+        AnimationGateInputs {
+            remote_session: true,
+            ..active_gate
+        },
+        AnimationGateInputs {
+            software_adapter: true,
+            ..active_gate
+        },
+    ] {
+        let (us, reqs) = sched.step(static_gate, t0 + Duration::from_secs(10));
+        assert_eq!(us, 0.0);
+        assert!(!reqs);
+    }
+
+    // Verify `sys(gpu)` & `sys(sensor)` detection on `ClientSnapshot`
+    let mut snap = ClientSnapshot::default();
+    assert!(!has_active_hardware_diagnostic(&snap));
+    let mut active_tools = BTreeMap::new();
+    active_tools.insert(
+        "call-1".to_owned(),
+        json!({ "toolName": "sys", "args": { "scope": "sensor" } }),
+    );
+    Arc::make_mut(&mut snap.loaded_sessions).insert(
+        "s1".to_owned(),
+        Arc::new(SessionViewSnapshot {
+            id: "s1".to_owned(),
+            revision: 1,
+            event_cursor: None,
+            leaf_id: None,
+            running: true,
+            active_turn_started_ms: None,
+            messages: Arc::new(Vec::new()),
+            entries: Arc::new(Vec::new()),
+            active_tools: Arc::new(active_tools),
+            streaming_assistant: None,
+            bitlocker: None,
+            context_usage: None,
+            queue: None,
+            ui: None,
+            estimated_bytes: 0,
+        }),
+    );
+    assert!(has_active_hardware_diagnostic(&snap));
+}
+
+#[test]
+fn window_geometry_multi_dpi_clamping_drag_intersection_and_normal_bounds() {
+    let primary = DisplayWorkArea {
+        display_id: None,
+        hint: compute_display_hint("disp-primary"),
+        work_x: 0.0,
+        work_y: 0.0,
+        work_width: 1366.0,
+        work_height: 768.0,
+    };
+    let secondary = DisplayWorkArea {
+        display_id: None,
+        hint: compute_display_hint("disp-secondary-2k"),
+        work_x: 1366.0,
+        work_y: -200.0,
+        work_width: 2560.0,
+        work_height: 1400.0,
+    };
+    let displays = [primary.clone(), secondary.clone()];
+
+    // 1. Oversized saved rect on 1366x768 clamps to 90% (1229x691) and centers when offscreen
+    let small_settings = DesktopSettingsDto {
+        display_hint: Some(primary.hint.clone()),
+        window_width: Some(2400),
+        window_height: Some(1600),
+        window_x: Some(-2000),
+        window_y: Some(-900),
+        ..DesktopSettingsDto::default()
+    };
+    let res_small = resolve_startup_window_geometry(&small_settings, &displays);
+    assert_eq!(res_small.width, 1229.0);
+    assert_eq!(res_small.height, 691.0);
+    assert_eq!(res_small.x, 69.0);
+    assert_eq!(res_small.y, 39.0);
+
+    // 2. Secondary display hint matches secondary work area & preserves valid drag bar position
+    let sec_settings = DesktopSettingsDto {
+        display_hint: Some(secondary.hint.clone()),
+        window_width: Some(1400),
+        window_height: Some(900),
+        window_x: Some(1500),
+        window_y: Some(-150),
+        ..DesktopSettingsDto::default()
+    };
+    let res_sec = resolve_startup_window_geometry(&sec_settings, &displays);
+    assert_eq!(
+        res_sec.display_hint.as_deref(),
+        Some(secondary.hint.as_str())
+    );
+    assert_eq!(res_sec.x, 1500.0);
+    assert_eq!(res_sec.y, -150.0);
+
+    // 3. NormalBoundsTracker preserves normal restore bounds across maximize & minimize
+    let mut tracker = NormalBoundsTracker::from_resolved(&res_sec);
+    let initial_bounds = Bounds {
+        origin: Point {
+            x: px(1500.0),
+            y: px(-150.0),
+        },
+        size: Size {
+            width: px(1400.0),
+            height: px(900.0),
+        },
+    };
+    assert!(
+        !tracker.observe(initial_bounds, false, false, Some(secondary.hint.clone())),
+        "initial window creation frame must not emit a settings PATCH"
+    );
+
+    // User moves normal window to (1600, -120)
+    let moved_bounds = Bounds {
+        origin: Point {
+            x: px(1600.0),
+            y: px(-120.0),
+        },
+        size: Size {
+            width: px(1440.0),
+            height: px(920.0),
+        },
+    };
+    assert!(tracker.observe(moved_bounds, false, false, Some(secondary.hint.clone())));
+
+    // User maximizes to 2560x1400 -> `window_maximized` flips to true, normal rect stays 1440x920 @ (1600, -120)!
+    let max_bounds = Bounds {
+        origin: Point {
+            x: px(1366.0),
+            y: px(-200.0),
+        },
+        size: Size {
+            width: px(2560.0),
+            height: px(1400.0),
+        },
+    };
+    assert!(tracker.observe(max_bounds, true, false, Some(secondary.hint.clone())));
+    let patch = tracker.take_pending_patch().expect("maximize patch");
+    assert_eq!(patch.window_maximized, Some(true));
+    assert_eq!(patch.window_width, Some(Some(1440)));
+    assert_eq!(patch.window_height, Some(Some(920)));
+    assert_eq!(patch.window_x, Some(Some(1600)));
+    assert_eq!(patch.window_y, Some(Some(-120)));
+
+    // Minimized 0x0 notification is ignored
+    let min_bounds = Bounds {
+        origin: Point {
+            x: px(-32000.0),
+            y: px(-32000.0),
+        },
+        size: Size {
+            width: px(0.0),
+            height: px(0.0),
+        },
+    };
+    assert!(!tracker.observe(min_bounds, false, true, None));
+}
+
+#[test]
+fn desktop_cli_health_check_lock_free_and_corrupt_asset_rejection() {
+    let parsed = parse_cli_args([
+        "--health-check".to_owned(),
+        "--ui".to_owned(),
+        "tui".to_owned(),
+    ])
+    .unwrap();
+    assert!(parsed.health_check);
+    assert_eq!(parsed.ui, RestartUi::Tui);
+
+    let fixture = KitTempFixture::create();
+    let ver = run_desktop_health_check(&fixture.root, Some("0.1.0")).unwrap();
+    assert_eq!(ver, "v0.1.0");
+
+    // Hold single-instance desktop lock while spawning real `cst-pilot.exe --health-check`!
+    let boot_opts = BootstrapOptions {
+        require_elevation: false,
+        ..BootstrapOptions::default()
+    };
+    let guard = match acquire_or_activate_desktop_instance(&fixture.root, &boot_opts).unwrap() {
+        DesktopInstanceOutcome::Acquired(g) => g,
+        DesktopInstanceOutcome::ActivatedExisting { .. } => panic!("unexpected existing instance"),
+    };
+
+    let exe = Path::new(env!("CARGO_BIN_EXE_cst-pilot"));
+    let output = Command::new(exe)
+        .arg("--health-check")
+        .arg("--kit-root")
+        .arg(&fixture.root)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "cst-pilot.exe --health-check failed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), "cst-pilot v0.1.0");
+    drop(guard);
+
+    // Corrupt SFNT font header -> must fail cleanly without modifying files
+    let mono_path = fixture.root.join("assets/fonts/JetBrainsMono-Regular.ttf");
+    fs::write(&mono_path, b"BAD_FONT_HEADER_BYTES").unwrap();
+    let bad_out = Command::new(exe)
+        .arg("--health-check")
+        .arg("--kit-root")
+        .arg(&fixture.root)
+        .output()
+        .unwrap();
+    assert!(!bad_out.status.success());
+    assert_eq!(fs::read(&mono_path).unwrap(), b"BAD_FONT_HEADER_BYTES");
+}
+
+#[derive(Default)]
+struct MockServerState {
+    channel_mode: String,
+    sidebar_collapsed: bool,
+    running_sessions: bool,
+    web_closed_calls: usize,
+    exit_calls: usize,
+    patched_bodies: Vec<Value>,
+}
+
+struct MockDesktopBackend {
+    rt: tokio::runtime::Runtime,
+    port: u16,
+    token: String,
+    state: Arc<Mutex<MockServerState>>,
+    stop: Arc<AtomicBool>,
+}
+
+impl MockDesktopBackend {
+    fn start() -> Self {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let state = Arc::new(Mutex::new(MockServerState {
+            channel_mode: "app_active".to_owned(),
+            sidebar_collapsed: false,
+            running_sessions: true,
+            web_closed_calls: 0,
+            exit_calls: 0,
+            patched_bodies: Vec::new(),
+        }));
+        let stop = Arc::new(AtomicBool::new(false));
+        let token = "test-app-bearer-token-step3".to_owned();
+
+        let state_bg = Arc::clone(&state);
+        let stop_bg = Arc::clone(&stop);
+        let port = rt.block_on(async move {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            tokio::spawn(async move {
+                while !stop_bg.load(Ordering::Relaxed) {
+                    let Ok((mut stream, _)) = listener.accept().await else {
+                        break;
+                    };
+                    let st = Arc::clone(&state_bg);
+                    let st_stop = Arc::clone(&stop_bg);
+                    tokio::spawn(async move {
+                        let mut buf = vec![0u8; 16384];
+                        let Ok(n) = stream.read(&mut buf).await else {
+                            return;
+                        };
+                        if n == 0 {
+                            return;
+                        }
+                        let req = String::from_utf8_lossy(&buf[..n]);
+                        let first_line = req.lines().next().unwrap_or("");
+                        let mut parts = first_line.split_whitespace();
+                        let method = parts.next().unwrap_or("GET");
+                        let path = parts.next().unwrap_or("/");
+                        let body_str = req.split("\r\n\r\n").nth(1).unwrap_or("");
+
+                        if path.starts_with("/api/app/events") || path.starts_with("/api/events/stream") {
+                            let hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n: connected\n\n";
+                            let _ = stream.write_all(hdr.as_bytes()).await;
+                            while !st_stop.load(Ordering::Relaxed) {
+                                tokio::time::sleep(Duration::from_millis(200)).await;
+                                if stream.write_all(b": ping\n\n").await.is_err() {
+                                    break;
+                                }
+                            }
+                            return;
+                        }
+
+                        let resp_json = {
+                            let mut guard = st.lock().unwrap();
+                            match (method, path) {
+                                ("GET", "/api/health") => json!({
+                                    "connected": true,
+                                    "stopping": false,
+                                    "version": "v0.1.0"
+                                }),
+                                ("GET", "/api/state") => json!({
+                                    "version": "v0.1.0",
+                                    "channelMode": guard.channel_mode,
+                                    "multiplexStream": true
+                                }),
+                                ("GET", "/api/sessions") => json!({
+                                    "sessions": [
+                                        { "id": "sess-1", "title": "蓝屏 0x116 显卡驱动排查", "running": guard.running_sessions }
+                                    ]
+                                }),
+                                ("GET", p) if p.starts_with("/api/models") => json!({
+                                    "models": [],
+                                    "catalog": [],
+                                    "unavailableEnabled": []
+                                }),
+                                ("GET", "/api/auth") => json!({ "providers": [] }),
+                                ("GET", p) if p.starts_with("/api/account") => json!({
+                                    "signedIn": true,
+                                    "profile": {
+                                        "supported": true,
+                                        "studentId": "20260001",
+                                        "name": "测试队员"
+                                    }
+                                }),
+                                ("GET", "/api/app/settings") => json!({
+                                    "theme": "light",
+                                    "defaultView": "gui",
+                                    "sidebarCollapsed": guard.sidebar_collapsed,
+                                    "windowMaximized": false
+                                }),
+                                ("PATCH", "/api/app/settings") => {
+                                    if let Ok(v) = serde_json::from_str::<Value>(body_str) {
+                                        if let Some(c) = v.get("sidebarCollapsed").and_then(Value::as_bool) {
+                                            guard.sidebar_collapsed = c;
+                                        }
+                                        guard.patched_bodies.push(v);
+                                    }
+                                    json!({
+                                        "theme": "light",
+                                        "defaultView": "gui",
+                                        "sidebarCollapsed": guard.sidebar_collapsed,
+                                        "windowMaximized": false
+                                    })
+                                }
+                                ("GET", "/api/ui-hints") => json!({}),
+                                ("GET", "/api/app/update/status") => json!({
+                                    "status": { "phase": "idle" }
+                                }),
+                                ("POST", "/api/app/web/open") => {
+                                    guard.channel_mode = "web_active".to_owned();
+                                    json!({ "url": "http://127.0.0.1:43110/?ticket=mock" })
+                                }
+                                ("POST", "/api/app/web/close") => {
+                                    guard.channel_mode = "app_active".to_owned();
+                                    guard.web_closed_calls += 1;
+                                    json!({ "channelMode": "app_active" })
+                                }
+                                ("GET", "/api/lifecycle") => json!({
+                                    "stopping": false,
+                                    "version": "v0.1.0",
+                                    "activeExports": 0,
+                                    "sessions": [
+                                        {
+                                            "id": "sess-1",
+                                            "title": "蓝屏排查",
+                                            "running": guard.running_sessions,
+                                            "pendingInboxCount": 1
+                                        }
+                                    ]
+                                }),
+                                ("POST", "/api/app/exit") => {
+                                    guard.exit_calls += 1;
+                                    json!({ "stopping": true })
+                                }
+                                _ => json!({}),
+                            }
+                        };
+
+                        let body_bytes = serde_json::to_vec(&resp_json).unwrap();
+                        let header = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body_bytes.len()
+                        );
+                        let _ = stream.write_all(header.as_bytes()).await;
+                        let _ = stream.write_all(&body_bytes).await;
+                    });
+                }
+            });
+            port
+        });
+
+        Self {
+            rt,
+            port,
+            token,
+            state,
+            stop,
+        }
+    }
+}
+
+impl Drop for MockDesktopBackend {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+#[gpui_kit::test]
+async fn headless_gpui_shell_sidebar_drawer_escape_web_lock_and_exit_confirm(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    cx.executor().allow_parking();
+    let fixture = KitTempFixture::create();
+    let backend = MockDesktopBackend::start();
+    let self_id = ProcessIdentity::current().unwrap();
+    let endpoint = VerifiedServerEndpoint {
+        kit_root: fixture.root.clone(),
+        pid: self_id.pid,
+        process_created: self_id.created,
+        port: backend.port,
+        version: "v0.1.0".into(),
+        http: AppHttpClient::new(backend.port, &backend.token).unwrap(),
+        spawned_by_client: false,
+    };
+    let handle = CstClient::from_verified_endpoint(backend.rt.handle(), endpoint, None).unwrap();
+    backend
+        .rt
+        .block_on(handle.refresh_globals())
+        .expect("initial globals refresh");
+
+    let (win_handle, shell) = cx.update(|cx| {
+        let font_report = cst_desktop::theme::load_bundled_fonts(&fixture.root, cx);
+        assert!(font_report.loaded_cjk, "{font_report:?}");
+        assert!(font_report.loaded_mono, "{font_report:?}");
+        assert_eq!(font_report.ui_family(), "Source Han Sans CN VF");
+        assert_eq!(font_report.mono_family(), "JetBrains Mono");
+        assert!(font_report.warning.is_none(), "{font_report:?}");
+        gpui_kit::init(cx);
+        register_shell_keys(cx);
+        open_desktop_shell_window_with_handle(handle.clone(), Some(font_report), cx).unwrap()
+    });
+
+    // 1. Initial expanded state: `sidebar-l081m1` + `topbar-gels8` + `workspace-home-view` visible
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("sidebar-l081m1").visible());
+        assert!(window.find("topbar-gels8").visible());
+        assert!(window.find("workspace-home-view").visible());
+        assert!(window.try_find("topbar-mklbe").is_none());
+    })
+    .unwrap();
+
+    // 2. Collapse sidebar via `ctrl-b` -> switches to `topbar-mklbe` and focuses expand button
+    cx.update_window(win_handle, |_, window, cx| {
+        window.press("ctrl-b", cx);
+        assert!(window.try_find("sidebar-l081m1").is_none());
+        assert!(window.find("topbar-mklbe").visible());
+        assert_eq!(
+            window.find("topbar-expand-sidebar-btn").focused(),
+            Some(true)
+        );
+    })
+    .unwrap();
+
+    // 3. Open recent sessions drawer, then press `escape` -> single-layer close + 1-frame focus restore
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("topbar-recent-drawer-btn", cx);
+        assert!(window.find("recent-sessions-drawer").visible());
+
+        window.press("escape", cx);
+        assert!(window.try_find("recent-sessions-drawer").is_none());
+        assert_eq!(
+            window.find("topbar-recent-drawer-btn").focused(),
+            Some(true)
+        );
+    })
+    .unwrap();
+
+    // 4. `WebActive` lock overlay (`WO6NQ`) & `"切回桌面端"` recovery
+    {
+        backend.state.lock().unwrap().channel_mode = "web_active".to_owned();
+    }
+    backend.rt.block_on(handle.refresh_globals()).unwrap();
+    assert_eq!(handle.snapshot().channel_mode, ChannelModeDto::WebActive);
+
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window.try_find("web-active-card-wo6nq").is_some()
+    })
+    .await;
+
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("web-active-switch-back-btn", cx);
+    })
+    .unwrap();
+
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window.try_find("web-active-card-wo6nq").is_none()
+    })
+    .await;
+    assert_eq!(backend.state.lock().unwrap().web_closed_calls, 1);
+
+    // 5. Close button (`window-btn-close`) with active session -> opens `pFooK` 384px exit dialog,
+    //    initial focus on `"取消"`, `escape` dismisses safely without calling `/api/app/exit`!
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("window-btn-close", cx);
+    })
+    .unwrap();
+
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window.try_find("exit-dialog-card-pfook").is_some()
+    })
+    .await;
+
+    cx.update_window(win_handle, |_, window, cx| {
+        let card = window.find("exit-dialog-card-pfook");
+        assert_eq!(f32::from(card.bounds().size.width), 384.0);
+        assert_eq!(window.find("exit-dialog-cancel-btn").focused(), Some(true));
+
+        window.press("escape", cx);
+        assert!(window.try_find("exit-dialog-card-pfook").is_none());
+    })
+    .unwrap();
+
+    cx.update(|cx| {
+        assert!(!shell.read(cx).has_exit_dialog());
+    });
+    assert_eq!(backend.state.lock().unwrap().exit_calls, 0);
+}

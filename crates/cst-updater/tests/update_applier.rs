@@ -40,6 +40,7 @@ impl Fixture {
             ("VERSION", b"cst-pilot v0.6.0\n".as_slice()),
             ("BUILD-INFO.json", br#"{"version":"v0.6.0"}"#),
             ("cst-pilot.exe", b"old main"),
+            ("cst-server.exe", b"old server"),
             ("cst-updater.exe", b"old updater"),
             ("assets/old-only.txt", b"obsolete resource"),
             (
@@ -93,6 +94,7 @@ impl Fixture {
             "VERSION",
             "BUILD-INFO.json",
             "cst-pilot.exe",
+            "cst-server.exe",
             "cst-updater.exe",
             "assets/old-only.txt",
             "agent/home/settings.json",
@@ -129,9 +131,26 @@ fn key() -> ReleaseKey {
     ReleaseKey::from_bytes(SigningKey::from_bytes(&[42; 32]).verifying_key().as_bytes()).unwrap()
 }
 
+fn mock_sfnt(magic: &[u8; 4]) -> Vec<u8> {
+    let tables = [*b"cmap", *b"name"];
+    let header_len = 12 + tables.len() * 16;
+    let mut buf = vec![0u8; header_len + 8];
+    buf[..4].copy_from_slice(magic);
+    buf[4..6].copy_from_slice(&(tables.len() as u16).to_be_bytes());
+    for (idx, tag) in tables.iter().enumerate() {
+        let entry = 12 + idx * 16;
+        buf[entry..entry + 4].copy_from_slice(tag);
+        let offset = (header_len + idx * 4) as u32;
+        buf[entry + 8..entry + 12].copy_from_slice(&offset.to_be_bytes());
+        buf[entry + 12..entry + 16].copy_from_slice(&4u32.to_be_bytes());
+    }
+    buf
+}
+
 fn files() -> BTreeMap<String, Vec<u8>> {
     let mut files = BTreeMap::from([
         ("cst-pilot.exe".into(), b"new main".to_vec()),
+        ("cst-server.exe".into(), b"new server".to_vec()),
         ("cst-updater.exe".into(), b"new updater".to_vec()),
         ("VERSION".into(), b"cst-pilot v0.7.0\n".to_vec()),
         (
@@ -142,6 +161,23 @@ fn files() -> BTreeMap<String, Vec<u8>> {
         ("THIRD-PARTY-NOTICES.md".into(), b"license notices".to_vec()),
         ("licenses/mock.txt".into(), b"mock third party".to_vec()),
         ("assets/new-only.txt".into(), b"new resource".to_vec()),
+        (
+            "assets/fonts/SourceHanSansCN-VF.otf".into(),
+            mock_sfnt(b"OTTO"),
+        ),
+        ("assets/fonts/LICENSE.txt".into(), b"SIL OFL 1.1".to_vec()),
+        (
+            "assets/fonts/JetBrainsMono-Regular.ttf".into(),
+            mock_sfnt(&[0, 1, 0, 0]),
+        ),
+        (
+            "assets/fonts/JetBrainsMono-Medium.ttf".into(),
+            mock_sfnt(&[0, 1, 0, 0]),
+        ),
+        (
+            "assets/fonts/JetBrainsMono-OFL.txt".into(),
+            b"SIL OFL 1.1".to_vec(),
+        ),
         (
             "agent/home/APPEND_SYSTEM.md".into(),
             b"synthetic prompt".to_vec(),
@@ -703,10 +739,9 @@ fn native_test_host() -> PathBuf {
 fn real_native_health_process_and_ui_restart_succeed_inside_the_isolated_kit() {
     let f = Fixture::new();
     let mut next = files();
-    next.insert(
-        "cst-pilot.exe".into(),
-        fs::read(native_test_host()).unwrap(),
-    );
+    let host_bytes = fs::read(native_test_host()).unwrap();
+    next.insert("cst-server.exe".into(), host_bytes.clone());
+    next.insert("cst-pilot.exe".into(), host_bytes);
     let package = f.package_with(next);
     let host = process::NativeHost { ui: RestartUi::Web };
     assert_eq!(
@@ -721,21 +756,24 @@ fn real_native_health_process_and_ui_restart_succeed_inside_the_isolated_kit() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(f.read(".state/health-checked"), b"checked");
+    assert_eq!(
+        String::from_utf8(f.read(".state/health-order")).unwrap(),
+        "cst-server.exe\ncst-pilot.exe\n"
+    );
     assert_eq!(f.read(".state/restarted-ui"), b"web");
 }
 
 #[test]
-fn real_health_failure_and_fifteen_second_timeout_both_roll_back() {
-    for mode in ["fail", "hang"] {
+fn real_health_failure_version_mismatch_and_shared_fifteen_second_budget_all_roll_back() {
+    for mode in ["fail", "mismatch", "slow_then_hang"] {
         let f = Fixture::new();
         let old = f.old_program();
         let users = f.users();
         f.write(".state/health-mode", mode.as_bytes());
         let mut next = files();
-        next.insert(
-            "cst-pilot.exe".into(),
-            fs::read(native_test_host()).unwrap(),
-        );
+        let host_bytes = fs::read(native_test_host()).unwrap();
+        next.insert("cst-server.exe".into(), host_bytes.clone());
+        next.insert("cst-pilot.exe".into(), host_bytes);
         let package = f.package_with(next);
         let start = std::time::Instant::now();
         assert_eq!(
@@ -749,9 +787,10 @@ fn real_health_failure_and_fifteen_second_timeout_both_roll_back() {
                 .unwrap(),
             ApplyOutcome::RolledBack
         );
-        if mode == "hang" {
+        if mode == "slow_then_hang" {
+            // cst-server took 6s, then cst-pilot hung; shared 15s total budget must cap total wait ~15s (not 21s/30s).
             assert!(start.elapsed() >= Duration::from_secs(15));
-            assert!(start.elapsed() < Duration::from_secs(22));
+            assert!(start.elapsed() < Duration::from_secs(20));
         }
         assert_eq!(old, f.old_program());
         assert_eq!(users, f.users());

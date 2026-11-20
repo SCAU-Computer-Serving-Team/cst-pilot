@@ -67,7 +67,7 @@ impl ModeRejection {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Stopping => "stopping",
-            Self::Updating(_) => "updating",
+            Self::Updating(_) => "update_in_progress",
             Self::WebModeActive => "web_mode_active",
             Self::WebModeInactive => "web_mode_inactive",
         }
@@ -318,6 +318,28 @@ impl ModeController {
         let was_stopping = self.stopping.swap(true, Ordering::SeqCst);
         self.shutdown_notify.notify_waiters();
         !was_stopping
+    }
+
+    /// Reverts `stopping` when `SessionPool::shutdown` aborts due to a concurrent busy session.
+    pub fn cancel_shutdown(&self) {
+        let mut inner = self.presence.lock().expect("presence lock");
+        if let Some(task) = inner.timer_task.take() {
+            task.abort();
+        }
+        self.stopping.store(false, Ordering::SeqCst);
+        if self.config.standalone_web || inner.active_app_connections > 0 {
+            inner.phase = AppPresenceState::Connected;
+        } else {
+            inner.presence_epoch = inner.presence_epoch.wrapping_add(1);
+            let epoch = inner.presence_epoch;
+            inner.phase = AppPresenceState::GracePeriod { epoch };
+            let grace = self.config.grace_period;
+            let controller = self.clone();
+            inner.timer_task = Some(tokio::spawn(async move {
+                tokio::time::sleep(grace).await;
+                controller.expire_grace_period(epoch);
+            }));
+        }
     }
 
     /// Switches `ChannelMode` to `WebActive` under the exclusive write lock and issues a 30s single-use ticket.

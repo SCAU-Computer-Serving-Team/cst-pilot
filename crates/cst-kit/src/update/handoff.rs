@@ -11,8 +11,33 @@ pub fn health_check(root: &Path) -> Result<(), String> {
     layout::read_version(root)?;
     crate::Kit::new(root)?.check_resources()?;
     let storage = Storage::new(root)?;
+    let _fonts = storage.pin_directory(Path::new("assets/fonts"), false)?;
+    for rel in layout::REQUIRED_FONT_FILES {
+        if storage
+            .read_limited(&storage.root.join(rel), 32 * 1024 * 1024)?
+            .is_none()
+        {
+            return Err("健康检查缺少必需随包字体或许可文件。".into());
+        }
+    }
+    for (rel, magic) in [
+        ("assets/fonts/SourceHanSansCN-VF.otf", b"OTTO"),
+        ("assets/fonts/JetBrainsMono-Regular.ttf", &[0, 1, 0, 0]),
+        ("assets/fonts/JetBrainsMono-Medium.ttf", &[0, 1, 0, 0]),
+    ] {
+        let bytes = storage
+            .read_limited(&storage.root.join(rel), 32 * 1024 * 1024)?
+            .ok_or("健康检查缺少随包字体。")?;
+        layout::validate_sfnt_font_bytes(&bytes, magic)?;
+    }
     let _home = storage.pin_directory(Path::new("agent/home"), false)?;
-    for name in ["auth.json", "models.json", "settings.json", "device.json"] {
+    for name in [
+        "auth.json",
+        "models.json",
+        "settings.json",
+        "device.json",
+        "desktop.json",
+    ] {
         if let Some(bytes) =
             storage.read_limited(&storage.root.join("agent/home").join(name), 8 * 1024 * 1024)?
             && !parse_local_json(&format!("agent/home/{name}"), &bytes)?.is_object()
@@ -21,4 +46,33 @@ pub fn health_check(root: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Normalizes optional leading `'v'` on release version tags (`"v0.9.5"` == `"0.9.5"`).
+pub fn normalize_version_tag(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    trimmed.strip_prefix('v').unwrap_or(trimmed)
+}
+
+/// Runs `health_check(root)` and verifies an optional binary-compiled build version against `<kit_root>/VERSION`.
+/// Returns the verified `VERSION` string (`<ver>`) for `--health-check` stdout.
+pub fn run_cli_health_check_with_version(
+    root: &Path,
+    compiled_build_version: Option<&str>,
+) -> Result<String, String> {
+    health_check(root)?;
+    let disk_version = layout::read_version(root)?;
+    if let Some(build_ver) = compiled_build_version
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        && normalize_version_tag(&disk_version) != normalize_version_tag(build_ver)
+    {
+        return Err("健康检查发现程序内置版本与工具包 VERSION 不一致。".into());
+    }
+    Ok(disk_version)
+}
+
+/// Runs `health_check(root)` and returns the verified `VERSION` string (`<ver>`) for `--health-check` stdout.
+pub fn run_cli_health_check(root: &Path) -> Result<String, String> {
+    run_cli_health_check_with_version(root, option_env!("CST_BUILD_VERSION"))
 }

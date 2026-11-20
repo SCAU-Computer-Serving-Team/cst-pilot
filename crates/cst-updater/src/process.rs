@@ -14,14 +14,16 @@ pub struct NativeHost {
 
 impl UpdateHost for NativeHost {
     fn health_check(&self, root: &Path, cancel: &CancellationToken) -> Result<(), String> {
-        run_health_check_in_job(
-            &root.join("cst-pilot.exe"),
+        let expected_version = crate::layout::read_version(root)?;
+        let expected_line = format!("cst-pilot {expected_version}");
+        run_health_checks_in_shared_job(
+            &[root.join("cst-server.exe"), root.join("cst-pilot.exe")],
             &[OsString::from("--health-check")],
+            &expected_line,
             Duration::from_secs(15),
             cancel,
             64 * 1024,
         )
-        .map(|_| ())
         .map_err(|_| "新版程序未在 15 秒内通过健康检查。".into())
     }
 
@@ -40,13 +42,14 @@ pub(crate) fn launch(exe: &Path, args: &[OsString], root: &Path) -> Result<u32, 
 }
 
 #[cfg(windows)]
-fn run_health_check_in_job(
-    exe: &Path,
+fn run_health_checks_in_shared_job(
+    exes: &[std::path::PathBuf],
     args: &[OsString],
+    expected_line: &str,
     timeout: Duration,
     cancel: &CancellationToken,
     max_output: usize,
-) -> Result<Vec<u8>, String> {
+) -> Result<(), String> {
     use std::fs::File;
     use std::io::Read;
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
@@ -117,18 +120,6 @@ fn run_health_check_in_job(
 
     crate::io::cancelled(cancel)?;
     let deadline = Instant::now() + timeout;
-    let application = wide(exe.as_os_str())?;
-    let mut command = OsString::new();
-    for value in std::iter::once(exe.as_os_str()).chain(args.iter().map(OsString::as_os_str)) {
-        if !command.is_empty() {
-            command.push(" ");
-        }
-        command.push(quote(value));
-    }
-    let mut command = wide(&command)?;
-    if command.len() > 32767 {
-        return Err("健康检查命令行超过系统上限。".into());
-    }
 
     unsafe {
         let job = Handle(CreateJobObjectW(None, PCWSTR::null()).map_err(err)?);
@@ -141,132 +132,198 @@ fn run_health_check_in_job(
             std::mem::size_of_val(&limits) as u32,
         )
         .map_err(err)?;
-        let security = SECURITY_ATTRIBUTES {
-            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-            bInheritHandle: true.into(),
-            ..Default::default()
-        };
-        let mut read = HANDLE::default();
-        let mut write = HANDLE::default();
-        CreatePipe(&mut read, &mut write, Some(&security), 0).map_err(err)?;
-        let reader = Handle(read);
-        let writer = Handle(write);
-        SetHandleInformation(reader.0, HANDLE_FLAG_INHERIT.0, Default::default()).map_err(err)?;
-        let mut size = 0usize;
-        let _ = InitializeProcThreadAttributeList(None, 1, None, &mut size);
-        let mut memory = vec![0usize; size.div_ceil(std::mem::size_of::<usize>())];
-        let ptr = LPPROC_THREAD_ATTRIBUTE_LIST(memory.as_mut_ptr().cast());
-        InitializeProcThreadAttributeList(Some(ptr), 1, None, &mut size).map_err(err)?;
-        let attributes = Attributes {
-            ptr,
-            _memory: memory,
-        };
-        let handles = [writer.0];
-        UpdateProcThreadAttribute(
-            attributes.ptr,
-            0,
-            PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
-            Some(handles.as_ptr().cast()),
-            std::mem::size_of_val(&handles),
-            None,
-            None,
-        )
-        .map_err(err)?;
-        let mut startup = STARTUPINFOEXW {
-            lpAttributeList: attributes.ptr,
-            ..Default::default()
-        };
-        startup.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
-        startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-        startup.StartupInfo.hStdOutput = writer.0;
-        startup.StartupInfo.hStdError = writer.0;
-        let mut info = PROCESS_INFORMATION::default();
-        CreateProcessW(
-            PCWSTR(application.as_ptr()),
-            Some(PWSTR(command.as_mut_ptr())),
-            None,
-            None,
-            true,
-            CREATE_SUSPENDED | CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
-            None,
-            PCWSTR::null(),
-            &startup.StartupInfo,
-            &mut info,
-        )
-        .map_err(err)?;
-        let process = Handle(info.hProcess);
-        let thread = Handle(info.hThread);
-        if AssignProcessToJobObject(job.0, process.0).is_err() {
-            let _ = TerminateProcess(process.0, 1);
-            return Err("健康检查进程无法加入受控任务。".into());
-        }
-        if ResumeThread(thread.0) == u32::MAX {
-            let _ = TerminateJobObject(job.0, 1);
-            return Err("健康检查进程无法恢复运行。".into());
-        }
-        drop(writer);
-        let raw = reader.0;
-        std::mem::forget(reader);
-        let mut file = File::from_raw_handle(raw.0);
-        let output = std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            let mut block = [0u8; 8192];
-            let mut overflow = false;
-            loop {
-                match file.read(&mut block) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        if bytes.len() + n <= max_output {
-                            bytes.extend_from_slice(&block[..n]);
-                        } else {
-                            overflow = true;
-                        }
-                    }
-                    Err(e) => return Err(e.to_string()),
-                }
-            }
-            if overflow {
-                Err("健康检查输出超过预算。".into())
-            } else {
-                Ok(bytes)
-            }
-        });
-        let outcome = loop {
-            if let Err(error) = crate::io::cancelled(cancel) {
-                break Err(error);
-            }
+
+        for exe in exes {
+            crate::io::cancelled(cancel)?;
             if Instant::now() >= deadline {
-                break Err("健康检查超时。".into());
+                let _ = TerminateJobObject(job.0, 1);
+                return Err("健康检查超时。".into());
             }
-            match WaitForSingleObject(process.0, 20) {
-                WAIT_OBJECT_0 => {
-                    let mut code = 0;
-                    GetExitCodeProcess(process.0, &mut code).map_err(err)?;
-                    break if code == 0 {
-                        Ok(())
-                    } else {
-                        Err(format!("健康检查进程退出码：{code}。"))
-                    };
+            let application = wide(exe.as_os_str())?;
+            let mut command = OsString::new();
+            for value in
+                std::iter::once(exe.as_os_str()).chain(args.iter().map(OsString::as_os_str))
+            {
+                if !command.is_empty() {
+                    command.push(" ");
                 }
-                WAIT_TIMEOUT => (),
-                _ => break Err("等待健康检查进程失败。".into()),
+                command.push(quote(value));
             }
-        };
+            let mut command = wide(&command)?;
+            if command.len() > 32767 {
+                let _ = TerminateJobObject(job.0, 1);
+                return Err("健康检查命令行超过系统上限。".into());
+            }
+
+            let security = SECURITY_ATTRIBUTES {
+                nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+                bInheritHandle: true.into(),
+                ..Default::default()
+            };
+            let mut read = HANDLE::default();
+            let mut write = HANDLE::default();
+            CreatePipe(&mut read, &mut write, Some(&security), 0).map_err(err)?;
+            let reader = Handle(read);
+            let writer = Handle(write);
+            SetHandleInformation(reader.0, HANDLE_FLAG_INHERIT.0, Default::default())
+                .map_err(err)?;
+            let mut size = 0usize;
+            let _ = InitializeProcThreadAttributeList(None, 1, None, &mut size);
+            let mut memory = vec![0usize; size.div_ceil(std::mem::size_of::<usize>())];
+            let ptr = LPPROC_THREAD_ATTRIBUTE_LIST(memory.as_mut_ptr().cast());
+            InitializeProcThreadAttributeList(Some(ptr), 1, None, &mut size).map_err(err)?;
+            let attributes = Attributes {
+                ptr,
+                _memory: memory,
+            };
+            let handles = [writer.0];
+            UpdateProcThreadAttribute(
+                attributes.ptr,
+                0,
+                PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
+                Some(handles.as_ptr().cast()),
+                std::mem::size_of_val(&handles),
+                None,
+                None,
+            )
+            .map_err(err)?;
+            let mut startup = STARTUPINFOEXW {
+                lpAttributeList: attributes.ptr,
+                ..Default::default()
+            };
+            startup.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
+            startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+            startup.StartupInfo.hStdOutput = writer.0;
+            startup.StartupInfo.hStdError = writer.0;
+            let mut info = PROCESS_INFORMATION::default();
+            CreateProcessW(
+                PCWSTR(application.as_ptr()),
+                Some(PWSTR(command.as_mut_ptr())),
+                None,
+                None,
+                true,
+                CREATE_SUSPENDED | CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
+                None,
+                PCWSTR::null(),
+                &startup.StartupInfo,
+                &mut info,
+            )
+            .map_err(err)?;
+            let process = Handle(info.hProcess);
+            let thread = Handle(info.hThread);
+            if AssignProcessToJobObject(job.0, process.0).is_err() {
+                let _ = TerminateProcess(process.0, 1);
+                let _ = TerminateJobObject(job.0, 1);
+                return Err("健康检查进程无法加入受控任务。".into());
+            }
+            if ResumeThread(thread.0) == u32::MAX {
+                let _ = TerminateJobObject(job.0, 1);
+                return Err("健康检查进程无法恢复运行。".into());
+            }
+            drop(writer);
+            let raw = reader.0;
+            std::mem::forget(reader);
+            let mut file = File::from_raw_handle(raw.0);
+            let output = std::thread::spawn(move || {
+                let mut bytes = Vec::new();
+                let mut block = [0u8; 8192];
+                let mut overflow = false;
+                loop {
+                    match file.read(&mut block) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            if bytes.len() + n <= max_output {
+                                bytes.extend_from_slice(&block[..n]);
+                            } else {
+                                overflow = true;
+                            }
+                        }
+                        Err(e) => return Err(e.to_string()),
+                    }
+                }
+                if overflow {
+                    Err("健康检查输出超过预算。".into())
+                } else {
+                    Ok(bytes)
+                }
+            });
+            let outcome = loop {
+                if let Err(error) = crate::io::cancelled(cancel) {
+                    break Err(error);
+                }
+                if Instant::now() >= deadline {
+                    break Err("健康检查超时。".into());
+                }
+                match WaitForSingleObject(process.0, 20) {
+                    WAIT_OBJECT_0 => {
+                        let mut code = 0;
+                        if let Err(error) = GetExitCodeProcess(process.0, &mut code) {
+                            break Err(err(error));
+                        }
+                        break if code == 0 {
+                            Ok(())
+                        } else {
+                            Err(format!("健康检查进程退出码：{code}。"))
+                        };
+                    }
+                    WAIT_TIMEOUT => (),
+                    _ => break Err("等待健康检查进程失败。".into()),
+                }
+            };
+            if let Err(error) = outcome {
+                let _ = TerminateJobObject(job.0, 1);
+                return Err(error);
+            }
+            // A child can keep the inherited output handle open after the probe exits.
+            // Include pipe draining in the common deadline and cancellation budget.
+            while !output.is_finished() {
+                if cancel.is_cancelled() || Instant::now() >= deadline {
+                    let _ = TerminateJobObject(job.0, 1);
+                    return Err(if cancel.is_cancelled() {
+                        "健康检查已取消。".into()
+                    } else {
+                        "健康检查输出读取超时。".into()
+                    });
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let bytes = match output
+                .join()
+                .map_err(|_| "健康检查输出线程异常。".to_owned())?
+            {
+                Ok(b) => b,
+                Err(e) => {
+                    let _ = TerminateJobObject(job.0, 1);
+                    return Err(e);
+                }
+            };
+            let text = std::str::from_utf8(&bytes).map_err(|_| {
+                let _ = TerminateJobObject(job.0, 1);
+                "健康检查输出编码无效。".to_owned()
+            })?;
+            if !text.lines().any(|line| line.trim() == expected_line) {
+                let _ = TerminateJobObject(job.0, 1);
+                return Err("健康检查输出版本与工具包 VERSION 不一致。".into());
+            }
+        }
         let _ = TerminateJobObject(job.0, 1);
-        let bytes = output.join().map_err(|_| "健康检查输出线程异常。")?;
-        outcome?;
-        bytes
+        crate::io::cancelled(cancel)?;
+        if Instant::now() >= deadline {
+            return Err("健康检查超时。".into());
+        }
+        Ok(())
     }
 }
 
 #[cfg(not(windows))]
-fn run_health_check_in_job(
-    _: &Path,
+fn run_health_checks_in_shared_job(
+    _: &[std::path::PathBuf],
     _: &[OsString],
+    _: &str,
     _: Duration,
     _: &CancellationToken,
     _: usize,
-) -> Result<Vec<u8>, String> {
+) -> Result<(), String> {
     Err("运行态升级仅支持 Windows。".into())
 }
 

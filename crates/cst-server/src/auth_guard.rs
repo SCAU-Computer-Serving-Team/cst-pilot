@@ -171,8 +171,15 @@ pub async fn authenticate_api_request(
         if is_app_route {
             return Ok(CallerIdentity::App);
         }
+        if pathname == "/api/ui-hints/missing-key-prompt/claim" && *method == Method::POST {
+            if mode_controller.is_stopping() {
+                return Err(AuthGuardError::from(ModeRejection::Stopping));
+            }
+            return Ok(CallerIdentity::App);
+        }
         let is_readonly_method = *method == Method::GET || *method == Method::HEAD;
-        let allow_in_web = is_readonly_method && is_app_readonly_allowed_in_web_mode(pathname);
+        let allow_in_web =
+            is_readonly_method && is_app_readonly_allowed_in_web_mode(pathname, headers);
         mode_controller
             .verify_caller_access(CallerIdentity::App, !is_readonly_method, allow_in_web)
             .await?;
@@ -230,13 +237,17 @@ pub async fn authenticate_api_request(
     Ok(caller)
 }
 
-fn is_app_readonly_allowed_in_web_mode(pathname: &str) -> bool {
+fn is_app_readonly_allowed_in_web_mode(pathname: &str, headers: &HeaderMap) -> bool {
+    if pathname == "/api/sessions" {
+        return is_app_client_header(headers);
+    }
     matches!(
         pathname,
         "/api/events"
             | "/api/models"
             | "/api/auth"
             | "/api/settings"
+            | "/api/ui-hints"
             | "/api/account"
             | "/api/quota"
             | "/api/health"

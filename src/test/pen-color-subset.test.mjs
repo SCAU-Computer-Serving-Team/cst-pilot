@@ -19,6 +19,29 @@ const penPaths = [
 ].map((p) => path.join(root, p));
 const colorsPenPath = path.join(root, "design/cst-pilot-colors.pen");
 
+test("Storybook 浅深主题的静态颜色与桌面画布一致，包含透明度", () => {
+  const { variables } = JSON.parse(readFileSync(penPaths[0], "utf8"));
+  const storybook = readFileSync(path.join(root, "design/storybook.html"), "utf8");
+
+  for (const mode of ["light", "dark"]) {
+    const block = storybook.match(new RegExp(`\\[data-theme="${mode}"\\] \\{([^}]+)\\}`))?.[1];
+    assert.ok(block, `缺少 ${mode} 主题`);
+    const staticBlock = block.split("/* --- B.")[0];
+    const actual = Object.fromEntries(
+      Array.from(staticBlock.matchAll(/--([\w-]+):\s*([^;]+);/g), ([, key, value]) => [key, value.toUpperCase()]),
+    );
+    const expected = Object.fromEntries(
+      Object.entries(variables)
+        .filter(([, def]) => def.type === "color")
+        .map(([key, { value }]) => [
+          key,
+          (Array.isArray(value) ? value.find((item) => item.theme.mode === mode).value : value).toUpperCase(),
+        ]),
+    );
+    assert.deepEqual(actual, expected, `${mode} 静态颜色与桌面画布不一致`);
+  }
+});
+
 /** 提取文本中的十六进制颜色。8 位含透明通道：全透明（alpha=00）视为不可见，跳过。 */
 function extractColors(text) {
   const found = [];

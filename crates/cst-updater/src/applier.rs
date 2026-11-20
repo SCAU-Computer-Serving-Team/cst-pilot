@@ -18,6 +18,32 @@ use crate::verify::{self, VerifiedPackage};
 const JOURNAL: &str = ".state/update/transaction.json";
 const JOURNAL_LIMIT: usize = 64 * 1024 * 1024;
 
+/// Reads `.state/update/result.json` without acquiring `UpdateLock`.
+pub fn read_last_report(root: &Path) -> Result<Option<UpdateReport>, String> {
+    let storage = Storage::new(root)?;
+    if !storage
+        .root
+        .join(".state/update")
+        .try_exists()
+        .map_err(|_| "升级结果无法读取。")?
+    {
+        return Ok(None);
+    }
+    let _pin = storage.pin_directory(Path::new(".state/update"), false)?;
+    let Some(bytes) =
+        storage.read_limited(&storage.root.join(".state/update/result.json"), 4096)?
+    else {
+        return Ok(None);
+    };
+    let report: UpdateReport =
+        serde_json::from_value(crate::json::parse(&bytes)?).map_err(|_| "升级结果格式无效。")?;
+    crate::manifest::version(&report.version)?;
+    if report.rolled_back != report.reason.is_some() {
+        return Err("升级结果字段无效。".into());
+    }
+    Ok(Some(report))
+}
+
 /// Implemented only by a trusted host. Neither executable nor command line comes from a manifest.
 pub trait UpdateHost: Send + Sync {
     /// Must terminate the health-check process and its descendants before returning a failure.
@@ -434,31 +460,7 @@ impl Applier {
 
     /// A fixed local result for startup UI; no command, path, credential, or raw error is stored.
     pub fn report(&self) -> Result<Option<UpdateReport>, String> {
-        if !self
-            .storage
-            .root
-            .join(".state/update")
-            .try_exists()
-            .map_err(|_| "升级结果无法读取。")?
-        {
-            return Ok(None);
-        }
-        let _pin = self
-            .storage
-            .pin_directory(Path::new(".state/update"), false)?;
-        let Some(bytes) = self
-            .storage
-            .read_limited(&self.storage.root.join(".state/update/result.json"), 4096)?
-        else {
-            return Ok(None);
-        };
-        let report: UpdateReport = serde_json::from_value(crate::json::parse(&bytes)?)
-            .map_err(|_| "升级结果格式无效。")?;
-        crate::manifest::version(&report.version)?;
-        if report.rolled_back != report.reason.is_some() {
-            return Err("升级结果字段无效。".into());
-        }
-        Ok(Some(report))
+        read_last_report(&self.storage.root)
     }
 
     fn save_report(&self, journal: &Journal, reason: Option<RollbackReason>) -> Result<(), String> {
