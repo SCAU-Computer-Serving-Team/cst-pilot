@@ -51,6 +51,17 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy 检查
         run: cargo clippy --workspace --exclude cst-desktop --all-targets --locked -- -D warnings
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            design/fonts
+            assets/fonts
+          key: fonts-${{ hashFiles('src/web/frontend/scripts/prepare-fonts.mjs') }}
+      - name: 准备共享字体资产
+        run: node src/web/frontend/scripts/prepare-fonts.mjs
       - name: 隔离回归测试
         run: cargo test --workspace --exclude cst-desktop --locked
       - name: 故障注入静态检查
@@ -85,6 +96,17 @@ jobs:
             ~/.cargo/git
             ${{ runner.temp }}/cst-desktop-rust/target
           key: rust-${{ runner.os }}-1.99.1-${{ hashFiles('Cargo.lock') }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            design/fonts
+            assets/fonts
+          key: fonts-${{ hashFiles('src/web/frontend/scripts/prepare-fonts.mjs') }}
+      - name: 准备共享字体资产
+        run: node src/web/frontend/scripts/prepare-fonts.mjs
       - name: 桌面端 Clippy 检查
         run: cargo clippy -p cst-desktop --all-targets --locked -- -D warnings
       - name: 桌面端隔离回归测试

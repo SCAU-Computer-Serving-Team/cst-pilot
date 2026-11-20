@@ -29,7 +29,7 @@ impl KitTempFixture {
     fn create() -> Self {
         static SEQ: AtomicU64 = AtomicU64::new(1);
         let id = SEQ.fetch_add(1, Ordering::Relaxed);
-        let base = PathBuf::from(r"E:\tmp\2026-11-20");
+        let base = std::env::temp_dir();
         let root = base.join(format!("desktop-wb-test-{}-{id}", std::process::id()));
         fs::create_dir_all(root.join("agent").join("home")).unwrap();
         Self { root }

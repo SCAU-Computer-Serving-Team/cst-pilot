@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use chrono::NaiveDate;
+use chrono::{Duration as ChronoDuration, Local, NaiveDate, TimeZone};
 use cst_client::{AppHttpClient, CstClient, SessionSummary, VerifiedServerEndpoint};
 use cst_desktop::auth::cstoa_qr::{parse_cstoa_oauth_payload, rasterize_qr_image_offline};
 use cst_desktop::open_desktop_shell_window_with_handle;
@@ -30,7 +30,7 @@ impl KitTempFixture {
     fn create() -> Self {
         static SEQ: AtomicU64 = AtomicU64::new(1);
         let id = SEQ.fetch_add(1, Ordering::Relaxed);
-        let base = PathBuf::from(r"E:\tmp\2026-11-20");
+        let base = std::env::temp_dir();
         let root = base.join(format!("desktop-step6-test-{}-{id}", std::process::id()));
         fs::create_dir_all(root.join("agent").join("home")).unwrap();
         Self { root }
@@ -62,24 +62,35 @@ fn offline_qr_natural_day_grouping_and_branch_tree_five_filters() {
     assert!(!qr_img.bytes().is_empty());
 
     // 2. Natural-day 4-group bucketing omitting empty groups (`LastMonth` omitted here)
+    let local_noon_rfc3339 = |date: NaiveDate| -> String {
+        let dt = date.and_hms_opt(12, 0, 0).expect("valid noon");
+        Local
+            .from_local_datetime(&dt)
+            .single()
+            .or_else(|| Local.from_local_datetime(&dt).earliest())
+            .expect("local datetime")
+            .to_rfc3339()
+    };
     let today = NaiveDate::from_ymd_opt(2026, 11, 20).unwrap();
     let sessions = vec![
         SessionSummary {
             id: "s-today".into(),
             title: "今日排查".into(),
-            updated_at: Some("2026-11-20T01:00:00+08:00".into()),
+            updated_at: Some(local_noon_rfc3339(today)),
             running: false,
         },
         SessionSummary {
             id: "s-week".into(),
             title: "三天前巡检".into(),
-            updated_at: Some("2026-11-17T10:00:00+08:00".into()),
+            updated_at: Some(local_noon_rfc3339(today - ChronoDuration::days(3))),
             running: false,
         },
         SessionSummary {
             id: "s-old".into(),
             title: "两个月前记录".into(),
-            updated_at: Some("2026-09-01T09:00:00+08:00".into()),
+            updated_at: Some(local_noon_rfc3339(
+                NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+            )),
             running: false,
         },
     ];
