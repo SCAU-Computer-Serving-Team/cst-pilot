@@ -1,7 +1,7 @@
 use cst_client::SessionSummary;
 use gpui_kit::assets::IconName;
-use gpui_kit::component::Icon;
 use gpui_kit::component::command::{Command, CommandGroup, CommandItem, CommandState};
+use gpui_kit::component::{Disableable as _, Icon};
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
     IntoElement, ParentElement, Render, SharedString, Styled, TestSupportExt, Window, div, px,
@@ -78,7 +78,7 @@ impl CommandPaletteModal {
         let mut groups = Vec::new();
         let mut section_targets = Vec::new();
 
-        // Group 1: 会话命令 (`/export`, `/tree`, `/compact`, `/fork`)
+        // Group 1: 会话命令 (`/export`, `/tree`, `/compact`, `/fork`) — disabled when no active session
         let slash_specs: [(&str, &[&str], IconName, PaletteCommandTarget); 4] = [
             (
                 "/export · 导出当前对话",
@@ -108,12 +108,14 @@ impl CommandPaletteModal {
 
         let mut g1 = CommandGroup::new().label("会话命令");
         let mut t1 = Vec::with_capacity(slash_specs.len());
+        let slash_disabled = !self.has_active_session;
         for (label, kw, icon, target) in slash_specs {
             g1 = g1.item(
                 CommandItem::new()
                     .label(label)
                     .keywords(kw.iter().copied())
-                    .icon(Icon::new(icon)),
+                    .icon(Icon::new(icon))
+                    .disabled(slash_disabled),
             );
             t1.push(target);
         }
@@ -147,7 +149,7 @@ impl CommandPaletteModal {
             (
                 "新建对话",
                 &["new", "新建", "对话", "主页", "home"],
-                IconName::Plus,
+                IconName::SquarePen,
                 PaletteCommandTarget::NewSession,
             ),
             (
@@ -196,9 +198,15 @@ impl Render for CommandPaletteModal {
         let mut cmd = Command::new(&self.command_state)
             .searchable(true)
             .filterable(true)
-            .highlight_matches(true);
+            .highlight_matches(true)
+            .bordered(false)
+            .placeholder("搜索命令、历史会话或跳转入口…")
+            .bg(gpui_kit::transparent_black());
 
-        for grp in groups {
+        for (idx, grp) in groups.into_iter().enumerate() {
+            if idx > 0 {
+                cmd = cmd.separator();
+            }
             cmd = cmd.group(grp);
         }
 
@@ -254,33 +262,33 @@ impl Render for CommandPaletteModal {
             .test_support()
             .w(layout::PALETTE_MODAL_WIDTH)
             .max_h(px(460.0))
-            .rounded(radius::SPECIAL)
+            .rounded(radius::ROW)
             .border_1()
-            .border_color(palette.border_subtle)
+            .border_color(palette.border_hairline)
             .overflow_hidden()
             .flex()
             .flex_col()
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
                 cx.stop_propagation();
             })
-            .child(div().flex_1().min_h_0().w_full().child(cmd))
+            .child(div().relative().flex_1().min_h_0().w_full().child(cmd))
             // Bottom `28px` keybinding navigation hint bar
             .child(
                 apply_scale(div(), scale::CAPTION)
                     .id("command-palette-footer-hints")
                     .test_support()
+                    .relative()
                     .w_full()
                     .h(px(28.0))
                     .px(space::MD)
                     .border_t_1()
                     .border_color(palette.border_subtle)
-                    .bg(palette.bg_surface)
                     .text_color(palette.text_muted)
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(cjk_inline_label("↑↓ 选择条目 · Enter 确认执行"))
-                    .child(cjk_inline_label("Esc 收起面板")),
+                    .child(cjk_inline_label("↑↓ 选择 · Enter 执行"))
+                    .child(cjk_inline_label("Esc 关闭")),
             ),
         )
     }

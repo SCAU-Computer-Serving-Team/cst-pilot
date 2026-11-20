@@ -1,4 +1,6 @@
 use cst_client::{UpdatePhaseDto, UpdateStateDto};
+use gpui_kit::assets::IconName;
+use gpui_kit::component::Icon;
 use gpui_kit::{
     App, FocusHandle, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px, relative,
@@ -40,10 +42,10 @@ pub fn compute_update_progress_ratio(update_state: Option<&UpdateStateDto>) -> O
     }
 }
 
-/// Renders the `384px` Software Update confirm / download-cancel / restart-handoff modal:
-/// - `Phase::Available` (`Pvhss` -> `kOm7J`): target version, archive MB, `releaseNotes`, `"稍后"` + `"更新并重启"`
-/// - `Phase::Preparing` (`IHkDa` -> `TqiZo`): `6px` progress bar, downloaded MB, `"稍后"` (background) + `"取消"` (`POST /api/app/update/cancel`)
-/// - `Phase::Ready` / `handoff_locked`: `"立即重启更新"` (`POST /api/app/update/launch`), `409 session_busy_for_update` warning, or `"正在重启完成更新…"` lock screen.
+/// Renders the `384px` Software Update confirm / download-cancel / restart-handoff modal (`r: 8px` `K3x72`):
+/// - `Phase::Available` (`Pvhss` -> `kOm7J`): `16px` `$accent-ink` upgrade icon, target version, monospace archive MB, plain `releaseNotes`, `"稍后"` + `"更新并重启"`
+/// - `Phase::Preparing` (`IHkDa` -> `TqiZo`): `6px` `$bg-surface` progress track, downloaded MB, `"稍后"` (background) + neutral outline `"取消"` (`s2CZVU`)
+/// - `Phase::Ready` / `handoff_locked`: `"立即重启更新"`, `409 session_busy_for_update` warning, or `"正在重启完成更新…"` lock screen.
 #[allow(clippy::too_many_arguments)]
 pub fn render_update_dialog(
     dialog: &UpdateDialogState,
@@ -98,21 +100,33 @@ pub fn render_update_dialog(
             )
             .test_support()
             .w(layout::MODAL_STANDARD_WIDTH)
-            .p(space::GROUP)
-            .rounded(radius::SPECIAL)
+            .p(px(20.0))
+            .rounded(radius::ROW)
             .border_1()
             .border_color(palette.border_subtle)
             .flex()
             .flex_col()
-            .items_center()
             .gap(space::MD)
             .child(
-                apply_scale(div(), scale::BODY_SEMIBOLD)
-                    .text_color(palette.text_primary)
-                    .child("正在重启完成更新…"),
+                div()
+                    .relative()
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .child(
+                        Icon::new(IconName::CircleArrowUp)
+                            .size(px(16.0))
+                            .text_color(palette.accent_ink),
+                    )
+                    .child(
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label("正在重启完成更新…")),
+                    ),
             )
             .child(
-                apply_scale(div(), scale::CAPTION)
+                apply_scale(div(), scale::UI)
+                    .relative()
                     .text_color(palette.text_secondary)
                     .child("正在交接独立升级程序校验并替换组件，窗口即将自动重启。"),
             ),
@@ -133,10 +147,14 @@ pub fn render_update_dialog(
         "update-available-dialog-kom7j"
     };
 
-    let size_meta = match archive_bytes {
-        Some(b) => format!("{target_ver} · {}", format_megabytes(b)),
-        None => target_ver.to_owned(),
+    let header_title = if is_preparing {
+        format!("正在下载更新 {target_ver}")
+    } else if is_ready {
+        format!("更新包 {target_ver} 已就绪")
+    } else {
+        format!("发现新版本 {target_ver}")
     };
+    let right_size_badge = archive_bytes.map(format_megabytes);
 
     let mut card = render_frosted_surface(
         card_id,
@@ -147,36 +165,46 @@ pub fn render_update_dialog(
     )
     .test_support()
     .w(layout::MODAL_STANDARD_WIDTH)
-    .p(space::GROUP)
-    .rounded(radius::SPECIAL)
+    .p(px(20.0))
+    .rounded(radius::ROW)
     .border_1()
     .border_color(palette.border_subtle)
     .flex()
     .flex_col()
-    .gap(space::LG)
+    .gap(space::MD)
     .child(
         div()
             .relative()
             .flex()
-            .flex_col()
-            .gap(space::MICRO)
+            .items_center()
+            .justify_between()
+            .gap(space::SM)
             .child(
-                apply_scale(div(), scale::BODY_SEMIBOLD)
-                    .text_color(palette.text_primary)
-                    .child(if is_preparing {
-                        "正在下载并校验更新包"
-                    } else if is_ready {
-                        "更新包已就绪"
-                    } else {
-                        "发现可用软件更新"
-                    }),
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .min_w_0()
+                    .child(
+                        Icon::new(IconName::CircleArrowUp)
+                            .size(px(16.0))
+                            .text_color(palette.accent_ink),
+                    )
+                    .child(
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .min_w_0()
+                            .truncate()
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label(header_title)),
+                    ),
             )
-            .child(
+            .children(right_size_badge.map(|sz| {
                 apply_scale(div(), scale::CAPTION)
                     .font_family(mono_family.clone())
                     .text_color(palette.text_secondary)
-                    .child(SharedString::from(size_meta)),
-            ),
+                    .flex_shrink_0()
+                    .child(SharedString::from(sz))
+            })),
     );
 
     if is_preparing {
@@ -204,7 +232,7 @@ pub fn render_update_dialog(
                         .w_full()
                         .h(px(6.0))
                         .rounded(radius::FULL)
-                        .bg(palette.bg_track_recess)
+                        .bg(palette.bg_surface)
                         .overflow_hidden()
                         .child(
                             div()
@@ -228,9 +256,6 @@ pub fn render_update_dialog(
                 .relative()
                 .max_h(px(160.0))
                 .overflow_y_scroll()
-                .p(space::MD)
-                .rounded(radius::ROW)
-                .bg(palette.bg_surface)
                 .text_color(palette.text_secondary)
                 .child(SharedString::from(notes.to_owned())),
         );
@@ -262,7 +287,7 @@ pub fn render_update_dialog(
                     .rounded(radius::CONTROL)
                     .border_1()
                     .border_color(palette.border_strong)
-                    .bg(palette.bg_elevated)
+                    .bg(palette.bg_workspace)
                     .text_color(palette.text_primary)
                     .flex()
                     .items_center()
@@ -278,8 +303,9 @@ pub fn render_update_dialog(
                     .px(space::MD)
                     .rounded(radius::CONTROL)
                     .border_1()
-                    .border_color(palette.status_danger)
-                    .text_color(palette.status_danger)
+                    .border_color(palette.border_strong)
+                    .bg(palette.bg_workspace)
+                    .text_color(palette.text_primary)
                     .flex()
                     .items_center()
                     .hover(|s| s.bg(palette.bg_item_hover))
@@ -301,7 +327,7 @@ pub fn render_update_dialog(
                     .rounded(radius::CONTROL)
                     .border_1()
                     .border_color(palette.border_strong)
-                    .bg(palette.bg_elevated)
+                    .bg(palette.bg_workspace)
                     .text_color(palette.text_primary)
                     .flex()
                     .items_center()
@@ -314,7 +340,7 @@ pub fn render_update_dialog(
                     .id("update-dialog-launch-btn")
                     .test_support()
                     .h(height::CONTROL)
-                    .px(space::MD)
+                    .px(space::LG)
                     .rounded(radius::CONTROL)
                     .bg(palette.accent_solid)
                     .text_color(palette.text_on_accent)
@@ -339,7 +365,7 @@ pub fn render_update_dialog(
                     .rounded(radius::CONTROL)
                     .border_1()
                     .border_color(palette.border_strong)
-                    .bg(palette.bg_elevated)
+                    .bg(palette.bg_workspace)
                     .text_color(palette.text_primary)
                     .flex()
                     .items_center()
@@ -352,7 +378,7 @@ pub fn render_update_dialog(
                     .id("update-dialog-confirm-restart-btn")
                     .test_support()
                     .h(height::CONTROL)
-                    .px(space::MD)
+                    .px(space::LG)
                     .rounded(radius::CONTROL)
                     .bg(palette.accent_solid)
                     .text_color(palette.text_on_accent)

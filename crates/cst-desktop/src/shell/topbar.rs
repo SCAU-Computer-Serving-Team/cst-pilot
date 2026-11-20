@@ -4,8 +4,9 @@ use cst_client::WorkspaceView;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::{
-    App, FocusHandle, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, TestSupportExt, Window, WindowControlArea, div, px,
+    App, FocusHandle, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement,
+    SharedString, StatefulInteractiveElement, Styled, TestSupportExt, Window, WindowControlArea,
+    div, px,
 };
 
 use crate::theme::{
@@ -37,7 +38,6 @@ pub fn render_topbar(
     sidebar_collapsed: bool,
     active_view: WorkspaceView,
     is_maximized: bool,
-    update_available: bool,
     account_initial: SharedString,
     expand_btn_focus: &FocusHandle,
     recent_btn_focus: &FocusHandle,
@@ -58,10 +58,15 @@ pub fn render_topbar(
         let on_dash = Rc::clone(&cb.on_open_dashboard);
 
         div()
-            .pl(space::MD)
+            .pl(space::GROUP)
             .flex()
             .items_center()
             .gap(space::XS)
+            .child(
+                apply_scale(div(), scale::BODY_SEMIBOLD)
+                    .text_color(palette.text_primary)
+                    .child("CST Pilot"),
+            )
             .child(
                 div()
                     .id("topbar-expand-sidebar-btn")
@@ -83,13 +88,14 @@ pub fn render_topbar(
                     ),
             )
             .child(
-                apply_scale(div(), scale::UI_MEDIUM)
-                    .px(space::XS)
-                    .text_color(palette.text_primary)
-                    .child("CST Pilot"),
+                div()
+                    .w(px(1.0))
+                    .h(px(14.0))
+                    .mx(space::MICRO)
+                    .bg(palette.border_strong),
             )
             .child(
-                apply_scale(div(), scale::UI)
+                apply_scale(div(), scale::UI_MEDIUM)
                     .id("topbar-recent-drawer-btn")
                     .test_support()
                     .track_focus(recent_btn_focus)
@@ -99,94 +105,74 @@ pub fn render_topbar(
                     .rounded(radius::CONTROL)
                     .flex()
                     .items_center()
-                    .gap(space::XS)
-                    .text_color(palette.text_secondary)
-                    .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                    .gap(space::TIGHT)
+                    .text_color(palette.text_primary)
+                    .hover(|s| s.bg(palette.bg_item_hover))
                     .on_click(move |_, w, cx| (on_recent)(w, cx))
+                    .child(
+                        Icon::new(IconName::RotateCcwClock)
+                            .size(px(14.0))
+                            .text_color(palette.text_secondary),
+                    )
                     .child(cjk_inline_label("最近会话"))
                     .child(
                         Icon::new(IconName::ChevronDown)
-                            .size(px(13.0))
-                            .text_color(palette.text_muted),
+                            .size(px(12.0))
+                            .text_color(palette.text_secondary),
                     ),
             )
             .child(topbar_icon_btn(
                 "topbar-new-session-btn",
-                IconName::Plus,
+                IconName::SquarePen,
+                palette.text_primary,
                 palette,
                 move |w, cx| (on_new)(w, cx),
             ))
             .child(topbar_icon_btn(
                 "topbar-dashboard-btn",
                 IconName::LayoutDashboard,
+                palette.text_secondary,
                 palette,
                 move |w, cx| (on_dash)(w, cx),
             ))
     } else {
-        div().pl(space::SM)
+        div().pl(space::MD)
     };
 
     let on_view_gui = Rc::clone(&cb.on_select_view);
     let on_view_tui = Rc::clone(&cb.on_select_view);
+    let gui_active = active_view == WorkspaceView::Gui;
+    let tui_active = active_view == WorkspaceView::Tui;
+
     let view_segmented = div()
         .id("topbar-view-segmented")
         .test_support()
         .h(height::COMPACT)
         .p(space::MICRO)
-        .rounded(radius::ROW)
-        .bg(palette.bg_track_recess)
+        .rounded(px(6.0))
+        .bg(palette.bg_surface)
         .flex()
         .items_center()
         .gap(space::MICRO)
-        .child(
-            apply_scale(div(), scale::CAPTION_MEDIUM)
-                .id("topbar-view-gui-btn")
-                .test_support()
-                .h(height::INLINE)
-                .px(space::SM)
-                .rounded(radius::CONTROL)
-                .bg(if active_view == WorkspaceView::Gui {
-                    palette.bg_elevated
-                } else {
-                    gpui_kit::transparent_black()
-                })
-                .text_color(if active_view == WorkspaceView::Gui {
-                    palette.text_primary
-                } else {
-                    palette.text_secondary
-                })
-                .flex()
-                .items_center()
-                .justify_center()
-                .on_click(move |_, w, cx| (on_view_gui)(WorkspaceView::Gui, w, cx))
-                .child(cjk_inline_label("图形")),
-        )
-        .child(
-            apply_scale(div(), scale::CAPTION_MEDIUM)
-                .id("topbar-view-tui-btn")
-                .test_support()
-                .h(height::INLINE)
-                .px(space::SM)
-                .rounded(radius::CONTROL)
-                .bg(if active_view == WorkspaceView::Tui {
-                    palette.bg_elevated
-                } else {
-                    gpui_kit::transparent_black()
-                })
-                .text_color(if active_view == WorkspaceView::Tui {
-                    palette.text_primary
-                } else {
-                    palette.text_secondary
-                })
-                .flex()
-                .items_center()
-                .justify_center()
-                .on_click(move |_, w, cx| (on_view_tui)(WorkspaceView::Tui, w, cx))
-                .child(cjk_inline_label("终端")),
-        );
+        .child(view_segment_item(
+            "topbar-view-gui-btn",
+            IconName::Monitor,
+            "图形",
+            gui_active,
+            palette,
+            move |w, cx| (on_view_gui)(WorkspaceView::Gui, w, cx),
+        ))
+        .child(view_segment_item(
+            "topbar-view-tui-btn",
+            IconName::SquareTerminal,
+            "终端",
+            tui_active,
+            palette,
+            move |w, cx| (on_view_tui)(WorkspaceView::Tui, w, cx),
+        ));
 
     let on_web = Rc::clone(&cb.on_open_web);
-    let web_btn = apply_scale(div(), scale::CAPTION_MEDIUM)
+    let web_btn = apply_scale(div(), scale::UI)
         .id("topbar-open-web-btn")
         .test_support()
         .tab_index(0)
@@ -199,140 +185,78 @@ pub fn render_topbar(
         .text_color(palette.text_secondary)
         .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
         .on_click(move |_, w, cx| (on_web)(w, cx))
+        .child(Icon::new(IconName::Globe).size(px(14.0)))
+        .child(cjk_inline_label("网页"))
         .child(
-            Icon::new(IconName::Globe)
-                .size(px(14.0))
-                .text_color(palette.text_secondary),
-        )
-        .child(cjk_inline_label("网页"));
+            Icon::new(IconName::ArrowUpRight)
+                .size(px(12.0))
+                .text_color(palette.text_muted),
+        );
+
+    let right_gap = if sidebar_collapsed {
+        space::XS
+    } else {
+        space::TIGHT
+    };
 
     let mut right_cluster = div()
+        .h_full()
         .flex()
         .items_center()
-        .gap(space::XS)
+        .gap(right_gap)
         .child(view_segmented)
         .child(web_btn);
-
-    if update_available {
-        let on_settings_upd = Rc::clone(&cb.on_open_settings);
-        right_cluster = right_cluster.child(
-            div()
-                .id("topbar-update-badge-btn")
-                .test_support()
-                .w(height::COMPACT)
-                .h(height::COMPACT)
-                .rounded(radius::CONTROL)
-                .flex()
-                .items_center()
-                .justify_center()
-                .hover(|s| s.bg(palette.bg_item_hover))
-                .on_click(move |_, w, cx| (on_settings_upd)(w, cx))
-                .child(
-                    Icon::new(IconName::Bell)
-                        .size(px(15.0))
-                        .text_color(palette.accent_solid),
-                ),
-        );
-    }
 
     if sidebar_collapsed {
         let on_acc = Rc::clone(&cb.on_toggle_account_menu);
         let on_set = Rc::clone(&cb.on_open_settings);
         right_cluster = right_cluster
             .child(
-                apply_scale(div(), scale::CAPTION_MEDIUM)
+                div()
                     .id("topbar-account-btn")
                     .test_support()
                     .track_focus(account_btn_focus)
                     .tab_index(0)
                     .w(height::COMPACT)
                     .h(height::COMPACT)
-                    .rounded(radius::FULL)
-                    .bg(palette.accent_subtle)
-                    .text_color(palette.accent_solid)
+                    .rounded(radius::CONTROL)
                     .flex()
                     .items_center()
                     .justify_center()
+                    .hover(|s| s.bg(palette.bg_item_hover))
                     .on_click(move |_, w, cx| (on_acc)(w, cx))
-                    .child(account_initial),
+                    .child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .w(px(20.0))
+                            .h(px(20.0))
+                            .rounded(radius::FULL)
+                            .bg(palette.bg_item_active)
+                            .text_color(palette.text_primary)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(account_initial),
+                    ),
             )
             .child(topbar_icon_btn(
                 "topbar-settings-btn",
                 IconName::Settings,
+                palette.text_secondary,
                 palette,
                 move |w, cx| (on_set)(w, cx),
             ));
     }
 
-    let on_min = Rc::clone(&cb.on_minimize_window);
-    let on_zoom = Rc::clone(&cb.on_zoom_window);
-    let on_close = Rc::clone(&cb.on_request_close);
-
-    // Native caption buttons (`40×40px` hit targets on right edge)
-    let window_caption_controls = div()
-        .flex()
-        .items_center()
-        .h_full()
-        .child(
-            div()
-                .id("window-btn-minimize")
-                .test_support()
-                .window_control_area(WindowControlArea::Min)
-                .w(px(40.0))
-                .h_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .hover(|s| s.bg(palette.bg_item_hover))
-                .on_click(move |_, w, cx| (on_min)(w, cx))
-                .child(
-                    Icon::new(IconName::Minus)
-                        .size(px(14.0))
-                        .text_color(palette.text_secondary),
-                ),
-        )
-        .child(
-            div()
-                .id("window-btn-maximize")
-                .test_support()
-                .window_control_area(WindowControlArea::Max)
-                .w(px(40.0))
-                .h_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .hover(|s| s.bg(palette.bg_item_hover))
-                .on_click(move |_, w, cx| (on_zoom)(w, cx))
-                .child(
-                    Icon::new(if is_maximized {
-                        IconName::Minimize2
-                    } else {
-                        IconName::Maximize2
-                    })
-                    .size(px(13.0))
-                    .text_color(palette.text_secondary),
-                ),
-        )
-        .child(
-            div()
-                .id("window-btn-close")
-                .test_support()
-                .w(px(42.0))
-                .h_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .hover(|s| {
-                    s.bg(palette.status_danger)
-                        .text_color(palette.text_on_accent)
-                })
-                .on_click(move |_, w, cx| (on_close)(w, cx))
-                .child(
-                    Icon::new(IconName::X)
-                        .size(px(15.0))
-                        .text_color(palette.text_secondary),
-                ),
-        );
+    right_cluster = right_cluster
+        .child(div().w(px(1.0)).h(px(14.0)).bg(palette.border_strong))
+        .child(render_window_caption_controls(
+            is_maximized,
+            palette,
+            Rc::clone(&cb.on_minimize_window),
+            Rc::clone(&cb.on_zoom_window),
+            Rc::clone(&cb.on_request_close),
+        ));
 
     div()
         .id(bar_id)
@@ -353,12 +277,117 @@ pub fn render_topbar(
                 .h_full(),
         )
         .child(right_cluster)
-        .child(window_caption_controls)
+}
+
+/// Native caption buttons (`120×40px` master `T1U1Xf`, three `40×40px` hit targets on right edge).
+pub fn render_window_caption_controls(
+    is_maximized: bool,
+    palette: &DesktopPalette,
+    on_min: TopbarActionFn,
+    on_zoom: TopbarActionFn,
+    on_close: TopbarActionFn,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .h_full()
+        .child(
+            div()
+                .id("window-btn-minimize")
+                .test_support()
+                .window_control_area(WindowControlArea::Min)
+                .w(px(40.0))
+                .h_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(palette.text_secondary)
+                .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                .on_click(move |_, w, cx| (on_min)(w, cx))
+                .child(Icon::new(IconName::Minus).size(px(14.0))),
+        )
+        .child(
+            div()
+                .id("window-btn-maximize")
+                .test_support()
+                .window_control_area(WindowControlArea::Max)
+                .w(px(40.0))
+                .h_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(palette.text_secondary)
+                .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                .on_click(move |_, w, cx| (on_zoom)(w, cx))
+                .child(
+                    Icon::new(if is_maximized {
+                        IconName::Copy
+                    } else {
+                        IconName::Square
+                    })
+                    .size(px(12.0)),
+                ),
+        )
+        .child(
+            div()
+                .id("window-btn-close")
+                .test_support()
+                .window_control_area(WindowControlArea::Close)
+                .w(px(40.0))
+                .h_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(palette.text_secondary)
+                .hover(|s| {
+                    s.bg(palette.status_danger)
+                        .text_color(palette.text_on_accent)
+                })
+                .on_click(move |_, w, cx| (on_close)(w, cx))
+                .child(Icon::new(IconName::X).size(px(14.0))),
+        )
+}
+
+fn view_segment_item(
+    id: &'static str,
+    icon: IconName,
+    label: &'static str,
+    active: bool,
+    palette: &DesktopPalette,
+    on_click: impl Fn(&mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    let base = apply_scale(div(), if active { scale::UI_MEDIUM } else { scale::UI })
+        .id(id)
+        .test_support()
+        .h(height::INLINE)
+        .px(space::SM)
+        .rounded(radius::CONTROL)
+        .flex()
+        .items_center()
+        .justify_center()
+        .gap(space::XS)
+        .on_click(move |_, w, cx| on_click(w, cx));
+
+    let styled = if active {
+        base.bg(palette.bg_elevated)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .text_color(palette.text_primary)
+    } else {
+        base.bg(gpui_kit::transparent_black())
+            .text_color(palette.text_secondary)
+            .hover(|s| s.text_color(palette.text_primary))
+    };
+
+    styled
+        .child(Icon::new(icon).size(px(14.0)))
+        .child(cjk_inline_label(label))
 }
 
 fn topbar_icon_btn(
     id: &'static str,
     icon: IconName,
+    icon_color: Hsla,
     palette: &DesktopPalette,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
@@ -374,9 +403,5 @@ fn topbar_icon_btn(
         .justify_center()
         .hover(|s| s.bg(palette.bg_item_hover))
         .on_click(move |_, w, cx| on_click(w, cx))
-        .child(
-            Icon::new(icon)
-                .size(px(15.0))
-                .text_color(palette.text_secondary),
-        )
+        .child(Icon::new(icon).size(px(16.0)).text_color(icon_color))
 }

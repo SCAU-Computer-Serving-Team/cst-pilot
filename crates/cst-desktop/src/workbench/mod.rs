@@ -8,14 +8,17 @@ pub mod turn_segments;
 
 use cst_client::{ClientHandle, DraftKey};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::FocusTrapElement;
 use gpui_kit::component::Icon;
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
     IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled, Subscription,
-    TestSupportExt, Window, div, px,
+    TestSupportExt, Window, div, px, rgba,
 };
 
-use crate::background::{SkyPreset, render_sky_background};
+use crate::background::{
+    FrostedGlassSpec, SkyPreset, render_frosted_surface, render_sky_background_rounded,
+};
 use crate::theme::{
     DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
 };
@@ -33,6 +36,14 @@ pub enum WorkbenchEvent {
     TopNotice(String),
 }
 
+#[derive(Debug, Clone)]
+struct PendingEditDraftConfirm {
+    session_id: String,
+    parent_entry_id: Option<String>,
+    user_text: String,
+    prior_focus: Option<FocusHandle>,
+}
+
 pub struct WorkbenchView {
     client: ClientHandle,
     active_session_id: Option<String>,
@@ -40,6 +51,13 @@ pub struct WorkbenchView {
     home_composer: Entity<ComposerView>,
     session_composer: Entity<ComposerView>,
     message_list: Entity<MessageListView>,
+    header_menu_open: bool,
+    header_more_focus: FocusHandle,
+    header_menu_prior_focus: Option<FocusHandle>,
+    pending_edit_confirm: Option<PendingEditDraftConfirm>,
+    edit_confirm_trap_focus: FocusHandle,
+    edit_confirm_keep_focus: FocusHandle,
+    edit_confirm_overwrite_focus: FocusHandle,
     lightbox: Option<LightboxImageTarget>,
     lightbox_trap_focus: FocusHandle,
     lightbox_close_focus: FocusHandle,
@@ -62,6 +80,10 @@ impl WorkbenchView {
             message_list.update(cx, |ml, cx| ml.set_session_id(sid_clone, cx));
         }
 
+        let header_more_focus = cx.focus_handle();
+        let edit_confirm_trap_focus = cx.focus_handle();
+        let edit_confirm_keep_focus = cx.focus_handle();
+        let edit_confirm_overwrite_focus = cx.focus_handle();
         let lightbox_trap_focus = cx.focus_handle();
         let lightbox_close_focus = cx.focus_handle();
 
@@ -76,6 +98,13 @@ impl WorkbenchView {
             home_composer,
             session_composer,
             message_list,
+            header_menu_open: false,
+            header_more_focus,
+            header_menu_prior_focus: None,
+            pending_edit_confirm: None,
+            edit_confirm_trap_focus,
+            edit_confirm_keep_focus,
+            edit_confirm_overwrite_focus,
             lightbox: None,
             lightbox_trap_focus,
             lightbox_close_focus,
@@ -109,6 +138,9 @@ impl WorkbenchView {
         self.sky_time = sky_time;
         if self.active_session_id != session_id {
             self.active_session_id = session_id.clone();
+            self.header_menu_open = false;
+            self.header_menu_prior_focus = None;
+            self.pending_edit_confirm = None;
             self.message_list
                 .update(cx, |ml, cx| ml.set_session_id(session_id.clone(), cx));
             if let Some(sid) = session_id {
@@ -135,9 +167,26 @@ impl WorkbenchView {
         });
     }
 
-    /// Dismisses the single topmost open workbench surface (`lightbox` -> active `ComposerView` popovers)
+    /// Dismisses the single topmost open workbench surface (`HUkqs` header menu -> draft-overwrite confirm -> `lightbox` -> active `ComposerView` popovers)
     /// and restores focus within 1 frame.
     pub fn dismiss_topmost_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.header_menu_open {
+            self.header_menu_open = false;
+            if let Some(prev) = self.header_menu_prior_focus.take() {
+                prev.focus(window, cx);
+            } else {
+                self.header_more_focus.focus(window, cx);
+            }
+            cx.notify();
+            return true;
+        }
+        if let Some(pending) = self.pending_edit_confirm.take() {
+            if let Some(prev) = pending.prior_focus {
+                prev.focus(window, cx);
+            }
+            cx.notify();
+            return true;
+        }
         if let Some(target) = self.lightbox.take() {
             if let Some(prev) = target.prior_focus {
                 prev.focus(window, cx);
@@ -160,8 +209,28 @@ impl WorkbenchView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.header_menu_open = false;
         self.lightbox = Some(target);
         self.lightbox_close_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn execute_edit_backfill(
+        &mut self,
+        session_id: String,
+        parent_entry_id: Option<String>,
+        user_text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.message_list.update(cx, |ml, cx| {
+            ml.apply_edit_and_rewrite_user_turn(session_id, parent_entry_id, user_text, cx);
+        });
+        self.session_composer.update(cx, |comp, cx| {
+            comp.reconcile_external_draft_changes(window, cx);
+            comp.focus_handle(cx).focus(window, cx);
+            cx.notify();
+        });
         cx.notify();
     }
 
@@ -261,9 +330,37 @@ impl WorkbenchView {
                 cx.emit(WorkbenchEvent::ActivatedSession(sid.clone()));
             }
             MessageListEvent::FocusComposer => {
-                let fh = self.session_composer.read(cx).focus_handle(cx);
-                fh.focus(window, cx);
-                cx.notify();
+                self.session_composer.update(cx, |comp, cx| {
+                    comp.reconcile_external_draft_changes(window, cx);
+                    comp.focus_handle(cx).focus(window, cx);
+                    cx.notify();
+                });
+            }
+            MessageListEvent::RequestEditUserTurn {
+                session_id,
+                parent_entry_id,
+                user_text,
+            } => {
+                let has_draft = self.session_composer.read(cx).has_unsent_draft_content(cx);
+                if has_draft {
+                    self.header_menu_open = false;
+                    self.pending_edit_confirm = Some(PendingEditDraftConfirm {
+                        session_id: session_id.clone(),
+                        parent_entry_id: parent_entry_id.clone(),
+                        user_text: user_text.clone(),
+                        prior_focus: window.focused(cx),
+                    });
+                    self.edit_confirm_keep_focus.focus(window, cx);
+                    cx.notify();
+                } else {
+                    self.execute_edit_backfill(
+                        session_id.clone(),
+                        parent_entry_id.clone(),
+                        user_text.clone(),
+                        window,
+                        cx,
+                    );
+                }
             }
             MessageListEvent::MissingCredentials { provider } => {
                 cx.emit(WorkbenchEvent::MissingCredentials {
@@ -304,8 +401,7 @@ impl Render for WorkbenchView {
                 })
                 .unwrap_or_else(|| "当前对话".to_owned());
 
-            let ent_tree = entity.clone();
-            let ent_exp = entity.clone();
+            let ent_more = entity.clone();
 
             // `44px` (`height::HEADER`) session header bar (`HUkqs`)
             let session_header = div()
@@ -313,7 +409,8 @@ impl Render for WorkbenchView {
                 .test_support()
                 .w_full()
                 .h(height::HEADER)
-                .px(space::GROUP)
+                .pl(space::GROUP)
+                .pr(space::LG)
                 .border_b_1()
                 .border_color(palette.border_subtle)
                 .flex()
@@ -321,74 +418,63 @@ impl Render for WorkbenchView {
                 .justify_between()
                 .gap(space::MD)
                 .child(
-                    apply_scale(div(), scale::BODY_MEDIUM)
-                        .min_w_0()
-                        .truncate()
-                        .text_color(palette.text_primary)
-                        .child(cjk_inline_label(session_title)),
-                )
-                .child(
                     div()
                         .flex()
                         .items_center()
-                        .gap(space::XS)
+                        .gap(space::MD)
+                        .min_w_0()
                         .child(
-                            apply_scale(div(), scale::CAPTION_MEDIUM)
-                                .id("session-header-tree-btn")
-                                .test_support()
-                                .h(height::COMPACT)
-                                .px(space::SM)
-                                .rounded(radius::CONTROL)
-                                .flex()
-                                .items_center()
-                                .gap(space::XS)
-                                .text_color(palette.text_secondary)
-                                .hover(|s| s.bg(palette.bg_item_hover))
-                                .on_click(move |_, _, cx| {
-                                    ent_tree.update(cx, |_, cx| {
-                                        cx.emit(WorkbenchEvent::OpenSlashRoute(
-                                            SlashNavigationTarget::Tree,
-                                        ));
-                                    });
-                                })
-                                .child(
-                                    Icon::new(IconName::GitBranch)
-                                        .size(px(13.0))
-                                        .text_color(palette.text_secondary),
-                                )
-                                .child(cjk_inline_label("分支树")),
+                            Icon::new(IconName::MessageSquare)
+                                .size(px(16.0))
+                                .text_color(palette.text_secondary),
                         )
                         .child(
-                            apply_scale(div(), scale::CAPTION_MEDIUM)
-                                .id("session-header-export-btn")
-                                .test_support()
-                                .h(height::COMPACT)
-                                .px(space::SM)
-                                .rounded(radius::CONTROL)
-                                .flex()
-                                .items_center()
-                                .gap(space::XS)
-                                .text_color(palette.text_secondary)
-                                .hover(|s| s.bg(palette.bg_item_hover))
-                                .on_click(move |_, _, cx| {
-                                    ent_exp.update(cx, |_, cx| {
-                                        cx.emit(WorkbenchEvent::OpenSlashRoute(
-                                            SlashNavigationTarget::Export,
-                                        ));
-                                    });
-                                })
-                                .child(
-                                    Icon::new(IconName::Download)
-                                        .size(px(13.0))
-                                        .text_color(palette.text_secondary),
-                                )
-                                .child(cjk_inline_label("导出")),
+                            apply_scale(div(), scale::BODY_MEDIUM)
+                                .min_w_0()
+                                .truncate()
+                                .text_color(palette.text_primary)
+                                .child(cjk_inline_label(session_title)),
+                        ),
+                )
+                .child(
+                    div()
+                        .id("session-header-more-btn")
+                        .test_support()
+                        .track_focus(&self.header_more_focus)
+                        .tab_index(0)
+                        .w(height::COMPACT)
+                        .h(height::COMPACT)
+                        .flex_shrink_0()
+                        .rounded(radius::CONTROL)
+                        .bg(if self.header_menu_open {
+                            palette.bg_item_active
+                        } else {
+                            gpui_kit::transparent_black()
+                        })
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .on_click(move |_, w, cx| {
+                            ent_more.update(cx, |this, cx| {
+                                this.header_menu_open = !this.header_menu_open;
+                                if this.header_menu_open {
+                                    this.header_menu_prior_focus = w.focused(cx);
+                                }
+                                cx.notify();
+                            });
+                        })
+                        .child(
+                            Icon::new(IconName::EllipsisVertical)
+                                .size(px(16.0))
+                                .text_color(palette.text_secondary),
                         ),
                 );
 
-            div()
+            let mut session_view = div()
                 .id("workspace-session-view")
                 .test_support()
+                .relative()
                 .size_full()
                 .bg(palette.bg_workspace)
                 .flex()
@@ -399,7 +485,7 @@ impl Render for WorkbenchView {
                     div()
                         .w_full()
                         .px(space::GROUP)
-                        .pb(space::LG)
+                        .pb(space::MD)
                         .pt(space::XS)
                         .flex()
                         .justify_center()
@@ -409,12 +495,146 @@ impl Render for WorkbenchView {
                                 .max_w(layout::CENTER_COLUMN_MAX_WIDTH)
                                 .child(self.session_composer.clone()),
                         ),
+                );
+
+            if self.header_menu_open {
+                let ent_backdrop = entity.clone();
+                let ent_tree = entity.clone();
+                let ent_exp = entity.clone();
+
+                let menu_card = render_frosted_surface(
+                    "session-header-more-menu",
+                    FrostedGlassSpec::popover_h2p2z(&palette),
+                    palette.bg_elevated,
+                    transparency_enabled,
+                    scale_factor,
                 )
-                .into_any_element()
+                .test_support()
+                .w(px(200.0))
+                .p(space::XS)
+                .rounded(radius::ROW)
+                .border_1()
+                .border_color(palette.border_hairline)
+                .flex()
+                .flex_col()
+                .gap(space::MICRO)
+                .on_click(|_, _, cx| cx.stop_propagation())
+                .child(
+                    apply_scale(div(), scale::UI)
+                        .id("session-header-tree-btn")
+                        .test_support()
+                        .relative()
+                        .h(height::CONTROL)
+                        .px(space::SM)
+                        .rounded(radius::CONTROL)
+                        .flex()
+                        .items_center()
+                        .gap(space::SM)
+                        .text_color(palette.text_primary)
+                        .hover(|s| s.bg(palette.bg_item_active))
+                        .on_click(move |_, _, cx| {
+                            ent_tree.update(cx, |this, cx| {
+                                this.header_menu_open = false;
+                                cx.emit(WorkbenchEvent::OpenSlashRoute(
+                                    SlashNavigationTarget::Tree,
+                                ));
+                                cx.notify();
+                            });
+                        })
+                        .child(
+                            Icon::new(IconName::GitBranch)
+                                .size(px(15.0))
+                                .text_color(palette.text_secondary),
+                        )
+                        .child(cjk_inline_label("分支树")),
+                )
+                .child(
+                    apply_scale(div(), scale::UI)
+                        .id("session-header-export-btn")
+                        .test_support()
+                        .relative()
+                        .h(height::CONTROL)
+                        .px(space::SM)
+                        .rounded(radius::CONTROL)
+                        .flex()
+                        .items_center()
+                        .gap(space::SM)
+                        .text_color(palette.text_primary)
+                        .hover(|s| s.bg(palette.bg_item_active))
+                        .on_click(move |_, _, cx| {
+                            ent_exp.update(cx, |this, cx| {
+                                this.header_menu_open = false;
+                                cx.emit(WorkbenchEvent::OpenSlashRoute(
+                                    SlashNavigationTarget::Export,
+                                ));
+                                cx.notify();
+                            });
+                        })
+                        .child(
+                            Icon::new(IconName::FileText)
+                                .size(px(15.0))
+                                .text_color(palette.text_secondary),
+                        )
+                        .child(cjk_inline_label("导出会话")),
+                )
+                .child(
+                    div()
+                        .relative()
+                        .w_full()
+                        .my(space::MICRO)
+                        .h(px(1.0))
+                        .bg(palette.border_subtle),
+                )
+                .child(
+                    apply_scale(div(), scale::UI)
+                        .id("session-header-share-disabled")
+                        .test_support()
+                        .relative()
+                        .h(height::CONTROL)
+                        .px(space::SM)
+                        .rounded(radius::CONTROL)
+                        .opacity(0.45)
+                        .flex()
+                        .items_center()
+                        .gap(space::SM)
+                        .text_color(palette.text_secondary)
+                        .child(
+                            Icon::new(IconName::ExternalLink)
+                                .size(px(15.0))
+                                .text_color(palette.text_secondary),
+                        )
+                        .child(cjk_inline_label("分享")),
+                );
+
+                session_view = session_view
+                    .child(
+                        div()
+                            .id("session-header-menu-backdrop")
+                            .absolute()
+                            .top(height::HEADER)
+                            .left_0()
+                            .right_0()
+                            .bottom_0()
+                            .on_click(move |_, w, cx| {
+                                ent_backdrop.update(cx, |this, cx| {
+                                    let _ = this.dismiss_topmost_surface(w, cx);
+                                });
+                            }),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(40.0))
+                            .right(space::LG)
+                            .child(menu_card),
+                    );
+            }
+
+            session_view.into_any_element()
         } else {
             let home_pending = self.client.with_outbox(|ob| ob.home_item().is_some());
 
-            // Home welcome canvas (`p2HWHP` / `PuezS` with `blue-hour.glsl` sky + `600px` centered composer)
+            // Home welcome canvas (`p2HWHP` / `PuezS` with `blue-hour.glsl` rounded sky + `600px` centered composer)
             div()
                 .id("workspace-home-view")
                 .test_support()
@@ -427,10 +647,12 @@ impl Render for WorkbenchView {
                         .left_0()
                         .right_0()
                         .bottom_0()
-                        .child(render_sky_background(
+                        .child(render_sky_background_rounded(
                             SkyPreset::home_for_theme(palette.mode),
                             self.sky_time,
                             1.0,
+                            [8.0, 8.0, 8.0, 8.0],
+                            scale_factor,
                         )),
                 )
                 .child(
@@ -452,21 +674,166 @@ impl Render for WorkbenchView {
                                 .gap(space::GROUP)
                                 .child(
                                     apply_scale(div(), scale::HERO)
-                                        .text_color(palette.text_primary)
-                                        .child("有什么需要诊断或修复？"),
+                                        .text_color(palette.text_welcome)
+                                        .child("我该如何协助您？"),
                                 )
                                 .child(self.home_composer.clone())
                                 .children(home_pending.then(|| {
                                     apply_scale(div(), scale::CAPTION)
-                                        .text_color(palette.text_secondary)
+                                        .text_color(rgba(0xFFFF_FFBF))
                                         .child("正在创建新对话并提交消息…")
                                 })),
+                        ),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .bottom(space::MD)
+                        .flex()
+                        .justify_center()
+                        .child(
+                            apply_scale(div(), scale::CAPTION)
+                                .text_color(rgba(0xFFFF_FF88))
+                                .child("@cst-pilot"),
                         ),
                 )
                 .into_any_element()
         };
 
         let mut root = div().relative().size_full().child(body);
+
+        if self.pending_edit_confirm.is_some() {
+            let ent_scrim = entity.clone();
+            let ent_keep = entity.clone();
+            let ent_overwrite = entity.clone();
+
+            let scrim = render_frosted_surface(
+                "overwrite-draft-confirm-scrim",
+                FrostedGlassSpec::scrim_dz0fp(&palette),
+                palette.bg_scrim,
+                transparency_enabled,
+                scale_factor,
+            )
+            .test_support()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .occlude()
+            .on_click(move |_, w, cx| {
+                ent_scrim.update(cx, |this, cx| {
+                    let _ = this.dismiss_topmost_surface(w, cx);
+                });
+            });
+
+            let card = render_frosted_surface(
+                "overwrite-draft-confirm-card",
+                FrostedGlassSpec::modal_k3x72(&palette, 8.0),
+                palette.bg_modal,
+                transparency_enabled,
+                scale_factor,
+            )
+            .test_support()
+            .w(layout::MODAL_STANDARD_WIDTH)
+            .rounded(radius::ROW)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .p(space::GROUP)
+            .flex()
+            .flex_col()
+            .gap(space::LG)
+            .on_click(|_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .gap(space::SM)
+                    .child(
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label("覆盖当前输入框草稿？")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI)
+                            .text_color(palette.text_secondary)
+                            .child("回填历史消息将替换输入框内尚未发送的内容。"),
+                    ),
+            )
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(space::SM)
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .id("overwrite-draft-keep-btn")
+                            .test_support()
+                            .track_focus(&self.edit_confirm_keep_focus)
+                            .tab_index(0)
+                            .h(height::CONTROL)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(palette.border_strong)
+                            .bg(palette.bg_elevated)
+                            .text_color(palette.text_primary)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_click(move |_, w, cx| {
+                                ent_keep.update(cx, |this, cx| {
+                                    let _ = this.dismiss_topmost_surface(w, cx);
+                                });
+                            })
+                            .child(cjk_inline_label("保留原草稿")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .id("overwrite-draft-confirm-btn")
+                            .test_support()
+                            .track_focus(&self.edit_confirm_overwrite_focus)
+                            .tab_index(0)
+                            .h(height::CONTROL)
+                            .px(space::LG)
+                            .rounded(radius::CONTROL)
+                            .bg(palette.accent_solid)
+                            .text_color(palette.text_on_accent)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .hover(|s| s.bg(palette.accent_hover))
+                            .on_click(move |_, w, cx| {
+                                ent_overwrite.update(cx, |this, cx| {
+                                    if let Some(pending) = this.pending_edit_confirm.take() {
+                                        this.execute_edit_backfill(
+                                            pending.session_id,
+                                            pending.parent_entry_id,
+                                            pending.user_text,
+                                            w,
+                                            cx,
+                                        );
+                                    }
+                                });
+                            })
+                            .child(cjk_inline_label("覆盖草稿")),
+                    ),
+            );
+
+            root = root.child(scrim.child(div().tab_stop(false).child(card).focus_trap(
+                "overwrite-draft-confirm-trap",
+                &self.edit_confirm_trap_focus,
+            )));
+        }
 
         if let Some(ref target) = self.lightbox {
             let ent_close = entity.clone();

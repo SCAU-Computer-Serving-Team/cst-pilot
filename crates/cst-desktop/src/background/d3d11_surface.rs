@@ -440,6 +440,7 @@ mod imp {
         preset: SkyPreset,
         time_sec: f32,
         opacity: f32,
+        corner_radii_phys: [f32; 4],
     ) -> Result<()> {
         IS_SOFTWARE_ADAPTER.store(ctx.is_software_emulated, Ordering::Relaxed);
         if ctx.feature_level < D3D_FEATURE_LEVEL_11_0_RAW {
@@ -487,6 +488,7 @@ mod imp {
                         ctx.viewport_size,
                         opacity,
                         effective_time,
+                        corner_radii_phys,
                     );
                     let raw = slice::from_raw_parts(
                         (&u as *const BlueHourUniforms).cast::<u8>(),
@@ -509,6 +511,7 @@ mod imp {
                         ctx.viewport_size,
                         opacity,
                         effective_time,
+                        corner_radii_phys,
                     );
                     let raw = slice::from_raw_parts(
                         (&u as *const SkyUniforms).cast::<u8>(),
@@ -706,12 +709,19 @@ pub struct D3d11SkySurface {
     pub preset: SkyPreset,
     pub time_sec: f32,
     pub opacity: f32,
+    pub corner_radii_phys: [f32; 4],
 }
 
 #[cfg(windows)]
 impl WindowsSurfaceRenderer for D3d11SkySurface {
     fn paint(&self, ctx: &WindowsSurfaceDrawContext) -> Result<()> {
-        imp::paint_sky(ctx, self.preset, self.time_sec, self.opacity)
+        imp::paint_sky(
+            ctx,
+            self.preset,
+            self.time_sec,
+            self.opacity,
+            self.corner_radii_phys,
+        )
     }
 }
 

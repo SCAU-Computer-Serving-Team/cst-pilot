@@ -108,7 +108,7 @@ impl FrostedGlassSpec {
     }
 }
 
-/// 64-byte `vec4`-aligned constant buffer for `blue-sky.glsl` and `night-sky.glsl`.
+/// 80-byte `vec4`-aligned constant buffer for `blue-sky.glsl` and `night-sky.glsl`.
 #[repr(C, align(16))]
 #[derive(Debug, Clone, Copy)]
 pub struct SkyUniforms {
@@ -116,6 +116,7 @@ pub struct SkyUniforms {
     pub slot1: [f32; 4], // [viewport_w, viewport_h, opacity, u_time]
     pub slot2: [f32; 4], // [u_speed, u_scale, u_distortion, u_swirl]
     pub slot3: [f32; 4], // [u_direction, u_grain, 0, 0]
+    pub slot4: [f32; 4], // [r_tl, r_tr, r_br, r_bl] physical corner radii
 }
 
 impl SkyUniforms {
@@ -126,9 +127,10 @@ impl SkyUniforms {
         viewport: [f32; 2],
         opacity: f32,
         time_sec: f32,
+        corner_radii_phys: [f32; 4],
     ) -> Self {
         let (speed, scale, distortion, swirl, direction, grain) = match preset {
-            SkyPreset::LoginLight | SkyPreset::HomeLight => (22.0, 45.0, 50.0, 40.0, 0.0, 4.0),
+            SkyPreset::LoginLight | SkyPreset::HomeLight => (22.0, 72.0, 48.0, 38.0, 0.0, 4.0),
             SkyPreset::LoginDark | SkyPreset::HomeDark => (14.0, 42.0, 46.0, 28.0, 0.0, 8.0),
         };
         Self {
@@ -136,11 +138,12 @@ impl SkyUniforms {
             slot1: [viewport[0], viewport[1], opacity, time_sec],
             slot2: [speed, scale, distortion, swirl],
             slot3: [direction, grain, 0.0, 0.0],
+            slot4: corner_radii_phys,
         }
     }
 }
 
-/// 80-byte `vec4`-aligned constant buffer for `blue-hour.glsl`.
+/// 96-byte `vec4`-aligned constant buffer for `blue-hour.glsl`.
 #[repr(C, align(16))]
 #[derive(Debug, Clone, Copy)]
 pub struct BlueHourUniforms {
@@ -149,6 +152,7 @@ pub struct BlueHourUniforms {
     pub slot2: [f32; 4], // [u_speed, u_phase, u_count, u_height]
     pub slot3: [f32; 4], // [u_focus, u_position, u_blend, u_facets]
     pub slot4: [f32; 4], // [u_grain, 0, 0, 0]
+    pub slot5: [f32; 4], // [r_tl, r_tr, r_br, r_bl] physical corner radii
 }
 
 impl BlueHourUniforms {
@@ -158,6 +162,7 @@ impl BlueHourUniforms {
         viewport: [f32; 2],
         opacity: f32,
         time_sec: f32,
+        corner_radii_phys: [f32; 4],
     ) -> Self {
         Self {
             slot0: [origin[0], origin[1], resolution[0], resolution[1]],
@@ -165,6 +170,7 @@ impl BlueHourUniforms {
             slot2: [30.0, 20.75, 11.0, 60.0],
             slot3: [50.0, 50.0, 65.0, 35.0],
             slot4: [0.015, 0.0, 0.0, 0.0],
+            slot5: corner_radii_phys,
         }
     }
 }

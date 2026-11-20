@@ -74,7 +74,7 @@ pub fn render_image_lightbox_modal(
 
     let card = render_frosted_surface(
         "image-lightbox-card",
-        FrostedGlassSpec::modal_k3x72(palette, 12.0),
+        FrostedGlassSpec::modal_k3x72(palette, 8.0),
         palette.bg_modal,
         transparency_enabled,
         scale_factor,
@@ -83,7 +83,7 @@ pub fn render_image_lightbox_modal(
     .max_w(px(960.0))
     .max_h(px(680.0))
     .p(space::LG)
-    .rounded(radius::SPECIAL)
+    .rounded(radius::ROW)
     .border_1()
     .border_color(palette.border_subtle)
     .flex()

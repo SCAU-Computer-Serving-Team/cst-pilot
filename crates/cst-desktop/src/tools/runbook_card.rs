@@ -27,20 +27,36 @@ pub struct RunbookCardProps<'a> {
 
 pub type OpenRunbookFn = Rc<dyn Fn(String, String, &mut Window, &mut App)>;
 
-fn risk_tier_meta(level: &str, palette: &DesktopPalette) -> (&'static str, gpui_kit::Hsla) {
+fn risk_tier_plain_label(level: &str) -> &'static str {
     match level.to_ascii_lowercase().as_str() {
-        "safe" => ("安全只读", palette.status_success),
-        "low" => ("低风险调整", palette.accent_solid),
-        "confirm" => ("需人工确认", palette.status_warning),
-        _ => ("执行建议", palette.text_secondary),
+        "safe" => "安全",
+        "low" => "低风险",
+        "confirm" => "需人工确认",
+        _ => "执行建议",
+    }
+}
+
+fn format_shell_meta(shell: &str, admin: bool) -> String {
+    let s = match shell.trim().to_ascii_lowercase().as_str() {
+        "" | "powershell" | "pwsh" => "PowerShell",
+        "cmd" => "cmd",
+        other => {
+            return if admin {
+                format!("{other} · 管理员")
+            } else {
+                other.to_owned()
+            };
+        }
+    };
+    if admin {
+        format!("{s} · 管理员")
+    } else {
+        s.to_owned()
     }
 }
 
 /// Renders the standalone Command Plan & Runbook Delivery card (`command_plan`, `runbook_deliver`, `runbook`,
-/// `cst-pilot-desktop.pen` 「07 · 工具与特殊工具」).
-/// Groups commands by risk tier (`safe` / `low` / `confirm`), displays `JetBrains Mono` command text with
-/// `cmd / powershell` tags, admin requirement badges, impact summary, single-row copy buttons, and opens
-/// delivered runbooks in trusted `notepad.exe` (`CursorStyle::PointingHand`).
+/// `cst-pilot-desktop.pen` `s3WzY`).
 pub fn render_runbook_card<V: 'static>(
     props: RunbookCardProps<'_>,
     mono_family: SharedString,
@@ -50,69 +66,30 @@ pub fn render_runbook_card<V: 'static>(
     on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
     cx: &mut Context<V>,
 ) -> gpui_kit::AnyElement {
-    let (tier_label, tier_color) = risk_tier_meta(props.level, palette);
+    let tier_label = risk_tier_plain_label(props.level);
 
-    let right_meta = if props.planned {
-        let ver_prefix = props
-            .version
-            .map(|v| format!("方案 v{v} · "))
-            .unwrap_or_default();
-        Some(
-            apply_scale(div(), scale::CAPTION_MEDIUM)
-                .text_color(palette.text_secondary)
-                .child(SharedString::from(format!(
-                    "{ver_prefix}待核对，尚未导出文本"
-                )))
-                .into_any_element(),
-        )
-    } else if props.status != SpecialStatus::Error
-        && let Some(deliv) = props.delivery
-        && !deliv.file.trim().is_empty()
-    {
-        let eid = props.entry_id.to_owned();
-        let cid = props.call_id.to_owned();
-        let open_fn = Rc::clone(&on_open_runbook);
-        let file_label = if deliv.name.trim().is_empty() {
-            deliv
-                .file
-                .rsplit(['/', '\\'])
-                .next()
-                .unwrap_or(deliv.file.as_str())
-                .to_owned()
-        } else {
-            deliv.name.clone()
-        };
-
-        Some(
-            apply_scale(div(), scale::CAPTION_MEDIUM)
-                .id(SharedString::from(format!(
-                    "runbook-open-file-btn-{}",
-                    props.call_id
-                )))
-                .test_support()
-                .h(height::COMPACT)
-                .px(space::SM)
-                .rounded(radius::CONTROL)
-                .border_1()
-                .border_color(palette.border_strong)
-                .bg(palette.bg_elevated)
-                .text_color(palette.accent_solid)
-                .cursor(CursorStyle::PointingHand)
-                .flex()
-                .items_center()
-                .gap(space::XS)
-                .hover(|s| s.bg(palette.bg_item_hover))
-                .on_click(move |_, w, cx| (open_fn)(eid.clone(), cid.clone(), w, cx))
-                .child(
-                    Icon::new(IconName::FileText)
-                        .size(px(13.0))
-                        .text_color(palette.accent_solid),
-                )
-                .child(cjk_inline_label(file_label))
-                .into_any_element(),
-        )
+    let (status_icon, status_color, status_text) = if props.planned {
+        (IconName::Clock3, palette.text_secondary, "待核对")
     } else {
-        None
+        match props.status {
+            SpecialStatus::Running | SpecialStatus::Pending => {
+                (IconName::LoaderCircle, palette.accent_ink, "生成中")
+            }
+            SpecialStatus::Error => (IconName::CircleAlert, palette.status_danger, "生成失败"),
+            SpecialStatus::Degraded | SpecialStatus::Interrupted => {
+                (IconName::TriangleAlert, palette.status_warning, "部分缺失")
+            }
+            _ => (IconName::CircleCheck, palette.status_success, "已生成"),
+        }
+    };
+
+    let mode_text = if props.planned {
+        match props.version {
+            Some(v) => format!("方案 v{v} · 尚未导出文本"),
+            None => "尚未导出文本".to_owned(),
+        }
+    } else {
+        "手动执行".to_owned()
     };
 
     let mut card = div()
@@ -127,11 +104,14 @@ pub fn render_runbook_card<V: 'static>(
         .border_1()
         .border_color(palette.border_subtle)
         .bg(palette.bg_special)
+        .shadow(palette.craft_stack_shadows())
         .flex()
         .flex_col()
         .gap(space::MD)
+        // 1. `28px` Header (`Ymhja`): left `18px` FileTerminal + `16/24 @ 500` title; right `12px` status icon + text
         .child(
             div()
+                .h(height::COMPACT)
                 .flex()
                 .items_center()
                 .justify_between()
@@ -143,12 +123,12 @@ pub fn render_runbook_card<V: 'static>(
                         .gap(space::SM)
                         .min_w_0()
                         .child(
-                            Icon::new(IconName::SquareTerminal)
-                                .size(px(16.0))
-                                .text_color(palette.accent_solid),
+                            Icon::new(IconName::FileTerminal)
+                                .size(px(18.0))
+                                .text_color(palette.text_primary),
                         )
                         .child(
-                            apply_scale(div(), scale::UI_MEDIUM)
+                            apply_scale(div(), scale::BODY_MEDIUM)
                                 .truncate()
                                 .text_color(palette.text_primary)
                                 .child(cjk_inline_label(if props.title.trim().is_empty() {
@@ -156,18 +136,40 @@ pub fn render_runbook_card<V: 'static>(
                                 } else {
                                     props.title
                                 })),
-                        )
-                        .child(
-                            apply_scale(div(), scale::CAPTION_MEDIUM)
-                                .px(space::TIGHT)
-                                .py(space::MICRO)
-                                .rounded(radius::CONTROL)
-                                .bg(palette.bg_surface)
-                                .text_color(tier_color)
-                                .child(cjk_inline_label(tier_label)),
                         ),
                 )
-                .children(right_meta),
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::XS)
+                        .flex_shrink_0()
+                        .child(
+                            Icon::new(status_icon)
+                                .size(px(12.0))
+                                .text_color(status_color),
+                        )
+                        .child(
+                            apply_scale(div(), scale::CAPTION)
+                                .text_color(palette.text_secondary)
+                                .child(cjk_inline_label(status_text)),
+                        ),
+                ),
+        )
+        // 2. `24px` Plain-text attributes bar (`g5GxvF` — zero colored capsules!)
+        .child(
+            apply_scale(div(), scale::CAPTION)
+                .h(height::INLINE)
+                .flex()
+                .items_center()
+                .gap(space::MD)
+                .text_color(palette.text_secondary)
+                .child(SharedString::from(tier_label))
+                .child(SharedString::from(format!(
+                    "{} 条命令",
+                    props.commands.len()
+                )))
+                .child(SharedString::from(mode_text)),
         );
 
     if !props.summary.trim().is_empty() {
@@ -178,76 +180,82 @@ pub fn render_runbook_card<V: 'static>(
         );
     }
 
+    // 3. Command entries (`TkDiu`): frameless `24px` description row + `40px` `4px`-radius `DXEuq` single-line command box
     if !props.commands.is_empty() {
-        let mut cmd_col = div().w_full().flex().flex_col().gap(space::SM);
+        let mut cmd_col = div().w_full().flex().flex_col().gap(space::MD);
         for (idx, item) in props.commands.iter().enumerate() {
-            let copy_id = SharedString::from(format!("runbook-cmd-copy-{}-{idx}", props.call_id));
+            let copy_id = SharedString::from(format!("runbook-cmd-copy-{}-{}", props.call_id, idx));
             let copied = is_copied_fn(copy_id.as_ref());
             let cmd_str = item.command.clone();
             let cid_click = copy_id.clone();
             let mark_cb = on_mark_copied.clone();
 
-            let shell_label = if item.shell.trim().is_empty() {
-                "powershell"
+            let desc_str = if item.summary.trim().is_empty() {
+                format!("步骤 {}", idx + 1)
             } else {
-                item.shell.as_str()
+                item.summary.clone()
             };
+            let meta_str = format_shell_meta(&item.shell, item.admin);
 
             cmd_col =
                 cmd_col.child(
                     div()
-                        .p(space::MD)
-                        .rounded(radius::ROW)
-                        .border_1()
-                        .border_color(palette.border_subtle)
-                        .bg(palette.bg_surface)
+                        .w_full()
                         .flex()
                         .flex_col()
                         .gap(space::XS)
                         .child(
                             div()
+                                .h(height::INLINE)
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap(space::MD)
+                                .child(
+                                    apply_scale(div(), scale::UI_MEDIUM)
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_color(palette.text_primary)
+                                        .child(SharedString::from(desc_str)),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::CAPTION)
+                                        .flex_shrink_0()
+                                        .text_color(palette.text_secondary)
+                                        .child(SharedString::from(meta_str)),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .w_full()
+                                .h(height::FIELD)
+                                .pl(space::MD)
+                                .pr(space::XS)
+                                .rounded(radius::CONTROL)
+                                .border_1()
+                                .border_color(palette.border_subtle)
+                                .bg(palette.bg_surface)
                                 .flex()
                                 .items_center()
                                 .justify_between()
                                 .gap(space::SM)
                                 .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap(space::XS)
+                                    apply_scale(div(), scale::CAPTION)
+                                        .flex_1()
                                         .min_w_0()
-                                        .child(
-                                            apply_scale(div(), scale::CAPTION_MEDIUM)
-                                                .px(space::TIGHT)
-                                                .py(space::MICRO)
-                                                .rounded(radius::CONTROL)
-                                                .bg(palette.bg_elevated)
-                                                .font_family(mono_family.clone())
-                                                .text_color(palette.text_secondary)
-                                                .child(SharedString::from(shell_label.to_owned())),
-                                        )
-                                        .children(item.admin.then(|| {
-                                            apply_scale(div(), scale::CAPTION_MEDIUM)
-                                                .px(space::TIGHT)
-                                                .py(space::MICRO)
-                                                .rounded(radius::CONTROL)
-                                                .bg(palette.bg_elevated)
-                                                .text_color(palette.status_warning)
-                                                .child(cjk_inline_label("需管理员"))
-                                        }))
-                                        .children((!item.summary.trim().is_empty()).then(|| {
-                                            apply_scale(div(), scale::CAPTION)
-                                                .truncate()
-                                                .text_color(palette.text_secondary)
-                                                .child(SharedString::from(item.summary.clone()))
-                                        })),
+                                        .truncate()
+                                        .font_family(mono_family.clone())
+                                        .text_color(palette.text_primary)
+                                        .child(SharedString::from(item.command.clone())),
                                 )
                                 .child(
                                     div()
                                         .id(copy_id)
                                         .test_support()
-                                        .w(px(32.0))
-                                        .h(px(32.0))
+                                        .w(height::CONTROL)
+                                        .h(height::CONTROL)
+                                        .flex_shrink_0()
                                         .rounded(radius::CONTROL)
                                         .flex()
                                         .items_center()
@@ -265,7 +273,7 @@ pub fn render_runbook_card<V: 'static>(
                                             } else {
                                                 IconName::Copy
                                             })
-                                            .size(px(14.0))
+                                            .size(px(16.0))
                                             .text_color(if copied {
                                                 palette.status_success
                                             } else {
@@ -273,16 +281,82 @@ pub fn render_runbook_card<V: 'static>(
                                             }),
                                         ),
                                 ),
-                        )
-                        .child(
-                            apply_scale(div(), scale::CAPTION)
-                                .font_family(mono_family.clone())
-                                .text_color(palette.text_primary)
-                                .child(SharedString::from(item.command.clone())),
                         ),
                 );
         }
         card = card.child(cmd_col);
+    }
+
+    // 4. File delivery bar (`Yp82l`) below command list
+    if props.status != SpecialStatus::Error
+        && let Some(deliv) = props.delivery
+        && !deliv.file.trim().is_empty()
+    {
+        let eid = props.entry_id.to_owned();
+        let cid = props.call_id.to_owned();
+        let open_fn = Rc::clone(&on_open_runbook);
+        let file_label = if deliv.name.trim().is_empty() {
+            deliv
+                .file
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(deliv.file.as_str())
+                .to_owned()
+        } else {
+            deliv.name.clone()
+        };
+
+        card = card.child(
+            div()
+                .w_full()
+                .pt(space::MD)
+                .border_t_1()
+                .border_color(palette.border_subtle)
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(space::MD)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::MD)
+                        .min_w_0()
+                        .child(
+                            Icon::new(IconName::FileText)
+                                .size(px(14.0))
+                                .text_color(palette.text_secondary),
+                        )
+                        .child(
+                            apply_scale(div(), scale::CAPTION)
+                                .truncate()
+                                .text_color(palette.accent_ink)
+                                .child(SharedString::from(file_label)),
+                        ),
+                )
+                .child(
+                    apply_scale(div(), scale::CAPTION)
+                        .id(SharedString::from(format!(
+                            "runbook-open-file-btn-{}",
+                            props.call_id
+                        )))
+                        .test_support()
+                        .cursor(CursorStyle::PointingHand)
+                        .flex()
+                        .items_center()
+                        .gap(space::SM)
+                        .flex_shrink_0()
+                        .text_color(palette.text_secondary)
+                        .hover(|s| s.text_color(palette.text_primary))
+                        .on_click(move |_, w, cx| (open_fn)(eid.clone(), cid.clone(), w, cx))
+                        .child(cjk_inline_label("打开"))
+                        .child(
+                            Icon::new(IconName::ExternalLink)
+                                .size(px(12.0))
+                                .text_color(palette.text_secondary),
+                        ),
+                ),
+        );
     }
 
     for err in props.errors {

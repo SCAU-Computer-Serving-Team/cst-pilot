@@ -127,6 +127,7 @@ layout(std140, set = 0, binding = 0) uniform CstUniforms {
     vec4 _u_slot1; // [viewport_w, viewport_h, opacity, u_time]
     vec4 _u_slot2; // [u_speed, u_scale, u_distortion, u_swirl]
     vec4 _u_slot3; // [u_direction, u_grain, 0, 0]
+    vec4 _u_slot4; // [r_tl, r_tr, r_br, r_bl] physical corner radii
 };
 layout(location = 0) out vec4 _cst_outColor;
 #define u_resolution (_u_slot0.zw)
@@ -137,8 +138,22 @@ layout(location = 0) out vec4 _cst_outColor;
 #define u_swirl (_u_slot2.w)
 #define u_direction (_u_slot3.x)
 #define u_grain (_u_slot3.y)
+float _cst_rounded_coverage(vec2 topDownPx, vec2 sizePx, vec4 radiiPx) {
+    if (max(max(radiiPx.x, radiiPx.y), max(radiiPx.z, radiiPx.w)) <= 0.01) {
+        return 1.0;
+    }
+    vec2 halfSize = sizePx * 0.5;
+    vec2 p = topDownPx - halfSize;
+    float r = (p.x > 0.0)
+        ? ((p.y > 0.0) ? radiiPx.z : radiiPx.y)
+        : ((p.y > 0.0) ? radiiPx.w : radiiPx.x);
+    r = min(r, min(halfSize.x, halfSize.y));
+    vec2 q = abs(p) - halfSize + vec2(r);
+    float d = min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+    return clamp(0.5 - d, 0.0, 1.0);
+}
 "#,
-            "_u_slot1.z",
+            "_u_slot1.z * _cst_rounded_coverage(gl_FragCoord.xy - _u_slot0.xy, u_resolution, _u_slot4)",
         ),
         "blue-hour.glsl" => (
             r#"#version 450
@@ -148,6 +163,7 @@ layout(std140, set = 0, binding = 0) uniform CstUniforms {
     vec4 _u_slot2; // [u_speed, u_phase, u_count, u_height]
     vec4 _u_slot3; // [u_focus, u_position, u_blend, u_facets]
     vec4 _u_slot4; // [u_grain, 0, 0, 0]
+    vec4 _u_slot5; // [r_tl, r_tr, r_br, r_bl] physical corner radii
 };
 layout(set = 0, binding = 1) uniform texture2D _u_palette_tex;
 layout(set = 0, binding = 2) uniform sampler _u_palette_smp;
@@ -166,8 +182,22 @@ layout(location = 0) out vec4 _cst_outColor;
 vec4 _cst_sample_palette(vec2 uv) {
     return texture(sampler2D(_u_palette_tex, _u_palette_smp), vec2(uv.x, 0.5));
 }
+float _cst_rounded_coverage(vec2 topDownPx, vec2 sizePx, vec4 radiiPx) {
+    if (max(max(radiiPx.x, radiiPx.y), max(radiiPx.z, radiiPx.w)) <= 0.01) {
+        return 1.0;
+    }
+    vec2 halfSize = sizePx * 0.5;
+    vec2 p = topDownPx - halfSize;
+    float r = (p.x > 0.0)
+        ? ((p.y > 0.0) ? radiiPx.z : radiiPx.y)
+        : ((p.y > 0.0) ? radiiPx.w : radiiPx.x);
+    r = min(r, min(halfSize.x, halfSize.y));
+    vec2 q = abs(p) - halfSize + vec2(r);
+    float d = min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+    return clamp(0.5 - d, 0.0, 1.0);
+}
 "#,
-            "_u_slot1.z",
+            "_u_slot1.z * _cst_rounded_coverage(gl_FragCoord.xy - _u_slot0.xy, u_resolution, _u_slot5)",
         ),
         "frosted-glass.glsl" => (
             r#"#version 450

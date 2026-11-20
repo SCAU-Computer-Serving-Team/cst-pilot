@@ -326,21 +326,29 @@ fn d3d11_single_window_sky_frosted_glass_and_device_recovery() {
 
     let h1 = OffscreenD3d11Harness::create(256, 160);
 
-    // 1. Paint all 4 sky presets and verify non-trivial vertical gradient & time progression
+    // 1. Paint all 4 sky presets and verify non-trivial vertical gradient & rounded SDF corner clipping
     for preset in [
         SkyPreset::HomeLight,
         SkyPreset::HomeDark,
         SkyPreset::LoginLight,
         SkyPreset::LoginDark,
     ] {
+        h1.clear_split_black_white();
         let sky0 = D3d11SkySurface {
             preset,
             time_sec: 0.0,
             opacity: 1.0,
+            corner_radii_phys: [12.0, 12.0, 12.0, 12.0],
         };
         sky0.paint(&h1.make_draw_ctx(0.0, 0.0, 256.0, 160.0, D3D_FEATURE_LEVEL_11_0_RAW))
             .unwrap();
         let px0 = h1.readback_bgra();
+        // Top-left (0, 0) lies outside the 12px corner radius, so it stays untouched black (0, 0, 0)!
+        assert_eq!(
+            px0[0][0..3],
+            [0, 0, 0],
+            "rounded sky SDF must clip (0, 0) for {preset:?}"
+        );
         let top = px0[16 * 256 + 128];
         let bot = px0[144 * 256 + 128];
         assert_ne!(
@@ -389,6 +397,7 @@ fn d3d11_single_window_sky_frosted_glass_and_device_recovery() {
         preset: SkyPreset::HomeLight,
         time_sec: 2.5,
         opacity: 1.0,
+        corner_radii_phys: [8.0, 8.0, 8.0, 8.0],
     }
     .paint(&h2.make_draw_ctx(0.0, 0.0, 192.0, 128.0, D3D_FEATURE_LEVEL_11_0_RAW))
     .unwrap();
@@ -403,6 +412,7 @@ fn d3d11_single_window_sky_frosted_glass_and_device_recovery() {
         preset: SkyPreset::HomeLight,
         time_sec: 1.0,
         opacity: 1.0,
+        corner_radii_phys: [0.0; 4],
     }
     .paint(&h2.make_draw_ctx(0.0, 0.0, 192.0, 128.0, 0xa000))
     .unwrap();
@@ -412,6 +422,7 @@ fn d3d11_single_window_sky_frosted_glass_and_device_recovery() {
         preset: SkyPreset::HomeLight,
         time_sec: 1.0,
         opacity: 1.0,
+        corner_radii_phys: [0.0; 4],
     }
     .paint(&h2.make_draw_ctx(0.0, 0.0, 192.0, 128.0, D3D_FEATURE_LEVEL_11_0_RAW))
     .unwrap();
@@ -907,9 +918,15 @@ async fn headless_gpui_shell_sidebar_drawer_escape_web_lock_and_exit_confirm(
         .expect("initial globals refresh");
 
     let (win_handle, shell) = cx.update(|cx| {
+        let font_report = cst_desktop::theme::load_bundled_fonts(&fixture.root, cx);
+        assert!(font_report.loaded_cjk, "{font_report:?}");
+        assert!(font_report.loaded_mono, "{font_report:?}");
+        assert_eq!(font_report.ui_family(), "Source Han Sans CN VF");
+        assert_eq!(font_report.mono_family(), "JetBrains Mono");
+        assert!(font_report.warning.is_none(), "{font_report:?}");
         gpui_kit::init(cx);
         register_shell_keys(cx);
-        open_desktop_shell_window_with_handle(handle.clone(), None, cx).unwrap()
+        open_desktop_shell_window_with_handle(handle.clone(), Some(font_report), cx).unwrap()
     });
 
     // 1. Initial expanded state: `sidebar-l081m1` + `topbar-gels8` + `workspace-home-view` visible

@@ -28,6 +28,7 @@ use gpui::*;
 struct FontInfo {
     font_family_h: HSTRING,
     font_face: IDWriteFontFace3,
+    requested_weight: DWRITE_FONT_WEIGHT,
     features: IDWriteTypography,
     fallbacks: Option<IDWriteFontFallback>,
     font_collection: IDWriteFontCollection1,
@@ -371,11 +372,12 @@ impl DirectWriteState {
         };
         let fontset = unsafe { collection.GetFontSet().log_err()? };
         let font_family_h = HSTRING::from(family.as_str());
+        let dwrite_weight = font_weight_to_dwrite(weight);
         let font = unsafe {
             fontset
                 .GetMatchingFonts(
                     &font_family_h,
-                    font_weight_to_dwrite(weight),
+                    dwrite_weight,
                     DWRITE_FONT_STRETCH_NORMAL,
                     font_style_to_dwrite(style),
                 )
@@ -385,7 +387,32 @@ impl DirectWriteState {
         for index in 0..total_number {
             let res = maybe!({
                 let font_face_ref = unsafe { font.GetFontFaceReference(index).log_err()? };
-                let font_face = unsafe { font_face_ref.CreateFontFace().log_err()? };
+                let base_face = unsafe { font_face_ref.CreateFontFace().log_err()? };
+                let font_face = unsafe {
+                    if let Ok(face5) = base_face.cast::<IDWriteFontFace5>()
+                        && face5.HasVariations().as_bool()
+                        && let Ok(resource) = face5.GetFontResource()
+                    {
+                        let axis_count = resource.GetFontAxisCount() as usize;
+                        let mut axes = vec![DWRITE_FONT_AXIS_VALUE::default(); axis_count];
+                        if axis_count > 0 && resource.GetDefaultFontAxisValues(&mut axes).is_ok() {
+                            for ax in &mut axes {
+                                if ax.axisTag == DWRITE_FONT_AXIS_TAG_WEIGHT {
+                                    ax.value = weight.0;
+                                }
+                            }
+                            resource
+                                .CreateFontFace(DWRITE_FONT_SIMULATIONS_NONE, &axes)
+                                .ok()
+                                .and_then(|f| f.cast::<IDWriteFontFace3>().ok())
+                                .unwrap_or(base_face)
+                        } else {
+                            base_face
+                        }
+                    } else {
+                        base_face
+                    }
+                };
                 let direct_write_features =
                     unsafe { Self::generate_font_features(factory, features).log_err()? };
                 let fallbacks = fallbacks.as_ref().and_then(|fallbacks| {
@@ -396,6 +423,7 @@ impl DirectWriteState {
                 let font_info = FontInfo {
                     font_family_h: font_family_h.clone(),
                     font_face,
+                    requested_weight: dwrite_weight,
                     features: direct_write_features,
                     fallbacks,
                     font_collection: collection.clone(),
@@ -500,12 +528,12 @@ impl DirectWriteState {
                 let first_run = &font_runs[0];
                 let font_info = &self.fonts[first_run.font_id.0];
                 let collection = &font_info.font_collection;
-                let format: IDWriteTextFormat1 = components
+                    let format: IDWriteTextFormat1 = components
                     .factory
                     .CreateTextFormat(
                         &font_info.font_family_h,
                         collection,
-                        font_info.font_face.GetWeight(),
+                        font_info.requested_weight,
                         font_info.font_face.GetStyle(),
                         DWRITE_FONT_STRETCH_NORMAL,
                         font_size.as_f32(),
@@ -566,7 +594,7 @@ impl DirectWriteState {
                 };
                 text_layout.SetFontSize(font_size, text_range)?;
                 text_layout.SetFontStyle(font_info.font_face.GetStyle(), text_range)?;
-                text_layout.SetFontWeight(font_info.font_face.GetWeight(), text_range)?;
+                text_layout.SetFontWeight(font_info.requested_weight, text_range)?;
                 text_layout.SetTypography(&font_info.features, text_range)?;
 
                 break_ligatures = !break_ligatures;

@@ -6,7 +6,7 @@ use gpui_kit::{
     App, Div, FontWeight, IntoElement, ParentElement, Pixels, SharedString, Styled, div, px,
 };
 
-pub const UI_FONT_FAMILY: &str = "Source Han Sans CN";
+pub const UI_FONT_FAMILY: &str = "Source Han Sans CN VF";
 pub const FALLBACK_UI_FONT_FAMILY: &str = "Microsoft YaHei UI";
 pub const MONO_FONT_FAMILY: &str = "JetBrains Mono";
 pub const FALLBACK_MONO_FONT_FAMILY: &str = "Consolas";
@@ -129,19 +129,16 @@ pub fn load_bundled_fonts(kit_root: &Path, cx: &App) -> FontLoadReport {
     let mut warnings = Vec::new();
 
     let cjk_path = fonts_dir.join("SourceHanSansCN-VF.otf");
-    let loaded_cjk = match fs::read(&cjk_path) {
+    let add_cjk_ok = match fs::read(&cjk_path) {
         Ok(bytes) if has_valid_sfnt_magic(&bytes, b"OTTO") => {
             cx.text_system().add_fonts(vec![Cow::Owned(bytes)]).is_ok()
         }
         _ => false,
     };
-    if !loaded_cjk {
-        warnings.push("思源黑体可变字体加载失败，已回退系统默认中文字体");
-    }
 
     let mono_reg = fonts_dir.join("JetBrainsMono-Regular.ttf");
     let mono_med = fonts_dir.join("JetBrainsMono-Medium.ttf");
-    let loaded_mono = match (fs::read(&mono_reg), fs::read(&mono_med)) {
+    let add_mono_ok = match (fs::read(&mono_reg), fs::read(&mono_med)) {
         (Ok(reg), Ok(med))
             if has_valid_sfnt_magic(&reg, &[0, 1, 0, 0])
                 && has_valid_sfnt_magic(&med, &[0, 1, 0, 0]) =>
@@ -152,6 +149,18 @@ pub fn load_bundled_fonts(kit_root: &Path, cx: &App) -> FontLoadReport {
         }
         _ => false,
     };
+
+    let registered = cx.text_system().all_font_names();
+    let has_registered = |target: &str| {
+        registered.is_empty() || registered.iter().any(|n| n.eq_ignore_ascii_case(target))
+    };
+
+    let loaded_cjk = add_cjk_ok && has_registered(UI_FONT_FAMILY);
+    if !loaded_cjk {
+        warnings.push("思源黑体可变字体加载失败，已回退系统默认中文字体");
+    }
+
+    let loaded_mono = add_mono_ok && has_registered(MONO_FONT_FAMILY);
     if !loaded_mono {
         warnings.push("JetBrains Mono 等宽字体加载失败，已回退系统默认等宽字体");
     }

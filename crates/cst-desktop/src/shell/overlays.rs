@@ -56,10 +56,10 @@ pub fn render_web_active_lock_overlay(
     .rounded(radius::ROW)
     .border_1()
     .border_color(palette.border_subtle)
-    .p(space::GROUP)
+    .p(px(20.0))
     .flex()
     .flex_col()
-    .gap(space::LG)
+    .gap(space::MD)
     .child(
         div()
             .relative()
@@ -123,7 +123,7 @@ pub fn render_web_active_lock_overlay(
                     .track_focus(switch_back_focus)
                     .tab_index(0)
                     .h(height::CONTROL)
-                    .px(space::MD)
+                    .px(space::LG)
                     .rounded(radius::CONTROL)
                     .bg(palette.accent_solid)
                     .text_color(palette.text_on_accent)
@@ -144,8 +144,8 @@ pub fn render_web_active_lock_overlay(
     )
 }
 
-/// Workspace top-center `40px` rectangular error bar (`doc/rust/plan/9.desktop.md` §3.4:
-/// single-line reason + left warning icon, `H2p2z` frosted glass, no action/close buttons, auto-dismisses).
+/// Workspace top-center `40px` rectangular error bar (`X2gAh`:
+/// `top(20px)`, `h(40px)`, `px(16px)`, `rounded(8px)`, `CircleAlert` `16px` `$status-danger` + single-line reason, `H2p2z` frosted glass).
 pub fn render_workspace_error_bar(
     message: SharedString,
     palette: &DesktopPalette,
@@ -154,7 +154,7 @@ pub fn render_workspace_error_bar(
 ) -> impl IntoElement {
     div()
         .absolute()
-        .top(space::MD)
+        .top(px(20.0))
         .left_0()
         .right_0()
         .flex()
@@ -176,15 +176,15 @@ pub fn render_workspace_error_bar(
             .border_color(palette.border_hairline)
             .flex()
             .items_center()
-            .gap(space::SM)
             .child(
                 div()
                     .relative()
                     .flex()
                     .items_center()
                     .gap(space::SM)
+                    .min_w_0()
                     .child(
-                        Icon::new(IconName::TriangleAlert)
+                        Icon::new(IconName::CircleAlert)
                             .size(px(16.0))
                             .text_color(palette.status_danger),
                     )
@@ -198,7 +198,8 @@ pub fn render_workspace_error_bar(
         )
 }
 
-/// Non-blocking top notice banner centered below the topbar/header so it never overlaps right-side header buttons.
+/// Non-blocking top notice banner (`h1BufF`:
+/// `top(20px)`, `h(40px)`, `px(16px)`, `rounded(8px)`, `CircleCheck` `16px` `$status-success` + message, `H2p2z` frosted glass).
 pub fn render_top_notice_banner(
     message: SharedString,
     palette: &DesktopPalette,
@@ -207,7 +208,7 @@ pub fn render_top_notice_banner(
 ) -> impl IntoElement {
     div()
         .absolute()
-        .top(px(92.0))
+        .top(px(20.0))
         .left_0()
         .right_0()
         .flex()
@@ -230,11 +231,23 @@ pub fn render_top_notice_banner(
             .flex()
             .items_center()
             .child(
-                apply_scale(div(), scale::UI)
+                div()
                     .relative()
-                    .text_color(palette.text_primary)
-                    .truncate()
-                    .child(cjk_inline_label(message)),
+                    .flex()
+                    .items_center()
+                    .gap(space::MD)
+                    .min_w_0()
+                    .child(
+                        Icon::new(IconName::CircleCheck)
+                            .size(px(16.0))
+                            .text_color(palette.status_success),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI)
+                            .text_color(palette.text_primary)
+                            .truncate()
+                            .child(cjk_inline_label(message)),
+                    ),
             ),
         )
 }

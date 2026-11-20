@@ -1,11 +1,13 @@
+use std::f32::consts::{FRAC_PI_2, TAU};
 use std::rc::Rc;
 
 use cst_client::{ModelChoiceDto, ModelsSnapshot};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::{
-    App, FocusHandle, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
+    App, CursorStyle, FocusHandle, InteractiveElement, IntoElement, ParentElement, PathBuilder,
+    SharedString, StatefulInteractiveElement, Styled, TestSupportExt, Window, canvas, div, point,
+    px, relative,
 };
 use serde_json::Value;
 
@@ -45,8 +47,7 @@ pub fn thinking_level_label(raw: &str) -> &'static str {
         "low" => "Low",
         "medium" => "Medium",
         "high" => "High",
-        "xhigh" => "XHigh",
-        "max" => "Max",
+        "xhigh" | "max" => "Max",
         _ => "Medium",
     }
 }
@@ -110,12 +111,11 @@ pub fn render_context_ring_button(
     on_toggle: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let pct = percent_opt.unwrap_or(0.0).clamp(0.0, 100.0);
-    let ring_color = if pct >= 85.0 {
+    let track_color = palette.border_strong;
+    let arc_color = if pct >= 85.0 {
         palette.status_warning
-    } else if pct > 0.0 {
-        palette.accent_solid
     } else {
-        palette.border_strong
+        palette.accent_solid
     };
 
     div()
@@ -132,26 +132,58 @@ pub fn render_context_ring_button(
         .hover(|s| s.bg(palette.bg_item_hover))
         .on_click(move |_, w, cx| on_toggle(w, cx))
         .child(
-            div()
-                .w(px(14.0))
-                .h(px(14.0))
-                .rounded(radius::FULL)
-                .border_2()
-                .border_color(ring_color)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .w(px(5.0))
-                        .h(px(5.0))
-                        .rounded(radius::FULL)
-                        .bg(if pct > 5.0 {
-                            ring_color
+            canvas(
+                |_, _, _| (),
+                move |bounds, _, window, _cx| {
+                    let cx_f = f32::from(bounds.origin.x) + f32::from(bounds.size.width) * 0.5;
+                    let cy_f = f32::from(bounds.origin.y) + f32::from(bounds.size.height) * 0.5;
+                    let r = 5.5_f32;
+                    let start_angle = -FRAC_PI_2;
+
+                    let mut track_pts = Vec::with_capacity(48);
+                    for i in 0..48 {
+                        let theta = start_angle + TAU * (i as f32 / 48.0);
+                        track_pts.push(point(
+                            px(cx_f + r * theta.cos()),
+                            px(cy_f + r * theta.sin()),
+                        ));
+                    }
+                    let mut track_builder = PathBuilder::stroke(px(2.0));
+                    track_builder.add_polygon(&track_pts, true);
+                    if let Ok(path) = track_builder.build() {
+                        window.paint_path(path, track_color);
+                    }
+
+                    if pct > 0.2 {
+                        if pct >= 99.8 {
+                            let mut full_builder = PathBuilder::stroke(px(2.0));
+                            full_builder.add_polygon(&track_pts, true);
+                            if let Ok(path) = full_builder.build() {
+                                window.paint_path(path, arc_color);
+                            }
                         } else {
-                            gpui_kit::transparent_black()
-                        }),
-                ),
+                            let sweep = TAU * (pct as f32 / 100.0);
+                            let steps = ((sweep * 12.0).ceil() as usize).max(2);
+                            let mut arc_builder = PathBuilder::stroke(px(2.0));
+                            for i in 0..=steps {
+                                let theta = start_angle + sweep * (i as f32 / steps as f32);
+                                let pt =
+                                    point(px(cx_f + r * theta.cos()), px(cy_f + r * theta.sin()));
+                                if i == 0 {
+                                    arc_builder.move_to(pt);
+                                } else {
+                                    arc_builder.line_to(pt);
+                                }
+                            }
+                            if let Ok(path) = arc_builder.build() {
+                                window.paint_path(path, arc_color);
+                            }
+                        }
+                    }
+                },
+            )
+            .w(px(14.0))
+            .h(px(14.0)),
         )
 }
 
@@ -207,7 +239,6 @@ pub fn render_context_quota_popover(
     };
 
     let bar_ratio = (percent_opt.unwrap_or(0.0).clamp(0.0, 100.0) / 100.0) as f32;
-    let bar_fill_px = (304.0 * bar_ratio).round().max(0.0);
 
     let mut card = render_frosted_surface(
         "composer-context-popover-h5jg6d",
@@ -255,10 +286,14 @@ pub fn render_context_quota_popover(
             .overflow_hidden()
             .child(
                 div()
-                    .w(px(bar_fill_px))
+                    .w(relative(bar_ratio))
                     .h_full()
                     .rounded(radius::FULL)
-                    .bg(palette.accent_solid),
+                    .bg(if bar_ratio >= 0.85 {
+                        palette.status_warning
+                    } else {
+                        palette.accent_solid
+                    }),
             ),
     )
     .child(
@@ -281,6 +316,7 @@ pub fn render_context_quota_popover(
     );
 
     if is_quota_provider(provider) {
+        let is_external_more = provider != "cstoa";
         let prov_owned = provider.to_owned();
         let more_action: SimpleUiFn = if provider == "cstoa" {
             Rc::clone(&on_open_account)
@@ -294,6 +330,28 @@ pub fn render_context_quota_popover(
                 open_url_in_trusted_browser(url);
             })
         };
+
+        let mut more_btn = apply_scale(div(), scale::CAPTION_MEDIUM)
+            .id("context-popover-more-btn")
+            .test_support()
+            .text_color(palette.accent_ink)
+            .flex()
+            .items_center()
+            .gap(space::MICRO)
+            .on_click(move |_, w, cx| (more_action)(w, cx))
+            .child(cjk_inline_label(if provider == "cstoa" {
+                "账号信息"
+            } else {
+                "更多"
+            }))
+            .child(
+                Icon::new(IconName::ChevronRight)
+                    .size(px(13.0))
+                    .text_color(palette.accent_ink),
+            );
+        if is_external_more {
+            more_btn = more_btn.cursor(CursorStyle::PointingHand);
+        }
 
         card = card
             .child(
@@ -325,26 +383,7 @@ pub fn render_context_quota_popover(
                                     .text_color(palette.text_muted),
                             ),
                     )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .id("context-popover-more-btn")
-                            .test_support()
-                            .text_color(palette.accent_solid)
-                            .flex()
-                            .items_center()
-                            .gap(space::MICRO)
-                            .on_click(move |_, w, cx| (more_action)(w, cx))
-                            .child(cjk_inline_label(if provider == "cstoa" {
-                                "账号信息"
-                            } else {
-                                "更多"
-                            }))
-                            .child(
-                                Icon::new(IconName::ChevronRight)
-                                    .size(px(13.0))
-                                    .text_color(palette.accent_solid),
-                            ),
-                    ),
+                    .child(more_btn),
             );
 
         if let Some(q) = quota {
@@ -510,7 +549,7 @@ pub fn render_model_picker_popover(
                         .px(space::SM)
                         .rounded(radius::CONTROL)
                         .bg(if highlighted_idx == 0 {
-                            palette.bg_item_hover
+                            palette.bg_item_active
                         } else {
                             gpui_kit::transparent_black()
                         })
@@ -518,7 +557,7 @@ pub fn render_model_picker_popover(
                         .items_center()
                         .justify_between()
                         .gap(space::SM)
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .hover(|s| s.bg(palette.bg_item_active))
                         .on_click(move |_, w, cx| (goto_m)(ModelPickerPage::Models, w, cx))
                         .child(
                             div()
@@ -554,7 +593,7 @@ pub fn render_model_picker_popover(
                         .px(space::SM)
                         .rounded(radius::CONTROL)
                         .bg(if highlighted_idx == 1 {
-                            palette.bg_item_hover
+                            palette.bg_item_active
                         } else {
                             gpui_kit::transparent_black()
                         })
@@ -562,7 +601,7 @@ pub fn render_model_picker_popover(
                         .items_center()
                         .justify_between()
                         .gap(space::SM)
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .hover(|s| s.bg(palette.bg_item_active))
                         .on_click(move |_, w, cx| (goto_t)(ModelPickerPage::Thinking, w, cx))
                         .child(
                             div()
@@ -602,7 +641,7 @@ pub fn render_model_picker_popover(
                         .flex()
                         .items_center()
                         .gap(space::XS)
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .hover(|s| s.bg(palette.bg_item_active))
                         .on_click(move |_, w, cx| (back)(ModelPickerPage::Main, w, cx))
                         .child(
                             Icon::new(IconName::ChevronLeft)
@@ -655,7 +694,7 @@ pub fn render_model_picker_popover(
                         .px(space::SM)
                         .rounded(radius::CONTROL)
                         .bg(if is_hi {
-                            palette.bg_item_hover
+                            palette.bg_item_active
                         } else {
                             gpui_kit::transparent_black()
                         })
@@ -664,7 +703,7 @@ pub fn render_model_picker_popover(
                         .items_center()
                         .justify_between()
                         .gap(space::SM)
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .hover(|s| s.bg(palette.bg_item_active))
                         .on_click(move |_, w, cx| {
                             (sel_fn)(prov.clone(), mid.clone(), w, cx);
                         })
@@ -673,7 +712,7 @@ pub fn render_model_picker_popover(
                         row = row.child(
                             Icon::new(IconName::Check)
                                 .size(px(13.0))
-                                .text_color(palette.accent_solid),
+                                .text_color(palette.accent_ink),
                         );
                     }
                     scroll = scroll.child(row);
@@ -696,7 +735,7 @@ pub fn render_model_picker_popover(
                         .flex()
                         .items_center()
                         .gap(space::XS)
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .hover(|s| s.bg(palette.bg_item_active))
                         .on_click(move |_, w, cx| (back)(ModelPickerPage::Main, w, cx))
                         .child(
                             Icon::new(IconName::ChevronLeft)
@@ -714,7 +753,12 @@ pub fn render_model_picker_popover(
                 );
 
             let levels: Vec<String> = if thinking_levels.is_empty() {
-                vec!["off".to_owned()]
+                vec![
+                    "low".to_owned(),
+                    "medium".to_owned(),
+                    "high".to_owned(),
+                    "max".to_owned(),
+                ]
             } else {
                 thinking_levels.to_vec()
             };
@@ -741,7 +785,7 @@ pub fn render_model_picker_popover(
                     .px(space::SM)
                     .rounded(radius::CONTROL)
                     .bg(if is_hi {
-                        palette.bg_item_hover
+                        palette.bg_item_active
                     } else {
                         gpui_kit::transparent_black()
                     })
@@ -749,7 +793,7 @@ pub fn render_model_picker_popover(
                     .flex()
                     .items_center()
                     .justify_between()
-                    .hover(|s| s.bg(palette.bg_item_hover))
+                    .hover(|s| s.bg(palette.bg_item_active))
                     .on_click(move |_, w, cx| {
                         (sel_fn)(lv_owned.clone(), w, cx);
                     })
@@ -758,7 +802,7 @@ pub fn render_model_picker_popover(
                     row = row.child(
                         Icon::new(IconName::Check)
                             .size(px(13.0))
-                            .text_color(palette.accent_solid),
+                            .text_color(palette.accent_ink),
                     );
                 }
                 list = list.child(row);

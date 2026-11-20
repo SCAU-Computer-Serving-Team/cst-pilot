@@ -3,6 +3,8 @@ use std::rc::Rc;
 use cst_client::{
     DefaultViewDto, DesktopSettingsDto, ThemeModeDto, UpdatePhaseDto, UpdateStateDto,
 };
+use gpui_kit::assets::IconName;
+use gpui_kit::component::Icon;
 use gpui_kit::{
     App, InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement,
     Styled, TestSupportExt, Window, div, px, relative,
@@ -16,9 +18,9 @@ pub type SelectDefaultViewFn = Rc<dyn Fn(DefaultViewDto, &mut Window, &mut App)>
 pub type UpdateCardActionFn = Rc<dyn Fn(&mut Window, &mut App)>;
 
 /// Renders the `常规` settings tab (`cst-pilot-desktop.pen` 「03 · 设置」 `q8TgB`):
-/// 1. `外观` group card (`界面主题` 3-way segmented + `默认视图` 2-way segmented)
-/// 2. `软件更新` group card (`72px` `C9or7K` sharing `UpdateStateDto`, with `$bg-track-recess` `keDNb`
-///    progress fill and `"取消"` button `oHWRT` during check/download).
+/// 1. Category heading `常规` (`20/28 @ 600`)
+/// 2. `外观` group (`$bg-workspace` + `8px` radius + `$border-subtle`, two `72px` rows with icon segmented controls)
+/// 3. `软件更新` group (`72px` `C9or7K` card with `$bg-track-recess` `keDNb` progress fill and neutral outline `s2CZVU` button).
 #[allow(clippy::too_many_arguments)]
 pub fn render_general_tab(
     desktop_settings: &DesktopSettingsDto,
@@ -79,6 +81,7 @@ pub fn render_general_tab(
         _ => SharedString::from("手动检查签名离线升级包"),
     };
 
+    // Neutral outline button `s2CZVU` across all states (no solid accent blue conflict!)
     let right_update_btn = if in_flight {
         apply_scale(div(), scale::UI_MEDIUM)
             .id("settings-update-cancel-btn-ohwrt")
@@ -89,7 +92,7 @@ pub fn render_general_tab(
             .rounded(radius::CONTROL)
             .border_1()
             .border_color(palette.border_strong)
-            .bg(palette.bg_elevated)
+            .bg(palette.bg_workspace)
             .text_color(palette.text_primary)
             .flex()
             .items_center()
@@ -105,6 +108,8 @@ pub fn render_general_tab(
             .h(height::CONTROL)
             .px(space::MD)
             .rounded(radius::CONTROL)
+            .border_1()
+            .border_color(palette.border_subtle)
             .bg(palette.bg_surface)
             .text_color(palette.text_muted)
             .flex()
@@ -112,7 +117,6 @@ pub fn render_general_tab(
             .child(cjk_inline_label("未启用"))
             .into_any_element()
     } else {
-        let is_actionable = matches!(phase, UpdatePhaseDto::Available | UpdatePhaseDto::Ready);
         let btn_label = match phase {
             UpdatePhaseDto::Available => "查看更新",
             UpdatePhaseDto::Ready => "重启更新",
@@ -126,23 +130,12 @@ pub fn render_general_tab(
             .px(space::MD)
             .rounded(radius::CONTROL)
             .border_1()
-            .border_color(if is_actionable {
-                palette.accent_solid
-            } else {
-                palette.border_strong
-            })
-            .bg(if is_actionable {
-                palette.accent_solid
-            } else {
-                palette.bg_elevated
-            })
-            .text_color(if is_actionable {
-                palette.text_on_accent
-            } else {
-                palette.text_primary
-            })
+            .border_color(palette.border_strong)
+            .bg(palette.bg_workspace)
+            .text_color(palette.text_primary)
             .flex()
             .items_center()
+            .hover(|s| s.bg(palette.bg_item_hover))
             .on_click(move |_, w, cx| (on_check_or_open_update)(w, cx))
             .child(cjk_inline_label(btn_label))
             .into_any_element()
@@ -155,10 +148,10 @@ pub fn render_general_tab(
         .w_full()
         .h(px(72.0))
         .px(space::LG)
-        .rounded(radius::SPECIAL)
+        .rounded(radius::ROW)
         .border_1()
         .border_color(palette.border_subtle)
-        .bg(palette.bg_surface)
+        .bg(palette.bg_workspace)
         .overflow_hidden()
         .flex()
         .items_center()
@@ -194,9 +187,9 @@ pub fn render_general_tab(
                         .items_center()
                         .gap(space::SM)
                         .child(
-                            apply_scale(div(), scale::UI_MEDIUM)
+                            apply_scale(div(), scale::BODY)
                                 .text_color(palette.text_primary)
-                                .child("CST Pilot 桌面端"),
+                                .child(cjk_inline_label("软件版本与更新")),
                         )
                         .child(
                             apply_scale(div(), scale::CAPTION)
@@ -230,6 +223,11 @@ pub fn render_general_tab(
         .flex()
         .flex_col()
         .gap(space::GROUP)
+        .child(
+            apply_scale(div(), scale::TITLE)
+                .text_color(palette.text_primary)
+                .child(cjk_inline_label("常规")),
+        )
         // Group 1: 外观
         .child(
             div()
@@ -237,51 +235,44 @@ pub fn render_general_tab(
                 .flex_col()
                 .gap(space::SM)
                 .child(
-                    apply_scale(div(), scale::CAPTION_MEDIUM)
-                        .text_color(palette.text_secondary)
-                        .child("外观"),
+                    apply_scale(div(), scale::BODY_SEMIBOLD)
+                        .text_color(palette.text_primary)
+                        .child(cjk_inline_label("外观")),
                 )
                 .child(
                     div()
                         .w_full()
-                        .rounded(radius::SPECIAL)
+                        .rounded(radius::ROW)
                         .border_1()
                         .border_color(palette.border_subtle)
-                        .bg(palette.bg_surface)
+                        .bg(palette.bg_workspace)
                         .flex()
                         .flex_col()
                         .child(
                             div()
+                                .w_full()
+                                .h(px(72.0))
                                 .px(space::LG)
-                                .py(space::MD)
                                 .flex()
                                 .items_center()
                                 .justify_between()
                                 .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(space::MICRO)
-                                        .child(
-                                            apply_scale(div(), scale::UI_MEDIUM)
-                                                .text_color(palette.text_primary)
-                                                .child("界面主题"),
-                                        )
-                                        .child(
-                                            apply_scale(div(), scale::CAPTION)
-                                                .text_color(palette.text_secondary)
-                                                .child("调整窗口外观配色与动态天空着色器场景"),
-                                        ),
+                                    apply_scale(div(), scale::BODY)
+                                        .text_color(palette.text_primary)
+                                        .child(cjk_inline_label("界面主题")),
                                 )
                                 .child(
                                     div()
-                                        .p(space::MICRO)
+                                        .h(height::CONTROL)
+                                        .p(space::XS)
                                         .rounded(radius::ROW)
-                                        .bg(palette.bg_track_recess)
+                                        .bg(palette.bg_surface)
                                         .flex()
+                                        .items_center()
                                         .gap(space::MICRO)
                                         .child(seg_pill(
                                             "settings-theme-system",
+                                            IconName::Monitor,
                                             "跟随系统",
                                             desktop_settings.theme == ThemeModeDto::System,
                                             palette,
@@ -289,6 +280,7 @@ pub fn render_general_tab(
                                         ))
                                         .child(seg_pill(
                                             "settings-theme-light",
+                                            IconName::Sun,
                                             "浅色",
                                             desktop_settings.theme == ThemeModeDto::Light,
                                             palette,
@@ -296,6 +288,7 @@ pub fn render_general_tab(
                                         ))
                                         .child(seg_pill(
                                             "settings-theme-dark",
+                                            IconName::Moon,
                                             "深色",
                                             desktop_settings.theme == ThemeModeDto::Dark,
                                             palette,
@@ -305,38 +298,31 @@ pub fn render_general_tab(
                         )
                         .child(
                             div()
+                                .w_full()
+                                .h(px(72.0))
                                 .px(space::LG)
-                                .py(space::MD)
                                 .border_t_1()
                                 .border_color(palette.border_subtle)
                                 .flex()
                                 .items_center()
                                 .justify_between()
                                 .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(space::MICRO)
-                                        .child(
-                                            apply_scale(div(), scale::UI_MEDIUM)
-                                                .text_color(palette.text_primary)
-                                                .child("默认工作视图"),
-                                        )
-                                        .child(
-                                            apply_scale(div(), scale::CAPTION)
-                                                .text_color(palette.text_secondary)
-                                                .child("设置启动 CST Pilot 时默认进入的工作模式"),
-                                        ),
+                                    apply_scale(div(), scale::BODY)
+                                        .text_color(palette.text_primary)
+                                        .child(cjk_inline_label("默认启动视图")),
                                 )
                                 .child(
                                     div()
-                                        .p(space::MICRO)
+                                        .h(height::CONTROL)
+                                        .p(space::XS)
                                         .rounded(radius::ROW)
-                                        .bg(palette.bg_track_recess)
+                                        .bg(palette.bg_surface)
                                         .flex()
+                                        .items_center()
                                         .gap(space::MICRO)
                                         .child(seg_pill(
                                             "settings-view-gui",
+                                            IconName::Layers,
                                             "图形",
                                             desktop_settings.default_view == DefaultViewDto::Gui,
                                             palette,
@@ -344,6 +330,7 @@ pub fn render_general_tab(
                                         ))
                                         .child(seg_pill(
                                             "settings-view-tui",
+                                            IconName::SquareTerminal,
                                             "终端",
                                             desktop_settings.default_view == DefaultViewDto::Tui,
                                             palette,
@@ -360,9 +347,9 @@ pub fn render_general_tab(
                 .flex_col()
                 .gap(space::SM)
                 .child(
-                    apply_scale(div(), scale::CAPTION_MEDIUM)
-                        .text_color(palette.text_secondary)
-                        .child("软件更新"),
+                    apply_scale(div(), scale::BODY_SEMIBOLD)
+                        .text_color(palette.text_primary)
+                        .child(cjk_inline_label("软件更新")),
                 )
                 .child(update_card),
         )
@@ -370,29 +357,37 @@ pub fn render_general_tab(
 
 fn seg_pill(
     id: &'static str,
+    icon: IconName,
     label: &'static str,
     active: bool,
     palette: &DesktopPalette,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    apply_scale(div(), scale::CAPTION_MEDIUM)
-        .id(id)
+    let base = if active {
+        apply_scale(div(), scale::UI_MEDIUM)
+            .bg(palette.bg_elevated)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .text_color(palette.text_primary)
+    } else {
+        apply_scale(div(), scale::UI)
+            .bg(gpui_kit::transparent_black())
+            .text_color(palette.text_secondary)
+    };
+
+    base.id(id)
         .test_support()
-        .h(height::COMPACT)
+        .h(height::INLINE)
         .px(space::MD)
         .rounded(radius::CONTROL)
-        .bg(if active {
-            palette.bg_elevated
-        } else {
-            gpui_kit::transparent_black()
-        })
-        .text_color(if active {
+        .flex()
+        .items_center()
+        .gap(space::XS)
+        .on_click(move |_, w, cx| on_click(w, cx))
+        .child(Icon::new(icon).size(px(14.0)).text_color(if active {
             palette.text_primary
         } else {
             palette.text_secondary
-        })
-        .flex()
-        .items_center()
-        .on_click(move |_, w, cx| on_click(w, cx))
+        }))
         .child(cjk_inline_label(label))
 }

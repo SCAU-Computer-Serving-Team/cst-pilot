@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
+use chrono::{DateTime, Local};
 use cst_client::tool_presenter::{ToolCallInput, ToolExecutionMeta, ToolResultInput};
 use cst_client::{
     ClientError, ClientHandle, ComposerDraft, DraftKey, OutboxItem, OutboxItemState,
@@ -19,13 +20,12 @@ use gpui_kit::{
 };
 use serde_json::Value;
 
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
     scale, space,
 };
 use crate::tools::bitlocker_card::{SecretInput, SecretInputEvent, find_pending_bitlocker_request};
-use crate::tools::normal_card::render_normal_tool_card;
+use crate::tools::normal_card::render_normal_tool_card_with_args;
 use crate::tools::{SpecialToolDispatchProps, render_special_tool_component};
 use crate::workbench::image_viewer::{
     LightboxImageTarget, gpui_image_from_bytes, gpui_image_from_handle,
@@ -47,7 +47,14 @@ pub enum MessageListEvent {
     OpenLightbox(LightboxImageTarget),
     SwitchToSession(String),
     FocusComposer,
-    MissingCredentials { provider: String },
+    RequestEditUserTurn {
+        session_id: String,
+        parent_entry_id: Option<String>,
+        user_text: String,
+    },
+    MissingCredentials {
+        provider: String,
+    },
     ErrorMessage(String),
     TopNotice(String),
 }
@@ -238,7 +245,7 @@ impl MessageListView {
         None
     }
 
-    fn edit_and_rewrite_user_turn(
+    pub fn apply_edit_and_rewrite_user_turn(
         &mut self,
         session_id: String,
         parent_entry_id: Option<String>,
@@ -271,6 +278,20 @@ impl MessageListView {
             })
             .detach();
         }
+    }
+
+    fn request_edit_user_turn(
+        &mut self,
+        session_id: String,
+        parent_entry_id: Option<String>,
+        user_text: String,
+        cx: &mut Context<Self>,
+    ) {
+        cx.emit(MessageListEvent::RequestEditUserTurn {
+            session_id,
+            parent_entry_id,
+            user_text,
+        });
     }
 
     fn retry_user_turn(
@@ -361,9 +382,9 @@ impl MessageListView {
         let images = extract_user_images(&user_entry.raw);
 
         let mut bubble = div()
-            .max_w(px(640.0))
-            .px(space::MD)
-            .py(space::SM)
+            .max_w(px(560.0))
+            .px(space::LG)
+            .py(space::MD)
             .rounded(radius::ROW)
             .bg(palette.bg_surface)
             .flex()
@@ -433,7 +454,7 @@ impl MessageListView {
         let text_retry = text;
         let ent_retry = entity.clone();
 
-        // Bottom-right `24×24px` icon-only action bar (`b0aK5`)
+        // Bottom-right `24×24px` icon-only action bar (`SHcR1` / `b0aK5`)
         let action_bar = div()
             .id(SharedString::from(format!("user-actions-{turn_key}")))
             .test_support()
@@ -452,8 +473,9 @@ impl MessageListView {
                 if is_copied {
                     palette.status_success
                 } else {
-                    palette.text_muted
+                    palette.text_secondary
                 },
+                false,
                 palette,
                 move |_, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(text_copy.clone()));
@@ -468,22 +490,24 @@ impl MessageListView {
             ))
             .child(icon_action_24(
                 format!("user-edit-btn-{turn_key}"),
-                IconName::SquarePen,
-                palette.text_muted,
+                IconName::Pencil,
+                palette.text_secondary,
+                false,
                 palette,
                 move |_, cx| {
                     let s = sid_edit.clone();
                     let p = parent_edit.clone();
                     let t = text_edit.clone();
                     ent_edit.update(cx, |this, cx| {
-                        this.edit_and_rewrite_user_turn(s, p, t, cx);
+                        this.request_edit_user_turn(s, p, t, cx);
                     });
                 },
             ))
             .child(icon_action_24(
                 format!("user-retry-btn-{turn_key}"),
                 IconName::RotateCcw,
-                palette.text_muted,
+                palette.text_secondary,
+                false,
                 palette,
                 move |_, cx| {
                     let s = sid_retry.clone();
@@ -519,9 +543,9 @@ impl MessageListView {
         let in_flight = item.state.is_in_flight();
 
         let mut bubble = div()
-            .max_w(px(640.0))
-            .px(space::MD)
-            .py(space::SM)
+            .max_w(px(560.0))
+            .px(space::LG)
+            .py(space::MD)
             .rounded(radius::ROW)
             .bg(palette.bg_surface)
             .opacity(if in_flight { 0.76 } else { 1.0 })
@@ -634,6 +658,7 @@ impl MessageListView {
                         format!("outbox-retry-{mid}"),
                         IconName::RotateCcw,
                         palette.text_secondary,
+                        false,
                         palette,
                         move |_, cx| {
                             let s = sid_retry.clone();
@@ -655,8 +680,9 @@ impl MessageListView {
                     ))
                     .child(icon_action_24(
                         format!("outbox-edit-{mid}"),
-                        IconName::SquarePen,
+                        IconName::Pencil,
                         palette.text_secondary,
+                        false,
                         palette,
                         move |_, cx| {
                             ent_edit.update(cx, |this, cx| {
@@ -678,6 +704,7 @@ impl MessageListView {
                         format!("outbox-remove-{mid}"),
                         IconName::Trash,
                         palette.status_danger,
+                        false,
                         palette,
                         move |_, cx| {
                             ent_rm.update(cx, |this, cx| {
@@ -736,9 +763,10 @@ impl MessageListView {
         let ent_lb = entity.clone();
         let copy_ref = &self.copy_tracker;
 
-        render_normal_tool_card(
+        render_normal_tool_card_with_args(
             &call.id,
             &call.name,
+            Some(&call.arguments),
             duration_ms,
             parsed_res.is_some(),
             parsed_res.as_ref().is_some_and(|r| r.is_error),
@@ -1134,7 +1162,9 @@ impl MessageListView {
                         .h(height::COMPACT)
                         .flex()
                         .items_center()
-                        .gap(space::XS);
+                        .gap(space::SM)
+                        .text_color(palette.text_secondary)
+                        .hover(|s| s.text_color(palette.text_primary));
 
                     if has_expandable_parts {
                         seg_hdr = seg_hdr.on_click(move |_, _, cx| {
@@ -1164,8 +1194,8 @@ impl MessageListView {
                             } else {
                                 IconName::ChevronRight
                             })
-                            .size(px(12.0))
-                            .text_color(palette.text_muted),
+                            .size(px(14.0))
+                            .text_color(palette.text_secondary),
                         );
                     }
 
@@ -1177,13 +1207,7 @@ impl MessageListView {
                         .child(seg_hdr);
 
                     if seg_expanded && has_expandable_parts {
-                        let mut expanded_col = div()
-                            .pl(space::MD)
-                            .border_l_1()
-                            .border_color(palette.border_subtle)
-                            .flex()
-                            .flex_col()
-                            .gap(space::SM);
+                        let mut expanded_col = div().w_full().flex().flex_col().gap(space::SM);
 
                         for (part_idx, tp) in segment.parts.iter().enumerate() {
                             expanded_col = expanded_col.child(self.render_process_part(
@@ -1370,8 +1394,9 @@ impl MessageListView {
             );
         }
 
-        // Persistent bottom-left `24×24px` icon-only action bar (`VS7mw`) once turn finishes
-        if !is_live_turn && !turn.assistants.is_empty() {
+        // Persistent bottom `24px` action bar (`VS7mw`): disabled (`opacity: 0.35`) while generating,
+        // unlocked with right-aligned `HH:mm` timestamp once turn finishes.
+        if is_live_turn || !turn.assistants.is_empty() {
             let copy_text = if !split.final_text.trim().is_empty() {
                 split.final_text.clone()
             } else if let Some(ref e) = split.assistant_error {
@@ -1380,7 +1405,7 @@ impl MessageListView {
                 String::new()
             };
             let copy_id = SharedString::from(format!("assistant-copy-{turn_key}"));
-            let is_copied = self.copy_tracker.is_copied(copy_id.as_ref());
+            let is_copied = !is_live_turn && self.copy_tracker.is_copied(copy_id.as_ref());
             let copy_id_click = copy_id.clone();
             let ent_copy = entity.clone();
 
@@ -1407,14 +1432,21 @@ impl MessageListView {
             let ut_retry = user_text_for_turn;
             let ent_retry = entity.clone();
 
-            let assistant_actions = div()
-                .id(SharedString::from(format!("assistant-actions-{turn_key}")))
-                .test_support()
-                .h(height::INLINE)
+            let ts_label_opt = (!is_live_turn)
+                .then(|| {
+                    turn.assistants
+                        .last()
+                        .map(|a| a.timestamp_ms)
+                        .filter(|&ts| ts > 0)
+                        .and_then(format_timestamp_hhmm)
+                })
+                .flatten();
+
+            let left_btns = div()
                 .flex()
                 .items_center()
-                .justify_start()
                 .gap(space::XS)
+                .opacity(if is_live_turn { 0.35 } else { 1.0 })
                 .child(icon_action_24(
                     format!("assistant-copy-btn-{turn_key}"),
                     if is_copied {
@@ -1425,8 +1457,9 @@ impl MessageListView {
                     if is_copied {
                         palette.status_success
                     } else {
-                        palette.text_muted
+                        palette.text_secondary
                     },
+                    is_live_turn,
                     palette,
                     move |_, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
@@ -1441,22 +1474,24 @@ impl MessageListView {
                 ))
                 .child(icon_action_24(
                     format!("assistant-edit-btn-{turn_key}"),
-                    IconName::SquarePen,
-                    palette.text_muted,
+                    IconName::Pencil,
+                    palette.text_secondary,
+                    is_live_turn,
                     palette,
                     move |_, cx| {
                         let s = sid_edit.clone();
                         let p = parent_edit.clone();
                         let t = ut_edit.clone();
                         ent_edit.update(cx, |this, cx| {
-                            this.edit_and_rewrite_user_turn(s, p, t, cx);
+                            this.request_edit_user_turn(s, p, t, cx);
                         });
                     },
                 ))
                 .child(icon_action_24(
                     format!("assistant-fork-btn-{turn_key}"),
                     IconName::GitFork,
-                    palette.text_muted,
+                    palette.text_secondary,
+                    is_live_turn,
                     palette,
                     move |_, cx| {
                         if fork_eid.is_empty() {
@@ -1472,7 +1507,8 @@ impl MessageListView {
                 .child(icon_action_24(
                     format!("assistant-retry-btn-{turn_key}"),
                     IconName::RotateCcw,
-                    palette.text_muted,
+                    palette.text_secondary,
+                    is_live_turn,
                     palette,
                     move |_, cx| {
                         let s = sid_retry.clone();
@@ -1483,6 +1519,23 @@ impl MessageListView {
                         });
                     },
                 ));
+
+            let assistant_actions = div()
+                .id(SharedString::from(format!("assistant-actions-{turn_key}")))
+                .test_support()
+                .w_full()
+                .h(height::INLINE)
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(space::MD)
+                .child(left_btns)
+                .children(ts_label_opt.map(|hhmm| {
+                    apply_scale(div(), scale::CAPTION)
+                        .font_family(mono_family.clone())
+                        .text_color(palette.text_muted)
+                        .child(SharedString::from(hhmm))
+                }));
 
             assistant_stack = assistant_stack.child(assistant_actions);
         }
@@ -1511,15 +1564,16 @@ impl MessageListView {
                 let ent_th = entity.clone();
                 let k_th = think_key.clone();
 
-                // Collapsed: ONLY `"已思考"` + right `8px` arrow; Expanded: `12px/16px` surface block WITHOUT nested scrollbar!
-                let hdr = apply_scale(div(), scale::CAPTION_MEDIUM)
+                // Collapsed: `"已思考"` + `gap(8px)` + `14px` arrow; hover brightens text without bg block
+                let hdr = apply_scale(div(), scale::UI)
                     .id(SharedString::from(format!("thinking-hdr-{think_key}")))
                     .test_support()
                     .h(height::INLINE)
                     .flex()
                     .items_center()
-                    .gap(space::XS)
-                    .text_color(palette.text_muted)
+                    .gap(space::SM)
+                    .text_color(palette.text_secondary)
+                    .hover(|s| s.text_color(palette.text_primary))
                     .on_click(move |_, _, cx| {
                         let k = k_th.clone();
                         ent_th.update(cx, |this, cx| {
@@ -1536,8 +1590,8 @@ impl MessageListView {
                         } else {
                             IconName::ChevronRight
                         })
-                        .size(px(8.0))
-                        .text_color(palette.text_muted),
+                        .size(px(14.0))
+                        .text_color(palette.text_secondary),
                     );
 
                 let mut col = div().w_full().flex().flex_col().gap(space::XS).child(hdr);
@@ -1779,37 +1833,35 @@ impl Render for MessageListView {
                     .flex()
                     .justify_center()
                     .child(
-                        render_frosted_surface(
-                            "scroll-to-bottom-btn",
-                            FrostedGlassSpec::popover_h2p2z(&palette),
-                            palette.bg_elevated,
-                            transparency_enabled,
-                            scale_factor,
-                        )
-                        .test_support()
-                        .h(height::FIELD)
-                        .px(space::LG)
-                        .rounded(radius::FULL)
-                        .border_1()
-                        .border_color(palette.border_hairline)
-                        .flex()
-                        .items_center()
-                        .gap(space::XS)
-                        .on_click(move |_, _, cx| {
-                            ent_btm.update(cx, |this, cx| {
-                                this.scroll_to_bottom_and_follow(cx);
-                            });
-                        })
-                        .child(
-                            Icon::new(IconName::ArrowDown)
-                                .size(px(14.0))
-                                .text_color(palette.text_primary),
-                        )
-                        .child(
-                            apply_scale(div(), scale::UI_MEDIUM)
-                                .text_color(palette.text_primary)
-                                .child(cjk_inline_label("回到底部")),
-                        ),
+                        div()
+                            .id("scroll-to-bottom-btn")
+                            .test_support()
+                            .h(height::CONTROL)
+                            .px(space::MD)
+                            .rounded(radius::FULL)
+                            .bg(palette.bg_elevated)
+                            .border_1()
+                            .border_color(palette.border_subtle)
+                            .shadow(palette.craft_lift_shadows())
+                            .flex()
+                            .items_center()
+                            .gap(space::TIGHT)
+                            .hover(|s| s.bg(palette.bg_surface))
+                            .on_click(move |_, _, cx| {
+                                ent_btm.update(cx, |this, cx| {
+                                    this.scroll_to_bottom_and_follow(cx);
+                                });
+                            })
+                            .child(
+                                Icon::new(IconName::ArrowDown)
+                                    .size(px(14.0))
+                                    .text_color(palette.text_secondary),
+                            )
+                            .child(
+                                apply_scale(div(), scale::UI_MEDIUM)
+                                    .text_color(palette.text_primary)
+                                    .child(cjk_inline_label("回到底部")),
+                            ),
                     ),
             );
         }
@@ -1818,14 +1870,20 @@ impl Render for MessageListView {
     }
 }
 
+fn format_timestamp_hhmm(ts_ms: u64) -> Option<String> {
+    let dt = DateTime::from_timestamp_millis(ts_ms as i64)?;
+    Some(dt.with_timezone(&Local).format("%H:%M").to_string())
+}
+
 fn icon_action_24(
     id: impl Into<SharedString>,
     icon: IconName,
     icon_color: gpui_kit::Hsla,
+    disabled: bool,
     palette: &DesktopPalette,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    div()
+    let mut btn = div()
         .id(id.into())
         .test_support()
         .w(height::INLINE)
@@ -1833,10 +1891,13 @@ fn icon_action_24(
         .rounded(radius::CONTROL)
         .flex()
         .items_center()
-        .justify_center()
-        .hover(|s| s.bg(palette.bg_item_hover))
-        .on_click(move |_, w, cx| on_click(w, cx))
-        .child(Icon::new(icon).size(px(13.0)).text_color(icon_color))
+        .justify_center();
+    if !disabled {
+        btn = btn
+            .hover(|s| s.bg(palette.bg_item_hover))
+            .on_click(move |_, w, cx| on_click(w, cx));
+    }
+    btn.child(Icon::new(icon).size(px(14.0)).text_color(icon_color))
 }
 
 fn to_tool_call_input(call: &ToolCallPart) -> ToolCallInput {

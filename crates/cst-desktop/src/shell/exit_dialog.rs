@@ -105,10 +105,10 @@ pub fn render_exit_confirm_dialog(
     .rounded(radius::ROW)
     .border_1()
     .border_color(palette.border_subtle)
-    .p(space::GROUP)
+    .p(px(20.0))
     .flex()
     .flex_col()
-    .gap(space::LG)
+    .gap(space::MD)
     .child(
         div()
             .relative()
@@ -178,7 +178,7 @@ pub fn render_exit_confirm_dialog(
                     .track_focus(confirm_focus)
                     .tab_index(0)
                     .h(height::CONTROL)
-                    .px(space::MD)
+                    .px(space::LG)
                     .rounded(radius::CONTROL)
                     .bg(palette.status_danger)
                     .text_color(palette.text_on_accent)
@@ -186,6 +186,7 @@ pub fn render_exit_confirm_dialog(
                     .items_center()
                     .justify_center()
                     .opacity(if exiting_in_progress { 0.65 } else { 1.0 })
+                    .hover(|s| s.bg(palette.status_danger_hover))
                     .on_click(move |_, window, cx| {
                         if !exiting_in_progress {
                             cb(window, cx);

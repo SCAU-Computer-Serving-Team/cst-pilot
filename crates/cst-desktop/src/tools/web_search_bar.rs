@@ -24,11 +24,7 @@ pub struct WebSearchBarProps<'a> {
     pub warning_hovered: bool,
 }
 
-/// Renders the standalone Web Search persistent bar (`web_search`,
-/// `cst-pilot-desktop.pen` 「07 · 工具与特殊工具」).
-/// Displays a `14×14px` search icon optically aligned with the `16px` title, expands to show the full
-/// keyword list & hit summary, and preserves all original keywords on partial failure with a frosted
-/// warning tooltip (`H2p2z`) on hover.
+/// Renders the standalone Web Search persistent bar (`web_search`, `cst-pilot-desktop.pen` `JQMQZ`).
 pub fn render_web_search_bar(
     props: WebSearchBarProps<'_>,
     palette: &DesktopPalette,
@@ -46,32 +42,65 @@ pub fn render_web_search_bar(
 
     let expand_key = format!("web-search-expand-{}", props.call_id);
     let warn_key = format!("web-search-warn-{}", props.call_id);
-    let ek_click = expand_key.clone();
+    let ek_click = expand_key;
 
-    let status_text = if is_running {
+    let count_text = if !props.queries.is_empty() {
+        format!("{} 个关键词", props.queries.len())
+    } else if is_running {
         "正在检索…".to_owned()
     } else if !props.summary.trim().is_empty() {
         props.summary.to_owned()
     } else if let Some(ok_cnt) = props.successful {
-        format!("已完成 {ok_cnt} 组检索")
+        format!("{ok_cnt} 个关键词")
     } else {
-        format!("共 {} 个检索词", props.queries.len())
+        "0 个关键词".to_owned()
     };
 
-    let mut right_row = div().flex().items_center().gap(space::SM);
+    let display_title = if props.title.trim().is_empty() || props.title == "联网检索" {
+        if is_running {
+            "正在联网检索"
+        } else {
+            "已联网检索"
+        }
+    } else {
+        props.title
+    };
 
-    if has_partial_warning {
-        let wk_hover = warn_key.clone();
+    let mut left_row = div()
+        .flex()
+        .items_center()
+        .gap(space::SM)
+        .min_w_0()
+        .child(
+            Icon::new(IconName::Globe)
+                .size(px(14.0))
+                .text_color(palette.accent_ink),
+        )
+        .child(
+            apply_scale(div(), scale::BODY_MEDIUM)
+                .truncate()
+                .text_color(palette.text_primary)
+                .child(cjk_inline_label(display_title)),
+        );
+
+    if is_running {
+        left_row = left_row.child(
+            Icon::new(IconName::LoaderCircle)
+                .size(px(14.0))
+                .text_color(palette.accent_ink),
+        );
+    } else if has_partial_warning {
+        let wk_hover = warn_key;
         let hover_cb = Rc::clone(&on_hover_warning);
-        right_row = right_row.child(
+        left_row = left_row.child(
             div()
                 .id(SharedString::from(format!(
                     "web-search-warn-icon-{}",
                     props.call_id
                 )))
                 .test_support()
-                .w(height::INLINE)
-                .h(height::INLINE)
+                .w(px(16.0))
+                .h(px(16.0))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -80,27 +109,27 @@ pub fn render_web_search_bar(
                 })
                 .child(
                     Icon::new(IconName::TriangleAlert)
-                        .size(px(14.0))
+                        .size(px(15.0))
                         .text_color(palette.status_warning),
                 ),
         );
+    } else {
+        left_row = left_row.child(
+            Icon::new(IconName::CircleCheck)
+                .size(px(16.0))
+                .text_color(palette.status_success),
+        );
     }
 
-    right_row = right_row
-        .child(
-            apply_scale(div(), scale::CAPTION)
-                .text_color(palette.text_secondary)
-                .child(SharedString::from(status_text)),
-        )
-        .child(
-            Icon::new(if props.expanded {
-                IconName::ChevronDown
-            } else {
-                IconName::ChevronRight
-            })
-            .size(px(12.0))
-            .text_color(palette.text_muted),
-        );
+    left_row = left_row.child(
+        Icon::new(if props.expanded {
+            IconName::ChevronDown
+        } else {
+            IconName::ChevronRight
+        })
+        .size(px(12.0))
+        .text_color(palette.text_secondary),
+    );
 
     let header_bar = div()
         .id(SharedString::from(format!(
@@ -108,46 +137,20 @@ pub fn render_web_search_bar(
             props.call_id
         )))
         .test_support()
-        .h(height::FIELD)
-        .px(space::MD)
+        .w_full()
+        .h(height::COMPACT)
         .flex()
         .items_center()
         .justify_between()
         .gap(space::MD)
-        .hover(|s| s.bg(palette.bg_item_hover))
         .on_click(move |_, w, cx| (on_toggle_expand)(ek_click.clone(), w, cx))
+        .child(left_row)
         .child(
-            div()
-                .flex()
-                .items_center()
-                .gap(space::SM)
-                .min_w_0()
-                .child(
-                    // `14×14px` icon optically aligned with `16px` title
-                    Icon::new(if is_running {
-                        IconName::Loader
-                    } else {
-                        IconName::Search
-                    })
-                    .size(px(14.0))
-                    .text_color(if is_running {
-                        palette.accent_solid
-                    } else {
-                        palette.text_secondary
-                    }),
-                )
-                .child(
-                    apply_scale(div(), scale::BODY_MEDIUM)
-                        .truncate()
-                        .text_color(palette.text_primary)
-                        .child(cjk_inline_label(if props.title.trim().is_empty() {
-                            "联网检索"
-                        } else {
-                            props.title
-                        })),
-                ),
-        )
-        .child(right_row);
+            apply_scale(div(), scale::CAPTION)
+                .flex_shrink_0()
+                .text_color(palette.text_secondary)
+                .child(SharedString::from(count_text)),
+        );
 
     let mut card = div()
         .id(SharedString::from(format!(
@@ -157,41 +160,33 @@ pub fn render_web_search_bar(
         .test_support()
         .relative()
         .w_full()
+        .px(space::LG)
+        .py(space::MD)
         .rounded(radius::SPECIAL)
         .border_1()
         .border_color(palette.border_subtle)
         .bg(palette.bg_special)
+        .shadow(palette.craft_lift_shadows())
         .flex()
         .flex_col()
+        .gap(space::MD)
         .child(header_bar);
 
     if props.expanded {
         let mut details = div()
-            .px(space::MD)
-            .pb(space::MD)
-            .pt(space::SM)
-            .border_t_1()
-            .border_color(palette.border_subtle)
+            .w_full()
+            .pt(space::XS)
             .flex()
             .flex_col()
             .gap(space::SM);
 
-        if !props.queries.is_empty() {
-            let mut tags = div().flex().flex_wrap().gap(space::XS);
-            for q in props.queries {
-                tags = tags.child(
-                    apply_scale(div(), scale::CAPTION)
-                        .px(space::SM)
-                        .py(space::MICRO)
-                        .rounded(radius::FULL)
-                        .border_1()
-                        .border_color(palette.border_subtle)
-                        .bg(palette.bg_surface)
-                        .text_color(palette.text_primary)
-                        .child(SharedString::from(q.clone())),
-                );
-            }
-            details = details.child(tags);
+        for q in props.queries {
+            details = details.child(
+                apply_scale(div(), scale::CAPTION)
+                    .w_full()
+                    .text_color(palette.text_primary)
+                    .child(SharedString::from(q.clone())),
+            );
         }
 
         for row in props.fields {
@@ -202,7 +197,7 @@ pub fn render_web_search_bar(
                     .justify_between()
                     .gap(space::MD)
                     .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                        apply_scale(div(), scale::CAPTION)
                             .text_color(palette.text_secondary)
                             .child(SharedString::from(row.label.clone())),
                     )

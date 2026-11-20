@@ -14,17 +14,18 @@ use serde_json::Value;
 use zeroize::Zeroizing;
 
 use crate::auth::cstoa_qr::{now_epoch_ms, parse_cstoa_oauth_payload, rasterize_qr_image_offline};
-use crate::background::{SkyPreset, render_login_9_stop_fade, render_sky_background};
+use crate::background::{SkyPreset, render_login_9_stop_fade, render_sky_background_rounded};
 use crate::shell::open_url_in_trusted_browser;
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
+    scale, space,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginMethodTab {
     CstoaQr,
-    OAuth,
     ApiKey,
+    OAuth,
 }
 
 #[derive(Debug, Clone)]
@@ -36,7 +37,8 @@ pub enum LoginViewEvent {
 }
 
 /// Login View (`cst-pilot-desktop.pen` 「04 · 账号与登录」 `tM7YQ` light / `jiQRy` dark):
-/// Left `864×800` dynamic sky shader canvas + Right `300px` centered login viewport.
+/// Full-bleed `$bg-workspace` with absolute left `864×800` dynamic sky shader canvas + 9-stop horizontal fade,
+/// and right `300px` centered login viewport (`172×172` QR box `cstoa-qr-image-box` with `148×148` QR image).
 pub struct LoginView {
     client: ClientHandle,
     tab: LoginMethodTab,
@@ -229,6 +231,7 @@ impl LoginView {
 
     fn render_cstoa_qr_pane(
         &mut self,
+        mono_family: SharedString,
         palette: &DesktopPalette,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -265,16 +268,17 @@ impl LoginView {
             None
         };
 
+        let has_live_qr = self.qr_image.is_some() && !expired;
+        let _ = &self.qr_flow_id;
         let qr_box = if let Some(ref qr_img) = self.qr_image
             && !expired
         {
             div()
                 .id("cstoa-qr-image-box")
                 .test_support()
-                .w(px(216.0))
-                .h(px(216.0))
-                .p(space::SM)
-                .rounded(radius::SPECIAL)
+                .w(px(172.0))
+                .h(px(172.0))
+                .rounded(radius::ROW)
                 .border_1()
                 .border_color(palette.border_subtle)
                 .bg(gpui_kit::white())
@@ -283,8 +287,8 @@ impl LoginView {
                 .justify_center()
                 .child(
                     img(qr_img.clone())
-                        .w(px(196.0))
-                        .h(px(196.0))
+                        .w(px(148.0))
+                        .h(px(148.0))
                         .object_fit(ObjectFit::Contain),
                 )
                 .into_any_element()
@@ -292,9 +296,10 @@ impl LoginView {
             div()
                 .id("cstoa-qr-refresh-placeholder")
                 .test_support()
-                .w(px(216.0))
-                .h(px(216.0))
-                .rounded(radius::SPECIAL)
+                .w(px(172.0))
+                .h(px(172.0))
+                .px(space::MD)
+                .rounded(radius::ROW)
                 .border_1()
                 .border_color(palette.border_subtle)
                 .bg(palette.bg_surface)
@@ -302,10 +307,9 @@ impl LoginView {
                 .flex_col()
                 .items_center()
                 .justify_center()
-                .gap(space::MD)
+                .gap(space::SM)
                 .child(
                     apply_scale(div(), scale::CAPTION)
-                        .px(space::MD)
                         .text_color(if self.qr_error.is_some() {
                             palette.status_danger
                         } else {
@@ -318,33 +322,29 @@ impl LoginView {
                         } else if let Some(ref err) = self.qr_error {
                             err.clone()
                         } else {
-                            SharedString::from("点击获取扫码二维码")
+                            SharedString::from("点击下方刷新获取二维码")
                         }),
                 )
-                .children((!self.qr_loading).then(|| {
-                    apply_scale(div(), scale::UI_MEDIUM)
-                        .id("cstoa-qr-refresh-btn")
-                        .test_support()
-                        .h(height::CONTROL)
-                        .px(space::MD)
-                        .rounded(radius::CONTROL)
-                        .bg(palette.accent_solid)
-                        .text_color(palette.text_on_accent)
-                        .flex()
-                        .items_center()
-                        .gap(space::XS)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.qr_image = None;
-                            this.start_cstoa_qr_flow(cx);
-                        }))
-                        .child(
-                            Icon::new(IconName::RefreshCw)
-                                .size(px(13.0))
-                                .text_color(palette.text_on_accent),
-                        )
-                        .child(cjk_inline_label("刷新二维码"))
-                }))
                 .into_any_element()
+        };
+
+        let countdown_text = match rem_secs {
+            Some(s) => {
+                let mins = s / 60;
+                let secs = s % 60;
+                SharedString::from(format!("{mins:02}:{secs:02}"))
+            }
+            None if self.qr_loading => SharedString::from("加载中"),
+            None if expired => SharedString::from("00:00"),
+            None => SharedString::from("待刷新"),
+        };
+
+        let dot_color = if has_live_qr {
+            palette.status_success
+        } else if self.qr_loading {
+            palette.status_warning
+        } else {
+            palette.text_muted
         };
 
         div()
@@ -354,15 +354,49 @@ impl LoginView {
             .items_center()
             .gap(space::MD)
             .child(qr_box)
+            // Always-present `6×6` status dot + monospace countdown + `"刷新二维码"` entry
             .child(
-                apply_scale(div(), scale::CAPTION)
-                    .text_color(palette.text_secondary)
-                    .child(match rem_secs {
-                        Some(s) => {
-                            SharedString::from(format!("请使用微信扫码确认（有效剩余 {s} 秒）"))
-                        }
-                        None => SharedString::from("使用科协专属账号扫码登录"),
-                    }),
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .gap(space::SM)
+                    .child(
+                        div()
+                            .w(px(6.0))
+                            .h(px(6.0))
+                            .rounded(radius::FULL)
+                            .bg(dot_color),
+                    )
+                    .child(
+                        apply_scale(div(), scale::CAPTION)
+                            .font_family(mono_family)
+                            .text_color(palette.text_secondary)
+                            .child(countdown_text),
+                    )
+                    .child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .id("cstoa-qr-refresh-btn")
+                            .test_support()
+                            .h(height::INLINE)
+                            .px(space::XS)
+                            .rounded(radius::CONTROL)
+                            .text_color(palette.text_secondary)
+                            .flex()
+                            .items_center()
+                            .gap(space::MICRO)
+                            .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.qr_image = None;
+                                this.start_cstoa_qr_flow(cx);
+                            }))
+                            .child(
+                                Icon::new(IconName::RefreshCw)
+                                    .size(px(12.0))
+                                    .text_color(palette.text_secondary),
+                            )
+                            .child(cjk_inline_label("刷新二维码")),
+                    ),
             )
     }
 }
@@ -371,21 +405,26 @@ impl Render for LoginView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme_global = DesktopThemeGlobal::current(cx);
         let palette = theme_global.palette;
+        let mono_family = theme_global.mono_font_family;
+        let scale_factor = window.scale_factor();
 
-        // Left `864×800` dynamic sky canvas (`tM7YQ` / `jiQRy`) with 9-stop horizontal right fade
+        // Underlying left `864×800` absolute sky canvas (`tM7YQ` / `jiQRy`) with 9-stop horizontal fade
         let left_canvas = div()
             .id("login-sky-canvas-864")
             .test_support()
-            .relative()
-            .w(crate::theme::layout::LOGIN_SHADER_WIDTH)
-            .min_w(px(360.0))
-            .flex_shrink(1.0)
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .left_0()
+            .w(layout::LOGIN_SHADER_WIDTH)
             .h_full()
             .overflow_hidden()
-            .child(render_sky_background(
+            .child(render_sky_background_rounded(
                 SkyPreset::login_for_theme(palette.mode),
                 self.sky_time_secs,
                 1.0,
+                [0.0; 4],
+                scale_factor,
             ))
             .child(render_login_9_stop_fade(&palette));
 
@@ -398,7 +437,7 @@ impl Render for LoginView {
 
         let tab_content = match self.tab {
             LoginMethodTab::CstoaQr => self
-                .render_cstoa_qr_pane(&palette, window, cx)
+                .render_cstoa_qr_pane(mono_family, &palette, window, cx)
                 .into_any_element(),
             LoginMethodTab::OAuth => {
                 let mut col = div().w_full().flex().flex_col().gap(space::SM);
@@ -423,10 +462,10 @@ impl Render for LoginView {
                                 .w_full()
                                 .h(height::FIELD)
                                 .px(space::MD)
-                                .rounded(radius::ROW)
+                                .rounded(radius::CONTROL)
                                 .border_1()
                                 .border_color(palette.border_strong)
-                                .bg(palette.bg_surface)
+                                .bg(palette.bg_workspace)
                                 .text_color(palette.text_primary)
                                 .flex()
                                 .items_center()
@@ -476,18 +515,23 @@ impl Render for LoginView {
                             .rounded(radius::CONTROL)
                             .border_1()
                             .border_color(if active {
-                                palette.accent_solid
+                                palette.border_strong
                             } else {
                                 palette.border_subtle
                             })
                             .bg(if active {
                                 palette.bg_item_active
                             } else {
-                                palette.bg_surface
+                                palette.bg_workspace
                             })
-                            .text_color(palette.text_primary)
+                            .text_color(if active {
+                                palette.text_primary
+                            } else {
+                                palette.text_secondary
+                            })
                             .flex()
                             .items_center()
+                            .hover(|s| s.bg(palette.bg_item_hover))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.selected_provider_id = pid_click.clone();
                                 cx.notify();
@@ -502,15 +546,20 @@ impl Render for LoginView {
                     .flex_col()
                     .gap(space::MD)
                     .child(provider_pills)
-                    .child(Input::new(&self.api_key_input))
-                    .child(Input::new(&self.base_url_input))
+                    .child(
+                        Input::new(&self.api_key_input)
+                            .h(height::FIELD)
+                            .mask_toggle(),
+                    )
+                    .child(Input::new(&self.base_url_input).h(height::FIELD))
                     .child(
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("login-apikey-save-btn")
                             .test_support()
                             .w_full()
-                            .h(height::FIELD)
-                            .rounded(radius::ROW)
+                            .h(height::CONTROL)
+                            .px(space::LG)
+                            .rounded(radius::CONTROL)
                             .bg(palette.accent_solid)
                             .text_color(palette.text_on_accent)
                             .flex()
@@ -528,12 +577,82 @@ impl Render for LoginView {
             }
         };
 
-        // Right `300px` centered login viewport
+        // Compact switching footer below QR / form (`APIKEY 登录` / `OAuth 登录` / `自定义网关`)
+        let mode_footer = div()
+            .w_full()
+            .pt(space::SM)
+            .border_t_1()
+            .border_color(palette.border_subtle)
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(space::XS)
+            .child(if self.tab == LoginMethodTab::CstoaQr {
+                login_compact_switch_btn(
+                    "login-tab-apikey",
+                    "APIKEY 登录",
+                    false,
+                    &palette,
+                    cx.listener(|this, _, _, cx| {
+                        this.tab = LoginMethodTab::ApiKey;
+                        cx.notify();
+                    }),
+                )
+                .into_any_element()
+            } else {
+                login_compact_switch_btn(
+                    "login-tab-cstoa",
+                    "扫码登录",
+                    false,
+                    &palette,
+                    cx.listener(|this, _, _, cx| {
+                        this.tab = LoginMethodTab::CstoaQr;
+                        cx.notify();
+                    }),
+                )
+                .into_any_element()
+            })
+            .child(if self.tab == LoginMethodTab::OAuth {
+                login_compact_switch_btn(
+                    "login-tab-apikey",
+                    "APIKEY 登录",
+                    false,
+                    &palette,
+                    cx.listener(|this, _, _, cx| {
+                        this.tab = LoginMethodTab::ApiKey;
+                        cx.notify();
+                    }),
+                )
+                .into_any_element()
+            } else {
+                login_compact_switch_btn(
+                    "login-tab-oauth",
+                    "OAuth 登录",
+                    false,
+                    &palette,
+                    cx.listener(|this, _, _, cx| {
+                        this.tab = LoginMethodTab::OAuth;
+                        cx.notify();
+                    }),
+                )
+                .into_any_element()
+            })
+            .child(login_compact_switch_btn(
+                "login-goto-custom-gateway-btn",
+                "自定义网关",
+                false,
+                &palette,
+                cx.listener(|_, _, _, cx| {
+                    cx.emit(LoginViewEvent::NavigateToCustomGatewaySettings);
+                }),
+            ));
+
+        // Right login main area overlapping smoothly from the fade blend zone rightward
         let right_viewport = div()
-            .flex_1()
-            .min_w(px(360.0))
+            .relative()
+            .ml_auto()
+            .w(px(560.0))
             .h_full()
-            .bg(palette.bg_workspace)
             .flex()
             .items_center()
             .justify_center()
@@ -546,96 +665,57 @@ impl Render for LoginView {
                     .flex_shrink_0()
                     .flex()
                     .flex_col()
+                    .items_center()
                     .gap(space::LG)
                     .child(
                         div()
+                            .w_full()
                             .flex()
                             .flex_col()
+                            .items_center()
                             .gap(space::XS)
                             .child(
                                 apply_scale(div(), scale::TITLE)
                                     .text_color(palette.text_primary)
-                                    .child(cjk_inline_label("登录模型服务")),
+                                    .child(cjk_inline_label(match self.tab {
+                                        LoginMethodTab::CstoaQr => "CSTOA 扫码登录",
+                                        LoginMethodTab::ApiKey => "APIKEY 凭据登录",
+                                        LoginMethodTab::OAuth => "OAuth 授权登录",
+                                    })),
                             )
                             .child(
                                 apply_scale(div(), scale::CAPTION)
                                     .text_color(palette.text_secondary)
-                                    .child("各模型服务凭据彼此独立，任一就绪即可开始诊断。"),
+                                    .child(match self.tab {
+                                        LoginMethodTab::CstoaQr => {
+                                            "使用微信扫描二维码登录科协专属服务"
+                                        }
+                                        LoginMethodTab::ApiKey => {
+                                            "各服务凭据独立保存，就绪即可开始诊断"
+                                        }
+                                        LoginMethodTab::OAuth => "在系统浏览器中完成第三方账号授权",
+                                    }),
                             ),
                     )
-                    // 3-tab selector (`CSTOA / OAuth / APIKEY`)
-                    .child(
-                        div()
-                            .w_full()
-                            .p(space::MICRO)
-                            .rounded(radius::ROW)
-                            .bg(palette.bg_surface)
-                            .flex()
-                            .gap(space::MICRO)
-                            .child(login_tab_btn(
-                                "login-tab-cstoa",
-                                "CSTOA 扫码",
-                                self.tab == LoginMethodTab::CstoaQr,
-                                &palette,
-                                cx.listener(|this, _, _, cx| {
-                                    this.tab = LoginMethodTab::CstoaQr;
-                                    cx.notify();
-                                }),
-                            ))
-                            .child(login_tab_btn(
-                                "login-tab-oauth",
-                                "OAuth",
-                                self.tab == LoginMethodTab::OAuth,
-                                &palette,
-                                cx.listener(|this, _, _, cx| {
-                                    this.tab = LoginMethodTab::OAuth;
-                                    cx.notify();
-                                }),
-                            ))
-                            .child(login_tab_btn(
-                                "login-tab-apikey",
-                                "API Key",
-                                self.tab == LoginMethodTab::ApiKey,
-                                &palette,
-                                cx.listener(|this, _, _, cx| {
-                                    this.tab = LoginMethodTab::ApiKey;
-                                    cx.notify();
-                                }),
-                            )),
-                    )
                     .child(tab_content)
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .id("login-goto-custom-gateway-btn")
-                            .test_support()
-                            .w_full()
-                            .h(height::CONTROL)
-                            .rounded(radius::CONTROL)
-                            .text_color(palette.accent_solid)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(|_, _, _, cx| {
-                                cx.emit(LoginViewEvent::NavigateToCustomGatewaySettings);
-                            }))
-                            .child(cjk_inline_label("配置自定义模型网关 →")),
-                    ),
+                    .child(mode_footer),
             );
 
         div()
             .id("login-view-tm7yq")
             .test_support()
+            .relative()
             .size_full()
+            .overflow_hidden()
+            .bg(palette.bg_workspace)
             .flex()
             .flex_row()
-            .items_stretch()
             .child(left_canvas)
             .child(right_viewport)
     }
 }
 
-fn login_tab_btn<F>(
+fn login_compact_switch_btn<F>(
     id: &'static str,
     label: &'static str,
     active: bool,
@@ -648,11 +728,11 @@ where
     apply_scale(div(), scale::CAPTION_MEDIUM)
         .id(id)
         .test_support()
-        .flex_1()
-        .h(height::CONTROL)
+        .h(height::COMPACT)
+        .px(space::SM)
         .rounded(radius::CONTROL)
         .bg(if active {
-            palette.bg_elevated
+            palette.bg_item_active
         } else {
             gpui_kit::transparent_black()
         })
@@ -664,6 +744,7 @@ where
         .flex()
         .items_center()
         .justify_center()
+        .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
         .on_click(on_click)
         .child(cjk_inline_label(label))
 }

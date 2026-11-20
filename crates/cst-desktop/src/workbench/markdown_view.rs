@@ -2,11 +2,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use gpui::{Overflow, StyleRefinement, rems};
+use gpui::{FontWeight, Overflow, StyleRefinement, rems};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::Easing;
+use gpui_kit::base::text::{
+    SelectionFormat, TextView, TextViewMotion, TextViewState, TextViewStyle,
+};
 use gpui_kit::component::Icon;
-use gpui_kit::component::highlighter::HighlightTheme;
-use gpui_kit::component::text::{SelectionFormat, TextView, TextViewState, TextViewStyle};
 use gpui_kit::{
     App, AppContext as _, ClipboardItem, Context, CursorStyle, Entity, InteractiveElement,
     IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
@@ -87,17 +89,20 @@ pub fn build_markdown_style(palette: &DesktopPalette) -> TextViewStyle {
 
     let code_block_style = StyleRefinement::default().pr(px(40.0)).rounded(radius::ROW);
 
-    let mut style = TextViewStyle::default()
-        .paragraph_gap(rems(1.0))
-        .table(table_style)
-        .code_block(code_block_style);
-    style.is_dark = palette.mode.is_dark();
-    style.highlight_theme = if palette.mode.is_dark() {
-        HighlightTheme::default_dark()
-    } else {
-        HighlightTheme::default_light()
-    };
-    style
+    TextViewStyle::default()
+        .with_foreground(palette.text_primary)
+        .with_muted_foreground(palette.text_secondary)
+        .with_link(palette.accent_ink)
+        .with_code_background(palette.bg_surface)
+        .with_border(palette.border_subtle)
+        .with_paragraph_gap(rems(1.0))
+        .with_heading(|level| match level {
+            1 | 2 => StyleRefinement::default().font_weight(FontWeight::SEMIBOLD),
+            _ => StyleRefinement::default().font_weight(FontWeight::SEMIBOLD),
+        })
+        .with_table(table_style)
+        .with_code_block(code_block_style)
+        .with_dark(palette.mode.is_dark())
 }
 
 /// Renders a streaming or finalized assistant Markdown block backed by a stable `Entity<TextViewState>`.
@@ -110,6 +115,14 @@ pub fn render_assistant_markdown(
     let copied_code_spans: Arc<Mutex<BTreeMap<usize, Instant>>> =
         Arc::new(Mutex::new(BTreeMap::new()));
     let state_weak = state.downgrade();
+    let motion = if is_streaming {
+        TextViewMotion::default()
+            .with_stream_fade(Duration::from_millis(280))
+            .with_stream_fade_stagger(Duration::from_millis(10))
+            .with_stream_fade_easing(Easing::EaseOut)
+    } else {
+        TextViewMotion::default()
+    };
 
     apply_scale(div(), scale::BODY)
         .w_full()
@@ -120,7 +133,7 @@ pub fn render_assistant_markdown(
                 .style(build_markdown_style(palette))
                 .selectable(true)
                 .scrollable(false)
-                .stream_fade(is_streaming)
+                .motion(motion)
                 .code_block_actions(move |block, _window, _cx| {
                     let span_start = block.span.as_ref().map(|s| s.start).unwrap_or(0);
                     let copied_recently = copied_code_spans

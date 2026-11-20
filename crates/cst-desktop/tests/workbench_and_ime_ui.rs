@@ -600,9 +600,9 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
         window.render_frame(cx);
         // `/` slash completion popover (`p2biT`) must be visible!
         assert!(window.find("composer-completion-popover-p2bit").visible());
-        assert!(window.find("slash-item-disk-space").visible());
+        assert!(window.find("slash-item-disk").visible());
 
-        // Press `enter` to accept `/skill:disk-space` into an atomic `InlineToken`!
+        // Press `enter` to accept `/skill:disk` into an atomic `InlineToken`!
         window.press("enter", cx);
         assert!(
             window
@@ -624,14 +624,14 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
     })
     .unwrap();
 
-    // Verify GUI <-> TUI shared `WorkspaceState` draft holds both `skill: "disk-space"` and `"你好，排查蓝屏"`
+    // Verify GUI <-> TUI shared `WorkspaceState` draft holds both `skill: "disk"` and `"你好，排查蓝屏"`
     let (draft_skill, draft_text) = handle.with_workspace_mut(|ws| {
         ws.switch_view(WorkspaceView::Tui, None);
         ws.switch_view(WorkspaceView::Gui, None);
         let d = ws.draft(&DraftKey::NewSession).unwrap();
         (d.skill_name().map(str::to_owned), d.text.clone())
     });
-    assert_eq!(draft_skill.as_deref(), Some("disk-space"));
+    assert_eq!(draft_skill.as_deref(), Some("disk"));
     assert_eq!(draft_text, "你好，排查蓝屏");
 
     // 3. Press `enter` (with IME idle) -> optimistic two-phase Home submission transitions to `ShellRoute::Session`!
@@ -655,7 +655,7 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
         assert_eq!(guard.sent_messages.len(), 1);
         assert_eq!(
             guard.sent_messages[0].get("skill").and_then(Value::as_str),
-            Some("disk-space")
+            Some("disk")
         );
         assert_eq!(
             guard.sent_messages[0].get("text").and_then(Value::as_str),

@@ -2,9 +2,7 @@ use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use cst_client::{
-    ClientError, ClientHandle, ComposerDraft, DraftKey, InlineToken as DraftToken, SendMode,
-};
+use cst_client::{ClientError, ClientHandle, ComposerDraft, DraftKey, InlineToken as DraftToken};
 use gpui::{
     ClipboardEntry, ClipboardItem, EntityInputHandler, ExternalPaths, ImageSource, KeyDownEvent,
     ObjectFit, PathPromptOptions, StyledImage as _,
@@ -18,6 +16,7 @@ use gpui_kit::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Task, TestSupportExt, Window, div, img, px,
+    rgba,
 };
 use serde_json::Value;
 
@@ -61,58 +60,58 @@ pub struct SlashEntrySpec {
 
 pub const SLASH_CATALOG: &[SlashEntrySpec] = &[
     SlashEntrySpec {
-        command: "/skill:cst-overview",
-        short_label: "cst-overview",
-        description: "整机软硬件与运行状态快速巡检",
+        command: "/skill:disk",
+        short_label: "disk",
+        description: "分区容量、磁盘健康与目录空间排查",
         is_skill_or_token: true,
         nav_target: None,
     },
     SlashEntrySpec {
-        command: "/skill:bsod-triage",
-        short_label: "bsod-triage",
-        description: "蓝屏转储、错误代码与驱动故障定位",
+        command: "/skill:ls",
+        short_label: "ls",
+        description: "浏览指定目录结构与文件属性",
         is_skill_or_token: true,
         nav_target: None,
     },
     SlashEntrySpec {
-        command: "/skill:disk-space",
-        short_label: "disk-space",
-        description: "分区剩余容量与大体积目录排查",
+        command: "/skill:sys",
+        short_label: "sys",
+        description: "整机硬件、处理器、内存、显卡与传感器采样",
         is_skill_or_token: true,
         nav_target: None,
     },
     SlashEntrySpec {
-        command: "/skill:perf-slow",
-        short_label: "perf-slow",
-        description: "卡顿掉帧、高占用进程与温度功耗分析",
-        is_skill_or_token: true,
-        nav_target: None,
-    },
-    SlashEntrySpec {
-        command: "/skill:network-diag",
-        short_label: "network-diag",
-        description: "网卡、DNS、代理与网关连通性诊断",
-        is_skill_or_token: true,
-        nav_target: None,
-    },
-    SlashEntrySpec {
-        command: "/skill:startup-audit",
-        short_label: "startup-audit",
+        command: "/skill:startup",
+        short_label: "startup",
         description: "开机自启项、计划任务与第三方服务审查",
         is_skill_or_token: true,
         nav_target: None,
     },
     SlashEntrySpec {
-        command: "/skill:software-issue",
-        short_label: "software-issue",
-        description: "软件闪退、运行库缺失与安装报错排查",
+        command: "/skill:eventlog",
+        short_label: "eventlog",
+        description: "系统与应用程序关键事件日志检索",
+        is_skill_or_token: true,
+        nav_target: None,
+    },
+    SlashEntrySpec {
+        command: "/skill:driver",
+        short_label: "driver",
+        description: "异常设备、驱动版本与硬件连接排查",
+        is_skill_or_token: true,
+        nav_target: None,
+    },
+    SlashEntrySpec {
+        command: "/skill:runbook",
+        short_label: "runbook",
+        description: "生成可审阅的手动修复命令清单",
         is_skill_or_token: true,
         nav_target: None,
     },
     SlashEntrySpec {
         command: "/skill:bitlocker",
         short_label: "bitlocker",
-        description: "BitLocker 卷状态核查、解锁与全盘解密",
+        description: "BitLocker 卷状态核查、解锁与关闭加密",
         is_skill_or_token: true,
         nav_target: None,
     },
@@ -133,7 +132,7 @@ pub const SLASH_CATALOG: &[SlashEntrySpec] = &[
     SlashEntrySpec {
         command: "/export",
         short_label: "export",
-        description: "预览并导出当前会话为图片或网页",
+        description: "预览并导出当前会话",
         is_skill_or_token: false,
         nav_target: Some(SlashNavigationTarget::Export),
     },
@@ -145,6 +144,30 @@ pub const SLASH_CATALOG: &[SlashEntrySpec] = &[
         nav_target: Some(SlashNavigationTarget::ForkLatest),
     },
 ];
+
+fn icon_for_token_key(key: &str) -> IconName {
+    if key.starts_with("file:") {
+        return IconName::FileText;
+    }
+    let normalized = key
+        .strip_prefix("/skill:")
+        .or_else(|| key.strip_prefix('/'))
+        .unwrap_or(key);
+    match normalized {
+        "disk" => IconName::HardDrive,
+        "ls" => IconName::FolderOpen,
+        "sys" => IconName::Cpu,
+        "startup" => IconName::Play,
+        "eventlog" => IconName::FileText,
+        "driver" => IconName::Settings2,
+        "runbook" => IconName::FileTerminal,
+        "bitlocker" => IconName::LockKeyhole,
+        "tree" => IconName::GitBranch,
+        "export" => IconName::FileText,
+        "fork" => IconName::GitFork,
+        _ => IconName::Layers,
+    }
+}
 
 #[derive(Debug, Clone)]
 enum CompletionPopupState {
@@ -262,6 +285,15 @@ impl ComposerView {
 
     pub fn draft_key(&self) -> &DraftKey {
         &self.draft_key
+    }
+
+    pub fn has_unsent_draft_content(&self, cx: &App) -> bool {
+        let content = self.textarea.read(cx).content();
+        if !content.text().trim().is_empty() || !content.tokens().is_empty() {
+            return true;
+        }
+        self.client
+            .with_workspace(|ws| ws.draft(&self.draft_key).is_some_and(|d| !d.is_empty()))
     }
 
     /// Switches this composer between `DraftKey::NewSession` and `DraftKey::Session(id)` without losing drafts.
@@ -1044,6 +1076,7 @@ impl ComposerView {
 
     fn render_completion_popover(
         &self,
+        mono_family: SharedString,
         palette: &DesktopPalette,
         transparency_enabled: bool,
         scale_factor: f32,
@@ -1084,6 +1117,7 @@ impl ComposerView {
                 for (idx, item) in items.iter().enumerate() {
                     let is_sel = idx == *selected_idx;
                     let ent = entity.clone();
+                    let icon = icon_for_token_key(item.short_label);
                     scroll = scroll.child(
                         apply_scale(div(), scale::UI)
                             .id(SharedString::from(format!(
@@ -1103,7 +1137,7 @@ impl ComposerView {
                             .items_center()
                             .justify_between()
                             .gap(space::MD)
-                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .hover(|s| s.bg(palette.bg_item_active))
                             .on_click(move |_, w, cx| {
                                 ent.update(cx, |this, cx| {
                                     if let Some(CompletionPopupState::Slash {
@@ -1117,9 +1151,32 @@ impl ComposerView {
                                 });
                             })
                             .child(
-                                apply_scale(div(), scale::CAPTION_MEDIUM)
-                                    .text_color(palette.text_primary)
-                                    .child(item.command),
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(space::SM)
+                                    .child(
+                                        div()
+                                            .w(px(20.0))
+                                            .h(px(20.0))
+                                            .rounded(px(4.0))
+                                            .bg(palette.accent_subtle)
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .flex_shrink_0()
+                                            .child(
+                                                Icon::new(icon)
+                                                    .size(px(13.0))
+                                                    .text_color(palette.accent_ink),
+                                            ),
+                                    )
+                                    .child(
+                                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                                            .font_family(mono_family.clone())
+                                            .text_color(palette.text_primary)
+                                            .child(item.command),
+                                    ),
                             )
                             .child(
                                 apply_scale(div(), scale::CAPTION)
@@ -1163,7 +1220,7 @@ impl ComposerView {
                             .flex()
                             .items_center()
                             .gap(space::SM)
-                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .hover(|s| s.bg(palette.bg_item_active))
                             .on_click(move |_, w, cx| {
                                 ent.update(cx, |this, cx| {
                                     if let Some(CompletionPopupState::Files {
@@ -1220,10 +1277,10 @@ impl Render for ComposerView {
         let parsed_queue =
             ParsedQueueSnapshot::from_json(active_session.as_ref().and_then(|s| s.queue.as_ref()));
 
-        let (draft_images, send_mode) = self.client.with_workspace(|ws| {
+        let draft_images = self.client.with_workspace(|ws| {
             ws.draft(&self.draft_key)
-                .map(|d| (d.images.clone(), d.send_mode))
-                .unwrap_or_else(|| (Vec::new(), SendMode::Direct))
+                .map(|d| d.images.clone())
+                .unwrap_or_default()
         });
 
         let empty_models = cst_client::ModelsSnapshot::default();
@@ -1396,7 +1453,7 @@ impl Render for ComposerView {
                         .relative()
                         .w(px(80.0))
                         .h(px(64.0))
-                        .rounded(radius::ROW)
+                        .rounded(radius::CONTROL)
                         .border_1()
                         .border_color(palette.border_subtle)
                         .bg(palette.bg_surface)
@@ -1423,17 +1480,16 @@ impl Render for ComposerView {
                                 .id(SharedString::from(format!("composer-draft-thumb-rm-{idx}")))
                                 .test_support()
                                 .absolute()
-                                .top(space::MICRO)
-                                .right(space::MICRO)
-                                .w(px(18.0))
-                                .h(px(18.0))
+                                .top(space::XS)
+                                .right(space::XS)
+                                .w(px(20.0))
+                                .h(px(20.0))
                                 .rounded(radius::FULL)
-                                .bg(palette.bg_modal)
-                                .border_1()
-                                .border_color(palette.border_subtle)
+                                .bg(rgba(0x1111_14BF))
                                 .flex()
                                 .items_center()
                                 .justify_center()
+                                .hover(|s| s.bg(palette.status_danger))
                                 .on_click(move |_, _, cx| {
                                     cx.stop_propagation();
                                     ent_rm.update(cx, |this, cx| {
@@ -1443,7 +1499,7 @@ impl Render for ComposerView {
                                 .child(
                                     Icon::new(IconName::X)
                                         .size(px(11.0))
-                                        .text_color(palette.text_primary),
+                                        .text_color(palette.text_on_accent),
                                 ),
                         ),
                 );
@@ -1460,39 +1516,50 @@ impl Render for ComposerView {
             .token(move |tok_ctx, _window, _cx| {
                 let tok = tok_ctx.token();
                 let label = tok.label().clone();
-                let is_file = tok.id().starts_with("file:");
+                let token_icon = icon_for_token_key(tok.id().as_ref());
                 let span_range = tok_ctx.range();
                 let ent_click = ent_tok.clone();
 
-                apply_scale(div(), scale::CAPTION_MEDIUM)
+                div()
                     .h(height::COMPACT)
-                    .px(space::SM)
+                    .pl(space::XS)
+                    .pr(space::SM)
                     .rounded(radius::CONTROL)
                     .border_1()
-                    .border_color(palette.border_subtle)
-                    .bg(palette.bg_surface)
-                    .text_color(palette.text_primary)
+                    .border_color(palette.border_hairline)
+                    .bg(palette.bg_special)
                     .flex()
                     .items_center()
-                    .gap(space::XS)
+                    .gap(space::TIGHT)
                     .child(
-                        Icon::new(if is_file {
-                            IconName::FileText
-                        } else {
-                            IconName::Layers
-                        })
-                        .size(px(13.0))
-                        .text_color(palette.accent_solid),
+                        div()
+                            .w(px(20.0))
+                            .h(px(20.0))
+                            .rounded(px(4.0))
+                            .bg(palette.accent_subtle)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .flex_shrink_0()
+                            .child(
+                                Icon::new(token_icon)
+                                    .size(px(13.0))
+                                    .text_color(palette.accent_ink),
+                            ),
                     )
-                    .child(cjk_inline_label(label))
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label(label)),
+                    )
                     .child(
                         div()
                             .id(SharedString::from(format!(
                                 "inline-token-rm-{}",
                                 span_range.start
                             )))
-                            .w(px(16.0))
-                            .h(px(16.0))
+                            .w(px(18.0))
+                            .h(px(18.0))
                             .rounded(radius::CONTROL)
                             .flex()
                             .items_center()
@@ -1507,7 +1574,7 @@ impl Render for ComposerView {
                             .child(
                                 Icon::new(IconName::X)
                                     .size(px(11.0))
-                                    .text_color(palette.text_secondary),
+                                    .text_color(palette.text_muted),
                             ),
                     )
             })
@@ -1591,52 +1658,6 @@ impl Render for ComposerView {
                     .text_color(palette.text_secondary),
             );
 
-        // Busy session delivery mode toggle (`排队` vs `插话`)
-        let delivery_toggle = is_session_running.then(|| {
-            let ent_mode = entity.clone();
-            let is_steer = send_mode == SendMode::Steer;
-            apply_scale(div(), scale::CAPTION_MEDIUM)
-                .id("composer-delivery-mode-btn")
-                .test_support()
-                .h(height::COMPACT)
-                .px(space::SM)
-                .rounded(radius::CONTROL)
-                .border_1()
-                .border_color(if is_steer {
-                    palette.accent_solid
-                } else {
-                    palette.border_subtle
-                })
-                .bg(if is_steer {
-                    palette.accent_subtle
-                } else {
-                    palette.bg_surface
-                })
-                .text_color(if is_steer {
-                    palette.accent_solid
-                } else {
-                    palette.text_secondary
-                })
-                .flex()
-                .items_center()
-                .on_click(move |_, _, cx| {
-                    ent_mode.update(cx, |this, cx| {
-                        let key = this.draft_key.clone();
-                        this.last_synced_edit_rev = this.client.with_workspace_mut(|ws| {
-                            let d = ws.draft_mut(key.clone());
-                            d.send_mode = if d.send_mode == SendMode::Steer {
-                                SendMode::Queue
-                            } else {
-                                SendMode::Steer
-                            };
-                            ws.draft_edit_revision(&key)
-                        });
-                        cx.notify();
-                    });
-                })
-                .child(cjk_inline_label(if is_steer { "插话" } else { "排队" }))
-        });
-
         let ent_ctx_btn = entity.clone();
         let prov_for_ctx = cur_provider.clone();
         let context_ring = render_context_ring_button(
@@ -1700,46 +1721,18 @@ impl Render for ComposerView {
                     .text_color(palette.text_secondary),
             );
 
-        let abort_btn = if is_session_running && let DraftKey::Session(ref sid) = self.draft_key {
-            let sid_abort = sid.clone();
-            let ent_abort = entity.clone();
-            Some(
-                div()
-                    .id("composer-abort-btn")
-                    .test_support()
-                    .w(height::COMPACT)
-                    .h(height::COMPACT)
-                    .rounded(radius::CONTROL)
-                    .border_1()
-                    .border_color(palette.border_strong)
-                    .bg(palette.bg_elevated)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .hover(|s| s.bg(palette.bg_item_hover))
-                    .on_click(move |_, _, cx| {
-                        let s = sid_abort.clone();
-                        ent_abort.update(cx, |this, cx| {
-                            let c = this.client.clone();
-                            cx.spawn(async move |weak, cx| {
-                                if let Err(e) = c.abort_session(s).await {
-                                    let _ = weak.update(cx, |_, cx| {
-                                        cx.emit(ComposerHostEvent::ErrorMessage(e.to_string()));
-                                    });
-                                }
-                            })
-                            .detach();
-                        });
-                    })
-                    .child(
-                        Icon::new(IconName::Square)
-                            .size(px(12.0))
-                            .text_color(palette.status_danger),
-                    ),
-            )
-        } else {
-            None
+        // Unified `28×28px` primary button (`composer-send-btn-b0mrik`, `OQrq0`):
+        // when session is running AND draft has neither text/tokens nor attached images, displays `12px` white `Square` to abort;
+        // otherwise displays `14px` white `ArrowUp` to send/enqueue.
+        let ta_content = self.textarea.read(cx).content();
+        let has_draft_content = !ta_content.text().trim().is_empty()
+            || !ta_content.tokens().is_empty()
+            || !draft_images.is_empty();
+        let abort_session_id = match (&self.draft_key, is_session_running && !has_draft_content) {
+            (DraftKey::Session(sid), true) => Some(sid.clone()),
+            _ => None,
         };
+        let is_abort_mode = abort_session_id.is_some();
 
         let ent_send = entity.clone();
         let send_btn = div()
@@ -1754,29 +1747,46 @@ impl Render for ComposerView {
             .justify_center()
             .hover(|s| s.bg(palette.accent_hover))
             .on_click(move |_, w, cx| {
-                ent_send.update(cx, |this, cx| this.trigger_submit(w, cx));
+                if let Some(ref sid_abort) = abort_session_id {
+                    let s = sid_abort.clone();
+                    ent_send.update(cx, |this, cx| {
+                        let c = this.client.clone();
+                        cx.spawn(async move |weak, cx| {
+                            if let Err(e) = c.abort_session(s).await {
+                                let _ = weak.update(cx, |_, cx| {
+                                    cx.emit(ComposerHostEvent::ErrorMessage(e.to_string()));
+                                });
+                            }
+                        })
+                        .detach();
+                    });
+                } else {
+                    ent_send.update(cx, |this, cx| this.trigger_submit(w, cx));
+                }
             })
-            .child(
+            .child(if is_abort_mode {
+                Icon::new(IconName::Square)
+                    .size(px(12.0))
+                    .text_color(palette.text_on_accent)
+            } else {
                 Icon::new(IconName::ArrowUp)
                     .size(px(14.0))
-                    .text_color(palette.text_on_accent),
-            );
+                    .text_color(palette.text_on_accent)
+            });
 
-        let mut right_cluster = div().flex().items_center().gap(space::SM).child(
-            div()
-                .flex()
-                .items_center()
-                .gap(space::XS)
-                .child(context_ring)
-                .child(model_btn),
-        );
-        if let Some(dt) = delivery_toggle {
-            right_cluster = right_cluster.child(dt);
-        }
-        if let Some(ab) = abort_btn {
-            right_cluster = right_cluster.child(ab);
-        }
-        right_cluster = right_cluster.child(send_btn);
+        let right_cluster = div()
+            .flex()
+            .items_center()
+            .gap(space::SM)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::XS)
+                    .child(context_ring)
+                    .child(model_btn),
+            )
+            .child(send_btn);
 
         let action_bar = div()
             .h(height::COMPACT)
@@ -1786,26 +1796,31 @@ impl Render for ComposerView {
             .child(attach_btn)
             .child(right_cluster);
 
+        let is_home_composer = matches!(self.draft_key, DraftKey::NewSession);
+        let card_border_color = if is_home_composer {
+            palette.border_hairline
+        } else if is_focused {
+            palette.border_focus
+        } else {
+            palette.border_strong
+        };
+
         let ent_drop = entity.clone();
         let mut card = div()
             .id("composer-card-zwas1")
             .test_support()
             .w_full()
             .min_h(px(88.0))
-            .px(space::MD)
-            .py(px(11.0))
+            .p(space::MD)
             .rounded(radius::ROW)
             .border_1()
-            .border_color(if is_focused {
-                palette.accent_solid
-            } else {
-                palette.border_strong
-            })
+            .border_color(card_border_color)
             .bg(palette.bg_workspace)
+            .shadow(palette.composer_shadows(is_focused))
             .flex()
             .flex_col()
             .justify_between()
-            .gap(space::SM)
+            .gap(space::MD)
             .on_action(
                 cx.listener(|this, _: &crate::shell::DismissTopSurface, window, cx| {
                     // `InputBaseState::escape` unmarks active IME composition BEFORE propagating `Escape`;
@@ -1840,9 +1855,13 @@ impl Render for ComposerView {
         // Outer relative wrapper anchoring upward popovers (`p2biT`, `d8zzg`, `h5jG6d`)
         let mut wrapper = div().relative().w_full();
 
-        if let Some(comp_pop) =
-            self.render_completion_popover(&palette, transparency_enabled, scale_factor, &entity)
-        {
+        if let Some(comp_pop) = self.render_completion_popover(
+            mono_family.clone(),
+            &palette,
+            transparency_enabled,
+            scale_factor,
+            &entity,
+        ) {
             wrapper = wrapper.child(comp_pop);
         }
 

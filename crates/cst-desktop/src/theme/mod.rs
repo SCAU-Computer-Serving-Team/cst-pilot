@@ -1,7 +1,9 @@
 pub mod typography;
 
 use cst_client::ThemeModeDto;
-use gpui_kit::{App, Global, Hsla, SharedString, Window, WindowAppearance, px, rgba};
+use gpui_kit::{
+    App, BoxShadow, Global, Hsla, SharedString, Window, WindowAppearance, point, px, rgba,
+};
 
 pub use typography::{
     CJK_INLINE_OPTICAL_OFFSET_PX, FontLoadReport, TypographyScale, apply_scale, cjk_inline_label,
@@ -159,27 +161,34 @@ pub struct DesktopPalette {
     pub bg_surface: Hsla,
     pub bg_special: Hsla,
     pub bg_item_hover: Hsla,
+    pub bg_active_press: Hsla,
     pub bg_item_active: Hsla,
     pub bg_track_recess: Hsla,
-    // Borders & highlights
+    // Borders, highlights & shadows
     pub border_subtle: Hsla,
     pub border_strong: Hsla,
+    pub border_focus: Hsla,
     pub border_hairline: Hsla,
     pub highlight_top: Hsla,
+    pub shadow_panel_sm: Hsla,
+    pub shadow_panel_lg: Hsla,
     // Text
     pub text_primary: Hsla,
     pub text_secondary: Hsla,
     pub text_muted: Hsla,
+    pub text_welcome: Hsla,
     pub text_on_accent: Hsla,
     // Accent & semantic status
     pub accent_solid: Hsla,
     pub accent_hover: Hsla,
+    pub accent_ink: Hsla,
     pub accent_subtle: Hsla,
     pub status_success: Hsla,
     pub status_success_subtle: Hsla,
     pub status_warning: Hsla,
     pub status_warning_subtle: Hsla,
     pub status_danger: Hsla,
+    pub status_danger_hover: Hsla,
     pub status_danger_subtle: Hsla,
 }
 
@@ -202,26 +211,33 @@ impl DesktopPalette {
             bg_modal: c(0xFFFF_FFF2),
             bg_surface: c(0xF4F4_F5FF),
             bg_special: c(0xFCFC_FCFF),
-            bg_item_hover: c(0xEAEA_EB80),
+            bg_item_hover: c(0x1111_110C),
+            bg_active_press: c(0x1111_1114),
             bg_item_active: c(0xEAEA_EBFF),
-            bg_track_recess: c(0xE4E4_E7FF),
-            border_subtle: c(0x0000_0012),
-            border_strong: c(0x0000_0024),
-            border_hairline: c(0x0000_0014),
-            highlight_top: c(0xFFFF_FFCC),
+            bg_track_recess: c(0x1111_110D),
+            border_subtle: c(0xE4E4_E7FF),
+            border_strong: c(0xD4D4_D8FF),
+            border_focus: c(0xC2C2_C8FF),
+            border_hairline: c(0x1111_111A),
+            highlight_top: c(0xFFFF_FFF2),
+            shadow_panel_sm: c(0x1111_110F),
+            shadow_panel_lg: c(0x1111_1117),
             text_primary: c(0x1111_11FF),
             text_secondary: c(0x6B6B_6BFF),
             text_muted: c(0x8A8A_8EFF),
+            text_welcome: c(0xFFFF_FFFF),
             text_on_accent: c(0xFFFF_FFFF),
             accent_solid: c(0x1A4B_E0FF),
-            accent_hover: c(0x153E_C0FF),
-            accent_subtle: c(0x1A4B_E014),
+            accent_hover: c(0x1640_C2FF),
+            accent_ink: c(0x1A4B_E0FF),
+            accent_subtle: c(0xEEF2_FFFF),
             status_success: c(0x16A3_4AFF),
-            status_success_subtle: c(0x16A3_4A1A),
+            status_success_subtle: c(0x16A3_4A1F),
             status_warning: c(0x8C5A_00FF),
-            status_warning_subtle: c(0x8C5A_001A),
+            status_warning_subtle: c(0x8C5A_001F),
             status_danger: c(0xDC26_26FF),
-            status_danger_subtle: c(0xDC26_261A),
+            status_danger_hover: c(0xB91C_1CFF),
+            status_danger_subtle: c(0xDC26_2624),
         }
     }
 
@@ -239,26 +255,33 @@ impl DesktopPalette {
             bg_modal: c(0x1818_1CF2),
             bg_surface: c(0x1C1C_20FF),
             bg_special: c(0x1212_15FF),
-            bg_item_hover: c(0x2424_2980),
+            bg_item_hover: c(0xF2F2_F40E),
+            bg_active_press: c(0xF2F2_F418),
             bg_item_active: c(0x2424_29FF),
-            bg_track_recess: c(0x2727_2AFF),
-            border_subtle: c(0xFFFF_FF12),
-            border_strong: c(0xFFFF_FF24),
-            border_hairline: c(0xFFFF_FF1A),
-            highlight_top: c(0xFFFF_FF14),
+            bg_track_recess: c(0x0000_0066),
+            border_subtle: c(0x2626_2BFF),
+            border_strong: c(0x3434_3AFF),
+            border_focus: c(0x4646_4FFF),
+            border_hairline: c(0xF2F2_F41F),
+            highlight_top: c(0xFFFF_FF1F),
+            shadow_panel_sm: c(0x0000_0066),
+            shadow_panel_lg: c(0x0000_0080),
             text_primary: c(0xF2F2_F4FF),
             text_secondary: c(0x8585_8BFF),
             text_muted: c(0x6363_69FF),
+            text_welcome: c(0xFFFF_FFFF),
             text_on_accent: c(0xFFFF_FFFF),
             accent_solid: c(0x3B6B_F5FF),
-            accent_hover: c(0x4E7B_FFFF),
-            accent_subtle: c(0x3B6B_F524),
+            accent_hover: c(0x4E7A_F7FF),
+            accent_ink: c(0x688F_F8FF),
+            accent_subtle: c(0x1923_42FF),
             status_success: c(0x4CC3_8AFF),
-            status_success_subtle: c(0x4CC3_8A24),
+            status_success_subtle: c(0x4CC3_8A29),
             status_warning: c(0xE4A2_47FF),
-            status_warning_subtle: c(0xE4A2_4724),
+            status_warning_subtle: c(0xE4A2_4729),
             status_danger: c(0xE548_4DFF),
-            status_danger_subtle: c(0xE548_4D24),
+            status_danger_hover: c(0xCF36_3BFF),
+            status_danger_subtle: c(0xE548_4D38),
         }
     }
 
@@ -267,6 +290,106 @@ impl DesktopPalette {
             ResolvedTheme::Light => Self::light(),
             ResolvedTheme::Dark => Self::dark(),
         }
+    }
+
+    /// Dual-layer outer shadow for the workspace container (`d7oLH` / `k7X8V`).
+    pub fn workspace_shadows(&self) -> Vec<BoxShadow> {
+        vec![
+            BoxShadow {
+                color: self.shadow_panel_sm,
+                offset: point(px(0.0), px(2.0)),
+                blur_radius: px(6.0),
+                spread_radius: px(0.0),
+                inset: false,
+            },
+            BoxShadow {
+                color: self.shadow_panel_lg,
+                offset: point(px(0.0), px(8.0)),
+                blur_radius: px(24.0),
+                spread_radius: px(0.0),
+                inset: false,
+            },
+        ]
+    }
+
+    /// Compact elevation (`--craft-lift`) for pills, buttons, and compact special cards.
+    pub fn craft_lift_shadows(&self) -> Vec<BoxShadow> {
+        vec![
+            BoxShadow {
+                color: self.highlight_top,
+                offset: point(px(0.0), px(1.0)),
+                blur_radius: px(0.0),
+                spread_radius: px(0.0),
+                inset: true,
+            },
+            BoxShadow {
+                color: self.shadow_panel_sm,
+                offset: point(px(0.0), px(1.0)),
+                blur_radius: px(2.0),
+                spread_radius: px(0.0),
+                inset: false,
+            },
+            BoxShadow {
+                color: self.shadow_panel_sm,
+                offset: point(px(0.0), px(4.0)),
+                blur_radius: px(10.0),
+                spread_radius: px(0.0),
+                inset: false,
+            },
+        ]
+    }
+
+    /// Three-layer stacked elevation (`--craft-stack` + top highlight) for `ZWAs1` composer, `H2p2z` popovers, `K3x72` modals, and special cards.
+    pub fn craft_stack_shadows(&self) -> Vec<BoxShadow> {
+        vec![
+            BoxShadow {
+                color: self.highlight_top,
+                offset: point(px(0.0), px(1.0)),
+                blur_radius: px(0.0),
+                spread_radius: px(0.0),
+                inset: true,
+            },
+            BoxShadow {
+                color: self.shadow_panel_sm,
+                offset: point(px(0.0), px(1.0)),
+                blur_radius: px(2.0),
+                spread_radius: px(0.0),
+                inset: false,
+            },
+            BoxShadow {
+                color: self.shadow_panel_sm,
+                offset: point(px(0.0), px(6.0)),
+                blur_radius: px(14.0),
+                spread_radius: px(-2.0),
+                inset: false,
+            },
+            BoxShadow {
+                color: self.shadow_panel_lg,
+                offset: point(px(0.0), px(18.0)),
+                blur_radius: px(36.0),
+                spread_radius: px(-6.0),
+                inset: false,
+            },
+        ]
+    }
+
+    /// Composer elevation + subtle neutral focus halo (`--focus-shadow` + `--craft-stack`).
+    pub fn composer_shadows(&self, focused: bool) -> Vec<BoxShadow> {
+        let mut list = self.craft_stack_shadows();
+        if focused {
+            let halo = match self.mode {
+                ResolvedTheme::Light => c(0x1111_140E),
+                ResolvedTheme::Dark => c(0xF2F2_F40E),
+            };
+            list.push(BoxShadow {
+                color: halo,
+                offset: point(px(0.0), px(2.0)),
+                blur_radius: px(8.0),
+                spread_radius: px(1.0),
+                inset: false,
+            });
+        }
+        list
     }
 }
 
@@ -411,4 +534,77 @@ pub fn apply_desktop_theme(
     });
 
     palette
+}
+
+/// Renders the shared full-width `44px` subpage header master `xWJOf` (`cst-pilot-desktop.pen` 「00A · 窗口与导航」):
+/// `pl: 24px, pr: 16px`, bottom `1px $border-subtle`, left `16px` icon + `12px` gap + `16/24 @ 600` title,
+/// and an optional trailing slot on the right.
+pub fn render_subpage_header_xwjof(
+    id: impl Into<gpui_kit::ElementId>,
+    icon: gpui_kit::assets::IconName,
+    title: impl Into<SharedString>,
+    trailing: Option<gpui_kit::AnyElement>,
+    palette: &DesktopPalette,
+) -> impl gpui_kit::IntoElement {
+    use gpui_kit::{InteractiveElement as _, ParentElement as _, Styled as _, TestSupportExt as _};
+    let mut bar = gpui_kit::div()
+        .id(id)
+        .test_support()
+        .w_full()
+        .h(height::HEADER)
+        .flex_shrink_0()
+        .pl(space::GROUP)
+        .pr(space::LG)
+        .bg(palette.bg_workspace)
+        .border_b_1()
+        .border_color(palette.border_subtle)
+        .flex()
+        .items_center()
+        .justify_between()
+        .child(
+            gpui_kit::div()
+                .flex()
+                .items_center()
+                .gap(space::MD)
+                .min_w_0()
+                .child(
+                    gpui_kit::component::Icon::new(icon)
+                        .size(px(16.0))
+                        .text_color(palette.text_secondary),
+                )
+                .child(
+                    apply_scale(gpui_kit::div(), scale::BODY_SEMIBOLD)
+                        .text_color(palette.text_primary)
+                        .truncate()
+                        .child(cjk_inline_label(title)),
+                ),
+        );
+    if let Some(right_el) = trailing {
+        bar = bar.child(right_el);
+    }
+    bar
+}
+
+/// Renders the `28px` keyboard shortcut badge master `ZCGS3` (`cst-pilot-desktop.pen` 「00B · 按钮与输入」):
+/// `h: 28px, px: 8px, r: 4px`, `$bg-surface` fill + `1px $border-subtle`, `12/16 @ 500` `JetBrains Mono` `$text-primary`.
+pub fn render_kbd_zcgs3(
+    keys: impl Into<SharedString>,
+    mono_family: SharedString,
+    palette: &DesktopPalette,
+) -> gpui_kit::Div {
+    use gpui_kit::{ParentElement as _, Styled as _};
+    apply_scale(gpui_kit::div(), scale::CAPTION_MEDIUM)
+        .h(height::COMPACT)
+        .px(space::SM)
+        .rounded(radius::CONTROL)
+        .border_1()
+        .border_color(palette.border_subtle)
+        .bg(palette.bg_surface)
+        .font_family(mono_family)
+        .text_color(palette.text_primary)
+        .flex()
+        .items_center()
+        .justify_center()
+        .flex_shrink_0()
+        .child(keys.into())
 }

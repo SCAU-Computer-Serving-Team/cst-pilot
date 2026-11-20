@@ -1,6 +1,8 @@
+use gpui_kit::assets::IconName;
+use gpui_kit::component::Icon;
 use gpui_kit::{
     App, FocusHandle, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, TestSupportExt, Window, div,
+    StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
 };
 
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
@@ -27,7 +29,12 @@ pub fn render_missing_key_dialog(
     on_cancel: impl Fn(&mut Window, &mut App) + 'static,
     on_configure: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    let body_text = match state.provider_label.as_deref().filter(|s| !s.is_empty()) {
+    let clean_prov = state.provider_label.as_deref().filter(|s| !s.is_empty());
+    let title_text = match clean_prov {
+        Some(prov) => SharedString::from(format!("缺少 {prov} 服务凭据")),
+        None => SharedString::from("缺少模型服务凭据"),
+    };
+    let body_text = match clean_prov {
         Some(prov) => SharedString::from(format!(
             "当前所选模型所属的 {prov} 尚未配置有效凭据。已保留输入框内的草稿与附图，配置完成后可返回原会话继续发送。"
         )),
@@ -63,29 +70,37 @@ pub fn render_missing_key_dialog(
         )
         .test_support()
         .w(layout::MODAL_STANDARD_WIDTH)
-        .p(space::GROUP)
-        .rounded(radius::SPECIAL)
+        .p(px(20.0))
+        .rounded(radius::ROW)
         .border_1()
         .border_color(palette.border_subtle)
         .flex()
         .flex_col()
-        .gap(space::LG)
+        .gap(space::MD)
         .child(
             div()
                 .relative()
                 .flex()
-                .flex_col()
+                .items_center()
                 .gap(space::SM)
                 .child(
-                    apply_scale(div(), scale::BODY_SEMIBOLD)
-                        .text_color(palette.text_primary)
-                        .child("缺少模型服务凭据"),
+                    Icon::new(IconName::TriangleAlert)
+                        .size(px(16.0))
+                        .text_color(palette.status_warning),
                 )
                 .child(
-                    apply_scale(div(), scale::UI)
-                        .text_color(palette.text_secondary)
-                        .child(body_text),
+                    apply_scale(div(), scale::BODY_SEMIBOLD)
+                        .min_w_0()
+                        .truncate()
+                        .text_color(palette.text_primary)
+                        .child(cjk_inline_label(title_text)),
                 ),
+        )
+        .child(
+            apply_scale(div(), scale::UI)
+                .relative()
+                .text_color(palette.text_secondary)
+                .child(body_text),
         )
         .child(
             div()
@@ -102,7 +117,7 @@ pub fn render_missing_key_dialog(
                         .rounded(radius::CONTROL)
                         .border_1()
                         .border_color(palette.border_strong)
-                        .bg(palette.bg_elevated)
+                        .bg(palette.bg_workspace)
                         .text_color(palette.text_primary)
                         .flex()
                         .items_center()
@@ -115,7 +130,7 @@ pub fn render_missing_key_dialog(
                         .id("missing-key-configure-btn")
                         .test_support()
                         .h(height::CONTROL)
-                        .px(space::MD)
+                        .px(space::LG)
                         .rounded(radius::CONTROL)
                         .bg(palette.accent_solid)
                         .text_color(palette.text_on_accent)

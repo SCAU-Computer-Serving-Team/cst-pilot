@@ -310,12 +310,12 @@ pub fn render_queue_bar(
                             format!("queue-steer-btn-{iid}")
                         }))
                         .test_support()
-                        .h(px(22.0))
-                        .px(space::TIGHT)
+                        .h(height::INLINE)
+                        .px(space::SM)
                         .rounded(radius::CONTROL)
                         .border_1()
-                        .border_color(palette.border_strong)
-                        .bg(palette.bg_elevated)
+                        .border_color(palette.border_subtle)
+                        .bg(palette.bg_workspace)
                         .text_color(palette.text_primary)
                         .flex()
                         .items_center()
@@ -354,8 +354,8 @@ pub fn render_queue_bar(
                             (edit_fn)(iid_edit.clone(), raw_text_edit.clone(), w, cx);
                         })
                         .child(
-                            Icon::new(IconName::SquarePen)
-                                .size(px(13.0))
+                            Icon::new(IconName::Pencil)
+                                .size(px(14.0))
                                 .text_color(palette.text_secondary),
                         ),
                 )
@@ -375,7 +375,7 @@ pub fn render_queue_bar(
                         })
                         .child(
                             Icon::new(IconName::Trash)
-                                .size(px(13.0))
+                                .size(px(14.0))
                                 .text_color(palette.text_secondary),
                         ),
                 );
@@ -385,7 +385,7 @@ pub fn render_queue_bar(
             div()
                 .id(SharedString::from(format!("queue-item-row-{iid}")))
                 .test_support()
-                .h(px(30.0))
+                .h(height::CONTROL)
                 .border_t_1()
                 .border_color(palette.border_subtle)
                 .flex()

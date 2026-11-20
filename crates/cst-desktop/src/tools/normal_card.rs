@@ -12,11 +12,11 @@ use gpui_kit::{
     App, ClipboardItem, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, TestSupportExt, Window, div, img, px,
 };
+use serde_json::Value;
 
 use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
 use crate::workbench::image_viewer::{LightboxImageTarget, gpui_image_from_bytes};
 use crate::workbench::markdown_view::render_copyable_text_block;
-use crate::workbench::turn_segments::format_duration_zh;
 
 pub fn localized_normal_tool_title(tool_name: &str) -> &'static str {
     match tool_name {
@@ -37,13 +37,54 @@ pub fn localized_normal_tool_title(tool_name: &str) -> &'static str {
     }
 }
 
+pub fn format_duration_en_sec(ms: u64) -> String {
+    let secs = ((ms as f64) / 1000.0).max(0.1);
+    format!("{secs:.1}s")
+}
+
+fn format_call_arg_value(val: &Value) -> String {
+    match val {
+        Value::String(s) => {
+            if s.chars().count() > 42 {
+                let prefix: String = s.chars().take(39).collect();
+                format!("{prefix}…")
+            } else {
+                format!("{s:?}")
+            }
+        }
+        Value::Null => "null".to_owned(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::Array(arr) => format!("[…{}]", arr.len()),
+        Value::Object(_) => "{…}".to_owned(),
+    }
+}
+
+fn format_call_capsule(tool_name: &str, call_args: Option<&Value>) -> String {
+    let Some(obj) = call_args.and_then(Value::as_object) else {
+        return format!("{tool_name}()");
+    };
+    if obj.is_empty() {
+        return format!("{tool_name}()");
+    }
+    let mut parts = Vec::with_capacity(obj.len());
+    if let Some(sc) = obj.get("scope") {
+        parts.push(format!("scope: {}", format_call_arg_value(sc)));
+    }
+    for (k, v) in obj {
+        if k == "scope" || v.is_null() {
+            continue;
+        }
+        parts.push(format!("{k}: {}", format_call_arg_value(v)));
+    }
+    format!("{tool_name}({})", parts.join(", "))
+}
+
 pub type OpenLightboxFn = Rc<dyn Fn(LightboxImageTarget, &mut Window, &mut App)>;
 pub type ToggleKeyFn = Rc<dyn Fn(String, &mut Window, &mut App)>;
 pub type CopyMarkedFn = Rc<dyn Fn(SharedString, &mut Window, &mut App)>;
 
-/// Renders an ordinary diagnostic tool card (`cst-pilot-desktop.pen` 「07 · 工具与特殊工具」)
-/// with frozen duration, `24px` (`space::GROUP`) indented vertical guide line, longest-label column
-/// alignment, `read` image-before-path ordering, and collapsible `"原始数据"` block.
+/// Renders an ordinary diagnostic tool card (`BuK2W` collapsed / `E9dWo9`, `VM8ko`, `VwO1J` expanded).
 #[allow(clippy::too_many_arguments)]
 pub fn render_normal_tool_card<V: 'static>(
     call_id: &str,
@@ -64,18 +105,76 @@ pub fn render_normal_tool_card<V: 'static>(
     on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
     cx: &mut Context<V>,
 ) -> gpui_kit::AnyElement {
-    let status_color = if !has_result {
+    render_normal_tool_card_with_args(
+        call_id,
+        tool_name,
+        None,
+        duration_ms,
+        has_result,
+        is_error_result,
+        live,
+        card_view,
+        is_expanded,
+        is_raw_expanded,
+        mono_family,
+        palette,
+        is_copied_fn,
+        on_toggle_card,
+        on_toggle_raw,
+        on_open_lightbox,
+        on_mark_copied,
+        cx,
+    )
+}
+
+/// Renders an ordinary diagnostic tool card (`cst-pilot-desktop.pen` `BuK2W`, `E9dWo9`, `VM8ko`, `VwO1J`)
+/// with `16×16px` semantic status icon, continuous `2px` vertical guide rail, `24px` `$bg-surface`
+/// call parameter capsule, frameless aligned rows, `VwO1J` copyable text block, and `24px` `"原始数据"` disclosure.
+#[allow(clippy::too_many_arguments)]
+pub fn render_normal_tool_card_with_args<V: 'static>(
+    call_id: &str,
+    tool_name: &str,
+    call_args: Option<&Value>,
+    duration_ms: Option<u64>,
+    has_result: bool,
+    is_error_result: bool,
+    live: bool,
+    card_view: &ToolCardView,
+    is_expanded: bool,
+    is_raw_expanded: bool,
+    mono_family: SharedString,
+    palette: &DesktopPalette,
+    is_copied_fn: &dyn Fn(&str) -> bool,
+    on_toggle_card: ToggleKeyFn,
+    on_toggle_raw: ToggleKeyFn,
+    on_open_lightbox: OpenLightboxFn,
+    on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
+    cx: &mut Context<V>,
+) -> gpui_kit::AnyElement {
+    let (status_icon, status_color, status_word) = if !has_result {
         if live {
-            palette.accent_solid
+            (IconName::LoaderCircle, palette.accent_ink, "运行中")
         } else {
-            palette.status_warning
+            (IconName::TriangleAlert, palette.status_warning, "已中断")
         }
     } else if is_error_result || card_view.status == CardStatus::Error {
-        palette.status_danger
+        (IconName::CircleAlert, palette.status_danger, "执行失败")
     } else if card_view.status == CardStatus::Degraded {
-        palette.status_warning
+        (IconName::TriangleAlert, palette.status_warning, "部分降级")
     } else {
-        palette.status_success
+        (IconName::CircleCheck, palette.status_success, "已完成")
+    };
+
+    let scope_opt = call_args
+        .and_then(|v| v.get("scope"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
+    let summary_text = match scope_opt {
+        Some(sc) => format!("{tool_name}({sc}) · {status_word}"),
+        None => format!(
+            "{tool_name} · {} · {status_word}",
+            localized_normal_tool_title(tool_name)
+        ),
     };
 
     let card_key = format!("tool-card-{call_id}");
@@ -85,79 +184,141 @@ pub fn render_normal_tool_card<V: 'static>(
         apply_scale(div(), scale::CAPTION)
             .font_family(mono_family.clone())
             .text_color(palette.text_muted)
-            .child(SharedString::from(format_duration_zh(ms)))
+            .child(SharedString::from(format_duration_en_sec(ms)))
     });
 
     let toggle_hdr = Rc::clone(&on_toggle_card);
     let key_hdr = card_key.clone();
 
-    let header = apply_scale(div(), scale::UI)
+    if !is_expanded {
+        // Collapsed state (`BuK2W`): `28px` high, `px: 0`, transparent background, hover only brightens text.
+        return div()
+            .id(SharedString::from(format!("normal-tool-card-{call_id}")))
+            .test_support()
+            .w_full()
+            .child(
+                apply_scale(div(), scale::UI)
+                    .id(SharedString::from(format!("normal-tool-hdr-{call_id}")))
+                    .test_support()
+                    .w_full()
+                    .h(height::COMPACT)
+                    .px(px(0.0))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(space::SM)
+                    .text_color(palette.text_secondary)
+                    .hover(|s| s.text_color(palette.text_primary))
+                    .on_click(move |_, w, cx| (toggle_hdr)(key_hdr.clone(), w, cx))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(space::SM)
+                            .min_w_0()
+                            .child(
+                                Icon::new(status_icon)
+                                    .size(px(16.0))
+                                    .text_color(status_color),
+                            )
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .child(cjk_inline_label(summary_text)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(space::SM)
+                            .flex_shrink_0()
+                            .children(duration_badge)
+                            .child(
+                                Icon::new(IconName::ChevronRight)
+                                    .size(px(16.0))
+                                    .text_color(palette.text_secondary),
+                            ),
+                    ),
+            )
+            .into_any_element();
+    }
+
+    // Expanded state (`E9dWo9`, `VM8ko`, `VwO1J`): two-column layout (`16px` status rail + `2px` guide line | right body)
+    let left_rail = div()
+        .w(px(16.0))
+        .flex_shrink_0()
+        .flex()
+        .flex_col()
+        .items_center()
+        .pt(px(6.0))
+        .child(
+            Icon::new(status_icon)
+                .size(px(16.0))
+                .text_color(status_color),
+        )
+        .child(
+            div()
+                .w(px(2.0))
+                .flex_1()
+                .mt(px(4.0))
+                .rounded(radius::FULL)
+                .bg(palette.border_subtle),
+        );
+
+    let header_row = apply_scale(div(), scale::UI)
         .id(SharedString::from(format!("normal-tool-hdr-{call_id}")))
         .test_support()
+        .w_full()
         .h(height::COMPACT)
-        .px(space::SM)
-        .rounded(radius::CONTROL)
         .flex()
         .items_center()
         .justify_between()
         .gap(space::SM)
-        .hover(|s| s.bg(palette.bg_item_hover))
+        .text_color(palette.text_secondary)
+        .hover(|s| s.text_color(palette.text_primary))
         .on_click(move |_, w, cx| (toggle_hdr)(key_hdr.clone(), w, cx))
         .child(
             div()
-                .flex()
-                .items_center()
-                .gap(space::SM)
-                .child(
-                    div()
-                        .w(px(7.0))
-                        .h(px(7.0))
-                        .rounded(radius::FULL)
-                        .bg(status_color),
-                )
-                .child(
-                    apply_scale(div(), scale::UI_MEDIUM)
-                        .text_color(palette.text_primary)
-                        .child(cjk_inline_label(localized_normal_tool_title(tool_name))),
-                )
-                .child(
-                    apply_scale(div(), scale::CAPTION)
-                        .font_family(mono_family.clone())
-                        .text_color(palette.text_muted)
-                        .child(SharedString::from(tool_name.to_owned())),
-                ),
+                .min_w_0()
+                .truncate()
+                .child(cjk_inline_label(summary_text)),
         )
         .child(
             div()
                 .flex()
                 .items_center()
                 .gap(space::SM)
+                .flex_shrink_0()
                 .children(duration_badge)
                 .child(
-                    Icon::new(if is_expanded {
-                        IconName::ChevronDown
-                    } else {
-                        IconName::ChevronRight
-                    })
-                    .size(px(12.0))
-                    .text_color(palette.text_muted),
+                    Icon::new(IconName::ChevronDown)
+                        .size(px(16.0))
+                        .text_color(palette.text_secondary),
                 ),
         );
 
-    let mut container = div()
-        .id(SharedString::from(format!("normal-tool-card-{call_id}")))
-        .test_support()
-        .w_full()
-        .flex()
-        .flex_col()
-        .gap(space::XS)
-        .child(header);
+    let call_capsule_str = format_call_capsule(tool_name, call_args);
+    let call_capsule_row = div().w_full().flex().items_center().child(
+        apply_scale(div(), scale::CAPTION)
+            .h(height::INLINE)
+            .px(space::SM)
+            .rounded(radius::CONTROL)
+            .bg(palette.bg_surface)
+            .font_family(mono_family.clone())
+            .text_color(palette.text_secondary)
+            .max_w_full()
+            .flex()
+            .items_center()
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .child(SharedString::from(call_capsule_str)),
+            ),
+    );
 
-    if !is_expanded {
-        return container.into_any_element();
-    }
-
-    // Compute longest field label width across all `Fields` blocks in this card so values align cleanly!
     let max_label_chars = card_view
         .blocks
         .iter()
@@ -169,16 +330,16 @@ pub fn render_normal_tool_card<V: 'static>(
         .unwrap_or(6);
     let label_col_px = ((max_label_chars as f32) * 13.5 + 12.0).clamp(72.0, 180.0);
 
-    // `24px` (`space::GROUP`) left indent with continuous vertical guide line
-    let mut body = div()
-        .pl(space::GROUP)
-        .border_l_1()
-        .border_color(palette.border_subtle)
+    let mut right_col = div()
+        .flex_1()
+        .min_w_0()
         .flex()
         .flex_col()
-        .gap(space::SM);
+        .gap(space::MD)
+        .child(header_row)
+        .child(call_capsule_row);
 
-    // Per plan §3.4: for `read` with images, render image thumbnails FIRST, then absolute path / text blocks!
+    // For `read` with images, render image thumbnails FIRST, then path / text blocks
     let mut ordered_blocks: Vec<&ToolBlock> = Vec::with_capacity(card_view.blocks.len());
     for blk in &card_view.blocks {
         if matches!(blk, ToolBlock::Image { .. }) {
@@ -200,7 +361,7 @@ pub fn render_normal_tool_card<V: 'static>(
                     let gpui_img = gpui_image_from_bytes(mime_type, bytes);
                     let img_open = Arc::clone(&gpui_img);
                     let lb_cb = Rc::clone(&on_open_lightbox);
-                    body = body.child(
+                    right_col = right_col.child(
                         div()
                             .id(SharedString::from(format!(
                                 "tool-read-img-{call_id}-{blk_idx}"
@@ -208,7 +369,7 @@ pub fn render_normal_tool_card<V: 'static>(
                             .test_support()
                             .w(px(160.0))
                             .h(px(112.0))
-                            .rounded(radius::ROW)
+                            .rounded(radius::CONTROL)
                             .border_1()
                             .border_color(palette.border_subtle)
                             .bg(palette.bg_surface)
@@ -239,7 +400,7 @@ pub fn render_normal_tool_card<V: 'static>(
                 if let Some(t) = title.as_deref().filter(|s| !s.is_empty()) {
                     group = group.child(
                         apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .text_color(palette.text_muted)
+                            .text_color(palette.text_secondary)
                             .child(SharedString::from(t.to_owned())),
                     );
                 }
@@ -251,13 +412,14 @@ pub fn render_normal_tool_card<V: 'static>(
                         palette,
                     ));
                 }
-                body = body.child(group);
+                right_col = right_col.child(group);
             }
             ToolBlock::Listing { items, .. } => {
-                body = body.child(render_listing_table(items, mono_family.clone(), palette));
+                right_col =
+                    right_col.child(render_listing_table(items, mono_family.clone(), palette));
             }
             ToolBlock::Commands { items, .. } => {
-                body = body.child(render_inline_commands_list(
+                right_col = right_col.child(render_inline_commands_list(
                     call_id,
                     blk_idx,
                     items,
@@ -269,23 +431,84 @@ pub fn render_normal_tool_card<V: 'static>(
                 ));
             }
             ToolBlock::Notice { text, status, .. } => {
-                let color = match status {
-                    NoticeStatus::Danger => palette.status_danger,
-                    NoticeStatus::Warning => palette.status_warning,
-                    NoticeStatus::Default => palette.text_secondary,
+                let (icon, color) = match status {
+                    NoticeStatus::Danger => (IconName::CircleAlert, palette.status_danger),
+                    NoticeStatus::Warning => (IconName::TriangleAlert, palette.status_warning),
+                    NoticeStatus::Default => (IconName::Info, palette.text_secondary),
                 };
-                body = body.child(
-                    apply_scale(div(), scale::CAPTION)
-                        .text_color(color)
-                        .child(SharedString::from(text.clone())),
+                right_col = right_col.child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .gap(space::SM)
+                        .child(Icon::new(icon).size(px(14.0)).text_color(color))
+                        .child(
+                            apply_scale(div(), scale::CAPTION)
+                                .flex_1()
+                                .min_w_0()
+                                .text_color(color)
+                                .child(SharedString::from(text.clone())),
+                        ),
                 );
             }
             ToolBlock::Text { text, .. } => {
-                body = body.child(
-                    apply_scale(div(), scale::CAPTION)
-                        .font_family(mono_family.clone())
-                        .text_color(palette.text_secondary)
-                        .child(SharedString::from(text.clone())),
+                let txt_copy_id = SharedString::from(format!("norm-text-copy-{call_id}-{blk_idx}"));
+                let copied = is_copied_fn(txt_copy_id.as_ref());
+                let txt_owned = text.clone();
+                let cid_click = txt_copy_id.clone();
+                let mark_cb = on_mark_copied.clone();
+
+                // `VwO1J`: `p: 12px, r: 4px, bg: $bg-surface` + right `28×28px` copy button
+                right_col = right_col.child(
+                    div()
+                        .w_full()
+                        .p(space::MD)
+                        .rounded(radius::CONTROL)
+                        .bg(palette.bg_surface)
+                        .flex()
+                        .items_start()
+                        .justify_between()
+                        .gap(space::MD)
+                        .child(
+                            apply_scale(div(), scale::CAPTION)
+                                .flex_1()
+                                .min_w_0()
+                                .text_color(palette.text_secondary)
+                                .child(SharedString::from(text.clone())),
+                        )
+                        .child(
+                            div()
+                                .id(txt_copy_id)
+                                .test_support()
+                                .w(height::COMPACT)
+                                .h(height::COMPACT)
+                                .flex_shrink_0()
+                                .rounded(radius::CONTROL)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .hover(|s| s.bg(palette.bg_item_hover))
+                                .on_click(cx.listener(move |_, _, w, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(
+                                        txt_owned.clone(),
+                                    ));
+                                    mark_cb(cid_click.clone(), w, cx);
+                                }))
+                                .child(
+                                    Icon::new(if copied {
+                                        IconName::Check
+                                    } else {
+                                        IconName::Copy
+                                    })
+                                    .size(px(14.0))
+                                    .text_color(if copied {
+                                        palette.status_success
+                                    } else {
+                                        palette.text_secondary
+                                    }),
+                                ),
+                        ),
                 );
             }
         }
@@ -293,38 +516,49 @@ pub fn render_normal_tool_card<V: 'static>(
 
     if !card_view.raw.trim().is_empty() {
         let toggle_raw = Rc::clone(&on_toggle_raw);
-        let rk = raw_key.clone();
-        body = body.child(
-            apply_scale(div(), scale::CAPTION_MEDIUM)
+        let rk = raw_key;
+        let mut raw_section = div().w_full().flex().flex_col().gap(space::TIGHT).child(
+            apply_scale(div(), scale::CAPTION)
                 .id(SharedString::from(format!(
                     "normal-tool-raw-toggle-{call_id}"
                 )))
                 .test_support()
+                .w_full()
+                .h(height::INLINE)
                 .flex()
                 .items_center()
-                .gap(space::MICRO)
-                .text_color(palette.text_muted)
+                .justify_between()
+                .text_color(palette.text_secondary)
+                .hover(|s| s.text_color(palette.text_primary))
                 .on_click(move |_, w, cx| (toggle_raw)(rk.clone(), w, cx))
-                .child(cjk_inline_label(if is_raw_expanded {
-                    "收起原始数据"
-                } else {
-                    "原始数据"
-                }))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::SM)
+                        .child(
+                            Icon::new(IconName::Braces)
+                                .size(px(12.0))
+                                .text_color(palette.text_secondary),
+                        )
+                        .child(cjk_inline_label("原始数据")),
+                )
                 .child(
                     Icon::new(if is_raw_expanded {
                         IconName::ChevronDown
                     } else {
                         IconName::ChevronRight
                     })
-                    .size(px(11.0))
-                    .text_color(palette.text_muted),
+                    .size(px(12.0))
+                    .text_color(palette.text_secondary),
                 ),
         );
+
         if is_raw_expanded {
             let blk_id = SharedString::from(format!("tool-raw-block-{call_id}"));
             let copied = is_copied_fn(blk_id.as_ref());
             let mark_cb = on_mark_copied.clone();
-            body = body.child(render_copyable_text_block(
+            raw_section = raw_section.child(render_copyable_text_block(
                 blk_id,
                 card_view.raw.clone(),
                 true,
@@ -335,10 +569,19 @@ pub fn render_normal_tool_card<V: 'static>(
                 cx,
             ));
         }
+
+        right_col = right_col.child(raw_section);
     }
 
-    container = container.child(body);
-    container.into_any_element()
+    div()
+        .id(SharedString::from(format!("normal-tool-card-{call_id}")))
+        .test_support()
+        .w_full()
+        .flex()
+        .gap(space::SM)
+        .child(left_rail)
+        .child(right_col)
+        .into_any_element()
 }
 
 fn render_aligned_field_row(
@@ -362,11 +605,12 @@ fn render_aligned_field_row(
 
     div()
         .w_full()
+        .min_h(px(20.0))
         .flex()
-        .items_start()
+        .items_center()
         .gap(space::MD)
         .child(
-            apply_scale(div(), scale::CAPTION_MEDIUM)
+            apply_scale(div(), scale::CAPTION)
                 .w(px(label_col_px))
                 .flex_shrink_0()
                 .text_color(palette.text_secondary)
@@ -375,62 +619,49 @@ fn render_aligned_field_row(
         .child(val_div.child(SharedString::from(row.value.clone())))
 }
 
+/// Frameless transparent aligned ranking/listing rows (`VM8ko` — no outer card border or surface background).
 fn render_listing_table(
     items: &[ListingItem],
     mono_family: SharedString,
     palette: &DesktopPalette,
 ) -> impl IntoElement {
-    let mut table = div()
-        .w_full()
-        .rounded(radius::ROW)
-        .border_1()
-        .border_color(palette.border_subtle)
-        .bg(palette.bg_surface)
-        .flex()
-        .flex_col();
+    let mut table = div().w_full().flex().flex_col().gap(space::XS);
 
-    for (idx, item) in items.iter().enumerate() {
-        let mut metrics_row = div().flex().flex_wrap().items_center().gap(space::MD);
+    for item in items {
+        let mut metrics_parts: Vec<String> = Vec::with_capacity(item.metrics.len());
         for m in &item.metrics {
-            metrics_row = metrics_row.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::XS)
-                    .child(
-                        apply_scale(div(), scale::CAPTION)
-                            .text_color(palette.text_muted)
-                            .child(SharedString::from(m.label.clone())),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .font_family(mono_family.clone())
-                            .text_color(palette.text_primary)
-                            .child(SharedString::from(m.value.clone())),
-                    ),
-            );
+            if m.label.is_empty() || matches!(m.label.as_str(), "大小" | "占比") {
+                metrics_parts.push(m.value.clone());
+            } else {
+                metrics_parts.push(format!("{} {}", m.label, m.value));
+            }
         }
+        let metrics_text = metrics_parts.join(" · ");
 
-        let mut row_div = div()
-            .px(space::SM)
-            .py(space::XS)
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(space::MD)
-            .child(
-                apply_scale(div(), scale::UI)
-                    .min_w_0()
-                    .truncate()
-                    .text_color(palette.text_primary)
-                    .child(SharedString::from(item.name.clone())),
-            )
-            .child(metrics_row);
-
-        if idx > 0 {
-            row_div = row_div.border_t_1().border_color(palette.border_subtle);
-        }
-        table = table.child(row_div);
+        table = table.child(
+            div()
+                .w_full()
+                .min_h(height::INLINE)
+                .flex()
+                .items_center()
+                .gap(space::MD)
+                .child(
+                    apply_scale(div(), scale::CAPTION)
+                        .w(px(200.0))
+                        .flex_shrink_0()
+                        .truncate()
+                        .text_color(palette.text_primary)
+                        .child(SharedString::from(item.name.clone())),
+                )
+                .child(
+                    apply_scale(div(), scale::CAPTION)
+                        .flex_1()
+                        .min_w_0()
+                        .font_family(mono_family.clone())
+                        .text_color(palette.text_secondary)
+                        .child(SharedString::from(metrics_text)),
+                ),
+        );
     }
 
     table
@@ -457,8 +688,10 @@ fn render_inline_commands_list<V: 'static>(
 
         col = col.child(
             div()
-                .p(space::SM)
-                .rounded(radius::ROW)
+                .h(height::FIELD)
+                .pl(space::MD)
+                .pr(space::XS)
+                .rounded(radius::CONTROL)
                 .border_1()
                 .border_color(palette.border_subtle)
                 .bg(palette.bg_surface)
@@ -470,6 +703,7 @@ fn render_inline_commands_list<V: 'static>(
                     apply_scale(div(), scale::CAPTION)
                         .flex_1()
                         .min_w_0()
+                        .truncate()
                         .font_family(mono_family.clone())
                         .text_color(palette.text_primary)
                         .child(SharedString::from(cmd.command.clone())),
@@ -477,8 +711,9 @@ fn render_inline_commands_list<V: 'static>(
                 .child(
                     div()
                         .id(copy_id)
-                        .w(px(32.0))
-                        .h(px(32.0))
+                        .w(height::CONTROL)
+                        .h(height::CONTROL)
+                        .flex_shrink_0()
                         .rounded(radius::CONTROL)
                         .flex()
                         .items_center()

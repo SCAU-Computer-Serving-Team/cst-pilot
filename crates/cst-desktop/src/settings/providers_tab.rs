@@ -66,6 +66,36 @@ pub struct EditableModelRow {
     pub image: bool,
 }
 
+fn format_token_window(n: u64) -> String {
+    if n >= 1_000_000 && n.is_multiple_of(1_000_000) {
+        format!("{}M", n / 1_000_000)
+    } else if n >= 1_000 {
+        format!("{}K", n / 1_000)
+    } else {
+        n.to_string()
+    }
+}
+
+fn next_context_window(cur: u64) -> u64 {
+    match cur {
+        0..=32_768 => 64_000,
+        32_769..=65_536 => 128_000,
+        65_537..=131_072 => 200_000,
+        131_073..=262_144 => 1_000_000,
+        _ => 32_000,
+    }
+}
+
+fn next_max_tokens(cur: u64) -> u64 {
+    match cur {
+        0..=4_096 => 8_192,
+        4_097..=8_192 => 16_384,
+        8_193..=16_384 => 32_768,
+        16_385..=32_768 => 65_536,
+        _ => 4_096,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ProvidersTabEvent {
     OpenLoginOrAccount { signed_in: bool },
@@ -146,6 +176,14 @@ impl ProvidersTabView {
             .update(cx, |i, cx| i.set_value("", window, cx));
         self.editable_rows.clear();
         self.append_blank_editable_row(window, cx);
+        cx.notify();
+    }
+
+    fn return_to_provider_list(&mut self, cx: &mut Context<Self>) {
+        self.inline_edit_mode = false;
+        self.creating_new_custom = false;
+        self.active_provider_id = None;
+        self.search_visible = false;
         cx.notify();
     }
 
@@ -264,7 +302,6 @@ impl ProvidersTabView {
     }
 
     fn append_blank_editable_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // If switching a built-in provider into inline edit mode for the first time, seed existing models first!
         if !self.inline_edit_mode {
             self.inline_edit_mode = true;
             if let Some(ref pid) = self.active_provider_id
@@ -318,6 +355,53 @@ impl ProvidersTabView {
                 match res {
                     Ok(_) => cx.emit(ProvidersTabEvent::Notice("模型目录已更新。".into())),
                     Err(err) => cx.emit(ProvidersTabEvent::ErrorMessage(err.to_string())),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn save_builtin_api_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.saving {
+            return;
+        }
+        let Some(provider) = self.active_provider_id.clone() else {
+            return;
+        };
+        let raw_key = Zeroizing::new(self.api_key_input.read(cx).value().trim().to_owned());
+        if raw_key.is_empty() {
+            cx.emit(ProvidersTabEvent::ErrorMessage(
+                "请输入要更新的 API Key。".into(),
+            ));
+            return;
+        }
+        let base_url = {
+            let b = self.base_url_input.read(cx).value().trim().to_owned();
+            (!b.is_empty()).then_some(b)
+        };
+        self.api_key_input
+            .update(cx, |i, cx| i.set_value("", window, cx));
+        self.saving = true;
+        cx.notify();
+
+        let client = self.client.clone();
+        cx.spawn(async move |weak, cx| {
+            let res = client
+                .save_provider_api_key(provider, raw_key, base_url)
+                .await;
+            let _ = client.refresh_globals().await;
+            let _ = client.refresh_models(None).await;
+            let _ = weak.update(cx, |this, cx| {
+                this.saving = false;
+                match res {
+                    Ok(_) => {
+                        cx.emit(ProvidersTabEvent::CredentialsSaved);
+                        cx.emit(ProvidersTabEvent::Notice("服务凭据已保存。".into()));
+                    }
+                    Err(err) => {
+                        cx.emit(ProvidersTabEvent::ErrorMessage(err.to_string()));
+                    }
                 }
                 cx.notify();
             });
@@ -418,6 +502,35 @@ impl ProvidersTabView {
         .detach();
     }
 
+    fn render_back_bar(
+        &self,
+        palette: &DesktopPalette,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        div().w_full().flex().items_center().child(
+            apply_scale(div(), scale::UI_MEDIUM)
+                .id("providers-back-to-list-btn")
+                .test_support()
+                .h(height::CONTROL)
+                .px(space::SM)
+                .rounded(radius::CONTROL)
+                .text_color(palette.text_secondary)
+                .flex()
+                .items_center()
+                .gap(space::XS)
+                .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.return_to_provider_list(cx);
+                }))
+                .child(
+                    Icon::new(IconName::ArrowLeft)
+                        .size(px(14.0))
+                        .text_color(palette.text_secondary),
+                )
+                .child(cjk_inline_label("模型服务")),
+        )
+    }
+
     fn render_group_header_with_3_icon_buttons(
         &self,
         title: &'static str,
@@ -431,9 +544,9 @@ impl ProvidersTabView {
             .items_center()
             .justify_between()
             .child(
-                apply_scale(div(), scale::CAPTION_MEDIUM)
-                    .text_color(palette.text_secondary)
-                    .child(title),
+                apply_scale(div(), scale::BODY_SEMIBOLD)
+                    .text_color(palette.text_primary)
+                    .child(cjk_inline_label(title)),
             )
             .child(
                 div()
@@ -509,6 +622,7 @@ impl ProvidersTabView {
 
     fn render_borderless_hairline_editor(
         &self,
+        mono_family: SharedString,
         palette: &DesktopPalette,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -527,18 +641,23 @@ impl ProvidersTabView {
                     .rounded(radius::CONTROL)
                     .border_1()
                     .border_color(if active {
-                        palette.accent_solid
+                        palette.border_strong
                     } else {
                         palette.border_subtle
                     })
                     .bg(if active {
                         palette.bg_item_active
                     } else {
-                        palette.bg_surface
+                        palette.bg_workspace
                     })
-                    .text_color(palette.text_primary)
+                    .text_color(if active {
+                        palette.text_primary
+                    } else {
+                        palette.text_secondary
+                    })
                     .flex()
                     .items_center()
+                    .hover(|s| s.bg(palette.bg_item_hover))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.protocol = proto;
                         cx.notify();
@@ -547,17 +666,86 @@ impl ProvidersTabView {
             );
         }
 
-        // Borderless hairline editable table (`border_t_1` hairlines only, no outer heavy frame!)
+        // Borderless hairline editable table with `32px` column header row (`思考` / `图片` 16×16 checkboxes)
         let mut hairline_table = div()
             .id("providers-hairline-edit-table")
             .test_support()
             .w_full()
             .flex()
-            .flex_col();
+            .flex_col()
+            .child(
+                div()
+                    .w_full()
+                    .h(height::CONTROL)
+                    .border_b_1()
+                    .border_color(palette.border_subtle)
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .flex_1()
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label("模型 ID")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .flex_1()
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label("显示名称")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .w(px(76.0))
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label("上下文窗口")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .w(px(68.0))
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label("最大输出")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .w(px(40.0))
+                            .flex()
+                            .justify_center()
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label("思考")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .w(px(40.0))
+                            .flex()
+                            .justify_center()
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label("图片")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .w(px(36.0))
+                            .flex()
+                            .justify_center()
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label("移除")),
+                    ),
+            );
 
+        let filter_q = self.search_input.read(cx).value().to_lowercase();
         for (idx, row) in self.editable_rows.iter().enumerate() {
+            if self.search_visible && !filter_q.is_empty() {
+                let id_v = row.id_input.read(cx).value().to_lowercase();
+                let nm_v = row.name_input.read(cx).value().to_lowercase();
+                if !id_v.contains(&filter_q) && !nm_v.contains(&filter_q) {
+                    continue;
+                }
+            }
             let reasoning = row.reasoning;
             let image = row.image;
+            let cw_text = format_token_window(row.context_window);
+            let mt_text = format_token_window(row.max_tokens);
+
             hairline_table = hairline_table.child(
                 div()
                     .py(space::SM)
@@ -569,80 +757,119 @@ impl ProvidersTabView {
                     .child(div().flex_1().child(Input::new(&row.id_input)))
                     .child(div().flex_1().child(Input::new(&row.name_input)))
                     .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .id(SharedString::from(format!("edit-row-reasoning-{idx}")))
+                        apply_scale(div(), scale::CAPTION)
+                            .id(SharedString::from(format!("edit-row-cw-{idx}")))
                             .test_support()
+                            .w(px(76.0))
                             .h(height::COMPACT)
-                            .px(space::SM)
+                            .px(space::XS)
                             .rounded(radius::CONTROL)
-                            .bg(if reasoning {
-                                palette.bg_item_active
-                            } else {
-                                palette.bg_surface
-                            })
-                            .text_color(if reasoning {
-                                palette.accent_solid
-                            } else {
-                                palette.text_muted
-                            })
-                            .flex()
-                            .items_center()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(r) = this.editable_rows.get_mut(idx) {
-                                    r.reasoning = !r.reasoning;
-                                    cx.notify();
-                                }
-                            }))
-                            .child(cjk_inline_label("推理")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .id(SharedString::from(format!("edit-row-image-{idx}")))
-                            .test_support()
-                            .h(height::COMPACT)
-                            .px(space::SM)
-                            .rounded(radius::CONTROL)
-                            .bg(if image {
-                                palette.bg_item_active
-                            } else {
-                                palette.bg_surface
-                            })
-                            .text_color(if image {
-                                palette.accent_solid
-                            } else {
-                                palette.text_muted
-                            })
-                            .flex()
-                            .items_center()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(r) = this.editable_rows.get_mut(idx) {
-                                    r.image = !r.image;
-                                    cx.notify();
-                                }
-                            }))
-                            .child(cjk_inline_label("多模态")),
-                    )
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("edit-row-remove-{idx}")))
-                            .test_support()
-                            .w(height::COMPACT)
-                            .h(height::COMPACT)
-                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(palette.border_subtle)
+                            .bg(palette.bg_workspace)
+                            .font_family(mono_family.clone())
+                            .text_color(palette.text_primary)
                             .flex()
                             .items_center()
                             .justify_center()
                             .hover(|s| s.bg(palette.bg_item_hover))
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                if idx < this.editable_rows.len() {
-                                    this.editable_rows.remove(idx);
+                                if let Some(r) = this.editable_rows.get_mut(idx) {
+                                    r.context_window = next_context_window(r.context_window);
                                     cx.notify();
                                 }
                             }))
+                            .child(SharedString::from(cw_text)),
+                    )
+                    .child(
+                        apply_scale(div(), scale::CAPTION)
+                            .id(SharedString::from(format!("edit-row-mt-{idx}")))
+                            .test_support()
+                            .w(px(68.0))
+                            .h(height::COMPACT)
+                            .px(space::XS)
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(palette.border_subtle)
+                            .bg(palette.bg_workspace)
+                            .font_family(mono_family.clone())
+                            .text_color(palette.text_primary)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(r) = this.editable_rows.get_mut(idx) {
+                                    r.max_tokens = next_max_tokens(r.max_tokens);
+                                    cx.notify();
+                                }
+                            }))
+                            .child(SharedString::from(mt_text)),
+                    )
+                    .child(
+                        div()
+                            .w(px(40.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(capability_checkbox(
+                                SharedString::from(format!("edit-row-reasoning-{idx}")),
+                                reasoning,
+                                palette,
+                                cx.listener(move |this, _, _, cx| {
+                                    if let Some(r) = this.editable_rows.get_mut(idx) {
+                                        r.reasoning = !r.reasoning;
+                                        cx.notify();
+                                    }
+                                }),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .w(px(40.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(capability_checkbox(
+                                SharedString::from(format!("edit-row-image-{idx}")),
+                                image,
+                                palette,
+                                cx.listener(move |this, _, _, cx| {
+                                    if let Some(r) = this.editable_rows.get_mut(idx) {
+                                        r.image = !r.image;
+                                        cx.notify();
+                                    }
+                                }),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .w(px(36.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
                             .child(
-                                Icon::new(IconName::Trash)
-                                    .size(px(13.0))
-                                    .text_color(palette.text_muted),
+                                div()
+                                    .id(SharedString::from(format!("edit-row-remove-{idx}")))
+                                    .test_support()
+                                    .w(height::COMPACT)
+                                    .h(height::COMPACT)
+                                    .rounded(radius::CONTROL)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .hover(|s| s.bg(palette.bg_item_hover))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        if idx < this.editable_rows.len() {
+                                            this.editable_rows.remove(idx);
+                                            cx.notify();
+                                        }
+                                    }))
+                                    .child(
+                                        Icon::new(IconName::Trash)
+                                            .size(px(13.0))
+                                            .text_color(palette.text_muted),
+                                    ),
                             ),
                     ),
             );
@@ -653,18 +880,35 @@ impl ProvidersTabView {
             .flex()
             .flex_col()
             .gap(space::MD)
+            .child(self.render_back_bar(palette, cx))
             .child(
                 div()
                     .flex()
                     .gap(space::SM)
-                    .child(div().flex_1().child(Input::new(&self.provider_id_input)))
-                    .child(div().flex_1().child(Input::new(&self.provider_name_input))),
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(Input::new(&self.provider_id_input).h(height::FIELD)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(Input::new(&self.provider_name_input).h(height::FIELD)),
+                    ),
             )
             .child(protocol_row)
-            .child(Input::new(&self.base_url_input))
-            .child(Input::new(&self.api_key_input))
+            .child(Input::new(&self.base_url_input).h(height::FIELD))
+            .child(
+                Input::new(&self.api_key_input)
+                    .h(height::FIELD)
+                    .mask_toggle(),
+            )
             .child(self.render_group_header_with_3_icon_buttons("模型列表", palette, cx))
-            .children(self.search_visible.then(|| Input::new(&self.search_input)))
+            .children(self.search_visible.then(|| {
+                Input::new(&self.search_input)
+                    .h(height::FIELD)
+                    .cleanable(true)
+            }))
             .child(hairline_table)
             .child(
                 div()
@@ -680,15 +924,13 @@ impl ProvidersTabView {
                             .rounded(radius::CONTROL)
                             .border_1()
                             .border_color(palette.border_strong)
-                            .bg(palette.bg_elevated)
+                            .bg(palette.bg_workspace)
                             .text_color(palette.text_primary)
                             .flex()
                             .items_center()
+                            .hover(|s| s.bg(palette.bg_item_hover))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.inline_edit_mode = false;
-                                this.creating_new_custom = false;
-                                this.active_provider_id = None;
-                                cx.notify();
+                                this.return_to_provider_list(cx);
                             }))
                             .child(cjk_inline_label("取消")),
                     )
@@ -697,12 +939,13 @@ impl ProvidersTabView {
                             .id("providers-inline-save-btn")
                             .test_support()
                             .h(height::CONTROL)
-                            .px(space::MD)
+                            .px(space::LG)
                             .rounded(radius::CONTROL)
                             .bg(palette.accent_solid)
                             .text_color(palette.text_on_accent)
                             .flex()
                             .items_center()
+                            .hover(|s| s.bg(palette.accent_hover))
                             .on_click(cx.listener(|this, _, w, cx| {
                                 this.save_inline_provider_form(w, cx);
                             }))
@@ -718,141 +961,37 @@ impl ProvidersTabView {
 
 impl Render for ProvidersTabView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = DesktopThemeGlobal::current(cx).palette;
+        let theme_global = DesktopThemeGlobal::current(cx);
+        let palette = theme_global.palette;
+        let mono_family = theme_global.mono_font_family;
         let snap = self.client.snapshot();
 
-        let cstoa_signed_in = snap.account.as_ref().is_some_and(|a| a.signed_in);
-        let cstoa_meta = if cstoa_signed_in {
-            let acc = snap.account.as_ref().unwrap();
-            let sid = acc.profile.student_id.as_deref().unwrap_or("--");
-            let nm = acc.profile.name.as_deref().unwrap_or("已登录");
-            format!("扫码登录 · 已就绪 · {nm}（{sid}）")
-        } else {
-            "扫码登录 · 未登录".to_owned()
-        };
-
-        // Top-pinned CSTOA card
-        let cstoa_card = div()
-            .id("providers-cstoa-pinned-card")
-            .test_support()
-            .w_full()
-            .p(space::LG)
-            .rounded(radius::SPECIAL)
-            .border_1()
-            .border_color(palette.border_subtle)
-            .bg(palette.bg_surface)
-            .flex()
-            .items_center()
-            .justify_between()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(space::MICRO)
-                    .child(
-                        apply_scale(div(), scale::UI_MEDIUM)
-                            .text_color(palette.text_primary)
-                            .child("CSTOA 科协专属服务"),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION)
-                            .text_color(palette.text_secondary)
-                            .child(SharedString::from(cstoa_meta)),
-                    ),
-            )
-            .child(
-                apply_scale(div(), scale::UI_MEDIUM)
-                    .id("providers-cstoa-action-btn")
-                    .test_support()
-                    .h(height::CONTROL)
-                    .px(space::MD)
-                    .rounded(radius::CONTROL)
-                    .border_1()
-                    .border_color(palette.border_strong)
-                    .bg(palette.bg_elevated)
-                    .text_color(palette.text_primary)
-                    .flex()
-                    .items_center()
-                    .on_click(cx.listener(move |_, _, _, cx| {
-                        cx.emit(ProvidersTabEvent::OpenLoginOrAccount {
-                            signed_in: cstoa_signed_in,
-                        });
-                    }))
-                    .child(cjk_inline_label(if cstoa_signed_in {
-                        "账号详情"
-                    } else {
-                        "扫码登录"
-                    })),
-            );
-
-        // Provider list
-        let providers = snap
-            .auth_providers
-            .as_ref()
-            .map(|p| p.as_slice())
-            .unwrap_or(&[]);
-        let mut provider_list = div()
-            .w_full()
-            .rounded(radius::SPECIAL)
-            .border_1()
-            .border_color(palette.border_subtle)
-            .bg(palette.bg_surface)
-            .flex()
-            .flex_col();
-
-        let non_cstoa: Vec<_> = providers.iter().filter(|p| p.id != "cstoa").collect();
-        if non_cstoa.is_empty() {
-            provider_list = provider_list.child(
-                apply_scale(div(), scale::CAPTION)
-                    .p(space::LG)
-                    .text_color(palette.text_muted)
-                    .child("暂无其他已配置或待更新凭据的模型服务，可点击下方添加自定义服务。"),
-            );
-        } else {
-            for (idx, prov) in non_cstoa.iter().enumerate() {
-                let pid = prov.id.clone();
-                let status_str = if prov.requires_login {
-                    ("凭据已失效", palette.status_danger)
-                } else if prov.configured == Some(true) {
-                    ("已就绪", palette.status_success)
-                } else {
-                    ("未配置", palette.text_muted)
-                };
-                let mut row = div()
-                    .id(SharedString::from(format!("provider-row-{pid}")))
-                    .test_support()
-                    .px(space::LG)
-                    .py(space::MD)
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .hover(|s| s.bg(palette.bg_item_hover))
-                    .on_click(cx.listener(move |this, _, w, cx| {
-                        this.select_provider(pid.clone(), w, cx);
-                    }))
-                    .child(
-                        apply_scale(div(), scale::UI_MEDIUM)
-                            .text_color(palette.text_primary)
-                            .child(SharedString::from(prov.name.clone())),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .text_color(status_str.1)
-                            .child(cjk_inline_label(status_str.0)),
-                    );
-                if idx > 0 {
-                    row = row.border_t_1().border_color(palette.border_subtle);
-                }
-                provider_list = provider_list.child(row);
-            }
+        // 1. Custom / Inline Provider Editor Mode
+        if self.creating_new_custom || self.inline_edit_mode {
+            return div()
+                .id("settings-providers-tab")
+                .test_support()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(space::MD)
+                .child(
+                    apply_scale(div(), scale::TITLE)
+                        .text_color(palette.text_primary)
+                        .child(cjk_inline_label("模型服务")),
+                )
+                .child(self.render_borderless_hairline_editor(mono_family, &palette, cx));
         }
 
-        let detail_section = if self.creating_new_custom || self.inline_edit_mode {
-            Some(
-                self.render_borderless_hairline_editor(&palette, cx)
-                    .into_any_element(),
-            )
-        } else if let Some(ref pid) = self.active_provider_id {
+        // 2. Built-in Provider Detail / Credential Management Mode
+        if let Some(ref pid) = self.active_provider_id {
+            let pid_owned = pid.clone();
+            let prov_name = snap
+                .auth_providers
+                .as_ref()
+                .and_then(|list| list.iter().find(|p| p.id == pid_owned))
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| pid_owned.clone());
             let filter_q = self.search_input.read(cx).value().to_lowercase();
             let catalog_models: Vec<_> = snap
                 .models
@@ -861,7 +1000,7 @@ impl Render for ProvidersTabView {
                     m.catalog
                         .iter()
                         .filter(|mc| {
-                            &mc.provider == pid
+                            mc.provider == pid_owned
                                 && (filter_q.is_empty()
                                     || mc.id.to_lowercase().contains(&filter_q)
                                     || mc.name.to_lowercase().contains(&filter_q))
@@ -871,52 +1010,314 @@ impl Render for ProvidersTabView {
                 })
                 .unwrap_or_default();
 
-            let mut model_rows = div()
-                .w_full()
-                .rounded(radius::SPECIAL)
-                .border_1()
-                .border_color(palette.border_subtle)
-                .bg(palette.bg_surface)
-                .flex()
-                .flex_col();
+            let mut model_table = div().w_full().flex().flex_col().child(
+                div()
+                    .w_full()
+                    .h(height::CONTROL)
+                    .border_b_1()
+                    .border_color(palette.border_subtle)
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .flex_1()
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label("模型 ID")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .flex_1()
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label("显示名称")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .w(px(76.0))
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label("上下文窗口")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .w(px(40.0))
+                            .flex()
+                            .justify_center()
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label("思考")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .w(px(40.0))
+                            .flex()
+                            .justify_center()
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label("图片")),
+                    ),
+            );
 
-            for (idx, m) in catalog_models.iter().enumerate() {
-                let mut r = div()
+            for m in &catalog_models {
+                let has_image = m.input.iter().any(|x| x == "image");
+                model_table = model_table.child(
+                    div()
+                        .h(px(44.0))
+                        .border_b_1()
+                        .border_color(palette.border_hairline)
+                        .flex()
+                        .items_center()
+                        .gap(space::SM)
+                        .child(
+                            apply_scale(div(), scale::CAPTION)
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .font_family(mono_family.clone())
+                                .text_color(palette.text_secondary)
+                                .child(SharedString::from(m.id.clone())),
+                        )
+                        .child(
+                            apply_scale(div(), scale::UI)
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_color(palette.text_primary)
+                                .child(SharedString::from(m.name.clone())),
+                        )
+                        .child(
+                            apply_scale(div(), scale::CAPTION)
+                                .w(px(76.0))
+                                .font_family(mono_family.clone())
+                                .text_color(palette.text_secondary)
+                                .child(SharedString::from(format_token_window(
+                                    m.context_window.unwrap_or(128_000),
+                                ))),
+                        )
+                        .child(
+                            div()
+                                .w(px(40.0))
+                                .flex()
+                                .justify_center()
+                                .child(readonly_capability_box(m.reasoning, &palette)),
+                        )
+                        .child(
+                            div()
+                                .w(px(40.0))
+                                .flex()
+                                .justify_center()
+                                .child(readonly_capability_box(has_image, &palette)),
+                        ),
+                );
+            }
+
+            return div()
+                .id("settings-providers-tab")
+                .test_support()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(space::MD)
+                .child(
+                    apply_scale(div(), scale::TITLE)
+                        .text_color(palette.text_primary)
+                        .child(cjk_inline_label("模型服务")),
+                )
+                .child(self.render_back_bar(&palette, cx))
+                .child(
+                    apply_scale(div(), scale::BODY_SEMIBOLD)
+                        .text_color(palette.text_primary)
+                        .child(SharedString::from(prov_name)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap(space::SM)
+                        .child(
+                            div().flex_1().child(
+                                Input::new(&self.api_key_input)
+                                    .h(height::FIELD)
+                                    .mask_toggle(),
+                            ),
+                        )
+                        .child(
+                            apply_scale(div(), scale::UI_MEDIUM)
+                                .id("providers-builtin-save-key-btn")
+                                .test_support()
+                                .h(height::FIELD)
+                                .px(space::LG)
+                                .rounded(radius::CONTROL)
+                                .bg(palette.accent_solid)
+                                .text_color(palette.text_on_accent)
+                                .flex()
+                                .items_center()
+                                .hover(|s| s.bg(palette.accent_hover))
+                                .on_click(cx.listener(|this, _, w, cx| {
+                                    this.save_builtin_api_key(w, cx);
+                                }))
+                                .child(cjk_inline_label(if self.saving {
+                                    "正在保存…"
+                                } else {
+                                    "保存密钥"
+                                })),
+                        ),
+                )
+                .child(self.render_group_header_with_3_icon_buttons("模型列表", &palette, cx))
+                .children(self.search_visible.then(|| {
+                    Input::new(&self.search_input)
+                        .h(height::FIELD)
+                        .cleanable(true)
+                }))
+                .child(model_table);
+        }
+
+        // 3. Main Merged Provider List (`$bg-workspace` + `8px` radius + `72px` rows)
+        let cstoa_signed_in = snap.account.as_ref().is_some_and(|a| a.signed_in);
+        let (cstoa_meta, cstoa_meta_color) = if cstoa_signed_in {
+            let acc = snap.account.as_ref().unwrap();
+            let sid = acc.profile.student_id.as_deref().unwrap_or("--");
+            let nm = acc.profile.name.as_deref().unwrap_or("已登录");
+            (
+                format!("扫码登录 · 已就绪 · {nm}（{sid}）"),
+                palette.text_secondary,
+            )
+        } else {
+            ("扫码登录 · 未登录".to_owned(), palette.status_warning)
+        };
+
+        let mut merged_card = div()
+            .w_full()
+            .rounded(radius::ROW)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .bg(palette.bg_workspace)
+            .flex()
+            .flex_col()
+            // First row retains `providers-cstoa-pinned-card` ID for test compatibility
+            .child(
+                div()
+                    .id("providers-cstoa-pinned-card")
+                    .test_support()
+                    .w_full()
+                    .h(px(72.0))
                     .px(space::LG)
-                    .py(space::SM)
                     .flex()
                     .items_center()
                     .justify_between()
+                    .gap(space::LG)
                     .child(
-                        apply_scale(div(), scale::UI)
-                            .text_color(palette.text_primary)
-                            .child(SharedString::from(m.name.clone())),
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(space::MICRO)
+                            .min_w_0()
+                            .child(
+                                apply_scale(div(), scale::BODY)
+                                    .text_color(palette.text_primary)
+                                    .child(cjk_inline_label("CSTOA 科协专属服务")),
+                            )
+                            .child(
+                                apply_scale(div(), scale::CAPTION)
+                                    .text_color(cstoa_meta_color)
+                                    .child(SharedString::from(cstoa_meta)),
+                            ),
                     )
                     .child(
-                        apply_scale(div(), scale::CAPTION)
-                            .text_color(palette.text_muted)
-                            .child(SharedString::from(m.id.clone())),
-                    );
-                if idx > 0 {
-                    r = r.border_t_1().border_color(palette.border_subtle);
-                }
-                model_rows = model_rows.child(r);
-            }
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .id("providers-cstoa-action-btn")
+                            .test_support()
+                            .h(height::CONTROL)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(palette.border_strong)
+                            .bg(palette.bg_workspace)
+                            .text_color(palette.text_primary)
+                            .flex()
+                            .items_center()
+                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_click(cx.listener(move |_, _, _, cx| {
+                                cx.emit(ProvidersTabEvent::OpenLoginOrAccount {
+                                    signed_in: cstoa_signed_in,
+                                });
+                            }))
+                            .child(cjk_inline_label(if cstoa_signed_in {
+                                "管理"
+                            } else {
+                                "扫码登录"
+                            })),
+                    ),
+            );
 
-            Some(
+        let providers = snap
+            .auth_providers
+            .as_ref()
+            .map(|p| p.as_slice())
+            .unwrap_or(&[]);
+        for prov in providers.iter().filter(|p| p.id != "cstoa") {
+            let pid = prov.id.clone();
+            let pid_btn = pid.clone();
+            let (status_label, status_color) = if prov.requires_login {
+                ("凭据已失效，请重新配置", palette.status_warning)
+            } else if prov.configured == Some(true) {
+                ("已就绪", palette.status_success)
+            } else {
+                ("尚未配置凭据", palette.status_warning)
+            };
+
+            merged_card = merged_card.child(
                 div()
+                    .id(SharedString::from(format!("provider-row-{pid}")))
+                    .test_support()
                     .w_full()
+                    .h(px(72.0))
+                    .px(space::LG)
+                    .border_t_1()
+                    .border_color(palette.border_subtle)
                     .flex()
-                    .flex_col()
-                    .gap(space::SM)
-                    .child(self.render_group_header_with_3_icon_buttons("模型列表", &palette, cx))
-                    .children(self.search_visible.then(|| Input::new(&self.search_input)))
-                    .child(model_rows)
-                    .into_any_element(),
-            )
-        } else {
-            None
-        };
+                    .items_center()
+                    .justify_between()
+                    .gap(space::LG)
+                    .hover(|s| s.bg(palette.bg_item_hover))
+                    .on_click(cx.listener(move |this, _, w, cx| {
+                        this.select_provider(pid.clone(), w, cx);
+                    }))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(space::MICRO)
+                            .min_w_0()
+                            .child(
+                                apply_scale(div(), scale::BODY)
+                                    .text_color(palette.text_primary)
+                                    .child(SharedString::from(prov.name.clone())),
+                            )
+                            .child(
+                                apply_scale(div(), scale::CAPTION)
+                                    .text_color(status_color)
+                                    .child(cjk_inline_label(status_label)),
+                            ),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .id(SharedString::from(format!("provider-manage-btn-{pid_btn}")))
+                            .test_support()
+                            .h(height::CONTROL)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(palette.border_strong)
+                            .bg(palette.bg_workspace)
+                            .text_color(palette.text_primary)
+                            .flex()
+                            .items_center()
+                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_click(cx.listener(move |this, _, w, cx| {
+                                this.select_provider(pid_btn.clone(), w, cx);
+                                cx.stop_propagation();
+                            }))
+                            .child(cjk_inline_label("管理")),
+                    ),
+            );
+        }
 
         div()
             .id("settings-providers-tab")
@@ -925,45 +1326,106 @@ impl Render for ProvidersTabView {
             .flex()
             .flex_col()
             .gap(space::GROUP)
-            .child(cstoa_card)
             .child(
                 div()
+                    .w_full()
                     .flex()
-                    .flex_col()
-                    .gap(space::SM)
+                    .items_center()
+                    .justify_between()
                     .child(
-                        div()
+                        apply_scale(div(), scale::TITLE)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label("模型服务")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .id("providers-new-custom-btn")
+                            .test_support()
+                            .h(height::CONTROL)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(palette.border_strong)
+                            .bg(palette.bg_workspace)
+                            .text_color(palette.text_primary)
                             .flex()
                             .items_center()
-                            .justify_between()
+                            .gap(space::XS)
+                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_click(cx.listener(|this, _, w, cx| {
+                                this.open_new_custom_provider(w, cx);
+                            }))
                             .child(
-                                apply_scale(div(), scale::CAPTION_MEDIUM)
-                                    .text_color(palette.text_secondary)
-                                    .child("第三方与自定义模型服务"),
+                                Icon::new(IconName::Plus)
+                                    .size(px(14.0))
+                                    .text_color(palette.text_secondary),
                             )
-                            .child(
-                                div()
-                                    .id("providers-new-custom-btn")
-                                    .test_support()
-                                    .w(height::COMPACT)
-                                    .h(height::COMPACT)
-                                    .rounded(radius::CONTROL)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .hover(|s| s.bg(palette.bg_item_hover))
-                                    .on_click(cx.listener(|this, _, w, cx| {
-                                        this.open_new_custom_provider(w, cx);
-                                    }))
-                                    .child(
-                                        Icon::new(IconName::Plus)
-                                            .size(px(14.0))
-                                            .text_color(palette.text_secondary),
-                                    ),
-                            ),
-                    )
-                    .child(provider_list),
+                            .child(cjk_inline_label("添加服务")),
+                    ),
             )
-            .children(detail_section)
+            .child(merged_card)
     }
+}
+
+fn capability_checkbox<F>(
+    id: SharedString,
+    checked: bool,
+    palette: &DesktopPalette,
+    on_click: F,
+) -> impl IntoElement
+where
+    F: Fn(&gpui::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
+{
+    div()
+        .id(id)
+        .test_support()
+        .w(px(16.0))
+        .h(px(16.0))
+        .rounded(radius::CONTROL)
+        .border_1()
+        .border_color(if checked {
+            palette.accent_solid
+        } else {
+            palette.border_strong
+        })
+        .bg(if checked {
+            palette.accent_solid
+        } else {
+            palette.bg_workspace
+        })
+        .flex()
+        .items_center()
+        .justify_center()
+        .on_click(on_click)
+        .children(checked.then(|| {
+            Icon::new(IconName::Check)
+                .size(px(11.0))
+                .text_color(palette.text_on_accent)
+        }))
+}
+
+fn readonly_capability_box(checked: bool, palette: &DesktopPalette) -> impl IntoElement {
+    div()
+        .w(px(16.0))
+        .h(px(16.0))
+        .rounded(radius::CONTROL)
+        .border_1()
+        .border_color(if checked {
+            palette.accent_solid
+        } else {
+            palette.border_subtle
+        })
+        .bg(if checked {
+            palette.accent_solid
+        } else {
+            palette.bg_workspace
+        })
+        .flex()
+        .items_center()
+        .justify_center()
+        .children(checked.then(|| {
+            Icon::new(IconName::Check)
+                .size(px(11.0))
+                .text_color(palette.text_on_accent)
+        }))
 }

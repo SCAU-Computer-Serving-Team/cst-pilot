@@ -9,6 +9,7 @@ use std::rc::Rc;
 use cst_client::{
     ClientHandle, DefaultViewDto, DesktopSettingsPatchDto, ThemeModeDto, UpdatePhaseDto,
 };
+use gpui_kit::assets::IconName;
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ParentElement,
     Render, SharedString, StatefulInteractiveElement, Styled, Subscription, TestSupportExt, Window,
@@ -20,8 +21,8 @@ use crate::settings::preferences_tab::{PreferencesTabEvent, PreferencesTabView};
 use crate::settings::providers_tab::{ProvidersTabEvent, ProvidersTabView};
 use crate::settings::shortcuts_tab::render_shortcuts_tab;
 use crate::theme::{
-    DesktopThemeGlobal, apply_desktop_theme, apply_scale, cjk_inline_label, height, layout, scale,
-    space,
+    DesktopThemeGlobal, apply_desktop_theme, apply_scale, cjk_inline_label, height, layout,
+    render_subpage_header_xwjof, scale, space,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -61,8 +62,8 @@ pub enum SettingsViewEvent {
     ErrorMessage(String),
 }
 
-/// 4-Tab Settings View (`cst-pilot-desktop.pen` 「03 · 设置」 master `VPWAF`, `816px` center column,
-/// `2px` `$accent-solid` active tab indicator).
+/// 4-Tab Settings View (`cst-pilot-desktop.pen` 「03 · 设置」 master `VPWAF`):
+/// Top full-width `44px` `xWJOf` subpage header + `816px` center column with `40px` tabbar (`2px` `$accent-solid` indicator at `bottom: -1px`).
 pub struct SettingsView {
     client: ClientHandle,
     category: SettingsCategory,
@@ -76,7 +77,7 @@ impl EventEmitter<SettingsViewEvent> for SettingsView {}
 impl SettingsView {
     pub fn new(client: ClientHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let providers_tab = cx.new(|cx| ProvidersTabView::new(client.clone(), window, cx));
-        let preferences_tab = cx.new(|cx| PreferencesTabView::new(client.clone(), cx));
+        let preferences_tab = cx.new(|cx| PreferencesTabView::new(client.clone(), window, cx));
 
         let mut subs = Vec::new();
         subs.push(cx.subscribe(&providers_tab, |_, _, ev, cx| match ev {
@@ -137,7 +138,7 @@ impl Render for SettingsView {
             .id("settings-tabbar-vpwaf")
             .test_support()
             .w_full()
-            .h(height::HEADER)
+            .h(height::FIELD)
             .border_b_1()
             .border_color(palette.border_subtle)
             .flex()
@@ -146,6 +147,16 @@ impl Render for SettingsView {
 
         for cat in SettingsCategory::ALL {
             let active = self.category == cat;
+            let text_el = if active {
+                apply_scale(div(), scale::BODY_SEMIBOLD)
+                    .text_color(palette.text_primary)
+                    .child(cjk_inline_label(cat.label()))
+            } else {
+                apply_scale(div(), scale::BODY)
+                    .text_color(palette.text_secondary)
+                    .child(cjk_inline_label(cat.label()))
+            };
+
             tab_bar = tab_bar.child(
                 div()
                     .id(SharedString::from(format!("settings-tab-{:?}", cat)))
@@ -158,21 +169,13 @@ impl Render for SettingsView {
                         this.category = cat;
                         cx.notify();
                     }))
-                    .child(
-                        apply_scale(div(), scale::UI_MEDIUM)
-                            .text_color(if active {
-                                palette.text_primary
-                            } else {
-                                palette.text_secondary
-                            })
-                            .child(cjk_inline_label(cat.label())),
-                    )
+                    .child(text_el)
                     .children(active.then(|| {
                         div()
                             .absolute()
                             .left_0()
                             .right_0()
-                            .bottom_0()
+                            .bottom(px(-1.0))
                             .h(px(2.0))
                             .bg(palette.accent_solid)
                     })),
@@ -294,21 +297,38 @@ impl Render for SettingsView {
             .id("settings-view-vpwaf")
             .test_support()
             .size_full()
-            .overflow_y_scroll()
             .flex()
             .flex_col()
-            .items_center()
-            .px(space::GROUP)
-            .py(space::GROUP)
+            .bg(palette.bg_workspace)
+            .child(render_subpage_header_xwjof(
+                "settings-subpage-header",
+                IconName::Settings,
+                "设置",
+                None,
+                &palette,
+            ))
             .child(
                 div()
+                    .id("settings-scroll-body")
+                    .flex_1()
+                    .min_h_0()
                     .w_full()
-                    .max_w(layout::CENTER_COLUMN_MAX_WIDTH)
+                    .overflow_y_scroll()
+                    .px(space::GROUP)
+                    .py(space::GROUP)
                     .flex()
                     .flex_col()
-                    .gap(space::GROUP)
-                    .child(tab_bar)
-                    .child(content_el),
+                    .items_center()
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w(layout::CENTER_COLUMN_MAX_WIDTH)
+                            .flex()
+                            .flex_col()
+                            .gap(space::GROUP)
+                            .child(tab_bar)
+                            .child(content_el),
+                    ),
             )
     }
 }

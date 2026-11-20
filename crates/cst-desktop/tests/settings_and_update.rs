@@ -693,11 +693,12 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
     .unwrap();
 
     cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
-        window.try_find("session-header-tree-btn").is_some()
+        window.try_find("session-header-more-btn").is_some()
     })
     .await;
 
     cx.update_window(win_handle, |_, window, cx| {
+        window.click("session-header-more-btn", cx);
         window.click("session-header-tree-btn", cx);
     })
     .unwrap();
@@ -738,6 +739,7 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
 
     // 5. `ExportView` (`Ntay1`: `264px` `ER02w` + `eGkN1` independent theme preview + Explorer `open`)
     cx.update_window(win_handle, |_, window, cx| {
+        window.click("session-header-more-btn", cx);
         window.click("session-header-export-btn", cx);
     })
     .unwrap();

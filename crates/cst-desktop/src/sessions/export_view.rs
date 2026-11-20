@@ -1,8 +1,8 @@
 use std::rc::Rc;
+use std::time::Duration;
 
 use cst_client::ClientHandle;
 use cst_client::tool_presenter::{ToolCallInput, ToolExecutionMeta, ToolResultInput};
-use gpui::CursorStyle;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::{
@@ -72,8 +72,8 @@ pub enum ExportViewEvent {
     ErrorMessage(String),
 }
 
-/// Session Export & Native Read-Only Preview (`cst-pilot-desktop.pen` 「02 · 会话管理」 `Y8hs0` -> `Ntay1`):
-/// Left `264px` options column (`ER02w`) + Right independent-theme GPUI native preview (`eGkN1`).
+/// Session Export & Native Read-Only Preview (`cst-pilot-desktop.pen` 「02 · 会话管理」 `Y8hs0` -> `hesLq` + `Ntay1`):
+/// Top full-width `44px` `hesLq` header + `24px` dual-column body (`264px` `ER02w` options + `eGkN1` independent-theme preview).
 pub struct ExportView {
     client: ClientHandle,
     session_id: String,
@@ -209,12 +209,11 @@ impl ExportView {
                 return;
             }
 
-            // Poll `GET /api/exports/<exportId>` on the Tokio runtime (never blocking GPUI test clock)
+            // Poll `GET /api/exports/<exportId>` with 200ms Tokio sleep backoff when still running
             let poll_client = client.clone();
             let jid = job_id.clone();
-            let final_job = poll_client.get_export_job(jid.clone()).await;
+            let mut resolved_job = poll_client.get_export_job(jid.clone()).await;
 
-            let mut resolved_job = final_job;
             for _ in 0..120 {
                 let status = resolved_job
                     .as_ref()
@@ -225,9 +224,14 @@ impl ExportView {
                 if matches!(status, "completed" | "failed") {
                     break;
                 }
+                let _ = client
+                    .spawn_tokio(async {
+                        tokio::time::sleep(Duration::from_millis(200)).await;
+                        Ok::<(), cst_client::ClientError>(())
+                    })
+                    .await;
                 let pc = client.clone();
                 let j = jid.clone();
-                // Short backoff via Tokio runtime inside `get_export_job`
                 resolved_job = pc.get_export_job(j).await;
             }
 
@@ -287,18 +291,235 @@ impl ExportView {
     fn render_readonly_preview(
         &self,
         mono_family: SharedString,
+        ui_palette: &DesktopPalette,
         scale_factor: f32,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let doc_palette = self.doc_theme.palette();
 
-        let Some(ref snap) = self.preview_snapshot else {
-            return div()
+        let viewport_el = if let Some(ref snap) = self.preview_snapshot {
+            let title = snap
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("会话导出");
+            let entries = snap
+                .get("entries")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let (turns, tool_results) = group_turns_and_results(&entries);
+
+            let mut doc_col = div()
+                .w_full()
+                .max_w(px(760.0))
+                .mx_auto()
+                .flex()
+                .flex_col()
+                .gap(space::GROUP)
+                .child(
+                    div()
+                        .pb(space::MD)
+                        .border_b_1()
+                        .border_color(doc_palette.border_subtle)
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            apply_scale(div(), scale::TITLE)
+                                .text_color(doc_palette.text_primary)
+                                .child(SharedString::from(title.to_owned())),
+                        )
+                        .children(self.loading_preview.then(|| {
+                            apply_scale(div(), scale::CAPTION)
+                                .text_color(doc_palette.text_muted)
+                                .child("正在更新预览…")
+                        })),
+                );
+
+            for (t_idx, turn) in turns.iter().enumerate() {
+                let mut turn_box = div()
+                    .id(SharedString::from(format!("export-preview-turn-{t_idx}")))
+                    .test_support()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(space::MD);
+
+                if let Some(ref u) = turn.user {
+                    let utext = extract_message_text(u.raw.get("message").unwrap_or(&u.raw));
+                    if !utext.trim().is_empty() {
+                        turn_box = turn_box.child(
+                            div().w_full().flex().justify_end().child(
+                                apply_scale(div(), scale::BODY)
+                                    .max_w(px(560.0))
+                                    .px(space::LG)
+                                    .py(space::SM)
+                                    .rounded(radius::ROW)
+                                    .bg(doc_palette.bg_surface)
+                                    .text_color(doc_palette.text_primary)
+                                    .child(SharedString::from(utext)),
+                            ),
+                        );
+                    }
+                }
+
+                if !turn.assistants.is_empty() {
+                    let split = split_turn(&turn.assistants);
+                    let segments = build_turn_segments(split.process);
+                    for seg in segments {
+                        for part in seg.parts {
+                            match part.part {
+                                ConversationPart::Thinking(th)
+                                    if !th.thinking.trim().is_empty() =>
+                                {
+                                    turn_box = turn_box.child(
+                                        apply_scale(div(), scale::CAPTION)
+                                            .p(space::MD)
+                                            .rounded(radius::ROW)
+                                            .bg(doc_palette.bg_surface)
+                                            .text_color(doc_palette.text_secondary)
+                                            .child(SharedString::from(th.thinking)),
+                                    );
+                                }
+                                ConversationPart::Special { call: tc, .. } => {
+                                    let res_val = tool_results.get(&tc.id);
+                                    let input = ToolCallInput {
+                                        id: tc.id.clone(),
+                                        name: tc.name.clone(),
+                                        arguments: tc
+                                            .arguments
+                                            .as_object()
+                                            .cloned()
+                                            .unwrap_or_default(),
+                                        execution: Some(ToolExecutionMeta::default()),
+                                    };
+                                    let parsed = res_val.map(ToolResultInput::from_message_json);
+                                    if let Some(special) =
+                                        self.client.with_presenter_cache(|cache| {
+                                            cache.get_or_map_special(
+                                                &input,
+                                                parsed.as_ref(),
+                                                1,
+                                                false,
+                                            )
+                                        })
+                                    {
+                                        turn_box = turn_box.child(render_special_tool_component(
+                                            SpecialToolDispatchProps {
+                                                session_id: &self.session_id,
+                                                entry_id: "export-preview",
+                                                call_id: &tc.id,
+                                                has_result: res_val.is_some(),
+                                                view: &special,
+                                                bitlocker_snapshot: None,
+                                                secret_input: None,
+                                                details_expanded: true,
+                                                warning_hovered: false,
+                                                transparency_enabled: false,
+                                                scale_factor,
+                                            },
+                                            self.client.clone(),
+                                            mono_family.clone(),
+                                            &doc_palette,
+                                            &|_| false,
+                                            Rc::new(|_, _, _| {}),
+                                            Rc::new(|_, _, _, _| {}),
+                                            Rc::new(|_, _, _, _| {}),
+                                            |_, _, _| {},
+                                            |_, _| {},
+                                            window,
+                                            cx,
+                                        ));
+                                    }
+                                }
+                                ConversationPart::Tools(calls) => {
+                                    for tc in calls {
+                                        let res_val = tool_results.get(&tc.id);
+                                        let input = ToolCallInput {
+                                            id: tc.id.clone(),
+                                            name: tc.name.clone(),
+                                            arguments: tc
+                                                .arguments
+                                                .as_object()
+                                                .cloned()
+                                                .unwrap_or_default(),
+                                            execution: Some(ToolExecutionMeta::default()),
+                                        };
+                                        let parsed = res_val
+                                            .map(ToolResultInput::from_message_json)
+                                            .unwrap_or_default();
+                                        let card_view = self.client.with_presenter_cache(|cache| {
+                                            cache.get_or_map_normal(&input, &parsed, 1)
+                                        });
+                                        turn_box = turn_box.child(render_normal_tool_card(
+                                            &tc.id,
+                                            &tc.name,
+                                            None,
+                                            res_val.is_some(),
+                                            parsed.is_error,
+                                            false,
+                                            &card_view,
+                                            true,
+                                            false,
+                                            mono_family.clone(),
+                                            &doc_palette,
+                                            &|_| false,
+                                            Rc::new(|_, _, _| {}),
+                                            Rc::new(|_, _, _| {}),
+                                            Rc::new(|_, _, _| {}),
+                                            |_, _, _| {},
+                                            cx,
+                                        ));
+                                    }
+                                }
+                                ConversationPart::Text(txt) if !txt.trim().is_empty() => {
+                                    turn_box = turn_box.child(
+                                        apply_scale(div(), scale::BODY)
+                                            .text_color(doc_palette.text_primary)
+                                            .child(SharedString::from(txt)),
+                                    );
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    if !split.final_text.trim().is_empty() {
+                        turn_box = turn_box.child(
+                            apply_scale(div(), scale::BODY)
+                                .text_color(doc_palette.text_primary)
+                                .child(SharedString::from(split.final_text)),
+                        );
+                    }
+                }
+                doc_col = doc_col.child(turn_box);
+            }
+
+            div()
                 .id("export-preview-pane-egkn1")
                 .test_support()
                 .flex_1()
-                .h_full()
+                .min_h_0()
+                .w_full()
+                .p(space::GROUP)
+                .rounded(radius::ROW)
+                .border_1()
+                .border_color(ui_palette.border_hairline)
+                .overflow_y_scroll()
+                .bg(doc_palette.bg_workspace)
+                .child(doc_col)
+                .into_any_element()
+        } else {
+            div()
+                .id("export-preview-pane-egkn1")
+                .test_support()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .p(space::GROUP)
+                .rounded(radius::ROW)
+                .border_1()
+                .border_color(ui_palette.border_hairline)
                 .bg(doc_palette.bg_workspace)
                 .flex()
                 .items_center()
@@ -312,207 +533,22 @@ impl ExportView {
                             "暂无可导出的消息内容"
                         }),
                 )
-                .into_any_element();
+                .into_any_element()
         };
 
-        let title = snap
-            .get("title")
-            .and_then(Value::as_str)
-            .unwrap_or("会话导出");
-        let entries = snap
-            .get("entries")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let (turns, tool_results) = group_turns_and_results(&entries);
-
-        let mut doc_col = div()
-            .w_full()
-            .max_w(px(760.0))
-            .mx_auto()
-            .p(space::GROUP)
-            .flex()
-            .flex_col()
-            .gap(space::GROUP)
-            .child(
-                div()
-                    .pb(space::MD)
-                    .border_b_1()
-                    .border_color(doc_palette.border_subtle)
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        apply_scale(div(), scale::TITLE)
-                            .text_color(doc_palette.text_primary)
-                            .child(SharedString::from(title.to_owned())),
-                    )
-                    .children(self.loading_preview.then(|| {
-                        apply_scale(div(), scale::CAPTION)
-                            .text_color(doc_palette.text_muted)
-                            .child("正在更新预览…")
-                    })),
-            );
-
-        for (t_idx, turn) in turns.iter().enumerate() {
-            let mut turn_box = div()
-                .id(SharedString::from(format!("export-preview-turn-{t_idx}")))
-                .test_support()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap(space::MD);
-
-            if let Some(ref u) = turn.user {
-                let utext = extract_message_text(u.raw.get("message").unwrap_or(&u.raw));
-                if !utext.trim().is_empty() {
-                    turn_box = turn_box.child(
-                        div().w_full().flex().justify_end().child(
-                            apply_scale(div(), scale::BODY)
-                                .max_w(px(560.0))
-                                .px(space::LG)
-                                .py(space::SM)
-                                .rounded(radius::SPECIAL)
-                                .bg(doc_palette.bg_surface)
-                                .text_color(doc_palette.text_primary)
-                                .child(SharedString::from(utext)),
-                        ),
-                    );
-                }
-            }
-
-            if !turn.assistants.is_empty() {
-                let split = split_turn(&turn.assistants);
-                let segments = build_turn_segments(split.process);
-                for seg in segments {
-                    for part in seg.parts {
-                        match part.part {
-                            ConversationPart::Thinking(th) if !th.thinking.trim().is_empty() => {
-                                turn_box = turn_box.child(
-                                    apply_scale(div(), scale::CAPTION)
-                                        .p(space::MD)
-                                        .rounded(radius::ROW)
-                                        .bg(doc_palette.bg_surface)
-                                        .text_color(doc_palette.text_secondary)
-                                        .child(SharedString::from(th.thinking)),
-                                );
-                            }
-                            ConversationPart::Special { call: tc, .. } => {
-                                let res_val = tool_results.get(&tc.id);
-                                let input = ToolCallInput {
-                                    id: tc.id.clone(),
-                                    name: tc.name.clone(),
-                                    arguments: tc
-                                        .arguments
-                                        .as_object()
-                                        .cloned()
-                                        .unwrap_or_default(),
-                                    execution: Some(ToolExecutionMeta::default()),
-                                };
-                                let parsed = res_val.map(ToolResultInput::from_message_json);
-                                if let Some(special) = self.client.with_presenter_cache(|cache| {
-                                    cache.get_or_map_special(&input, parsed.as_ref(), 1, false)
-                                }) {
-                                    turn_box = turn_box.child(render_special_tool_component(
-                                        SpecialToolDispatchProps {
-                                            session_id: &self.session_id,
-                                            entry_id: "export-preview",
-                                            call_id: &tc.id,
-                                            has_result: res_val.is_some(),
-                                            view: &special,
-                                            bitlocker_snapshot: None,
-                                            secret_input: None,
-                                            details_expanded: true,
-                                            warning_hovered: false,
-                                            transparency_enabled: false,
-                                            scale_factor,
-                                        },
-                                        self.client.clone(),
-                                        mono_family.clone(),
-                                        &doc_palette,
-                                        &|_| false,
-                                        Rc::new(|_, _, _| {}),
-                                        Rc::new(|_, _, _, _| {}),
-                                        Rc::new(|_, _, _, _| {}),
-                                        |_, _, _| {},
-                                        |_, _| {},
-                                        window,
-                                        cx,
-                                    ));
-                                }
-                            }
-                            ConversationPart::Tools(calls) => {
-                                for tc in calls {
-                                    let res_val = tool_results.get(&tc.id);
-                                    let input = ToolCallInput {
-                                        id: tc.id.clone(),
-                                        name: tc.name.clone(),
-                                        arguments: tc
-                                            .arguments
-                                            .as_object()
-                                            .cloned()
-                                            .unwrap_or_default(),
-                                        execution: Some(ToolExecutionMeta::default()),
-                                    };
-                                    let parsed = res_val
-                                        .map(ToolResultInput::from_message_json)
-                                        .unwrap_or_default();
-                                    let card_view = self.client.with_presenter_cache(|cache| {
-                                        cache.get_or_map_normal(&input, &parsed, 1)
-                                    });
-                                    turn_box = turn_box.child(render_normal_tool_card(
-                                        &tc.id,
-                                        &tc.name,
-                                        None,
-                                        res_val.is_some(),
-                                        parsed.is_error,
-                                        false,
-                                        &card_view,
-                                        true,
-                                        false,
-                                        mono_family.clone(),
-                                        &doc_palette,
-                                        &|_| false,
-                                        Rc::new(|_, _, _| {}),
-                                        Rc::new(|_, _, _| {}),
-                                        Rc::new(|_, _, _| {}),
-                                        |_, _, _| {},
-                                        cx,
-                                    ));
-                                }
-                            }
-                            ConversationPart::Text(txt) if !txt.trim().is_empty() => {
-                                turn_box = turn_box.child(
-                                    apply_scale(div(), scale::BODY)
-                                        .text_color(doc_palette.text_primary)
-                                        .child(SharedString::from(txt)),
-                                );
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                if !split.final_text.trim().is_empty() {
-                    turn_box = turn_box.child(
-                        apply_scale(div(), scale::BODY)
-                            .text_color(doc_palette.text_primary)
-                            .child(SharedString::from(split.final_text)),
-                    );
-                }
-            }
-            doc_col = doc_col.child(turn_box);
-        }
-
         div()
-            .id("export-preview-pane-egkn1")
-            .test_support()
             .flex_1()
             .min_w_0()
             .h_full()
-            .overflow_y_scroll()
-            .bg(doc_palette.bg_workspace)
-            .child(doc_col)
-            .into_any_element()
+            .flex()
+            .flex_col()
+            .gap(space::MD)
+            .child(
+                apply_scale(div(), scale::BODY_SEMIBOLD)
+                    .text_color(ui_palette.text_primary)
+                    .child(cjk_inline_label("预览")),
+            )
+            .child(viewport_el)
     }
 }
 
@@ -523,208 +559,224 @@ impl Render for ExportView {
         let mono_family = theme_global.mono_font_family;
         let scale_factor = window.scale_factor();
 
+        // Top full-width `44px` header `hesLq`: `pl(24px) pr(16px) border_b_1`, `export-back-btn` + `24px` gap + `"导出会话"`
+        let top_header = div()
+            .id("export-subpage-header-heslq")
+            .test_support()
+            .w_full()
+            .h(height::HEADER)
+            .flex_shrink_0()
+            .pl(space::GROUP)
+            .pr(space::LG)
+            .bg(palette.bg_workspace)
+            .border_b_1()
+            .border_color(palette.border_subtle)
+            .flex()
+            .items_center()
+            .gap(space::GROUP)
+            .child(
+                apply_scale(div(), scale::UI_MEDIUM)
+                    .id("export-back-btn")
+                    .test_support()
+                    .h(height::CONTROL)
+                    .px(space::SM)
+                    .rounded(radius::CONTROL)
+                    .text_color(palette.text_secondary)
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                    .on_click(cx.listener(|_, _, _, cx| {
+                        cx.emit(ExportViewEvent::BackToChat);
+                    }))
+                    .child(
+                        Icon::new(IconName::ArrowLeft)
+                            .size(px(16.0))
+                            .text_color(palette.text_secondary),
+                    )
+                    .child(cjk_inline_label("返回对话")),
+            )
+            .child(
+                apply_scale(div(), scale::BODY_SEMIBOLD)
+                    .text_color(palette.text_primary)
+                    .child(cjk_inline_label("导出会话")),
+            );
+
+        // Left `264px` options column `ER02w` (no gray `bg_surface`, no right border)
+        let saved_section_opt = self.last_completed_export_id.as_ref().map(|eid| {
+            let eid_open = eid.clone();
+            let dir_hint = self.last_completed_dir.clone();
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::XS)
+                .children(dir_hint.map(|d| {
+                    apply_scale(div(), scale::CAPTION)
+                        .truncate()
+                        .text_color(palette.text_muted)
+                        .child(SharedString::from(d))
+                }))
+                .child(
+                    apply_scale(div(), scale::UI_MEDIUM)
+                        .id("export-open-dir-btn")
+                        .test_support()
+                        .w_full()
+                        .h(height::CONTROL)
+                        .px(space::MD)
+                        .rounded(radius::CONTROL)
+                        .border_1()
+                        .border_color(palette.border_strong)
+                        .bg(palette.bg_workspace)
+                        .text_color(palette.text_primary)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let c = this.client.clone();
+                            let id = eid_open.clone();
+                            cx.spawn(async move |weak, cx| {
+                                if let Err(err) = c.open_export_directory(id).await {
+                                    let _ = weak.update(cx, |_, cx| {
+                                        cx.emit(ExportViewEvent::ErrorMessage(err.to_string()));
+                                    });
+                                }
+                            })
+                            .detach();
+                        }))
+                        .child(cjk_inline_label("打开保存目录")),
+                )
+        });
+
         let left_options = div()
             .id("export-options-pane-er02w")
             .test_support()
             .w(px(264.0))
             .h_full()
             .flex_shrink_0()
-            .p(space::LG)
-            .border_r_1()
-            .border_color(palette.border_subtle)
-            .bg(palette.bg_surface)
             .flex()
             .flex_col()
-            .justify_between()
+            .gap(space::LG)
+            .child(
+                apply_scale(div(), scale::BODY_SEMIBOLD)
+                    .text_color(palette.text_primary)
+                    .child(cjk_inline_label("导出选项")),
+            )
+            // Format selector (`PNG / HTML`)
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap(space::LG)
+                    .gap(space::XS)
                     .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(space::SM)
-                            .child(
-                                apply_scale(div(), scale::UI_MEDIUM)
-                                    .id("export-back-btn")
-                                    .test_support()
-                                    .h(height::CONTROL)
-                                    .px(space::SM)
-                                    .rounded(radius::CONTROL)
-                                    .text_color(palette.text_secondary)
-                                    .flex()
-                                    .items_center()
-                                    .gap(space::XS)
-                                    .hover(|s| s.bg(palette.bg_item_hover))
-                                    .on_click(cx.listener(|_, _, _, cx| {
-                                        cx.emit(ExportViewEvent::BackToChat);
-                                    }))
-                                    .child(
-                                        Icon::new(IconName::ArrowLeft)
-                                            .size(px(14.0))
-                                            .text_color(palette.text_secondary),
-                                    )
-                                    .child(cjk_inline_label("返回")),
-                            )
-                            .child(
-                                apply_scale(div(), scale::BODY_SEMIBOLD)
-                                    .text_color(palette.text_primary)
-                                    .child(cjk_inline_label("会话导出")),
-                            ),
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label("导出格式")),
                     )
-                    // Format selector (`PNG / HTML`)
                     .child(
                         div()
                             .flex()
-                            .flex_col()
                             .gap(space::XS)
-                            .child(
-                                apply_scale(div(), scale::CAPTION_MEDIUM)
-                                    .text_color(palette.text_secondary)
-                                    .child("导出格式"),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap(space::XS)
-                                    .child(export_seg_btn(
-                                        "export-format-png-btn",
-                                        ExportFormatChoice::Png.label(),
-                                        self.format == ExportFormatChoice::Png,
-                                        &palette,
-                                        cx.listener(|this, _, _, cx| {
-                                            this.format = ExportFormatChoice::Png;
-                                            this.reload_preview(cx);
-                                        }),
-                                    ))
-                                    .child(export_seg_btn(
-                                        "export-format-html-btn",
-                                        ExportFormatChoice::Html.label(),
-                                        self.format == ExportFormatChoice::Html,
-                                        &palette,
-                                        cx.listener(|this, _, _, cx| {
-                                            this.format = ExportFormatChoice::Html;
-                                            this.reload_preview(cx);
-                                        }),
-                                    )),
-                            ),
-                    )
-                    // Document theme selector (`日间 / 夜间`)
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(space::XS)
-                            .child(
-                                apply_scale(div(), scale::CAPTION_MEDIUM)
-                                    .text_color(palette.text_secondary)
-                                    .child("文档主题"),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap(space::XS)
-                                    .child(export_seg_btn(
-                                        "export-theme-light-btn",
-                                        "日间",
-                                        self.doc_theme == ExportDocTheme::Light,
-                                        &palette,
-                                        cx.listener(|this, _, _, cx| {
-                                            this.doc_theme = ExportDocTheme::Light;
-                                            this.reload_preview(cx);
-                                        }),
-                                    ))
-                                    .child(export_seg_btn(
-                                        "export-theme-dark-btn",
-                                        "夜间",
-                                        self.doc_theme == ExportDocTheme::Dark,
-                                        &palette,
-                                        cx.listener(|this, _, _, cx| {
-                                            this.doc_theme = ExportDocTheme::Dark;
-                                            this.reload_preview(cx);
-                                        }),
-                                    )),
-                            ),
-                    )
-                    // Include checkboxes
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(space::SM)
-                            .child(export_check_row(
-                                "export-include-thinking-chk",
-                                "包含思考过程",
-                                self.include_thinking,
+                            .child(export_seg_btn(
+                                "export-format-png-btn",
+                                ExportFormatChoice::Png.label(),
+                                self.format == ExportFormatChoice::Png,
                                 &palette,
                                 cx.listener(|this, _, _, cx| {
-                                    this.include_thinking = !this.include_thinking;
+                                    this.format = ExportFormatChoice::Png;
                                     this.reload_preview(cx);
                                 }),
                             ))
-                            .child(export_check_row(
-                                "export-include-tools-chk",
-                                "包含工具调用结果",
-                                self.include_tools,
+                            .child(export_seg_btn(
+                                "export-format-html-btn",
+                                ExportFormatChoice::Html.label(),
+                                self.format == ExportFormatChoice::Html,
                                 &palette,
                                 cx.listener(|this, _, _, cx| {
-                                    this.include_tools = !this.include_tools;
+                                    this.format = ExportFormatChoice::Html;
                                     this.reload_preview(cx);
                                 }),
                             )),
                     ),
             )
-            // Bottom action buttons
+            // Document theme selector (`日间 / 夜间`)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(space::XS)
+                    .child(
+                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label("文档主题")),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap(space::XS)
+                            .child(export_seg_btn(
+                                "export-theme-light-btn",
+                                "日间",
+                                self.doc_theme == ExportDocTheme::Light,
+                                &palette,
+                                cx.listener(|this, _, _, cx| {
+                                    this.doc_theme = ExportDocTheme::Light;
+                                    this.reload_preview(cx);
+                                }),
+                            ))
+                            .child(export_seg_btn(
+                                "export-theme-dark-btn",
+                                "夜间",
+                                self.doc_theme == ExportDocTheme::Dark,
+                                &palette,
+                                cx.listener(|this, _, _, cx| {
+                                    this.doc_theme = ExportDocTheme::Dark;
+                                    this.reload_preview(cx);
+                                }),
+                            )),
+                    ),
+            )
+            // Include checkboxes
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .gap(space::SM)
-                    .children(self.last_completed_export_id.as_ref().map(|eid| {
-                        let eid_open = eid.clone();
-                        apply_scale(div(), scale::UI_MEDIUM)
-                            .id("export-open-dir-btn")
-                            .test_support()
-                            .w_full()
-                            .h(height::CONTROL)
-                            .rounded(radius::CONTROL)
-                            .border_1()
-                            .border_color(palette.border_strong)
-                            .bg(palette.bg_elevated)
-                            .text_color(palette.text_primary)
-                            .cursor(CursorStyle::PointingHand)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .gap(space::XS)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                let c = this.client.clone();
-                                let id = eid_open.clone();
-                                cx.spawn(async move |weak, cx| {
-                                    if let Err(err) = c.open_export_directory(id).await {
-                                        let _ = weak.update(cx, |_, cx| {
-                                            cx.emit(ExportViewEvent::ErrorMessage(err.to_string()));
-                                        });
-                                    }
-                                })
-                                .detach();
-                            }))
-                            .child(
-                                Icon::new(IconName::FolderOpen)
-                                    .size(px(14.0))
-                                    .text_color(palette.accent_solid),
-                            )
-                            .child(cjk_inline_label("打开所在目录"))
-                    }))
+                    .child(export_check_row(
+                        "export-include-thinking-chk",
+                        "包含思考过程",
+                        self.include_thinking,
+                        &palette,
+                        cx.listener(|this, _, _, cx| {
+                            this.include_thinking = !this.include_thinking;
+                            this.reload_preview(cx);
+                        }),
+                    ))
+                    .child(export_check_row(
+                        "export-include-tools-chk",
+                        "包含工具调用结果",
+                        self.include_tools,
+                        &palette,
+                        cx.listener(|this, _, _, cx| {
+                            this.include_tools = !this.include_tools;
+                            this.reload_preview(cx);
+                        }),
+                    )),
+            )
+            // Primary action button (`32px`, `px: 16px`, `r: 4px`) + completed save area below
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(space::SM)
                     .child(
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("export-generate-save-btn")
                             .test_support()
                             .w_full()
-                            .h(height::FIELD)
-                            .rounded(radius::ROW)
+                            .h(height::CONTROL)
+                            .px(space::LG)
+                            .rounded(radius::CONTROL)
                             .bg(palette.accent_solid)
                             .text_color(palette.text_on_accent)
                             .flex()
@@ -739,20 +791,35 @@ impl Render for ExportView {
                             } else {
                                 "生成并保存"
                             })),
-                    ),
+                    )
+                    .children(saved_section_opt),
             );
 
-        let right_preview = self.render_readonly_preview(mono_family, scale_factor, window, cx);
+        let right_preview =
+            self.render_readonly_preview(mono_family, &palette, scale_factor, window, cx);
 
         div()
             .id("export-view-ntay1")
             .test_support()
             .size_full()
             .flex()
-            .flex_row()
-            .items_stretch()
-            .child(left_options)
-            .child(right_preview)
+            .flex_col()
+            .bg(palette.bg_workspace)
+            .child(top_header)
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .p(space::GROUP)
+                    .gap(space::GROUP)
+                    .bg(palette.bg_workspace)
+                    .flex()
+                    .flex_row()
+                    .items_stretch()
+                    .child(left_options)
+                    .child(right_preview),
+            )
     }
 }
 
@@ -775,14 +842,14 @@ where
         .rounded(radius::CONTROL)
         .border_1()
         .border_color(if active {
-            palette.accent_solid
+            palette.border_strong
         } else {
             palette.border_subtle
         })
         .bg(if active {
             palette.bg_item_active
         } else {
-            palette.bg_elevated
+            palette.bg_workspace
         })
         .text_color(if active {
             palette.text_primary
@@ -792,6 +859,7 @@ where
         .flex()
         .items_center()
         .justify_center()
+        .hover(|s| s.bg(palette.bg_item_hover))
         .on_click(on_click)
         .child(cjk_inline_label(label))
 }
@@ -829,7 +897,7 @@ where
                 .bg(if checked {
                     palette.accent_solid
                 } else {
-                    palette.bg_elevated
+                    palette.bg_workspace
                 })
                 .flex()
                 .items_center()
