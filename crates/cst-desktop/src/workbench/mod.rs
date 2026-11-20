@@ -6,6 +6,8 @@ pub mod model_picker;
 pub mod queue_bar;
 pub mod turn_segments;
 
+use std::time::Instant;
+
 use cst_client::{ClientHandle, DraftKey};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement;
@@ -22,7 +24,7 @@ use crate::background::{
     FrostedGlassSpec, SkyPreset, render_frosted_surface, render_sky_background_rounded,
 };
 use crate::theme::{
-    DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
 use crate::workbench::composer::{ComposerHostEvent, ComposerView, SlashNavigationTarget};
 use crate::workbench::image_viewer::{LightboxImageTarget, render_image_lightbox_modal};
@@ -50,6 +52,8 @@ pub struct WorkbenchView {
     client: ClientHandle,
     active_session_id: Option<String>,
     sky_time: f32,
+    welcome_stagger_start: Option<Instant>,
+    welcome_stagger_done: bool,
     home_composer: Entity<ComposerView>,
     session_composer: Entity<ComposerView>,
     message_list: Entity<MessageListView>,
@@ -93,10 +97,15 @@ impl WorkbenchView {
         let sub_sess = cx.subscribe_in(&session_composer, window, Self::on_composer_event);
         let sub_list = cx.subscribe_in(&message_list, window, Self::on_message_list_event);
 
+        let welcome_stagger_done = initial_sid.is_some();
+        let welcome_stagger_start = (!welcome_stagger_done).then(Instant::now);
+
         Self {
             client,
             active_session_id: initial_sid,
             sky_time: 0.0,
+            welcome_stagger_start,
+            welcome_stagger_done,
             home_composer,
             session_composer,
             message_list,
@@ -130,6 +139,14 @@ impl WorkbenchView {
         self.lightbox.is_some()
     }
 
+    pub fn mark_left_home_route(&mut self) {
+        self.welcome_stagger_done = true;
+    }
+
+    pub fn is_welcome_stagger_done(&self) -> bool {
+        self.welcome_stagger_done
+    }
+
     pub fn sync_route_and_sky(
         &mut self,
         session_id: Option<String>,
@@ -139,6 +156,9 @@ impl WorkbenchView {
     ) {
         self.sky_time = sky_time;
         if self.active_session_id != session_id {
+            if session_id.is_some() {
+                self.welcome_stagger_done = true;
+            }
             self.active_session_id = session_id.clone();
             self.header_menu_open = false;
             self.header_menu_prior_focus = None;
@@ -635,18 +655,38 @@ impl Render for WorkbenchView {
                                 });
                             }),
                     )
-                    .child(
-                        div()
-                            .absolute()
-                            .top(px(40.0))
-                            .right(space::LG)
-                            .child(menu_card),
-                    );
+                    .child(div().absolute().top(px(40.0)).right(space::LG).child(
+                        motion::animate_popover_enter(
+                            "session-header-more-anim",
+                            menu_card,
+                            palette.craft_stack_shadows(),
+                            -6.0,
+                        ),
+                    ));
             }
 
             session_view.into_any_element()
         } else {
             let home_pending = self.client.with_outbox(|ob| ob.home_item().is_some());
+            let reduce_motion = cx.reduce_motion();
+            let (arcs_op, arcs_y, title_op, title_y, comp_op, comp_y) =
+                if self.welcome_stagger_done || reduce_motion {
+                    self.welcome_stagger_done = true;
+                    (1.0, 0.0, 1.0, 0.0, 1.0, 0.0)
+                } else {
+                    let started = *self.welcome_stagger_start.get_or_insert_with(Instant::now);
+                    let elapsed = started.elapsed();
+                    if elapsed >= motion::WELCOME_MAX_TOTAL {
+                        self.welcome_stagger_done = true;
+                        (1.0, 0.0, 1.0, 0.0, 1.0, 0.0)
+                    } else {
+                        window.request_animation_frame();
+                        let (a_op, a_y) = motion::welcome_stagger_progress(0, elapsed, false);
+                        let (t_op, t_y) = motion::welcome_stagger_progress(1, elapsed, false);
+                        let (c_op, c_y) = motion::welcome_stagger_progress(2, elapsed, false);
+                        (a_op, a_y, t_op, t_y, c_op, c_y)
+                    }
+                };
 
             // Home welcome canvas (`p2HWHP` / `PuezS` with `blue-hour.glsl` rounded sky + `600px` centered composer)
             div()
@@ -694,20 +734,35 @@ impl Render for WorkbenchView {
                                         .relative()
                                         .flex()
                                         .justify_center()
-                                        .child(render_home_brand_arcs())
+                                        .child(
+                                            div()
+                                                .relative()
+                                                .w_full()
+                                                .h_full()
+                                                .opacity(arcs_op)
+                                                .mt(px(arcs_y))
+                                                .child(render_home_brand_arcs()),
+                                        )
                                         .child(
                                             apply_scale(div(), scale::HERO)
                                                 .absolute()
-                                                .top(px(125.0))
+                                                .top(px(125.0 + title_y))
                                                 .left_0()
                                                 .right_0()
+                                                .opacity(title_op)
                                                 .flex()
                                                 .justify_center()
                                                 .text_color(palette.text_welcome)
                                                 .child("我该如何协助您？"),
                                         ),
                                 )
-                                .child(self.home_composer.clone())
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .opacity(comp_op)
+                                        .mt(px(comp_y))
+                                        .child(self.home_composer.clone()),
+                                )
                                 .children(home_pending.then(|| {
                                     apply_scale(div(), scale::CAPTION)
                                         .pt(space::MD)
@@ -863,10 +918,21 @@ impl Render for WorkbenchView {
                     ),
             );
 
-            root = root.child(scrim.child(div().tab_stop(false).child(card).focus_trap(
-                "overwrite-draft-confirm-trap",
-                &self.edit_confirm_trap_focus,
-            )));
+            root = root.child(
+                scrim.child(
+                    div()
+                        .tab_stop(false)
+                        .child(motion::animate_modal_enter(
+                            "overwrite-draft-confirm-anim",
+                            card,
+                            palette.craft_stack_shadows(),
+                        ))
+                        .focus_trap(
+                            "overwrite-draft-confirm-trap",
+                            &self.edit_confirm_trap_focus,
+                        ),
+                ),
+            );
         }
 
         if let Some(ref target) = self.lightbox {

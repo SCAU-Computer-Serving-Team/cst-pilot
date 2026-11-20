@@ -1156,3 +1156,302 @@ async fn headless_gpui_shell_sidebar_drawer_escape_web_lock_and_exit_confirm(
     });
     assert_eq!(backend.state.lock().unwrap().exit_calls, 0);
 }
+
+#[test]
+fn motion_primitives_timings_easings_banner_hover_pause_and_welcome_stagger_unit() {
+    use cst_desktop::shell::overlays::BannerCountdownState;
+    use cst_desktop::theme::motion;
+
+    assert_eq!(motion::INSTANT, Duration::ZERO);
+    assert_eq!(motion::PRESS, Duration::from_millis(120));
+    assert_eq!(motion::FAST, Duration::from_millis(150));
+    assert_eq!(motion::POPOVER_OPEN, Duration::from_millis(220));
+    assert_eq!(motion::WELCOME_ITEM, Duration::from_millis(220));
+    assert_eq!(motion::MODAL_OPEN, Duration::from_millis(240));
+    assert_eq!(motion::NORMAL, Duration::from_millis(240));
+    assert_eq!(motion::SURFACE_CLOSE, Duration::from_millis(150));
+    assert_eq!(motion::FLIP_ENTER, Duration::from_millis(180));
+    assert_eq!(motion::FLIP_MOVE, Duration::from_millis(250));
+    assert_eq!(motion::RESIZE, Duration::from_millis(300));
+    assert_eq!(motion::WELCOME_MAX_TOTAL, Duration::from_millis(300));
+    assert_eq!(motion::WELCOME_STAGGER_STEP, Duration::from_millis(40));
+    assert_eq!(motion::SLOW, Duration::from_millis(340));
+    assert_eq!(motion::ICON_SWAP_RESTORE, Duration::from_millis(1600));
+    assert_eq!(motion::RUNNING_LIGHT_CYCLE, Duration::from_millis(2000));
+    assert_eq!(motion::BANNER_AUTO_DISMISS, Duration::from_millis(2600));
+    assert_eq!(motion::TOOLTIP_INITIAL_DELAY, Duration::from_millis(400));
+    assert_eq!(motion::TOOLTIP_COOLDOWN, Duration::from_millis(300));
+
+    let eo = motion::ease_out();
+    assert!((eo(0.0) - 0.0).abs() < 1e-4);
+    assert!((eo(1.0) - 1.0).abs() < 1e-4);
+    assert!(eo(0.2) > 0.45, "ease_out should accelerate early");
+
+    let eio = motion::ease_in_out();
+    assert!((eio(0.0) - 0.0).abs() < 1e-4);
+    assert!((eio(0.5) - 0.5).abs() < 0.02);
+    assert!((eio(1.0) - 1.0).abs() < 1e-4);
+
+    let sp = motion::ease_spring();
+    assert!((sp(0.0) - 0.0).abs() < 1e-4);
+    assert!((sp(1.0) - 1.0).abs() < 1e-4);
+    assert!(
+        (1..20).any(|i| sp(i as f32 * 0.05) > 1.0),
+        "ease_spring should produce subtle overshoot"
+    );
+
+    assert_eq!(
+        motion::welcome_stagger_progress(2, Duration::ZERO, true),
+        (1.0, 0.0)
+    );
+    let (op0, y0) = motion::welcome_stagger_progress(0, Duration::from_millis(110), false);
+    let (op2, y2) = motion::welcome_stagger_progress(2, Duration::from_millis(110), false);
+    assert!(op0 > op2 && y0 < y2, "item 2 must lag item 0 by 80ms");
+    assert_eq!(
+        motion::welcome_stagger_progress(2, Duration::from_millis(300), false),
+        (1.0, 0.0)
+    );
+
+    let t0 = Instant::now();
+    let mut countdown = BannerCountdownState::new();
+    let (g1, w1) = countdown.start(t0);
+    assert_eq!(w1, Duration::from_millis(2600));
+    assert!(countdown.should_dismiss(g1));
+    assert_eq!(
+        countdown.set_hovered(true, t0 + Duration::from_millis(1000)),
+        None
+    );
+    assert!(!countdown.should_dismiss(g1));
+    assert_eq!(countdown.remaining(), Duration::from_millis(1600));
+    assert_eq!(
+        countdown.set_hovered(false, t0 + Duration::from_millis(4000)),
+        Some((g1, Duration::from_millis(1600)))
+    );
+    assert!(countdown.should_dismiss(g1));
+    let (g2, _) = countdown.start(t0 + Duration::from_millis(4100));
+    assert!(!countdown.should_dismiss(g1));
+    assert!(countdown.should_dismiss(g2));
+}
+
+#[gpui_kit::test]
+async fn headless_gpui_motion_primitives_interruptible_reversal_reduce_motion_one_shot_and_banner_hover_pause(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    use gpui_kit::base::motion::{Transition, transition};
+    use gpui_kit::{ParentElement as _, Styled as _, div};
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    cx.executor().allow_parking();
+
+    // 1. Interruptible GPUI Transition mid-flight reversal + reduce_motion 0ms snap
+    struct ProbeView {
+        target: Rc<Cell<f32>>,
+        last_val: Rc<Cell<f32>>,
+    }
+    impl gpui_kit::Render for ProbeView {
+        fn render(
+            &mut self,
+            window: &mut gpui_kit::Window,
+            cx: &mut gpui_kit::Context<Self>,
+        ) -> impl gpui_kit::IntoElement {
+            let v = transition(
+                "probe-reversal-id",
+                self.target.get(),
+                Transition::new(cst_desktop::theme::motion::NORMAL)
+                    .ease(cst_desktop::theme::motion::ease_out()),
+                window,
+                cx,
+            );
+            self.last_val.set(v);
+            div().size_full().child(format!("{v:.3}"))
+        }
+    }
+
+    let target = Rc::new(Cell::new(0.0_f32));
+    let sampled = Rc::new(Cell::new(0.0_f32));
+    let probe_handle = cx.add_window(|_, _| ProbeView {
+        target: Rc::clone(&target),
+        last_val: Rc::clone(&sampled),
+    });
+    cx.update_window(*probe_handle, |_, window, cx| {
+        window.render_frame(cx);
+    })
+    .unwrap();
+    assert!((sampled.get() - 0.0).abs() < 1e-4);
+
+    // Retarget 0.0 -> 1.0 and advance half duration (120ms / 240ms)
+    target.set(1.0);
+    cx.update_window(*probe_handle, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.executor().advance_clock(Duration::from_millis(120));
+    cx.update_window(*probe_handle, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
+    })
+    .unwrap();
+    let mid = sampled.get();
+    assert!(
+        mid > 0.25 && mid < 0.99,
+        "expected mid-flight value in (0.25, 0.99), got {mid}"
+    );
+
+    // Reverse target back to 0.0 mid-flight — must reverse smoothly from `mid` without snapping to 0 or 1
+    target.set(0.0);
+    cx.update_window(*probe_handle, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
+    })
+    .unwrap();
+    let at_reverse = sampled.get();
+    assert!(
+        at_reverse > 0.2 && (at_reverse - mid).abs() < 0.1,
+        "reversal must start from current mid-flight value {mid}, got {at_reverse}"
+    );
+    cx.executor().advance_clock(Duration::from_millis(80));
+    cx.update_window(*probe_handle, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
+    })
+    .unwrap();
+    let reversing = sampled.get();
+    assert!(
+        reversing > 0.0 && reversing < at_reverse,
+        "expected smooth downward progress between 0 and {at_reverse}, got {reversing}"
+    );
+
+    // Enabling reduce_motion must snap immediately (0ms) on target change
+    cx.update(|cx| cx.set_reduce_motion(true));
+    target.set(1.0);
+    cx.update_window(*probe_handle, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
+    })
+    .unwrap();
+    assert!(
+        (sampled.get() - 1.0).abs() < 1e-4,
+        "reduce_motion must snap transition to 1.0 at 0ms, got {}",
+        sampled.get()
+    );
+    cx.update(|cx| cx.set_reduce_motion(false));
+
+    // 2. Real AppShell: welcomeStagger oneShotPerSession, 0ms Ctrl+K, & 2600ms hover-pause banner
+    let fixture = KitTempFixture::create();
+    let backend = MockDesktopBackend::start();
+    let self_id = ProcessIdentity::current().unwrap();
+    let endpoint = VerifiedServerEndpoint {
+        kit_root: fixture.root.clone(),
+        pid: self_id.pid,
+        process_created: self_id.created,
+        port: backend.port,
+        version: "v0.1.0".into(),
+        http: AppHttpClient::new(backend.port, &backend.token).unwrap(),
+        spawned_by_client: false,
+    };
+    let handle = CstClient::from_verified_endpoint(backend.rt.handle(), endpoint, None).unwrap();
+    backend.rt.block_on(handle.refresh_globals()).unwrap();
+
+    let (win_handle, shell) = cx.update(|cx| {
+        let font_report = cst_desktop::theme::load_bundled_fonts(&fixture.root, cx);
+        gpui_kit::init(cx);
+        register_shell_keys(cx);
+        open_desktop_shell_window_with_handle(handle.clone(), Some(font_report), cx).unwrap()
+    });
+
+    // Ctrl+K instant (0ms) open and Escape close
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.press("ctrl-k", cx);
+        assert!(window.find("command-palette-modal-i70mz").visible());
+        window.press("escape", cx);
+        assert!(window.try_find("command-palette-modal-i70mz").is_none());
+    })
+    .unwrap();
+
+    // Navigating away from Home and back marks welcomeStagger as done (no replay per session)
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("sidebar-settings-btn", cx);
+        assert!(window.find("settings-view-vpwaf").visible());
+        window.click("sidebar-new-session-btn", cx);
+        assert!(window.find("workspace-home-view").visible());
+    })
+    .unwrap();
+    cx.update(|cx| {
+        assert!(shell.read(cx).workbench_welcome_stagger_done(cx));
+    });
+
+    // Banner hover pauses 2600ms auto-dismiss and unhover completes countdown
+    shell.update(cx, |this, cx| {
+        this.show_top_notice("已自动保存配置", cx);
+    });
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("top-notice-banner").visible());
+        window.hover("top-notice-banner", cx);
+    })
+    .unwrap();
+
+    cx.executor().advance_clock(Duration::from_millis(3200));
+    cx.executor().run_until_parked();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.try_find("top-notice-banner").is_some(),
+            "hovered banner must pause auto-dismiss"
+        );
+        window.hover("topbar-gels8", cx);
+    })
+    .unwrap();
+
+    cx.executor().advance_clock(Duration::from_millis(2800));
+    cx.executor().run_until_parked();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.try_find("top-notice-banner").is_none(),
+            "unhovered banner must auto-dismiss after remaining duration"
+        );
+    })
+    .unwrap();
+
+    // CopyFeedbackTracker 1600ms iconSwap restore check
+    struct CopyProbe {
+        tracker: cst_desktop::workbench::markdown_view::CopyFeedbackTracker,
+    }
+    impl gpui_kit::Render for CopyProbe {
+        fn render(
+            &mut self,
+            _window: &mut gpui_kit::Window,
+            _cx: &mut gpui_kit::Context<Self>,
+        ) -> impl gpui_kit::IntoElement {
+            div().size_full()
+        }
+    }
+    let copy_entity = cx.new(|_| CopyProbe {
+        tracker: Default::default(),
+    });
+    copy_entity.update(cx, |p, cx| {
+        p.tracker
+            .mark_copied("block-1".into(), |v| &mut v.tracker, cx);
+        assert!(p.tracker.is_copied("block-1"));
+    });
+    cx.executor().advance_clock(Duration::from_millis(1500));
+    cx.executor().run_until_parked();
+    cx.read(|cx| {
+        assert!(
+            copy_entity.read(cx).tracker.is_copied("block-1"),
+            "copy icon must stay swapped before 1600ms"
+        );
+    });
+    cx.executor().advance_clock(Duration::from_millis(150));
+    cx.executor().run_until_parked();
+    cx.read(|cx| {
+        assert!(
+            !copy_entity.read(cx).tracker.is_copied("block-1"),
+            "copy icon must restore cleanly at 1600ms (< 2000ms)"
+        );
+    });
+}

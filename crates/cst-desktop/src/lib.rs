@@ -21,7 +21,7 @@ use gpui_kit::{App, AppContext as _, Entity, Global};
 
 use crate::shell::window_bounds::{collect_app_displays, resolve_startup_window_geometry};
 use crate::shell::{AppShell, register_shell_keys};
-use crate::theme::{FontLoadReport, load_bundled_fonts};
+use crate::theme::{FontLoadReport, load_bundled_fonts, motion};
 
 const REQUIRED_SKILL_NAMES: &[&str] = &[
     "disk",
@@ -301,6 +301,10 @@ pub fn open_desktop_shell_window_with_handle(
     font_report: Option<FontLoadReport>,
     cx: &mut App,
 ) -> anyhow::Result<(gpui_kit::AnyWindowHandle, Entity<AppShell>)> {
+    gpui_kit::base::TooltipDefaults::new()
+        .with_show_delay(motion::TOOLTIP_INITIAL_DELAY)
+        .with_grace_period(motion::TOOLTIP_COOLDOWN)
+        .install(cx);
     let settings = handle.snapshot().desktop_settings.clone();
     let displays = collect_app_displays(cx);
     let resolved = resolve_startup_window_geometry(&settings, &displays);

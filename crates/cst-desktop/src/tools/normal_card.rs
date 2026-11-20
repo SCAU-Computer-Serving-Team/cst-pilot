@@ -15,7 +15,9 @@ use gpui_kit::{
 use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{
+    DesktopPalette, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
+};
 use crate::workbench::image_viewer::{LightboxImageTarget, gpui_image_from_bytes};
 use crate::workbench::markdown_view::render_copyable_text_block;
 
@@ -104,6 +106,7 @@ pub fn render_normal_tool_card<V: 'static>(
     on_toggle_raw: ToggleKeyFn,
     on_open_lightbox: OpenLightboxFn,
     on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
+    window: &mut Window,
     cx: &mut Context<V>,
 ) -> gpui_kit::AnyElement {
     render_normal_tool_card_with_args(
@@ -124,6 +127,7 @@ pub fn render_normal_tool_card<V: 'static>(
         on_toggle_raw,
         on_open_lightbox,
         on_mark_copied,
+        window,
         cx,
     )
 }
@@ -150,6 +154,7 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
     on_toggle_raw: ToggleKeyFn,
     on_open_lightbox: OpenLightboxFn,
     on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
+    window: &mut Window,
     cx: &mut Context<V>,
 ) -> gpui_kit::AnyElement {
     let (status_icon, status_color, status_word) = if !has_result {
@@ -241,11 +246,15 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                             .gap(space::SM)
                             .flex_shrink_0()
                             .children(duration_badge)
-                            .child(
-                                Icon::new(IconName::ChevronRight)
-                                    .size(px(16.0))
-                                    .text_color(palette.text_secondary),
-                            ),
+                            .child(motion::animated_chevron(
+                                format!("normal-card-{call_id}"),
+                                false,
+                                false,
+                                px(16.0),
+                                palette.text_secondary,
+                                window,
+                                cx,
+                            )),
                     ),
             )
             .into_any_element();
@@ -306,11 +315,15 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                 .gap(space::SM)
                 .flex_shrink_0()
                 .children(duration_badge)
-                .child(
-                    Icon::new(IconName::ChevronDown)
-                        .size(px(16.0))
-                        .text_color(palette.text_secondary),
-                ),
+                .child(motion::animated_chevron(
+                    format!("normal-card-{call_id}"),
+                    true,
+                    false,
+                    px(16.0),
+                    palette.text_secondary,
+                    window,
+                    cx,
+                )),
         );
 
     let call_capsule_str = format_call_capsule(tool_name, call_args);
@@ -439,6 +452,7 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                     palette,
                     is_copied_fn,
                     on_mark_copied.clone(),
+                    window,
                     cx,
                 ));
             }
@@ -500,19 +514,18 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                                     ));
                                     mark_cb(cid_click.clone(), w, cx);
                                 }))
-                                .child(
-                                    Icon::new(if copied {
-                                        IconName::Check
-                                    } else {
-                                        IconName::Copy
-                                    })
-                                    .size(px(14.0))
-                                    .text_color(if copied {
+                                .child(motion::animated_copy_icon(
+                                    SharedString::from(format!("normal-out-{call_id}-{blk_idx}")),
+                                    copied,
+                                    px(14.0),
+                                    if copied {
                                         palette.status_success
                                     } else {
                                         palette.text_secondary
-                                    }),
-                                ),
+                                    },
+                                    window,
+                                    cx,
+                                )),
                         ),
                 );
             }
@@ -548,15 +561,15 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                         )
                         .child(cjk_inline_label("原始数据")),
                 )
-                .child(
-                    Icon::new(if is_raw_expanded {
-                        IconName::ChevronDown
-                    } else {
-                        IconName::ChevronRight
-                    })
-                    .size(px(12.0))
-                    .text_color(palette.text_secondary),
-                ),
+                .child(motion::animated_chevron(
+                    format!("normal-raw-{call_id}"),
+                    is_raw_expanded,
+                    false,
+                    px(12.0),
+                    palette.text_secondary,
+                    window,
+                    cx,
+                )),
         );
 
         if is_raw_expanded {
@@ -571,6 +584,7 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                 copied,
                 palette,
                 move |cid, w, cx| mark_cb(cid, w, cx),
+                window,
                 cx,
             ));
         }
@@ -686,6 +700,7 @@ fn render_inline_commands_list<V: 'static>(
     palette: &DesktopPalette,
     is_copied_fn: &dyn Fn(&str) -> bool,
     on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
+    window: &mut Window,
     cx: &mut Context<V>,
 ) -> impl IntoElement {
     let mut col = div().w_full().flex().flex_col().gap(space::XS);
@@ -735,19 +750,18 @@ fn render_inline_commands_list<V: 'static>(
                             cx.write_to_clipboard(ClipboardItem::new_string(cmd_text.clone()));
                             mark_cb(cid_click.clone(), w, cx);
                         }))
-                        .child(
-                            Icon::new(if copied {
-                                IconName::Check
-                            } else {
-                                IconName::Copy
-                            })
-                            .size(px(14.0))
-                            .text_color(if copied {
+                        .child(motion::animated_copy_icon(
+                            SharedString::from(format!("normal-cmd-{call_id}-{idx}")),
+                            copied,
+                            px(14.0),
+                            if copied {
                                 palette.status_success
                             } else {
                                 palette.text_secondary
-                            }),
-                        ),
+                            },
+                            window,
+                            cx,
+                        )),
                 ),
         );
     }

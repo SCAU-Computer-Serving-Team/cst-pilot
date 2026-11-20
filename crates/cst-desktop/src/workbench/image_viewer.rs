@@ -13,7 +13,7 @@ use gpui_kit::{
 
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
-use crate::theme::{DesktopPalette, height, radius, space};
+use crate::theme::{DesktopPalette, height, motion, radius, space};
 
 #[derive(Debug, Clone)]
 pub struct LightboxImageTarget {
@@ -144,7 +144,11 @@ pub fn render_image_lightbox_modal(
             .items_center()
             .justify_center()
             .tab_stop(false)
-            .child(image_frame)
+            .child(motion::animate_modal_enter(
+                "image-lightbox-anim",
+                image_frame,
+                Vec::new(),
+            ))
             .child(close_circle_btn)
             .focus_trap("image-lightbox-focus-trap", trap_focus),
     )

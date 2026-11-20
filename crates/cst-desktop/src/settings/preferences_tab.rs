@@ -15,7 +15,7 @@ use gpui_kit::{
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
+    DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
 };
 
 #[derive(Debug, Clone)]
@@ -429,48 +429,54 @@ impl Render for PreferencesTabView {
                     );
                 }
             }
-            let menu = render_frosted_surface(
-                "pref-default-model-popover",
-                FrostedGlassSpec::popover_h2p2z(&palette),
-                palette.bg_elevated,
-                transparency_enabled,
-                scale_factor,
-            )
-            .test_support()
-            .a11y_dialog("pref-default-model-popover", "选择默认模型")
-            .absolute()
-            .top(px(60.0))
-            .right(space::LG)
-            .w(px(300.0))
-            .p(space::XS)
-            .rounded(radius::ROW)
-            .border_1()
-            .border_color(palette.border_hairline)
-            .shadow(palette.craft_stack_shadows())
-            .occlude()
-            .child(
-                div()
-                    .w_full()
-                    .focus_trap("pref-default-model-focus", &self.picker_focus)
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if super::move_picker_cursor(
-                            event,
-                            &mut this.picker_index,
-                            choices.len(),
-                            &this.picker_scroll,
-                        ) {
-                            cx.notify();
-                            cx.stop_propagation();
-                        } else if super::activates_button(event) {
-                            if let Some((provider, model)) = choices.get(this.picker_index) {
-                                this.set_default_model(provider.clone(), model.clone(), window, cx);
+            let menu = motion::animate_popover_enter(
+                "pref-default-model-pop-anim",
+                render_frosted_surface(
+                    "pref-default-model-popover",
+                    FrostedGlassSpec::popover_h2p2z(&palette),
+                    palette.bg_elevated,
+                    transparency_enabled,
+                    scale_factor,
+                )
+                .test_support()
+                .a11y_dialog("pref-default-model-popover", "选择默认模型")
+                .w(px(300.0))
+                .p(space::XS)
+                .rounded(radius::ROW)
+                .border_1()
+                .border_color(palette.border_hairline)
+                .occlude()
+                .child(
+                    div()
+                        .w_full()
+                        .focus_trap("pref-default-model-focus", &self.picker_focus)
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                            if super::move_picker_cursor(
+                                event,
+                                &mut this.picker_index,
+                                choices.len(),
+                                &this.picker_scroll,
+                            ) {
+                                cx.notify();
+                                cx.stop_propagation();
+                            } else if super::activates_button(event) {
+                                if let Some((provider, model)) = choices.get(this.picker_index) {
+                                    this.set_default_model(
+                                        provider.clone(),
+                                        model.clone(),
+                                        window,
+                                        cx,
+                                    );
+                                }
+                                cx.stop_propagation();
                             }
-                            cx.stop_propagation();
-                        }
-                    }))
-                    .child(items),
+                        }))
+                        .child(items),
+                ),
+                palette.craft_stack_shadows(),
+                -6.0,
             );
-            dropdown_menu_opt = Some(menu);
+            dropdown_menu_opt = Some(div().absolute().top(px(60.0)).right(space::LG).child(menu));
         }
 
         let default_card = div()
@@ -545,11 +551,15 @@ impl Render for PreferencesTabView {
                             .truncate()
                             .child(SharedString::from(default_label)),
                     )
-                    .child(
-                        Icon::new(IconName::ChevronDown)
-                            .size(px(14.0))
-                            .text_color(palette.text_secondary),
-                    ),
+                    .child(motion::animated_chevron(
+                        "pref-default-model",
+                        self.default_dropdown_open,
+                        true,
+                        px(14.0),
+                        palette.text_secondary,
+                        window,
+                        cx,
+                    )),
             );
 
         // 2. Search + Provider filter `PHFud` dropdown (`zjoqr`) + `"全选 / 清空 / 刷新"` ghost buttons (`I8Og18`)
@@ -650,50 +660,57 @@ impl Render for PreferencesTabView {
                 );
             }
 
-            render_frosted_surface(
-                "pref-filter-popover",
-                FrostedGlassSpec::popover_h2p2z(&palette),
-                palette.bg_elevated,
-                transparency_enabled,
-                scale_factor,
-            )
-            .test_support()
-            .a11y_dialog("pref-filter-popover", "按模型服务筛选")
-            .absolute()
-            .top(px(36.0))
-            .right_0()
-            .w(px(220.0))
-            .p(space::XS)
-            .rounded(radius::ROW)
-            .border_1()
-            .border_color(palette.border_hairline)
-            .shadow(palette.craft_stack_shadows())
-            .occlude()
-            .child(
-                div()
-                    .w_full()
-                    .focus_trap("pref-filter-focus", &self.picker_focus)
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if super::move_picker_cursor(
-                            event,
-                            &mut this.picker_index,
-                            choices.len() + 1,
-                            &this.picker_scroll,
-                        ) {
-                            cx.notify();
-                            cx.stop_propagation();
-                        } else if super::activates_button(event) {
-                            this.provider_filter = this
-                                .picker_index
-                                .checked_sub(1)
-                                .and_then(|ix| choices.get(ix))
-                                .cloned();
-                            this.dismiss_dropdowns(window, cx);
-                            cx.stop_propagation();
-                        }
-                    }))
-                    .child(items),
-            )
+            div()
+                .absolute()
+                .top(px(36.0))
+                .right_0()
+                .child(motion::animate_popover_enter(
+                    "pref-filter-pop-anim",
+                    render_frosted_surface(
+                        "pref-filter-popover",
+                        FrostedGlassSpec::popover_h2p2z(&palette),
+                        palette.bg_elevated,
+                        transparency_enabled,
+                        scale_factor,
+                    )
+                    .test_support()
+                    .a11y_dialog("pref-filter-popover", "按模型服务筛选")
+                    .w(px(220.0))
+                    .p(space::XS)
+                    .rounded(radius::ROW)
+                    .border_1()
+                    .border_color(palette.border_hairline)
+                    .occlude()
+                    .child(
+                        div()
+                            .w_full()
+                            .focus_trap("pref-filter-focus", &self.picker_focus)
+                            .on_key_down(cx.listener(
+                                move |this, event: &KeyDownEvent, window, cx| {
+                                    if super::move_picker_cursor(
+                                        event,
+                                        &mut this.picker_index,
+                                        choices.len() + 1,
+                                        &this.picker_scroll,
+                                    ) {
+                                        cx.notify();
+                                        cx.stop_propagation();
+                                    } else if super::activates_button(event) {
+                                        this.provider_filter = this
+                                            .picker_index
+                                            .checked_sub(1)
+                                            .and_then(|ix| choices.get(ix))
+                                            .cloned();
+                                        this.dismiss_dropdowns(window, cx);
+                                        cx.stop_propagation();
+                                    }
+                                },
+                            ))
+                            .child(items),
+                    ),
+                    palette.craft_stack_shadows(),
+                    -6.0,
+                ))
         });
 
         let search_q = self.search_input.read(cx).value().trim().to_lowercase();
@@ -802,11 +819,15 @@ impl Render for PreferencesTabView {
                             .truncate()
                             .child(SharedString::from(filter_label)),
                     )
-                    .child(
-                        Icon::new(IconName::ChevronDown)
-                            .size(px(14.0))
-                            .text_color(palette.text_secondary),
-                    ),
+                    .child(motion::animated_chevron(
+                        "pref-filter",
+                        self.filter_dropdown_open,
+                        true,
+                        px(14.0),
+                        palette.text_secondary,
+                        window,
+                        cx,
+                    )),
             );
 
         let batch_toolbar = div()
@@ -920,7 +941,15 @@ impl Render for PreferencesTabView {
                     this.focus_handle.focus(w, cx);
                     cx.notify();
                 }))
-                .child(
+                .child({
+                    let chk_mark = motion::animated_checkbox_mark(
+                        chk_id.clone(),
+                        true,
+                        px(11.0),
+                        palette.text_on_accent,
+                        window,
+                        cx,
+                    );
                     div()
                         .id(chk_id.clone())
                         .test_support()
@@ -939,12 +968,8 @@ impl Render for PreferencesTabView {
                             this.toggle_model_enabled(fid_chk.clone(), cx);
                             cx.stop_propagation();
                         }))
-                        .child(
-                            Icon::new(IconName::Check)
-                                .size(px(11.0))
-                                .text_color(palette.text_on_accent),
-                        ),
-                )
+                        .children(chk_mark)
+                })
                 .child(
                     apply_scale(div(), scale::BODY)
                         .flex_1()
@@ -1049,7 +1074,15 @@ impl Render for PreferencesTabView {
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.toggle_model_enabled(fid_add.clone(), cx);
                 }))
-                .child(
+                .child({
+                    let unchk_mark = motion::animated_checkbox_mark(
+                        format!("pref-chk-{full_id}"),
+                        false,
+                        px(11.0),
+                        palette.text_on_accent,
+                        window,
+                        cx,
+                    );
                     div()
                         .w(px(16.0))
                         .h(px(16.0))
@@ -1057,8 +1090,12 @@ impl Render for PreferencesTabView {
                         .border_1()
                         .border_color(palette.border_strong)
                         .bg(palette.bg_workspace)
-                        .flex_shrink_0(),
-                )
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .flex_shrink_0()
+                        .children(unchk_mark)
+                })
                 .child(
                     apply_scale(div(), scale::BODY)
                         .flex_1()

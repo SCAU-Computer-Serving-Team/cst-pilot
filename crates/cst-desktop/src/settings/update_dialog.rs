@@ -10,7 +10,7 @@ use gpui_kit::{
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -100,7 +100,8 @@ pub fn render_update_dialog(
             div()
                 .tab_stop(false)
                 .focus_trap("update-handoff-focus-trap", trap_focus)
-                .child(
+                .child(motion::animate_modal_enter(
+                    "update-handoff-lock-anim",
                     render_frosted_surface(
                         "update-handoff-lock-card",
                         FrostedGlassSpec::modal_k3x72(palette, 8.0),
@@ -141,7 +142,8 @@ pub fn render_update_dialog(
                             .text_color(palette.text_secondary)
                             .child("正在交接独立升级程序校验并替换组件，窗口即将自动重启。"),
                     ),
-                ),
+                    palette.craft_stack_shadows(),
+                )),
         )
         .into_any_element();
     }
@@ -439,7 +441,11 @@ pub fn render_update_dialog(
         div()
             .tab_stop(false)
             .focus_trap("update-dialog-focus-trap", trap_focus)
-            .child(card.child(footer)),
+            .child(motion::animate_modal_enter(
+                "update-dialog-card-anim",
+                card.child(footer),
+                palette.craft_stack_shadows(),
+            )),
     )
     .into_any_element()
 }

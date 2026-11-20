@@ -3,12 +3,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use gpui::{FontWeight, HighlightStyle, Overflow, StyleRefinement, rems};
-use gpui_kit::assets::IconName;
 use gpui_kit::base::Easing;
 use gpui_kit::base::text::{
     SelectionFormat, TextView, TextViewMotion, TextViewState, TextViewStyle,
 };
-use gpui_kit::component::Icon;
 use gpui_kit::{
     App, AppContext as _, ClipboardItem, Context, CursorStyle, Entity, InteractiveElement,
     IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, TestSupportExt,
@@ -17,7 +15,7 @@ use gpui_kit::{
 
 use crate::accessibility::A11yElementExt as _;
 use crate::shell::open_url_in_trusted_browser;
-use crate::theme::{DesktopPalette, apply_scale, radius, scale, space};
+use crate::theme::{DesktopPalette, apply_scale, motion, radius, scale, space};
 
 /// Maintains stable `Entity<TextViewState>` instances keyed by message/entry ID so streaming
 /// incremental deltas (`push_str`) and snapshot replacements (`set_text`) never recreate the view
@@ -153,13 +151,15 @@ pub fn build_markdown_style(palette: &DesktopPalette) -> TextViewStyle {
 pub fn render_assistant_markdown(
     state: &Entity<TextViewState>,
     is_streaming: bool,
+    reduce_motion: bool,
     palette: &DesktopPalette,
 ) -> impl IntoElement {
     let palette_copy = *palette;
     let copied_code_spans: Arc<Mutex<BTreeMap<usize, Instant>>> =
         Arc::new(Mutex::new(BTreeMap::new()));
+    let state_entity_id = state.entity_id();
     let state_weak = state.downgrade();
-    let motion = if is_streaming {
+    let text_motion = if is_streaming && !reduce_motion {
         TextViewMotion::default()
             .with_stream_fade(Duration::from_millis(280))
             .with_stream_fade_stagger(Duration::from_millis(10))
@@ -177,19 +177,22 @@ pub fn render_assistant_markdown(
                 .style(build_markdown_style(palette))
                 .selectable(true)
                 .scrollable(false)
-                .motion(motion)
-                .code_block_actions(move |block, _window, _cx| {
+                .motion(text_motion)
+                .code_block_actions(move |block, window, cx| {
                     let span_start = block.span.as_ref().map(|s| s.start).unwrap_or(0);
                     let copied_recently = copied_code_spans
                         .lock()
                         .ok()
                         .and_then(|map| map.get(&span_start).copied())
-                        .is_some_and(|t| t.elapsed() < Duration::from_secs(2));
+                        .is_some_and(|t| t.elapsed() < motion::ICON_SWAP_RESTORE);
                     let code_str = block.code();
                     let map_click = Arc::clone(&copied_code_spans);
                     let weak_notify = state_weak.clone();
 
                     let code_copy_id = SharedString::from(format!("md-code-copy-{span_start}"));
+                    let motion_copy_id = SharedString::from(format!(
+                        "md-code-copy-{state_entity_id:?}-{span_start}"
+                    ));
                     div()
                         .id(code_copy_id.clone())
                         .test_support()
@@ -212,7 +215,9 @@ pub fn render_assistant_markdown(
                             let map_expire = Arc::clone(&map_click);
                             let weak_expire = weak_notify.clone();
                             cx.spawn(async move |cx| {
-                                cx.background_executor().timer(Duration::from_secs(2)).await;
+                                cx.background_executor()
+                                    .timer(motion::ICON_SWAP_RESTORE)
+                                    .await;
                                 if let Ok(mut map) = map_expire.lock() {
                                     map.remove(&span_start);
                                 }
@@ -222,19 +227,18 @@ pub fn render_assistant_markdown(
                             })
                             .detach();
                         })
-                        .child(
-                            Icon::new(if copied_recently {
-                                IconName::Check
-                            } else {
-                                IconName::Copy
-                            })
-                            .size(px(14.0))
-                            .text_color(if copied_recently {
+                        .child(motion::animated_copy_icon(
+                            motion_copy_id,
+                            copied_recently,
+                            px(14.0),
+                            if copied_recently {
                                 palette_copy.status_success
                             } else {
                                 palette_copy.text_secondary
-                            }),
-                        )
+                            },
+                            window,
+                            cx,
+                        ))
                 })
                 .on_link_click(|url, _event, _window, _cx| {
                     open_url_in_trusted_browser(url.as_ref());
@@ -243,7 +247,7 @@ pub fn render_assistant_markdown(
 }
 
 /// Renders a `12px/16px` (`$font-caption`) monospace or plain block (`$bg-surface`) with a
-/// persistent top-right `32×32px` copy button (`copy` -> 2s `check` swap) and right padding
+/// persistent top-right `32×32px` copy button (`copy` -> 1.6s `check` swap) and right padding
 /// so text is never occluded.
 #[allow(clippy::too_many_arguments)]
 pub fn render_copyable_text_block<V: 'static>(
@@ -254,6 +258,7 @@ pub fn render_copyable_text_block<V: 'static>(
     copied_recently: bool,
     palette: &DesktopPalette,
     on_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + 'static,
+    window: &mut Window,
     cx: &mut Context<V>,
 ) -> impl IntoElement {
     let block_id = block_id.into();
@@ -261,6 +266,7 @@ pub fn render_copyable_text_block<V: 'static>(
     let copy_btn_id = SharedString::from(format!("{block_id}-copy-btn"));
     let text_for_copy = text_shared.clone();
     let id_for_cb = block_id.clone();
+    let motion_id = copy_btn_id.clone();
 
     let mut content_div = apply_scale(div(), scale::CAPTION)
         .w_full()
@@ -302,23 +308,22 @@ pub fn render_copyable_text_block<V: 'static>(
                     on_copied(id_for_cb.clone(), window, cx);
                     let _ = view;
                 }))
-                .child(
-                    Icon::new(if copied_recently {
-                        IconName::Check
-                    } else {
-                        IconName::Copy
-                    })
-                    .size(px(16.0))
-                    .text_color(if copied_recently {
+                .child(motion::animated_copy_icon(
+                    motion_id,
+                    copied_recently,
+                    px(16.0),
+                    if copied_recently {
                         palette.status_success
                     } else {
                         palette.text_secondary
-                    }),
-                ),
+                    },
+                    window,
+                    cx,
+                )),
         )
 }
 
-/// Helper tracker that remembers recently-copied IDs for 2 seconds (`iconSwap` contract).
+/// Helper tracker that remembers recently-copied IDs for 1.6s (`iconSwap` contract).
 #[derive(Default)]
 pub struct CopyFeedbackTracker {
     copied_ids: BTreeSet<SharedString>,
@@ -338,7 +343,9 @@ impl CopyFeedbackTracker {
         self.copied_ids.insert(id.clone());
         cx.notify();
         cx.spawn(async move |weak, cx| {
-            cx.background_executor().timer(Duration::from_secs(2)).await;
+            cx.background_executor()
+                .timer(motion::ICON_SWAP_RESTORE)
+                .await;
             let _ = weak.update(cx, |view, cx| {
                 get_mut(view).copied_ids.remove(&id);
                 cx.notify();

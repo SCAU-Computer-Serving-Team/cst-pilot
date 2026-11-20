@@ -1,16 +1,19 @@
 use std::rc::Rc;
 
 use cst_client::tool_presenter::{FieldRow, SpecialStatus};
+use gpui::{Animation, AnimationExt as _};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::{
-    InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement,
-    Styled, TestSupportExt, div, px,
+    App, InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement,
+    Styled, TestSupportExt, Window, div, px,
 };
 
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{
+    DesktopPalette, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
+};
 
 pub struct WebSearchBarProps<'a> {
     pub call_id: &'a str,
@@ -26,6 +29,7 @@ pub struct WebSearchBarProps<'a> {
 }
 
 /// Renders the standalone Web Search persistent bar (`web_search`, `cst-pilot-desktop.pen` `JQMQZ`).
+#[allow(clippy::too_many_arguments)]
 pub fn render_web_search_bar(
     props: WebSearchBarProps<'_>,
     palette: &DesktopPalette,
@@ -33,6 +37,8 @@ pub fn render_web_search_bar(
     scale_factor: f32,
     on_toggle_expand: crate::tools::ToggleDetailsFn,
     on_hover_warning: crate::tools::HoverWarningFn,
+    window: &mut Window,
+    cx: &mut App,
 ) -> gpui_kit::AnyElement {
     let is_running = matches!(
         props.status,
@@ -125,15 +131,15 @@ pub fn render_web_search_bar(
     }
 
     if has_details {
-        left_row = left_row.child(
-            Icon::new(if expanded {
-                IconName::ChevronDown
-            } else {
-                IconName::ChevronRight
-            })
-            .size(px(12.0))
-            .text_color(palette.text_secondary),
-        );
+        left_row = left_row.child(motion::animated_chevron(
+            format!("web-search-{}", props.call_id),
+            expanded,
+            false,
+            px(12.0),
+            palette.text_secondary,
+            window,
+            cx,
+        ));
     }
 
     let hdr_id = SharedString::from(format!("web-search-bar-hdr-{}", props.call_id));
@@ -269,6 +275,17 @@ pub fn render_web_search_bar(
                             .relative()
                             .text_color(palette.text_primary)
                             .child(SharedString::from(reason_text)),
+                    )
+                    .with_animation(
+                        SharedString::from(format!(
+                            "web-search-warn-tooltip-anim-{}",
+                            props.call_id
+                        )),
+                        Animation::new(motion::FAST).with_easing(motion::ease_out()),
+                        |el, d| {
+                            let t = d.clamp(0.0, 1.0);
+                            el.opacity(0.01 + 0.99 * t).mt(px(4.0 * (1.0 - t)))
+                        },
                     ),
                 ),
         );

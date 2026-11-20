@@ -17,7 +17,7 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, scale, space};
+use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, motion, scale, space};
 use crate::tools::bitlocker_card::{
     BitLockerCardProps, PendingBitLockerPrompt, SecretInput, render_bitlocker_card,
 };
@@ -97,6 +97,7 @@ pub fn render_special_tool_component<V: 'static>(
             is_copied_fn,
             on_toggle_details,
             on_mark_copied,
+            window,
             cx,
         ),
         SpecialToolView::Runbook {
@@ -135,6 +136,7 @@ pub fn render_special_tool_component<V: 'static>(
             on_toggle_details,
             on_open_runbook,
             on_mark_copied,
+            window,
             cx,
         ),
         SpecialToolView::WebSearch {
@@ -164,6 +166,8 @@ pub fn render_special_tool_component<V: 'static>(
             props.scale_factor,
             on_toggle_details,
             on_hover_warning,
+            window,
+            cx,
         ),
         SpecialToolView::BitLocker {
             status,
@@ -268,6 +272,7 @@ pub(crate) fn render_special_details_section<V: 'static>(
     is_copied_fn: &dyn Fn(&str) -> bool,
     on_toggle: ToggleDetailsFn,
     on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
+    window: &mut Window,
     cx: &mut Context<V>,
 ) -> Option<gpui_kit::Div> {
     let has_raw = !raw.trim().is_empty();
@@ -299,6 +304,7 @@ pub(crate) fn render_special_details_section<V: 'static>(
     }
 
     if has_details {
+        let chev_id = toggle_id.clone();
         bar = bar.child(
             apply_scale(div(), scale::CAPTION)
                 .id(toggle_id.clone())
@@ -313,15 +319,15 @@ pub(crate) fn render_special_details_section<V: 'static>(
                 .hover(|s| s.text_color(palette.text_primary))
                 .on_click(move |_, w, cx| (on_toggle)(w, cx))
                 .child(cjk_inline_label("详情"))
-                .child(
-                    Icon::new(if expanded {
-                        IconName::ChevronDown
-                    } else {
-                        IconName::ChevronRight
-                    })
-                    .size(px(12.0))
-                    .text_color(palette.text_secondary),
-                ),
+                .child(motion::animated_chevron(
+                    chev_id,
+                    expanded,
+                    false,
+                    px(12.0),
+                    palette.text_secondary,
+                    window,
+                    cx,
+                )),
         );
     }
 
@@ -394,6 +400,7 @@ pub(crate) fn render_special_details_section<V: 'static>(
                 copied,
                 palette,
                 on_mark_copied,
+                window,
                 cx,
             ));
         }

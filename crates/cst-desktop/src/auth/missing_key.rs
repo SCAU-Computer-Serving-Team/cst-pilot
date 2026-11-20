@@ -9,7 +9,7 @@ use gpui_kit::{
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
 
 #[derive(Debug, Clone)]
@@ -68,7 +68,8 @@ pub fn render_missing_key_dialog(
         div()
             .tab_stop(false)
             .focus_trap("missing-key-focus-trap", trap_focus)
-            .child(
+            .child(motion::animate_modal_enter(
+                "missing-key-dialog-anim",
                 render_frosted_surface(
                     "missing-key-dialog-e7fety",
                     FrostedGlassSpec::modal_k3x72(palette, 8.0),
@@ -155,6 +156,7 @@ pub fn render_missing_key_dialog(
                                 .child(cjk_inline_label("去配置")),
                         ),
                 ),
-            ),
+                palette.craft_stack_shadows(),
+            )),
     )
 }

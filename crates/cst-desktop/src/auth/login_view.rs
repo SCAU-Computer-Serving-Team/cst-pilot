@@ -22,8 +22,8 @@ use crate::background::{
 };
 use crate::shell::open_url_in_trusted_browser;
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
-    scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion,
+    radius, scale, space,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -758,49 +758,56 @@ impl Render for LoginView {
                         );
                     }
 
-                    render_frosted_surface(
-                        "login-apikey-provider-popover",
-                        FrostedGlassSpec::popover_h2p2z(&palette),
-                        palette.bg_elevated,
-                        transparency_enabled,
-                        scale_factor,
-                    )
-                    .test_support()
-                    .a11y_dialog("login-apikey-provider-popover", "选择服务提供商")
-                    .absolute()
-                    .top(px(62.0))
-                    .left_0()
-                    .right_0()
-                    .p(space::XS)
-                    .rounded(radius::ROW)
-                    .border_1()
-                    .border_color(palette.border_hairline)
-                    .shadow(palette.craft_stack_shadows())
-                    .occlude()
-                    .child(
-                        div()
-                            .w_full()
-                            .focus_trap("login-apikey-provider-focus", &self.provider_menu_focus)
-                            .on_key_down(cx.listener({
-                                let choices = key_providers.clone();
-                                move |this, event: &gpui::KeyDownEvent, window, cx| {
-                                    if crate::settings::move_picker_cursor(
-                                        event,
-                                        &mut this.provider_index,
-                                        choices.len(),
-                                        &this.provider_scroll,
-                                    ) {
-                                        cx.notify();
-                                        cx.stop_propagation();
-                                    } else if crate::settings::activates_button(event) {
-                                        if let Some((id, _)) = choices.get(this.provider_index) {
-                                            this.select_api_key_provider(id, window, cx);
+                    div().absolute().top(px(62.0)).left_0().right_0().child(
+                        motion::animate_popover_enter(
+                            "login-apikey-provider-pop-anim",
+                            render_frosted_surface(
+                                "login-apikey-provider-popover",
+                                FrostedGlassSpec::popover_h2p2z(&palette),
+                                palette.bg_elevated,
+                                transparency_enabled,
+                                scale_factor,
+                            )
+                            .test_support()
+                            .a11y_dialog("login-apikey-provider-popover", "选择服务提供商")
+                            .p(space::XS)
+                            .rounded(radius::ROW)
+                            .border_1()
+                            .border_color(palette.border_hairline)
+                            .occlude()
+                            .child(
+                                div()
+                                    .w_full()
+                                    .focus_trap(
+                                        "login-apikey-provider-focus",
+                                        &self.provider_menu_focus,
+                                    )
+                                    .on_key_down(cx.listener({
+                                        let choices = key_providers.clone();
+                                        move |this, event: &gpui::KeyDownEvent, window, cx| {
+                                            if crate::settings::move_picker_cursor(
+                                                event,
+                                                &mut this.provider_index,
+                                                choices.len(),
+                                                &this.provider_scroll,
+                                            ) {
+                                                cx.notify();
+                                                cx.stop_propagation();
+                                            } else if crate::settings::activates_button(event) {
+                                                if let Some((id, _)) =
+                                                    choices.get(this.provider_index)
+                                                {
+                                                    this.select_api_key_provider(id, window, cx);
+                                                }
+                                                cx.stop_propagation();
+                                            }
                                         }
-                                        cx.stop_propagation();
-                                    }
-                                }
-                            }))
-                            .child(list),
+                                    }))
+                                    .child(list),
+                            ),
+                            palette.craft_stack_shadows(),
+                            -6.0,
+                        ),
                     )
                 });
 
@@ -866,11 +873,15 @@ impl Render for LoginView {
                                             .truncate()
                                             .child(SharedString::from(selected_provider_name)),
                                     )
-                                    .child(
-                                        Icon::new(IconName::ChevronDown)
-                                            .size(px(14.0))
-                                            .text_color(palette.text_secondary),
-                                    ),
+                                    .child(motion::animated_chevron(
+                                        "login-apikey-provider",
+                                        self.provider_dropdown_open,
+                                        true,
+                                        px(14.0),
+                                        palette.text_secondary,
+                                        window,
+                                        cx,
+                                    )),
                             ),
                     )
                     .child(

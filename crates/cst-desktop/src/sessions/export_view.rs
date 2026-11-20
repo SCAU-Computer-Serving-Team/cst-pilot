@@ -13,7 +13,8 @@ use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
+    scale, space,
 };
 use crate::tools::normal_card::render_normal_tool_card;
 use crate::tools::{SpecialToolDispatchProps, render_special_tool_component};
@@ -451,6 +452,7 @@ impl ExportView {
                                         Rc::new(|_, _, _| {}),
                                         Rc::new(|_, _, _| {}),
                                         |_, _, _| {},
+                                        window,
                                         cx,
                                     ));
                                 }
@@ -750,6 +752,8 @@ impl Render for ExportView {
                             this.include_thinking = !this.include_thinking;
                             this.reload_preview(cx);
                         }),
+                        window,
+                        cx,
                     ))
                     .child(export_check_row(
                         "export-include-tools-chk",
@@ -760,6 +764,8 @@ impl Render for ExportView {
                             this.include_tools = !this.include_tools;
                             this.reload_preview(cx);
                         }),
+                        window,
+                        cx,
                     )),
             )
             // Primary action button (`32px`, `px: 16px`, `r: 4px`) + completed save area below
@@ -879,10 +885,14 @@ fn export_check_row<F>(
     checked: bool,
     palette: &DesktopPalette,
     on_click: F,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
 ) -> impl IntoElement
 where
     F: Fn(&gpui::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
 {
+    let chk_mark =
+        motion::animated_checkbox_mark(id, checked, px(12.0), palette.text_on_accent, window, cx);
     apply_scale(div(), scale::UI)
         .id(id)
         .test_support()
@@ -912,11 +922,7 @@ where
                 .flex()
                 .items_center()
                 .justify_center()
-                .children(checked.then(|| {
-                    Icon::new(IconName::Check)
-                        .size(px(12.0))
-                        .text_color(palette.text_on_accent)
-                })),
+                .children(chk_mark),
         )
         .child(
             div()

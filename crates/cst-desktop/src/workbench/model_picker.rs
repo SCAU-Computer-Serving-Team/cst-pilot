@@ -2,7 +2,9 @@ use std::f32::consts::{FRAC_PI_2, TAU};
 use std::rc::Rc;
 
 use cst_client::{ModelChoiceDto, ModelsSnapshot};
+use gpui::{Animation, AnimationExt as _};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::component::Icon;
 use gpui_kit::{
     App, CursorStyle, FocusHandle, InteractiveElement, IntoElement, ParentElement, PathBuilder,
@@ -14,7 +16,9 @@ use serde_json::Value;
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::shell::open_url_in_trusted_browser;
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{
+    DesktopPalette, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelPickerPage {
@@ -502,7 +506,12 @@ pub fn render_context_quota_popover(
         }
     }
 
-    card
+    motion::animate_popover_enter(
+        "composer-ctx-pop-anim",
+        card,
+        palette.craft_stack_shadows(),
+        6.0,
+    )
 }
 
 pub type SelectModelFn = Rc<dyn Fn(String, String, &mut Window, &mut App)>;
@@ -514,6 +523,8 @@ pub type ChangePickerPageFn = Rc<dyn Fn(ModelPickerPage, &mut Window, &mut App)>
 #[allow(clippy::too_many_arguments)]
 pub fn render_model_picker_popover(
     page: ModelPickerPage,
+    page_epoch: u64,
+    page_slide_dir: f32,
     highlighted_idx: usize,
     scroll_handle: &gpui_kit::ScrollHandle,
     scoped_models: &[ModelChoiceDto],
@@ -528,12 +539,21 @@ pub fn render_model_picker_popover(
     on_goto_page: ChangePickerPageFn,
     on_select_model: SelectModelFn,
     on_select_thinking: SelectThinkingFn,
+    window: &mut Window,
+    cx: &mut App,
 ) -> impl IntoElement {
-    let pop_width = match page {
-        ModelPickerPage::Main => px(224.0),
-        ModelPickerPage::Models => px(248.0),
-        ModelPickerPage::Thinking => px(148.0),
+    let target_width = match page {
+        ModelPickerPage::Main => 224.0,
+        ModelPickerPage::Models => 248.0,
+        ModelPickerPage::Thinking => 148.0,
     };
+    let anim_width = transition(
+        "model-picker-resize-w",
+        target_width,
+        Transition::new(motion::RESIZE).ease(motion::ease_out()),
+        window,
+        cx,
+    );
 
     let mut card = render_frosted_surface(
         "composer-model-picker-d8zzg",
@@ -545,21 +565,21 @@ pub fn render_model_picker_popover(
     .test_support()
     .occlude()
     .a11y_dialog("composer-model-picker-d8zzg", "模型与思考强度选择")
-    .w(pop_width)
+    .w(px(anim_width))
     .p(space::XS)
     .rounded(radius::ROW)
     .border_1()
     .border_color(palette.border_hairline)
-    .flex()
-    .flex_col()
-    .gap(space::MICRO)
+    .overflow_hidden()
     .on_click(|_, _, cx| cx.stop_propagation());
+
+    let mut page_body = div().w_full().flex().flex_col().gap(space::MICRO);
 
     match page {
         ModelPickerPage::Main => {
             let goto_m = Rc::clone(&on_goto_page);
             let goto_t = Rc::clone(&on_goto_page);
-            card = card
+            page_body = page_body
                 .child(
                     apply_scale(div(), scale::CAPTION_MEDIUM)
                         .id("model-picker-goto-models")
@@ -656,7 +676,7 @@ pub fn render_model_picker_popover(
         }
         ModelPickerPage::Models => {
             let back = Rc::clone(&on_goto_page);
-            card = card
+            page_body = page_body
                 .child(
                     apply_scale(div(), scale::CAPTION_MEDIUM)
                         .id("model-picker-back-btn")
@@ -750,11 +770,11 @@ pub fn render_model_picker_popover(
                     scroll = scroll.child(row);
                 }
             }
-            card = card.child(scroll);
+            page_body = page_body.child(scroll);
         }
         ModelPickerPage::Thinking => {
             let back = Rc::clone(&on_goto_page);
-            card = card
+            page_body = page_body
                 .child(
                     apply_scale(div(), scale::CAPTION_MEDIUM)
                         .id("thinking-picker-back-btn")
@@ -841,9 +861,30 @@ pub fn render_model_picker_popover(
                 }
                 list = list.child(row);
             }
-            card = card.child(list);
+            page_body = page_body.child(list);
         }
     }
 
-    card
+    card = card.child(if page_epoch > 0 {
+        page_body
+            .with_animation(
+                ("model-picker-page-slide", page_epoch),
+                Animation::new(motion::NORMAL).with_easing(motion::ease_out()),
+                move |el, d| {
+                    let t = d.clamp(0.0, 1.0);
+                    el.opacity(0.01 + 0.99 * t)
+                        .ml(px(8.0 * page_slide_dir * (1.0 - t)))
+                },
+            )
+            .into_any_element()
+    } else {
+        page_body.into_any_element()
+    });
+
+    motion::animate_popover_enter(
+        "composer-model-pop-anim",
+        card,
+        palette.craft_stack_shadows(),
+        6.0,
+    )
 }

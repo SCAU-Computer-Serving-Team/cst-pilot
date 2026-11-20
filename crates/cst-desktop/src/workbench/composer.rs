@@ -24,7 +24,8 @@ use serde_json::Value;
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
+    scale, space,
 };
 use crate::workbench::image_viewer::{LightboxImageTarget, gpui_image_from_handle};
 use crate::workbench::model_picker::{
@@ -201,6 +202,8 @@ pub struct ComposerView {
     model_change_pending: bool,
     picker_open: bool,
     picker_page: ModelPickerPage,
+    picker_page_epoch: u64,
+    picker_slide_dir: f32,
     picker_hi_idx: usize,
     picker_scroll: ScrollHandle,
     picker_prior_focus: Option<FocusHandle>,
@@ -274,6 +277,8 @@ impl ComposerView {
             model_change_pending: false,
             picker_open: false,
             picker_page: ModelPickerPage::Main,
+            picker_page_epoch: 0,
+            picker_slide_dir: 1.0,
             picker_hi_idx: 0,
             picker_scroll: ScrollHandle::new(),
             picker_prior_focus: None,
@@ -564,10 +569,19 @@ impl ComposerView {
 
     fn close_picker(&mut self) -> Option<FocusHandle> {
         self.picker_open = false;
+        self.picker_page_epoch = 0;
         self.picker_prior_focus.take()
     }
 
     fn set_picker_page(&mut self, page: ModelPickerPage) {
+        if self.picker_page != page {
+            self.picker_slide_dir = if matches!(page, ModelPickerPage::Main) {
+                -1.0
+            } else {
+                1.0
+            };
+            self.picker_page_epoch = self.picker_page_epoch.wrapping_add(1);
+        }
         self.picker_page = page;
         self.picker_hi_idx = 0;
         self.picker_scroll = ScrollHandle::new();
@@ -1476,7 +1490,12 @@ impl ComposerView {
                 .right_0()
                 .bottom_full()
                 .pb(space::SM)
-                .child(pop)
+                .child(motion::animate_popover_enter(
+                    "composer-comp-pop-anim",
+                    pop,
+                    palette.craft_stack_shadows(),
+                    6.0,
+                ))
                 .into_any_element(),
         )
     }
@@ -1964,11 +1983,21 @@ impl Render for ComposerView {
                     .text_color(palette.text_secondary)
                     .child(cjk_inline_label(thinking_level_label(&cur_thinking))),
             )
-            .child(
-                Icon::new(IconName::ChevronDown)
-                    .size(px(12.0))
-                    .text_color(palette.text_secondary),
-            );
+            .child(motion::animated_chevron(
+                format!(
+                    "composer-model-{}",
+                    match &self.draft_key {
+                        DraftKey::NewSession => "home",
+                        DraftKey::Session(s) => s.as_str(),
+                    }
+                ),
+                self.picker_open,
+                true,
+                px(12.0),
+                palette.text_secondary,
+                window,
+                cx,
+            ));
 
         // Unified `28×28px` primary button (`composer-send-btn-b0mrik`, `OQrq0`):
         // when session is running AND draft has neither text/tokens nor attached images, displays `12px` white `Square` to abort;
@@ -2212,6 +2241,8 @@ impl Render for ComposerView {
                     .pb(space::SM)
                     .child(render_model_picker_popover(
                         self.picker_page,
+                        self.picker_page_epoch,
+                        self.picker_slide_dir,
                         self.picker_hi_idx,
                         &self.picker_scroll,
                         &scoped_models,
@@ -2236,6 +2267,8 @@ impl Render for ComposerView {
                         Rc::new(move |level, w, cx| {
                             ent_sel_t.update(cx, |this, cx| this.select_thinking(level, w, cx));
                         }),
+                        window,
+                        cx,
                     )),
             );
         }

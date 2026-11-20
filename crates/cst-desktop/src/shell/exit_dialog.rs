@@ -12,7 +12,7 @@ use gpui_kit::{
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
 
 /// Formats the human-readable Chinese summary lines for non-zero unfinished items in [`ExitCheckReport`].
@@ -214,7 +214,11 @@ pub fn render_exit_confirm_dialog(
     scrim.child(
         div()
             .tab_stop(false)
-            .child(card)
+            .child(motion::animate_modal_enter(
+                "exit-dialog-anim",
+                card,
+                palette.craft_stack_shadows(),
+            ))
             .focus_trap("exit-dialog-focus-trap", trap_focus),
     )
 }

@@ -11,7 +11,7 @@ use crate::accessibility::A11yElementExt as _;
 use crate::auth::login_view::LoginMethodTab;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
+    DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion, radius,
     render_subpage_header_xwjof, scale, space,
 };
 use crate::workbench::model_picker::format_quota_balance;
@@ -421,7 +421,11 @@ impl Render for AccountView {
                 div()
                     .tab_stop(false)
                     .focus_trap("account-logout-confirm-trap", &self.logout_trap_focus)
-                    .child(card),
+                    .child(motion::animate_modal_enter(
+                        "account-logout-confirm-anim",
+                        card,
+                        palette.craft_stack_shadows(),
+                    )),
             )
         });
 

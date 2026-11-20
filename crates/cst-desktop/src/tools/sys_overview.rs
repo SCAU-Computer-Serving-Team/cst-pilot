@@ -37,6 +37,7 @@ pub fn render_sys_overview_card<V: 'static>(
     is_copied_fn: &dyn Fn(&str) -> bool,
     on_toggle_details: crate::tools::ToggleDetailsFn,
     on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
+    window: &mut Window,
     cx: &mut Context<V>,
 ) -> gpui_kit::AnyElement {
     let (status_icon, status_icon_color, status_text) = match props.status {
@@ -230,6 +231,7 @@ pub fn render_sys_overview_card<V: 'static>(
         is_copied_fn,
         on_toggle_details,
         on_mark_copied,
+        window,
         cx,
     ) {
         card = card.child(details_section);

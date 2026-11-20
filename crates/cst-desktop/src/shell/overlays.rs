@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement;
@@ -11,8 +12,78 @@ use gpui_kit::{
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
+
+/// Hover-pausable countdown state for transient top banners (`toast` `2600ms` + `pauseOnHover`).
+#[derive(Debug, Clone)]
+pub struct BannerCountdownState {
+    generation: u64,
+    remaining: Duration,
+    hovered: bool,
+    last_resumed: Option<Instant>,
+}
+
+impl Default for BannerCountdownState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BannerCountdownState {
+    pub fn new() -> Self {
+        Self {
+            generation: 0,
+            remaining: motion::BANNER_AUTO_DISMISS,
+            hovered: false,
+            last_resumed: None,
+        }
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn is_hovered(&self) -> bool {
+        self.hovered
+    }
+
+    pub fn remaining(&self) -> Duration {
+        self.remaining
+    }
+
+    /// Starts a fresh `2600ms` banner lifecycle and returns `(generation, wait_duration)`.
+    pub fn start(&mut self, now: Instant) -> (u64, Duration) {
+        self.generation = self.generation.wrapping_add(1);
+        self.remaining = motion::BANNER_AUTO_DISMISS;
+        self.hovered = false;
+        self.last_resumed = Some(now);
+        (self.generation, self.remaining)
+    }
+
+    /// Updates hover state; returns `Some((generation, remaining))` when hover ends and timer should resume.
+    pub fn set_hovered(&mut self, hovered: bool, now: Instant) -> Option<(u64, Duration)> {
+        if self.hovered == hovered {
+            return None;
+        }
+        self.hovered = hovered;
+        if hovered {
+            if let Some(started) = self.last_resumed.take() {
+                let elapsed = now.saturating_duration_since(started);
+                self.remaining = self.remaining.saturating_sub(elapsed);
+            }
+            None
+        } else {
+            self.last_resumed = Some(now);
+            Some((self.generation, self.remaining))
+        }
+    }
+
+    /// Returns `true` only if the timer matches the active generation and is not currently paused by hover.
+    pub fn should_dismiss(&self, generation: u64) -> bool {
+        self.generation == generation && !self.hovered
+    }
+}
 
 /// `WebActive` takeover lock overlay (`cst-pilot-desktop.pen` 「01 · 工作台」 frame `sYHwZ`, card `WO6NQ`, `384px` wide).
 pub fn render_web_active_lock_overlay(
@@ -143,7 +214,11 @@ pub fn render_web_active_lock_overlay(
     scrim.child(
         div()
             .tab_stop(false)
-            .child(card)
+            .child(motion::animate_modal_enter(
+                "web-active-card-anim",
+                card,
+                palette.craft_stack_shadows(),
+            ))
             .focus_trap("web-active-focus-trap", trap_focus),
     )
 }
@@ -152,11 +227,51 @@ pub fn render_web_active_lock_overlay(
 /// `top(20px)`, `h(40px)`, `px(16px)`, `rounded(8px)`, `CircleAlert` `16px` `$status-danger` + single-line reason, `H2p2z` frosted glass).
 pub fn render_workspace_error_bar(
     message: SharedString,
+    generation: u64,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
+    on_hover: impl Fn(&bool, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let label = single_line_banner_label(&message);
+    let card = render_frosted_surface(
+        "workspace-top-error-bar",
+        FrostedGlassSpec::popover_h2p2z(palette),
+        palette.bg_elevated,
+        transparency_enabled,
+        scale_factor,
+    )
+    .test_support()
+    .a11y_status("workspace-top-error-bar", format!("错误：{message}"))
+    .h(height::FIELD)
+    .max_w(px(640.0))
+    .px(space::LG)
+    .rounded(radius::ROW)
+    .border_1()
+    .border_color(palette.border_hairline)
+    .flex()
+    .items_center()
+    .on_hover(on_hover)
+    .child(
+        div()
+            .relative()
+            .flex()
+            .items_center()
+            .gap(space::MD)
+            .min_w_0()
+            .child(
+                Icon::new(IconName::CircleAlert)
+                    .size(px(16.0))
+                    .text_color(palette.status_danger),
+            )
+            .child(
+                apply_scale(div(), scale::UI)
+                    .text_color(palette.text_primary)
+                    .min_w_0()
+                    .truncate()
+                    .child(cjk_inline_label(label)),
+            ),
+    );
     div()
         .absolute()
         .top(space::LG)
@@ -164,57 +279,62 @@ pub fn render_workspace_error_bar(
         .right_0()
         .flex()
         .justify_center()
-        .child(
-            render_frosted_surface(
-                "workspace-top-error-bar",
-                FrostedGlassSpec::popover_h2p2z(palette),
-                palette.bg_elevated,
-                transparency_enabled,
-                scale_factor,
-            )
-            .test_support()
-            .a11y_status("workspace-top-error-bar", format!("错误：{message}"))
-            .h(height::FIELD)
-            .max_w(px(640.0))
-            .px(space::LG)
-            .rounded(radius::ROW)
-            .border_1()
-            .border_color(palette.border_hairline)
-            .shadow(palette.craft_stack_shadows())
-            .flex()
-            .items_center()
-            .child(
-                div()
-                    .relative()
-                    .flex()
-                    .items_center()
-                    .gap(space::MD)
-                    .min_w_0()
-                    .child(
-                        Icon::new(IconName::CircleAlert)
-                            .size(px(16.0))
-                            .text_color(palette.status_danger),
-                    )
-                    .child(
-                        apply_scale(div(), scale::UI)
-                            .text_color(palette.text_primary)
-                            .min_w_0()
-                            .truncate()
-                            .child(cjk_inline_label(label)),
-                    ),
-            ),
-        )
+        .child(motion::animate_toast_enter(
+            ("workspace-top-error-anim", generation),
+            card,
+            palette.craft_stack_shadows(),
+        ))
 }
 
 /// Non-blocking top notice banner (`h1BufF`:
 /// `top(20px)`, `h(40px)`, `px(16px)`, `rounded(8px)`, `CircleCheck` `16px` `$status-success` + message, `H2p2z` frosted glass).
 pub fn render_top_notice_banner(
     message: SharedString,
+    generation: u64,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
+    on_hover: impl Fn(&bool, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let label = single_line_banner_label(&message);
+    let card = render_frosted_surface(
+        "top-notice-banner",
+        FrostedGlassSpec::popover_h2p2z(palette),
+        palette.bg_elevated,
+        transparency_enabled,
+        scale_factor,
+    )
+    .test_support()
+    .a11y_status("top-notice-banner", format!("提示：{message}"))
+    .h(height::FIELD)
+    .max_w(px(480.0))
+    .px(space::LG)
+    .rounded(radius::ROW)
+    .border_1()
+    .border_color(palette.border_hairline)
+    .flex()
+    .items_center()
+    .on_hover(on_hover)
+    .child(
+        div()
+            .relative()
+            .flex()
+            .items_center()
+            .gap(space::MD)
+            .min_w_0()
+            .child(
+                Icon::new(IconName::CircleCheck)
+                    .size(px(16.0))
+                    .text_color(palette.status_success),
+            )
+            .child(
+                apply_scale(div(), scale::UI)
+                    .text_color(palette.text_primary)
+                    .min_w_0()
+                    .truncate()
+                    .child(cjk_inline_label(label)),
+            ),
+    );
     div()
         .absolute()
         .top(space::LG)
@@ -222,46 +342,11 @@ pub fn render_top_notice_banner(
         .right_0()
         .flex()
         .justify_center()
-        .child(
-            render_frosted_surface(
-                "top-notice-banner",
-                FrostedGlassSpec::popover_h2p2z(palette),
-                palette.bg_elevated,
-                transparency_enabled,
-                scale_factor,
-            )
-            .test_support()
-            .a11y_status("top-notice-banner", format!("提示：{message}"))
-            .h(height::FIELD)
-            .max_w(px(480.0))
-            .px(space::LG)
-            .rounded(radius::ROW)
-            .border_1()
-            .border_color(palette.border_hairline)
-            .shadow(palette.craft_stack_shadows())
-            .flex()
-            .items_center()
-            .child(
-                div()
-                    .relative()
-                    .flex()
-                    .items_center()
-                    .gap(space::MD)
-                    .min_w_0()
-                    .child(
-                        Icon::new(IconName::CircleCheck)
-                            .size(px(16.0))
-                            .text_color(palette.status_success),
-                    )
-                    .child(
-                        apply_scale(div(), scale::UI)
-                            .text_color(palette.text_primary)
-                            .min_w_0()
-                            .truncate()
-                            .child(cjk_inline_label(label)),
-                    ),
-            ),
-        )
+        .child(motion::animate_toast_enter(
+            ("top-notice-anim", generation),
+            card,
+            palette.craft_stack_shadows(),
+        ))
 }
 
 fn single_line_banner_label(message: &SharedString) -> SharedString {

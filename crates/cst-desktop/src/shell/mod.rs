@@ -6,12 +6,13 @@ pub mod window_bounds;
 
 use std::collections::BTreeSet;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cst_client::{
     ChannelModeDto, ClientError, ClientHandle, ClientSnapshot, DesktopSettingsPatchDto,
     ExitCheckReport, ThemeModeDto, UpdatePhaseDto, WorkspaceView,
 };
+use gpui::{Animation, AnimationExt as _};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::Icon;
@@ -37,7 +38,8 @@ use crate::settings::update_dialog::{UpdateDialogState, render_update_dialog};
 use crate::settings::{SettingsCategory, SettingsView, SettingsViewEvent};
 use crate::shell::exit_dialog::render_exit_confirm_dialog;
 use crate::shell::overlays::{
-    render_top_notice_banner, render_web_active_lock_overlay, render_workspace_error_bar,
+    BannerCountdownState, render_top_notice_banner, render_web_active_lock_overlay,
+    render_workspace_error_bar,
 };
 use crate::shell::sidebar::{
     MAX_RECENT_SIDEBAR_SESSIONS, ShellRoute, SidebarCallbacks, filter_recent_sidebar_sessions,
@@ -49,12 +51,10 @@ use crate::shell::window_bounds::{
 };
 use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, FontLoadReport, apply_desktop_theme, apply_scale,
-    cjk_inline_label, height, layout, radius, scale, space,
+    cjk_inline_label, height, layout, motion, radius, scale, space,
 };
 use crate::workbench::composer::SlashNavigationTarget;
 use crate::workbench::{WorkbenchEvent, WorkbenchView};
-
-const BANNER_AUTO_DISMISS_MS: u64 = 2600;
 
 fn viewport_is_narrow(window: &Window) -> Option<bool> {
     let viewport = window.viewport_size();
@@ -162,6 +162,8 @@ pub struct AppShell {
     last_web_url: Option<String>,
     workspace_error: Option<SharedString>,
     top_notice: Option<SharedString>,
+    error_banner_timer: BannerCountdownState,
+    notice_banner_timer: BannerCountdownState,
     shader_scheduler: ShaderFrameScheduler,
     bounds_tracker: NormalBoundsTracker,
     bounds_debounce_task: Option<Task<()>>,
@@ -349,6 +351,8 @@ impl AppShell {
             last_web_url: None,
             workspace_error: None,
             top_notice: None,
+            error_banner_timer: BannerCountdownState::new(),
+            notice_banner_timer: BannerCountdownState::new(),
             shader_scheduler: ShaderFrameScheduler::new(),
             bounds_tracker: NormalBoundsTracker::from_resolved(resolved_geometry),
             bounds_debounce_task: None,
@@ -451,6 +455,9 @@ impl AppShell {
                     view.set_active(route == ShellRoute::Login, cx)
                 });
             }
+            if self.route == ShellRoute::Home {
+                self.workbench.update(cx, |wb, _| wb.mark_left_home_route());
+            }
             if self.route == ShellRoute::Settings {
                 self.settings_view.update(cx, SettingsView::leave);
             }
@@ -500,6 +507,10 @@ impl AppShell {
 
     pub fn has_exit_dialog(&self) -> bool {
         self.exit_dialog.is_some()
+    }
+
+    pub fn workbench_welcome_stagger_done(&self, cx: &App) -> bool {
+        self.workbench.read(cx).is_welcome_stagger_done()
     }
 
     pub fn open_update_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -601,37 +612,72 @@ impl AppShell {
         }
     }
 
+    fn schedule_error_dismiss_after(
+        &mut self,
+        gen_id: u64,
+        wait: Duration,
+        cx: &mut Context<Self>,
+    ) {
+        self.error_dismiss_task = Some(cx.spawn(async move |weak, cx| {
+            cx.background_executor().timer(wait).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.error_banner_timer.should_dismiss(gen_id) {
+                    this.workspace_error = None;
+                    this.error_dismiss_task = None;
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    fn schedule_notice_dismiss_after(
+        &mut self,
+        gen_id: u64,
+        wait: Duration,
+        cx: &mut Context<Self>,
+    ) {
+        self.notice_dismiss_task = Some(cx.spawn(async move |weak, cx| {
+            cx.background_executor().timer(wait).await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.notice_banner_timer.should_dismiss(gen_id) {
+                    this.top_notice = None;
+                    this.notice_dismiss_task = None;
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    fn set_banner_hovered(&mut self, is_error: bool, hovered: bool, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        if is_error {
+            if let Some((gen_id, wait)) = self.error_banner_timer.set_hovered(hovered, now) {
+                self.schedule_error_dismiss_after(gen_id, wait, cx);
+            } else if hovered {
+                self.error_dismiss_task = None;
+            }
+        } else if let Some((gen_id, wait)) = self.notice_banner_timer.set_hovered(hovered, now) {
+            self.schedule_notice_dismiss_after(gen_id, wait, cx);
+        } else if hovered {
+            self.notice_dismiss_task = None;
+        }
+    }
+
     pub fn show_workspace_error(
         &mut self,
         message: impl Into<SharedString>,
         cx: &mut Context<Self>,
     ) {
         self.workspace_error = Some(message.into());
-        self.error_dismiss_task = Some(cx.spawn(async move |weak, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(BANNER_AUTO_DISMISS_MS))
-                .await;
-            let _ = weak.update(cx, |this, cx| {
-                this.workspace_error = None;
-                this.error_dismiss_task = None;
-                cx.notify();
-            });
-        }));
+        let (gen_id, wait) = self.error_banner_timer.start(Instant::now());
+        self.schedule_error_dismiss_after(gen_id, wait, cx);
         cx.notify();
     }
 
     pub fn show_top_notice(&mut self, message: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.top_notice = Some(message.into());
-        self.notice_dismiss_task = Some(cx.spawn(async move |weak, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(BANNER_AUTO_DISMISS_MS))
-                .await;
-            let _ = weak.update(cx, |this, cx| {
-                this.top_notice = None;
-                this.notice_dismiss_task = None;
-                cx.notify();
-            });
-        }));
+        let (gen_id, wait) = self.notice_banner_timer.start(Instant::now());
+        self.schedule_notice_dismiss_after(gen_id, wait, cx);
         cx.notify();
     }
 
@@ -2114,13 +2160,14 @@ impl AppShell {
                     this.dismiss_sidebar_menu(window, cx);
                 });
             })
-            .child(
-                div()
-                    .absolute()
-                    .top(px(menu_y))
-                    .left(px(menu_x))
-                    .child(menu_box),
-            )
+            .child(div().absolute().top(px(menu_y)).left(px(menu_x)).child(
+                motion::animate_popover_enter(
+                    "sidebar-ctx-menu-anim",
+                    menu_box,
+                    palette.craft_stack_shadows(),
+                    -4.0,
+                ),
+            ))
     }
 
     fn render_recent_drawer_popover(
@@ -2220,59 +2267,64 @@ impl AppShell {
             })
             .child(
                 div().absolute().top(px(44.0)).left(px(148.0)).child(
-                    render_frosted_surface(
-                        "recent-sessions-drawer",
-                        FrostedGlassSpec::popover_h2p2z(palette),
-                        palette.bg_elevated,
-                        transparency_enabled,
-                        scale_factor,
-                    )
-                    .test_support()
-                    .a11y_dialog("recent-sessions-drawer", "最近会话抽屉")
-                    .w(px(264.0))
-                    .p(space::XS)
-                    .rounded(radius::ROW)
-                    .border_1()
-                    .border_color(palette.border_hairline)
-                    .flex()
-                    .flex_col()
-                    .gap(space::MICRO)
-                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(rows)
-                    .child(
-                        div()
-                            .relative()
-                            .px(space::XS)
-                            .py(space::MICRO)
-                            .child(div().w_full().h(px(1.0)).bg(palette.border_subtle)),
-                    )
-                    .child(
-                        apply_scale(div(), scale::UI)
-                            .id("drawer-open-all-sessions-btn")
-                            .test_support()
-                            .a11y_button("drawer-open-all-sessions-btn", "查看全部会话")
-                            .relative()
-                            .h(height::CONTROL)
-                            .px(space::SM)
-                            .rounded(radius::CONTROL)
-                            .text_color(palette.text_primary)
-                            .flex()
-                            .items_center()
-                            .gap(space::SM)
-                            .hover(|s| s.bg(palette.bg_item_active))
-                            .on_click(move |_, _, cx| {
-                                ent_all.update(cx, |this, cx| {
-                                    this.recent_drawer_open = false;
-                                    this.set_route(ShellRoute::AllSessions, cx);
-                                    cx.notify();
-                                });
-                            })
-                            .child(
-                                Icon::new(IconName::RotateCcwClock)
-                                    .size(px(16.0))
-                                    .text_color(palette.text_secondary),
-                            )
-                            .child(cjk_inline_label("查看全部会话")),
+                    motion::animate_popover_enter(
+                        "recent-drawer-anim",
+                        render_frosted_surface(
+                            "recent-sessions-drawer",
+                            FrostedGlassSpec::popover_h2p2z(palette),
+                            palette.bg_elevated,
+                            transparency_enabled,
+                            scale_factor,
+                        )
+                        .test_support()
+                        .a11y_dialog("recent-sessions-drawer", "最近会话抽屉")
+                        .w(px(264.0))
+                        .p(space::XS)
+                        .rounded(radius::ROW)
+                        .border_1()
+                        .border_color(palette.border_hairline)
+                        .flex()
+                        .flex_col()
+                        .gap(space::MICRO)
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(rows)
+                        .child(
+                            div()
+                                .relative()
+                                .px(space::XS)
+                                .py(space::MICRO)
+                                .child(div().w_full().h(px(1.0)).bg(palette.border_subtle)),
+                        )
+                        .child(
+                            apply_scale(div(), scale::UI)
+                                .id("drawer-open-all-sessions-btn")
+                                .test_support()
+                                .a11y_button("drawer-open-all-sessions-btn", "查看全部会话")
+                                .relative()
+                                .h(height::CONTROL)
+                                .px(space::SM)
+                                .rounded(radius::CONTROL)
+                                .text_color(palette.text_primary)
+                                .flex()
+                                .items_center()
+                                .gap(space::SM)
+                                .hover(|s| s.bg(palette.bg_item_active))
+                                .on_click(move |_, _, cx| {
+                                    ent_all.update(cx, |this, cx| {
+                                        this.recent_drawer_open = false;
+                                        this.set_route(ShellRoute::AllSessions, cx);
+                                        cx.notify();
+                                    });
+                                })
+                                .child(
+                                    Icon::new(IconName::RotateCcwClock)
+                                        .size(px(16.0))
+                                        .text_color(palette.text_secondary),
+                                )
+                                .child(cjk_inline_label("查看全部会话")),
+                        ),
+                        palette.craft_stack_shadows(),
+                        -6.0,
                     ),
                 ),
             )
@@ -2330,7 +2382,8 @@ impl AppShell {
                 });
             })
             .child(
-                pos_div.child(
+                pos_div.child(motion::animate_popover_enter(
+                    "account-popover-anim",
                     render_frosted_surface(
                         "account-popover-menu",
                         FrostedGlassSpec::popover_h2p2z(palette),
@@ -2508,7 +2561,9 @@ impl AppShell {
                             )
                             .child(cjk_inline_label("退出 CST Pilot")),
                     ),
-                ),
+                    palette.craft_stack_shadows(),
+                    if self.sidebar_collapsed { -6.0 } else { 6.0 },
+                )),
             )
     }
 }
@@ -2651,18 +2706,30 @@ impl Render for AppShell {
                 );
 
             if let Some(ref err_msg) = self.workspace_error {
+                let ent_hover = entity.clone();
                 login_shell = login_shell.child(render_workspace_error_bar(
                     err_msg.clone(),
+                    self.error_banner_timer.generation(),
                     &palette,
                     transparency_enabled,
                     scale_factor,
+                    move |hovered, _, cx| {
+                        let hov = *hovered;
+                        ent_hover.update(cx, |this, cx| this.set_banner_hovered(true, hov, cx));
+                    },
                 ));
             } else if let Some(ref notice) = self.top_notice {
+                let ent_hover = entity.clone();
                 login_shell = login_shell.child(render_top_notice_banner(
                     notice.clone(),
+                    self.notice_banner_timer.generation(),
                     &palette,
                     transparency_enabled,
                     scale_factor,
+                    move |hovered, _, cx| {
+                        let hov = *hovered;
+                        ent_hover.update(cx, |this, cx| this.set_banner_hovered(false, hov, cx));
+                    },
                 ));
             }
             login_shell
@@ -2679,6 +2746,7 @@ impl Render for AppShell {
                 let e9 = entity.clone();
                 render_topbar(
                     self.sidebar_collapsed,
+                    self.recent_drawer_open,
                     active_view,
                     window.is_maximized(),
                     account_initial.clone(),
@@ -2755,6 +2823,8 @@ impl Render for AppShell {
                             e9.update(cx, |this, cx| this.request_close_flow(w, cx));
                         }),
                     },
+                    window,
+                    cx,
                 )
             };
 
@@ -2771,18 +2841,30 @@ impl Render for AppShell {
                 .child(self.render_workspace_body(&palette, &entity));
 
             if let Some(ref err_msg) = self.workspace_error {
+                let ent_hover = entity.clone();
                 workspace_card = workspace_card.child(render_workspace_error_bar(
                     err_msg.clone(),
+                    self.error_banner_timer.generation(),
                     &palette,
                     transparency_enabled,
                     scale_factor,
+                    move |hovered, _, cx| {
+                        let hov = *hovered;
+                        ent_hover.update(cx, |this, cx| this.set_banner_hovered(true, hov, cx));
+                    },
                 ));
             } else if let Some(ref notice) = self.top_notice {
+                let ent_hover = entity.clone();
                 workspace_card = workspace_card.child(render_top_notice_banner(
                     notice.clone(),
+                    self.notice_banner_timer.generation(),
                     &palette,
                     transparency_enabled,
                     scale_factor,
+                    move |hovered, _, cx| {
+                        let hov = *hovered;
+                        ent_hover.update(cx, |this, cx| this.set_banner_hovered(false, hov, cx));
+                    },
                 ));
             }
 
@@ -2853,147 +2935,169 @@ impl Render for AppShell {
                 let s10 = entity.clone();
                 let s11 = entity.clone();
 
-                row_layout = row_layout.child(render_sidebar_l081m1(
-                    self.route,
-                    active_session_id.as_deref(),
-                    &sidebar_sessions,
-                    window,
-                    cx,
-                    &self.sidebar_search_input,
-                    &search_query,
-                    self.sidebar_batch_mode,
-                    &self.sidebar_selected_ids,
-                    account_label,
-                    account_initial,
-                    &self.sidebar_collapse_focus,
-                    &self.sidebar_account_focus,
-                    &palette,
-                    SidebarCallbacks {
-                        on_collapse: Rc::new(move |w, cx| {
-                            s1.update(cx, |this, cx| this.toggle_sidebar(w, cx));
-                        }),
-                        on_new_session: Rc::new(move |_, cx| {
-                            s2.update(cx, |this, cx| {
-                                this.set_route(ShellRoute::Home, cx);
-                                this.sidebar_batch_mode = false;
-                                this.sidebar_selected_ids.clear();
-                                let c = this.client.clone();
-                                cx.background_executor()
-                                    .spawn(async move {
-                                        let _ = c.activate_session(None).await;
-                                    })
-                                    .detach();
-                                cx.notify();
-                            });
-                        }),
-                        on_clear_search: Rc::new(move |w, cx| {
-                            s_clr.update(cx, |this, cx| {
-                                this.sidebar_search_input.update(cx, |st, cx| {
-                                    st.set_value("", w, cx);
-                                    st.focus(w, cx);
-                                });
-                                cx.notify();
-                            });
-                        }),
-                        on_open_palette: Rc::new(move |w, cx| {
-                            s_pal.update(cx, |this, cx| this.toggle_command_palette(w, cx));
-                        }),
-                        on_open_all_sessions: Rc::new(move |window, cx| {
-                            s3.update(cx, |this, cx| {
-                                this.sidebar_batch_mode = false;
-                                this.sidebar_selected_ids.clear();
-                                this.set_route(ShellRoute::AllSessions, cx);
-                                this.all_sessions_view
-                                    .update(cx, |view, cx| view.focus(window, cx));
-                            });
-                        }),
-                        on_open_dashboard: Rc::new(move |_, cx| {
-                            s4.update(cx, |this, cx| {
-                                this.sidebar_batch_mode = false;
-                                this.sidebar_selected_ids.clear();
-                                this.show_top_notice("本地用量仪表盘将在后续版本开放。", cx);
-                            });
-                        }),
-                        on_select_session: Rc::new(move |sid, window, cx| {
-                            s5.update(cx, |this, cx| {
-                                this.activate_session_by_id(sid, cx);
-                                this.root_focus.focus(window, cx);
-                            });
-                        }),
-                        on_open_session_menu: Rc::new(move |sid, pos, window, cx| {
-                            s5_menu.update(cx, |this, cx| {
-                                if this.sidebar_context_menu.is_none() {
-                                    this.sidebar_menu_prior_focus = window.focused(cx);
-                                }
-                                this.sidebar_context_menu = Some((sid, pos));
-                                this.sidebar_menu_focus.focus(window, cx);
-                                cx.notify();
-                            });
-                        }),
-                        on_toggle_select_all: Rc::new(move |_, cx| {
-                            s7.update(cx, |this, cx| {
-                                let q = this.sidebar_search_input.read(cx).value().to_string();
-                                let recent_ids: Vec<String> = filter_recent_sidebar_sessions(
-                                    &this.all_sessions_view.read(cx).visible_sessions(),
-                                    &q,
-                                )
-                                .into_iter()
-                                .map(|s| s.id)
-                                .collect();
-                                if !recent_ids.is_empty()
-                                    && recent_ids
-                                        .iter()
-                                        .all(|id| this.sidebar_selected_ids.contains(id))
-                                {
-                                    this.sidebar_selected_ids.clear();
-                                } else {
-                                    this.sidebar_selected_ids = recent_ids.into_iter().collect();
-                                }
-                                cx.notify();
-                            });
-                        }),
-                        on_batch_delete: Rc::new(move |window, cx| {
-                            s8.update(cx, |this, cx| {
-                                if !this.sidebar_batch_mode || this.sidebar_selected_ids.is_empty()
-                                {
-                                    return;
-                                }
-                                let targets = std::mem::take(&mut this.sidebar_selected_ids)
-                                    .into_iter()
-                                    .collect();
-                                this.sidebar_batch_mode = false;
-                                this.sidebar_collapse_focus.focus(window, cx);
-                                this.all_sessions_view.update(cx, |view, cx| {
-                                    view.delete_sessions_optimistic(targets, cx)
-                                });
-                                cx.notify();
-                            });
-                        }),
-                        on_toggle_session_checked: Rc::new(move |sid, _, cx| {
-                            s9.update(cx, |this, cx| {
-                                if !this.sidebar_selected_ids.remove(&sid) {
-                                    this.sidebar_selected_ids.insert(sid);
-                                }
-                                cx.notify();
-                            });
-                        }),
-                        on_toggle_account_menu: Rc::new(move |w, cx| {
-                            s10.update(cx, |this, cx| {
-                                this.account_menu_open = !this.account_menu_open;
-                                if this.account_menu_open {
-                                    this.account_menu_prior_focus = w.focused(cx);
-                                }
-                                cx.notify();
-                            });
-                        }),
-                        on_open_settings: Rc::new(move |_, cx| {
-                            s11.update(cx, |this, cx| {
-                                this.set_route(ShellRoute::Settings, cx);
-                                cx.notify();
-                            });
-                        }),
-                    },
-                ));
+                row_layout = row_layout.child(
+                    div()
+                        .h_full()
+                        .flex()
+                        .flex_shrink_0()
+                        .child(render_sidebar_l081m1(
+                            self.route,
+                            active_session_id.as_deref(),
+                            &sidebar_sessions,
+                            window,
+                            cx,
+                            &self.sidebar_search_input,
+                            &search_query,
+                            self.sidebar_batch_mode,
+                            &self.sidebar_selected_ids,
+                            account_label,
+                            account_initial,
+                            &self.sidebar_collapse_focus,
+                            &self.sidebar_account_focus,
+                            &palette,
+                            SidebarCallbacks {
+                                on_collapse: Rc::new(move |w, cx| {
+                                    s1.update(cx, |this, cx| this.toggle_sidebar(w, cx));
+                                }),
+                                on_new_session: Rc::new(move |_, cx| {
+                                    s2.update(cx, |this, cx| {
+                                        this.set_route(ShellRoute::Home, cx);
+                                        this.sidebar_batch_mode = false;
+                                        this.sidebar_selected_ids.clear();
+                                        let c = this.client.clone();
+                                        cx.background_executor()
+                                            .spawn(async move {
+                                                let _ = c.activate_session(None).await;
+                                            })
+                                            .detach();
+                                        cx.notify();
+                                    });
+                                }),
+                                on_clear_search: Rc::new(move |w, cx| {
+                                    s_clr.update(cx, |this, cx| {
+                                        this.sidebar_search_input.update(cx, |st, cx| {
+                                            st.set_value("", w, cx);
+                                            st.focus(w, cx);
+                                        });
+                                        cx.notify();
+                                    });
+                                }),
+                                on_open_palette: Rc::new(move |w, cx| {
+                                    s_pal.update(cx, |this, cx| this.toggle_command_palette(w, cx));
+                                }),
+                                on_open_all_sessions: Rc::new(move |window, cx| {
+                                    s3.update(cx, |this, cx| {
+                                        this.sidebar_batch_mode = false;
+                                        this.sidebar_selected_ids.clear();
+                                        this.set_route(ShellRoute::AllSessions, cx);
+                                        this.all_sessions_view
+                                            .update(cx, |view, cx| view.focus(window, cx));
+                                    });
+                                }),
+                                on_open_dashboard: Rc::new(move |_, cx| {
+                                    s4.update(cx, |this, cx| {
+                                        this.sidebar_batch_mode = false;
+                                        this.sidebar_selected_ids.clear();
+                                        this.show_top_notice(
+                                            "本地用量仪表盘将在后续版本开放。",
+                                            cx,
+                                        );
+                                    });
+                                }),
+                                on_select_session: Rc::new(move |sid, window, cx| {
+                                    s5.update(cx, |this, cx| {
+                                        this.activate_session_by_id(sid, cx);
+                                        this.root_focus.focus(window, cx);
+                                    });
+                                }),
+                                on_open_session_menu: Rc::new(move |sid, pos, window, cx| {
+                                    s5_menu.update(cx, |this, cx| {
+                                        if this.sidebar_context_menu.is_none() {
+                                            this.sidebar_menu_prior_focus = window.focused(cx);
+                                        }
+                                        this.sidebar_context_menu = Some((sid, pos));
+                                        this.sidebar_menu_focus.focus(window, cx);
+                                        cx.notify();
+                                    });
+                                }),
+                                on_toggle_select_all: Rc::new(move |_, cx| {
+                                    s7.update(cx, |this, cx| {
+                                        let q =
+                                            this.sidebar_search_input.read(cx).value().to_string();
+                                        let recent_ids: Vec<String> =
+                                            filter_recent_sidebar_sessions(
+                                                &this.all_sessions_view.read(cx).visible_sessions(),
+                                                &q,
+                                            )
+                                            .into_iter()
+                                            .map(|s| s.id)
+                                            .collect();
+                                        if !recent_ids.is_empty()
+                                            && recent_ids
+                                                .iter()
+                                                .all(|id| this.sidebar_selected_ids.contains(id))
+                                        {
+                                            this.sidebar_selected_ids.clear();
+                                        } else {
+                                            this.sidebar_selected_ids =
+                                                recent_ids.into_iter().collect();
+                                        }
+                                        cx.notify();
+                                    });
+                                }),
+                                on_batch_delete: Rc::new(move |window, cx| {
+                                    s8.update(cx, |this, cx| {
+                                        if !this.sidebar_batch_mode
+                                            || this.sidebar_selected_ids.is_empty()
+                                        {
+                                            return;
+                                        }
+                                        let targets =
+                                            std::mem::take(&mut this.sidebar_selected_ids)
+                                                .into_iter()
+                                                .collect();
+                                        this.sidebar_batch_mode = false;
+                                        this.sidebar_collapse_focus.focus(window, cx);
+                                        this.all_sessions_view.update(cx, |view, cx| {
+                                            view.delete_sessions_optimistic(targets, cx)
+                                        });
+                                        cx.notify();
+                                    });
+                                }),
+                                on_toggle_session_checked: Rc::new(move |sid, _, cx| {
+                                    s9.update(cx, |this, cx| {
+                                        if !this.sidebar_selected_ids.remove(&sid) {
+                                            this.sidebar_selected_ids.insert(sid);
+                                        }
+                                        cx.notify();
+                                    });
+                                }),
+                                on_toggle_account_menu: Rc::new(move |w, cx| {
+                                    s10.update(cx, |this, cx| {
+                                        this.account_menu_open = !this.account_menu_open;
+                                        if this.account_menu_open {
+                                            this.account_menu_prior_focus = w.focused(cx);
+                                        }
+                                        cx.notify();
+                                    });
+                                }),
+                                on_open_settings: Rc::new(move |_, cx| {
+                                    s11.update(cx, |this, cx| {
+                                        this.set_route(ShellRoute::Settings, cx);
+                                        cx.notify();
+                                    });
+                                }),
+                            },
+                        ))
+                        .with_animation(
+                            "sidebar-drawer-enter",
+                            Animation::new(motion::NORMAL).with_easing(motion::ease_out()),
+                            |el, d| {
+                                let t = d.clamp(0.0, 1.0);
+                                el.opacity(0.01 + 0.99 * t).ml(px(-24.0 * (1.0 - t)))
+                            },
+                        ),
+                );
             }
 
             row_layout.child(right_column)
@@ -3108,7 +3212,8 @@ impl Render for AppShell {
                 .items_center()
                 .justify_center()
                 .occlude()
-                .child(
+                .child(motion::animate_modal_enter(
+                    "rename-session-modal-anim",
                     render_frosted_surface(
                         "rename-session-modal",
                         FrostedGlassSpec::modal_k3x72(&palette, 8.0),
@@ -3205,7 +3310,8 @@ impl Render for AppShell {
                     )
                     .tab_stop(false)
                     .focus_trap("sidebar-rename-focus-trap", &self.rename_trap_focus),
-                ),
+                    palette.craft_stack_shadows(),
+                )),
             );
         }
 
@@ -3295,7 +3401,8 @@ impl Render for AppShell {
                 .items_center()
                 .justify_center()
                 .occlude()
-                .child(
+                .child(motion::animate_modal_enter(
+                    "web-switch-confirm-anim",
                     render_frosted_surface(
                         "web-switch-confirm-card",
                         FrostedGlassSpec::modal_k3x72(&palette, 8.0),
@@ -3378,7 +3485,8 @@ impl Render for AppShell {
                                     .child(cjk_inline_label("继续切换")),
                             ),
                     ),
-                ),
+                    palette.craft_stack_shadows(),
+                )),
             );
         }
 

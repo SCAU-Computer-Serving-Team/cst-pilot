@@ -19,8 +19,8 @@ use gpui_kit::{
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
-    render_subpage_header_xwjof, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion,
+    radius, render_subpage_header_xwjof, scale, space,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -406,7 +406,7 @@ impl AllSessionsView {
     fn render_virtual_range(
         &mut self,
         range: std::ops::Range<usize>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<gpui_kit::AnyElement> {
         let theme_global = DesktopThemeGlobal::current(cx);
@@ -476,6 +476,14 @@ impl AllSessionsView {
                         .flex_1();
 
                     if batch_mode {
+                        let chk_mark = motion::animated_checkbox_mark(
+                            format!("all-sessions-chk-{sid}"),
+                            is_checked,
+                            px(12.0),
+                            palette.text_on_accent,
+                            window,
+                            cx,
+                        );
                         left_row = left_row.child(
                             div()
                                 .w(px(16.0))
@@ -496,11 +504,7 @@ impl AllSessionsView {
                                 .items_center()
                                 .justify_center()
                                 .flex_shrink_0()
-                                .children(is_checked.then(|| {
-                                    Icon::new(IconName::Check)
-                                        .size(px(12.0))
-                                        .text_color(palette.text_on_accent)
-                                })),
+                                .children(chk_mark),
                         );
                     }
 
@@ -665,120 +669,129 @@ impl AllSessionsView {
                     .max_w(layout::CENTER_COLUMN_MAX_WIDTH)
                     .h_full()
                     .child(
-                        render_frosted_surface(
-                            "all-sessions-context-menu-uwt8w",
-                            FrostedGlassSpec::popover_h2p2z(palette),
-                            palette.bg_elevated,
-                            transparency_enabled,
-                            scale_factor,
-                        )
-                        .test_support()
-                        .role(gpui_kit::Role::Menu)
-                        .accessibility_id("all-sessions-context-menu")
-                        .aria_label("会话操作菜单")
-                        .absolute()
-                        .top(px(menu.anchor_top_px))
-                        .right(space::SM)
-                        .w(px(200.0))
-                        .p(space::XS)
-                        .rounded(radius::ROW)
-                        .border_1()
-                        .border_color(palette.border_hairline)
-                        .occlude()
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                            cx.stop_propagation();
-                        })
-                        .flex()
-                        .flex_col()
-                        .gap(space::MICRO)
-                        .child(
-                            apply_scale(div(), scale::UI)
-                                .id("all-sessions-ctx-rename")
-                                .test_support()
-                                .a11y_menuitem("all-sessions-ctx-rename", "重命名")
-                                .relative()
-                                .h(height::CONTROL)
-                                .px(space::SM)
-                                .rounded(radius::CONTROL)
-                                .text_color(palette.text_primary)
-                                .flex()
-                                .items_center()
-                                .gap(space::SM)
-                                .hover(|s| s.bg(palette.bg_item_active))
-                                .on_click(cx.listener(move |this, _, w, cx| {
-                                    this.open_rename_modal(
-                                        sid_rename.clone(),
-                                        title_rename.clone(),
-                                        w,
-                                        cx,
-                                    );
-                                }))
-                                .child(
-                                    Icon::new(IconName::Pencil)
-                                        .size(px(16.0))
-                                        .text_color(palette.text_secondary),
+                        div()
+                            .absolute()
+                            .top(px(menu.anchor_top_px))
+                            .right(space::SM)
+                            .child(motion::animate_popover_enter(
+                                "all-sessions-ctx-anim",
+                                render_frosted_surface(
+                                    "all-sessions-context-menu-uwt8w",
+                                    FrostedGlassSpec::popover_h2p2z(palette),
+                                    palette.bg_elevated,
+                                    transparency_enabled,
+                                    scale_factor,
                                 )
-                                .child(cjk_inline_label("重命名")),
-                        )
-                        .child(
-                            apply_scale(div(), scale::UI)
-                                .id("all-sessions-ctx-manage")
                                 .test_support()
-                                .a11y_menuitem("all-sessions-ctx-manage", "管理")
-                                .relative()
-                                .h(height::CONTROL)
-                                .px(space::SM)
-                                .rounded(radius::CONTROL)
-                                .text_color(palette.text_primary)
+                                .role(gpui_kit::Role::Menu)
+                                .accessibility_id("all-sessions-context-menu")
+                                .aria_label("会话操作菜单")
+                                .w(px(200.0))
+                                .p(space::XS)
+                                .rounded(radius::ROW)
+                                .border_1()
+                                .border_color(palette.border_hairline)
+                                .occlude()
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                    cx.stop_propagation();
+                                })
                                 .flex()
-                                .items_center()
-                                .gap(space::SM)
-                                .hover(|s| s.bg(palette.bg_item_active))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.context_menu = None;
-                                    this.batch_mode = true;
-                                    this.selected_ids.clear();
-                                    this.selected_ids.insert(sid_manage.clone());
-                                    cx.notify();
-                                }))
+                                .flex_col()
+                                .gap(space::MICRO)
                                 .child(
-                                    Icon::new(IconName::ListChecks)
-                                        .size(px(16.0))
-                                        .text_color(palette.text_secondary),
+                                    apply_scale(div(), scale::UI)
+                                        .id("all-sessions-ctx-rename")
+                                        .test_support()
+                                        .a11y_menuitem("all-sessions-ctx-rename", "重命名")
+                                        .relative()
+                                        .h(height::CONTROL)
+                                        .px(space::SM)
+                                        .rounded(radius::CONTROL)
+                                        .text_color(palette.text_primary)
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::SM)
+                                        .hover(|s| s.bg(palette.bg_item_active))
+                                        .on_click(cx.listener(move |this, _, w, cx| {
+                                            this.open_rename_modal(
+                                                sid_rename.clone(),
+                                                title_rename.clone(),
+                                                w,
+                                                cx,
+                                            );
+                                        }))
+                                        .child(
+                                            Icon::new(IconName::Pencil)
+                                                .size(px(16.0))
+                                                .text_color(palette.text_secondary),
+                                        )
+                                        .child(cjk_inline_label("重命名")),
                                 )
-                                .child(cjk_inline_label("管理")),
-                        )
-                        .child(
-                            div()
-                                .relative()
-                                .px(space::XS)
-                                .py(space::MICRO)
-                                .child(div().w_full().h(px(1.0)).bg(palette.border_subtle)),
-                        )
-                        .child(
-                            apply_scale(div(), scale::UI_MEDIUM)
-                                .id("all-sessions-ctx-delete")
-                                .test_support()
-                                .a11y_menuitem("all-sessions-ctx-delete", "删除")
-                                .relative()
-                                .h(height::CONTROL)
-                                .px(space::SM)
-                                .rounded(radius::CONTROL)
-                                .text_color(palette.status_danger)
-                                .flex()
-                                .items_center()
-                                .gap(space::SM)
-                                .hover(|s| s.bg(palette.status_danger_subtle))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.delete_sessions_optimistic(vec![sid_delete.clone()], cx);
-                                }))
                                 .child(
-                                    Icon::new(IconName::Trash)
-                                        .size(px(16.0))
-                                        .text_color(palette.status_danger),
+                                    apply_scale(div(), scale::UI)
+                                        .id("all-sessions-ctx-manage")
+                                        .test_support()
+                                        .a11y_menuitem("all-sessions-ctx-manage", "管理")
+                                        .relative()
+                                        .h(height::CONTROL)
+                                        .px(space::SM)
+                                        .rounded(radius::CONTROL)
+                                        .text_color(palette.text_primary)
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::SM)
+                                        .hover(|s| s.bg(palette.bg_item_active))
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.context_menu = None;
+                                            this.batch_mode = true;
+                                            this.selected_ids.clear();
+                                            this.selected_ids.insert(sid_manage.clone());
+                                            cx.notify();
+                                        }))
+                                        .child(
+                                            Icon::new(IconName::ListChecks)
+                                                .size(px(16.0))
+                                                .text_color(palette.text_secondary),
+                                        )
+                                        .child(cjk_inline_label("管理")),
                                 )
-                                .child(cjk_inline_label("删除")),
-                        ),
+                                .child(
+                                    div()
+                                        .relative()
+                                        .px(space::XS)
+                                        .py(space::MICRO)
+                                        .child(div().w_full().h(px(1.0)).bg(palette.border_subtle)),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::UI_MEDIUM)
+                                        .id("all-sessions-ctx-delete")
+                                        .test_support()
+                                        .a11y_menuitem("all-sessions-ctx-delete", "删除")
+                                        .relative()
+                                        .h(height::CONTROL)
+                                        .px(space::SM)
+                                        .rounded(radius::CONTROL)
+                                        .text_color(palette.status_danger)
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::SM)
+                                        .hover(|s| s.bg(palette.status_danger_subtle))
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.delete_sessions_optimistic(
+                                                vec![sid_delete.clone()],
+                                                cx,
+                                            );
+                                        }))
+                                        .child(
+                                            Icon::new(IconName::Trash)
+                                                .size(px(16.0))
+                                                .text_color(palette.status_danger),
+                                        )
+                                        .child(cjk_inline_label("删除")),
+                                ),
+                                palette.craft_stack_shadows(),
+                                -6.0,
+                            )),
                     ),
             )
             .into_any_element()
@@ -892,7 +905,11 @@ impl AllSessionsView {
         let wrapped_modal = div()
             .tab_stop(false)
             .focus_trap("all-sessions-rename-trap", &self.rename_trap_focus)
-            .child(modal_card);
+            .child(motion::animate_modal_enter(
+                "all-sessions-rename-anim",
+                modal_card,
+                palette.craft_stack_shadows(),
+            ));
 
         render_frosted_surface(
             "all-sessions-rename-scrim",

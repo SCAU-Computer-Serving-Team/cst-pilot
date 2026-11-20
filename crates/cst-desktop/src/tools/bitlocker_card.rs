@@ -12,7 +12,9 @@ use gpui_kit::{
 use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{
+    DesktopPalette, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
+};
 use crate::tools::{render_special_details_section, render_tool_notice_line};
 use gpui::relative;
 
@@ -398,6 +400,10 @@ pub fn render_bitlocker_card<V: 'static>(
                                 "bitlocker-copy-key-id-{}",
                                 props.call_id
                             ));
+                            let copied = is_copied_fn(copy_key_btn_id.as_ref());
+                            let mark_cb = on_mark_copied.clone();
+                            let cid_click = copy_key_btn_id.clone();
+                            let motion_id = copy_key_btn_id.clone();
                             div()
                                 .id(copy_key_btn_id.clone())
                                 .test_support()
@@ -410,16 +416,24 @@ pub fn render_bitlocker_card<V: 'static>(
                                 .items_center()
                                 .justify_center()
                                 .hover(|s| s.bg(palette.bg_item_hover))
-                                .on_click(move |_, _, cx| {
+                                .on_click(cx.listener(move |_, _, w, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(
                                         key_id_copy.clone(),
                                     ));
-                                })
-                                .child(
-                                    Icon::new(IconName::Copy)
-                                        .size(px(14.0))
-                                        .text_color(palette.text_secondary),
-                                )
+                                    mark_cb(cid_click.clone(), w, cx);
+                                }))
+                                .child(motion::animated_copy_icon(
+                                    motion_id,
+                                    copied,
+                                    px(14.0),
+                                    if copied {
+                                        palette.status_success
+                                    } else {
+                                        palette.text_secondary
+                                    },
+                                    window,
+                                    cx,
+                                ))
                         }),
                 );
             }
@@ -756,6 +770,7 @@ pub fn render_bitlocker_card<V: 'static>(
         is_copied_fn,
         on_toggle_details,
         on_mark_copied,
+        window,
         cx,
     ) {
         card = card.child(details_section);

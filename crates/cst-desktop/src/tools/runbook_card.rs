@@ -10,7 +10,9 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{
+    DesktopPalette, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
+};
 use crate::tools::{render_special_details_section, render_tool_notice_line};
 
 pub struct RunbookCardProps<'a> {
@@ -71,6 +73,7 @@ pub fn render_runbook_card<V: 'static>(
     on_toggle_details: crate::tools::ToggleDetailsFn,
     on_open_runbook: OpenRunbookFn,
     on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
+    window: &mut Window,
     cx: &mut Context<V>,
 ) -> gpui_kit::AnyElement {
     let tier_label = risk_tier_plain_label(props.level);
@@ -218,93 +221,92 @@ pub fn render_runbook_card<V: 'static>(
             let meta_str = format_shell_meta(&item.shell, item.admin);
 
             let copy_label = SharedString::from(format!("复制命令：{desc_str}"));
-            cmd_col =
-                cmd_col.child(
-                    div()
-                        .w_full()
-                        .flex()
-                        .flex_col()
-                        .gap(space::XS)
-                        .child(
-                            div()
-                                .h(height::INLINE)
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .gap(space::MD)
-                                .child(
-                                    apply_scale(div(), scale::UI_MEDIUM)
-                                        .flex_1()
-                                        .min_w_0()
-                                        .truncate()
-                                        .text_color(palette.text_primary)
-                                        .child(SharedString::from(desc_str)),
-                                )
-                                .child(
-                                    apply_scale(div(), scale::CAPTION)
-                                        .flex_shrink_0()
-                                        .text_color(palette.text_secondary)
-                                        .child(SharedString::from(meta_str)),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .w_full()
-                                .h(height::FIELD)
-                                .pl(space::MD)
-                                .pr(space::XS)
-                                .rounded(radius::CONTROL)
-                                .border_1()
-                                .border_color(palette.border_subtle)
-                                .bg(palette.bg_surface)
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .gap(space::SM)
-                                .child(
-                                    apply_scale(div(), scale::CAPTION)
-                                        .flex_1()
-                                        .min_w_0()
-                                        .truncate()
-                                        .font_family(mono_family.clone())
-                                        .text_color(palette.text_primary)
-                                        .child(SharedString::from(item.command.clone())),
-                                )
-                                .child(
-                                    div()
-                                        .id(copy_id.clone())
-                                        .test_support()
-                                        .a11y_button(copy_id, copy_label)
-                                        .w(height::CONTROL)
-                                        .h(height::CONTROL)
-                                        .flex_shrink_0()
-                                        .rounded(radius::CONTROL)
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .hover(|s| s.bg(palette.bg_item_hover))
-                                        .on_click(cx.listener(move |_, _, w, cx| {
-                                            cx.write_to_clipboard(ClipboardItem::new_string(
-                                                cmd_str.clone(),
-                                            ));
-                                            mark_cb(cid_click.clone(), w, cx);
-                                        }))
-                                        .child(
-                                            Icon::new(if copied {
-                                                IconName::Check
-                                            } else {
-                                                IconName::Copy
-                                            })
-                                            .size(px(16.0))
-                                            .text_color(if copied {
-                                                palette.status_success
-                                            } else {
-                                                palette.text_secondary
-                                            }),
-                                        ),
-                                ),
-                        ),
-                );
+            cmd_col = cmd_col.child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(space::XS)
+                    .child(
+                        div()
+                            .h(height::INLINE)
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(space::MD)
+                            .child(
+                                apply_scale(div(), scale::UI_MEDIUM)
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_color(palette.text_primary)
+                                    .child(SharedString::from(desc_str)),
+                            )
+                            .child(
+                                apply_scale(div(), scale::CAPTION)
+                                    .flex_shrink_0()
+                                    .text_color(palette.text_secondary)
+                                    .child(SharedString::from(meta_str)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .h(height::FIELD)
+                            .pl(space::MD)
+                            .pr(space::XS)
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(palette.border_subtle)
+                            .bg(palette.bg_surface)
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(space::SM)
+                            .child(
+                                apply_scale(div(), scale::CAPTION)
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .font_family(mono_family.clone())
+                                    .text_color(palette.text_primary)
+                                    .child(SharedString::from(item.command.clone())),
+                            )
+                            .child({
+                                let cid_motion = cid_click.clone();
+                                div()
+                                    .id(copy_id.clone())
+                                    .test_support()
+                                    .a11y_button(copy_id, copy_label)
+                                    .w(height::CONTROL)
+                                    .h(height::CONTROL)
+                                    .flex_shrink_0()
+                                    .rounded(radius::CONTROL)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .hover(|s| s.bg(palette.bg_item_hover))
+                                    .on_click(cx.listener(move |_, _, w, cx| {
+                                        cx.write_to_clipboard(ClipboardItem::new_string(
+                                            cmd_str.clone(),
+                                        ));
+                                        mark_cb(cid_click.clone(), w, cx);
+                                    }))
+                                    .child(motion::animated_copy_icon(
+                                        cid_motion,
+                                        copied,
+                                        px(16.0),
+                                        if copied {
+                                            palette.status_success
+                                        } else {
+                                            palette.text_secondary
+                                        },
+                                        window,
+                                        cx,
+                                    ))
+                            }),
+                    ),
+            );
         }
         card = card.child(cmd_col);
     }
@@ -406,6 +408,7 @@ pub fn render_runbook_card<V: 'static>(
         is_copied_fn,
         on_toggle_details,
         on_mark_copied,
+        window,
         cx,
     ) {
         card = card.child(details_section);

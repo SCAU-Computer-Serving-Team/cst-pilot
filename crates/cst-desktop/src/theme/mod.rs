@@ -67,9 +67,34 @@ pub mod layout {
 pub mod motion {
     use std::time::Duration;
 
+    use gpui::{Animation, AnimationExt as _, Transformation};
+    use gpui_kit::assets::IconName;
+    use gpui_kit::base::motion::{Transition, TransitionId, transition};
+    use gpui_kit::component::Icon;
+    use gpui_kit::{
+        App, BoxShadow, Hsla, IntoElement, Pixels, SharedString, Styled, Window, percentage, px,
+        size,
+    };
+
+    pub const INSTANT: Duration = Duration::ZERO;
+    pub const PRESS: Duration = Duration::from_millis(120);
+    pub const FAST: Duration = Duration::from_millis(150);
     pub const POPOVER_OPEN: Duration = Duration::from_millis(220);
+    pub const WELCOME_ITEM: Duration = Duration::from_millis(220);
     pub const MODAL_OPEN: Duration = Duration::from_millis(240);
+    pub const NORMAL: Duration = Duration::from_millis(240);
     pub const SURFACE_CLOSE: Duration = Duration::from_millis(150);
+    pub const FLIP_ENTER: Duration = Duration::from_millis(180);
+    pub const FLIP_MOVE: Duration = Duration::from_millis(250);
+    pub const RESIZE: Duration = Duration::from_millis(300);
+    pub const WELCOME_MAX_TOTAL: Duration = Duration::from_millis(300);
+    pub const WELCOME_STAGGER_STEP: Duration = Duration::from_millis(40);
+    pub const SLOW: Duration = Duration::from_millis(340);
+    pub const ICON_SWAP_RESTORE: Duration = Duration::from_millis(1600);
+    pub const RUNNING_LIGHT_CYCLE: Duration = Duration::from_millis(2000);
+    pub const BANNER_AUTO_DISMISS: Duration = Duration::from_millis(2600);
+    pub const TOOLTIP_INITIAL_DELAY: Duration = Duration::from_millis(400);
+    pub const TOOLTIP_COOLDOWN: Duration = Duration::from_millis(300);
 
     pub fn cubic_bezier(
         x1: f32,
@@ -129,6 +154,189 @@ pub mod motion {
 
     pub fn ease_spring() -> impl Fn(f32) -> f32 + Copy + 'static {
         cubic_bezier(0.22, 1.12, 0.36, 1.0)
+    }
+
+    /// Scales box shadow alpha cubically (`d^3`) during fade-in so GPUI drop shadows never bleed through translucent panels.
+    pub fn scale_shadows(mut shadows: Vec<BoxShadow>, factor: f32) -> Vec<BoxShadow> {
+        let f = factor.clamp(0.0, 1.0);
+        for s in &mut shadows {
+            s.color.a *= f;
+        }
+        shadows
+    }
+
+    /// Animates a popover panel (`220ms` `ease_out`, fade + subtle `6px` lift, shadow alpha ramp `d^3`, `0ms` in `reduce_motion`).
+    pub fn animate_popover_enter<E: IntoElement + Styled + 'static>(
+        id: impl Into<gpui::ElementId>,
+        el: E,
+        shadows: Vec<BoxShadow>,
+        slide_y_px: f32,
+    ) -> impl IntoElement {
+        el.with_animation(
+            id,
+            Animation::new(POPOVER_OPEN).with_easing(ease_out()),
+            move |el, d| {
+                let raw = d.clamp(0.0, 1.0);
+                let fade = 0.01 + 0.99 * raw;
+                el.opacity(fade)
+                    .mt(px(slide_y_px * (1.0 - raw)))
+                    .shadow(scale_shadows(shadows.clone(), raw * raw * raw))
+            },
+        )
+    }
+
+    /// Animates a modal dialog card (`240ms` `ease_out`, fade + `6px` lift, shadow alpha ramp `d^3`, `0ms` in `reduce_motion`).
+    pub fn animate_modal_enter<E: IntoElement + Styled + 'static>(
+        id: impl Into<gpui::ElementId>,
+        el: E,
+        shadows: Vec<BoxShadow>,
+    ) -> impl IntoElement {
+        el.with_animation(
+            id,
+            Animation::new(MODAL_OPEN).with_easing(ease_out()),
+            move |el, d| {
+                let raw = d.clamp(0.0, 1.0);
+                let fade = 0.01 + 0.99 * raw;
+                let animated = el.opacity(fade).mt(px(6.0 * (1.0 - raw)));
+                if shadows.is_empty() {
+                    animated
+                } else {
+                    animated.shadow(scale_shadows(shadows.clone(), raw * raw * raw))
+                }
+            },
+        )
+    }
+
+    /// Animates a top banner / toast (`240ms` `ease_out`, `-8px -> 0` top slide + fade + shadow alpha ramp `d^3`, `0ms` in `reduce_motion`).
+    pub fn animate_toast_enter<E: IntoElement + Styled + 'static>(
+        id: impl Into<gpui::ElementId>,
+        el: E,
+        shadows: Vec<BoxShadow>,
+    ) -> impl IntoElement {
+        el.with_animation(
+            id,
+            Animation::new(NORMAL).with_easing(ease_out()),
+            move |el, d| {
+                let raw = d.clamp(0.0, 1.0);
+                let fade = 0.01 + 0.99 * raw;
+                let animated = el.opacity(fade).mt(px(-8.0 * (1.0 - raw)));
+                if shadows.is_empty() {
+                    animated
+                } else {
+                    animated.shadow(scale_shadows(shadows.clone(), raw * raw * raw))
+                }
+            },
+        )
+    }
+
+    /// Returns an interruptible `Icon` rotated cleanly (`base_down`: `0->180deg` dropdown; `!base_down`: `0->90deg` disclosure).
+    pub fn animated_chevron(
+        id: impl Into<SharedString>,
+        expanded: bool,
+        base_down: bool,
+        size_px: Pixels,
+        color: Hsla,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Icon {
+        let tid: TransitionId = SharedString::from(format!("chev-{}", id.into())).into();
+        let target = if expanded {
+            if base_down { 0.5 } else { 0.25 }
+        } else {
+            0.0
+        };
+        let turns = transition(
+            tid,
+            target,
+            Transition::new(NORMAL).ease(ease_out()),
+            window,
+            cx,
+        );
+        Icon::new(if base_down {
+            IconName::ChevronDown
+        } else {
+            IconName::ChevronRight
+        })
+        .size(size_px)
+        .text_color(color)
+        .rotate(percentage(turns))
+    }
+
+    /// Returns a spring-scaled copy/check icon (`240ms ease_spring`, `0.65 -> 1.0`, zero blur).
+    pub fn animated_copy_icon(
+        id: impl Into<SharedString>,
+        copied: bool,
+        size_px: Pixels,
+        color: Hsla,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Icon {
+        let tid: TransitionId = SharedString::from(format!("copy-{}", id.into())).into();
+        let target = if copied { 1.0 } else { 0.0 };
+        let prog = transition(
+            tid,
+            target,
+            Transition::new(NORMAL).ease(ease_spring()),
+            window,
+            cx,
+        );
+        let s = 0.65 + 0.35 * if copied { prog } else { 1.0 - prog };
+        Icon::new(if copied {
+            IconName::Check
+        } else {
+            IconName::Copy
+        })
+        .size(size_px)
+        .text_color(color)
+        .transform(Transformation::scale(size(s, s)))
+    }
+
+    /// Returns interruptible spring progress (`0.0 -> 1.0`) for checkbox mark (`340ms` check / `150ms` uncheck).
+    pub fn animated_checkbox_mark(
+        id: impl Into<SharedString>,
+        checked: bool,
+        size_px: Pixels,
+        color: Hsla,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Icon> {
+        let tid: TransitionId = SharedString::from(format!("chk-{}", id.into())).into();
+        let dur = if checked { SLOW } else { SURFACE_CLOSE };
+        let p = transition(
+            tid,
+            if checked { 1.0 } else { 0.0 },
+            Transition::new(dur).ease(ease_spring()),
+            window,
+            cx,
+        );
+        (p > 0.02).then(|| {
+            let s = (0.55 + 0.45 * p).max(0.1);
+            Icon::new(IconName::Check)
+                .size(size_px)
+                .text_color(color.opacity(p.clamp(0.0, 1.0)))
+                .transform(Transformation::scale(size(s, s)))
+        })
+    }
+
+    /// Computes `(opacity, translate_y_px)` for one-shot welcome stagger (`40ms` step, `220ms` item, `<=300ms` total).
+    pub fn welcome_stagger_progress(
+        index: usize,
+        elapsed: Duration,
+        reduce_motion: bool,
+    ) -> (f32, f32) {
+        if reduce_motion {
+            return (1.0, 0.0);
+        }
+        let max_delay = WELCOME_MAX_TOTAL.saturating_sub(WELCOME_ITEM);
+        let raw_delay = WELCOME_STAGGER_STEP.saturating_mul(index as u32);
+        let delay = raw_delay.min(max_delay);
+        if elapsed <= delay {
+            return (0.01, 10.0);
+        }
+        let item_elapsed = elapsed.saturating_sub(delay);
+        let raw_t = (item_elapsed.as_secs_f32() / WELCOME_ITEM.as_secs_f32()).clamp(0.0, 1.0);
+        let eased = ease_out()(raw_t).clamp(0.0, 1.0);
+        (0.01 + 0.99 * eased, 10.0 * (1.0 - eased))
     }
 }
 

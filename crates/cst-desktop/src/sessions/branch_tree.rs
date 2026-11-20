@@ -16,8 +16,8 @@ use serde_json::Value;
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
-    render_subpage_header_xwjof, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion,
+    radius, render_subpage_header_xwjof, scale, space,
 };
 use crate::workbench::turn_segments::extract_message_text;
 
@@ -873,7 +873,11 @@ impl BranchTreeView {
             div()
                 .tab_stop(false)
                 .focus_trap("branch-summary-focus-trap", &self.modal_trap_focus)
-                .child(card),
+                .child(motion::animate_modal_enter(
+                    "branch-summary-modal-anim",
+                    card,
+                    palette.craft_stack_shadows(),
+                )),
         )
         .into_any_element()
     }
@@ -1172,15 +1176,15 @@ impl Render for BranchTreeView {
                                                 cx.notify();
                                             }
                                         }))
-                                        .child(
-                                            Icon::new(if is_collapsed {
-                                                IconName::ChevronRight
-                                            } else {
-                                                IconName::ChevronDown
-                                            })
-                                            .size(px(12.0))
-                                            .text_color(palette.text_muted),
-                                        )
+                                        .child(motion::animated_chevron(
+                                            format!("tree-collapse-{}", node.id),
+                                            !is_collapsed,
+                                            false,
+                                            px(12.0),
+                                            palette.text_muted,
+                                            window,
+                                            cx,
+                                        ))
                                 },
                             ))
                             .child(

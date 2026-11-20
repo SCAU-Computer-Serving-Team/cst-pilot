@@ -1,7 +1,9 @@
+use std::cell::Cell;
 use std::rc::Rc;
 
 use cst_client::WorkspaceView;
 use gpui_kit::assets::IconName;
+use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::component::Icon;
 use gpui_kit::{
     App, FocusHandle, FontWeight, Hsla, InteractiveElement, IntoElement, ParentElement,
@@ -11,7 +13,7 @@ use gpui_kit::{
 
 use crate::accessibility::A11yElementExt as _;
 use crate::theme::{
-    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
 
 pub type TopbarActionFn = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -37,6 +39,7 @@ pub struct TopbarCallbacks {
 #[allow(clippy::too_many_arguments)]
 pub fn render_topbar(
     sidebar_collapsed: bool,
+    recent_drawer_open: bool,
     active_view: WorkspaceView,
     is_maximized: bool,
     account_initial: SharedString,
@@ -45,6 +48,8 @@ pub fn render_topbar(
     account_btn_focus: &FocusHandle,
     palette: &DesktopPalette,
     cb: TopbarCallbacks,
+    window: &mut Window,
+    cx: &mut App,
 ) -> impl IntoElement {
     let bar_id = if sidebar_collapsed {
         "topbar-mklbe"
@@ -112,11 +117,15 @@ pub fn render_topbar(
                             .text_color(palette.text_secondary),
                     )
                     .child(cjk_inline_label("最近会话"))
-                    .child(
-                        Icon::new(IconName::ChevronDown)
-                            .size(px(12.0))
-                            .text_color(palette.text_secondary),
-                    ),
+                    .child(motion::animated_chevron(
+                        "topbar-recent-drawer",
+                        recent_drawer_open,
+                        true,
+                        px(12.0),
+                        palette.text_secondary,
+                        window,
+                        cx,
+                    )),
             )
             .child(topbar_icon_btn(
                 "topbar-new-session-btn",
@@ -143,22 +152,76 @@ pub fn render_topbar(
     let gui_active = active_view == WorkspaceView::Gui;
     let tui_active = active_view == WorkspaceView::Tui;
 
-    let view_segmented = div()
+    #[derive(Clone, Default)]
+    struct SegBounds {
+        rects: Rc<[Cell<(f32, f32)>; 2]>,
+    }
+    let seg_bounds = window.use_keyed_state("topbar-seg-bounds", cx, |_, _| SegBounds::default());
+    let seg_rects = seg_bounds.read(cx).rects.clone();
+    let gui_rect = seg_rects[0].get();
+    let tui_rect = seg_rects[1].get();
+    let measured = gui_rect.1 > 0.0 && tui_rect.1 > 0.0;
+    let target_rect = if tui_active { tui_rect } else { gui_rect };
+    let seg_rects_capture = seg_rects;
+
+    let mut view_segmented = div()
+        .on_children_prepainted(move |bounds, _, _| {
+            let start_idx = if bounds.len() >= 3 { 1 } else { 0 };
+            if let (Some(b0), Some(b1)) = (bounds.get(start_idx), bounds.get(start_idx + 1)) {
+                let x0 = f32::from(space::MICRO);
+                let x1 = x0 + f32::from(b1.origin.x - b0.origin.x);
+                seg_rects_capture[0].set((x0, f32::from(b0.size.width)));
+                seg_rects_capture[1].set((x1, f32::from(b1.size.width)));
+            }
+        })
         .id("topbar-view-segmented")
         .test_support()
         .a11y_region("topbar-view-segmented", "工作区视图切换")
+        .relative()
         .h(height::COMPACT)
         .p(space::MICRO)
         .rounded(px(6.0))
         .bg(palette.bg_surface)
         .flex()
         .items_center()
-        .gap(space::MICRO)
+        .gap(space::MICRO);
+
+    if measured {
+        let pill_x = transition(
+            "topbar-seg-pill-x",
+            target_rect.0,
+            Transition::new(motion::NORMAL).ease(motion::ease_in_out()),
+            window,
+            cx,
+        );
+        let pill_w = transition(
+            "topbar-seg-pill-w",
+            target_rect.1,
+            Transition::new(motion::NORMAL).ease(motion::ease_in_out()),
+            window,
+            cx,
+        );
+        view_segmented = view_segmented.child(
+            div()
+                .absolute()
+                .top(space::MICRO)
+                .bottom(space::MICRO)
+                .left(px(pill_x))
+                .w(px(pill_w))
+                .rounded(radius::CONTROL)
+                .bg(palette.bg_elevated)
+                .border_1()
+                .border_color(palette.border_subtle),
+        );
+    }
+
+    view_segmented = view_segmented
         .child(view_segment_item(
             "topbar-view-gui-btn",
             IconName::Monitor,
             "图形",
             gui_active,
+            !measured && gui_active,
             palette,
             move |w, cx| (on_view_gui)(WorkspaceView::Gui, w, cx),
         ))
@@ -167,6 +230,7 @@ pub fn render_topbar(
             IconName::SquareTerminal,
             "终端",
             tui_active,
+            !measured && tui_active,
             palette,
             move |w, cx| (on_view_tui)(WorkspaceView::Tui, w, cx),
         ));
@@ -370,6 +434,7 @@ fn view_segment_item(
     icon: IconName,
     label: &'static str,
     active: bool,
+    paint_static_pill: bool,
     palette: &DesktopPalette,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
@@ -377,6 +442,7 @@ fn view_segment_item(
         .id(id)
         .test_support()
         .a11y_tab(id, label, active)
+        .relative()
         .h(height::INLINE)
         .px(space::SM)
         .rounded(radius::CONTROL)
@@ -387,10 +453,15 @@ fn view_segment_item(
         .on_click(move |_, w, cx| on_click(w, cx));
 
     let styled = if active {
-        base.bg(palette.bg_elevated)
-            .border_1()
-            .border_color(palette.border_subtle)
-            .text_color(palette.text_primary)
+        if paint_static_pill {
+            base.bg(palette.bg_elevated)
+                .border_1()
+                .border_color(palette.border_subtle)
+                .text_color(palette.text_primary)
+        } else {
+            base.bg(gpui_kit::transparent_black())
+                .text_color(palette.text_primary)
+        }
     } else {
         base.bg(gpui_kit::transparent_black())
             .text_color(palette.text_secondary)

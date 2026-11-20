@@ -22,8 +22,8 @@ use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
-    scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion,
+    radius, scale, space,
 };
 use crate::tools::bitlocker_card::{
     PendingBitLockerPrompt, SecretInput, SecretInputEvent, find_pending_bitlocker_request,
@@ -521,6 +521,7 @@ impl MessageListView {
         parent_entry_id: Option<String>,
         palette: &DesktopPalette,
         entity: &Entity<Self>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
         let text = extract_message_text(&user_entry.raw);
@@ -603,6 +604,7 @@ impl MessageListView {
         let ent_retry = entity.clone();
 
         // Bottom-right `24×24px` icon-only action bar (`SHcR1` / `b0aK5`)
+        let copy_icon_id = SharedString::from(format!("user-copy-btn-{turn_key}"));
         let action_bar = div()
             .id(SharedString::from(format!("user-actions-{turn_key}")))
             .test_support()
@@ -611,19 +613,21 @@ impl MessageListView {
             .items_center()
             .justify_end()
             .gap(space::XS)
-            .child(icon_action_24(
-                format!("user-copy-btn-{turn_key}"),
+            .child(icon_action_24_element(
+                copy_icon_id.clone(),
                 "复制用户消息",
-                if is_copied {
-                    IconName::Check
-                } else {
-                    IconName::Copy
-                },
-                if is_copied {
-                    palette.status_success
-                } else {
-                    palette.text_secondary
-                },
+                motion::animated_copy_icon(
+                    copy_icon_id,
+                    is_copied,
+                    px(14.0),
+                    if is_copied {
+                        palette.status_success
+                    } else {
+                        palette.text_secondary
+                    },
+                    window,
+                    cx,
+                ),
                 false,
                 palette,
                 move |_, cx| {
@@ -891,6 +895,7 @@ impl MessageListView {
         mono_family: SharedString,
         palette: &DesktopPalette,
         entity: &Entity<Self>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
         let input = to_tool_call_input(call);
@@ -966,6 +971,7 @@ impl MessageListView {
                         .mark_copied(cid, |v| &mut v.copy_tracker, cx);
                 });
             },
+            window,
             cx,
         )
     }
@@ -1141,6 +1147,7 @@ impl MessageListView {
                                 .mark_copied(cid, |v| &mut v.copy_tracker, cx);
                         });
                     },
+                    window,
                     cx,
                 ))
                 .into_any_element();
@@ -1162,6 +1169,7 @@ impl MessageListView {
                 parent_entry_id.clone(),
                 palette,
                 entity,
+                window,
                 cx,
             ));
         }
@@ -1277,15 +1285,15 @@ impl MessageListView {
                     ));
 
                     if has_expandable_parts {
-                        header = header.child(
-                            Icon::new(if seg_expanded {
-                                IconName::ChevronDown
-                            } else {
-                                IconName::ChevronRight
-                            })
-                            .size(px(16.0))
-                            .text_color(palette.text_secondary),
-                        );
+                        header = header.child(motion::animated_chevron(
+                            format!("process-hdr-{segment_id}"),
+                            seg_expanded,
+                            false,
+                            px(16.0),
+                            palette.text_secondary,
+                            window,
+                            cx,
+                        ));
                     }
 
                     let mut seg_box = div()
@@ -1309,6 +1317,7 @@ impl MessageListView {
                                 mono_family.clone(),
                                 palette,
                                 entity,
+                                window,
                                 cx,
                             ));
                         }
@@ -1394,6 +1403,7 @@ impl MessageListView {
                                             mono_family.clone(),
                                             palette,
                                             entity,
+                                            window,
                                             cx,
                                         ));
                                 }
@@ -1415,8 +1425,12 @@ impl MessageListView {
             let md_entity = self
                 .markdown_store
                 .sync_entry(&stream_key, &split.final_text, cx);
-            assistant_stack =
-                assistant_stack.child(render_assistant_markdown(&md_entity, is_live_turn, palette));
+            assistant_stack = assistant_stack.child(render_assistant_markdown(
+                &md_entity,
+                is_live_turn,
+                reduce_motion,
+                palette,
+            ));
         }
 
         // Standard assistant error prose (`{服务名} {故障现象}，{处理指引}。` + single collapsed `详情` block)
@@ -1461,15 +1475,15 @@ impl MessageListView {
                             });
                         })
                         .child(cjk_inline_label("详情"))
-                        .child(
-                            Icon::new(if det_open {
-                                IconName::ChevronDown
-                            } else {
-                                IconName::ChevronRight
-                            })
-                            .size(px(14.0))
-                            .text_color(palette.text_secondary),
-                        ),
+                        .child(motion::animated_chevron(
+                            format!("assistant-err-det-{turn_key}"),
+                            det_open,
+                            false,
+                            px(14.0),
+                            palette.text_secondary,
+                            window,
+                            cx,
+                        )),
                 );
                 if det_open {
                     let blk_id = SharedString::from(format!("assistant-err-raw-{turn_key}"));
@@ -1487,6 +1501,7 @@ impl MessageListView {
                                     .mark_copied(cid, |v| &mut v.copy_tracker, cx);
                             });
                         },
+                        window,
                         cx,
                     ));
                 }
@@ -1553,24 +1568,27 @@ impl MessageListView {
                 })
                 .flatten();
 
+            let copy_icon_id = SharedString::from(format!("assistant-copy-btn-{turn_key}"));
             let left_btns = div()
                 .flex()
                 .items_center()
                 .gap(space::XS)
                 .opacity(if is_live_turn { 0.35 } else { 1.0 })
-                .child(icon_action_24(
-                    format!("assistant-copy-btn-{turn_key}"),
+                .child(icon_action_24_element(
+                    copy_icon_id.clone(),
                     "复制回复内容",
-                    if is_copied {
-                        IconName::Check
-                    } else {
-                        IconName::Copy
-                    },
-                    if is_copied {
-                        palette.status_success
-                    } else {
-                        palette.text_secondary
-                    },
+                    motion::animated_copy_icon(
+                        copy_icon_id,
+                        is_copied,
+                        px(14.0),
+                        if is_copied {
+                            palette.status_success
+                        } else {
+                            palette.text_secondary
+                        },
+                        window,
+                        cx,
+                    ),
                     is_live_turn,
                     palette,
                     move |_, cx| {
@@ -1670,6 +1688,7 @@ impl MessageListView {
         mono_family: SharedString,
         palette: &DesktopPalette,
         entity: &Entity<Self>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
         match &tp.part {
@@ -1701,15 +1720,15 @@ impl MessageListView {
                         });
                     })
                     .child(cjk_inline_label("已思考"))
-                    .child(
-                        Icon::new(if open {
-                            IconName::ChevronDown
-                        } else {
-                            IconName::ChevronRight
-                        })
-                        .size(px(14.0))
-                        .text_color(palette.text_secondary),
-                    );
+                    .child(motion::animated_chevron(
+                        format!("thinking-hdr-{think_key}"),
+                        open,
+                        false,
+                        px(14.0),
+                        palette.text_secondary,
+                        window,
+                        cx,
+                    ));
 
                 let mut col = div().w_full().flex().flex_col().gap(space::XS).child(hdr);
                 if open {
@@ -1733,6 +1752,7 @@ impl MessageListView {
                                     .mark_copied(cid, |v| &mut v.copy_tracker, cx);
                             });
                         },
+                        window,
                         cx,
                     ));
                 }
@@ -1753,6 +1773,7 @@ impl MessageListView {
                         mono_family.clone(),
                         palette,
                         entity,
+                        window,
                         cx,
                     ));
                 }
@@ -1994,11 +2015,10 @@ fn format_timestamp_hhmm(ts_ms: u64) -> Option<String> {
     Some(dt.with_timezone(&Local).format("%H:%M").to_string())
 }
 
-fn icon_action_24(
+fn icon_action_24_element(
     id: impl Into<SharedString>,
     label: &'static str,
-    icon: IconName,
-    icon_color: gpui_kit::Hsla,
+    icon: Icon,
     disabled: bool,
     palette: &DesktopPalette,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
@@ -2019,7 +2039,26 @@ fn icon_action_24(
             .hover(|s| s.bg(palette.bg_item_hover))
             .on_click(move |_, w, cx| on_click(w, cx));
     }
-    btn.child(Icon::new(icon).size(px(14.0)).text_color(icon_color))
+    btn.child(icon)
+}
+
+fn icon_action_24(
+    id: impl Into<SharedString>,
+    label: &'static str,
+    icon: IconName,
+    icon_color: gpui_kit::Hsla,
+    disabled: bool,
+    palette: &DesktopPalette,
+    on_click: impl Fn(&mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    icon_action_24_element(
+        id,
+        label,
+        Icon::new(icon).size(px(14.0)).text_color(icon_color),
+        disabled,
+        palette,
+        on_click,
+    )
 }
 
 fn to_tool_call_input(call: &ToolCallPart) -> ToolCallInput {

@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use cst_client::SessionSummary;
 use gpui_kit::assets::IconName;
+use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::{
@@ -13,7 +14,7 @@ use gpui_kit::{
 
 use crate::accessibility::A11yElementExt as _;
 use crate::theme::{
-    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
 
 pub const MAX_RECENT_SIDEBAR_SESSIONS: usize = 20;
@@ -192,39 +193,64 @@ pub fn render_sidebar_l081m1(
                     }
                 });
 
+            let slot_w = transition(
+                SharedString::from(format!("sb-shift-{sid}")),
+                if batch_mode { 24.0 } else { 0.0 },
+                Transition::new(motion::NORMAL).ease(motion::ease_out()),
+                window,
+                cx,
+            );
+            let slot_ratio = (slot_w / 24.0).clamp(0.0, 1.0);
+            let chk_mark = (batch_mode || slot_w > 0.5).then(|| {
+                motion::animated_checkbox_mark(
+                    format!("sb-chk-{sid}"),
+                    batch_mode && is_checked,
+                    px(11.0),
+                    palette.text_on_accent,
+                    window,
+                    cx,
+                )
+            });
+
             if batch_mode {
-                row = row
-                    .a11y_checkbox(row_a11y_id, title_text.clone(), is_checked)
-                    .child(
-                        div()
-                            .w(px(16.0))
-                            .h(px(16.0))
-                            .rounded(radius::CONTROL)
-                            .border_1()
-                            .border_color(if is_checked {
-                                palette.accent_solid
-                            } else {
-                                palette.border_strong
-                            })
-                            .bg(if is_checked {
-                                palette.accent_solid
-                            } else {
-                                palette.bg_elevated
-                            })
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .flex_shrink_0()
-                            .when_some(is_checked.then_some(()), |d, ()| {
-                                d.child(
-                                    Icon::new(IconName::Check)
-                                        .size(px(11.0))
-                                        .text_color(palette.text_on_accent),
-                                )
-                            }),
-                    );
+                row = row.a11y_checkbox(row_a11y_id, title_text.clone(), is_checked);
             } else {
                 row = row.a11y_listitem(row_a11y_id, title_text.clone(), is_active);
+            }
+
+            if let Some(mark_opt) = chk_mark {
+                row = row.child(
+                    div()
+                        .w(px(slot_w))
+                        .h(px(16.0))
+                        .overflow_hidden()
+                        .flex()
+                        .items_center()
+                        .flex_shrink_0()
+                        .opacity(slot_ratio)
+                        .child(
+                            div()
+                                .w(px(16.0))
+                                .h(px(16.0))
+                                .rounded(radius::CONTROL)
+                                .border_1()
+                                .border_color(if is_checked {
+                                    palette.accent_solid
+                                } else {
+                                    palette.border_strong
+                                })
+                                .bg(if is_checked {
+                                    palette.accent_solid
+                                } else {
+                                    palette.bg_elevated
+                                })
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .flex_shrink_0()
+                                .children(mark_opt),
+                        ),
+                );
             }
 
             let menu_btn_id = SharedString::from(format!("sidebar-row-menu-btn-{sid}"));
