@@ -93,10 +93,9 @@ pub fn render_sys_overview_card(
         .border_1()
         .border_color(palette.border_subtle)
         .bg(palette.bg_special)
-        .shadow(palette.craft_stack_shadows())
         .flex()
         .flex_col()
-        .gap(space::MD)
+        .gap(space::LG)
         // 1. `28px` Header (`E8ziuK`): left `18px` Monitor + `16/24 @ 500` title; right `12px` status icon + `12/16` text
         .child(
             div()

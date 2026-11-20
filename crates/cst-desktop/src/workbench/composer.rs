@@ -8,10 +8,10 @@ use gpui::{
     ObjectFit, PathPromptOptions, StyledImage as _,
 };
 use gpui_kit::assets::IconName;
-use gpui_kit::component::Icon;
 use gpui_kit::component::input::{
     InlineToken as UiInlineToken, InputContent, InputEvent, InputState, Textarea, TextareaState,
 };
+use gpui_kit::component::{Icon, Sizable as _};
 use gpui_kit::{
     App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
@@ -1524,8 +1524,11 @@ impl Render for ComposerView {
         let textarea_element = Textarea::new(&self.textarea)
             .accessibility_id("composer-input")
             .aria_label("对话输入框")
+            .xsmall()
             .appearance(false)
             .bordered(false)
+            .text_size(scale::BODY.font_size)
+            .line_height(scale::BODY.line_height)
             .token(move |tok_ctx, _window, _cx| {
                 let tok = tok_ctx.token();
                 let label = tok.label().clone();
@@ -1694,7 +1697,7 @@ impl Render for ComposerView {
         );
 
         let ent_picker_btn = entity.clone();
-        let model_btn = apply_scale(div(), scale::CAPTION_MEDIUM)
+        let model_btn = apply_scale(div(), scale::CAPTION)
             .id("composer-model-picker-btn")
             .test_support()
             .a11y_toggle_button(
@@ -1732,12 +1735,12 @@ impl Render for ComposerView {
                     .max_w(px(148.0))
                     .truncate()
                     .text_color(palette.text_primary)
-                    .child(SharedString::from(cur_model_label.clone())),
+                    .child(cjk_inline_label(cur_model_label.clone())),
             )
             .child(
                 div()
                     .text_color(palette.text_secondary)
-                    .child(thinking_level_label(&cur_thinking)),
+                    .child(cjk_inline_label(thinking_level_label(&cur_thinking))),
             )
             .child(
                 Icon::new(IconName::ChevronDown)
@@ -1828,10 +1831,7 @@ impl Render for ComposerView {
             .child(attach_btn)
             .child(right_cluster);
 
-        let is_home_composer = matches!(self.draft_key, DraftKey::NewSession);
-        let card_border_color = if is_home_composer {
-            palette.border_hairline
-        } else if is_focused {
+        let card_border_color = if is_focused {
             palette.border_focus
         } else {
             palette.border_strong

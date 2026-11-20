@@ -66,7 +66,7 @@ pub fn render_topbar(
             .child(
                 apply_scale(div(), scale::BODY_SEMIBOLD)
                     .text_color(palette.text_primary)
-                    .child("CST Pilot"),
+                    .child(cjk_inline_label("CST Pilot")),
             )
             .child(
                 div()
@@ -89,13 +89,7 @@ pub fn render_topbar(
                             .text_color(palette.text_secondary),
                     ),
             )
-            .child(
-                div()
-                    .w(px(1.0))
-                    .h(px(14.0))
-                    .mx(space::MICRO)
-                    .bg(palette.border_strong),
-            )
+            .child(div().w(px(1.0)).h(px(14.0)).bg(palette.border_strong))
             .child(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("topbar-recent-drawer-btn")

@@ -258,11 +258,18 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
         .flex()
         .flex_col()
         .items_center()
-        .pt(px(6.0))
         .child(
-            Icon::new(status_icon)
-                .size(px(16.0))
-                .text_color(status_color),
+            div()
+                .w(px(16.0))
+                .h(px(19.0))
+                .pt(px(3.0))
+                .flex()
+                .justify_center()
+                .child(
+                    Icon::new(status_icon)
+                        .size(px(16.0))
+                        .text_color(status_color),
+                ),
         )
         .child(
             div()
@@ -278,7 +285,7 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
         .test_support()
         .a11y_toggle_button(hdr_a11y_id, summary_label.clone(), true)
         .w_full()
-        .h(height::COMPACT)
+        .h(px(22.0))
         .flex()
         .items_center()
         .justify_between()
@@ -335,7 +342,7 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
         })
         .max()
         .unwrap_or(6);
-    let label_col_px = ((max_label_chars as f32) * 13.5 + 12.0).clamp(72.0, 180.0);
+    let label_col_px = ((max_label_chars as f32) * 13.5 + 12.0).clamp(84.0, 180.0);
 
     let mut right_col = div()
         .flex_1()
@@ -624,9 +631,13 @@ fn render_aligned_field_row(
                 .w(px(label_col_px))
                 .flex_shrink_0()
                 .text_color(palette.text_secondary)
-                .child(SharedString::from(row.label.clone())),
+                .child(cjk_inline_label(row.label.clone())),
         )
-        .child(val_div.child(SharedString::from(row.value.clone())))
+        .child(
+            val_div
+                .pb(space::MICRO)
+                .child(SharedString::from(row.value.clone())),
+        )
 }
 
 /// Frameless transparent aligned ranking/listing rows (`VM8ko` — no outer card border or surface background).

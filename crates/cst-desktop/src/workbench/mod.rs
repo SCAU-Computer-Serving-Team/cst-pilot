@@ -12,8 +12,9 @@ use gpui_kit::base::FocusTrapElement;
 use gpui_kit::component::Icon;
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled, Subscription,
-    TestSupportExt, Window, div, px, rgba,
+    IntoElement, ParentElement, PathBuilder, Render, StatefulInteractiveElement, Styled,
+    Subscription, TestSupportExt, Window, canvas, div, linear_color_stop, linear_gradient, point,
+    px, rgba,
 };
 
 use crate::accessibility::A11yElementExt as _;
@@ -494,7 +495,6 @@ impl Render for WorkbenchView {
                         .w_full()
                         .px(space::GROUP)
                         .pb(space::MD)
-                        .pt(space::XS)
                         .flex()
                         .justify_center()
                         .child(
@@ -674,6 +674,7 @@ impl Render for WorkbenchView {
                         .relative()
                         .size_full()
                         .px(space::GROUP)
+                        .pb(space::SM)
                         .flex()
                         .flex_col()
                         .items_center()
@@ -685,15 +686,30 @@ impl Render for WorkbenchView {
                                 .flex()
                                 .flex_col()
                                 .items_center()
-                                .gap(space::GROUP)
                                 .child(
-                                    apply_scale(div(), scale::HERO)
-                                        .text_color(palette.text_welcome)
-                                        .child("我该如何协助您？"),
+                                    div()
+                                        .w_full()
+                                        .h(px(200.0))
+                                        .relative()
+                                        .flex()
+                                        .justify_center()
+                                        .child(render_home_brand_arcs())
+                                        .child(
+                                            apply_scale(div(), scale::HERO)
+                                                .absolute()
+                                                .top(px(125.0))
+                                                .left_0()
+                                                .right_0()
+                                                .flex()
+                                                .justify_center()
+                                                .text_color(palette.text_welcome)
+                                                .child("我该如何协助您？"),
+                                        ),
                                 )
                                 .child(self.home_composer.clone())
                                 .children(home_pending.then(|| {
                                     apply_scale(div(), scale::CAPTION)
+                                        .pt(space::MD)
                                         .text_color(rgba(0xFFFF_FFBF))
                                         .child("正在创建新对话并提交消息…")
                                 })),
@@ -704,12 +720,12 @@ impl Render for WorkbenchView {
                         .absolute()
                         .left_0()
                         .right_0()
-                        .bottom(space::MD)
+                        .bottom(px(17.0))
                         .flex()
                         .justify_center()
                         .child(
                             apply_scale(div(), scale::CAPTION)
-                                .text_color(rgba(0xFFFF_FF88))
+                                .text_color(palette.text_secondary)
                                 .child("@cst-pilot"),
                         ),
                 )
@@ -859,6 +875,7 @@ impl Render for WorkbenchView {
                 &palette,
                 transparency_enabled,
                 scale_factor,
+                window.viewport_size(),
                 &self.lightbox_trap_focus,
                 &self.lightbox_close_focus,
                 move |w, cx| {
@@ -871,4 +888,53 @@ impl Render for WorkbenchView {
 
         root
     }
+}
+
+/// Renders the `280×280` concentric brand arc graphic (`cst-pilot-desktop.pen` 「01 · 工作台」 `lbYEI`:
+/// outer `280×280` `tnt5a` & inner `244×244` `Nc5f1`, `3.5px` stroke, `45°..315°` sweep, white vertical fade).
+fn render_home_brand_arcs() -> impl IntoElement {
+    div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .h(px(280.0))
+        .flex()
+        .justify_center()
+        .child(
+            canvas(
+                |_, _, _| (),
+                |bounds, _, window, _cx| {
+                    let cx_f = f32::from(bounds.origin.x) + f32::from(bounds.size.width) * 0.5;
+                    let cy_f = f32::from(bounds.origin.y) + f32::from(bounds.size.height) * 0.5;
+                    let stroke_bg = linear_gradient(
+                        0.0,
+                        linear_color_stop(rgba(0xFFFF_FF00), 0.49),
+                        linear_color_stop(rgba(0xFFFF_FFFF), 1.0),
+                    );
+                    let start_rad = 45.0_f32.to_radians();
+                    let sweep_rad = 270.0_f32.to_radians();
+                    let steps = 180usize;
+
+                    for diameter in [280.0_f32, 244.0_f32] {
+                        let r = (diameter - 3.5) * 0.5;
+                        let mut builder = PathBuilder::stroke(px(3.5));
+                        for i in 0..=steps {
+                            let theta = start_rad + sweep_rad * (i as f32 / steps as f32);
+                            let pt = point(px(cx_f + r * theta.cos()), px(cy_f + r * theta.sin()));
+                            if i == 0 {
+                                builder.move_to(pt);
+                            } else {
+                                builder.line_to(pt);
+                            }
+                        }
+                        if let Ok(path) = builder.build() {
+                            window.paint_path(path, stroke_bg);
+                        }
+                    }
+                },
+            )
+            .w(px(280.0))
+            .h(px(280.0)),
+        )
 }

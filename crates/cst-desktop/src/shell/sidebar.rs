@@ -318,7 +318,7 @@ pub fn render_sidebar_l081m1(
                 (on_palette)(w, cx);
                 cx.stop_propagation();
             })
-            .child("Ctrl+K")
+            .child(cjk_inline_label("Ctrl+K"))
             .into_any_element()
     };
 
@@ -333,7 +333,7 @@ pub fn render_sidebar_l081m1(
         .flex_shrink_0()
         .flex()
         .items_center()
-        .gap(space::TIGHT)
+        .gap(space::SM)
         .on_click(move |_, window, cx| {
             search_focus_ent.focus_handle(cx).focus(window, cx);
         })
@@ -400,7 +400,7 @@ pub fn render_sidebar_l081m1(
                                 .child(
                                     apply_scale(div(), scale::BODY_SEMIBOLD)
                                         .text_color(palette.text_primary)
-                                        .child("CST Pilot"),
+                                        .child(cjk_inline_label("CST Pilot")),
                                 ),
                         )
                         .child(
@@ -486,7 +486,7 @@ pub fn render_sidebar_l081m1(
                                     move |w, cx| (on_all)(w, cx),
                                 )),
                         )
-                        // 2c. Recent sessions group `CzUNm` (`24px` header + scrollable list)
+                        // 2c. Recent sessions group `CzUNm` (`24px` header + `12px` gap + scrollable list)
                         .child(
                             div()
                                 .flex_1()
@@ -494,7 +494,7 @@ pub fn render_sidebar_l081m1(
                                 .min_w_0()
                                 .flex()
                                 .flex_col()
-                                .gap(space::SM)
+                                .gap(space::MD)
                                 .child(
                                     div()
                                         .h(height::INLINE)
@@ -561,12 +561,11 @@ pub fn render_sidebar_l081m1(
                         ),
                 ),
         )
-        // 3. Bottom account + settings bar `fMdf9` (no top divider line)
+        // 3. Bottom account + settings bar `fMdf9` (aligned to `24px` vertical spine, no top divider line)
         .child(
             div().pt(space::SM).flex_shrink_0().child(
                 div()
                     .h(height::CONTROL)
-                    .pl(space::SM)
                     .pr(space::MICRO)
                     .rounded(radius::CONTROL)
                     .flex()
@@ -582,8 +581,8 @@ pub fn render_sidebar_l081m1(
                             .tab_index(0)
                             .flex_1()
                             .min_w_0()
-                            .h(height::COMPACT)
-                            .px(space::XS)
+                            .h(height::CONTROL)
+                            .px(space::SM)
                             .rounded(radius::CONTROL)
                             .flex()
                             .items_center()

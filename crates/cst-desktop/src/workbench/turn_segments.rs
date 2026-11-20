@@ -5,7 +5,7 @@ use gpui_kit::{Hsla, IntoElement, ParentElement, SharedString, Styled, Window, d
 use serde_json::Value;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::theme::{DesktopPalette, apply_scale, scale};
+use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, scale};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpecialToolKind {
@@ -669,9 +669,9 @@ pub fn render_running_light_label(
     let should_sweep = active && !reduce_motion && window.is_window_active() && !minimized;
 
     if !should_sweep {
-        return apply_scale(div(), scale::UI)
+        return apply_scale(div(), scale::BODY)
             .text_color(palette.text_secondary)
-            .child(SharedString::from(text.to_owned()));
+            .child(cjk_inline_label(text.to_owned()));
     }
 
     window.request_animation_frame();
@@ -683,7 +683,10 @@ pub fn render_running_light_label(
     let base = palette.text_secondary;
     let hi = palette.text_primary;
 
-    let mut row = apply_scale(div(), scale::UI).flex().items_center();
+    let mut row = apply_scale(div(), scale::BODY)
+        .pb(crate::theme::space::MICRO)
+        .flex()
+        .items_center();
     for (idx, g) in glyphs.into_iter().enumerate() {
         let strength = glyph_light_strength(idx, count, phase);
         // Strength peaks at 0.48 -> normalize to [0, 1] blend toward primary highlight

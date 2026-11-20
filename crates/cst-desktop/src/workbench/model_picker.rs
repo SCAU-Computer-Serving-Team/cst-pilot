@@ -130,6 +130,7 @@ pub fn render_context_ring_button(
         .tab_index(0)
         .w(height::COMPACT)
         .h(height::COMPACT)
+        .pt(space::MICRO)
         .rounded(radius::CONTROL)
         .flex()
         .items_center()

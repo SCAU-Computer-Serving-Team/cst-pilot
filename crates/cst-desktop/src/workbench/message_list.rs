@@ -447,6 +447,7 @@ impl MessageListView {
         if !text.trim().is_empty() {
             bubble = bubble.child(
                 apply_scale(div(), scale::BODY)
+                    .pb(space::MICRO)
                     .text_color(palette.text_primary)
                     .child(SharedString::from(text.clone())),
             );
@@ -613,6 +614,7 @@ impl MessageListView {
         if !item.text.trim().is_empty() {
             bubble = bubble.child(
                 apply_scale(div(), scale::BODY)
+                    .pb(space::MICRO)
                     .text_color(palette.text_primary)
                     .child(SharedString::from(item.text.clone())),
             );
@@ -632,7 +634,7 @@ impl MessageListView {
                 .justify_end()
                 .gap(space::SM)
                 .child(
-                    Icon::new(IconName::TriangleAlert)
+                    Icon::new(IconName::CircleAlert)
                         .size(px(16.0))
                         .text_color(palette.status_danger),
                 )
@@ -1184,7 +1186,10 @@ impl MessageListView {
                     let mut header = div()
                         .id(header_id.clone())
                         .test_support()
-                        .h(height::COMPACT)
+                        .w_full()
+                        .h(height::CONTROL)
+                        .border_b_1()
+                        .border_color(palette.bg_surface)
                         .flex()
                         .items_center()
                         .gap(space::SM)
@@ -1232,7 +1237,7 @@ impl MessageListView {
                             } else {
                                 IconName::ChevronRight
                             })
-                            .size(px(14.0))
+                            .size(px(16.0))
                             .text_color(palette.text_secondary),
                         );
                     }
@@ -1372,14 +1377,16 @@ impl MessageListView {
                 let k_det = det_key.clone();
                 let det_btn_id = SharedString::from(format!("assistant-err-detail-btn-{turn_key}"));
                 err_col = err_col.child(
-                    apply_scale(div(), scale::CAPTION_MEDIUM)
+                    apply_scale(div(), scale::CAPTION)
                         .id(det_btn_id.clone())
                         .test_support()
                         .a11y_toggle_button(det_btn_id, "错误详情", det_open)
+                        .h(px(22.0))
                         .flex()
                         .items_center()
-                        .gap(space::MICRO)
-                        .text_color(palette.text_muted)
+                        .gap(space::SM)
+                        .text_color(palette.text_secondary)
+                        .hover(|s| s.text_color(palette.text_primary))
                         .on_click(move |_, _, cx| {
                             let k = k_det.clone();
                             ent_det.update(cx, |this, cx| {
@@ -1396,8 +1403,8 @@ impl MessageListView {
                             } else {
                                 IconName::ChevronRight
                             })
-                            .size(px(11.0))
-                            .text_color(palette.text_muted),
+                            .size(px(14.0))
+                            .text_color(palette.text_secondary),
                         ),
                 );
                 if det_open {
@@ -1426,7 +1433,7 @@ impl MessageListView {
         // Manual stop marker (`已停止生成`)
         if split.was_aborted {
             assistant_stack = assistant_stack.child(
-                apply_scale(div(), scale::CAPTION)
+                apply_scale(div(), scale::UI)
                     .id(SharedString::from(format!("assistant-aborted-{turn_key}")))
                     .test_support()
                     .text_color(palette.text_muted)
@@ -1568,17 +1575,17 @@ impl MessageListView {
                 .id(SharedString::from(format!("assistant-actions-{turn_key}")))
                 .test_support()
                 .w_full()
-                .h(height::INLINE)
+                .h(height::COMPACT)
                 .flex()
                 .items_center()
                 .justify_between()
                 .gap(space::MD)
                 .child(left_btns)
                 .children(ts_label_opt.map(|hhmm| {
-                    apply_scale(div(), scale::CAPTION)
+                    apply_scale(div(), scale::UI)
                         .font_family(mono_family.clone())
-                        .text_color(palette.text_muted)
-                        .child(SharedString::from(hhmm))
+                        .text_color(palette.text_secondary)
+                        .child(cjk_inline_label(hhmm))
                 }));
 
             assistant_stack = assistant_stack.child(assistant_actions);
@@ -1883,17 +1890,15 @@ impl Render for MessageListView {
                             .id("scroll-to-bottom-btn")
                             .test_support()
                             .a11y_button("scroll-to-bottom-btn", "回到底部")
-                            .h(height::CONTROL)
-                            .px(space::MD)
-                            .rounded(radius::FULL)
-                            .bg(palette.bg_elevated)
-                            .border_1()
-                            .border_color(palette.border_subtle)
+                            .h(height::FIELD)
+                            .px(space::LG)
+                            .rounded(radius::ROW)
+                            .bg(palette.text_primary)
                             .shadow(palette.craft_lift_shadows())
                             .flex()
                             .items_center()
-                            .gap(space::TIGHT)
-                            .hover(|s| s.bg(palette.bg_surface))
+                            .gap(space::SM)
+                            .hover(|s| s.opacity(0.92))
                             .on_click(move |_, _, cx| {
                                 ent_btm.update(cx, |this, cx| {
                                     this.scroll_to_bottom_and_follow(cx);
@@ -1901,12 +1906,12 @@ impl Render for MessageListView {
                             })
                             .child(
                                 Icon::new(IconName::ArrowDown)
-                                    .size(px(14.0))
-                                    .text_color(palette.text_secondary),
+                                    .size(px(16.0))
+                                    .text_color(palette.bg_workspace),
                             )
                             .child(
                                 apply_scale(div(), scale::UI_MEDIUM)
-                                    .text_color(palette.text_primary)
+                                    .text_color(palette.bg_workspace)
                                     .child(cjk_inline_label("回到底部")),
                             ),
                     ),

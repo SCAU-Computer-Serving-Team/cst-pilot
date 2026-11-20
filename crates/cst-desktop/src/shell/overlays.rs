@@ -158,7 +158,7 @@ pub fn render_workspace_error_bar(
 ) -> impl IntoElement {
     div()
         .absolute()
-        .top(px(20.0))
+        .top(space::LG)
         .left_0()
         .right_0()
         .flex()
@@ -213,7 +213,7 @@ pub fn render_top_notice_banner(
 ) -> impl IntoElement {
     div()
         .absolute()
-        .top(px(20.0))
+        .top(space::LG)
         .left_0()
         .right_0()
         .flex()

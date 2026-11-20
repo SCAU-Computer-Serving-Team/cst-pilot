@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use gpui::{FontWeight, Overflow, StyleRefinement, rems};
+use gpui::{FontWeight, HighlightStyle, Overflow, StyleRefinement, rems};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::Easing;
 use gpui_kit::base::text::{
@@ -86,23 +86,65 @@ impl MarkdownStreamStore {
 }
 
 pub fn build_markdown_style(palette: &DesktopPalette) -> TextViewStyle {
-    let mut table_style = StyleRefinement::default().rounded(radius::ROW);
+    let mut table_style = StyleRefinement::default().rounded(radius::CONTROL);
     table_style.overflow.x = Some(Overflow::Scroll);
 
-    let code_block_style = StyleRefinement::default().pr(px(40.0)).rounded(radius::ROW);
+    let table_head_style = StyleRefinement::default().font_weight(FontWeight::MEDIUM);
+    let table_cell_style = StyleRefinement::default()
+        .text_size(scale::UI.font_size)
+        .line_height(scale::UI.line_height)
+        .px(space::MD)
+        .py(px(10.0));
+
+    let code_block_style = StyleRefinement::default()
+        .px(space::MD)
+        .py(px(10.0))
+        .pr(px(40.0))
+        .rounded(radius::CONTROL)
+        .border_0()
+        .text_size(scale::UI.font_size)
+        .line_height(scale::UI.line_height);
 
     TextViewStyle::default()
         .with_foreground(palette.text_primary)
         .with_muted_foreground(palette.text_secondary)
         .with_link(palette.accent_ink)
         .with_code_background(palette.bg_surface)
+        .with_inline_code(HighlightStyle {
+            background_color: Some(palette.bg_surface),
+            color: Some(palette.text_primary),
+            ..Default::default()
+        })
+        .with_inline_code_style(
+            StyleRefinement::default()
+                .text_size(scale::UI.font_size)
+                .px(space::XS)
+                .rounded(radius::CONTROL)
+                .bg(palette.bg_surface),
+        )
         .with_border(palette.border_subtle)
         .with_paragraph_gap(rems(1.0))
         .with_heading(|level| match level {
-            1 | 2 => StyleRefinement::default().font_weight(FontWeight::SEMIBOLD),
-            _ => StyleRefinement::default().font_weight(FontWeight::SEMIBOLD),
+            1 => StyleRefinement::default()
+                .text_size(px(24.0))
+                .line_height(px(32.0))
+                .font_weight(FontWeight::SEMIBOLD),
+            2 => StyleRefinement::default()
+                .text_size(scale::TITLE.font_size)
+                .line_height(scale::TITLE.line_height)
+                .font_weight(FontWeight::SEMIBOLD),
+            3 => StyleRefinement::default()
+                .text_size(px(18.0))
+                .line_height(px(26.0))
+                .font_weight(FontWeight::SEMIBOLD),
+            _ => StyleRefinement::default()
+                .text_size(scale::BODY.font_size)
+                .line_height(scale::BODY.line_height)
+                .font_weight(FontWeight::SEMIBOLD),
         })
         .with_table(table_style)
+        .with_table_head(table_head_style)
+        .with_table_cell(table_cell_style)
         .with_code_block(code_block_style)
         .with_dark(palette.mode.is_dark())
 }
@@ -223,7 +265,6 @@ pub fn render_copyable_text_block<V: 'static>(
     let mut content_div = apply_scale(div(), scale::CAPTION)
         .w_full()
         .min_w_0()
-        .pr(px(36.0))
         .text_color(palette.text_secondary);
     if monospace {
         content_div = content_div.font_family(mono_family);
@@ -234,10 +275,11 @@ pub fn render_copyable_text_block<V: 'static>(
         .relative()
         .w_full()
         .min_w_0()
-        .p(space::MD)
-        .rounded(radius::ROW)
-        .border_1()
-        .border_color(palette.border_subtle)
+        .min_h(px(36.0))
+        .pl(space::MD)
+        .pr(px(40.0))
+        .py(px(10.0))
+        .rounded(radius::CONTROL)
         .bg(palette.bg_surface)
         .child(content_div.child(text_shared))
         .child(
@@ -247,9 +289,9 @@ pub fn render_copyable_text_block<V: 'static>(
                 .a11y_button(copy_btn_id, "复制文本内容")
                 .absolute()
                 .top(space::XS)
-                .right(space::XS)
-                .w(px(32.0))
-                .h(px(32.0))
+                .right(space::SM)
+                .w(px(28.0))
+                .h(px(28.0))
                 .rounded(radius::CONTROL)
                 .flex()
                 .items_center()
@@ -266,7 +308,7 @@ pub fn render_copyable_text_block<V: 'static>(
                     } else {
                         IconName::Copy
                     })
-                    .size(px(14.0))
+                    .size(px(16.0))
                     .text_color(if copied_recently {
                         palette.status_success
                     } else {

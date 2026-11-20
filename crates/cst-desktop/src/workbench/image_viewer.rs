@@ -2,7 +2,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cst_client::SharedImageHandle;
-use gpui::{Image, ImageFormat, ImageSource, ObjectFit, StyledImage as _};
+use gpui::{Image, ImageFormat, ImageSource, ObjectFit, Pixels, Size, StyledImage as _};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement;
 use gpui_kit::component::Icon;
@@ -13,7 +13,7 @@ use gpui_kit::{
 
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{DesktopPalette, height, radius, space};
 
 #[derive(Debug, Clone)]
 pub struct LightboxImageTarget {
@@ -40,6 +40,7 @@ pub fn render_image_lightbox_modal(
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
+    viewport_size: Size<Pixels>,
     trap_focus: &FocusHandle,
     close_focus: &FocusHandle,
     on_close: impl Fn(&mut Window, &mut App) + 'static,
@@ -47,6 +48,7 @@ pub fn render_image_lightbox_modal(
     let on_close = Rc::new(on_close);
     let close_scrim = Rc::clone(&on_close);
     let close_btn = Rc::clone(&on_close);
+    let close_img = Rc::clone(&on_close);
 
     let meta_label = match target.dimensions {
         Some((w, h)) => SharedString::from(format!("{} · {w}×{h}", target.title)),
@@ -66,88 +68,84 @@ pub fn render_image_lightbox_modal(
     .left_0()
     .right_0()
     .bottom_0()
-    .p(space::GROUP)
     .flex()
     .items_center()
     .justify_center()
     .occlude()
     .on_click(move |_, w, cx| close_scrim(w, cx));
 
-    let card = render_frosted_surface(
-        "image-lightbox-card",
-        FrostedGlassSpec::modal_k3x72(palette, 8.0),
-        palette.bg_modal,
-        transparency_enabled,
-        scale_factor,
-    )
-    .test_support()
-    .a11y_dialog("image-lightbox-card", format!("图片预览：{meta_label}"))
-    .max_w(px(960.0))
-    .max_h(px(680.0))
-    .p(space::LG)
-    .rounded(radius::ROW)
-    .border_1()
-    .border_color(palette.border_subtle)
-    .flex()
-    .flex_col()
-    .gap(space::MD)
-    .on_click(|_, _, cx| cx.stop_propagation())
-    .child(
-        div()
-            .relative()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(space::MD)
-            .child(
-                apply_scale(div(), scale::UI_MEDIUM)
-                    .text_color(palette.text_primary)
-                    .truncate()
-                    .child(cjk_inline_label(meta_label)),
-            )
-            .child(
-                div()
-                    .id("image-lightbox-close-btn")
-                    .test_support()
-                    .a11y_button("image-lightbox-close-btn", "关闭图片预览")
-                    .track_focus(close_focus)
-                    .tab_index(0)
-                    .w(height::CONTROL)
-                    .h(height::CONTROL)
-                    .rounded(radius::CONTROL)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .hover(|s| s.bg(palette.bg_item_hover))
-                    .on_click(move |_, w, cx| close_btn(w, cx))
-                    .child(
-                        Icon::new(IconName::X)
-                            .size(px(16.0))
-                            .text_color(palette.text_secondary),
-                    ),
-            ),
-    )
-    .child(
-        div()
-            .relative()
-            .flex()
-            .items_center()
-            .justify_center()
-            .overflow_hidden()
-            .rounded(radius::ROW)
-            .bg(palette.bg_surface)
-            .child(
-                img(ImageSource::Image(Arc::clone(&target.image)))
-                    .max_w(px(912.0))
-                    .max_h(px(580.0))
-                    .object_fit(ObjectFit::Contain),
-            ),
-    );
+    let max_image_w = (f32::from(viewport_size.width) - 58.0).clamp(160.0, 960.0);
+    let max_image_h = (f32::from(viewport_size.height) - 98.0).clamp(160.0, 680.0);
+
+    let close_circle_btn = div()
+        .id("image-lightbox-close-btn")
+        .test_support()
+        .a11y_button("image-lightbox-close-btn", "关闭图片预览")
+        .track_focus(close_focus)
+        .tab_index(0)
+        .absolute()
+        .top(space::GROUP)
+        .right(space::GROUP)
+        .w(height::FIELD)
+        .h(height::FIELD)
+        .rounded(radius::FULL)
+        .bg(palette.bg_elevated)
+        .border_1()
+        .border_color(palette.border_subtle)
+        .shadow(palette.craft_lift_shadows())
+        .flex()
+        .items_center()
+        .justify_center()
+        .hover(|s| s.bg(palette.bg_surface))
+        .on_click(move |_, w, cx| {
+            cx.stop_propagation();
+            close_btn(w, cx);
+        })
+        .child(
+            Icon::new(IconName::X)
+                .size(px(22.0))
+                .text_color(palette.text_secondary),
+        );
+
+    let image_frame = div()
+        .id("image-lightbox-body")
+        .max_w_full()
+        .max_h_full()
+        .min_w_0()
+        .min_h_0()
+        .rounded(radius::ROW)
+        .border_1()
+        .border_color(palette.border_subtle)
+        .bg(palette.bg_surface)
+        .overflow_hidden()
+        .flex()
+        .items_center()
+        .justify_center()
+        .on_click(move |_, w, cx| {
+            cx.stop_propagation();
+            close_img(w, cx);
+        })
+        .child(
+            img(ImageSource::Image(Arc::clone(&target.image)))
+                .max_w(px(max_image_w))
+                .max_h(px(max_image_h))
+                .object_fit(ObjectFit::Contain),
+        );
 
     scrim.child(
         div()
+            .id("image-lightbox-card")
+            .test_support()
+            .a11y_dialog("image-lightbox-card", format!("图片预览：{meta_label}"))
+            .relative()
+            .size_full()
+            .p(space::GROUP)
+            .flex()
+            .items_center()
+            .justify_center()
             .tab_stop(false)
-            .child(card)
+            .child(image_frame)
+            .child(close_circle_btn)
             .focus_trap("image-lightbox-focus-trap", trap_focus),
     )
 }
