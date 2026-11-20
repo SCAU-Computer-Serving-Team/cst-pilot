@@ -135,6 +135,15 @@ impl SettingsView {
             .update(cx, |pt, cx| pt.open_new_custom_provider(window, cx));
         cx.notify();
     }
+
+    pub fn dismiss_topmost_surface(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.category == SettingsCategory::Preferences {
+            return self
+                .preferences_tab
+                .update(cx, |pt, cx| pt.dismiss_dropdowns(cx));
+        }
+        false
+    }
 }
 
 impl Render for SettingsView {

@@ -1,10 +1,11 @@
-use cst_client::ClientHandle;
+use cst_client::{ClientError, ClientHandle};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
-use gpui_kit::component::input::{Input, InputContentType, InputState};
+use gpui_kit::component::input::{Input, InputContentType, InputEvent, InputState};
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
+    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, TestSupportExt, Window,
+    div, px,
 };
 use serde_json::{Value, json};
 use zeroize::Zeroizing;
@@ -120,6 +121,9 @@ pub struct ProvidersTabView {
     revision: Option<String>,
     editable_rows: Vec<EditableModelRow>,
     saving: bool,
+    key_error: Option<SharedString>,
+    form_error: Option<SharedString>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<ProvidersTabEvent> for ProvidersTabView {}
@@ -143,6 +147,22 @@ impl ProvidersTabView {
                 .masked(true)
         });
 
+        let mut subs = Vec::new();
+        for inp in [&provider_id_input, &provider_name_input, &base_url_input] {
+            subs.push(cx.subscribe(inp, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) && this.form_error.take().is_some() {
+                    cx.notify();
+                }
+            }));
+        }
+        subs.push(
+            cx.subscribe(&api_key_input, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) && this.key_error.take().is_some() {
+                    cx.notify();
+                }
+            }),
+        );
+
         Self {
             client,
             active_provider_id: None,
@@ -158,6 +178,9 @@ impl ProvidersTabView {
             revision: None,
             editable_rows: Vec::new(),
             saving: false,
+            key_error: None,
+            form_error: None,
+            _subscriptions: subs,
         }
     }
 
@@ -166,6 +189,8 @@ impl ProvidersTabView {
         self.creating_new_custom = true;
         self.inline_edit_mode = true;
         self.revision = None;
+        self.key_error = None;
+        self.form_error = None;
         self.protocol = CustomApiProtocol::OpenaiCompletions;
         self.provider_id_input
             .update(cx, |i, cx| i.set_value("", window, cx));
@@ -185,6 +210,8 @@ impl ProvidersTabView {
         self.creating_new_custom = false;
         self.active_provider_id = None;
         self.search_visible = false;
+        self.key_error = None;
+        self.form_error = None;
         cx.notify();
     }
 
@@ -363,6 +390,39 @@ impl ProvidersTabView {
         .detach();
     }
 
+    fn remove_active_provider_credentials(&mut self, cx: &mut Context<Self>) {
+        if self.saving {
+            return;
+        }
+        let Some(provider) = self.active_provider_id.clone() else {
+            return;
+        };
+        self.saving = true;
+        self.key_error = None;
+        cx.notify();
+
+        let client = self.client.clone();
+        cx.spawn(async move |weak, cx| {
+            let res = client.logout_provider(provider).await;
+            let _ = client.refresh_globals().await;
+            let _ = client.refresh_models(None).await;
+            let _ = weak.update(cx, |this, cx| {
+                this.saving = false;
+                match res {
+                    Ok(_) => {
+                        this.return_to_provider_list(cx);
+                        cx.emit(ProvidersTabEvent::Notice("已移除服务凭据。".into()));
+                    }
+                    Err(err) => {
+                        cx.emit(ProvidersTabEvent::ErrorMessage(err.to_string()));
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn save_builtin_api_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.saving {
             return;
@@ -372,11 +432,11 @@ impl ProvidersTabView {
         };
         let raw_key = Zeroizing::new(self.api_key_input.read(cx).value().trim().to_owned());
         if raw_key.is_empty() {
-            cx.emit(ProvidersTabEvent::ErrorMessage(
-                "请输入要更新的 API Key。".into(),
-            ));
+            self.key_error = Some("请输入要更新的 API Key。".into());
+            cx.notify();
             return;
         }
+        self.key_error = None;
         let base_url = {
             let b = self.base_url_input.read(cx).value().trim().to_owned();
             (!b.is_empty()).then_some(b)
@@ -397,8 +457,12 @@ impl ProvidersTabView {
                 this.saving = false;
                 match res {
                     Ok(_) => {
+                        this.key_error = None;
                         cx.emit(ProvidersTabEvent::CredentialsSaved);
                         cx.emit(ProvidersTabEvent::Notice("服务凭据已保存。".into()));
+                    }
+                    Err(ClientError::BadRequest { message, .. }) => {
+                        this.key_error = Some(message.into());
                     }
                     Err(err) => {
                         cx.emit(ProvidersTabEvent::ErrorMessage(err.to_string()));
@@ -422,11 +486,11 @@ impl ProvidersTabView {
             .update(cx, |i, cx| i.set_value("", window, cx));
 
         if pid.is_empty() || name.is_empty() || base_url.is_empty() {
-            cx.emit(ProvidersTabEvent::ErrorMessage(
-                "请完整填写服务标识、名称与 Base URL。".into(),
-            ));
+            self.form_error = Some("请完整填写服务标识、显示名称与 Base URL。".into());
+            cx.notify();
             return;
         }
+        self.form_error = None;
 
         let mut models_arr = Vec::new();
         for row in &self.editable_rows {
@@ -907,6 +971,13 @@ impl ProvidersTabView {
             );
         }
 
+        let pid_empty =
+            self.form_error.is_some() && self.provider_id_input.read(cx).value().trim().is_empty();
+        let name_empty = self.form_error.is_some()
+            && self.provider_name_input.read(cx).value().trim().is_empty();
+        let url_empty =
+            self.form_error.is_some() && self.base_url_input.read(cx).value().trim().is_empty();
+
         div()
             .w_full()
             .flex()
@@ -915,40 +986,201 @@ impl ProvidersTabView {
             .child(self.render_back_bar(palette, cx))
             .child(
                 div()
+                    .w_full()
                     .flex()
-                    .gap(space::SM)
+                    .flex_col()
                     .child(
-                        div().flex_1().child(
-                            Input::new(&self.provider_id_input)
-                                .accessibility_id("providers-id-input")
-                                .aria_label("服务标识")
-                                .h(height::FIELD),
-                        ),
+                        div()
+                            .w_full()
+                            .h(px(44.0))
+                            .border_b_1()
+                            .border_color(palette.border_subtle)
+                            .flex()
+                            .items_center()
+                            .gap(space::LG)
+                            .child(
+                                apply_scale(div(), scale::UI)
+                                    .w(px(140.0))
+                                    .flex_shrink_0()
+                                    .text_color(palette.text_secondary)
+                                    .child(cjk_inline_label("服务标识")),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .h(height::CONTROL)
+                                    .px(space::XS)
+                                    .rounded(radius::CONTROL)
+                                    .border_1()
+                                    .border_color(if pid_empty {
+                                        palette.status_danger
+                                    } else {
+                                        palette.border_subtle
+                                    })
+                                    .bg(palette.bg_workspace)
+                                    .flex()
+                                    .items_center()
+                                    .child(
+                                        Input::new(&self.provider_id_input)
+                                            .accessibility_id("providers-id-input")
+                                            .aria_label("服务标识")
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .w_full()
+                                            .h_full(),
+                                    ),
+                            ),
                     )
                     .child(
-                        div().flex_1().child(
-                            Input::new(&self.provider_name_input)
-                                .accessibility_id("providers-name-input")
-                                .aria_label("服务显示名称")
-                                .h(height::FIELD),
-                        ),
+                        div()
+                            .w_full()
+                            .h(px(44.0))
+                            .border_b_1()
+                            .border_color(palette.border_subtle)
+                            .flex()
+                            .items_center()
+                            .gap(space::LG)
+                            .child(
+                                apply_scale(div(), scale::UI)
+                                    .w(px(140.0))
+                                    .flex_shrink_0()
+                                    .text_color(palette.text_secondary)
+                                    .child(cjk_inline_label("显示名称")),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .h(height::CONTROL)
+                                    .px(space::XS)
+                                    .rounded(radius::CONTROL)
+                                    .border_1()
+                                    .border_color(if name_empty {
+                                        palette.status_danger
+                                    } else {
+                                        palette.border_subtle
+                                    })
+                                    .bg(palette.bg_workspace)
+                                    .flex()
+                                    .items_center()
+                                    .child(
+                                        Input::new(&self.provider_name_input)
+                                            .accessibility_id("providers-name-input")
+                                            .aria_label("服务显示名称")
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .w_full()
+                                            .h_full(),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .min_h(px(44.0))
+                            .py(space::XS)
+                            .border_b_1()
+                            .border_color(palette.border_subtle)
+                            .flex()
+                            .items_center()
+                            .gap(space::LG)
+                            .child(
+                                apply_scale(div(), scale::UI)
+                                    .w(px(140.0))
+                                    .flex_shrink_0()
+                                    .text_color(palette.text_secondary)
+                                    .child(cjk_inline_label("接口协议")),
+                            )
+                            .child(div().flex_1().child(protocol_row)),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(44.0))
+                            .border_b_1()
+                            .border_color(palette.border_subtle)
+                            .flex()
+                            .items_center()
+                            .gap(space::LG)
+                            .child(
+                                apply_scale(div(), scale::UI)
+                                    .w(px(140.0))
+                                    .flex_shrink_0()
+                                    .text_color(palette.text_secondary)
+                                    .child("Base URL"),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .h(height::CONTROL)
+                                    .px(space::XS)
+                                    .rounded(radius::CONTROL)
+                                    .border_1()
+                                    .border_color(if url_empty {
+                                        palette.status_danger
+                                    } else {
+                                        palette.border_subtle
+                                    })
+                                    .bg(palette.bg_workspace)
+                                    .flex()
+                                    .items_center()
+                                    .child(
+                                        Input::new(&self.base_url_input)
+                                            .accessibility_id("providers-baseurl-input")
+                                            .aria_label("服务 Base URL")
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .w_full()
+                                            .h_full(),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(44.0))
+                            .flex()
+                            .items_center()
+                            .gap(space::LG)
+                            .child(
+                                apply_scale(div(), scale::UI)
+                                    .w(px(140.0))
+                                    .flex_shrink_0()
+                                    .text_color(palette.text_secondary)
+                                    .child("API Key"),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .h(height::CONTROL)
+                                    .px(space::XS)
+                                    .rounded(radius::CONTROL)
+                                    .border_1()
+                                    .border_color(palette.border_subtle)
+                                    .bg(palette.bg_workspace)
+                                    .flex()
+                                    .items_center()
+                                    .child(
+                                        Input::new(&self.api_key_input)
+                                            .accessibility_id("providers-apikey-input")
+                                            .content_type(InputContentType::Password)
+                                            .aria_label("服务 API Key")
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .w_full()
+                                            .h_full()
+                                            .mask_toggle(),
+                                    ),
+                            ),
                     ),
             )
-            .child(protocol_row)
-            .child(
-                Input::new(&self.base_url_input)
-                    .accessibility_id("providers-baseurl-input")
-                    .aria_label("服务 Base URL")
-                    .h(height::FIELD),
-            )
-            .child(
-                Input::new(&self.api_key_input)
-                    .accessibility_id("providers-apikey-input")
-                    .content_type(InputContentType::Password)
-                    .aria_label("服务 API Key")
-                    .h(height::FIELD)
-                    .mask_toggle(),
-            )
+            .children(self.form_error.clone().map(|err| {
+                apply_scale(div(), scale::CAPTION)
+                    .id("providers-form-error-text")
+                    .test_support()
+                    .a11y_status("providers-form-error-text", err.clone())
+                    .text_color(palette.status_danger)
+                    .child(err)
+            }))
             .child(self.render_group_header_with_3_icon_buttons("模型列表", palette, cx))
             .children(self.search_visible.then(|| {
                 Input::new(&self.search_input)
@@ -1013,6 +1245,16 @@ impl ProvidersTabView {
                             })),
                     ),
             )
+            .children(
+                (!self.creating_new_custom && self.active_provider_id.is_some()).then(|| {
+                    render_remove_credentials_card(
+                        palette,
+                        cx.listener(|this, _, _, cx| {
+                            this.remove_active_provider_credentials(cx);
+                        }),
+                    )
+                }),
+            )
     }
 }
 
@@ -1023,7 +1265,7 @@ impl Render for ProvidersTabView {
         let mono_family = theme_global.mono_font_family;
         let snap = self.client.snapshot();
 
-        // 1. Custom / Inline Provider Editor Mode
+        // 1. Custom / Inline Provider Editor Mode (`q8NLwK`)
         if self.creating_new_custom || self.inline_edit_mode {
             return div()
                 .id("settings-providers-tab")
@@ -1034,22 +1276,37 @@ impl Render for ProvidersTabView {
                 .flex_col()
                 .gap(space::MD)
                 .child(
-                    apply_scale(div(), scale::TITLE)
-                        .text_color(palette.text_primary)
-                        .child(cjk_inline_label("模型服务")),
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(space::XS)
+                        .child(
+                            apply_scale(div(), scale::TITLE)
+                                .text_color(palette.text_primary)
+                                .child(cjk_inline_label("自定义模型服务")),
+                        )
+                        .child(
+                            apply_scale(div(), scale::UI)
+                                .text_color(palette.text_secondary)
+                                .child(cjk_inline_label(
+                                    "连接兼容 OpenAI、Anthropic 或 Google 接口的服务。",
+                                )),
+                        ),
                 )
                 .child(self.render_borderless_hairline_editor(mono_family, &palette, cx));
         }
 
-        // 2. Built-in Provider Detail / Credential Management Mode
+        // 2. Built-in Provider Detail / Credential Management Mode (`T5us8O`)
         if let Some(ref pid) = self.active_provider_id {
             let pid_owned = pid.clone();
-            let prov_name = snap
+            let prov_entry = snap
                 .auth_providers
                 .as_ref()
-                .and_then(|list| list.iter().find(|p| p.id == pid_owned))
+                .and_then(|list| list.iter().find(|p| p.id == pid_owned));
+            let prov_name = prov_entry
                 .map(|p| p.name.clone())
                 .unwrap_or_else(|| pid_owned.clone());
+            let is_configured = prov_entry.and_then(|p| p.configured) == Some(true);
             let filter_q = self.search_input.read(cx).value().to_lowercase();
             let catalog_models: Vec<_> = snap
                 .models
@@ -1181,53 +1438,113 @@ impl Render for ProvidersTabView {
                 )
                 .child(self.render_back_bar(&palette, cx))
                 .child(
-                    apply_scale(div(), scale::BODY_SEMIBOLD)
-                        .text_color(palette.text_primary)
-                        .child(SharedString::from(prov_name)),
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::MD)
+                        .child(
+                            apply_scale(div(), scale::BODY_SEMIBOLD)
+                                .text_color(palette.text_primary)
+                                .child(SharedString::from(prov_name)),
+                        )
+                        .children(is_configured.then(|| {
+                            div()
+                                .h(height::INLINE)
+                                .px(space::SM)
+                                .rounded(radius::CONTROL)
+                                .bg(palette.bg_surface)
+                                .flex()
+                                .items_center()
+                                .gap(space::XS)
+                                .child(
+                                    div()
+                                        .w(px(6.0))
+                                        .h(px(6.0))
+                                        .rounded(radius::FULL)
+                                        .bg(palette.status_success),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::CAPTION)
+                                        .text_color(palette.text_secondary)
+                                        .child(cjk_inline_label("已连接")),
+                                )
+                        })),
                 )
                 .child(
                     div()
+                        .w_full()
                         .flex()
-                        .gap(space::SM)
+                        .flex_col()
+                        .gap(space::TIGHT)
                         .child(
-                            div().flex_1().child(
-                                Input::new(&self.api_key_input)
-                                    .accessibility_id("providers-apikey-input")
-                                    .content_type(InputContentType::Password)
-                                    .aria_label("服务 API Key")
-                                    .h(height::FIELD)
-                                    .mask_toggle(),
-                            ),
-                        )
-                        .child(
-                            apply_scale(div(), scale::UI_MEDIUM)
-                                .id("providers-builtin-save-key-btn")
-                                .test_support()
-                                .a11y_button(
-                                    "providers-builtin-save-key-btn",
-                                    if self.saving {
-                                        "正在保存"
-                                    } else {
-                                        "保存密钥"
-                                    },
-                                )
-                                .h(height::FIELD)
-                                .px(space::LG)
-                                .rounded(radius::CONTROL)
-                                .bg(palette.accent_solid)
-                                .text_color(palette.text_on_accent)
+                            div()
                                 .flex()
-                                .items_center()
-                                .hover(|s| s.bg(palette.accent_hover))
-                                .on_click(cx.listener(|this, _, w, cx| {
-                                    this.save_builtin_api_key(w, cx);
-                                }))
-                                .child(cjk_inline_label(if self.saving {
-                                    "正在保存…"
-                                } else {
-                                    "保存密钥"
-                                })),
-                        ),
+                                .gap(space::SM)
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .h(height::FIELD)
+                                        .px(space::XS)
+                                        .rounded(radius::CONTROL)
+                                        .border_1()
+                                        .border_color(if self.key_error.is_some() {
+                                            palette.status_danger
+                                        } else {
+                                            palette.border_strong
+                                        })
+                                        .bg(palette.bg_workspace)
+                                        .flex()
+                                        .items_center()
+                                        .child(
+                                            Input::new(&self.api_key_input)
+                                                .accessibility_id("providers-apikey-input")
+                                                .content_type(InputContentType::Password)
+                                                .aria_label("服务 API Key")
+                                                .appearance(false)
+                                                .bordered(false)
+                                                .w_full()
+                                                .h_full()
+                                                .mask_toggle(),
+                                        ),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::UI_MEDIUM)
+                                        .id("providers-builtin-save-key-btn")
+                                        .test_support()
+                                        .a11y_button(
+                                            "providers-builtin-save-key-btn",
+                                            if self.saving {
+                                                "正在保存"
+                                            } else {
+                                                "保存密钥"
+                                            },
+                                        )
+                                        .h(height::FIELD)
+                                        .px(space::LG)
+                                        .rounded(radius::CONTROL)
+                                        .bg(palette.accent_solid)
+                                        .text_color(palette.text_on_accent)
+                                        .flex()
+                                        .items_center()
+                                        .hover(|s| s.bg(palette.accent_hover))
+                                        .on_click(cx.listener(|this, _, w, cx| {
+                                            this.save_builtin_api_key(w, cx);
+                                        }))
+                                        .child(cjk_inline_label(if self.saving {
+                                            "正在保存…"
+                                        } else {
+                                            "保存密钥"
+                                        })),
+                                ),
+                        )
+                        .children(self.key_error.clone().map(|err| {
+                            apply_scale(div(), scale::CAPTION)
+                                .id("providers-apikey-error-text")
+                                .test_support()
+                                .a11y_status("providers-apikey-error-text", err.clone())
+                                .text_color(palette.status_danger)
+                                .child(err)
+                        })),
                 )
                 .child(self.render_group_header_with_3_icon_buttons("模型列表", &palette, cx))
                 .children(self.search_visible.then(|| {
@@ -1237,7 +1554,15 @@ impl Render for ProvidersTabView {
                         .h(height::FIELD)
                         .cleanable(true)
                 }))
-                .child(model_table);
+                .child(model_table)
+                .children(is_configured.then(|| {
+                    render_remove_credentials_card(
+                        &palette,
+                        cx.listener(|this, _, _, cx| {
+                            this.remove_active_provider_credentials(cx);
+                        }),
+                    )
+                }));
         }
 
         // 3. Main Merged Provider List (`$bg-workspace` + `8px` radius + `72px` rows)
@@ -1406,6 +1731,12 @@ impl Render for ProvidersTabView {
             );
         }
 
+        let configured_count = usize::from(cstoa_signed_in)
+            + providers
+                .iter()
+                .filter(|p| p.id != "cstoa" && p.configured == Some(true))
+                .count();
+
         div()
             .id("settings-providers-tab")
             .test_support()
@@ -1452,8 +1783,97 @@ impl Render for ProvidersTabView {
                             .child(cjk_inline_label("添加服务")),
                     ),
             )
-            .child(merged_card)
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(space::SM)
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                apply_scale(div(), scale::BODY_SEMIBOLD)
+                                    .text_color(palette.text_primary)
+                                    .child(cjk_inline_label("服务列表")),
+                            )
+                            .child(
+                                apply_scale(div(), scale::UI)
+                                    .text_color(palette.text_secondary)
+                                    .child(cjk_inline_label(format!(
+                                        "{configured_count} 个已配置"
+                                    ))),
+                            ),
+                    )
+                    .child(merged_card),
+            )
     }
+}
+
+fn render_remove_credentials_card<F>(palette: &DesktopPalette, on_remove: F) -> impl IntoElement
+where
+    F: Fn(&gpui::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
+{
+    div()
+        .id("providers-remove-credentials-card-gawme")
+        .test_support()
+        .w_full()
+        .min_h(px(72.0))
+        .px(space::LG)
+        .py(space::MD)
+        .rounded(radius::ROW)
+        .border_1()
+        .border_color(palette.border_subtle)
+        .bg(palette.bg_special)
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(space::LG)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::MICRO)
+                .min_w_0()
+                .child(
+                    apply_scale(div(), scale::BODY_MEDIUM)
+                        .text_color(palette.text_primary)
+                        .child(cjk_inline_label("移除此服务凭据")),
+                )
+                .child(
+                    apply_scale(div(), scale::CAPTION)
+                        .text_color(palette.text_secondary)
+                        .child("移除后本机保存的 API Key 将立即清除，关联模型从选择器中隐藏。"),
+                ),
+        )
+        .child(
+            apply_scale(div(), scale::UI)
+                .id("providers-remove-cred-btn")
+                .test_support()
+                .a11y_button("providers-remove-cred-btn", "移除凭据")
+                .h(height::CONTROL)
+                .px(space::MD)
+                .rounded(radius::CONTROL)
+                .border_1()
+                .border_color(palette.border_strong)
+                .bg(palette.bg_workspace)
+                .text_color(palette.status_danger)
+                .flex()
+                .items_center()
+                .gap(space::SM)
+                .flex_shrink_0()
+                .hover(|s| s.bg(palette.status_danger_subtle))
+                .on_click(on_remove)
+                .child(
+                    Icon::new(IconName::Trash)
+                        .size(px(16.0))
+                        .text_color(palette.status_danger),
+                )
+                .child(cjk_inline_label("移除凭据")),
+        )
 }
 
 fn capability_checkbox<F>(

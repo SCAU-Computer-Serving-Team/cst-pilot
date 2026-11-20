@@ -10,6 +10,7 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
+use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
     DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
 };
@@ -25,6 +26,7 @@ pub struct PreferencesTabView {
     search_input: Entity<InputState>,
     provider_filter: Option<String>,
     default_dropdown_open: bool,
+    filter_dropdown_open: bool,
     ordered_enabled_ids: Vec<String>,
     selected_row_idx: usize,
     initialized_from_snapshot: bool,
@@ -47,11 +49,22 @@ impl PreferencesTabView {
             search_input,
             provider_filter: None,
             default_dropdown_open: false,
+            filter_dropdown_open: false,
             ordered_enabled_ids: Vec::new(),
             selected_row_idx: 0,
             initialized_from_snapshot: false,
             focus_handle: cx.focus_handle(),
         }
+    }
+
+    pub fn dismiss_dropdowns(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.default_dropdown_open && !self.filter_dropdown_open {
+            return false;
+        }
+        self.default_dropdown_open = false;
+        self.filter_dropdown_open = false;
+        cx.notify();
+        true
     }
 
     fn sync_from_snapshot_if_needed(&mut self) {
@@ -202,9 +215,12 @@ impl PreferencesTabView {
 }
 
 impl Render for PreferencesTabView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_from_snapshot_if_needed();
-        let palette = DesktopThemeGlobal::current(cx).palette;
+        let theme_global = DesktopThemeGlobal::current(cx);
+        let palette = theme_global.palette;
+        let transparency_enabled = theme_global.transparency_enabled;
+        let scale_factor = window.scale_factor();
         let snap = self.client.snapshot();
         let models_snap = snap.models.as_ref();
 
@@ -221,32 +237,21 @@ impl Render for PreferencesTabView {
             })
             .unwrap_or_else(|| "选择默认模型".to_owned());
 
-        // 1. Default model `72px` card with `208×32px` custom dropdown trigger + floating popover
+        // 1. Default model `72px` card with `208×32px` custom dropdown trigger + frosted popover (`H2p2z`)
         let ready_models: Vec<_> = catalog.iter().filter(|m| m.credential_ready).collect();
         let mut dropdown_menu_opt = None;
         if self.default_dropdown_open {
-            let mut menu = div()
-                .id("pref-default-model-popover")
-                .test_support()
-                .a11y_dialog("pref-default-model-popover", "选择默认模型")
-                .absolute()
-                .top(px(60.0))
-                .right(space::LG)
-                .w(px(256.0))
+            let mut items = div()
+                .id("pref-default-model-scroll")
+                .w_full()
                 .max_h(px(280.0))
                 .overflow_y_scroll()
-                .p(space::XS)
-                .rounded(radius::ROW)
-                .border_1()
-                .border_color(palette.border_subtle)
-                .bg(palette.bg_elevated)
-                .shadow(palette.craft_stack_shadows())
-                .occlude()
                 .flex()
-                .flex_col();
+                .flex_col()
+                .gap(space::MICRO);
 
             if ready_models.is_empty() {
-                menu = menu.child(
+                items = items.child(
                     apply_scale(div(), scale::CAPTION)
                         .p(space::SM)
                         .text_color(palette.text_muted)
@@ -259,12 +264,14 @@ impl Render for PreferencesTabView {
                     let prov = m.provider.clone();
                     let mid = m.id.clone();
                     let opt_id = SharedString::from(format!("pref-default-model-{prov}-{mid}"));
-                    let opt_label = SharedString::from(format!("{} · {}", m.provider, m.name));
-                    menu = menu.child(
+                    let mname_label = SharedString::from(m.name.clone());
+                    let prov_label = SharedString::from(m.provider.clone());
+                    let opt_aria = SharedString::from(format!("{} · {}", m.provider, m.name));
+                    items = items.child(
                         apply_scale(div(), scale::UI)
                             .id(opt_id.clone())
                             .test_support()
-                            .a11y_listitem(opt_id, opt_label.clone(), is_def)
+                            .a11y_listitem(opt_id, opt_aria, is_def)
                             .h(height::CONTROL)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -283,20 +290,51 @@ impl Render for PreferencesTabView {
                                 this.set_default_model(prov.clone(), mid.clone(), cx);
                                 cx.stop_propagation();
                             }))
-                            .child(div().min_w_0().truncate().child(opt_label))
-                            .children(is_def.then(|| {
-                                Icon::new(IconName::Check)
-                                    .size(px(13.0))
-                                    .text_color(palette.accent_ink)
-                            })),
+                            .child(div().flex_1().min_w_0().truncate().child(mname_label))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(space::XS)
+                                    .flex_shrink_0()
+                                    .child(
+                                        apply_scale(div(), scale::CAPTION)
+                                            .text_color(palette.text_muted)
+                                            .child(prov_label),
+                                    )
+                                    .children(is_def.then(|| {
+                                        Icon::new(IconName::Check)
+                                            .size(px(13.0))
+                                            .text_color(palette.accent_ink)
+                                    })),
+                            ),
                     );
                 }
             }
+            let menu = render_frosted_surface(
+                "pref-default-model-popover",
+                FrostedGlassSpec::popover_h2p2z(&palette),
+                palette.bg_elevated,
+                transparency_enabled,
+                scale_factor,
+            )
+            .test_support()
+            .a11y_dialog("pref-default-model-popover", "选择默认模型")
+            .absolute()
+            .top(px(60.0))
+            .right(space::LG)
+            .w(px(300.0))
+            .p(space::XS)
+            .rounded(radius::ROW)
+            .border_1()
+            .border_color(palette.border_hairline)
+            .shadow(palette.craft_stack_shadows())
+            .occlude()
+            .child(items);
             dropdown_menu_opt = Some(menu);
         }
 
         let default_card = div()
-            .relative()
             .w_full()
             .h(px(72.0))
             .px(space::LG)
@@ -340,15 +378,20 @@ impl Render for PreferencesTabView {
                     .rounded(radius::CONTROL)
                     .border_1()
                     .border_color(palette.border_strong)
-                    .bg(palette.bg_workspace)
+                    .bg(if self.default_dropdown_open {
+                        palette.bg_item_active
+                    } else {
+                        palette.bg_workspace
+                    })
                     .text_color(palette.text_primary)
                     .flex()
                     .items_center()
                     .justify_between()
                     .gap(space::XS)
-                    .hover(|s| s.bg(palette.bg_item_hover))
+                    .hover(|s| s.bg(palette.bg_surface))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.default_dropdown_open = !this.default_dropdown_open;
+                        this.filter_dropdown_open = false;
                         cx.notify();
                     }))
                     .child(
@@ -362,93 +405,125 @@ impl Render for PreferencesTabView {
                             .size(px(14.0))
                             .text_color(palette.text_secondary),
                     ),
-            )
-            .children(dropdown_menu_opt);
+            );
 
-        // 2. Search + Provider filter bar + `"全选 / 清空 / 刷新"` ghost buttons
+        // 2. Search + Provider filter `PHFud` dropdown (`zjoqr`) + `"全选 / 清空 / 刷新"` ghost buttons (`I8Og18`)
         let mut providers_seen = Vec::new();
         for m in catalog {
             if !providers_seen.contains(&m.provider) {
                 providers_seen.push(m.provider.clone());
             }
         }
-        let mut filter_pills = div()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(space::XS)
-            .child(
-                apply_scale(div(), scale::CAPTION_MEDIUM)
-                    .id("pref-filter-all")
-                    .test_support()
-                    .a11y_tab("pref-filter-all", "全部", self.provider_filter.is_none())
-                    .h(height::COMPACT)
-                    .px(space::SM)
-                    .rounded(radius::CONTROL)
-                    .border_1()
-                    .border_color(if self.provider_filter.is_none() {
-                        palette.border_subtle
-                    } else {
-                        gpui_kit::transparent_black()
-                    })
-                    .bg(if self.provider_filter.is_none() {
-                        palette.bg_item_active
-                    } else {
-                        gpui_kit::transparent_black()
-                    })
-                    .text_color(if self.provider_filter.is_none() {
-                        palette.text_primary
-                    } else {
-                        palette.text_secondary
-                    })
-                    .flex()
-                    .items_center()
-                    .hover(|s| s.bg(palette.bg_item_hover))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.provider_filter = None;
-                        cx.notify();
-                    }))
-                    .child(cjk_inline_label("全部")),
-            );
-        for prov in providers_seen {
-            let active = self.provider_filter.as_deref() == Some(prov.as_str());
-            let p_click = prov.clone();
-            let filter_id = SharedString::from(format!("pref-filter-{prov}"));
-            let prov_label = SharedString::from(prov);
-            filter_pills = filter_pills.child(
-                apply_scale(div(), scale::CAPTION_MEDIUM)
-                    .id(filter_id.clone())
-                    .test_support()
-                    .a11y_tab(filter_id, prov_label.clone(), active)
-                    .h(height::COMPACT)
-                    .px(space::SM)
-                    .rounded(radius::CONTROL)
-                    .border_1()
-                    .border_color(if active {
-                        palette.border_subtle
-                    } else {
-                        gpui_kit::transparent_black()
-                    })
-                    .bg(if active {
-                        palette.bg_item_active
-                    } else {
-                        gpui_kit::transparent_black()
-                    })
-                    .text_color(if active {
-                        palette.text_primary
-                    } else {
-                        palette.text_secondary
-                    })
-                    .flex()
-                    .items_center()
-                    .hover(|s| s.bg(palette.bg_item_hover))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.provider_filter = Some(p_click.clone());
-                        cx.notify();
-                    }))
-                    .child(prov_label),
-            );
-        }
+        let filter_label = self
+            .provider_filter
+            .as_deref()
+            .unwrap_or("全部服务")
+            .to_owned();
+
+        let filter_menu_opt = self.filter_dropdown_open.then(|| {
+            let mut items = div()
+                .id("pref-filter-scroll")
+                .w_full()
+                .max_h(px(260.0))
+                .overflow_y_scroll()
+                .flex()
+                .flex_col()
+                .gap(space::MICRO)
+                .child(
+                    apply_scale(div(), scale::UI)
+                        .id("pref-filter-all")
+                        .test_support()
+                        .a11y_listitem(
+                            "pref-filter-all",
+                            "全部服务",
+                            self.provider_filter.is_none(),
+                        )
+                        .h(height::CONTROL)
+                        .px(space::SM)
+                        .rounded(radius::CONTROL)
+                        .bg(if self.provider_filter.is_none() {
+                            palette.bg_item_active
+                        } else {
+                            gpui_kit::transparent_black()
+                        })
+                        .text_color(palette.text_primary)
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(space::SM)
+                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.provider_filter = None;
+                            this.filter_dropdown_open = false;
+                            cx.notify();
+                        }))
+                        .child(cjk_inline_label("全部服务"))
+                        .children(self.provider_filter.is_none().then(|| {
+                            Icon::new(IconName::Check)
+                                .size(px(13.0))
+                                .text_color(palette.accent_ink)
+                        })),
+                );
+
+            for prov in &providers_seen {
+                let active = self.provider_filter.as_deref() == Some(prov.as_str());
+                let p_click = prov.clone();
+                let filter_id = SharedString::from(format!("pref-filter-{prov}"));
+                let prov_label = SharedString::from(prov.clone());
+                items = items.child(
+                    apply_scale(div(), scale::UI)
+                        .id(filter_id.clone())
+                        .test_support()
+                        .a11y_listitem(filter_id, prov_label.clone(), active)
+                        .h(height::CONTROL)
+                        .px(space::SM)
+                        .rounded(radius::CONTROL)
+                        .bg(if active {
+                            palette.bg_item_active
+                        } else {
+                            gpui_kit::transparent_black()
+                        })
+                        .text_color(palette.text_primary)
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(space::SM)
+                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.provider_filter = Some(p_click.clone());
+                            this.filter_dropdown_open = false;
+                            cx.notify();
+                        }))
+                        .child(div().flex_1().min_w_0().truncate().child(prov_label))
+                        .children(active.then(|| {
+                            Icon::new(IconName::Check)
+                                .size(px(13.0))
+                                .text_color(palette.accent_ink)
+                        })),
+                );
+            }
+
+            render_frosted_surface(
+                "pref-filter-popover",
+                FrostedGlassSpec::popover_h2p2z(&palette),
+                palette.bg_elevated,
+                transparency_enabled,
+                scale_factor,
+            )
+            .test_support()
+            .a11y_dialog("pref-filter-popover", "按模型服务筛选")
+            .absolute()
+            .top(px(36.0))
+            .right_0()
+            .w(px(220.0))
+            .p(space::XS)
+            .rounded(radius::ROW)
+            .border_1()
+            .border_color(palette.border_hairline)
+            .shadow(palette.craft_stack_shadows())
+            .occlude()
+            .child(items)
+        });
 
         let search_q = self.search_input.read(cx).value().trim().to_lowercase();
         let matches_query = |prov: &str, mid: &str, mname: &str| -> bool {
@@ -492,96 +567,132 @@ impl Render for PreferencesTabView {
         let vis_for_all = visible_full_ids.clone();
         let vis_for_clear = visible_full_ids.clone();
 
-        let filter_toolbar = div()
+        let filter_row = div()
             .w_full()
             .flex()
-            .flex_wrap()
             .items_center()
             .justify_between()
             .gap(space::MD)
             .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap(space::SM)
-                    .child(
-                        div().w(px(208.0)).child(
-                            Input::new(&self.search_input)
-                                .accessibility_id("preferences-search-input")
-                                .aria_label("搜索模型或服务")
-                                .prefix(
-                                    Icon::new(IconName::Search)
-                                        .size(px(14.0))
-                                        .text_color(palette.text_muted),
-                                )
-                                .cleanable(true),
-                        ),
-                    )
-                    .child(filter_pills),
+                div().w(px(340.0)).child(
+                    Input::new(&self.search_input)
+                        .accessibility_id("preferences-search-input")
+                        .aria_label("搜索模型或服务")
+                        .h(height::CONTROL)
+                        .prefix(
+                            Icon::new(IconName::Search)
+                                .size(px(14.0))
+                                .text_color(palette.text_muted),
+                        )
+                        .cleanable(true),
+                ),
             )
             .child(
-                div()
+                apply_scale(div(), scale::UI)
+                    .id("pref-filter-dropdown-btn")
+                    .test_support()
+                    .a11y_toggle_button(
+                        "pref-filter-dropdown-btn",
+                        format!("筛选服务：{filter_label}"),
+                        self.filter_dropdown_open,
+                    )
+                    .min_w(px(108.0))
+                    .max_w(px(180.0))
+                    .h(height::CONTROL)
+                    .px(space::MD)
+                    .rounded(radius::CONTROL)
+                    .border_1()
+                    .border_color(palette.border_strong)
+                    .bg(if self.filter_dropdown_open {
+                        palette.bg_item_active
+                    } else {
+                        palette.bg_workspace
+                    })
+                    .text_color(palette.text_primary)
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(space::SM)
+                    .hover(|s| s.bg(palette.bg_surface))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.filter_dropdown_open = !this.filter_dropdown_open;
+                        this.default_dropdown_open = false;
+                        cx.notify();
+                    }))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .child(SharedString::from(filter_label)),
+                    )
+                    .child(
+                        Icon::new(IconName::ChevronDown)
+                            .size(px(14.0))
+                            .text_color(palette.text_secondary),
+                    ),
+            );
+
+        let batch_toolbar = div()
+            .w_full()
+            .flex()
+            .items_center()
+            .gap(space::SM)
+            .child(
+                apply_scale(div(), scale::UI)
+                    .id("pref-select-all-btn")
+                    .test_support()
+                    .a11y_button("pref-select-all-btn", "全选可见模型")
+                    .h(height::CONTROL)
+                    .px(space::SM)
+                    .rounded(radius::CONTROL)
+                    .text_color(palette.text_secondary)
+                    .flex()
+                    .items_center()
+                    .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.select_all_visible(vis_for_all.clone(), cx);
+                    }))
+                    .child(cjk_inline_label("全选")),
+            )
+            .child(
+                apply_scale(div(), scale::UI)
+                    .id("pref-clear-all-btn")
+                    .test_support()
+                    .a11y_button("pref-clear-all-btn", "清空可见模型")
+                    .h(height::CONTROL)
+                    .px(space::SM)
+                    .rounded(radius::CONTROL)
+                    .text_color(palette.text_secondary)
+                    .flex()
+                    .items_center()
+                    .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.clear_visible(vis_for_clear.clone(), cx);
+                    }))
+                    .child(cjk_inline_label("清空")),
+            )
+            .child(
+                apply_scale(div(), scale::UI)
+                    .id("pref-refresh-btn")
+                    .test_support()
+                    .a11y_button("pref-refresh-btn", "刷新模型列表")
+                    .h(height::CONTROL)
+                    .px(space::SM)
+                    .rounded(radius::CONTROL)
+                    .text_color(palette.text_secondary)
                     .flex()
                     .items_center()
                     .gap(space::XS)
+                    .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.refresh_catalog(cx);
+                    }))
                     .child(
-                        apply_scale(div(), scale::UI)
-                            .id("pref-select-all-btn")
-                            .test_support()
-                            .a11y_button("pref-select-all-btn", "全选可见模型")
-                            .h(height::CONTROL)
-                            .px(space::SM)
-                            .rounded(radius::CONTROL)
-                            .text_color(palette.text_secondary)
-                            .flex()
-                            .items_center()
-                            .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.select_all_visible(vis_for_all.clone(), cx);
-                            }))
-                            .child(cjk_inline_label("全选")),
+                        Icon::new(IconName::RefreshCw)
+                            .size(px(13.0))
+                            .text_color(palette.text_secondary),
                     )
-                    .child(
-                        apply_scale(div(), scale::UI)
-                            .id("pref-clear-all-btn")
-                            .test_support()
-                            .a11y_button("pref-clear-all-btn", "清空可见模型")
-                            .h(height::CONTROL)
-                            .px(space::SM)
-                            .rounded(radius::CONTROL)
-                            .text_color(palette.text_secondary)
-                            .flex()
-                            .items_center()
-                            .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.clear_visible(vis_for_clear.clone(), cx);
-                            }))
-                            .child(cjk_inline_label("清空")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::UI)
-                            .id("pref-refresh-btn")
-                            .test_support()
-                            .a11y_button("pref-refresh-btn", "刷新模型列表")
-                            .h(height::CONTROL)
-                            .px(space::SM)
-                            .rounded(radius::CONTROL)
-                            .text_color(palette.text_secondary)
-                            .flex()
-                            .items_center()
-                            .gap(space::XS)
-                            .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.refresh_catalog(cx);
-                            }))
-                            .child(
-                                Icon::new(IconName::RefreshCw)
-                                    .size(px(13.0))
-                                    .text_color(palette.text_secondary),
-                            )
-                            .child(cjk_inline_label("刷新")),
-                    ),
+                    .child(cjk_inline_label("刷新")),
             );
 
         // 3. Enabled models `56px` rows (`16×16` checkbox + `16/24` model name + `140px` `14/20` provider + reorder)
@@ -804,6 +915,8 @@ impl Render for PreferencesTabView {
             );
         }
 
+        let enabled_count = self.ordered_enabled_ids.len();
+
         div()
             .id("settings-preferences-tab")
             .test_support()
@@ -815,23 +928,78 @@ impl Render for PreferencesTabView {
             .flex_col()
             .gap(space::GROUP)
             .child(
-                apply_scale(div(), scale::TITLE)
-                    .text_color(palette.text_primary)
-                    .child(cjk_inline_label("模型偏好")),
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(space::XS)
+                    .child(
+                        apply_scale(div(), scale::TITLE)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label("模型偏好")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI)
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label("设置新会话默认模型与输入框中的模型范围。")),
+                    ),
             )
-            .child(default_card)
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap(space::MD)
+                    .gap(space::SM)
                     .child(
                         apply_scale(div(), scale::BODY_SEMIBOLD)
                             .text_color(palette.text_primary)
-                            .child(cjk_inline_label("启用模型与顺序")),
+                            .child(cjk_inline_label("新会话默认模型")),
                     )
-                    .child(filter_toolbar)
-                    .child(list_card),
+                    .child(
+                        div()
+                            .relative()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap(space::GROUP)
+                            .child(default_card)
+                            .child(
+                                div()
+                                    .relative()
+                                    .w_full()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(space::GROUP)
+                                    .child(filter_row)
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .gap(space::SM)
+                                            .child(
+                                                div()
+                                                    .w_full()
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_between()
+                                                    .child(
+                                                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                                                            .text_color(palette.text_primary)
+                                                            .child(cjk_inline_label("启用模型")),
+                                                    )
+                                                    .child(
+                                                        apply_scale(div(), scale::UI)
+                                                            .text_color(palette.text_secondary)
+                                                            .child(cjk_inline_label(format!(
+                                                                "{enabled_count} 个已启用"
+                                                            ))),
+                                                    ),
+                                            )
+                                            .child(batch_toolbar)
+                                            .child(list_card),
+                                    )
+                                    .children(filter_menu_opt),
+                            )
+                            .children(dropdown_menu_opt),
+                    ),
             )
     }
 }

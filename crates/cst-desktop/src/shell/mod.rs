@@ -485,6 +485,8 @@ impl AppShell {
             || (self.route == ShellRoute::Session
                 && self.session_subview == SessionSubView::Tree
                 && self.branch_tree_view.read(cx).has_summary_modal())
+            || (self.route == ShellRoute::Account
+                && self.account_view.read(cx).has_logout_confirm())
             || self.snapshot.channel_mode == ChannelModeDto::WebActive
     }
 
@@ -1101,6 +1103,25 @@ impl AppShell {
             self.return_to_chat(window, cx);
             return true;
         }
+        if self.route == ShellRoute::Account
+            && self
+                .account_view
+                .update(cx, |av, cx| av.dismiss_logout_confirm(window, cx))
+        {
+            return true;
+        }
+        if self.route == ShellRoute::Login
+            && self.login_view.update(cx, |lv, cx| lv.dismiss_dropdown(cx))
+        {
+            return true;
+        }
+        if self.route == ShellRoute::Settings
+            && self
+                .settings_view
+                .update(cx, |sv, cx| sv.dismiss_topmost_surface(cx))
+        {
+            return true;
+        }
         if matches!(self.route, ShellRoute::Home | ShellRoute::Session)
             && self
                 .workbench
@@ -1641,6 +1662,13 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         match event {
+            AccountViewEvent::OpenLoginTab(tab) => {
+                let target_tab = *tab;
+                self.login_view
+                    .update(cx, |lv, cx| lv.set_tab(target_tab, cx));
+                self.set_route(ShellRoute::Login, cx);
+                cx.notify();
+            }
             AccountViewEvent::LoggedOutCstoa => {
                 self.show_top_notice("已退出 CSTOA 登录，其余模型服务凭据保持不变。", cx);
                 self.set_route(ShellRoute::Login, cx);
@@ -2124,6 +2152,19 @@ impl AppShell {
             div().absolute().bottom(px(50.0)).left(space::LG)
         };
 
+        let account_identity = self
+            .snapshot
+            .account
+            .as_ref()
+            .filter(|a| a.signed_in)
+            .map(|a| {
+                let name = a.profile.name.as_deref().unwrap_or("科协队员");
+                match a.profile.student_id.as_deref().filter(|s| !s.is_empty()) {
+                    Some(sid) => format!("{name} · {sid}"),
+                    None => name.to_owned(),
+                }
+            });
+
         div()
             .absolute()
             .top_0()
@@ -2149,7 +2190,7 @@ impl AppShell {
                     .role(gpui::Role::Menu)
                     .accessibility_id("account-popover-menu")
                     .aria_label("账号与偏好菜单")
-                    .w(px(216.0))
+                    .w(px(224.0))
                     .p(space::XS)
                     .rounded(radius::ROW)
                     .border_1()
@@ -2158,6 +2199,17 @@ impl AppShell {
                     .flex_col()
                     .gap(space::MICRO)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .children(account_identity.map(|identity_label| {
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .id("account-menu-identity-header")
+                            .test_support()
+                            .w_full()
+                            .px(space::SM)
+                            .py(space::XS)
+                            .text_color(palette.text_primary)
+                            .truncate()
+                            .child(cjk_inline_label(identity_label))
+                    }))
                     .child(
                         apply_scale(div(), scale::UI)
                             .id("account-menu-profile-btn")

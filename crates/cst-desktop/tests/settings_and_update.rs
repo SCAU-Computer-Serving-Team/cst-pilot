@@ -895,12 +895,17 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
     })
     .unwrap();
 
-    // 7. `AccountView` CSTOA-only logout -> transitions to `LoginView` (`864px` sky + `300px` viewport + offline QR)
+    // 7. `AccountView` CSTOA-only logout (`sVucQ` confirm + `Esc` cancel + confirm logout) -> `LoginView` (`864px` sky + `300px` viewport + offline QR)
     cx.update_window(win_handle, |_, window, cx| {
         shell.update(cx, |s, cx| s.set_route(ShellRoute::Account, cx));
         window.render_frame(cx);
         assert!(window.find("account-view").visible());
         window.click("account-cstoa-logout-btn", cx);
+        assert!(window.find("account-logout-confirm-dialog").visible());
+        window.press("escape", cx);
+        assert!(window.try_find("account-logout-confirm-dialog").is_none());
+        window.click("account-cstoa-logout-btn", cx);
+        window.click("account-logout-confirm-btn", cx);
     })
     .unwrap();
 
@@ -910,6 +915,11 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
     .await;
 
     cx.update_window(win_handle, |_, window, cx| {
+        // Check Level-1 inline validation on empty APIKey login without leaving LoginView
+        window.click("login-tab-apikey", cx);
+        window.click("login-apikey-save-btn", cx);
+        assert!(window.find("login-apikey-error-text").visible());
+        window.click("login-tab-cstoa", cx);
         // Collapse sidebar on `1280×800` window so full login canvas reaches its `864px` max width alongside `300px` viewport
         window.press("ctrl-b", cx);
         let sky = window.find("login-sky-canvas-864");

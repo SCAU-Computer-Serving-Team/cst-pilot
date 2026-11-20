@@ -1,21 +1,24 @@
 use std::sync::Arc;
 
-use cst_client::ClientHandle;
+use cst_client::{ClientError, ClientHandle};
 use gpui::{Image, StyledImage as _};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
-use gpui_kit::component::input::{Input, InputContentType, InputState};
+use gpui_kit::component::input::{Input, InputContentType, InputEvent, InputState};
 use gpui_kit::{
-    AppContext as _, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ObjectFit,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, TestSupportExt,
-    Window, div, img, px,
+    AppContext as _, Context, Entity, EventEmitter, FontWeight, InteractiveElement, IntoElement,
+    ObjectFit, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, TestSupportExt, Window, div, img, px,
 };
 use serde_json::Value;
 use zeroize::Zeroizing;
 
 use crate::accessibility::A11yElementExt as _;
 use crate::auth::cstoa_qr::{now_epoch_ms, parse_cstoa_oauth_payload, rasterize_qr_image_offline};
-use crate::background::{SkyPreset, render_login_9_stop_fade, render_sky_background_rounded};
+use crate::background::{
+    FrostedGlassSpec, SkyPreset, render_frosted_surface, render_login_9_stop_fade,
+    render_sky_background_rounded,
+};
 use crate::shell::open_url_in_trusted_browser;
 use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
@@ -52,7 +55,10 @@ pub struct LoginView {
     selected_provider_id: String,
     api_key_input: Entity<InputState>,
     base_url_input: Entity<InputState>,
+    api_key_error: Option<SharedString>,
+    provider_dropdown_open: bool,
     saving_key: bool,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<LoginViewEvent> for LoginView {}
@@ -67,6 +73,12 @@ impl LoginView {
         let base_url_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("可选自定义 Base URL…"));
 
+        let key_sub = cx.subscribe(&api_key_input, |this, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) && this.api_key_error.take().is_some() {
+                cx.notify();
+            }
+        });
+
         Self {
             client,
             tab: LoginMethodTab::CstoaQr,
@@ -79,8 +91,27 @@ impl LoginView {
             selected_provider_id: "deepseek".into(),
             api_key_input,
             base_url_input,
+            api_key_error: None,
+            provider_dropdown_open: false,
             saving_key: false,
+            _subscriptions: vec![key_sub],
         }
+    }
+
+    pub fn set_tab(&mut self, tab: LoginMethodTab, cx: &mut Context<Self>) {
+        self.tab = tab;
+        self.provider_dropdown_open = false;
+        self.api_key_error = None;
+        cx.notify();
+    }
+
+    pub fn dismiss_dropdown(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.provider_dropdown_open {
+            return false;
+        }
+        self.provider_dropdown_open = false;
+        cx.notify();
+        true
     }
 
     pub fn set_sky_time(&mut self, sky_time_secs: f32) {
@@ -190,11 +221,11 @@ impl LoginView {
         }
         let raw_key = Zeroizing::new(self.api_key_input.read(cx).value().trim().to_owned());
         if raw_key.is_empty() {
-            cx.emit(LoginViewEvent::ErrorMessage(
-                "请输入有效的 API Key。".into(),
-            ));
+            self.api_key_error = Some("请输入有效的 API Key。".into());
+            cx.notify();
             return;
         }
+        self.api_key_error = None;
         let base_url = {
             let b = self.base_url_input.read(cx).value().trim().to_owned();
             (!b.is_empty()).then_some(b)
@@ -218,7 +249,11 @@ impl LoginView {
                 this.saving_key = false;
                 match res {
                     Ok(_) => {
+                        this.api_key_error = None;
                         cx.emit(LoginViewEvent::CredentialsSavedReturn);
+                    }
+                    Err(ClientError::BadRequest { message, .. }) => {
+                        this.api_key_error = Some(message.into());
                     }
                     Err(err) => {
                         cx.emit(LoginViewEvent::ErrorMessage(err.to_string()));
@@ -358,7 +393,7 @@ impl LoginView {
             .items_center()
             .gap(space::MD)
             .child(qr_box)
-            // Always-present `6×6` status dot + monospace countdown + `"刷新二维码"` entry
+            // `N1Rfg`: `6×6` status dot + `"等待扫码 ·"` / countdown + `1×12` separator + `$accent-ink` refresh link
             .child(
                 div()
                     .flex()
@@ -372,12 +407,23 @@ impl LoginView {
                             .rounded(radius::FULL)
                             .bg(dot_color),
                     )
+                    .children(has_live_qr.then(|| {
+                        apply_scale(div(), scale::CAPTION)
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label("等待扫码 ·"))
+                    }))
                     .child(
                         apply_scale(div(), scale::CAPTION)
                             .font_family(mono_family)
-                            .text_color(palette.text_secondary)
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(if has_live_qr {
+                                palette.text_primary
+                            } else {
+                                palette.text_secondary
+                            })
                             .child(countdown_text),
                     )
+                    .child(div().w(px(1.0)).h(px(12.0)).bg(palette.border_strong))
                     .child(
                         apply_scale(div(), scale::CAPTION_MEDIUM)
                             .id("cstoa-qr-refresh-btn")
@@ -386,11 +432,11 @@ impl LoginView {
                             .h(height::INLINE)
                             .px(space::XS)
                             .rounded(radius::CONTROL)
-                            .text_color(palette.text_secondary)
+                            .text_color(palette.accent_ink)
                             .flex()
                             .items_center()
-                            .gap(space::MICRO)
-                            .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                            .gap(space::TIGHT)
+                            .hover(|s| s.bg(palette.bg_item_hover))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.qr_image = None;
                                 this.start_cstoa_qr_flow(cx);
@@ -398,9 +444,9 @@ impl LoginView {
                             .child(
                                 Icon::new(IconName::RefreshCw)
                                     .size(px(12.0))
-                                    .text_color(palette.text_secondary),
+                                    .text_color(palette.accent_ink),
                             )
-                            .child(cjk_inline_label("刷新二维码")),
+                            .child(cjk_inline_label("刷新")),
                     ),
             )
     }
@@ -410,6 +456,7 @@ impl Render for LoginView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme_global = DesktopThemeGlobal::current(cx);
         let palette = theme_global.palette;
+        let transparency_enabled = theme_global.transparency_enabled;
         let mono_family = theme_global.mono_font_family;
         let scale_factor = window.scale_factor();
 
@@ -440,6 +487,7 @@ impl Render for LoginView {
             .map(|p| p.as_slice())
             .unwrap_or(&[]);
 
+        let mut provider_menu_opt = None;
         let tab_content = match self.tab {
             LoginMethodTab::CstoaQr => self
                 .render_cstoa_qr_pane(mono_family, &palette, window, cx)
@@ -494,7 +542,6 @@ impl Render for LoginView {
                 col.into_any_element()
             }
             LoginMethodTab::ApiKey => {
-                let mut provider_pills = div().flex().flex_wrap().gap(space::XS);
                 let key_providers: Vec<(String, String)> = {
                     let from_snap: Vec<(String, String)> = providers
                         .iter()
@@ -511,65 +558,221 @@ impl Render for LoginView {
                         from_snap
                     }
                 };
-                for (pid, pname) in key_providers {
-                    let active = self.selected_provider_id == pid;
-                    let pid_click = pid.clone();
-                    let pill_id = SharedString::from(format!("login-apikey-provider-{pid}"));
-                    let pill_label = SharedString::from(pname);
-                    provider_pills = provider_pills.child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .id(pill_id.clone())
-                            .test_support()
-                            .a11y_tab(pill_id, pill_label.clone(), active)
-                            .h(height::COMPACT)
-                            .px(space::SM)
-                            .rounded(radius::CONTROL)
-                            .border_1()
-                            .border_color(if active {
-                                palette.border_strong
-                            } else {
-                                palette.border_subtle
-                            })
-                            .bg(if active {
-                                palette.bg_item_active
-                            } else {
-                                palette.bg_workspace
-                            })
-                            .text_color(if active {
-                                palette.text_primary
-                            } else {
-                                palette.text_secondary
-                            })
-                            .flex()
-                            .items_center()
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.selected_provider_id = pid_click.clone();
-                                cx.notify();
-                            }))
-                            .child(pill_label),
-                    );
-                }
+                let selected_provider_name = key_providers
+                    .iter()
+                    .find(|(pid, _)| pid == &self.selected_provider_id)
+                    .map(|(_, pname)| pname.clone())
+                    .unwrap_or_else(|| self.selected_provider_id.clone());
+
+                provider_menu_opt = self.provider_dropdown_open.then(|| {
+                    let mut list = div()
+                        .id("login-apikey-provider-menu-scroll")
+                        .w_full()
+                        .max_h(px(220.0))
+                        .overflow_y_scroll()
+                        .flex()
+                        .flex_col()
+                        .gap(space::MICRO);
+
+                    for (pid, pname) in &key_providers {
+                        let active = &self.selected_provider_id == pid;
+                        let pid_click = pid.clone();
+                        let opt_id = SharedString::from(format!("login-apikey-provider-{pid}"));
+                        let opt_label = SharedString::from(pname.clone());
+                        list = list.child(
+                            apply_scale(div(), scale::UI)
+                                .id(opt_id.clone())
+                                .test_support()
+                                .a11y_listitem(opt_id, opt_label.clone(), active)
+                                .h(height::CONTROL)
+                                .px(space::SM)
+                                .rounded(radius::CONTROL)
+                                .bg(if active {
+                                    palette.bg_item_active
+                                } else {
+                                    gpui_kit::transparent_black()
+                                })
+                                .text_color(palette.text_primary)
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap(space::SM)
+                                .hover(|s| s.bg(palette.bg_item_hover))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.selected_provider_id = pid_click.clone();
+                                    this.provider_dropdown_open = false;
+                                    this.api_key_error = None;
+                                    cx.notify();
+                                }))
+                                .child(div().min_w_0().truncate().child(opt_label))
+                                .children(active.then(|| {
+                                    Icon::new(IconName::Check)
+                                        .size(px(14.0))
+                                        .text_color(palette.accent_ink)
+                                })),
+                        );
+                    }
+
+                    render_frosted_surface(
+                        "login-apikey-provider-popover",
+                        FrostedGlassSpec::popover_h2p2z(&palette),
+                        palette.bg_elevated,
+                        transparency_enabled,
+                        scale_factor,
+                    )
+                    .test_support()
+                    .a11y_dialog("login-apikey-provider-popover", "选择服务提供商")
+                    .absolute()
+                    .top(px(62.0))
+                    .left_0()
+                    .right_0()
+                    .p(space::XS)
+                    .rounded(radius::ROW)
+                    .border_1()
+                    .border_color(palette.border_hairline)
+                    .shadow(palette.craft_stack_shadows())
+                    .occlude()
+                    .child(list)
+                });
 
                 div()
                     .w_full()
                     .flex()
                     .flex_col()
                     .gap(space::MD)
-                    .child(provider_pills)
                     .child(
-                        Input::new(&self.api_key_input)
-                            .accessibility_id("login-apikey-input")
-                            .content_type(InputContentType::Password)
-                            .aria_label("API Key 密钥")
-                            .h(height::FIELD)
-                            .mask_toggle(),
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap(space::TIGHT)
+                            .child(
+                                apply_scale(div(), scale::CAPTION_MEDIUM)
+                                    .text_color(palette.text_primary)
+                                    .child(cjk_inline_label("服务提供商")),
+                            )
+                            .child(
+                                apply_scale(div(), scale::UI)
+                                    .id("login-apikey-provider-trigger")
+                                    .test_support()
+                                    .a11y_toggle_button(
+                                        "login-apikey-provider-trigger",
+                                        format!("服务提供商：{selected_provider_name}"),
+                                        self.provider_dropdown_open,
+                                    )
+                                    .w_full()
+                                    .h(px(36.0))
+                                    .px(space::MD)
+                                    .rounded(radius::CONTROL)
+                                    .border_1()
+                                    .border_color(palette.border_strong)
+                                    .bg(if self.provider_dropdown_open {
+                                        palette.bg_item_active
+                                    } else {
+                                        palette.bg_workspace
+                                    })
+                                    .text_color(palette.text_primary)
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .gap(space::SM)
+                                    .hover(|s| s.bg(palette.bg_surface))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.provider_dropdown_open = !this.provider_dropdown_open;
+                                        cx.notify();
+                                    }))
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .truncate()
+                                            .child(SharedString::from(selected_provider_name)),
+                                    )
+                                    .child(
+                                        Icon::new(IconName::ChevronDown)
+                                            .size(px(14.0))
+                                            .text_color(palette.text_secondary),
+                                    ),
+                            ),
                     )
                     .child(
-                        Input::new(&self.base_url_input)
-                            .accessibility_id("login-baseurl-input")
-                            .aria_label("自定义 Base URL")
-                            .h(height::FIELD),
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap(space::TIGHT)
+                            .child(
+                                apply_scale(div(), scale::CAPTION_MEDIUM)
+                                    .text_color(palette.text_primary)
+                                    .child("API Key"),
+                            )
+                            .child(
+                                div()
+                                    .w_full()
+                                    .h(px(36.0))
+                                    .px(space::XS)
+                                    .rounded(radius::CONTROL)
+                                    .border_1()
+                                    .border_color(if self.api_key_error.is_some() {
+                                        palette.status_danger
+                                    } else {
+                                        palette.border_strong
+                                    })
+                                    .bg(palette.bg_workspace)
+                                    .flex()
+                                    .items_center()
+                                    .child(
+                                        Input::new(&self.api_key_input)
+                                            .accessibility_id("login-apikey-input")
+                                            .content_type(InputContentType::Password)
+                                            .aria_label("API Key 密钥")
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .w_full()
+                                            .h_full()
+                                            .mask_toggle(),
+                                    ),
+                            )
+                            .children(self.api_key_error.clone().map(|err_msg| {
+                                apply_scale(div(), scale::CAPTION)
+                                    .id("login-apikey-error-text")
+                                    .test_support()
+                                    .a11y_status("login-apikey-error-text", err_msg.clone())
+                                    .text_color(palette.status_danger)
+                                    .child(err_msg)
+                            })),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap(space::TIGHT)
+                            .child(
+                                apply_scale(div(), scale::CAPTION_MEDIUM)
+                                    .text_color(palette.text_primary)
+                                    .child(cjk_inline_label("服务地址（可选）")),
+                            )
+                            .child(
+                                div()
+                                    .w_full()
+                                    .h(px(36.0))
+                                    .px(space::XS)
+                                    .rounded(radius::CONTROL)
+                                    .border_1()
+                                    .border_color(palette.border_strong)
+                                    .bg(palette.bg_workspace)
+                                    .flex()
+                                    .items_center()
+                                    .child(
+                                        Input::new(&self.base_url_input)
+                                            .accessibility_id("login-baseurl-input")
+                                            .aria_label("自定义 Base URL")
+                                            .appearance(false)
+                                            .bordered(false)
+                                            .w_full()
+                                            .h_full(),
+                                    ),
+                            ),
                     )
                     .child(
                         apply_scale(div(), scale::UI_MEDIUM)
@@ -584,8 +787,8 @@ impl Render for LoginView {
                                 },
                             )
                             .w_full()
-                            .h(height::CONTROL)
-                            .px(space::LG)
+                            .h(px(36.0))
+                            .px(space::MD)
                             .rounded(radius::CONTROL)
                             .bg(palette.accent_solid)
                             .text_color(palette.text_on_accent)
@@ -621,8 +824,7 @@ impl Render for LoginView {
                     false,
                     &palette,
                     cx.listener(|this, _, _, cx| {
-                        this.tab = LoginMethodTab::ApiKey;
-                        cx.notify();
+                        this.set_tab(LoginMethodTab::ApiKey, cx);
                     }),
                 )
                 .into_any_element()
@@ -633,8 +835,7 @@ impl Render for LoginView {
                     false,
                     &palette,
                     cx.listener(|this, _, _, cx| {
-                        this.tab = LoginMethodTab::CstoaQr;
-                        cx.notify();
+                        this.set_tab(LoginMethodTab::CstoaQr, cx);
                     }),
                 )
                 .into_any_element()
@@ -646,8 +847,7 @@ impl Render for LoginView {
                     false,
                     &palette,
                     cx.listener(|this, _, _, cx| {
-                        this.tab = LoginMethodTab::ApiKey;
-                        cx.notify();
+                        this.set_tab(LoginMethodTab::ApiKey, cx);
                     }),
                 )
                 .into_any_element()
@@ -658,8 +858,7 @@ impl Render for LoginView {
                     false,
                     &palette,
                     cx.listener(|this, _, _, cx| {
-                        this.tab = LoginMethodTab::OAuth;
-                        cx.notify();
+                        this.set_tab(LoginMethodTab::OAuth, cx);
                     }),
                 )
                 .into_any_element()
@@ -724,8 +923,17 @@ impl Render for LoginView {
                                     }),
                             ),
                     )
-                    .child(tab_content)
-                    .child(mode_footer),
+                    .child(
+                        div()
+                            .relative()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap(space::LG)
+                            .child(tab_content)
+                            .child(mode_footer)
+                            .children(provider_menu_opt),
+                    ),
             );
 
         div()
