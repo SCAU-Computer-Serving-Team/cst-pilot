@@ -34,8 +34,12 @@ fn show_error_dialog(message: &str) {
     }
 }
 
-/// Ensures the desktop process runs elevated via UAC (`ShellExecuteExW("runas")`) on normal startup.
-/// Returns `Ok(true)` if already elevated, `Ok(false)` if an elevated child was launched (caller should exit 0).
+/// Ensures administrator availability on normal startup:
+/// - Split-token administrators (`TokenElevationTypeLimited`) keep `cst-pilot.exe` at Medium Integrity Level
+///   so global hotkeys (e.g. `F1` screenshot tools), Explorer drag-and-drop, and zero-UAC single-instance wakeups
+///   are never blocked by Windows UIPI, while `cst-client` elevates headless `cst-server.exe` via UAC.
+/// - Restricted standard accounts (`TokenElevationTypeDefault` + non-admin) fall back to elevating the whole process
+///   at entry so desktop and server share the same target administrator SID.
 fn ensure_elevated_at_entry(
     kit_root: &std::path::Path,
     has_explicit_kit_root: bool,
@@ -44,6 +48,9 @@ fn ensure_elevated_at_entry(
         return Ok(true);
     }
     if cst_os::is_elevated()? {
+        return Ok(true);
+    }
+    if cst_os::can_elevate_same_user().unwrap_or(false) {
         return Ok(true);
     }
 

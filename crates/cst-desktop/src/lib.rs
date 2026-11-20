@@ -324,6 +324,7 @@ pub fn open_desktop_shell_window(
 pub fn run_desktop_app(kit_root: PathBuf, initial_ui: RestartUi) -> Result<(), String> {
     let (desktop_exe, server_exe, updater_exe) = resolve_sibling_kit_binaries(&kit_root)?;
     let mut boot_opts = BootstrapOptions {
+        allow_uac_server_spawn: cfg!(windows),
         expected_desktop_exe: Some(desktop_exe),
         expected_server_exe: Some(server_exe),
         expected_updater_exe: Some(updater_exe),

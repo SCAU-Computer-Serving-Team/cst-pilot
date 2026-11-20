@@ -25,6 +25,7 @@ pub type CurrentTokenFn = Arc<dyn Fn() -> Result<ProcessTokenInfo, String> + Sen
 #[derive(Clone)]
 pub struct BootstrapOptions {
     pub require_elevation: bool,
+    pub allow_uac_server_spawn: bool,
     pub expected_desktop_exe: Option<PathBuf>,
     pub expected_server_exe: Option<PathBuf>,
     pub expected_updater_exe: Option<PathBuf>,
@@ -39,6 +40,7 @@ impl Default for BootstrapOptions {
     fn default() -> Self {
         Self {
             require_elevation: true,
+            allow_uac_server_spawn: false,
             expected_desktop_exe: None,
             expected_server_exe: None,
             expected_updater_exe: None,
@@ -121,7 +123,7 @@ pub fn acquire_or_activate_desktop_instance(
 ) -> Result<DesktopInstanceOutcome, ClientError> {
     let canonical_root = canonicalize_kit_root(kit_root)?;
     let self_token = (options.current_token_fn)().map_err(ClientError::BootstrapFailed)?;
-    if options.require_elevation && !self_token.elevated {
+    if options.require_elevation && !options.allow_uac_server_spawn && !self_token.elevated {
         return Err(ClientError::NotElevated(
             "桌面端需要管理员权限运行，请通过 UAC 授权后启动。".into(),
         ));
@@ -265,7 +267,7 @@ pub async fn ensure_server_running(
 ) -> Result<VerifiedServerEndpoint, ClientError> {
     let canonical_root = canonicalize_kit_root(kit_root)?;
     let self_token = (options.current_token_fn)().map_err(ClientError::BootstrapFailed)?;
-    if options.require_elevation && !self_token.elevated {
+    if options.require_elevation && !options.allow_uac_server_spawn && !self_token.elevated {
         return Err(ClientError::NotElevated(
             "桌面端需要管理员权限运行，请通过 UAC 授权后启动。".into(),
         ));
@@ -289,7 +291,8 @@ pub async fn ensure_server_running(
         return Err(ClientError::Disconnected("本机后台服务未运行。".into()));
     }
 
-    // Step 2: Spawn `<kit_root>/cst-server.exe` with `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`
+    // Step 2: Spawn `<kit_root>/cst-server.exe` (via UAC `runas` when desktop runs at Medium IL,
+    // or direct `CREATE_NO_WINDOW` child when already elevated / elevation not required).
     let server_exe = options.server_exe_for(&canonical_root);
     if !server_exe.is_file() || path_is_reparse_or_symlink(&server_exe) {
         return Err(ClientError::BootstrapFailed(format!(
@@ -298,23 +301,28 @@ pub async fn ensure_server_running(
         )));
     }
 
-    let mut cmd = Command::new(&server_exe);
-    apply_portable_sanitized_env(&mut cmd, &canonical_root)?;
-    cmd.args(&options.server_extra_args)
-        .current_dir(&canonical_root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW (0x0800_0000) | CREATE_NEW_PROCESS_GROUP (0x0000_0200)
-        cmd.creation_flags(0x0800_0200);
-    }
+    let mut spawned = if options.require_elevation && !self_token.elevated {
+        spawn_elevated_server_via_uac(&server_exe, &canonical_root, &options.server_extra_args)?
+    } else {
+        let mut cmd = Command::new(&server_exe);
+        apply_portable_sanitized_env(&mut cmd, &canonical_root)?;
+        cmd.args(&options.server_extra_args)
+            .current_dir(&canonical_root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            // CREATE_NO_WINDOW (0x0800_0000) | CREATE_NEW_PROCESS_GROUP (0x0000_0200)
+            cmd.creation_flags(0x0800_0200);
+        }
 
-    let mut child = cmd.spawn().map_err(|e| {
-        ClientError::BootstrapFailed(format!("无法启动本机后台服务 cst-server.exe：{e}"))
-    })?;
+        let child = cmd.spawn().map_err(|e| {
+            ClientError::BootstrapFailed(format!("无法启动本机后台服务 cst-server.exe：{e}"))
+        })?;
+        SpawnedServerHandle::Direct(child)
+    };
 
     let deadline = Instant::now() + options.startup_timeout;
     loop {
@@ -327,7 +335,7 @@ pub async fn ensure_server_running(
             ProbeOutcome::Stopping(_) | ProbeOutcome::AbsentOrStale => {}
         }
 
-        if let Ok(Some(exit_status)) = child.try_wait() {
+        if let Some(exit_desc) = spawned.try_exited() {
             // One final probe in case another paired instance won the race cleanly
             if let ProbeOutcome::Verified(endpoint) =
                 probe_existing_server(&canonical_root, &self_token, options).await
@@ -335,19 +343,160 @@ pub async fn ensure_server_running(
                 return Ok(endpoint);
             }
             return Err(ClientError::BootstrapFailed(format!(
-                "后台服务进程提前退出（状态码：{exit_status}）。"
+                "后台服务进程提前退出（{exit_desc}）。"
             )));
         }
 
         if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+            spawned.terminate_best_effort();
             return Err(ClientError::BootstrapFailed(
                 "等待本机后台服务就绪超时（10 秒）。".into(),
             ));
         }
 
         tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+enum SpawnedServerHandle {
+    Direct(std::process::Child),
+    #[cfg(windows)]
+    Elevated(std::os::windows::io::OwnedHandle),
+}
+
+impl SpawnedServerHandle {
+    fn try_exited(&mut self) -> Option<String> {
+        match self {
+            Self::Direct(child) => child
+                .try_wait()
+                .ok()
+                .flatten()
+                .map(|st| format!("状态码：{st}")),
+            #[cfg(windows)]
+            Self::Elevated(handle) => {
+                use std::os::windows::io::AsRawHandle;
+                use windows::Win32::{
+                    Foundation::{HANDLE, WAIT_OBJECT_0},
+                    System::Threading::{GetExitCodeProcess, WaitForSingleObject},
+                };
+                let raw = HANDLE(handle.as_raw_handle());
+                if unsafe { WaitForSingleObject(raw, 0) } == WAIT_OBJECT_0 {
+                    let mut code = 0u32;
+                    let _ = unsafe { GetExitCodeProcess(raw, &mut code) };
+                    Some(format!("退出码：{code}"))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn terminate_best_effort(&mut self) {
+        match self {
+            Self::Direct(child) => {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            #[cfg(windows)]
+            Self::Elevated(handle) => {
+                use std::os::windows::io::AsRawHandle;
+                use windows::Win32::{Foundation::HANDLE, System::Threading::TerminateProcess};
+                let _ = unsafe { TerminateProcess(HANDLE(handle.as_raw_handle()), 1) };
+            }
+        }
+    }
+}
+
+fn spawn_elevated_server_via_uac(
+    server_exe: &Path,
+    canonical_root: &Path,
+    extra_args: &[OsString],
+) -> Result<SpawnedServerHandle, ClientError> {
+    #[cfg(windows)]
+    {
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use std::os::windows::io::{FromRawHandle, OwnedHandle};
+        use windows::Win32::UI::Shell::{
+            SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
+        use windows::core::PCWSTR;
+
+        fn quote_win32_arg(value: &OsStr) -> OsString {
+            let mut out = vec![b'"' as u16];
+            let mut slashes = 0usize;
+            for unit in value.encode_wide() {
+                if unit == b'\\' as u16 {
+                    slashes += 1;
+                    continue;
+                }
+                let repeat = if unit == b'"' as u16 {
+                    slashes * 2 + 1
+                } else {
+                    slashes
+                };
+                out.extend(std::iter::repeat_n(b'\\' as u16, repeat));
+                slashes = 0;
+                out.push(unit);
+            }
+            out.extend(std::iter::repeat_n(b'\\' as u16, slashes * 2));
+            out.push(b'"' as u16);
+            OsString::from_wide(&out)
+        }
+
+        let clean_root = strip_windows_verbatim_prefix(canonical_root);
+        let clean_exe = strip_windows_verbatim_prefix(server_exe);
+
+        let mut params = OsString::new();
+        params.push(quote_win32_arg(OsStr::new("--sanitize-env")));
+        params.push(" ");
+        params.push(quote_win32_arg(OsStr::new("--kit-root")));
+        params.push(" ");
+        params.push(quote_win32_arg(clean_root.as_os_str()));
+        for arg in extra_args {
+            params.push(" ");
+            params.push(quote_win32_arg(arg));
+        }
+
+        let verb_w: Vec<u16> = OsStr::new("runas").encode_wide().chain([0]).collect();
+        let file_w: Vec<u16> = clean_exe.as_os_str().encode_wide().chain([0]).collect();
+        let params_w: Vec<u16> = params.as_os_str().encode_wide().chain([0]).collect();
+        let dir_w: Vec<u16> = clean_root.as_os_str().encode_wide().chain([0]).collect();
+
+        let mut sei = SHELLEXECUTEINFOW {
+            cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+            fMask: SEE_MASK_NOCLOSEPROCESS,
+            lpVerb: PCWSTR(verb_w.as_ptr()),
+            lpFile: PCWSTR(file_w.as_ptr()),
+            lpParameters: PCWSTR(params_w.as_ptr()),
+            lpDirectory: PCWSTR(dir_w.as_ptr()),
+            nShow: SW_HIDE.0,
+            ..Default::default()
+        };
+
+        unsafe { ShellExecuteExW(&mut sei) }.map_err(|_| {
+            ClientError::NotElevated(
+                "需要管理员权限以运行后台诊断服务，UAC 授权已取消。".to_owned(),
+            )
+        })?;
+
+        if sei.hProcess.is_invalid() {
+            return Err(ClientError::BootstrapFailed(
+                "后台诊断服务 UAC 启动未返回有效进程句柄。".to_owned(),
+            ));
+        }
+        Ok(SpawnedServerHandle::Elevated(unsafe {
+            OwnedHandle::from_raw_handle(sei.hProcess.0)
+        }))
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = (server_exe, canonical_root, extra_args);
+        Err(ClientError::NotElevated(
+            "桌面端需要管理员权限运行。".into(),
+        ))
     }
 }
 

@@ -34,20 +34,12 @@ fn capture_windows(pid: u32) -> Result<Option<ProcessIdentity>, String> {
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
     use windows::Win32::{
         Foundation::{FILETIME, HANDLE},
-        System::Threading::{
-            GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-        },
+        System::Threading::{GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
     };
     if pid == 0 {
         return Err("升级父进程标识无效。".into());
     }
-    let handle = match unsafe {
-        OpenProcess(
-            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
-            false,
-            pid,
-        )
-    } {
+    let handle = match unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) } {
         Ok(handle) => unsafe { OwnedHandle::from_raw_handle(handle.0) },
         Err(error) if error.code().0 as u32 == 0x8007_0057 => return Ok(None),
         Err(_) => return Err("升级父进程无法核验。".into()),
@@ -426,6 +418,46 @@ pub fn query_process_token_info(pid: u32) -> Result<Option<ProcessTokenInfo>, St
 /// Queries the access token of the current process.
 pub fn current_process_token_info() -> Result<ProcessTokenInfo, String> {
     query_process_token_info(std::process::id())?.ok_or_else(|| "当前进程访问令牌无法读取。".into())
+}
+
+/// Returns `true` when the current process runs under a UAC split-token administrator account
+/// (`TokenElevationTypeLimited`), meaning `ShellExecuteExW("runas")` on `cst-server.exe` elevates
+/// under the exact same user SID while keeping the GUI window at Medium Integrity Level (avoiding UIPI).
+pub fn can_elevate_same_user() -> Result<bool, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+        use windows::Win32::{
+            Foundation::HANDLE,
+            Security::{
+                GetTokenInformation, TOKEN_ELEVATION_TYPE, TOKEN_QUERY, TokenElevationType,
+                TokenElevationTypeLimited,
+            },
+            System::Threading::{GetCurrentProcess, OpenProcessToken},
+        };
+
+        let mut raw_token = HANDLE::default();
+        unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw_token) }
+            .map_err(|_| "无法读取当前进程访问令牌。".to_owned())?;
+        let token = unsafe { OwnedHandle::from_raw_handle(raw_token.0) };
+        let mut elev_type = TOKEN_ELEVATION_TYPE::default();
+        let mut ret_len = 0u32;
+        unsafe {
+            GetTokenInformation(
+                HANDLE(token.as_raw_handle()),
+                TokenElevationType,
+                Some((&mut elev_type as *mut TOKEN_ELEVATION_TYPE).cast()),
+                std::mem::size_of::<TOKEN_ELEVATION_TYPE>() as u32,
+                &mut ret_len,
+            )
+        }
+        .map_err(|_| "无法读取当前进程提权令牌类型。".to_owned())?;
+        Ok(elev_type == TokenElevationTypeLimited)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(false)
+    }
 }
 
 #[cfg(all(test, windows))]

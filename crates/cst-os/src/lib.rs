@@ -23,8 +23,8 @@ pub use layout::{
 };
 pub use locks::{RunbookDirectoryLock, ServerInstanceLock, SessionOwnerLock, UpdateLock};
 pub use process::{
-    ProcessIdentity, ProcessTokenInfo, current_process_token_info, is_elevated, is_process_alive,
-    launch_detached, query_machine_app_path, query_process_image_path, query_process_token_info,
-    system_directory, windows_directory,
+    ProcessIdentity, ProcessTokenInfo, can_elevate_same_user, current_process_token_info,
+    is_elevated, is_process_alive, launch_detached, query_machine_app_path,
+    query_process_image_path, query_process_token_info, system_directory, windows_directory,
 };
 pub use update_types::{HandoffRequest, LaunchReceipt, RestartUi, RollbackReason, UpdateReport};

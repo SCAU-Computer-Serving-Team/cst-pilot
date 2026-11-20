@@ -12,6 +12,7 @@ struct CliArgs {
     health_check: bool,
     standalone_web: bool,
     open_browser: bool,
+    sanitize_env: bool,
     port: Option<u16>,
     kit_root: Option<PathBuf>,
     cwd: Option<PathBuf>,
@@ -28,6 +29,7 @@ where
     let mut health_check = false;
     let mut standalone_web = false;
     let mut open_browser = false;
+    let mut sanitize_env = false;
     let mut port = None;
     let mut kit_root = None;
     let mut cwd = None;
@@ -38,6 +40,7 @@ where
             "--health-check" => health_check = true,
             "--standalone-web" => standalone_web = true,
             "--open-browser" => open_browser = true,
+            "--sanitize-env" => sanitize_env = true,
             "--port" => {
                 let val = iter.next().ok_or("`--port` 缺少端口号参数")?;
                 port = Some(val.parse::<u16>().map_err(|_| "`--port` 端口号格式无效")?);
@@ -62,6 +65,7 @@ where
         health_check,
         standalone_web,
         open_browser,
+        sanitize_env,
         port,
         kit_root,
         cwd,
@@ -86,8 +90,83 @@ fn resolve_default_kit_root() -> Result<PathBuf, String> {
     cst_os::resolve_kit_root()
 }
 
-#[tokio::main]
-async fn main() -> ExitCode {
+/// Sanitizes the current single-threaded process environment when launched via `ShellExecuteExW("runas")`
+/// (before spawning any Tokio worker threads), matching `cst_client::apply_portable_sanitized_env`.
+fn sanitize_current_process_env(kit_root: &std::path::Path) -> Result<(), String> {
+    let canonical = kit_root
+        .canonicalize()
+        .map_err(|e| format!("无法读取工具包根目录 {}：{e}", kit_root.display()))?;
+    let clean_root = cst_os::strip_windows_verbatim_prefix(&canonical);
+    let tmp_dir = clean_root.join(".state").join("tmp");
+    std::fs::create_dir_all(&tmp_dir)
+        .map_err(|e| format!("无法创建便携运行临时目录 {}：{e}", tmp_dir.display()))?;
+
+    let win_dir = cst_os::windows_directory()?;
+    let sys_dir = cst_os::system_directory()?;
+
+    let mut path_entries = Vec::new();
+    let kit_pwsh = clean_root.join("pwsh");
+    if kit_pwsh.is_dir() {
+        path_entries.push(kit_pwsh);
+    }
+    let kit_bin = clean_root.join("bin");
+    if kit_bin.is_dir() {
+        path_entries.push(kit_bin);
+    }
+    path_entries.push(sys_dir.clone());
+    path_entries.push(win_dir.clone());
+    path_entries.push(sys_dir.join("Wbem"));
+    path_entries.push(sys_dir.join("WindowsPowerShell").join("v1.0"));
+    let joined_path =
+        std::env::join_paths(path_entries).map_err(|e| format!("组装安全 PATH 失败：{e}"))?;
+
+    const PASSTHROUGH_KEYS: &[&str] = &[
+        "SYSTEMDRIVE",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PROGRAMDATA",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+        "ProgramW6432",
+        "CommonProgramFiles",
+        "CommonProgramFiles(x86)",
+        "COMPUTERNAME",
+        "USERNAME",
+        "USERDOMAIN",
+        "OS",
+        "NUMBER_OF_PROCESSORS",
+        "PROCESSOR_ARCHITECTURE",
+    ];
+
+    let existing_keys: Vec<std::ffi::OsString> = std::env::vars_os().map(|(k, _)| k).collect();
+    // SAFETY: Called strictly at single-threaded `fn main()` entry before building the Tokio runtime.
+    unsafe {
+        for key in existing_keys {
+            let keep = key.to_str().is_some_and(|s| {
+                PASSTHROUGH_KEYS
+                    .iter()
+                    .any(|allowed| s.eq_ignore_ascii_case(allowed))
+            });
+            if !keep {
+                std::env::remove_var(&key);
+            }
+        }
+        std::env::set_var("SystemRoot", &win_dir);
+        std::env::set_var("WINDIR", &win_dir);
+        std::env::set_var("ComSpec", sys_dir.join("cmd.exe"));
+        std::env::set_var("PATH", joined_path);
+        std::env::set_var("PATHEXT", ".COM;.EXE;.BAT;.CMD");
+        std::env::set_var("TEMP", &tmp_dir);
+        std::env::set_var("TMP", &tmp_dir);
+        std::env::set_var("PI_CODING_AGENT_DIR", clean_root.join("agent").join("home"));
+        std::env::set_var("PI_OFFLINE", "1");
+    }
+    let _ = std::env::set_current_dir(&clean_root);
+    Ok(())
+}
+
+fn main() -> ExitCode {
     let args = match parse_args() {
         Ok(a) => a,
         Err(msg) => {
@@ -98,6 +177,7 @@ async fn main() -> ExitCode {
 
     let kit_root = match args
         .kit_root
+        .clone()
         .map(Ok)
         .unwrap_or_else(resolve_default_kit_root)
     {
@@ -108,6 +188,28 @@ async fn main() -> ExitCode {
         }
     };
 
+    if args.sanitize_env
+        && let Err(msg) = sanitize_current_process_env(&kit_root)
+    {
+        eprintln!("{msg}");
+        return ExitCode::FAILURE;
+    }
+
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(err) => {
+            eprintln!("无法初始化异步运行时：{err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    runtime.block_on(async_main(args, kit_root))
+}
+
+async fn async_main(args: CliArgs, kit_root: PathBuf) -> ExitCode {
     if args.health_check {
         return match cst_kit::update::handoff::run_cli_health_check_with_version(
             &kit_root,
@@ -215,5 +317,20 @@ mod tests {
         let err = parse_args_from(["--open-browser"].into_iter().map(str::to_owned))
             .expect_err("open-browser without standalone-web should fail");
         assert!(err.contains("--standalone-web"));
+    }
+
+    #[test]
+    fn parse_sanitize_env_and_kit_root() {
+        let parsed = parse_args_from(
+            ["--sanitize-env", "--kit-root", r"E:\kit"]
+                .into_iter()
+                .map(str::to_owned),
+        )
+        .expect("valid sanitize-env cli args");
+        assert!(parsed.sanitize_env);
+        assert_eq!(
+            parsed.kit_root.as_deref(),
+            Some(std::path::Path::new(r"E:\kit"))
+        );
     }
 }
