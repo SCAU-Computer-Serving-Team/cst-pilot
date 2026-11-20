@@ -13,6 +13,8 @@ use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
 use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::tools::{render_special_details_section, render_special_notice_line};
+use gpui::relative;
 
 pub use super::secret_input::{MAX_RECOVERY_PASSWORD_BYTES, SecretInput, SecretInputEvent};
 
@@ -133,6 +135,7 @@ pub struct BitLockerCardProps<'a> {
     pub status: SpecialStatus,
     pub title: &'a str,
     pub summary: &'a str,
+    pub raw: &'a str,
     pub scope: &'a str,
     pub volumes: &'a [SpecialVolumeView],
     pub fields: &'a [FieldRow],
@@ -150,7 +153,9 @@ pub fn render_bitlocker_card<V: 'static>(
     client: ClientHandle,
     mono_family: SharedString,
     palette: &DesktopPalette,
+    is_copied_fn: &dyn Fn(&str) -> bool,
     on_toggle_details: crate::tools::ToggleKeyFn,
+    on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
     on_error_notice: impl Fn(String, &mut Context<V>) + Clone + 'static,
     window: &mut Window,
     cx: &mut Context<V>,
@@ -187,7 +192,7 @@ pub fn render_bitlocker_card<V: 'static>(
             };
             Some((format!("剩余 {mins:02}:{secs:02}"), color))
         } else {
-            Some(("剩余 00:00".to_owned(), palette.status_danger))
+            Some(("请求已过期".to_owned(), palette.text_secondary))
         }
     });
 
@@ -216,7 +221,15 @@ pub fn render_bitlocker_card<V: 'static>(
             SpecialStatus::Pending | SpecialStatus::Running => {
                 ("处理中", palette.accent_ink, IconName::LoaderCircle)
             }
-            SpecialStatus::Success => ("已完成", palette.status_success, IconName::CircleCheck),
+            SpecialStatus::Success => {
+                if props.volumes.iter().any(|v| v.conversion_code == Some(3)) {
+                    ("解密中", palette.status_success, IconName::CircleCheck)
+                } else if props.volumes.iter().any(|v| v.conversion_code == Some(2)) {
+                    ("加密中", palette.status_success, IconName::CircleCheck)
+                } else {
+                    ("已完成", palette.status_success, IconName::CircleCheck)
+                }
+            }
             SpecialStatus::Degraded => {
                 ("部分完成", palette.status_warning, IconName::TriangleAlert)
             }
@@ -250,7 +263,7 @@ pub fn render_bitlocker_card<V: 'static>(
                     props.call_id
                 )))
                 .test_support()
-                .text_color(status_color)
+                .text_color(palette.text_secondary)
                 .child(cjk_inline_label(status_label)),
         );
 
@@ -287,7 +300,7 @@ pub fn render_bitlocker_card<V: 'static>(
         .shadow(palette.craft_stack_shadows())
         .flex()
         .flex_col()
-        .gap(space::MD)
+        .gap(space::LG)
         .child(
             div()
                 .h(height::COMPACT)
@@ -753,11 +766,12 @@ pub fn render_bitlocker_card<V: 'static>(
     }
 
     // 2. Settled or Unknown-Review Result Template
-    if !props.summary.trim().is_empty() {
+    let trimmed_summary = props.summary.trim();
+    if !trimmed_summary.is_empty() && trimmed_summary != status_label {
         card = card.child(
             apply_scale(div(), scale::CAPTION)
                 .text_color(palette.text_secondary)
-                .child(SharedString::from(props.summary.to_owned())),
+                .child(SharedString::from(trimmed_summary.to_owned())),
         );
     }
 
@@ -767,132 +781,58 @@ pub fn render_bitlocker_card<V: 'static>(
             mono_family.clone(),
             palette,
         ));
-    } else if is_unknown {
-        card = card.child(
-            div()
-                .w_full()
-                .flex()
-                .items_center()
-                .gap(space::SM)
-                .child(
-                    Icon::new(IconName::TriangleAlert)
-                        .size(px(14.0))
-                        .text_color(palette.status_warning),
-                )
-                .child(
-                    apply_scale(div(), scale::CAPTION)
-                        .flex_1()
-                        .min_w_0()
-                        .text_color(palette.status_warning)
-                        .child("操作中断且未采集到目标卷确认状态，请核对磁盘当前锁定与加密情况。"),
-                ),
-        );
+    } else if is_unknown && props.errors.is_empty() {
+        card = card.child(render_special_notice_line(
+            IconName::TriangleAlert,
+            palette.status_warning,
+            "操作中断且未采集到目标卷确认状态，请核对磁盘当前锁定与加密情况。",
+            palette,
+        ));
     }
 
     if let Some(first_err) = props.errors.first() {
+        let (err_icon, err_color) = if is_unknown {
+            (IconName::TriangleAlert, palette.status_warning)
+        } else {
+            (IconName::CircleAlert, palette.status_danger)
+        };
         card = card.child(
-            apply_scale(div(), scale::CAPTION)
+            render_special_notice_line(err_icon, err_color, first_err.clone(), palette)
                 .id(SharedString::from(format!(
                     "bitlocker-first-error-{}",
                     props.call_id
                 )))
-                .test_support()
-                .text_color(if is_unknown {
-                    palette.status_warning
-                } else {
-                    palette.status_danger
-                })
-                .child(SharedString::from(first_err.clone())),
+                .test_support(),
         );
     }
 
-    let has_details = !props.fields.is_empty() || props.errors.len() > 1;
-    if has_details {
-        let dk = format!("bitlocker-details-{}", props.call_id);
-        let dk_click = dk;
-        card = card
-            .child(div().w_full().h(px(1.0)).bg(palette.border_subtle))
-            .child(
-                div()
-                    .w_full()
-                    .h(height::INLINE)
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .child(
-                        apply_scale(div(), scale::CAPTION)
-                            .id(SharedString::from(format!(
-                                "bitlocker-detail-toggle-{}",
-                                props.call_id
-                            )))
-                            .test_support()
-                            .a11y_toggle_button(
-                                SharedString::from(format!(
-                                    "bitlocker-detail-toggle-{}",
-                                    props.call_id
-                                )),
-                                "BitLocker 详情",
-                                props.details_expanded,
-                            )
-                            .h(height::INLINE)
-                            .flex()
-                            .items_center()
-                            .gap(space::XS)
-                            .text_color(palette.text_secondary)
-                            .hover(|s| s.text_color(palette.text_primary))
-                            .on_click(move |_, w, cx| (on_toggle_details)(dk_click.clone(), w, cx))
-                            .child(cjk_inline_label("详情"))
-                            .child(
-                                Icon::new(if props.details_expanded {
-                                    IconName::ChevronDown
-                                } else {
-                                    IconName::ChevronRight
-                                })
-                                .size(px(12.0))
-                                .text_color(palette.text_secondary),
-                            ),
-                    ),
-            );
-
-        if props.details_expanded {
-            let mut detail_col = div().w_full().flex().flex_col().gap(space::XS);
-
-            for row in props.fields {
-                detail_col = detail_col.child(
-                    div()
-                        .flex()
-                        .items_start()
-                        .justify_between()
-                        .gap(space::MD)
-                        .child(
-                            apply_scale(div(), scale::CAPTION)
-                                .text_color(palette.text_secondary)
-                                .child(SharedString::from(row.label.clone())),
-                        )
-                        .child(
-                            apply_scale(div(), scale::CAPTION)
-                                .font_family(mono_family.clone())
-                                .text_color(palette.text_primary)
-                                .child(SharedString::from(row.value.clone())),
-                        ),
-                );
-            }
-
-            for extra_err in props.errors.iter().skip(1) {
-                detail_col = detail_col.child(
-                    apply_scale(div(), scale::CAPTION)
-                        .text_color(palette.status_danger)
-                        .child(SharedString::from(extra_err.clone())),
-                );
-            }
-            card = card.child(detail_col);
-        }
+    let extra_errors: Vec<String> = props.errors.iter().skip(1).cloned().collect();
+    if let Some(details_section) = render_special_details_section(
+        SharedString::from(format!("bitlocker-detail-toggle-{}", props.call_id)),
+        "BitLocker 详情",
+        format!("bitlocker-details-{}", props.call_id),
+        props.details_expanded,
+        None,
+        props.fields,
+        &extra_errors,
+        !is_unknown,
+        SharedString::from(format!("bitlocker-raw-{}", props.call_id)),
+        props.raw,
+        None,
+        mono_family.clone(),
+        palette,
+        is_copied_fn,
+        on_toggle_details,
+        on_mark_copied,
+        cx,
+    ) {
+        card = card.child(details_section);
     }
 
     card.into_any_element()
 }
 
-/// Frameless flat volume rows (no nested bordered sub-card box).
+/// Frameless flat volume rows (`LbF1q` / `PApm9` / `Wk1TN` — `60px` drive column + right status & 4px progress bar).
 fn render_volume_rows(
     volumes: &[SpecialVolumeView],
     mono_family: SharedString,
@@ -901,50 +841,87 @@ fn render_volume_rows(
     let mut list = div().w_full().flex().flex_col();
 
     for (idx, vol) in volumes.iter().enumerate() {
-        let pct_str = vol
-            .percentage
-            .map(|p| format!("{p:.1}%"))
-            .unwrap_or_default();
-        let right_text = if pct_str.is_empty() {
-            format!("{} · {}", vol.lock, vol.conversion)
-        } else {
-            format!("{} · {} · {pct_str}", vol.lock, vol.conversion)
-        };
-
-        let mut row = div()
-            .w_full()
-            .py(space::XS)
+        let mut metrics_row = div()
+            .min_h(height::INLINE)
             .flex()
-            .flex_col()
-            .gap(space::MICRO)
+            .flex_wrap()
+            .items_center()
+            .gap(space::MD)
             .child(
-                div()
-                    .min_h(height::INLINE)
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(space::MD)
-                    .child(
-                        apply_scale(div(), scale::UI_MEDIUM)
-                            .font_family(mono_family.clone())
-                            .text_color(palette.text_primary)
-                            .child(SharedString::from(vol.drive.clone())),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION)
-                            .font_family(mono_family.clone())
-                            .text_color(palette.text_secondary)
-                            .child(SharedString::from(right_text)),
-                    ),
+                apply_scale(div(), scale::UI)
+                    .text_color(palette.text_primary)
+                    .child(cjk_inline_label(vol.conversion.clone())),
+            )
+            .child(
+                apply_scale(div(), scale::CAPTION)
+                    .text_color(palette.text_secondary)
+                    .child(cjk_inline_label(vol.lock.clone())),
             );
 
         if !vol.reason.trim().is_empty() {
-            row = row.child(
+            metrics_row = metrics_row.child(
                 apply_scale(div(), scale::CAPTION)
-                    .text_color(palette.text_muted)
-                    .child(SharedString::from(vol.reason.clone())),
+                    .text_color(palette.text_secondary)
+                    .child(cjk_inline_label(vol.reason.clone())),
             );
         }
+
+        if let Some(pct) = vol.percentage {
+            metrics_row = metrics_row.child(
+                apply_scale(div(), scale::CAPTION)
+                    .font_family(mono_family.clone())
+                    .text_color(palette.text_secondary)
+                    .child(SharedString::from(format!("加密比例 {pct:.0}%"))),
+            );
+        }
+
+        let show_progress = vol.percentage.is_some_and(|pct| {
+            matches!(vol.conversion_code, Some(2..=5))
+                || (pct > 0.0 && pct < 100.0 && vol.conversion_code != Some(0))
+        });
+
+        let mut right_col = div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap(space::SM)
+            .child(metrics_row);
+
+        if show_progress && let Some(pct) = vol.percentage {
+            let ratio = (pct / 100.0).clamp(0.0, 1.0) as f32;
+            right_col = right_col.child(
+                div()
+                    .w_full()
+                    .h(px(4.0))
+                    .rounded(radius::FULL)
+                    .bg(palette.border_subtle)
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .w(relative(ratio))
+                            .h_full()
+                            .rounded(radius::FULL)
+                            .bg(palette.text_secondary),
+                    ),
+            );
+        }
+
+        let mut row = div()
+            .w_full()
+            .py(space::SM)
+            .flex()
+            .items_start()
+            .gap(space::LG)
+            .child(
+                apply_scale(div(), scale::UI_MEDIUM)
+                    .w(px(60.0))
+                    .flex_shrink_0()
+                    .font_family(mono_family.clone())
+                    .text_color(palette.text_primary)
+                    .child(SharedString::from(vol.drive.clone())),
+            )
+            .child(right_col);
 
         if idx > 0 {
             row = row.border_t_1().border_color(palette.border_subtle);

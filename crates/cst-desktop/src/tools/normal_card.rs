@@ -342,7 +342,11 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
         })
         .max()
         .unwrap_or(6);
-    let label_col_px = ((max_label_chars as f32) * 13.5 + 12.0).clamp(84.0, 180.0);
+    let label_col_px = if max_label_chars <= 4 {
+        72.0
+    } else {
+        ((max_label_chars as f32) * 13.5 + 16.0).clamp(84.0, 180.0)
+    };
 
     let mut right_col = div()
         .flex_1()
@@ -382,8 +386,8 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                             .id(read_img_id.clone())
                             .test_support()
                             .a11y_button(read_img_id, "预览工具读取图片")
-                            .w(px(160.0))
-                            .h(px(112.0))
+                            .w(px(300.0))
+                            .h(px(132.0))
                             .rounded(radius::CONTROL)
                             .border_1()
                             .border_color(palette.border_subtle)
@@ -405,7 +409,7 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                             .child(
                                 img(ImageSource::Image(gpui_img))
                                     .size_full()
-                                    .object_fit(ObjectFit::Cover),
+                                    .object_fit(ObjectFit::Contain),
                             ),
                     );
                 }
@@ -455,14 +459,19 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                     div()
                         .w_full()
                         .flex()
-                        .items_center()
+                        .items_start()
                         .gap(space::SM)
-                        .child(Icon::new(icon).size(px(14.0)).text_color(color))
+                        .child(
+                            div()
+                                .pt(px(2.0))
+                                .flex_shrink_0()
+                                .child(Icon::new(icon).size(px(14.0)).text_color(color)),
+                        )
                         .child(
                             apply_scale(div(), scale::CAPTION)
                                 .flex_1()
                                 .min_w_0()
-                                .text_color(color)
+                                .text_color(palette.text_secondary)
                                 .child(SharedString::from(text.clone())),
                         ),
                 );
@@ -489,6 +498,7 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                             apply_scale(div(), scale::CAPTION)
                                 .flex_1()
                                 .min_w_0()
+                                .font_family(mono_family.clone())
                                 .text_color(palette.text_secondary)
                                 .child(SharedString::from(text.clone())),
                         )

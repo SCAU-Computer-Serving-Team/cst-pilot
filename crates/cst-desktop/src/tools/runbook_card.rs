@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use cst_client::tool_presenter::{CommandItem, RunbookDeliveryView, SpecialStatus};
+use cst_client::tool_presenter::{CommandItem, FieldRow, RunbookDeliveryView, SpecialStatus};
 use gpui::CursorStyle;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
@@ -11,6 +11,7 @@ use gpui_kit::{
 
 use crate::accessibility::A11yElementExt as _;
 use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::tools::{render_special_details_section, render_special_notice_line};
 
 pub struct RunbookCardProps<'a> {
     pub call_id: &'a str,
@@ -18,12 +19,15 @@ pub struct RunbookCardProps<'a> {
     pub status: SpecialStatus,
     pub title: &'a str,
     pub summary: &'a str,
+    pub raw: &'a str,
+    pub fields: &'a [FieldRow],
     pub commands: &'a [CommandItem],
     pub level: &'a str,
     pub version: Option<i64>,
     pub planned: bool,
     pub delivery: Option<&'a RunbookDeliveryView>,
     pub errors: &'a [String],
+    pub details_expanded: bool,
 }
 
 pub type OpenRunbookFn = Rc<dyn Fn(String, String, &mut Window, &mut App)>;
@@ -58,11 +62,13 @@ fn format_shell_meta(shell: &str, admin: bool) -> String {
 
 /// Renders the standalone Command Plan & Runbook Delivery card (`command_plan`, `runbook_deliver`, `runbook`,
 /// `cst-pilot-desktop.pen` `s3WzY`).
+#[allow(clippy::too_many_arguments)]
 pub fn render_runbook_card<V: 'static>(
     props: RunbookCardProps<'_>,
     mono_family: SharedString,
     palette: &DesktopPalette,
     is_copied_fn: &dyn Fn(&str) -> bool,
+    on_toggle_details: crate::tools::ToggleKeyFn,
     on_open_runbook: OpenRunbookFn,
     on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
     cx: &mut Context<V>,
@@ -117,7 +123,7 @@ pub fn render_runbook_card<V: 'static>(
         .shadow(palette.craft_stack_shadows())
         .flex()
         .flex_col()
-        .gap(space::MD)
+        .gap(space::LG)
         // 1. `28px` Header (`Ymhja`): left `18px` FileTerminal + `16/24 @ 500` title; right `12px` status icon + text
         .child(
             div()
@@ -182,11 +188,18 @@ pub fn render_runbook_card<V: 'static>(
                 .child(SharedString::from(mode_text)),
         );
 
-    if !props.summary.trim().is_empty() {
+    let trimmed_summary = props.summary.trim();
+    if !trimmed_summary.is_empty()
+        && trimmed_summary != status_text
+        && !matches!(
+            trimmed_summary,
+            "已生成" | "生成失败" | "待核对" | "方案已保存" | "交付结果缺失"
+        )
+    {
         card = card.child(
             apply_scale(div(), scale::CAPTION)
                 .text_color(palette.text_secondary)
-                .child(SharedString::from(props.summary.to_owned())),
+                .child(SharedString::from(trimmed_summary.to_owned())),
         );
     }
 
@@ -358,25 +371,48 @@ pub fn render_runbook_card<V: 'static>(
                         .items_center()
                         .gap(space::SM)
                         .flex_shrink_0()
-                        .text_color(palette.text_secondary)
-                        .hover(|s| s.text_color(palette.text_primary))
+                        .text_color(palette.accent_ink)
+                        .hover(|s| s.text_color(palette.accent_hover))
                         .on_click(move |_, w, cx| (open_fn)(eid.clone(), cid.clone(), w, cx))
                         .child(cjk_inline_label("打开"))
                         .child(
                             Icon::new(IconName::ExternalLink)
                                 .size(px(12.0))
-                                .text_color(palette.text_secondary),
+                                .text_color(palette.accent_ink),
                         )
                 }),
         );
     }
 
     for err in props.errors {
-        card = card.child(
-            apply_scale(div(), scale::CAPTION)
-                .text_color(palette.status_danger)
-                .child(SharedString::from(err.clone())),
-        );
+        card = card.child(render_special_notice_line(
+            IconName::TriangleAlert,
+            palette.status_warning,
+            err.clone(),
+            palette,
+        ));
+    }
+
+    if let Some(details_section) = render_special_details_section(
+        SharedString::from(format!("runbook-detail-toggle-{}", props.call_id)),
+        "命令清单详情",
+        format!("runbook-details-{}", props.call_id),
+        props.details_expanded,
+        None,
+        props.fields,
+        &[],
+        false,
+        SharedString::from(format!("runbook-raw-{}", props.call_id)),
+        props.raw,
+        None,
+        mono_family,
+        palette,
+        is_copied_fn,
+        on_toggle_details,
+        on_mark_copied,
+        cx,
+    ) {
+        card = card.child(details_section);
     }
 
     card.into_any_element()

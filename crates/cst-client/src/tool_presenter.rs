@@ -1865,11 +1865,15 @@ pub fn map_special_tool(
                 .and_then(|s| s.get("uptime"))
                 .and_then(Value::as_object);
             let mut errors = common_errors;
-            errors.extend(collect_special_errors(&[
+            for err in collect_special_errors(&[
                 source.and_then(|s| s.get("error")),
                 source.and_then(|s| s.get("collectionErrors")),
                 source.and_then(|s| s.get("counterErrors")),
-            ]));
+            ]) {
+                if !errors.contains(&err) {
+                    errors.push(err);
+                }
+            }
 
             let cpu = source
                 .and_then(|s| s.get("cpuTotalPct"))
@@ -2065,9 +2069,11 @@ pub fn map_special_tool(
                         .and_then(Value::as_object)
                 });
             let mut errors = common_errors;
-            errors.extend(collect_special_errors(&[
-                source.and_then(|s| s.get("error"))
-            ]));
+            for err in collect_special_errors(&[source.and_then(|s| s.get("error"))]) {
+                if !errors.contains(&err) {
+                    errors.push(err);
+                }
+            }
             let status = match result {
                 None => initial,
                 Some(res) if res.is_error || !errors.is_empty() => SpecialStatus::Error,
@@ -2361,12 +2367,20 @@ pub fn map_special_tool(
             let top_reason_val = (volumes.is_empty() && !top_reason.is_empty())
                 .then(|| Value::String(top_reason.clone()));
             let mut errors = common_errors;
-            errors.extend(collect_special_errors(&[
+            for err in collect_special_errors(&[
                 source.and_then(|s| s.get("collectionErrors")),
                 top_reason_val.as_ref(),
-            ]));
+            ]) {
+                if !errors.contains(&err) {
+                    errors.push(err);
+                }
+            }
             for vol in &volumes {
-                errors.extend(vol.errors.iter().cloned());
+                for err in &vol.errors {
+                    if !errors.contains(err) {
+                        errors.push(err.clone());
+                    }
+                }
             }
 
             let attempted: Vec<&SpecialVolumeView> = volumes

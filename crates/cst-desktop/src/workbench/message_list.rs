@@ -36,9 +36,9 @@ use crate::workbench::markdown_view::{
 };
 use crate::workbench::turn_segments::{
     ConversationPart, ImageContentPart, SpecialToolKind, ToolCallPart, Turn, TurnEntry, TurnPart,
-    TurnSegmentKind, active_turn_index, build_turn_segments, extract_message_text,
-    extract_user_images, format_duration_zh, group_turns_and_results, process_segment_label,
-    render_running_light_label, split_turn,
+    TurnSegmentKind, active_turn_index, build_turn_segments_with_results, extract_message_text,
+    extract_user_images, format_duration_zh, group_turns_and_results, is_standalone_tool,
+    process_segment_label, render_running_light_label, split_turn,
 };
 
 pub const DEFAULT_VISIBLE_TURN_WINDOW: usize = 30;
@@ -71,6 +71,7 @@ pub struct MessageListView {
     expanded_thinking: BTreeSet<String>,
     expanded_error_details: BTreeSet<String>,
     expanded_tool_cards: BTreeSet<String>,
+    collapsed_standalone_tools: BTreeSet<String>,
     expanded_tool_raw: BTreeSet<String>,
     expanded_special_details: BTreeSet<String>,
     hovered_warnings: BTreeSet<String>,
@@ -98,6 +99,7 @@ impl MessageListView {
             expanded_thinking: BTreeSet::new(),
             expanded_error_details: BTreeSet::new(),
             expanded_tool_cards: BTreeSet::new(),
+            collapsed_standalone_tools: BTreeSet::new(),
             expanded_tool_raw: BTreeSet::new(),
             expanded_special_details: BTreeSet::new(),
             hovered_warnings: BTreeSet::new(),
@@ -134,6 +136,7 @@ impl MessageListView {
         self.expanded_thinking.clear();
         self.expanded_error_details.clear();
         self.expanded_tool_cards.clear();
+        self.collapsed_standalone_tools.clear();
         self.expanded_tool_raw.clear();
         self.expanded_special_details.clear();
         self.hovered_warnings.clear();
@@ -778,8 +781,13 @@ impl MessageListView {
             })
             .and_then(Value::as_u64);
 
+        let standalone = is_standalone_tool(call, tool_result_val);
         let card_key = format!("tool-card-{}", call.id);
-        let is_open = self.expanded_tool_cards.contains(&card_key);
+        let is_open = if standalone {
+            !self.collapsed_standalone_tools.contains(&card_key)
+        } else {
+            self.expanded_tool_cards.contains(&card_key)
+        };
         let raw_key = format!("tool-raw-{}", call.id);
         let is_raw_open = self.expanded_tool_raw.contains(&raw_key);
 
@@ -804,8 +812,13 @@ impl MessageListView {
             &|cid| copy_ref.is_copied(cid),
             Rc::new(move |key, _, cx| {
                 ent_card.update(cx, |this, cx| {
-                    if !this.expanded_tool_cards.remove(&key) {
-                        this.expanded_tool_cards.insert(key);
+                    let target = if standalone {
+                        &mut this.collapsed_standalone_tools
+                    } else {
+                        &mut this.expanded_tool_cards
+                    };
+                    if !target.remove(&key) {
+                        target.insert(key);
                     }
                     cx.notify();
                 });
@@ -967,7 +980,9 @@ impl MessageListView {
             SpecialToolKind::BitLocker => self
                 .expanded_special_details
                 .contains(&format!("bitlocker-details-{}", call.id)),
-            SpecialToolKind::Runbook => false,
+            SpecialToolKind::Runbook => self
+                .expanded_special_details
+                .contains(&format!("runbook-details-{}", call.id)),
         };
         let warning_hovered = self
             .hovered_warnings
@@ -1129,7 +1144,7 @@ impl MessageListView {
         }
 
         let split = split_turn(&turn.assistants);
-        let segments = build_turn_segments(split.process);
+        let segments = build_turn_segments_with_results(split.process, tool_results);
 
         // Track live elapsed instant for `RunningLight` sweep
         let started_instant = *self
@@ -1334,6 +1349,24 @@ impl MessageListView {
                                             ),
                                     );
                                 }
+                            }
+                            ConversationPart::Tools(calls) => {
+                                let mut visible_tools =
+                                    div().w_full().flex().flex_col().gap(space::SM);
+                                for call in calls {
+                                    visible_tools =
+                                        visible_tools.child(self.render_normal_tool_row(
+                                            call,
+                                            tool_results.get(&call.id),
+                                            session.revision,
+                                            is_live_turn,
+                                            mono_family.clone(),
+                                            palette,
+                                            entity,
+                                            cx,
+                                        ));
+                                }
+                                assistant_stack = assistant_stack.child(visible_tools);
                             }
                             _ => {}
                         }

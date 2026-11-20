@@ -8,17 +8,24 @@ pub mod web_search_bar;
 use std::rc::Rc;
 
 use cst_client::ClientHandle;
-use cst_client::tool_presenter::SpecialToolView;
-use gpui_kit::{App, Context, Entity, IntoElement, SharedString, Window, div};
+use cst_client::tool_presenter::{FieldRow, SpecialToolView};
+use gpui_kit::assets::IconName;
+use gpui_kit::component::Icon;
+use gpui_kit::{
+    App, Context, Entity, InteractiveElement, IntoElement, ParentElement, SharedString,
+    StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
+};
 use serde_json::Value;
 
-use crate::theme::DesktopPalette;
+use crate::accessibility::A11yElementExt as _;
+use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, scale, space};
 use crate::tools::bitlocker_card::{
     BitLockerCardProps, SecretInput, find_pending_bitlocker_request, render_bitlocker_card,
 };
 use crate::tools::runbook_card::{OpenRunbookFn, RunbookCardProps, render_runbook_card};
 use crate::tools::sys_overview::{SysOverviewProps, render_sys_overview_card};
 use crate::tools::web_search_bar::{WebSearchBarProps, render_web_search_bar};
+use crate::workbench::markdown_view::render_copyable_text_block;
 
 pub type ToggleKeyFn = Rc<dyn Fn(String, &mut Window, &mut App)>;
 pub type HoverWarningFn = Rc<dyn Fn(String, bool, &mut Window, &mut App)>;
@@ -59,6 +66,7 @@ pub fn render_special_tool_component<V: 'static>(
             status,
             title,
             summary,
+            raw,
             fields,
             errors,
             machine,
@@ -74,6 +82,7 @@ pub fn render_special_tool_component<V: 'static>(
                 status: *status,
                 title,
                 summary,
+                raw,
                 machine,
                 uptime,
                 cpu_pct: *cpu,
@@ -86,12 +95,17 @@ pub fn render_special_tool_component<V: 'static>(
             },
             mono_family,
             palette,
+            is_copied_fn,
             on_toggle_key,
+            on_mark_copied,
+            cx,
         ),
         SpecialToolView::Runbook {
             status,
             title,
             summary,
+            raw,
+            fields,
             commands,
             level,
             version,
@@ -106,16 +120,20 @@ pub fn render_special_tool_component<V: 'static>(
                 status: *status,
                 title,
                 summary,
+                raw,
+                fields,
                 commands,
                 level,
                 version: *version,
                 planned: *planned,
                 delivery: delivery.as_ref(),
                 errors,
+                details_expanded: props.details_expanded,
             },
             mono_family,
             palette,
             is_copied_fn,
+            on_toggle_key,
             on_open_runbook,
             on_mark_copied,
             cx,
@@ -152,6 +170,7 @@ pub fn render_special_tool_component<V: 'static>(
             status,
             title,
             summary,
+            raw,
             fields,
             errors,
             scope,
@@ -170,6 +189,7 @@ pub fn render_special_tool_component<V: 'static>(
                     status: *status,
                     title,
                     summary,
+                    raw,
                     scope,
                     volumes,
                     fields,
@@ -181,7 +201,9 @@ pub fn render_special_tool_component<V: 'static>(
                 client,
                 mono_family,
                 palette,
+                is_copied_fn,
                 on_toggle_key,
+                on_mark_copied,
                 on_error_notice,
                 window,
                 cx,
@@ -192,4 +214,199 @@ pub fn render_special_tool_component<V: 'static>(
 
 pub fn render_empty_tool_placeholder() -> impl IntoElement {
     div()
+}
+
+/// Renders a semantic-icon-only notice/error row matching `.pen` (`14px` icon in semantic color +
+/// `12/16px` `text_secondary` text).
+pub(crate) fn render_special_notice_line(
+    icon: IconName,
+    icon_color: gpui_kit::Hsla,
+    text: impl Into<SharedString>,
+    palette: &DesktopPalette,
+) -> gpui_kit::Div {
+    div()
+        .w_full()
+        .flex()
+        .items_start()
+        .gap(space::SM)
+        .child(
+            div()
+                .pt(px(2.0))
+                .flex_shrink_0()
+                .child(Icon::new(icon).size(px(14.0)).text_color(icon_color)),
+        )
+        .child(
+            apply_scale(div(), scale::CAPTION)
+                .flex_1()
+                .min_w_0()
+                .text_color(palette.text_secondary)
+                .child(text.into()),
+        )
+}
+
+/// Computes label column width (`72px` when <= 4 chars, or scaled up to `180px`, matching `.pen`).
+pub(crate) fn aligned_label_col_px<'a>(rows: impl IntoIterator<Item = &'a FieldRow>) -> f32 {
+    let max_chars = rows
+        .into_iter()
+        .map(|r| r.label.chars().count())
+        .max()
+        .unwrap_or(4);
+    if max_chars <= 4 {
+        72.0
+    } else {
+        ((max_chars as f32) * 13.5 + 16.0).clamp(84.0, 180.0)
+    }
+}
+
+/// Shared bottom `"详情"` toggle + fixed-label-aligned expanded body (`BMZLr` / `ctR8B`) for special tool cards.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_special_details_section<V: 'static>(
+    toggle_id: SharedString,
+    a11y_label: &'static str,
+    toggle_key: String,
+    expanded: bool,
+    call_capsule: Option<&str>,
+    fields: &[FieldRow],
+    errors: &[String],
+    error_is_danger: bool,
+    raw_block_id: SharedString,
+    raw: &str,
+    left_footer: Option<gpui_kit::AnyElement>,
+    mono_family: SharedString,
+    palette: &DesktopPalette,
+    is_copied_fn: &dyn Fn(&str) -> bool,
+    on_toggle: ToggleKeyFn,
+    on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
+    cx: &mut Context<V>,
+) -> Option<gpui_kit::Div> {
+    let has_raw = !raw.trim().is_empty();
+    let has_details = !fields.is_empty() || !errors.is_empty() || has_raw;
+    if left_footer.is_none() && !has_details {
+        return None;
+    }
+
+    let mut wrapper = div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(space::MD)
+        .child(div().w_full().h(px(1.0)).bg(palette.border_subtle));
+
+    let mut bar = div()
+        .w_full()
+        .h(height::INLINE)
+        .flex()
+        .items_center()
+        .gap(space::MD);
+    if let Some(left) = left_footer {
+        bar = bar.justify_between().child(left);
+    } else {
+        bar = bar.justify_end();
+    }
+
+    if has_details {
+        bar = bar.child(
+            apply_scale(div(), scale::CAPTION)
+                .id(toggle_id.clone())
+                .test_support()
+                .a11y_toggle_button(toggle_id, a11y_label, expanded)
+                .h(height::INLINE)
+                .flex()
+                .items_center()
+                .gap(space::XS)
+                .flex_shrink_0()
+                .text_color(palette.text_secondary)
+                .hover(|s| s.text_color(palette.text_primary))
+                .on_click(move |_, w, cx| (on_toggle)(toggle_key.clone(), w, cx))
+                .child(cjk_inline_label("详情"))
+                .child(
+                    Icon::new(if expanded {
+                        IconName::ChevronDown
+                    } else {
+                        IconName::ChevronRight
+                    })
+                    .size(px(12.0))
+                    .text_color(palette.text_secondary),
+                ),
+        );
+    }
+
+    wrapper = wrapper.child(bar);
+
+    if has_details && expanded {
+        let mut detail_col = div().w_full().flex().flex_col().gap(space::MD);
+        if let Some(cap) = call_capsule {
+            detail_col = detail_col.child(
+                apply_scale(div(), scale::CAPTION)
+                    .font_family(mono_family.clone())
+                    .text_color(palette.text_secondary)
+                    .child(SharedString::from(cap.to_owned())),
+            );
+        }
+
+        if !fields.is_empty() {
+            let label_w = aligned_label_col_px(fields);
+            let mut rows_col = div().w_full().flex().flex_col().gap(space::TIGHT);
+            for row in fields {
+                rows_col = rows_col.child(
+                    div()
+                        .w_full()
+                        .min_h(px(20.0))
+                        .flex()
+                        .items_start()
+                        .gap(space::MD)
+                        .child(
+                            apply_scale(div(), scale::CAPTION)
+                                .w(px(label_w))
+                                .flex_shrink_0()
+                                .text_color(palette.text_secondary)
+                                .child(cjk_inline_label(row.label.clone())),
+                        )
+                        .child(
+                            apply_scale(div(), scale::CAPTION)
+                                .flex_1()
+                                .min_w_0()
+                                .pb(space::MICRO)
+                                .font_family(mono_family.clone())
+                                .text_color(palette.text_primary)
+                                .child(SharedString::from(row.value.clone())),
+                        ),
+                );
+            }
+            detail_col = detail_col.child(rows_col);
+        }
+
+        for err in errors {
+            let (err_icon, err_color) = if error_is_danger {
+                (IconName::CircleAlert, palette.status_danger)
+            } else {
+                (IconName::TriangleAlert, palette.status_warning)
+            };
+            detail_col = detail_col.child(render_special_notice_line(
+                err_icon,
+                err_color,
+                err.clone(),
+                palette,
+            ));
+        }
+
+        if has_raw {
+            let copied = is_copied_fn(raw_block_id.as_ref());
+            let mark_cb = on_mark_copied;
+            detail_col = detail_col.child(render_copyable_text_block(
+                raw_block_id,
+                raw.to_owned(),
+                true,
+                mono_family,
+                copied,
+                palette,
+                move |cid, w, cx| mark_cb(cid, w, cx),
+                cx,
+            ));
+        }
+
+        wrapper = wrapper.child(detail_col);
+    }
+
+    Some(wrapper)
 }

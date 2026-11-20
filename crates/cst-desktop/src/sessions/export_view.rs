@@ -18,8 +18,8 @@ use crate::theme::{
 use crate::tools::normal_card::render_normal_tool_card;
 use crate::tools::{SpecialToolDispatchProps, render_special_tool_component};
 use crate::workbench::turn_segments::{
-    ConversationPart, build_turn_segments, extract_message_text, group_turns_and_results,
-    split_turn,
+    ConversationPart, build_turn_segments_with_results, extract_message_text,
+    group_turns_and_results, split_turn,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -367,7 +367,7 @@ impl ExportView {
 
                 if !turn.assistants.is_empty() {
                     let split = split_turn(&turn.assistants);
-                    let segments = build_turn_segments(split.process);
+                    let segments = build_turn_segments_with_results(split.process, &tool_results);
                     for seg in segments {
                         for part in seg.parts {
                             match part.part {

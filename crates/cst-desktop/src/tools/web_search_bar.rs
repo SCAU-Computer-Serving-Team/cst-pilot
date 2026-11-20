@@ -38,8 +38,10 @@ pub fn render_web_search_bar(
         props.status,
         SpecialStatus::Pending | SpecialStatus::Running
     );
-    let has_partial_warning = !props.errors.is_empty()
-        || matches!(props.status, SpecialStatus::Degraded | SpecialStatus::Error);
+    let is_error = props.status == SpecialStatus::Error;
+    let has_partial_warning =
+        !is_error && (!props.errors.is_empty() || props.status == SpecialStatus::Degraded);
+    let has_hover_issue = is_error || has_partial_warning;
 
     let expand_key = format!("web-search-expand-{}", props.call_id);
     let warn_key = format!("web-search-warn-{}", props.call_id);
@@ -90,9 +92,14 @@ pub fn render_web_search_bar(
                 .size(px(14.0))
                 .text_color(palette.accent_ink),
         );
-    } else if has_partial_warning {
+    } else if has_hover_issue {
         let wk_hover = warn_key;
         let hover_cb = Rc::clone(&on_hover_warning);
+        let (badge_icon, badge_color) = if is_error {
+            (IconName::CircleAlert, palette.status_danger)
+        } else {
+            (IconName::TriangleAlert, palette.status_warning)
+        };
         left_row = left_row.child(
             div()
                 .id(SharedString::from(format!(
@@ -108,11 +115,7 @@ pub fn render_web_search_bar(
                 .on_hover(move |hovered, w, cx| {
                     (hover_cb)(wk_hover.clone(), *hovered, w, cx);
                 })
-                .child(
-                    Icon::new(IconName::TriangleAlert)
-                        .size(px(15.0))
-                        .text_color(palette.status_warning),
-                ),
+                .child(Icon::new(badge_icon).size(px(15.0)).text_color(badge_color)),
         );
     } else {
         left_row = left_row.child(
@@ -171,7 +174,7 @@ pub fn render_web_search_bar(
         .border_1()
         .border_color(palette.border_subtle)
         .bg(palette.bg_special)
-        .shadow(palette.craft_lift_shadows())
+        .shadow(palette.craft_stack_shadows())
         .flex()
         .flex_col()
         .gap(space::MD)
@@ -219,16 +222,20 @@ pub fn render_web_search_bar(
         card = card.child(details);
     }
 
-    if has_partial_warning && props.warning_hovered {
+    if has_hover_issue && props.warning_hovered {
         let reason_text = if props.errors.is_empty() {
-            "部分检索词未能返回完整网页摘要。".to_owned()
+            if is_error {
+                "联网检索失败。".to_owned()
+            } else {
+                "部分检索词未能返回完整网页摘要。".to_owned()
+            }
         } else {
             props.errors.join("；")
         };
         card = card.child(
             div()
                 .absolute()
-                .right(space::MD)
+                .left(space::LG)
                 .bottom_full()
                 .pb(space::XS)
                 .child(
@@ -241,8 +248,9 @@ pub fn render_web_search_bar(
                     )
                     .test_support()
                     .max_w(px(320.0))
-                    .p(space::SM)
-                    .rounded(radius::ROW)
+                    .px(space::SM)
+                    .py(space::XS)
+                    .rounded(radius::CONTROL)
                     .border_1()
                     .border_color(palette.border_hairline)
                     .child(

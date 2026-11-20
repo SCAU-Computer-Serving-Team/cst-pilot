@@ -11,8 +11,9 @@ use cst_desktop::shell::sidebar::ShellRoute;
 use cst_desktop::workbench::markdown_view::MarkdownStreamStore;
 use cst_desktop::workbench::model_picker::{format_quota_balance, thinking_level_label};
 use cst_desktop::workbench::turn_segments::{
-    TurnSegmentKind, build_turn_segments, format_assistant_error, format_duration_zh,
-    glyph_light_strength, group_turns_and_results, light_glyphs, process_segment_label, split_turn,
+    TurnSegmentKind, build_turn_segments, build_turn_segments_with_results, format_assistant_error,
+    format_duration_zh, glyph_light_strength, group_turns_and_results, light_glyphs,
+    process_segment_label, split_turn,
 };
 use cst_os::ProcessIdentity;
 use gpui::{AppContext as _, EntityInputHandler};
@@ -139,6 +140,54 @@ fn turn_segments_special_isolation_and_running_light_parity() {
         }))
         .as_deref(),
         Some("12,500 额度点")
+    );
+
+    // `read` with returned image splits out of collapsed `Process` into `Visible`
+    let read_entries = vec![
+        json!({
+            "id": "u-img",
+            "message": { "role": "user", "timestamp": 10, "content": [{"type": "text", "text": "查截图"}] }
+        }),
+        json!({
+            "id": "a-img",
+            "message": {
+                "role": "assistant",
+                "timestamp": 20,
+                "durationMs": 500,
+                "content": [
+                    {"type": "toolCall", "id": "tc-d", "name": "disk", "arguments": {"scope": "space"}},
+                    {"type": "toolCall", "id": "tc-img", "name": "read", "arguments": {"path": "C:\\bsod.png"}},
+                    {"type": "toolCall", "id": "tc-e", "name": "eventlog", "arguments": {"scope": "security"}}
+                ]
+            }
+        }),
+        json!({
+            "id": "r-d",
+            "message": { "role": "toolResult", "toolCallId": "tc-d", "toolName": "disk", "isError": false, "content": [{"type": "text", "text": "ok"}] }
+        }),
+        json!({
+            "id": "r-img",
+            "message": { "role": "toolResult", "toolCallId": "tc-img", "toolName": "read", "isError": false, "content": [{"type": "text", "text": "C:\\bsod.png"}, {"type": "image", "mimeType": "image/png", "data": "AAAA"}] }
+        }),
+        json!({
+            "id": "r-e",
+            "message": { "role": "toolResult", "toolCallId": "tc-e", "toolName": "eventlog", "isError": false, "content": [{"type": "text", "text": "ok"}] }
+        }),
+    ];
+    let (img_turns, img_results) = group_turns_and_results(&read_entries);
+    let img_split = split_turn(&img_turns[0].assistants);
+    let img_segs = build_turn_segments_with_results(img_split.process, &img_results);
+    assert_eq!(img_segs.len(), 3);
+    assert_eq!(img_segs[0].kind, TurnSegmentKind::Process);
+    assert_eq!(img_segs[1].kind, TurnSegmentKind::Visible);
+    assert_eq!(img_segs[2].kind, TurnSegmentKind::Process);
+    assert_eq!(
+        process_segment_label(&img_segs[0].parts, &img_results, false).as_deref(),
+        Some("已完成 1 次工具调用")
+    );
+    assert_eq!(
+        process_segment_label(&img_segs[2].parts, &img_results, false).as_deref(),
+        Some("已完成 1 次工具调用")
     );
 }
 
