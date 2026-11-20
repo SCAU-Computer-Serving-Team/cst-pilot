@@ -39,6 +39,7 @@ use crate::workspace::{ComposerDraft, DraftKey, WorkspaceState};
 pub const MAX_MULTIPLEX_SUBSCRIPTIONS: usize = 32;
 const SUBSCRIPTION_DEBOUNCE_MS: u64 = 40;
 const STATE_REFRESH_COALESCE_MS: u64 = 25;
+const STARTUP_DESKTOP_SETTINGS_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone)]
 pub struct ClientRuntimeOptions {
@@ -221,29 +222,16 @@ impl CstClient {
             .map_err(|e| ClientError::BootstrapFailed(format!("无法创建客户端异步运行时：{e}")))?;
 
         let endpoint = runtime.block_on(ensure_server_running(kit_root, &options))?;
-        let initial_settings = runtime.block_on(endpoint.http.get_desktop_settings());
-        let wakeup_rx = instance_guard.subscribe_wakeup();
+        // Give saved bounds a chance to reach the first window without inheriting the
+        // normal settings request's timeout. The reducer refreshes settings on connect.
+        let initial_snapshot = runtime.block_on(load_startup_desktop_settings(&endpoint.http));
         let handle = spawn_client_workers(
             runtime.handle(),
             endpoint,
-            wakeup_rx,
+            instance_guard.subscribe_wakeup(),
             ClientRuntimeOptions::default(),
+            initial_snapshot,
         )?;
-        match initial_settings {
-            Ok(settings) => {
-                let mut guard = handle.core.snapshot.lock().expect("snapshot lock");
-                let mut next = (**guard).clone();
-                next.desktop_settings = settings;
-                *guard = Arc::new(next);
-            }
-            Err(ClientError::ConfigurationUnavailable(_)) => {
-                let mut guard = handle.core.snapshot.lock().expect("snapshot lock");
-                let mut next = (**guard).clone();
-                next.desktop_settings_corrupt = true;
-                *guard = Arc::new(next);
-            }
-            Err(_) => {}
-        }
 
         Ok(ClientBootstrapResult::Started(Self {
             handle,
@@ -276,7 +264,13 @@ impl CstClient {
             let (_tx, rx) = watch::channel(0u64);
             rx
         });
-        spawn_client_workers(runtime_handle, endpoint, rx, options)
+        spawn_client_workers(
+            runtime_handle,
+            endpoint,
+            rx,
+            options,
+            ClientSnapshot::default(),
+        )
     }
 
     pub fn handle(&self) -> &ClientHandle {
@@ -1123,11 +1117,29 @@ impl ClientHandle {
     }
 }
 
+async fn load_startup_desktop_settings(http: &AppHttpClient) -> ClientSnapshot {
+    let mut snapshot = ClientSnapshot::default();
+    match tokio::time::timeout(
+        STARTUP_DESKTOP_SETTINGS_TIMEOUT,
+        http.get_desktop_settings(),
+    )
+    .await
+    {
+        Ok(Ok(settings)) => snapshot.desktop_settings = settings,
+        Ok(Err(ClientError::ConfigurationUnavailable(_))) => {
+            snapshot.desktop_settings_corrupt = true;
+        }
+        _ => {}
+    }
+    snapshot
+}
+
 fn spawn_client_workers(
     rt_handle: &tokio::runtime::Handle,
     endpoint: VerifiedServerEndpoint,
     wakeup_rx: watch::Receiver<u64>,
     options: ClientRuntimeOptions,
+    startup_snapshot: ClientSnapshot,
 ) -> Result<ClientHandle, ClientError> {
     let app_identity = ProcessIdentity::current().map_err(ClientError::BootstrapFailed)?;
     let initial_snapshot = Arc::new(ClientSnapshot {
@@ -1136,7 +1148,7 @@ fn spawn_client_workers(
         reconnecting: false,
         channel_mode: ChannelModeDto::AppActive,
         version: endpoint.version.clone(),
-        ..ClientSnapshot::default()
+        ..startup_snapshot
     });
     let (revision_tx, revision_rx) = watch::channel(1u64);
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();

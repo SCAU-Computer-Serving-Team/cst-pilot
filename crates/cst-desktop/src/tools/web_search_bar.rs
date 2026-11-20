@@ -46,12 +46,14 @@ pub fn render_web_search_bar(
 
     let warn_key = format!("web-search-warn-{}", props.call_id);
 
+    let has_summary_count =
+        props.queries.is_empty() && !is_running && !props.summary.trim().is_empty();
     let count_text = if !props.queries.is_empty() {
         format!("{} 个关键词", props.queries.len())
     } else if is_running {
         "正在检索…".to_owned()
-    } else if !props.summary.trim().is_empty() {
-        props.summary.to_owned()
+    } else if has_summary_count {
+        props.summary.replace(['\r', '\n'], " ")
     } else if let Some(ok_cnt) = props.successful {
         format!("{ok_cnt} 个关键词")
     } else {
@@ -105,6 +107,7 @@ pub fn render_web_search_bar(
                 .test_support()
                 .w(px(16.0))
                 .h(px(16.0))
+                .flex_shrink_0()
                 .flex()
                 .items_center()
                 .justify_center()
@@ -135,6 +138,16 @@ pub fn render_web_search_bar(
 
     let hdr_id = SharedString::from(format!("web-search-bar-hdr-{}", props.call_id));
     let hdr_label = SharedString::from(format!("{display_title}（{count_text}）"));
+    let count_label = apply_scale(div(), scale::CAPTION)
+        .min_w_0()
+        .truncate()
+        .text_color(palette.text_secondary)
+        .child(SharedString::from(count_text));
+    let count_label = if has_summary_count {
+        count_label
+    } else {
+        count_label.flex_shrink_0()
+    };
     let header_bar = div()
         .id(hdr_id.clone())
         .test_support()
@@ -145,12 +158,7 @@ pub fn render_web_search_bar(
         .justify_between()
         .gap(space::MD)
         .child(left_row)
-        .child(
-            apply_scale(div(), scale::CAPTION)
-                .flex_shrink_0()
-                .text_color(palette.text_secondary)
-                .child(SharedString::from(count_text)),
-        );
+        .child(count_label);
     let header_bar = if has_details {
         header_bar
             .a11y_toggle_button(hdr_id, hdr_label, expanded)

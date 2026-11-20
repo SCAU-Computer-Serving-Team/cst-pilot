@@ -148,11 +148,7 @@ pub fn render_runbook_card<V: 'static>(
                             apply_scale(div(), scale::BODY_MEDIUM)
                                 .truncate()
                                 .text_color(palette.text_primary)
-                                .child(cjk_inline_label(if props.title.trim().is_empty() {
-                                    "修复命令清单"
-                                } else {
-                                    props.title
-                                })),
+                                .child(cjk_inline_label(card_title.replace(['\r', '\n'], " "))),
                         ),
                 )
                 .child(
@@ -357,7 +353,7 @@ pub fn render_runbook_card<V: 'static>(
                             apply_scale(div(), scale::CAPTION)
                                 .truncate()
                                 .text_color(palette.accent_ink)
-                                .child(SharedString::from(file_label)),
+                                .child(SharedString::from(file_label.replace(['\r', '\n'], " "))),
                         ),
                 )
                 .child({

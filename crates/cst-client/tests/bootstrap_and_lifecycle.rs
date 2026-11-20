@@ -258,6 +258,11 @@ fn bootstrap_spawns_real_server_verifies_health_and_executes_orderly_exit() {
     );
     let kit_server_exe = kit.0.join("cst-server.exe");
     fs::copy(&server_bin, &kit_server_exe).unwrap();
+    fs::write(
+        kit.0.join("agent/home/desktop.json"),
+        br#"{"sidebarCollapsed":true,"windowWidth":1100,"windowHeight":700}"#,
+    )
+    .unwrap();
 
     let mut opts = test_bootstrap_options();
     opts.expected_server_exe = Some(kit_server_exe);
@@ -268,6 +273,11 @@ fn bootstrap_spawns_real_server_verifies_health_and_executes_orderly_exit() {
         ClientBootstrapResult::ActivatedExisting { .. } => panic!("expected fresh start"),
     };
     let handle = started.handle().clone();
+    let initial = handle.snapshot();
+    assert!(initial.desktop_settings.sidebar_collapsed);
+    assert_eq!(initial.desktop_settings.window_width, Some(1100));
+    assert_eq!(initial.desktop_settings.window_height, Some(700));
+    assert!(!initial.desktop_settings_corrupt);
 
     // Wait briefly on a temporary runtime for initial keepalive connection + state sync
     let rt = tokio::runtime::Builder::new_current_thread()

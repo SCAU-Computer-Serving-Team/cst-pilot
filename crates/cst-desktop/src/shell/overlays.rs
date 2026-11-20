@@ -156,6 +156,7 @@ pub fn render_workspace_error_bar(
     transparency_enabled: bool,
     scale_factor: f32,
 ) -> impl IntoElement {
+    let label = single_line_banner_label(&message);
     div()
         .absolute()
         .top(space::LG)
@@ -197,8 +198,9 @@ pub fn render_workspace_error_bar(
                     .child(
                         apply_scale(div(), scale::UI)
                             .text_color(palette.text_primary)
+                            .min_w_0()
                             .truncate()
-                            .child(cjk_inline_label(message)),
+                            .child(cjk_inline_label(label)),
                     ),
             ),
         )
@@ -212,6 +214,7 @@ pub fn render_top_notice_banner(
     transparency_enabled: bool,
     scale_factor: f32,
 ) -> impl IntoElement {
+    let label = single_line_banner_label(&message);
     div()
         .absolute()
         .top(space::LG)
@@ -253,9 +256,18 @@ pub fn render_top_notice_banner(
                     .child(
                         apply_scale(div(), scale::UI)
                             .text_color(palette.text_primary)
+                            .min_w_0()
                             .truncate()
-                            .child(cjk_inline_label(message)),
+                            .child(cjk_inline_label(label)),
                     ),
             ),
         )
+}
+
+fn single_line_banner_label(message: &SharedString) -> SharedString {
+    if message.contains(['\r', '\n']) {
+        message.replace(['\r', '\n'], " ").into()
+    } else {
+        message.clone()
+    }
 }

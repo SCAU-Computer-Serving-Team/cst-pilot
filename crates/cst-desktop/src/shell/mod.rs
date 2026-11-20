@@ -56,6 +56,12 @@ use crate::workbench::{WorkbenchEvent, WorkbenchView};
 
 const BANNER_AUTO_DISMISS_MS: u64 = 2600;
 
+fn viewport_is_narrow(window: &Window) -> Option<bool> {
+    let viewport = window.viewport_size();
+    (viewport.width > px(1.0) && viewport.height > px(1.0))
+        .then(|| viewport.width < px(layout::COMPACT_SIDEBAR_BREAKPOINT_WIDTH))
+}
+
 gpui_kit::actions!(
     cst_shell,
     [
@@ -129,6 +135,9 @@ pub struct AppShell {
     session_subview_prior_focus: Option<FocusHandle>,
     sidebar_collapsed: bool,
     auto_collapsed_narrow: bool,
+    sidebar_viewport_narrow: bool,
+    sidebar_save_task: Option<Task<()>>,
+    sidebar_pending_save: Option<bool>,
     sidebar_batch_mode: bool,
     sidebar_selected_ids: BTreeSet<String>,
     sidebar_context_menu: Option<(String, Point<Pixels>)>,
@@ -188,9 +197,8 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> Self {
         let initial_snapshot = client.snapshot();
-        let vp_w = f32::from(window.viewport_size().width);
-        let initial_narrow = resolved_geometry.width < layout::COMPACT_SIDEBAR_BREAKPOINT_WIDTH
-            || (vp_w > 1.0 && vp_w < layout::COMPACT_SIDEBAR_BREAKPOINT_WIDTH);
+        let initial_narrow = viewport_is_narrow(window)
+            .unwrap_or(resolved_geometry.width < layout::COMPACT_SIDEBAR_BREAKPOINT_WIDTH);
         let auto_collapsed_narrow =
             initial_narrow && !initial_snapshot.desktop_settings.sidebar_collapsed;
         let sidebar_collapsed =
@@ -262,6 +270,16 @@ impl AppShell {
         subscriptions.push(cx.observe_window_bounds(window, |this, window, cx| {
             this.on_window_geometry_changed(window, cx);
         }));
+        let weak_shell = cx.entity().downgrade();
+        subscriptions.push(
+            window.observe_window_visibility(move |visibility, window, cx| {
+                if visibility.is_visible()
+                    && let Some(shell) = weak_shell.upgrade()
+                {
+                    shell.update(cx, |this, cx| this.on_window_geometry_changed(window, cx));
+                }
+            }),
+        );
 
         // Intercept native window close (`X` / `Alt+F4`) to check active tasks & drafts
         let weak_close = cx.entity().downgrade();
@@ -304,6 +322,9 @@ impl AppShell {
             session_subview_prior_focus: None,
             sidebar_collapsed,
             auto_collapsed_narrow,
+            sidebar_viewport_narrow: initial_narrow,
+            sidebar_save_task: None,
+            sidebar_pending_save: None,
             sidebar_batch_mode: false,
             sidebar_selected_ids: BTreeSet::new(),
             sidebar_context_menu: None,
@@ -347,6 +368,15 @@ impl AppShell {
             exit_confirm_focus,
             _subscriptions: subscriptions,
         };
+
+        // Seed the tracker even if the platform does not emit a bounds callback at startup.
+        // Geometry stabilization must not consume the first user-driven resize.
+        shell.bounds_tracker.observe(
+            window.bounds(),
+            resolved_geometry.maximized || window.is_maximized(),
+            viewport_is_narrow(window).is_none(),
+            resolved_geometry.display_hint.clone(),
+        );
 
         if shell.snapshot.channel_mode == ChannelModeDto::WebActive {
             shell.web_lock_prior_focus = Some(root_focus);
@@ -708,24 +738,27 @@ impl AppShell {
                     let prev_update_phase =
                         this.snapshot.update_state.as_ref().map(|u| u.status.phase);
                     let prev_pref_collapsed = this.snapshot.desktop_settings.sidebar_collapsed;
+                    let was_corrupt = this.snapshot.desktop_settings_corrupt;
                     this.snapshot = latest_snap;
                     let pref_collapsed = this.snapshot.desktop_settings.sidebar_collapsed;
-                    if pref_collapsed != prev_pref_collapsed {
-                        let vp_w = f32::from(window.viewport_size().width);
-                        let is_narrow =
-                            vp_w > 1.0 && vp_w < layout::COMPACT_SIDEBAR_BREAKPOINT_WIDTH;
-                        if pref_collapsed {
-                            this.auto_collapsed_narrow = false;
-                        } else if is_narrow {
-                            this.auto_collapsed_narrow = true;
-                        }
-                        let collapsed = pref_collapsed || this.auto_collapsed_narrow;
-                        if collapsed && !this.sidebar_collapsed {
-                            this.dismiss_sidebar_menu(window, cx);
-                            this.sidebar_batch_mode = false;
-                            this.sidebar_selected_ids.clear();
-                        }
-                        this.sidebar_collapsed = collapsed;
+                    // A revision can arrive while SSE is offline, e.g. from an HTTP request.
+                    // Ignore older echoes while a local manual preference is being saved.
+                    let local_pref_collapsed =
+                        this.sidebar_collapsed && !this.auto_collapsed_narrow;
+                    if pref_collapsed != prev_pref_collapsed
+                        && pref_collapsed != local_pref_collapsed
+                        && this.sidebar_save_task.is_none()
+                    {
+                        this.auto_collapsed_narrow =
+                            !pref_collapsed && this.sidebar_viewport_narrow;
+                        this.set_sidebar_collapsed(
+                            pref_collapsed || this.auto_collapsed_narrow,
+                            window,
+                            cx,
+                        );
+                    }
+                    if this.snapshot.desktop_settings_corrupt && !was_corrupt {
+                        this.show_top_notice("桌面配置文件格式异常，已保留原文件。", cx);
                     }
                     this.theme_preference = this.snapshot.desktop_settings.theme;
 
@@ -781,24 +814,19 @@ impl AppShell {
     }
 
     fn on_window_geometry_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let vp = window.viewport_size();
-        let is_min = vp.width <= px(1.0) || vp.height <= px(1.0);
-        if !is_min {
-            let is_narrow = f32::from(vp.width) < layout::COMPACT_SIDEBAR_BREAKPOINT_WIDTH;
+        let Some(is_narrow) = viewport_is_narrow(window).filter(|_| window.is_visible()) else {
+            return;
+        };
+        // Work only at breakpoint crossings. A manual expansion in a narrow window
+        // survives moves, resizes within the same range and minimize/restore.
+        if is_narrow != self.sidebar_viewport_narrow {
+            self.sidebar_viewport_narrow = is_narrow;
             if is_narrow && !self.sidebar_collapsed {
                 self.auto_collapsed_narrow = true;
-                self.sidebar_collapsed = true;
-                self.recent_drawer_open = false;
-                self.dismiss_sidebar_menu(window, cx);
-                self.sidebar_batch_mode = false;
-                self.sidebar_selected_ids.clear();
-                cx.notify();
+                self.set_sidebar_collapsed(true, window, cx);
             } else if !is_narrow && self.auto_collapsed_narrow {
                 self.auto_collapsed_narrow = false;
-                if !self.snapshot.desktop_settings.sidebar_collapsed {
-                    self.sidebar_collapsed = false;
-                }
-                cx.notify();
+                self.set_sidebar_collapsed(false, window, cx);
             }
         }
         let bounds = window.bounds();
@@ -816,7 +844,7 @@ impl AppShell {
 
         if self
             .bounds_tracker
-            .observe(bounds, window.is_maximized(), is_min, matched_hint)
+            .observe(bounds, window.is_maximized(), false, matched_hint)
         {
             let client = self.client.clone();
             self.bounds_debounce_task = Some(cx.spawn(async move |weak, cx| {
@@ -1048,40 +1076,90 @@ impl AppShell {
         }
     }
 
+    fn set_sidebar_collapsed(
+        &mut self,
+        collapsed: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if collapsed == self.sidebar_collapsed {
+            return;
+        }
+        self.sidebar_collapsed = collapsed;
+        let focus_disappears = if collapsed {
+            let search_focus = self.sidebar_search_input.read(cx).focus_handle(cx);
+            self.sidebar_collapse_focus.is_focused(window)
+                || self.sidebar_account_focus.is_focused(window)
+                || search_focus.contains_focused(window, cx)
+                || self.sidebar_menu_focus.contains_focused(window, cx)
+        } else {
+            self.topbar_expand_focus.is_focused(window)
+                || self.topbar_recent_focus.is_focused(window)
+                || self.topbar_account_focus.is_focused(window)
+        };
+        self.recent_drawer_open = false;
+        self.recent_drawer_prior_focus = None;
+        self.sidebar_context_menu = None;
+        self.sidebar_menu_prior_focus = None;
+        self.sidebar_batch_mode = false;
+        self.sidebar_selected_ids.clear();
+        if focus_disappears && self.route != ShellRoute::Login {
+            self.sidebar_toggle_focus().focus(window, cx);
+        }
+        cx.notify();
+    }
+
+    fn sidebar_toggle_focus(&self) -> &FocusHandle {
+        if self.sidebar_collapsed {
+            &self.topbar_expand_focus
+        } else {
+            &self.sidebar_collapse_focus
+        }
+    }
+
     pub fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let next_collapsed = !self.sidebar_collapsed;
         self.auto_collapsed_narrow = false;
-        self.sidebar_collapsed = next_collapsed;
-        self.recent_drawer_open = false;
-        self.sidebar_context_menu = None;
+        self.set_sidebar_collapsed(next_collapsed, window, cx);
         if self.route != ShellRoute::Login {
-            if next_collapsed {
-                self.topbar_expand_focus.focus(window, cx);
-            } else {
-                self.sidebar_collapse_focus.focus(window, cx);
-            }
+            self.sidebar_toggle_focus().focus(window, cx);
+        }
+
+        // Serialize writes to the same setting. Coalesce intervening clicks while
+        // a PATCH is outstanding, and keep the newest local choice on screen.
+        self.sidebar_pending_save = Some(next_collapsed);
+        if self.sidebar_save_task.is_some() {
+            return;
         }
         let client = self.client.clone();
-        cx.spawn(async move |weak, cx| {
-            let res = cx
-                .background_executor()
-                .spawn(async move {
-                    client
-                        .patch_desktop_settings(DesktopSettingsPatchDto {
-                            sidebar_collapsed: Some(next_collapsed),
-                            ..DesktopSettingsPatchDto::default()
-                        })
-                        .await
-                })
-                .await;
-            if let Err(err) = res {
-                let _ = weak.update(cx, |this, cx| {
-                    this.show_workspace_error(err.to_string(), cx);
+        self.sidebar_save_task = Some(cx.spawn(async move |weak, cx| {
+            loop {
+                let Ok(Some(collapsed)) =
+                    weak.update(cx, |this, _| this.sidebar_pending_save.take())
+                else {
+                    break;
+                };
+                let result = client
+                    .patch_desktop_settings(DesktopSettingsPatchDto {
+                        sidebar_collapsed: Some(collapsed),
+                        ..DesktopSettingsPatchDto::default()
+                    })
+                    .await;
+                let done = weak.update(cx, |this, cx| {
+                    if this.sidebar_pending_save.is_some() {
+                        return false;
+                    }
+                    this.sidebar_save_task = None;
+                    if let Err(err) = result {
+                        this.show_workspace_error(err.to_string(), cx);
+                    }
+                    true
                 });
+                if done.unwrap_or(true) {
+                    break;
+                }
             }
-        })
-        .detach();
-        cx.notify();
+        }));
     }
 
     /// Closes ONLY the single topmost open surface and restores focus within 1 frame.
@@ -2579,8 +2657,7 @@ impl Render for AppShell {
                     transparency_enabled,
                     scale_factor,
                 ));
-            }
-            if let Some(ref notice) = self.top_notice {
+            } else if let Some(ref notice) = self.top_notice {
                 login_shell = login_shell.child(render_top_notice_banner(
                     notice.clone(),
                     &palette,
@@ -2700,8 +2777,7 @@ impl Render for AppShell {
                     transparency_enabled,
                     scale_factor,
                 ));
-            }
-            if let Some(ref notice) = self.top_notice {
+            } else if let Some(ref notice) = self.top_notice {
                 workspace_card = workspace_card.child(render_top_notice_banner(
                     notice.clone(),
                     &palette,

@@ -708,6 +708,7 @@ fn desktop_cli_health_check_lock_free_and_corrupt_asset_rejection() {
 struct MockServerState {
     channel_mode: String,
     sidebar_collapsed: bool,
+    reject_sse: bool,
     running_sessions: bool,
     web_closed_calls: usize,
     exit_calls: usize,
@@ -732,6 +733,7 @@ impl MockDesktopBackend {
         let state = Arc::new(Mutex::new(MockServerState {
             channel_mode: "app_active".to_owned(),
             sidebar_collapsed: false,
+            reject_sse: false,
             running_sessions: true,
             web_closed_calls: 0,
             exit_calls: 0,
@@ -768,6 +770,9 @@ impl MockDesktopBackend {
                         let body_str = req.split("\r\n\r\n").nth(1).unwrap_or("");
 
                         if path.starts_with("/api/app/events") || path.starts_with("/api/events/stream") {
+                            if st.lock().unwrap().reject_sse {
+                                return;
+                            }
                             let hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n: connected\n\n";
                             let _ = stream.write_all(hdr.as_bytes()).await;
                             while !st_stop.load(Ordering::Relaxed) {
@@ -892,6 +897,138 @@ impl Drop for MockDesktopBackend {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
     }
+}
+
+#[gpui_kit::test]
+async fn narrow_sidebar_manual_override_and_drawer_follow_viewport_transitions(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    cx.executor().allow_parking();
+    let fixture = KitTempFixture::create();
+    let backend = MockDesktopBackend::start();
+    backend.state.lock().unwrap().reject_sse = true;
+    let self_id = ProcessIdentity::current().unwrap();
+    let endpoint = VerifiedServerEndpoint {
+        kit_root: fixture.root.clone(),
+        pid: self_id.pid,
+        process_created: self_id.created,
+        port: backend.port,
+        version: "v0.1.0".into(),
+        http: AppHttpClient::new(backend.port, &backend.token).unwrap(),
+        spawned_by_client: false,
+    };
+    let handle = CstClient::from_verified_endpoint(backend.rt.handle(), endpoint, None).unwrap();
+    let (win, _) = cx.update(|cx| {
+        gpui_kit::init(cx);
+        register_shell_keys(cx);
+        open_desktop_shell_window_with_handle(handle.clone(), None, cx).unwrap()
+    });
+    let resize = |cx: &gpui_kit::TestAppContext, w, h| {
+        cx.simulate_window_resize(win, Size::new(px(w), px(h)));
+    };
+
+    resize(cx, 1119.0, 700.0);
+    cx.update_window(win, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("topbar-mklbe").visible());
+        window.click("topbar-recent-drawer-btn", cx);
+        assert!(window.find("recent-sessions-drawer").visible());
+    })
+    .unwrap();
+    // The first resize persists its normal bounds even without a startup geometry event.
+    cx.wait_for(win, Duration::from_secs(2), |_, _| {
+        backend
+            .state
+            .lock()
+            .unwrap()
+            .patched_bodies
+            .iter()
+            .any(|patch| patch["windowWidth"] == 1119 && patch["windowHeight"] == 700)
+    })
+    .await;
+    assert!(
+        backend
+            .state
+            .lock()
+            .unwrap()
+            .patched_bodies
+            .iter()
+            .all(|patch| { patch.get("sidebarCollapsed").is_none() })
+    );
+
+    resize(cx, 1120.0, 700.0);
+    // HTTP revisions apply even with no SSE connection. A persisted collapse
+    // must stay collapsed across the breakpoint, unlike an automatic collapse.
+    backend.state.lock().unwrap().sidebar_collapsed = true;
+    backend
+        .rt
+        .block_on(handle.query_desktop_settings())
+        .unwrap();
+    assert!(!handle.snapshot().connected);
+    cx.wait_for(win, Duration::from_secs(2), |window, _| {
+        window.try_find("sidebar-l081m1").is_none()
+    })
+    .await;
+    resize(cx, 1119.0, 700.0);
+    resize(cx, 1120.0, 700.0);
+    cx.update_window(win, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("sidebar-l081m1").is_none());
+    })
+    .unwrap();
+    backend.state.lock().unwrap().sidebar_collapsed = false;
+    backend
+        .rt
+        .block_on(handle.query_desktop_settings())
+        .unwrap();
+    cx.wait_for(win, Duration::from_secs(2), |window, _| {
+        window.try_find("sidebar-l081m1").is_some()
+    })
+    .await;
+
+    resize(cx, 1119.0, 700.0);
+    cx.update_window(win, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("recent-sessions-drawer").is_none());
+        window.press("ctrl-b", cx);
+        assert!(window.find("sidebar-l081m1").visible());
+    })
+    .unwrap();
+
+    resize(cx, 1.0, 1.0);
+    resize(cx, 1100.0, 700.0);
+    cx.update_window(win, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(
+            window.find("sidebar-l081m1").visible(),
+            "manual expansion is retained within the narrow viewport"
+        );
+    })
+    .unwrap();
+    resize(cx, 1120.0, 700.0);
+    resize(cx, 1119.0, 700.0);
+    resize(cx, 1120.0, 1.0);
+    cx.update_window(win, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("sidebar-l081m1").is_none());
+    })
+    .unwrap();
+    resize(cx, 1120.0, 700.0);
+    cx.update_window(win, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("sidebar-l081m1").visible());
+    })
+    .unwrap();
+    cx.wait_for(win, Duration::from_secs(2), |_, _| {
+        backend
+            .state
+            .lock()
+            .unwrap()
+            .patched_bodies
+            .iter()
+            .any(|patch| patch["sidebarCollapsed"] == false)
+    })
+    .await;
 }
 
 #[gpui_kit::test]

@@ -437,7 +437,7 @@ impl Render for WorkbenchView {
                                 .min_w_0()
                                 .truncate()
                                 .text_color(palette.text_primary)
-                                .child(cjk_inline_label(session_title)),
+                                .child(cjk_inline_label(session_title.replace(['\r', '\n'], " "))),
                         ),
                 )
                 .child(
