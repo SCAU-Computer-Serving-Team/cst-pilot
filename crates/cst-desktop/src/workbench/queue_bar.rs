@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use cst_client::{ClientError, ClientHandle};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Input, InputState};
@@ -60,12 +61,15 @@ impl ParsedQueueSnapshot {
                 if !visible {
                     continue;
                 }
+                let Some(id) = item
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                else {
+                    continue;
+                };
                 items.push(VisibleQueueItem {
-                    id: item
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .to_owned(),
+                    id: id.to_owned(),
                     text: item
                         .get("text")
                         .and_then(Value::as_str)
@@ -91,6 +95,53 @@ impl ParsedQueueSnapshot {
             .filter(|i| i.status == "pending" && i.delivery == "queue")
             .map(|i| i.id.clone())
             .collect()
+    }
+}
+
+pub(super) enum QueueMutation {
+    Steer(String),
+    Retry(String),
+    Delete(String),
+    Reorder(Vec<String>),
+    Edit(String, String),
+}
+
+impl QueueMutation {
+    pub(super) async fn send(
+        self,
+        client: ClientHandle,
+        sid: String,
+        version: u64,
+    ) -> Result<Value, ClientError> {
+        match self {
+            Self::Steer(id) => client.steer_queue_item(sid, id, version).await,
+            Self::Retry(id) => client.retry_queue_item(sid, id, version).await,
+            Self::Delete(id) => client.delete_queue_item(sid, id, version).await,
+            Self::Reorder(ids) => client.reorder_queue(sid, version, ids).await,
+            Self::Edit(id, text) => client.edit_queue_item(sid, id, version, text).await,
+        }
+    }
+
+    pub(super) fn project(&self, mut queue: ParsedQueueSnapshot) -> ParsedQueueSnapshot {
+        match self {
+            Self::Reorder(ids) => {
+                let reordered: Vec<_> = ids
+                    .iter()
+                    .filter_map(|id| queue.items.iter().find(|item| &item.id == id).cloned())
+                    .collect();
+                for (slot, item) in queue
+                    .items
+                    .iter_mut()
+                    .filter(|i| i.status == "pending" && i.delivery == "queue")
+                    .zip(reordered)
+                {
+                    *slot = item;
+                }
+            }
+            Self::Delete(id) => queue.items.retain(|item| &item.id != id),
+            _ => {}
+        }
+        queue
     }
 }
 
@@ -172,7 +223,10 @@ pub fn render_queue_bar(
         let iid = item.id.clone();
         let is_editing = editing_item_id == Some(iid.as_str());
 
-        if is_editing && let Some(input_entity) = edit_input_state {
+        if is_editing
+            && matches!(item.status.as_str(), "pending" | "failed")
+            && let Some(input_entity) = edit_input_state
+        {
             let commit_cb = Rc::clone(&cb.on_commit_edit);
             let cancel_cb = Rc::clone(&cb.on_cancel_edit);
             let iid_save = iid.clone();
@@ -201,6 +255,7 @@ pub fn render_queue_bar(
                             .id(save_btn_id.clone())
                             .test_support()
                             .a11y_button(save_btn_id, "保存排队消息")
+                            .tab_index(0)
                             .h(height::INLINE)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -218,6 +273,7 @@ pub fn render_queue_bar(
                             .id(cancel_btn_id.clone())
                             .test_support()
                             .a11y_button(cancel_btn_id, "取消编辑排队消息")
+                            .tab_index(0)
                             .h(height::INLINE)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -258,6 +314,7 @@ pub fn render_queue_bar(
                         .id(up_id.clone())
                         .test_support()
                         .a11y_button(up_id, "上移排队消息")
+                        .tab_index(0)
                         .w(height::INLINE)
                         .h(height::INLINE)
                         .rounded(radius::CONTROL)
@@ -285,6 +342,7 @@ pub fn render_queue_bar(
                         .id(down_id.clone())
                         .test_support()
                         .a11y_button(down_id, "下移排队消息")
+                        .tab_index(0)
                         .w(height::INLINE)
                         .h(height::INLINE)
                         .rounded(radius::CONTROL)
@@ -330,6 +388,7 @@ pub fn render_queue_bar(
                     apply_scale(div(), scale::CAPTION_MEDIUM)
                         .id(pri_id.clone())
                         .test_support()
+                        .tab_index(0)
                         .a11y_button(
                             pri_id,
                             if is_failed {
@@ -372,6 +431,7 @@ pub fn render_queue_bar(
                         .id(edit_id.clone())
                         .test_support()
                         .a11y_button(edit_id, "编辑排队消息")
+                        .tab_index(0)
                         .w(height::INLINE)
                         .h(height::INLINE)
                         .rounded(radius::CONTROL)
@@ -393,6 +453,7 @@ pub fn render_queue_bar(
                         .id(del_id.clone())
                         .test_support()
                         .a11y_button(del_id, "删除排队消息")
+                        .tab_index(0)
                         .w(height::INLINE)
                         .h(height::INLINE)
                         .rounded(radius::CONTROL)

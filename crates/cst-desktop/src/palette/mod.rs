@@ -1,5 +1,6 @@
 use cst_client::SessionSummary;
 use gpui_kit::assets::IconName;
+use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::command::{Command, CommandGroup, CommandItem, CommandState};
 use gpui_kit::component::{Disableable as _, Icon};
 use gpui_kit::{
@@ -36,6 +37,7 @@ pub enum CommandPaletteEvent {
 pub struct CommandPaletteModal {
     command_state: Entity<CommandState>,
     prior_focus: Option<FocusHandle>,
+    trap_focus: FocusHandle,
     sessions: Vec<SessionSummary>,
     has_active_session: bool,
 }
@@ -57,6 +59,7 @@ impl CommandPaletteModal {
         Self {
             command_state,
             prior_focus,
+            trap_focus: cx.focus_handle(),
             sessions,
             has_active_session,
         }
@@ -273,7 +276,16 @@ impl Render for CommandPaletteModal {
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
                 cx.stop_propagation();
             })
-            .child(div().relative().flex_1().min_h_0().w_full().child(cmd))
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .tab_stop(false)
+                    .focus_trap("command-palette-focus-trap", &self.trap_focus)
+                    .child(cmd),
+            )
             // Bottom `28px` keybinding navigation hint bar
             .child(
                 apply_scale(div(), scale::CAPTION)

@@ -1004,6 +1004,10 @@ async fn headless_gpui_shell_sidebar_drawer_escape_web_lock_and_exit_confirm(
         let card = window.find("exit-dialog-card-pfook");
         assert_eq!(f32::from(card.bounds().size.width), 384.0);
         assert_eq!(window.find("exit-dialog-cancel-btn").focused(), Some(true));
+        window.press("tab", cx);
+        assert_eq!(window.find("exit-dialog-confirm-btn").focused(), Some(true));
+        window.press("tab", cx);
+        assert_eq!(window.find("exit-dialog-cancel-btn").focused(), Some(true));
 
         window.press("escape", cx);
         assert!(window.try_find("exit-dialog-card-pfook").is_none());

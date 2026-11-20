@@ -1,5 +1,6 @@
 use cst_client::{UpdatePhaseDto, UpdateStateDto};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::Icon;
 use gpui_kit::{
     App, FocusHandle, InteractiveElement, IntoElement, ParentElement, SharedString,
@@ -17,6 +18,8 @@ pub struct UpdateDialogState {
     pub open: bool,
     pub auto_launch_when_ready: bool,
     pub handoff_locked: bool,
+    pub request_pending: bool,
+    pub launch_pending: bool,
     pub busy_error: Option<SharedString>,
     pub prior_focus: Option<FocusHandle>,
 }
@@ -55,6 +58,8 @@ pub fn render_update_dialog(
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
+    trap_focus: &FocusHandle,
+    dismiss_focus: &FocusHandle,
     on_dismiss_later: impl Fn(&mut Window, &mut App) + 'static,
     on_start_prepare: impl Fn(&mut Window, &mut App) + 'static,
     on_cancel_prepare: impl Fn(&mut Window, &mut App) + 'static,
@@ -73,7 +78,7 @@ pub fn render_update_dialog(
         .filter(|s| !s.trim().is_empty())
         .unwrap_or("包含稳定性改进与诊断能力更新。");
 
-    if dialog.handoff_locked || phase == UpdatePhaseDto::Launching {
+    if dialog.handoff_locked || dialog.launch_pending || phase == UpdatePhaseDto::Launching {
         return render_frosted_surface(
             "update-handoff-lock-scrim",
             FrostedGlassSpec::scrim_dz0fp(palette),
@@ -92,46 +97,51 @@ pub fn render_update_dialog(
         .justify_center()
         .occlude()
         .child(
-            render_frosted_surface(
-                "update-handoff-lock-card",
-                FrostedGlassSpec::modal_k3x72(palette, 8.0),
-                palette.bg_modal,
-                transparency_enabled,
-                scale_factor,
-            )
-            .test_support()
-            .a11y_dialog("update-handoff-lock-card", "正在重启完成更新")
-            .w(layout::MODAL_STANDARD_WIDTH)
-            .p(px(20.0))
-            .rounded(radius::ROW)
-            .border_1()
-            .border_color(palette.border_subtle)
-            .flex()
-            .flex_col()
-            .gap(space::MD)
-            .child(
-                div()
-                    .relative()
+            div()
+                .tab_stop(false)
+                .focus_trap("update-handoff-focus-trap", trap_focus)
+                .child(
+                    render_frosted_surface(
+                        "update-handoff-lock-card",
+                        FrostedGlassSpec::modal_k3x72(palette, 8.0),
+                        palette.bg_modal,
+                        transparency_enabled,
+                        scale_factor,
+                    )
+                    .test_support()
+                    .a11y_dialog("update-handoff-lock-card", "正在重启完成更新")
+                    .w(layout::MODAL_STANDARD_WIDTH)
+                    .p(px(20.0))
+                    .rounded(radius::ROW)
+                    .border_1()
+                    .border_color(palette.border_subtle)
                     .flex()
-                    .items_center()
-                    .gap(space::SM)
+                    .flex_col()
+                    .gap(space::MD)
                     .child(
-                        Icon::new(IconName::CircleArrowUp)
-                            .size(px(16.0))
-                            .text_color(palette.accent_ink),
+                        div()
+                            .relative()
+                            .flex()
+                            .items_center()
+                            .gap(space::SM)
+                            .child(
+                                Icon::new(IconName::CircleArrowUp)
+                                    .size(px(16.0))
+                                    .text_color(palette.accent_ink),
+                            )
+                            .child(
+                                apply_scale(div(), scale::BODY_SEMIBOLD)
+                                    .text_color(palette.text_primary)
+                                    .child(cjk_inline_label("正在重启完成更新…")),
+                            ),
                     )
                     .child(
-                        apply_scale(div(), scale::BODY_SEMIBOLD)
-                            .text_color(palette.text_primary)
-                            .child(cjk_inline_label("正在重启完成更新…")),
+                        apply_scale(div(), scale::UI)
+                            .relative()
+                            .text_color(palette.text_secondary)
+                            .child("正在交接独立升级程序校验并替换组件，窗口即将自动重启。"),
                     ),
-            )
-            .child(
-                apply_scale(div(), scale::UI)
-                    .relative()
-                    .text_color(palette.text_secondary)
-                    .child("正在交接独立升级程序校验并替换组件，窗口即将自动重启。"),
-            ),
+                ),
         )
         .into_any_element();
     }
@@ -285,6 +295,8 @@ pub fn render_update_dialog(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("update-dialog-background-btn")
                     .test_support()
+                    .tab_index(0)
+                    .track_focus(dismiss_focus)
                     .a11y_button("update-dialog-background-btn", "后台继续下载")
                     .h(height::CONTROL)
                     .px(space::MD)
@@ -303,6 +315,7 @@ pub fn render_update_dialog(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("update-dialog-cancel-prepare-btn")
                     .test_support()
+                    .tab_index(0)
                     .a11y_button("update-dialog-cancel-prepare-btn", "取消下载更新")
                     .h(height::CONTROL)
                     .px(space::MD)
@@ -327,6 +340,8 @@ pub fn render_update_dialog(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("update-dialog-later-btn")
                     .test_support()
+                    .track_focus(dismiss_focus)
+                    .tab_index(0)
                     .a11y_button("update-dialog-later-btn", "稍后")
                     .h(height::CONTROL)
                     .px(space::MD)
@@ -345,6 +360,7 @@ pub fn render_update_dialog(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("update-dialog-launch-btn")
                     .test_support()
+                    .tab_index(0)
                     .a11y_button("update-dialog-launch-btn", "立即重启更新")
                     .h(height::CONTROL)
                     .px(space::LG)
@@ -367,6 +383,8 @@ pub fn render_update_dialog(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("update-dialog-later-btn")
                     .test_support()
+                    .track_focus(dismiss_focus)
+                    .tab_index(0)
                     .a11y_button("update-dialog-later-btn", "稍后")
                     .h(height::CONTROL)
                     .px(space::MD)
@@ -385,6 +403,7 @@ pub fn render_update_dialog(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("update-dialog-confirm-restart-btn")
                     .test_support()
+                    .tab_index(0)
                     .a11y_button("update-dialog-confirm-restart-btn", "更新并重启")
                     .h(height::CONTROL)
                     .px(space::LG)
@@ -416,6 +435,11 @@ pub fn render_update_dialog(
     .items_center()
     .justify_center()
     .occlude()
-    .child(card.child(footer))
+    .child(
+        div()
+            .tab_stop(false)
+            .focus_trap("update-dialog-focus-trap", trap_focus)
+            .child(card.child(footer)),
+    )
     .into_any_element()
 }

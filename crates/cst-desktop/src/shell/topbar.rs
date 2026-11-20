@@ -300,6 +300,7 @@ pub fn render_window_caption_controls(
                 .id("window-btn-minimize")
                 .test_support()
                 .a11y_button("window-btn-minimize", "最小化窗口")
+                .tab_index(0)
                 .window_control_area(WindowControlArea::Min)
                 .w(px(40.0))
                 .h_full()
@@ -323,6 +324,7 @@ pub fn render_window_caption_controls(
                         "最大化窗口"
                     },
                 )
+                .tab_index(0)
                 .window_control_area(WindowControlArea::Max)
                 .w(px(40.0))
                 .h_full()
@@ -346,6 +348,7 @@ pub fn render_window_caption_controls(
                 .id("window-btn-close")
                 .test_support()
                 .a11y_button("window-btn-close", "关闭窗口")
+                .tab_index(0)
                 .window_control_area(WindowControlArea::Close)
                 .w(px(40.0))
                 .h_full()

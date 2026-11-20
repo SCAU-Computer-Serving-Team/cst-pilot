@@ -136,6 +136,14 @@ pub struct AppShell {
     account_menu_prior_focus: Option<FocusHandle>,
     web_switch_confirm: Option<WebSwitchConfirmState>,
     exit_dialog: Option<ExitDialogModalState>,
+    exit_check_pending: bool,
+    shutting_down: bool,
+    web_transition_pending: bool,
+    web_lock_prior_focus: Option<FocusHandle>,
+    missing_key_trap_focus: FocusHandle,
+    missing_key_cancel_focus: FocusHandle,
+    update_trap_focus: FocusHandle,
+    update_dismiss_focus: FocusHandle,
     last_web_url: Option<String>,
     workspace_error: Option<SharedString>,
     top_notice: Option<SharedString>,
@@ -188,16 +196,16 @@ impl AppShell {
             });
 
         let root_focus = cx.focus_handle();
-        let sidebar_collapse_focus = cx.focus_handle();
-        let topbar_expand_focus = cx.focus_handle();
-        let topbar_recent_focus = cx.focus_handle();
+        let sidebar_collapse_focus = cx.focus_handle().tab_stop(true);
+        let topbar_expand_focus = cx.focus_handle().tab_stop(true);
+        let topbar_recent_focus = cx.focus_handle().tab_stop(true);
         let sidebar_account_focus = cx.focus_handle();
-        let topbar_account_focus = cx.focus_handle();
+        let topbar_account_focus = cx.focus_handle().tab_stop(true);
         let web_lock_trap_focus = cx.focus_handle();
-        let web_lock_switch_focus = cx.focus_handle();
+        let web_lock_switch_focus = cx.focus_handle().tab_stop(true);
         let exit_trap_focus = cx.focus_handle();
-        let exit_cancel_focus = cx.focus_handle();
-        let exit_confirm_focus = cx.focus_handle();
+        let exit_cancel_focus = cx.focus_handle().tab_stop(true);
+        let exit_confirm_focus = cx.focus_handle().tab_stop(true);
 
         let workbench = cx.new(|cx| WorkbenchView::new(client.clone(), window, cx));
         let all_sessions_view = cx.new(|_| AllSessionsView::new(client.clone()));
@@ -291,6 +299,14 @@ impl AppShell {
             account_menu_prior_focus: None,
             web_switch_confirm: None,
             exit_dialog: None,
+            exit_check_pending: false,
+            shutting_down: false,
+            web_transition_pending: false,
+            web_lock_prior_focus: None,
+            missing_key_trap_focus: cx.focus_handle(),
+            missing_key_cancel_focus: cx.focus_handle().tab_stop(true),
+            update_trap_focus: cx.focus_handle(),
+            update_dismiss_focus: cx.focus_handle().tab_stop(true),
             last_web_url: None,
             workspace_error: None,
             top_notice: None,
@@ -314,7 +330,12 @@ impl AppShell {
             _subscriptions: subscriptions,
         };
 
-        root_focus.focus(window, cx);
+        if shell.snapshot.channel_mode == ChannelModeDto::WebActive {
+            shell.web_lock_prior_focus = Some(root_focus);
+            shell.web_lock_switch_focus.focus(window, cx);
+        } else {
+            root_focus.focus(window, cx);
+        }
         if let Some(notice_msg) = initial_notice {
             shell.show_top_notice(notice_msg, cx);
         }
@@ -378,10 +399,82 @@ impl AppShell {
     }
 
     pub fn open_update_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.update_dialog.open || self.shutting_down {
+            return;
+        }
         self.update_dialog.open = true;
         self.update_dialog.busy_error = None;
         self.update_dialog.prior_focus = window.focused(cx);
+        if self.exit_dialog.is_none()
+            && self.snapshot.channel_mode != ChannelModeDto::WebActive
+            && self.web_switch_confirm.is_none()
+        {
+            self.update_dismiss_focus.focus(window, cx);
+        }
         cx.notify();
+    }
+
+    fn update_handoff_active(&self) -> bool {
+        self.update_dialog.handoff_locked
+            || self.update_dialog.launch_pending
+            || (self.update_dialog.open
+                && self
+                    .snapshot
+                    .update_state
+                    .as_ref()
+                    .is_some_and(|update| update.status.phase == UpdatePhaseDto::Launching))
+    }
+
+    fn blocks_workspace_shortcuts(&self) -> bool {
+        self.shutting_down
+            || self.exit_dialog.is_some()
+            || self.update_dialog.open
+            || self.missing_key_modal.is_some()
+            || self.web_switch_confirm.is_some()
+            || self.command_palette.is_some()
+            || self.rename_modal.is_some()
+            || self.snapshot.channel_mode == ChannelModeDto::WebActive
+    }
+
+    fn restore_surface_focus(
+        &self,
+        prior: Option<FocusHandle>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let keep = |trap: &FocusHandle, default: &FocusHandle| {
+            prior
+                .as_ref()
+                .filter(|focus| trap.contains(focus, window))
+                .unwrap_or(default)
+                .clone()
+        };
+        let focus = if self.exit_dialog.is_some() {
+            keep(&self.exit_trap_focus, &self.exit_cancel_focus)
+        } else if self.snapshot.channel_mode == ChannelModeDto::WebActive {
+            keep(&self.web_lock_trap_focus, &self.web_lock_switch_focus)
+        } else if self.update_dialog.open {
+            if self.update_handoff_active() {
+                self.update_trap_focus.clone()
+            } else {
+                keep(&self.update_trap_focus, &self.update_dismiss_focus)
+            }
+        } else if self.missing_key_modal.is_some() {
+            keep(&self.missing_key_trap_focus, &self.missing_key_cancel_focus)
+        } else {
+            prior.unwrap_or_else(|| self.root_focus.clone())
+        };
+        focus.focus(window, cx);
+    }
+
+    fn focus_missing_key(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.exit_dialog.is_none()
+            && !self.update_dialog.open
+            && self.snapshot.channel_mode != ChannelModeDto::WebActive
+            && self.web_switch_confirm.is_none()
+        {
+            self.missing_key_cancel_focus.focus(window, cx);
+        }
     }
 
     pub fn show_workspace_error(
@@ -461,19 +554,26 @@ impl AppShell {
         {
             self.startup_missing_key_checked = true;
             if !models.any_model_configured() {
-                let prior = window.focused(cx);
                 let client = self.client.clone();
-                cx.spawn(async move |weak, cx| {
+                cx.spawn_in(window, async move |weak, cx| {
                     if let Ok(claimed) = client.claim_missing_key_prompt().await
                         && claimed.claimed
                     {
-                        let _ = weak.update(cx, |this, cx| {
-                            if this.missing_key_modal.is_none() {
+                        let _ = weak.update_in(cx, |this, window, cx| {
+                            if this.missing_key_modal.is_none()
+                                && this.route == ShellRoute::Home
+                                && this
+                                    .snapshot
+                                    .models
+                                    .as_ref()
+                                    .is_some_and(|m| !m.any_model_configured())
+                            {
                                 this.missing_key_modal = Some(MissingKeyModalState {
                                     provider_label: None,
                                     return_session_id: None,
-                                    prior_focus: prior,
+                                    prior_focus: window.focused(cx),
                                 });
+                                this.focus_missing_key(window, cx);
                                 cx.notify();
                             }
                         });
@@ -491,12 +591,10 @@ impl AppShell {
                     if !ver.is_empty() && self.last_prompted_update_version.as_deref() != Some(&ver)
                     {
                         self.last_prompted_update_version = Some(ver);
-                        self.update_dialog.open = true;
-                        self.update_dialog.prior_focus = window.focused(cx);
+                        self.open_update_dialog(window, cx);
                     }
                 }
                 UpdatePhaseDto::Ready if self.update_dialog.auto_launch_when_ready => {
-                    self.update_dialog.auto_launch_when_ready = false;
                     self.trigger_update_launch_handoff(window, cx);
                 }
                 _ => {}
@@ -513,6 +611,8 @@ impl AppShell {
                 let keep_going = weak.update_in(cx, |this, window, cx| {
                     let prev_mode = this.snapshot.channel_mode;
                     let prev_theme = this.theme_preference;
+                    let prev_update_phase =
+                        this.snapshot.update_state.as_ref().map(|u| u.status.phase);
                     this.snapshot = latest_snap;
                     this.sidebar_collapsed = this.snapshot.desktop_settings.sidebar_collapsed;
                     this.theme_preference = this.snapshot.desktop_settings.theme;
@@ -520,12 +620,29 @@ impl AppShell {
                     if prev_theme != this.theme_preference {
                         apply_desktop_theme(this.theme_preference, Some(window), None, cx);
                     }
-                    if prev_mode != ChannelModeDto::WebActive
-                        && this.snapshot.channel_mode == ChannelModeDto::WebActive
-                    {
-                        this.web_lock_switch_focus.focus(window, cx);
+                    if prev_mode != this.snapshot.channel_mode {
+                        if this.snapshot.channel_mode == ChannelModeDto::WebActive {
+                            if this.exit_dialog.is_none() {
+                                this.web_lock_prior_focus = window.focused(cx);
+                                this.web_lock_switch_focus.focus(window, cx);
+                            }
+                        } else if prev_mode == ChannelModeDto::WebActive {
+                            let prior = this.web_lock_prior_focus.take();
+                            if this.exit_dialog.is_none() {
+                                this.restore_surface_focus(prior, window, cx);
+                            }
+                        }
                     }
                     this.maybe_check_startup_missing_key_and_updates(window, cx);
+                    let phase = this.snapshot.update_state.as_ref().map(|u| u.status.phase);
+                    if prev_update_phase != phase
+                        && this.update_dialog.open
+                        && this.exit_dialog.is_none()
+                        && this.web_switch_confirm.is_none()
+                        && this.snapshot.channel_mode != ChannelModeDto::WebActive
+                    {
+                        this.restore_surface_focus(None, window, cx);
+                    }
                     cx.notify();
                 });
                 if keep_going.is_err() {
@@ -594,6 +711,15 @@ impl AppShell {
     }
 
     pub fn toggle_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.exit_dialog.is_some()
+            || self.update_dialog.open
+            || self.missing_key_modal.is_some()
+            || self.web_switch_confirm.is_some()
+            || self.snapshot.channel_mode == ChannelModeDto::WebActive
+            || self.shutting_down
+        {
+            return;
+        }
         if let Some(palette_ent) = self.command_palette.take() {
             self.command_palette_sub = None;
             if let Some(pf) = palette_ent.read(cx).prior_focus() {
@@ -623,26 +749,22 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        match event {
-            CommandPaletteEvent::Dismiss => {
-                if let Some(pf) = palette_ent.read(cx).prior_focus() {
-                    pf.focus(window, cx);
-                }
-                self.command_palette = None;
-                self.command_palette_sub = None;
-                cx.notify();
-            }
-            CommandPaletteEvent::Execute(target) => {
-                let target_cloned = target.clone();
-                if let Some(pf) = palette_ent.read(cx).prior_focus() {
-                    pf.focus(window, cx);
-                }
-                self.command_palette = None;
-                self.command_palette_sub = None;
-                self.execute_palette_target(target_cloned, window, cx);
-                cx.notify();
-            }
+        if self.command_palette.as_ref() != Some(palette_ent)
+            || self.exit_dialog.is_some()
+            || self.update_dialog.open
+            || self.missing_key_modal.is_some()
+            || self.web_switch_confirm.is_some()
+            || self.snapshot.channel_mode == ChannelModeDto::WebActive
+        {
+            return;
         }
+        self.command_palette = None;
+        self.command_palette_sub = None;
+        self.restore_surface_focus(palette_ent.read(cx).prior_focus(), window, cx);
+        if let CommandPaletteEvent::Execute(target) = event {
+            self.execute_palette_target(target.clone(), window, cx);
+        }
+        cx.notify();
     }
 
     fn execute_palette_target(
@@ -800,32 +922,33 @@ impl AppShell {
 
     /// Closes ONLY the single topmost open surface and restores focus within 1 frame.
     pub fn dismiss_topmost_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.shutting_down {
+            return true;
+        }
         if let Some(dialog) = self.exit_dialog.take() {
-            if let Some(prev) = dialog.prior_focus {
-                prev.focus(window, cx);
-            } else {
-                self.root_focus.focus(window, cx);
-            }
+            self.restore_surface_focus(dialog.prior_focus, window, cx);
             cx.notify();
             return true;
         }
-        if self.update_dialog.open && !self.update_dialog.handoff_locked {
+        if self.snapshot.channel_mode == ChannelModeDto::WebActive || self.update_handoff_active() {
+            return true;
+        }
+        if let Some(confirm) = self.web_switch_confirm.take() {
+            self.restore_surface_focus(confirm.prior_focus, window, cx);
+            cx.notify();
+            return true;
+        }
+        if self.update_dialog.open {
             self.update_dialog.open = false;
+            self.update_dialog.auto_launch_when_ready = false;
             self.update_dialog.busy_error = None;
-            if let Some(prev) = self.update_dialog.prior_focus.take() {
-                prev.focus(window, cx);
-            } else {
-                self.root_focus.focus(window, cx);
-            }
+            let prior = self.update_dialog.prior_focus.take();
+            self.restore_surface_focus(prior, window, cx);
             cx.notify();
             return true;
         }
         if let Some(mk) = self.missing_key_modal.take() {
-            if let Some(prev) = mk.prior_focus {
-                prev.focus(window, cx);
-            } else {
-                self.root_focus.focus(window, cx);
-            }
+            self.restore_surface_focus(mk.prior_focus, window, cx);
             cx.notify();
             return true;
         }
@@ -847,15 +970,6 @@ impl AppShell {
             return true;
         }
         if self.sidebar_context_menu.take().is_some() {
-            cx.notify();
-            return true;
-        }
-        if let Some(confirm) = self.web_switch_confirm.take() {
-            if let Some(prev) = confirm.prior_focus {
-                prev.focus(window, cx);
-            } else {
-                self.root_focus.focus(window, cx);
-            }
             cx.notify();
             return true;
         }
@@ -910,6 +1024,13 @@ impl AppShell {
     }
 
     fn trigger_update_prepare(&mut self, cx: &mut Context<Self>) {
+        if !self.update_dialog.open
+            || self.update_dialog.request_pending
+            || self.update_handoff_active()
+        {
+            return;
+        }
+        self.update_dialog.request_pending = true;
         self.update_dialog.busy_error = None;
         self.update_dialog.auto_launch_when_ready = true;
         let client = self.client.clone();
@@ -917,6 +1038,7 @@ impl AppShell {
             let res = client.prepare_update().await;
             let _ = client.refresh_globals().await;
             let _ = weak.update(cx, |this, cx| {
+                this.update_dialog.request_pending = false;
                 if let Err(err) = res {
                     this.update_dialog.auto_launch_when_ready = false;
                     this.update_dialog.busy_error = Some(SharedString::from(err.to_string()));
@@ -928,6 +1050,10 @@ impl AppShell {
     }
 
     fn trigger_update_cancel(&mut self, cx: &mut Context<Self>) {
+        if self.update_dialog.request_pending || self.update_handoff_active() {
+            return;
+        }
+        self.update_dialog.request_pending = true;
         self.update_dialog.auto_launch_when_ready = false;
         self.update_dialog.busy_error = None;
         let op_id = self
@@ -940,6 +1066,7 @@ impl AppShell {
             let res = client.cancel_update(op_id.as_deref()).await;
             let _ = client.refresh_globals().await;
             let _ = weak.update(cx, |this, cx| {
+                this.update_dialog.request_pending = false;
                 if let Err(err) = res {
                     this.show_workspace_error(err.to_string(), cx);
                 }
@@ -950,29 +1077,48 @@ impl AppShell {
     }
 
     fn trigger_update_launch_handoff(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.update_dialog.open
+            || self.exit_check_pending
+            || self.exit_dialog.is_some()
+            || self.shutting_down
+            || self.update_handoff_active()
+            || self.snapshot.channel_mode == ChannelModeDto::WebActive
+            || self.web_switch_confirm.is_some()
+        {
+            return;
+        }
+        self.update_dialog.auto_launch_when_ready = false;
+        self.update_dialog.launch_pending = true;
         self.update_dialog.busy_error = None;
+        self.update_trap_focus.focus(window, cx);
+        cx.notify();
         let client = self.client.clone();
         cx.spawn_in(window, async move |weak, cx| {
             let res = client.launch_update("desktop").await;
-            let _ = weak.update_in(cx, |this, window, cx| match res {
-                Ok(_) => {
-                    // Receipt received: lock UI with `"正在重启完成更新…"` and immediately close window & quit!
-                    this.update_dialog.open = true;
-                    this.update_dialog.handoff_locked = true;
-                    this.allow_immediate_close = true;
-                    cx.notify();
-                    window.remove_window();
-                    cx.quit();
-                }
-                Err(ClientError::Conflict { message, .. }) => {
-                    this.update_dialog.open = true;
-                    this.update_dialog.busy_error = Some(SharedString::from(message));
-                    cx.notify();
-                }
-                Err(err) => {
-                    this.update_dialog.open = true;
-                    this.update_dialog.busy_error = Some(SharedString::from(err.to_string()));
-                    cx.notify();
+            let _ = weak.update_in(cx, |this, window, cx| {
+                this.update_dialog.launch_pending = false;
+                match res {
+                    Ok(_) => {
+                        // Receipt received: lock UI with `"正在重启完成更新…"` and immediately close window & quit!
+                        this.update_dialog.open = true;
+                        this.update_dialog.handoff_locked = true;
+                        this.allow_immediate_close = true;
+                        cx.notify();
+                        window.remove_window();
+                        cx.quit();
+                    }
+                    Err(ClientError::Conflict { message, .. }) => {
+                        this.update_dialog.open = true;
+                        this.update_dialog.busy_error = Some(SharedString::from(message));
+                        this.restore_surface_focus(None, window, cx);
+                        cx.notify();
+                    }
+                    Err(err) => {
+                        this.update_dialog.open = true;
+                        this.update_dialog.busy_error = Some(SharedString::from(err.to_string()));
+                        this.restore_surface_focus(None, window, cx);
+                        cx.notify();
+                    }
                 }
             });
         })
@@ -980,10 +1126,14 @@ impl AppShell {
     }
 
     pub fn request_close_flow(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.exit_dialog.is_some() {
+        if self.exit_dialog.is_some()
+            || self.exit_check_pending
+            || self.shutting_down
+            || self.update_handoff_active()
+        {
             return;
         }
-        let prior_focus = window.focused(cx);
+        self.exit_check_pending = true;
         let client = self.client.clone();
         cx.spawn_in(window, async move |weak, cx| {
             let check_res = cx
@@ -994,30 +1144,40 @@ impl AppShell {
                 })
                 .await;
 
-            match check_res {
-                Ok(report) if report.requires_confirmation() => {
-                    let _ = weak.update_in(cx, |this, window, cx| {
-                        this.exit_dialog = Some(ExitDialogModalState {
-                            report,
-                            exiting: false,
-                            prior_focus,
-                        });
-                        // Safe default focus on `"取消"`!
-                        this.exit_cancel_focus.focus(window, cx);
-                        cx.notify();
-                    });
+            let report = check_res.unwrap_or_else(|_| {
+                // A failed lifecycle query must not bypass confirmation for local drafts.
+                let local = client.check_web_switch();
+                ExitCheckReport {
+                    running_sessions: 0,
+                    pending_server_inbox: 0,
+                    active_exports: 0,
+                    unresolved_local_outbox: local.unresolved_local_outbox,
+                    unsent_drafts: local.unsent_drafts,
                 }
-                _ => {
-                    let _ = weak.update_in(cx, |this, window, cx| {
-                        this.execute_final_shutdown(window, cx);
+            });
+            let _ = weak.update_in(cx, |this, window, cx| {
+                this.exit_check_pending = false;
+                if report.requires_confirmation() {
+                    this.exit_dialog = Some(ExitDialogModalState {
+                        report,
+                        exiting: false,
+                        prior_focus: window.focused(cx),
                     });
+                    this.exit_cancel_focus.focus(window, cx);
+                    cx.notify();
+                } else {
+                    this.execute_final_shutdown(window, cx);
                 }
-            }
+            });
         })
         .detach();
     }
 
     fn execute_final_shutdown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.shutting_down || self.update_handoff_active() {
+            return;
+        }
+        self.shutting_down = true;
         if let Some(ref mut d) = self.exit_dialog {
             d.exiting = true;
             cx.notify();
@@ -1051,28 +1211,39 @@ impl AppShell {
     }
 
     fn trigger_open_web(&mut self, force: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.web_transition_pending || self.shutting_down || self.update_handoff_active() {
+            return;
+        }
         if !force && self.client.check_web_switch().requires_confirmation() {
+            if self.web_switch_confirm.is_some() {
+                return;
+            }
             self.web_switch_confirm = Some(WebSwitchConfirmState {
                 prior_focus: window.focused(cx),
             });
             cx.notify();
             return;
         }
-        self.web_switch_confirm = None;
+        if let Some(confirm) = self.web_switch_confirm.take() {
+            self.restore_surface_focus(confirm.prior_focus, window, cx);
+            cx.notify();
+        }
+        self.web_transition_pending = true;
         let client = self.client.clone();
         cx.spawn(async move |weak, cx| {
             let res = cx
                 .background_executor()
                 .spawn(async move { client.open_web().await })
                 .await;
-            let _ = weak.update(cx, |this, cx| match res {
-                Ok(opened) => {
-                    this.last_web_url = Some(opened.url.clone());
-                    open_url_in_trusted_browser(&opened.url);
-                    cx.notify();
-                }
-                Err(err) => {
-                    this.show_workspace_error(err.to_string(), cx);
+            let _ = weak.update(cx, |this, cx| {
+                this.web_transition_pending = false;
+                match res {
+                    Ok(opened) => {
+                        this.last_web_url = Some(opened.url.clone());
+                        open_url_in_trusted_browser(&opened.url);
+                        cx.notify();
+                    }
+                    Err(err) => this.show_workspace_error(err.to_string(), cx),
                 }
             });
         })
@@ -1080,20 +1251,25 @@ impl AppShell {
     }
 
     fn trigger_close_web(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.web_transition_pending
+            || self.shutting_down
+            || self.snapshot.channel_mode != ChannelModeDto::WebActive
+        {
+            return;
+        }
+        self.web_transition_pending = true;
         let client = self.client.clone();
         cx.spawn_in(window, async move |weak, cx| {
             let res = cx
                 .background_executor()
                 .spawn(async move { client.close_web().await })
                 .await;
-            let _ = weak.update_in(cx, |this, window, cx| match res {
-                Ok(()) => {
-                    this.root_focus.focus(window, cx);
-                    cx.notify();
-                }
-                Err(err) => {
+            let _ = weak.update_in(cx, |this, _, cx| {
+                this.web_transition_pending = false;
+                if let Err(err) = res {
                     this.show_workspace_error(err.to_string(), cx);
                 }
+                cx.notify();
             });
         })
         .detach();
@@ -1150,12 +1326,15 @@ impl AppShell {
                 let active_sid = self
                     .client
                     .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
-                self.missing_key_modal = Some(MissingKeyModalState {
-                    provider_label: Some(provider.clone()),
-                    return_session_id: active_sid,
-                    prior_focus: window.focused(cx),
-                });
-                cx.notify();
+                if self.missing_key_modal.is_none() {
+                    self.missing_key_modal = Some(MissingKeyModalState {
+                        provider_label: Some(provider.clone()),
+                        return_session_id: active_sid,
+                        prior_focus: window.focused(cx),
+                    });
+                    self.focus_missing_key(window, cx);
+                    cx.notify();
+                }
             }
             WorkbenchEvent::OpenSlashRoute(target) => {
                 let active_sid = self
@@ -2525,9 +2704,15 @@ impl Render for AppShell {
             .font_family(theme_global.ui_font_family)
             .text_color(palette.text_primary)
             .on_action(cx.listener(|this, _: &ToggleSidebar, window, cx| {
+                if this.blocks_workspace_shortcuts() {
+                    return;
+                }
                 this.toggle_sidebar(window, cx);
             }))
             .on_action(cx.listener(|this, _: &NewSession, _, cx| {
+                if this.blocks_workspace_shortcuts() {
+                    return;
+                }
                 this.route = ShellRoute::Home;
                 this.session_subview = SessionSubView::Chat;
                 this.sidebar_batch_mode = false;
@@ -2541,6 +2726,9 @@ impl Render for AppShell {
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &OpenSettings, _, cx| {
+                if this.blocks_workspace_shortcuts() {
+                    return;
+                }
                 this.route = ShellRoute::Settings;
                 cx.notify();
             }))
@@ -2727,16 +2915,20 @@ impl Render for AppShell {
                 &palette,
                 transparency_enabled,
                 scale_factor,
+                &self.missing_key_trap_focus,
+                &self.missing_key_cancel_focus,
                 move |w, cx| {
                     ent_cancel.update(cx, |this, cx| {
                         let _ = this.dismiss_topmost_surface(w, cx);
                     });
                 },
-                move |_, cx| {
+                move |w, cx| {
                     ent_cfg.update(cx, |this, cx| {
-                        if let Some(taken) = this.missing_key_modal.take() {
-                            this.pending_return_session_id = Some(taken.return_session_id);
-                        }
+                        let Some(taken) = this.missing_key_modal.take() else {
+                            return;
+                        };
+                        this.pending_return_session_id = Some(taken.return_session_id);
+                        this.root_focus.focus(w, cx);
                         this.route = ShellRoute::Settings;
                         this.settings_view.update(cx, |sv, cx| {
                             sv.set_category(SettingsCategory::Providers, cx);
@@ -2760,6 +2952,8 @@ impl Render for AppShell {
                 &palette,
                 transparency_enabled,
                 scale_factor,
+                &self.update_trap_focus,
+                &self.update_dismiss_focus,
                 move |w, cx| {
                     ent_later.update(cx, |this, cx| {
                         let _ = this.dismiss_topmost_surface(w, cx);

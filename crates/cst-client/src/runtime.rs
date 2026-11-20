@@ -432,6 +432,27 @@ impl ClientHandle {
         &self,
         target: DraftKey,
     ) -> Result<SendSubmissionOutcome, ClientError> {
+        self.begin_submit_draft(target).await
+    }
+
+    /// Takes the draft and enqueues the send synchronously so an interactive
+    /// caller can clear its editor before accepting any further input.
+    pub fn begin_submit_draft(
+        &self,
+        target: DraftKey,
+    ) -> impl Future<Output = Result<SendSubmissionOutcome, ClientError>> + use<> {
+        let reply = self.enqueue_draft(target);
+        async move {
+            reply?
+                .await
+                .map_err(|_| ClientError::Disconnected("客户端后台响应中断。".into()))?
+        }
+    }
+
+    fn enqueue_draft(
+        &self,
+        target: DraftKey,
+    ) -> Result<oneshot::Receiver<Result<SendSubmissionOutcome, ClientError>>, ClientError> {
         let draft = self.with_workspace_mut(|ws| ws.take_draft(&target));
         if draft.is_empty() {
             return Err(ClientError::BadRequest {
@@ -455,8 +476,7 @@ impl ClientHandle {
             });
             return Err(ClientError::Disconnected("客户端后台线程已退出。".into()));
         }
-        rx.await
-            .map_err(|_| ClientError::Disconnected("客户端后台响应中断。".into()))?
+        Ok(rx)
     }
 
     /// Retries a failed, storage-paused, or uncertain outbox item (`None` = Home item, `Some(sid)` = Session item).

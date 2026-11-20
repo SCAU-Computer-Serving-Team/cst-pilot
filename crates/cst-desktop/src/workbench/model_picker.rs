@@ -254,6 +254,7 @@ pub fn render_context_quota_popover(
         scale_factor,
     )
     .test_support()
+    .occlude()
     .a11y_dialog("composer-context-popover-h5jg6d", "上下文容量与剩余额度")
     .w(px(336.0))
     .p(space::LG)
@@ -514,6 +515,7 @@ pub type ChangePickerPageFn = Rc<dyn Fn(ModelPickerPage, &mut Window, &mut App)>
 pub fn render_model_picker_popover(
     page: ModelPickerPage,
     highlighted_idx: usize,
+    scroll_handle: &gpui_kit::ScrollHandle,
     scoped_models: &[ModelChoiceDto],
     current_provider: &str,
     current_model_id: &str,
@@ -541,6 +543,7 @@ pub fn render_model_picker_popover(
         scale_factor,
     )
     .test_support()
+    .occlude()
     .a11y_dialog("composer-model-picker-d8zzg", "模型与思考强度选择")
     .w(pop_width)
     .p(space::XS)
@@ -686,6 +689,7 @@ pub fn render_model_picker_popover(
 
             let mut scroll = div()
                 .id("model-picker-models-scroll")
+                .track_scroll(scroll_handle)
                 .relative()
                 .max_h(px(260.0))
                 .overflow_y_scroll()

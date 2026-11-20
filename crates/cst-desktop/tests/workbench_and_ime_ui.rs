@@ -480,7 +480,23 @@ impl WorkbenchMockBackend {
                                     if let Ok(v) = serde_json::from_str::<Value>(body_str) {
                                         guard.reordered_queues.push(v);
                                     }
-                                    ("HTTP/1.1 200 OK", json!({ "ok": true }))
+                                    if guard.reordered_queues.len() == 1 {
+                                        ("HTTP/1.1 409 Conflict", json!({
+                                            "error": "queue_version_conflict",
+                                            "message": "队列已更新"
+                                        }))
+                                    } else {
+                                    ("HTTP/1.1 200 OK", json!({
+                                        "queue": {
+                                            "version": 8,
+                                            "items": [
+                                                { "id": "q2", "text": "检查显卡驱动版本", "status": "pending", "delivery": "queue" },
+                                                { "id": "q1", "text": "补充查看系统事件日志", "status": "pending", "delivery": "queue" },
+                                                { "id": "q3", "text": "排查最新事件", "status": "pending", "delivery": "queue" }
+                                            ]
+                                        }
+                                    }))
+                                    }
                                 }
                                 ("POST", "/api/sessions/sess-new/queue/q1/steer") => {
                                     guard.steered_items.push("q1".to_owned());
@@ -686,6 +702,29 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
         "IME candidate selection Enter must NEVER trigger session creation or message send!"
     );
 
+    // Tab inserts at the caret, preserves the suffix and follows keyboard selection.
+    cx.update_window(win_handle, |_, window, cx| {
+        let textarea = shell
+            .read(cx)
+            .workbench()
+            .read(cx)
+            .home_composer()
+            .read(cx)
+            .textarea_state()
+            .clone();
+        textarea.update(cx, |st, cx| {
+            st.focus(window, cx);
+            st.set_value("尾部", window, cx);
+        });
+        window.press("home", cx);
+        window.press("tab", cx);
+        assert!(window.find("composer-completion-popover-p2bit").visible());
+        window.press("down", cx);
+        window.press("tab", cx);
+        assert_eq!(textarea.read(cx).value().as_ref(), "/skill:ls 尾部");
+    })
+    .unwrap();
+
     // 2. Clear cancelled preedit, commit `/disk`, and test `/` completion -> `InlineToken` + GUI/TUI draft sharing!
     cx.update_window(win_handle, |_, window, cx| {
         let home_comp = shell.read(cx).workbench().read(cx).home_composer().clone();
@@ -742,6 +781,7 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
     // 3. Press `enter` (with IME idle) -> optimistic two-phase Home submission transitions to `ShellRoute::Session`!
     cx.update_window(win_handle, |_, window, cx| {
         window.press("enter", cx);
+        window.press("enter", cx); // The unacknowledged draft must not be submitted again.
     })
     .unwrap();
 
@@ -772,6 +812,29 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
     cx.update_window(win_handle, |_, window, cx| {
         assert!(window.find("session-header-hukqs").visible());
         window.click("queue-move-down-q1", cx);
+        // Projection changes the row order immediately, before the network response.
+        assert!(
+            window.find("queue-item-row-q2").bounds().origin.y
+                < window.find("queue-item-row-q1").bounds().origin.y
+        );
+    })
+    .unwrap();
+
+    // A rejected mutation restores the authoritative order and allows retry.
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window.try_find("workspace-top-error-bar").is_some()
+            && window.try_find("queue-move-down-q1").is_some()
+    })
+    .await;
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("queue-move-down-q1", cx);
+    })
+    .unwrap();
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window.try_find("queue-item-row-q3").is_some()
+    })
+    .await;
+    cx.update_window(win_handle, |_, window, cx| {
         window.click("queue-steer-btn-q1", cx);
     })
     .unwrap();
@@ -784,9 +847,11 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
     .await;
     {
         let guard = backend.state.lock().unwrap();
-        assert_eq!(guard.reordered_queues.len(), 1);
-        assert_eq!(guard.reordered_queues[0]["version"], 7);
-        assert_eq!(guard.reordered_queues[0]["ids"], json!(["q2", "q1"]));
+        assert_eq!(guard.reordered_queues.len(), 2);
+        for reorder in &guard.reordered_queues {
+            assert_eq!(reorder["version"], 7);
+            assert_eq!(reorder["ids"], json!(["q2", "q1"]));
+        }
         assert_eq!(guard.steered_items, vec!["q1"]);
     }
 
@@ -803,9 +868,12 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
         // Open two-level Model Picker (`d8zzg`) -> Thinking page (`L7GWjV`) -> select `Max`!
         window.click("composer-model-picker-btn", cx);
         assert!(window.find("composer-model-picker-d8zzg").visible());
-        window.click("model-picker-goto-thinking", cx);
+        window.press("down", cx);
+        window.press("enter", cx);
         assert!(window.find("thinking-option-max").visible());
-        window.click("thinking-option-max", cx);
+        window.press("end", cx);
+        window.press("enter", cx);
+        assert!(window.try_find("composer-model-picker-d8zzg").is_none());
     })
     .unwrap();
 

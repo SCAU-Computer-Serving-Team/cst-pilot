@@ -49,7 +49,7 @@ pub fn summarize_exit_report(report: &ExitCheckReport) -> Vec<String> {
 }
 
 /// `384px` exit confirmation dialog (`cst-pilot-desktop.pen` 「01 · 工作台」 frame `xXtdv`, card `pFooK`).
-/// Default initial focus sits on the safe `"取消"` button; `"退出"` uses solid danger red (`$status-danger`).
+/// Default initial focus sits on the safe `"继续使用"` button.
 #[allow(clippy::too_many_arguments)]
 pub fn render_exit_confirm_dialog(
     report: &ExitCheckReport,
