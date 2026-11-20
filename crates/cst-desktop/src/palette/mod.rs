@@ -283,6 +283,7 @@ impl Render for CommandPaletteModal {
                     .w_full()
                     .h(px(28.0))
                     .px(space::MD)
+                    .bg(palette.bg_surface)
                     .border_t_1()
                     .border_color(palette.border_subtle)
                     .text_color(palette.text_muted)

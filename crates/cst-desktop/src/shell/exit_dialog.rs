@@ -123,14 +123,14 @@ pub fn render_exit_confirm_dialog(
                     .items_center()
                     .gap(space::SM)
                     .child(
-                        Icon::new(IconName::TriangleAlert)
-                            .size(px(18.0))
-                            .text_color(palette.status_warning),
+                        Icon::new(IconName::CircleAlert)
+                            .size(px(16.0))
+                            .text_color(palette.status_danger),
                     )
                     .child(
                         apply_scale(div(), scale::BODY_SEMIBOLD)
                             .text_color(palette.text_primary)
-                            .child(cjk_inline_label("确认退出 CST Pilot？")),
+                            .child(cjk_inline_label("退出 CST Pilot？")),
                     ),
             )
             .child(
@@ -171,7 +171,7 @@ pub fn render_exit_confirm_dialog(
                             cb(window, cx);
                         }
                     })
-                    .child(cjk_inline_label("取消"))
+                    .child(cjk_inline_label("继续使用"))
             })
             .child({
                 let cb = Rc::clone(&on_confirm_exit);
@@ -183,7 +183,7 @@ pub fn render_exit_confirm_dialog(
                         if exiting_in_progress {
                             "正在退出"
                         } else {
-                            "确认退出"
+                            "停止任务并退出"
                         },
                     )
                     .track_focus(confirm_focus)
@@ -206,7 +206,7 @@ pub fn render_exit_confirm_dialog(
                     .child(cjk_inline_label(if exiting_in_progress {
                         "正在退出…"
                     } else {
-                        "退出"
+                        "停止任务并退出"
                     }))
             }),
     );

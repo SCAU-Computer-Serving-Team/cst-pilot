@@ -75,8 +75,8 @@ pub fn render_web_active_lock_overlay(
                     .gap(space::SM)
                     .child(
                         Icon::new(IconName::Globe)
-                            .size(px(18.0))
-                            .text_color(palette.accent_solid),
+                            .size(px(16.0))
+                            .text_color(palette.accent_ink),
                     )
                     .child(
                         apply_scale(div(), scale::BODY_SEMIBOLD)

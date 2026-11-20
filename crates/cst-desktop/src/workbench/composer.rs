@@ -1101,6 +1101,32 @@ impl ComposerView {
         .flex_col()
         .gap(space::MICRO);
 
+        let header_title = match comp {
+            CompletionPopupState::Slash { .. } => "诊断技能与斜杠命令",
+            CompletionPopupState::Files { .. } => "工作区文件引用",
+        };
+        pop = pop.child(
+            apply_scale(div(), scale::CAPTION)
+                .relative()
+                .w_full()
+                .h(px(22.0))
+                .px(space::SM)
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(space::MD)
+                .child(
+                    div()
+                        .text_color(palette.text_secondary)
+                        .child(cjk_inline_label(header_title)),
+                )
+                .child(
+                    div()
+                        .text_color(palette.text_muted)
+                        .child(cjk_inline_label("↑↓ 选择 · Tab / Enter 插入 · Esc 关闭")),
+                ),
+        );
+
         match comp {
             CompletionPopupState::Slash {
                 items,
@@ -1115,7 +1141,21 @@ impl ComposerView {
                     .flex()
                     .flex_col()
                     .gap(space::MICRO);
+                let mut saw_skill = false;
+                let mut inserted_sep = false;
                 for (idx, item) in items.iter().enumerate() {
+                    let is_skill = item.command.starts_with("/skill:");
+                    if is_skill {
+                        saw_skill = true;
+                    } else if saw_skill && !inserted_sep {
+                        inserted_sep = true;
+                        scroll = scroll.child(
+                            div()
+                                .w_full()
+                                .py(space::XS)
+                                .child(div().w_full().h(px(1.0)).bg(palette.border_subtle)),
+                        );
+                    }
                     let is_sel = idx == *selected_idx;
                     let ent = entity.clone();
                     let icon = icon_for_token_key(item.short_label);
@@ -1127,7 +1167,7 @@ impl ComposerView {
                             .id(slash_id.clone())
                             .test_support()
                             .a11y_listitem(slash_id, slash_label, is_sel)
-                            .h(height::CONTROL)
+                            .h(height::COMPACT)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
                             .bg(if is_sel {
@@ -1212,7 +1252,7 @@ impl ComposerView {
                             .id(file_id.clone())
                             .test_support()
                             .a11y_listitem(file_id, path.clone(), is_sel)
-                            .h(height::CONTROL)
+                            .h(height::COMPACT)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
                             .bg(if is_sel {
@@ -1885,8 +1925,8 @@ impl Render for ComposerView {
             .child(div().w_full().min_h(px(24.0)).child(textarea_element))
             .child(action_bar);
 
-        // Outer relative wrapper anchoring upward popovers (`p2biT`, `d8zzg`, `h5jG6d`)
-        let mut wrapper = div().relative().w_full();
+        // Outer relative wrapper (`card` first, upward floating popovers `p2biT` / `d8zzg` / `h5jG6d` painted above `card`)
+        let mut wrapper = div().relative().w_full().child(card);
 
         if let Some(comp_pop) = self.render_completion_popover(
             mono_family.clone(),
@@ -1902,99 +1942,85 @@ impl Render for ComposerView {
             let ent_retry = entity.clone();
             let ent_acc = entity.clone();
             let prov_retry = cur_provider.clone();
-            wrapper = wrapper.child(div().absolute().right(px(64.0)).bottom(px(44.0)).child(
-                render_context_quota_popover(
-                    &cur_provider,
-                    context_usage,
-                    models_ref.usage.as_ref(),
-                    self.cached_quota.as_ref(),
-                    self.quota_loading,
-                    mono_family,
-                    &palette,
-                    transparency_enabled,
-                    scale_factor,
-                    Rc::new(move |_, cx| {
-                        let p = prov_retry.clone();
-                        ent_retry.update(cx, |this, cx| {
-                            this.refresh_quota_for_provider(p, true, cx);
-                        });
-                    }),
-                    Rc::new(move |_, cx| {
-                        ent_acc.update(cx, |this, cx| {
-                            this.context_popover_open = false;
-                            cx.emit(ComposerHostEvent::OpenAccountPage);
-                            cx.notify();
-                        });
-                    }),
-                ),
-            ));
+            wrapper = wrapper.child(
+                div()
+                    .absolute()
+                    .right(px(48.0))
+                    .bottom_full()
+                    .pb(space::SM)
+                    .child(render_context_quota_popover(
+                        &cur_provider,
+                        context_usage,
+                        models_ref.usage.as_ref(),
+                        self.cached_quota.as_ref(),
+                        self.quota_loading,
+                        mono_family,
+                        &palette,
+                        transparency_enabled,
+                        scale_factor,
+                        Rc::new(move |_, cx| {
+                            let p = prov_retry.clone();
+                            ent_retry.update(cx, |this, cx| {
+                                this.refresh_quota_for_provider(p, true, cx);
+                            });
+                        }),
+                        Rc::new(move |_, cx| {
+                            ent_acc.update(cx, |this, cx| {
+                                this.context_popover_open = false;
+                                cx.emit(ComposerHostEvent::OpenAccountPage);
+                                cx.notify();
+                            });
+                        }),
+                    )),
+            );
         }
 
         if self.picker_open {
             let ent_page = entity.clone();
             let ent_sel_m = entity.clone();
             let ent_sel_t = entity.clone();
-            wrapper = wrapper.child(div().absolute().right(px(36.0)).bottom(px(44.0)).child(
-                render_model_picker_popover(
-                    self.picker_page,
-                    self.picker_hi_idx,
-                    &scoped_models,
-                    &cur_provider,
-                    &cur_model_id,
-                    &cur_model_label,
-                    &models_ref.thinking_levels,
-                    &cur_thinking,
-                    &palette,
-                    transparency_enabled,
-                    scale_factor,
-                    Rc::new(move |next_page, _, cx| {
-                        ent_page.update(cx, |this, cx| {
-                            this.picker_page = next_page;
-                            this.picker_hi_idx = 0;
-                            cx.notify();
-                        });
-                    }),
-                    Rc::new(move |prov, mid, _, cx| {
-                        ent_sel_m.update(cx, |this, cx| {
-                            let key = this.draft_key.clone();
-                            this.last_synced_edit_rev = this.client.with_workspace_mut(|ws| {
-                                let d = ws.draft_mut(key.clone());
-                                d.selected_provider = Some(prov.clone());
-                                d.selected_model_id = Some(mid.clone());
-                                ws.draft_edit_revision(&key)
+            wrapper = wrapper.child(
+                div()
+                    .absolute()
+                    .right(px(36.0))
+                    .bottom_full()
+                    .pb(space::SM)
+                    .child(render_model_picker_popover(
+                        self.picker_page,
+                        self.picker_hi_idx,
+                        &scoped_models,
+                        &cur_provider,
+                        &cur_model_id,
+                        &cur_model_label,
+                        &models_ref.thinking_levels,
+                        &cur_thinking,
+                        &palette,
+                        transparency_enabled,
+                        scale_factor,
+                        Rc::new(move |next_page, _, cx| {
+                            ent_page.update(cx, |this, cx| {
+                                this.picker_page = next_page;
+                                this.picker_hi_idx = 0;
+                                cx.notify();
                             });
-                            let sid = match &this.draft_key {
-                                DraftKey::Session(id) => Some(id.clone()),
-                                DraftKey::NewSession => None,
-                            };
-                            let c = this.client.clone();
-                            cx.spawn(async move |weak, cx| {
-                                let res = c.select_model(sid.clone(), prov, mid).await;
-                                let _ = c.refresh_models(sid).await;
-                                if let Err(e) = res {
-                                    let _ = weak.update(cx, |_, cx| {
-                                        cx.emit(ComposerHostEvent::ErrorMessage(e.to_string()));
-                                    });
-                                }
-                            })
-                            .detach();
-                            this.picker_page = ModelPickerPage::Main;
-                            cx.notify();
-                        });
-                    }),
-                    Rc::new(move |lvl, w, cx| {
-                        ent_sel_t.update(cx, |this, cx| {
-                            let key = this.draft_key.clone();
-                            this.last_synced_edit_rev = this.client.with_workspace_mut(|ws| {
-                                let d = ws.draft_mut(key.clone());
-                                d.selected_thinking_level = Some(lvl.clone());
-                                ws.draft_edit_revision(&key)
-                            });
-                            if let DraftKey::Session(sid) = this.draft_key.clone() {
+                        }),
+                        Rc::new(move |prov, mid, _, cx| {
+                            ent_sel_m.update(cx, |this, cx| {
+                                let key = this.draft_key.clone();
+                                this.last_synced_edit_rev = this.client.with_workspace_mut(|ws| {
+                                    let d = ws.draft_mut(key.clone());
+                                    d.selected_provider = Some(prov.clone());
+                                    d.selected_model_id = Some(mid.clone());
+                                    ws.draft_edit_revision(&key)
+                                });
+                                let sid = match &this.draft_key {
+                                    DraftKey::Session(id) => Some(id.clone()),
+                                    DraftKey::NewSession => None,
+                                };
                                 let c = this.client.clone();
                                 cx.spawn(async move |weak, cx| {
-                                    let res = c.set_session_thinking_level(sid.clone(), lvl).await;
-                                    let _ = c.refresh_models(Some(sid)).await;
+                                    let res = c.select_model(sid.clone(), prov, mid).await;
+                                    let _ = c.refresh_models(sid).await;
                                     if let Err(e) = res {
                                         let _ = weak.update(cx, |_, cx| {
                                             cx.emit(ComposerHostEvent::ErrorMessage(e.to_string()));
@@ -2002,19 +2028,46 @@ impl Render for ComposerView {
                                     }
                                 })
                                 .detach();
-                            }
-                            this.picker_open = false;
-                            if let Some(prev) = this.picker_prior_focus.take() {
-                                prev.focus(w, cx);
-                            }
-                            cx.notify();
-                        });
-                    }),
-                ),
-            ));
+                                this.picker_page = ModelPickerPage::Main;
+                                cx.notify();
+                            });
+                        }),
+                        Rc::new(move |lvl, w, cx| {
+                            ent_sel_t.update(cx, |this, cx| {
+                                let key = this.draft_key.clone();
+                                this.last_synced_edit_rev = this.client.with_workspace_mut(|ws| {
+                                    let d = ws.draft_mut(key.clone());
+                                    d.selected_thinking_level = Some(lvl.clone());
+                                    ws.draft_edit_revision(&key)
+                                });
+                                if let DraftKey::Session(sid) = this.draft_key.clone() {
+                                    let c = this.client.clone();
+                                    cx.spawn(async move |weak, cx| {
+                                        let res =
+                                            c.set_session_thinking_level(sid.clone(), lvl).await;
+                                        let _ = c.refresh_models(Some(sid)).await;
+                                        if let Err(e) = res {
+                                            let _ = weak.update(cx, |_, cx| {
+                                                cx.emit(ComposerHostEvent::ErrorMessage(
+                                                    e.to_string(),
+                                                ));
+                                            });
+                                        }
+                                    })
+                                    .detach();
+                                }
+                                this.picker_open = false;
+                                if let Some(prev) = this.picker_prior_focus.take() {
+                                    prev.focus(w, cx);
+                                }
+                                cx.notify();
+                            });
+                        }),
+                    )),
+            );
         }
 
-        wrapper.child(card)
+        wrapper
     }
 }
 

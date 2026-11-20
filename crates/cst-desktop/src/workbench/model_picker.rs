@@ -289,7 +289,7 @@ pub fn render_context_quota_popover(
             .w_full()
             .h(px(6.0))
             .rounded(radius::FULL)
-            .bg(palette.bg_track_recess)
+            .bg(palette.bg_surface)
             .overflow_hidden()
             .child(
                 div()
