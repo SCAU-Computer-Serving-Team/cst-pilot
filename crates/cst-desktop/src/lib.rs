@@ -23,14 +23,14 @@ use crate::shell::{AppShell, register_shell_keys};
 use crate::theme::{FontLoadReport, load_bundled_fonts};
 
 const REQUIRED_SKILL_NAMES: &[&str] = &[
+    "disk",
+    "ls",
+    "sys",
+    "startup",
+    "eventlog",
+    "driver",
+    "runbook",
     "bitlocker",
-    "bsod-triage",
-    "cst-overview",
-    "disk-space",
-    "network-diag",
-    "perf-slow",
-    "software-issue",
-    "startup-audit",
 ];
 
 const REQUIRED_FONT_FILES: &[&str] = &[

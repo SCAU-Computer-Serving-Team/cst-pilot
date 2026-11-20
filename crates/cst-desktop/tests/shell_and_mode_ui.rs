@@ -68,14 +68,14 @@ impl KitTempFixture {
         )
         .unwrap();
         for skill in [
+            "disk",
+            "ls",
+            "sys",
+            "startup",
+            "eventlog",
+            "driver",
+            "runbook",
             "bitlocker",
-            "bsod-triage",
-            "cst-overview",
-            "disk-space",
-            "network-diag",
-            "perf-slow",
-            "software-issue",
-            "startup-audit",
         ] {
             let p = dir.join(format!("agent/home/skills/{skill}/SKILL.md"));
             fs::create_dir_all(p.parent().unwrap()).unwrap();

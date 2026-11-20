@@ -36,7 +36,10 @@ fn show_error_dialog(message: &str) {
 
 /// Ensures the desktop process runs elevated via UAC (`ShellExecuteExW("runas")`) on normal startup.
 /// Returns `Ok(true)` if already elevated, `Ok(false)` if an elevated child was launched (caller should exit 0).
-fn ensure_elevated_at_entry() -> Result<bool, String> {
+fn ensure_elevated_at_entry(
+    kit_root: &std::path::Path,
+    has_explicit_kit_root: bool,
+) -> Result<bool, String> {
     if std::env::var("CST_ALLOW_UNELEVATED").as_deref() == Ok("1") {
         return Ok(true);
     }
@@ -82,10 +85,19 @@ fn ensure_elevated_at_entry() -> Result<bool, String> {
             }
             joined_params.push(quote_win32_arg(&arg));
         }
+        if !has_explicit_kit_root {
+            if !joined_params.is_empty() {
+                joined_params.push(" ");
+            }
+            joined_params.push(quote_win32_arg(OsStr::new("--kit-root")));
+            joined_params.push(" ");
+            joined_params.push(quote_win32_arg(kit_root.as_os_str()));
+        }
 
         let verb_w: Vec<u16> = OsStr::new("runas").encode_wide().chain([0]).collect();
         let file_w: Vec<u16> = exe.as_os_str().encode_wide().chain([0]).collect();
         let params_w: Vec<u16> = joined_params.as_os_str().encode_wide().chain([0]).collect();
+        let dir_w: Vec<u16> = kit_root.as_os_str().encode_wide().chain([0]).collect();
 
         let mut sei = SHELLEXECUTEINFOW {
             cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
@@ -93,6 +105,7 @@ fn ensure_elevated_at_entry() -> Result<bool, String> {
             lpVerb: PCWSTR(verb_w.as_ptr()),
             lpFile: PCWSTR(file_w.as_ptr()),
             lpParameters: PCWSTR(params_w.as_ptr()),
+            lpDirectory: PCWSTR(dir_w.as_ptr()),
             nShow: SW_SHOWNORMAL.0,
             ..Default::default()
         };
@@ -104,6 +117,7 @@ fn ensure_elevated_at_entry() -> Result<bool, String> {
 
     #[cfg(not(windows))]
     {
+        let _ = (kit_root, has_explicit_kit_root);
         Ok(true)
     }
 }
@@ -118,6 +132,7 @@ fn main() -> ExitCode {
         }
     };
 
+    let has_explicit_kit_root = cli.kit_root.is_some();
     let kit_root = match cli
         .kit_root
         .map(Ok)
@@ -162,7 +177,7 @@ fn main() -> ExitCode {
     }
 
     // 3. UAC administrator elevation at entry boundary
-    match ensure_elevated_at_entry() {
+    match ensure_elevated_at_entry(&kit_root, has_explicit_kit_root) {
         Ok(true) => {}
         Ok(false) => return ExitCode::SUCCESS,
         Err(msg) => {
