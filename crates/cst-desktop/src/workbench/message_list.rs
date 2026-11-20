@@ -25,7 +25,9 @@ use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
     scale, space,
 };
-use crate::tools::bitlocker_card::{SecretInput, SecretInputEvent, find_pending_bitlocker_request};
+use crate::tools::bitlocker_card::{
+    PendingBitLockerPrompt, SecretInput, SecretInputEvent, find_pending_bitlocker_request,
+};
 use crate::tools::normal_card::render_normal_tool_card_with_args;
 use crate::tools::{SpecialToolDispatchProps, render_special_tool_component};
 use crate::workbench::image_viewer::{
@@ -60,6 +62,16 @@ pub enum MessageListEvent {
     TopNotice(String),
 }
 
+struct PendingSecretInput {
+    entity: Entity<SecretInput>,
+    request_id: String,
+    seen: bool,
+    busy: bool,
+    _subscription: Subscription,
+}
+
+type ProcessExpansionKey = (String, (usize, usize));
+
 pub struct MessageListView {
     client: ClientHandle,
     session_id: Option<String>,
@@ -67,16 +79,14 @@ pub struct MessageListView {
     scroll_handle: ScrollHandle,
     auto_follow_bottom: bool,
     visible_turn_limit: usize,
-    expanded_segments: BTreeSet<String>,
+    expanded_segments: BTreeSet<ProcessExpansionKey>,
     expanded_thinking: BTreeSet<String>,
     expanded_error_details: BTreeSet<String>,
-    expanded_tool_cards: BTreeSet<String>,
-    collapsed_standalone_tools: BTreeSet<String>,
+    tool_card_expansion: BTreeMap<String, bool>,
     expanded_tool_raw: BTreeSet<String>,
-    expanded_special_details: BTreeSet<String>,
+    expanded_special_details: BTreeSet<(String, String)>,
     hovered_warnings: BTreeSet<String>,
-    secret_inputs: BTreeMap<String, Entity<SecretInput>>,
-    secret_input_subs: Vec<Subscription>,
+    secret_inputs: BTreeMap<String, PendingSecretInput>,
     markdown_store: MarkdownStreamStore,
     copy_tracker: CopyFeedbackTracker,
     turn_started_instants: BTreeMap<String, Instant>,
@@ -98,13 +108,11 @@ impl MessageListView {
             expanded_segments: BTreeSet::new(),
             expanded_thinking: BTreeSet::new(),
             expanded_error_details: BTreeSet::new(),
-            expanded_tool_cards: BTreeSet::new(),
-            collapsed_standalone_tools: BTreeSet::new(),
+            tool_card_expansion: BTreeMap::new(),
             expanded_tool_raw: BTreeSet::new(),
             expanded_special_details: BTreeSet::new(),
             hovered_warnings: BTreeSet::new(),
             secret_inputs: BTreeMap::new(),
-            secret_input_subs: Vec::new(),
             markdown_store: MarkdownStreamStore::default(),
             copy_tracker: CopyFeedbackTracker::default(),
             turn_started_instants: BTreeMap::new(),
@@ -113,9 +121,14 @@ impl MessageListView {
         }
     }
 
-    fn set_process_segment_expanded(&mut self, key: &str, expanded: bool, cx: &mut Context<Self>) {
+    fn set_process_segment_expanded(
+        &mut self,
+        key: &ProcessExpansionKey,
+        expanded: bool,
+        cx: &mut Context<Self>,
+    ) {
         let changed = if expanded {
-            self.expanded_segments.insert(key.to_owned())
+            self.expanded_segments.insert(key.clone())
         } else {
             self.expanded_segments.remove(key)
         };
@@ -135,15 +148,12 @@ impl MessageListView {
         self.expanded_segments.clear();
         self.expanded_thinking.clear();
         self.expanded_error_details.clear();
-        self.expanded_tool_cards.clear();
-        self.collapsed_standalone_tools.clear();
+        self.tool_card_expansion.clear();
         self.expanded_tool_raw.clear();
         self.expanded_special_details.clear();
         self.hovered_warnings.clear();
-        for (_, si) in std::mem::take(&mut self.secret_inputs) {
-            si.update(cx, |s, cx| s.clear(cx));
-        }
-        self.secret_input_subs.clear();
+        self.retain_seen_secret_inputs(false, cx);
+        self.copy_tracker = CopyFeedbackTracker::default();
         self.markdown_store.clear();
         self.turn_started_instants.clear();
         self.scroll_handle.scroll_to_bottom();
@@ -151,7 +161,127 @@ impl MessageListView {
     }
 
     pub fn secret_input_for_call(&self, call_id: &str) -> Option<&Entity<SecretInput>> {
-        self.secret_inputs.get(call_id)
+        self.secret_inputs.get(call_id).map(|input| &input.entity)
+    }
+
+    fn retain_seen_secret_inputs(&mut self, retain_seen: bool, cx: &mut Context<Self>) {
+        self.secret_inputs.retain(|_, input| {
+            if retain_seen && std::mem::take(&mut input.seen) {
+                true
+            } else {
+                input.entity.update(cx, |secret, cx| secret.clear(cx));
+                false
+            }
+        });
+    }
+
+    fn render_password_input(
+        &mut self,
+        session_id: &str,
+        call_id: &str,
+        pending: &PendingBitLockerPrompt,
+        cx: &mut Context<Self>,
+    ) -> Entity<SecretInput> {
+        if let Some(input) = self.secret_inputs.get_mut(call_id)
+            && input.request_id == pending.request_id
+        {
+            input.seen = true;
+            return input.entity.clone();
+        }
+        if let Some(previous) = self.secret_inputs.remove(call_id) {
+            previous.entity.update(cx, |secret, cx| secret.clear(cx));
+        }
+
+        let id = format!("bitlocker-pwd-input-{call_id}");
+        let entity = cx.new(move |cx| SecretInput::with_accessibility_id(id, cx));
+        let call_key = call_id.to_owned();
+        let session_id = session_id.to_owned();
+        let prompt = pending.clone();
+        let subscription = cx.subscribe(&entity, move |this, input, event, cx| {
+            let Some(state) = this.secret_inputs.get_mut(&call_key) else {
+                return;
+            };
+            if state.entity != input || state.busy || prompt.is_expired() {
+                return;
+            }
+            let payload = match event {
+                SecretInputEvent::SubmitRequested => {
+                    let payload = input.read(cx).snapshot_zeroizing_payload();
+                    if payload.1 == 0 {
+                        input.update(cx, |secret, cx| {
+                            secret.set_error_message(Some("请输入八组六位数字恢复密码。"), cx);
+                        });
+                        return;
+                    }
+                    Some(payload)
+                }
+                SecretInputEvent::CancelRequested => {
+                    input.update(cx, |secret, cx| secret.clear(cx));
+                    None
+                }
+            };
+            state.busy = true;
+            input.update(cx, |secret, cx| secret.set_disabled(true, cx));
+
+            let client = this.client.clone();
+            let session_id = session_id.clone();
+            let prompt = prompt.clone();
+            let call_key = call_key.clone();
+            let input_id = input.entity_id();
+            cx.spawn(async move |weak, cx| {
+                let res = if let Some((buf, len)) = payload {
+                    client
+                        .respond_bitlocker_password(session_id, prompt.request_id.clone(), buf, len)
+                        .await
+                } else {
+                    client
+                        .cancel_bitlocker_request(session_id, prompt.request_id.clone())
+                        .await
+                };
+                let _ = weak.update(cx, |this, cx| {
+                    let Some(state) = this.secret_inputs.get_mut(&call_key) else {
+                        return;
+                    };
+                    if state.entity.entity_id() != input_id || prompt.is_expired() {
+                        return;
+                    }
+                    let invalid_message = match &res {
+                        Err(ClientError::BadRequest { code, message })
+                            if code == "invalid_bitlocker_input" =>
+                        {
+                            Some(message.as_str())
+                        }
+                        _ => None,
+                    };
+                    state.busy = res.is_ok();
+                    state.entity.update(cx, |secret, cx| {
+                        if let Some(message) = invalid_message {
+                            secret.set_error_message(Some(message.to_owned()), cx);
+                        } else {
+                            secret.clear(cx);
+                        }
+                        secret.set_disabled(state.busy, cx);
+                    });
+                    if invalid_message.is_none()
+                        && let Err(err) = res
+                    {
+                        cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
+                    }
+                });
+            })
+            .detach();
+        });
+        self.secret_inputs.insert(
+            call_id.to_owned(),
+            PendingSecretInput {
+                entity: entity.clone(),
+                request_id: pending.request_id.clone(),
+                seen: true,
+                busy: false,
+                _subscription: subscription,
+            },
+        );
+        entity
     }
 
     pub fn is_auto_following(&self) -> bool {
@@ -783,11 +913,11 @@ impl MessageListView {
 
         let standalone = is_standalone_tool(call, tool_result_val);
         let card_key = format!("tool-card-{}", call.id);
-        let is_open = if standalone {
-            !self.collapsed_standalone_tools.contains(&card_key)
-        } else {
-            self.expanded_tool_cards.contains(&card_key)
-        };
+        let is_open = self
+            .tool_card_expansion
+            .get(&card_key)
+            .copied()
+            .unwrap_or(standalone);
         let raw_key = format!("tool-raw-{}", call.id);
         let is_raw_open = self.expanded_tool_raw.contains(&raw_key);
 
@@ -812,14 +942,8 @@ impl MessageListView {
             &|cid| copy_ref.is_copied(cid),
             Rc::new(move |key, _, cx| {
                 ent_card.update(cx, |this, cx| {
-                    let target = if standalone {
-                        &mut this.collapsed_standalone_tools
-                    } else {
-                        &mut this.expanded_tool_cards
-                    };
-                    if !target.remove(&key) {
-                        target.insert(key);
-                    }
+                    let expanded = this.tool_card_expansion.entry(key).or_insert(standalone);
+                    *expanded = !*expanded;
                     cx.notify();
                 });
             }),
@@ -872,118 +996,22 @@ impl MessageListView {
             return div().into_any_element();
         };
 
-        let has_result = tool_result_val.is_some();
-        let secret_input = if kind == SpecialToolKind::BitLocker {
-            let pending_opt =
-                find_pending_bitlocker_request(session.bitlocker.as_ref(), &call.id, has_result);
-            if let Some(ref p) = pending_opt
-                && p.kind == "password"
-            {
-                let call_id_owned = call.id.clone();
-                let sid_owned = session.id.clone();
-                let rid_owned = p.request_id.clone();
-                Some(
-                    self.secret_inputs
-                        .entry(call.id.clone())
-                        .or_insert_with(|| {
-                            let secret_a11y_id = format!("bitlocker-pwd-input-{}", call.id);
-                            let si = cx.new(move |cx| {
-                                SecretInput::with_accessibility_id(secret_a11y_id, cx)
-                            });
-                            let sub = cx.subscribe(&si, move |this, si_ent, ev, cx| {
-                                match ev {
-                                    SecretInputEvent::SubmitRequested => {
-                                        let (buf, len) =
-                                            si_ent.read(cx).snapshot_zeroizing_payload();
-                                        if len == 0 {
-                                            si_ent.update(cx, |s, cx| {
-                                                s.set_error_message(
-                                                    Some("请输入八组六位数字恢复密码。"),
-                                                    cx,
-                                                );
-                                            });
-                                            return;
-                                        }
-                                        let c = this.client.clone();
-                                        let s_id = sid_owned.clone();
-                                        let r_id = rid_owned.clone();
-                                        let si_done = si_ent.clone();
-                                        cx.spawn(async move |weak, cx| {
-                                            let res = c
-                                                .respond_bitlocker_password(s_id, r_id, buf, len)
-                                                .await;
-                                            let _ = weak.update(cx, |_, cx| match res {
-                                                Ok(_) => {
-                                                    si_done.update(cx, |s, cx| s.clear(cx));
-                                                }
-                                                Err(ClientError::BadRequest {
-                                                    ref code,
-                                                    ref message,
-                                                }) if code == "invalid_bitlocker_input" => {
-                                                    let msg = message.clone();
-                                                    si_done.update(cx, |s, cx| {
-                                                        s.set_error_message(Some(msg), cx);
-                                                    });
-                                                }
-                                                Err(err) => {
-                                                    si_done.update(cx, |s, cx| s.clear(cx));
-                                                    cx.emit(MessageListEvent::ErrorMessage(
-                                                        err.to_string(),
-                                                    ));
-                                                }
-                                            });
-                                        })
-                                        .detach();
-                                    }
-                                    SecretInputEvent::CancelRequested => {
-                                        let c = this.client.clone();
-                                        let s_id = sid_owned.clone();
-                                        let r_id = rid_owned.clone();
-                                        cx.spawn(async move |weak, cx| {
-                                            if let Err(err) =
-                                                c.cancel_bitlocker_request(s_id, r_id).await
-                                            {
-                                                let _ = weak.update(cx, |_, cx| {
-                                                    cx.emit(MessageListEvent::ErrorMessage(
-                                                        err.to_string(),
-                                                    ));
-                                                });
-                                            }
-                                        })
-                                        .detach();
-                                    }
-                                }
-                                let _ = &call_id_owned;
-                            });
-                            self.secret_input_subs.push(sub);
-                            si
-                        })
-                        .clone(),
+        let pending_bitlocker = (kind == SpecialToolKind::BitLocker)
+            .then(|| {
+                find_pending_bitlocker_request(
+                    session.bitlocker.as_ref(),
+                    &call.id,
+                    tool_result_val.is_some(),
                 )
-            } else {
-                if let Some(removed) = self.secret_inputs.remove(&call.id) {
-                    removed.update(cx, |s, cx| s.clear(cx));
-                }
-                None
-            }
-        } else {
-            None
-        };
+            })
+            .flatten();
+        let secret_input = pending_bitlocker
+            .as_ref()
+            .filter(|pending| pending.kind == "password")
+            .map(|pending| self.render_password_input(&session.id, &call.id, pending, cx));
 
-        let details_expanded = match kind {
-            SpecialToolKind::SysOverview => self
-                .expanded_special_details
-                .contains(&format!("sys-overview-details-{}", call.id)),
-            SpecialToolKind::WebSearch => self
-                .expanded_special_details
-                .contains(&format!("web-search-expand-{}", call.id)),
-            SpecialToolKind::BitLocker => self
-                .expanded_special_details
-                .contains(&format!("bitlocker-details-{}", call.id)),
-            SpecialToolKind::Runbook => self
-                .expanded_special_details
-                .contains(&format!("runbook-details-{}", call.id)),
-        };
+        let details_key = (entry_id.to_owned(), call.id.clone());
+        let details_expanded = self.expanded_special_details.contains(&details_key);
         let warning_hovered = self
             .hovered_warnings
             .contains(&format!("web-search-warn-{}", call.id));
@@ -999,9 +1027,8 @@ impl MessageListView {
                 session_id: &session.id,
                 entry_id,
                 call_id: &call.id,
-                has_result,
                 view: &special,
-                bitlocker_snapshot: session.bitlocker.as_ref(),
+                pending_bitlocker,
                 secret_input,
                 details_expanded,
                 warning_hovered,
@@ -1012,10 +1039,10 @@ impl MessageListView {
             mono_family,
             palette,
             &|cid| copy_ref.is_copied(cid),
-            Rc::new(move |key, _, cx| {
+            Rc::new(move |_, cx| {
                 ent_toggle.update(cx, |this, cx| {
-                    if !this.expanded_special_details.remove(&key) {
-                        this.expanded_special_details.insert(key);
+                    if !this.expanded_special_details.remove(&details_key) {
+                        this.expanded_special_details.insert(details_key.clone());
                     }
                     cx.notify();
                 });
@@ -1179,9 +1206,14 @@ impl MessageListView {
                         continue;
                     }
 
-                    let seg_state_key = format!("{turn_key}:{}", segment.key);
-                    let seg_expanded = self.expanded_segments.contains(&seg_state_key);
-                    let has_expandable_parts = !segment.parts.is_empty();
+                    let segment_id = format!("{turn_key}:{}", segment.key);
+                    let expansion_key = segment
+                        .expansion_anchor()
+                        .map(|anchor| (turn_key.clone(), anchor));
+                    let seg_expanded = expansion_key
+                        .as_ref()
+                        .is_some_and(|key| self.expanded_segments.contains(key));
+                    let has_expandable_parts = expansion_key.is_some();
 
                     let header_text = if seg_idx == 0 {
                         let base = if is_live_turn {
@@ -1197,7 +1229,7 @@ impl MessageListView {
                         sub_label.unwrap_or_else(|| "处理过程".to_owned())
                     };
 
-                    let header_id = SharedString::from(format!("process-hdr-{seg_state_key}"));
+                    let header_id = SharedString::from(format!("process-hdr-{segment_id}"));
                     let mut header = div()
                         .id(header_id.clone())
                         .test_support()
@@ -1211,10 +1243,9 @@ impl MessageListView {
                         .text_color(palette.text_secondary)
                         .hover(|s| s.text_color(palette.text_primary));
 
-                    if has_expandable_parts {
-                        let expand_key = seg_state_key.clone();
-                        let collapse_key = seg_state_key.clone();
-                        let click_key = seg_state_key.clone();
+                    if let Some(click_key) = expansion_key {
+                        let expand_key = click_key.clone();
+                        let collapse_key = click_key.clone();
                         let expand_view = entity.clone();
                         let collapse_view = entity.clone();
                         header = header
@@ -1270,7 +1301,7 @@ impl MessageListView {
                         for (part_idx, tp) in segment.parts.iter().enumerate() {
                             expanded_col = expanded_col.child(self.render_process_part(
                                 session,
-                                &seg_state_key,
+                                &segment_id,
                                 part_idx,
                                 tp,
                                 tool_results,
@@ -1747,6 +1778,7 @@ impl Render for MessageListView {
         };
 
         let Some(session) = snap.loaded_sessions.get(sid).cloned() else {
+            self.retain_seen_secret_inputs(false, cx);
             return div()
                 .id("message-list-loading")
                 .size_full()
@@ -1882,6 +1914,8 @@ impl Render for MessageListView {
                 cx,
             ));
         }
+
+        self.retain_seen_secret_inputs(true, cx);
 
         for ob_item in &outbox_items {
             list_col = list_col.child(self.render_outbox_bubble(sid, ob_item, &palette, &entity));

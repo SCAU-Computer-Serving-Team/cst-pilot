@@ -333,20 +333,11 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
             ),
     );
 
-    let max_label_chars = card_view
-        .blocks
-        .iter()
-        .filter_map(|b| match b {
-            ToolBlock::Fields { rows, .. } => rows.iter().map(|r| r.label.chars().count()).max(),
-            _ => None,
-        })
-        .max()
-        .unwrap_or(6);
-    let label_col_px = if max_label_chars <= 4 {
-        72.0
-    } else {
-        ((max_label_chars as f32) * 13.5 + 16.0).clamp(84.0, 180.0)
-    };
+    let label_col_px =
+        super::aligned_label_col_px(card_view.blocks.iter().flat_map(|block| match block {
+            ToolBlock::Fields { rows, .. } => rows.as_slice(),
+            _ => &[],
+        }));
 
     let mut right_col = div()
         .flex_1()
@@ -375,7 +366,9 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
             ToolBlock::Image {
                 mime_type, data, ..
             } => {
-                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data.trim()) {
+                if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data.trim())
+                    && !bytes.is_empty()
+                {
                     let gpui_img = gpui_image_from_bytes(mime_type, bytes);
                     let img_open = Arc::clone(&gpui_img);
                     let lb_cb = Rc::clone(&on_open_lightbox);
@@ -455,26 +448,12 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                     NoticeStatus::Warning => (IconName::TriangleAlert, palette.status_warning),
                     NoticeStatus::Default => (IconName::Info, palette.text_secondary),
                 };
-                right_col = right_col.child(
-                    div()
-                        .w_full()
-                        .flex()
-                        .items_start()
-                        .gap(space::SM)
-                        .child(
-                            div()
-                                .pt(px(2.0))
-                                .flex_shrink_0()
-                                .child(Icon::new(icon).size(px(14.0)).text_color(color)),
-                        )
-                        .child(
-                            apply_scale(div(), scale::CAPTION)
-                                .flex_1()
-                                .min_w_0()
-                                .text_color(palette.text_secondary)
-                                .child(SharedString::from(text.clone())),
-                        ),
-                );
+                right_col = right_col.child(super::render_tool_notice_line(
+                    icon,
+                    color,
+                    text.clone(),
+                    palette,
+                ));
             }
             ToolBlock::Text { text, .. } => {
                 let txt_copy_id = SharedString::from(format!("norm-text-copy-{call_id}-{blk_idx}"));

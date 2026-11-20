@@ -2,7 +2,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use cst_client::ClientHandle;
-use cst_client::tool_presenter::{ToolCallInput, ToolExecutionMeta, ToolResultInput};
+use cst_client::tool_presenter::{ToolCallInput, ToolResultInput, map_special_tool, map_tool};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::{
@@ -18,8 +18,7 @@ use crate::theme::{
 use crate::tools::normal_card::render_normal_tool_card;
 use crate::tools::{SpecialToolDispatchProps, render_special_tool_component};
 use crate::workbench::turn_segments::{
-    ConversationPart, build_turn_segments_with_results, extract_message_text,
-    group_turns_and_results, split_turn,
+    ConversationPart, extract_message_text, group_turns_and_results, split_turn,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -367,23 +366,63 @@ impl ExportView {
 
                 if !turn.assistants.is_empty() {
                     let split = split_turn(&turn.assistants);
-                    let segments = build_turn_segments_with_results(split.process, &tool_results);
-                    for seg in segments {
-                        for part in seg.parts {
-                            match part.part {
-                                ConversationPart::Thinking(th)
-                                    if !th.thinking.trim().is_empty() =>
+                    for part in split.process {
+                        match part.part {
+                            ConversationPart::Thinking(th) if !th.thinking.trim().is_empty() => {
+                                turn_box = turn_box.child(
+                                    apply_scale(div(), scale::CAPTION)
+                                        .p(space::MD)
+                                        .rounded(radius::ROW)
+                                        .bg(doc_palette.bg_surface)
+                                        .text_color(doc_palette.text_secondary)
+                                        .child(SharedString::from(th.thinking)),
+                                );
+                            }
+                            ConversationPart::Special { call: tc, .. } => {
+                                let res_val = tool_results.get(&tc.id);
+                                let input = ToolCallInput {
+                                    id: tc.id.clone(),
+                                    name: tc.name.clone(),
+                                    arguments: tc
+                                        .arguments
+                                        .as_object()
+                                        .cloned()
+                                        .unwrap_or_default(),
+                                    execution: None,
+                                };
+                                let parsed = res_val.map(ToolResultInput::from_message_json);
+                                if let Some(special) =
+                                    map_special_tool(&input, parsed.as_ref(), false)
                                 {
-                                    turn_box = turn_box.child(
-                                        apply_scale(div(), scale::CAPTION)
-                                            .p(space::MD)
-                                            .rounded(radius::ROW)
-                                            .bg(doc_palette.bg_surface)
-                                            .text_color(doc_palette.text_secondary)
-                                            .child(SharedString::from(th.thinking)),
-                                    );
+                                    turn_box = turn_box.child(render_special_tool_component(
+                                        SpecialToolDispatchProps {
+                                            session_id: &self.session_id,
+                                            entry_id: "export-preview",
+                                            call_id: &tc.id,
+                                            view: &special,
+                                            pending_bitlocker: None,
+                                            secret_input: None,
+                                            details_expanded: true,
+                                            warning_hovered: false,
+                                            transparency_enabled: false,
+                                            scale_factor,
+                                        },
+                                        self.client.clone(),
+                                        mono_family.clone(),
+                                        &doc_palette,
+                                        &|_| false,
+                                        Rc::new(|_, _| {}),
+                                        Rc::new(|_, _, _, _| {}),
+                                        Rc::new(|_, _, _, _| {}),
+                                        |_, _, _| {},
+                                        |_, _| {},
+                                        window,
+                                        cx,
+                                    ));
                                 }
-                                ConversationPart::Special { call: tc, .. } => {
+                            }
+                            ConversationPart::Tools(calls) => {
+                                for tc in calls {
                                     let res_val = tool_results.get(&tc.id);
                                     let input = ToolCallInput {
                                         id: tc.id.clone(),
@@ -393,96 +432,41 @@ impl ExportView {
                                             .as_object()
                                             .cloned()
                                             .unwrap_or_default(),
-                                        execution: Some(ToolExecutionMeta::default()),
+                                        execution: None,
                                     };
-                                    let parsed = res_val.map(ToolResultInput::from_message_json);
-                                    if let Some(special) =
-                                        self.client.with_presenter_cache(|cache| {
-                                            cache.get_or_map_special(
-                                                &input,
-                                                parsed.as_ref(),
-                                                1,
-                                                false,
-                                            )
-                                        })
-                                    {
-                                        turn_box = turn_box.child(render_special_tool_component(
-                                            SpecialToolDispatchProps {
-                                                session_id: &self.session_id,
-                                                entry_id: "export-preview",
-                                                call_id: &tc.id,
-                                                has_result: res_val.is_some(),
-                                                view: &special,
-                                                bitlocker_snapshot: None,
-                                                secret_input: None,
-                                                details_expanded: true,
-                                                warning_hovered: false,
-                                                transparency_enabled: false,
-                                                scale_factor,
-                                            },
-                                            self.client.clone(),
-                                            mono_family.clone(),
-                                            &doc_palette,
-                                            &|_| false,
-                                            Rc::new(|_, _, _| {}),
-                                            Rc::new(|_, _, _, _| {}),
-                                            Rc::new(|_, _, _, _| {}),
-                                            |_, _, _| {},
-                                            |_, _| {},
-                                            window,
-                                            cx,
-                                        ));
-                                    }
+                                    let parsed = res_val
+                                        .map(ToolResultInput::from_message_json)
+                                        .unwrap_or_default();
+                                    let card_view = map_tool(&input, &parsed);
+                                    turn_box = turn_box.child(render_normal_tool_card(
+                                        &tc.id,
+                                        &tc.name,
+                                        None,
+                                        res_val.is_some(),
+                                        parsed.is_error,
+                                        false,
+                                        &card_view,
+                                        true,
+                                        false,
+                                        mono_family.clone(),
+                                        &doc_palette,
+                                        &|_| false,
+                                        Rc::new(|_, _, _| {}),
+                                        Rc::new(|_, _, _| {}),
+                                        Rc::new(|_, _, _| {}),
+                                        |_, _, _| {},
+                                        cx,
+                                    ));
                                 }
-                                ConversationPart::Tools(calls) => {
-                                    for tc in calls {
-                                        let res_val = tool_results.get(&tc.id);
-                                        let input = ToolCallInput {
-                                            id: tc.id.clone(),
-                                            name: tc.name.clone(),
-                                            arguments: tc
-                                                .arguments
-                                                .as_object()
-                                                .cloned()
-                                                .unwrap_or_default(),
-                                            execution: Some(ToolExecutionMeta::default()),
-                                        };
-                                        let parsed = res_val
-                                            .map(ToolResultInput::from_message_json)
-                                            .unwrap_or_default();
-                                        let card_view = self.client.with_presenter_cache(|cache| {
-                                            cache.get_or_map_normal(&input, &parsed, 1)
-                                        });
-                                        turn_box = turn_box.child(render_normal_tool_card(
-                                            &tc.id,
-                                            &tc.name,
-                                            None,
-                                            res_val.is_some(),
-                                            parsed.is_error,
-                                            false,
-                                            &card_view,
-                                            true,
-                                            false,
-                                            mono_family.clone(),
-                                            &doc_palette,
-                                            &|_| false,
-                                            Rc::new(|_, _, _| {}),
-                                            Rc::new(|_, _, _| {}),
-                                            Rc::new(|_, _, _| {}),
-                                            |_, _, _| {},
-                                            cx,
-                                        ));
-                                    }
-                                }
-                                ConversationPart::Text(txt) if !txt.trim().is_empty() => {
-                                    turn_box = turn_box.child(
-                                        apply_scale(div(), scale::BODY)
-                                            .text_color(doc_palette.text_primary)
-                                            .child(SharedString::from(txt)),
-                                    );
-                                }
-                                _ => {}
                             }
+                            ConversationPart::Text(txt) if !txt.trim().is_empty() => {
+                                turn_box = turn_box.child(
+                                    apply_scale(div(), scale::BODY)
+                                        .text_color(doc_palette.text_primary)
+                                        .child(SharedString::from(txt)),
+                                );
+                            }
+                            _ => {}
                         }
                     }
                     if !split.final_text.trim().is_empty() {

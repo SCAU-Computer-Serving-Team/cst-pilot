@@ -31,7 +31,7 @@ pub fn render_web_search_bar(
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
-    on_toggle_expand: crate::tools::ToggleKeyFn,
+    on_toggle_expand: crate::tools::ToggleDetailsFn,
     on_hover_warning: crate::tools::HoverWarningFn,
 ) -> gpui_kit::AnyElement {
     let is_running = matches!(
@@ -39,13 +39,12 @@ pub fn render_web_search_bar(
         SpecialStatus::Pending | SpecialStatus::Running
     );
     let is_error = props.status == SpecialStatus::Error;
-    let has_partial_warning =
-        !is_error && (!props.errors.is_empty() || props.status == SpecialStatus::Degraded);
-    let has_hover_issue = is_error || has_partial_warning;
+    let has_hover_issue = !is_running
+        && (is_error || !props.errors.is_empty() || props.status == SpecialStatus::Degraded);
+    let has_details = !props.queries.is_empty() || !props.fields.is_empty();
+    let expanded = has_details && props.expanded;
 
-    let expand_key = format!("web-search-expand-{}", props.call_id);
     let warn_key = format!("web-search-warn-{}", props.call_id);
-    let ek_click = expand_key;
 
     let count_text = if !props.queries.is_empty() {
         format!("{} 个关键词", props.queries.len())
@@ -59,14 +58,11 @@ pub fn render_web_search_bar(
         "0 个关键词".to_owned()
     };
 
-    let display_title = if props.title.trim().is_empty() || props.title == "联网检索" {
-        if is_running {
-            "正在联网检索"
-        } else {
-            "已联网检索"
-        }
-    } else {
-        props.title
+    let display_title = match props.title.trim() {
+        "" | "联网检索" if is_running => "正在联网检索",
+        "" | "联网检索" if props.status == SpecialStatus::Success => "已联网检索",
+        "" => "联网检索",
+        title => title,
     };
 
     let mut left_row = div()
@@ -117,7 +113,7 @@ pub fn render_web_search_bar(
                 })
                 .child(Icon::new(badge_icon).size(px(15.0)).text_color(badge_color)),
         );
-    } else {
+    } else if props.status == SpecialStatus::Success {
         left_row = left_row.child(
             Icon::new(IconName::CircleCheck)
                 .size(px(16.0))
@@ -125,29 +121,29 @@ pub fn render_web_search_bar(
         );
     }
 
-    left_row = left_row.child(
-        Icon::new(if props.expanded {
-            IconName::ChevronDown
-        } else {
-            IconName::ChevronRight
-        })
-        .size(px(12.0))
-        .text_color(palette.text_secondary),
-    );
+    if has_details {
+        left_row = left_row.child(
+            Icon::new(if expanded {
+                IconName::ChevronDown
+            } else {
+                IconName::ChevronRight
+            })
+            .size(px(12.0))
+            .text_color(palette.text_secondary),
+        );
+    }
 
     let hdr_id = SharedString::from(format!("web-search-bar-hdr-{}", props.call_id));
     let hdr_label = SharedString::from(format!("{display_title}（{count_text}）"));
     let header_bar = div()
         .id(hdr_id.clone())
         .test_support()
-        .a11y_toggle_button(hdr_id, hdr_label, props.expanded)
         .w_full()
         .h(height::COMPACT)
         .flex()
         .items_center()
         .justify_between()
         .gap(space::MD)
-        .on_click(move |_, w, cx| (on_toggle_expand)(ek_click.clone(), w, cx))
         .child(left_row)
         .child(
             apply_scale(div(), scale::CAPTION)
@@ -155,6 +151,13 @@ pub fn render_web_search_bar(
                 .text_color(palette.text_secondary)
                 .child(SharedString::from(count_text)),
         );
+    let header_bar = if has_details {
+        header_bar
+            .a11y_toggle_button(hdr_id, hdr_label, expanded)
+            .on_click(move |_, w, cx| (on_toggle_expand)(w, cx))
+    } else {
+        header_bar.a11y_region(hdr_id, hdr_label)
+    };
 
     let mut card = div()
         .id(SharedString::from(format!(
@@ -180,7 +183,7 @@ pub fn render_web_search_bar(
         .gap(space::MD)
         .child(header_bar);
 
-    if props.expanded {
+    if expanded {
         let mut details = div()
             .w_full()
             .pt(space::XS)

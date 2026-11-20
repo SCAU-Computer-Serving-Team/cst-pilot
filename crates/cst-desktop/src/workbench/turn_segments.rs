@@ -155,8 +155,12 @@ pub fn is_standalone_tool(call: &ToolCallPart, result: Option<&Value>) -> bool {
             .get("content")
             .and_then(Value::as_array);
         if content.is_some_and(|arr| {
-            arr.iter()
-                .any(|p| p.get("type").and_then(Value::as_str) == Some("image"))
+            arr.iter().any(|p| {
+                p.get("type").and_then(Value::as_str) == Some("image")
+                    && p.get("data")
+                        .and_then(Value::as_str)
+                        .is_some_and(|data| !data.trim().is_empty())
+            })
         }) {
             return true;
         }
@@ -502,9 +506,22 @@ pub struct TurnSegment {
     pub kind: TurnSegmentKind,
     pub key: String,
     pub parts: Vec<TurnPart>,
+    expansion_anchor: Option<(usize, usize)>,
 }
 
-fn push_turn_segment_item(segments: &mut Vec<TurnSegment>, kind: TurnSegmentKind, item: TurnPart) {
+impl TurnSegment {
+    /// Source part / call offsets before result-dependent splitting.
+    pub fn expansion_anchor(&self) -> Option<(usize, usize)> {
+        self.expansion_anchor
+    }
+}
+
+fn push_turn_segment_item(
+    segments: &mut Vec<TurnSegment>,
+    kind: TurnSegmentKind,
+    item: TurnPart,
+    anchor: (usize, usize),
+) {
     if let Some(prev) = segments.last_mut()
         && prev.kind == kind
     {
@@ -525,6 +542,7 @@ fn push_turn_segment_item(segments: &mut Vec<TurnSegment>, kind: TurnSegmentKind
         kind,
         key,
         parts: vec![item],
+        expansion_anchor: (kind == TurnSegmentKind::Process).then_some(anchor),
     });
 }
 
@@ -541,67 +559,45 @@ pub fn build_turn_segments_with_results(
     tool_results: &BTreeMap<String, Value>,
 ) -> Vec<TurnSegment> {
     let mut segments: Vec<TurnSegment> = Vec::new();
-    for item in process {
+    for (part_idx, item) in process.into_iter().enumerate() {
         match item.part {
             ConversationPart::Special { .. } | ConversationPart::Image(_) => {
-                push_turn_segment_item(&mut segments, TurnSegmentKind::Visible, item);
-            }
-            ConversationPart::Tools(calls) => {
-                let mut ordinary_run: Vec<ToolCallPart> = Vec::new();
-                for call in calls {
-                    if is_standalone_tool(&call, tool_results.get(&call.id)) {
-                        if !ordinary_run.is_empty() {
-                            push_turn_segment_item(
-                                &mut segments,
-                                TurnSegmentKind::Process,
-                                TurnPart {
-                                    entry_key: item.entry_key.clone(),
-                                    timestamp_ms: item.timestamp_ms,
-                                    is_final_entry: item.is_final_entry,
-                                    part: ConversationPart::Tools(std::mem::take(
-                                        &mut ordinary_run,
-                                    )),
-                                },
-                            );
-                        }
-                        push_turn_segment_item(
-                            &mut segments,
-                            TurnSegmentKind::Visible,
-                            TurnPart {
-                                entry_key: item.entry_key.clone(),
-                                timestamp_ms: item.timestamp_ms,
-                                is_final_entry: item.is_final_entry,
-                                part: ConversationPart::Tools(vec![call]),
-                            },
-                        );
-                    } else {
-                        ordinary_run.push(call);
-                    }
-                }
-                if !ordinary_run.is_empty() {
-                    push_turn_segment_item(
-                        &mut segments,
-                        TurnSegmentKind::Process,
-                        TurnPart {
-                            entry_key: item.entry_key,
-                            timestamp_ms: item.timestamp_ms,
-                            is_final_entry: item.is_final_entry,
-                            part: ConversationPart::Tools(ordinary_run),
-                        },
-                    );
-                }
-            }
-            other => {
                 push_turn_segment_item(
                     &mut segments,
-                    TurnSegmentKind::Process,
-                    TurnPart {
-                        entry_key: item.entry_key,
+                    TurnSegmentKind::Visible,
+                    item,
+                    (part_idx, 0),
+                );
+            }
+            ConversationPart::Tools(calls) => {
+                let mut calls = calls.into_iter().enumerate().peekable();
+                let kind_for = |call: &ToolCallPart| {
+                    if is_standalone_tool(call, tool_results.get(&call.id)) {
+                        TurnSegmentKind::Visible
+                    } else {
+                        TurnSegmentKind::Process
+                    }
+                };
+                while let Some((first_idx, first)) = calls.next() {
+                    let kind = kind_for(&first);
+                    let mut run = vec![first];
+                    // Keep standalone calls as separate parts, preserving subsequent element IDs.
+                    while let Some((_, call)) = calls.next_if(|(_, call)| {
+                        kind == TurnSegmentKind::Process && kind_for(call) == kind
+                    }) {
+                        run.push(call);
+                    }
+                    let part = TurnPart {
+                        entry_key: item.entry_key.clone(),
                         timestamp_ms: item.timestamp_ms,
                         is_final_entry: item.is_final_entry,
-                        part: other,
-                    },
-                );
+                        part: ConversationPart::Tools(run),
+                    };
+                    push_turn_segment_item(&mut segments, kind, part, (part_idx, first_idx));
+                }
+            }
+            _ => {
+                push_turn_segment_item(&mut segments, TurnSegmentKind::Process, item, (part_idx, 0))
             }
         }
     }
@@ -615,6 +611,7 @@ pub fn build_turn_segments_with_results(
                 kind: TurnSegmentKind::Process,
                 key: "process-start".to_owned(),
                 parts: Vec::new(),
+                expansion_anchor: None,
             },
         );
     } else if let Some(first) = segments.first_mut() {

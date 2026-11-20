@@ -1,19 +1,19 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use cst_client::ClientHandle;
 use cst_client::tool_presenter::{FieldRow, SpecialStatus, SpecialVolumeView};
-use cst_client::{ClientError, ClientHandle};
 use gpui::{ClipboardItem, CursorStyle};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::{
-    Context, Entity, InteractiveElement, IntoElement, ParentElement, SharedString,
+    Context, Entity, Focusable, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
 };
 use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
 use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
-use crate::tools::{render_special_details_section, render_special_notice_line};
+use crate::tools::{render_special_details_section, render_tool_notice_line};
 use gpui::relative;
 
 pub use super::secret_input::{MAX_RECOVERY_PASSWORD_BYTES, SecretInput, SecretInputEvent};
@@ -26,6 +26,12 @@ pub struct PendingBitLockerPrompt {
     pub prompt: String,
     pub expires_at_ms: u64,
     pub recovery_key_id: Option<String>,
+}
+
+impl PendingBitLockerPrompt {
+    pub(crate) fn is_expired(&self) -> bool {
+        self.expires_at_ms > 0 && now_epoch_ms() >= self.expires_at_ms
+    }
 }
 
 fn extract_recovery_key_id_from_request(chosen: &Value) -> Option<String> {
@@ -62,8 +68,7 @@ fn extract_recovery_key_id_from_request(chosen: &Value) -> Option<String> {
     None
 }
 
-/// Extracts an active pending BitLocker request matching `tool_call_id` (or an untagged pending
-/// request when `has_result == false`) from `session.bitlocker` JSON snapshot.
+/// Extracts an active pending BitLocker request explicitly bound to this tool call.
 pub fn find_pending_bitlocker_request(
     bitlocker_snapshot: Option<&Value>,
     tool_call_id: &str,
@@ -75,21 +80,20 @@ pub fn find_pending_bitlocker_request(
     let arr = bitlocker_snapshot?
         .get("requests")
         .and_then(Value::as_array)?;
-    if arr.is_empty() {
-        return None;
-    }
     let chosen = arr
         .iter()
-        .find(|r| r.get("toolCallId").and_then(Value::as_str) == Some(tool_call_id))
-        .or_else(|| {
-            arr.iter()
-                .find(|r| r.get("toolCallId").and_then(Value::as_str).is_none())
-        })?;
+        .find(|r| r.get("toolCallId").and_then(Value::as_str) == Some(tool_call_id))?;
 
     let request_id = chosen
         .get("requestId")
-        .or_else(|| chosen.get("id"))
-        .and_then(Value::as_str)?
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .or_else(|| {
+            chosen
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|id| !id.trim().is_empty())
+        })?
         .to_owned();
     let kind = chosen
         .get("kind")
@@ -154,7 +158,7 @@ pub fn render_bitlocker_card<V: 'static>(
     mono_family: SharedString,
     palette: &DesktopPalette,
     is_copied_fn: &dyn Fn(&str) -> bool,
-    on_toggle_details: crate::tools::ToggleKeyFn,
+    on_toggle_details: crate::tools::ToggleDetailsFn,
     on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
     on_error_notice: impl Fn(String, &mut Context<V>) + Clone + 'static,
     window: &mut Window,
@@ -171,6 +175,14 @@ pub fn render_bitlocker_card<V: 'static>(
             if !s.is_empty() || !s.is_disabled() {
                 s.clear(cx);
                 s.set_disabled(true, cx);
+            }
+            let focus = s.focus_handle(cx);
+            if focus.is_focused(window) {
+                window.defer(cx, move |window, cx| {
+                    if focus.is_focused(window) {
+                        window.blur(cx);
+                    }
+                });
             }
         });
     }
@@ -351,16 +363,7 @@ pub fn render_bitlocker_card<V: 'static>(
             && let Some(secret_entity) = props.secret_input
         {
             // Optional `24px` Recovery Key ID row (`yD9G3`)
-            let key_id_opt = pending.recovery_key_id.clone().or_else(|| {
-                props.fields.iter().find_map(|r| {
-                    let v = r.value.trim();
-                    ((r.label.contains("密钥") || r.label.contains("保护器"))
-                        || (v.starts_with('{') && v.ends_with('}')))
-                    .then(|| v.to_owned())
-                })
-            });
-
-            if let Some(key_id) = key_id_opt {
+            if let Some(key_id) = pending.recovery_key_id {
                 let key_id_copy = key_id.clone();
                 card = card.child(
                     div()
@@ -421,17 +424,8 @@ pub fn render_bitlocker_card<V: 'static>(
                 );
             }
 
-            let sid_submit = props.session_id.to_owned();
-            let rid_submit = pending.request_id.clone();
-            let client_submit = client.clone();
             let si_submit = secret_entity.clone();
-            let err_cb = on_error_notice.clone();
-
-            let sid_cancel = props.session_id.to_owned();
-            let rid_cancel = pending.request_id.clone();
-            let client_cancel = client;
             let si_cancel = secret_entity.clone();
-            let err_cancel_cb = on_error_notice;
 
             card = card
                 .child(secret_entity)
@@ -473,57 +467,9 @@ pub fn render_bitlocker_card<V: 'static>(
                                         .items_center()
                                         .hover(|s| s.bg(palette.accent_hover))
                                         .on_click(cx.listener(move |_, _, _, cx| {
-                                            if pending_expired {
-                                                return;
-                                            }
-                                            let (payload_buf, payload_len) =
-                                                si_submit.read(cx).snapshot_zeroizing_payload();
-                                            if payload_len == 0 {
-                                                si_submit.update(cx, |s, cx| {
-                                                    s.set_error_message(
-                                                        Some("请输入八组六位数字恢复密码。"),
-                                                        cx,
-                                                    );
-                                                });
-                                                return;
-                                            }
-                                            let c = client_submit.clone();
-                                            let s_id = sid_submit.clone();
-                                            let r_id = rid_submit.clone();
-                                            let si_done = si_submit.clone();
-                                            let e_cb = err_cb.clone();
-                                            cx.spawn(async move |weak, cx| {
-                                                let res = c
-                                                    .respond_bitlocker_password(
-                                                        s_id,
-                                                        r_id,
-                                                        payload_buf,
-                                                        payload_len,
-                                                    )
-                                                    .await;
-                                                let _ = weak.update(cx, |view, cx| {
-                                                    let _ = view;
-                                                    match res {
-                                                        Ok(_) => {
-                                                            si_done.update(cx, |s, cx| s.clear(cx));
-                                                        }
-                                                        Err(ClientError::BadRequest {
-                                                            ref code,
-                                                            ref message,
-                                                        }) if code == "invalid_bitlocker_input" => {
-                                                            let msg = message.clone();
-                                                            si_done.update(cx, |s, cx| {
-                                                                s.set_error_message(Some(msg), cx);
-                                                            });
-                                                        }
-                                                        Err(err) => {
-                                                            si_done.update(cx, |s, cx| s.clear(cx));
-                                                            e_cb(err.to_string(), cx);
-                                                        }
-                                                    }
-                                                });
-                                            })
-                                            .detach();
+                                            si_submit.update(cx, |_, cx| {
+                                                cx.emit(SecretInputEvent::SubmitRequested);
+                                            });
                                         }))
                                         .child(cjk_inline_label("解锁")),
                                 )
@@ -552,22 +498,9 @@ pub fn render_bitlocker_card<V: 'static>(
                                         .items_center()
                                         .hover(|s| s.bg(palette.bg_item_hover))
                                         .on_click(cx.listener(move |_, _, _, cx| {
-                                            si_cancel.update(cx, |s, cx| s.clear(cx));
-                                            let c = client_cancel.clone();
-                                            let s_id = sid_cancel.clone();
-                                            let r_id = rid_cancel.clone();
-                                            let e_cb = err_cancel_cb.clone();
-                                            cx.spawn(async move |weak, cx| {
-                                                if let Err(err) =
-                                                    c.cancel_bitlocker_request(s_id, r_id).await
-                                                {
-                                                    let _ = weak.update(cx, |view, cx| {
-                                                        let _ = view;
-                                                        e_cb(err.to_string(), cx);
-                                                    });
-                                                }
-                                            })
-                                            .detach();
+                                            si_cancel.update(cx, |_, cx| {
+                                                cx.emit(SecretInputEvent::CancelRequested);
+                                            });
                                         }))
                                         .child(cjk_inline_label("取消")),
                                 ),
@@ -610,7 +543,7 @@ pub fn render_bitlocker_card<V: 'static>(
                             ),
                     ),
                 );
-        } else {
+        } else if pending.kind != "password" {
             // `parameter` (AI-prefilled local confirmation) or `decrypt` (turn off encryption confirmation)
             let is_decrypt = pending.kind == "decrypt" || props.scope == "decrypt";
             if is_decrypt {
@@ -782,7 +715,7 @@ pub fn render_bitlocker_card<V: 'static>(
             palette,
         ));
     } else if is_unknown && props.errors.is_empty() {
-        card = card.child(render_special_notice_line(
+        card = card.child(render_tool_notice_line(
             IconName::TriangleAlert,
             palette.status_warning,
             "操作中断且未采集到目标卷确认状态，请核对磁盘当前锁定与加密情况。",
@@ -797,7 +730,7 @@ pub fn render_bitlocker_card<V: 'static>(
             (IconName::CircleAlert, palette.status_danger)
         };
         card = card.child(
-            render_special_notice_line(err_icon, err_color, first_err.clone(), palette)
+            render_tool_notice_line(err_icon, err_color, first_err.clone(), palette)
                 .id(SharedString::from(format!(
                     "bitlocker-first-error-{}",
                     props.call_id
@@ -806,15 +739,14 @@ pub fn render_bitlocker_card<V: 'static>(
         );
     }
 
-    let extra_errors: Vec<String> = props.errors.iter().skip(1).cloned().collect();
+    let extra_errors = props.errors.get(1..).unwrap_or_default();
     if let Some(details_section) = render_special_details_section(
         SharedString::from(format!("bitlocker-detail-toggle-{}", props.call_id)),
         "BitLocker 详情",
-        format!("bitlocker-details-{}", props.call_id),
         props.details_expanded,
         None,
         props.fields,
-        &extra_errors,
+        extra_errors,
         !is_unknown,
         SharedString::from(format!("bitlocker-raw-{}", props.call_id)),
         props.raw,
@@ -875,7 +807,7 @@ fn render_volume_rows(
             );
         }
 
-        let show_progress = vol.percentage.is_some_and(|pct| {
+        let progress_pct = vol.percentage.filter(|&pct| {
             matches!(vol.conversion_code, Some(2..=5))
                 || (pct > 0.0 && pct < 100.0 && vol.conversion_code != Some(0))
         });
@@ -888,7 +820,7 @@ fn render_volume_rows(
             .gap(space::SM)
             .child(metrics_row);
 
-        if show_progress && let Some(pct) = vol.percentage {
+        if let Some(pct) = progress_pct {
             let ratio = (pct / 100.0).clamp(0.0, 1.0) as f32;
             right_col = right_col.child(
                 div()

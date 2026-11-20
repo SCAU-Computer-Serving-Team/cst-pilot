@@ -15,12 +15,11 @@ use gpui_kit::{
     App, Context, Entity, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
 };
-use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
 use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, scale, space};
 use crate::tools::bitlocker_card::{
-    BitLockerCardProps, SecretInput, find_pending_bitlocker_request, render_bitlocker_card,
+    BitLockerCardProps, PendingBitLockerPrompt, SecretInput, render_bitlocker_card,
 };
 use crate::tools::runbook_card::{OpenRunbookFn, RunbookCardProps, render_runbook_card};
 use crate::tools::sys_overview::{SysOverviewProps, render_sys_overview_card};
@@ -28,15 +27,15 @@ use crate::tools::web_search_bar::{WebSearchBarProps, render_web_search_bar};
 use crate::workbench::markdown_view::render_copyable_text_block;
 
 pub type ToggleKeyFn = Rc<dyn Fn(String, &mut Window, &mut App)>;
+pub type ToggleDetailsFn = Rc<dyn Fn(&mut Window, &mut App)>;
 pub type HoverWarningFn = Rc<dyn Fn(String, bool, &mut Window, &mut App)>;
 
 pub struct SpecialToolDispatchProps<'a> {
     pub session_id: &'a str,
     pub entry_id: &'a str,
     pub call_id: &'a str,
-    pub has_result: bool,
     pub view: &'a SpecialToolView,
-    pub bitlocker_snapshot: Option<&'a Value>,
+    pub pending_bitlocker: Option<PendingBitLockerPrompt>,
     pub secret_input: Option<Entity<SecretInput>>,
     pub details_expanded: bool,
     pub warning_hovered: bool,
@@ -53,7 +52,7 @@ pub fn render_special_tool_component<V: 'static>(
     mono_family: SharedString,
     palette: &DesktopPalette,
     is_copied_fn: &dyn Fn(&str) -> bool,
-    on_toggle_key: ToggleKeyFn,
+    on_toggle_details: ToggleDetailsFn,
     on_hover_warning: HoverWarningFn,
     on_open_runbook: OpenRunbookFn,
     on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
@@ -96,7 +95,7 @@ pub fn render_special_tool_component<V: 'static>(
             mono_family,
             palette,
             is_copied_fn,
-            on_toggle_key,
+            on_toggle_details,
             on_mark_copied,
             cx,
         ),
@@ -133,7 +132,7 @@ pub fn render_special_tool_component<V: 'static>(
             mono_family,
             palette,
             is_copied_fn,
-            on_toggle_key,
+            on_toggle_details,
             on_open_runbook,
             on_mark_copied,
             cx,
@@ -163,7 +162,7 @@ pub fn render_special_tool_component<V: 'static>(
             palette,
             props.transparency_enabled,
             props.scale_factor,
-            on_toggle_key,
+            on_toggle_details,
             on_hover_warning,
         ),
         SpecialToolView::BitLocker {
@@ -176,39 +175,32 @@ pub fn render_special_tool_component<V: 'static>(
             scope,
             volumes,
             ..
-        } => {
-            let pending = find_pending_bitlocker_request(
-                props.bitlocker_snapshot,
-                props.call_id,
-                props.has_result,
-            );
-            render_bitlocker_card(
-                BitLockerCardProps {
-                    session_id: props.session_id,
-                    call_id: props.call_id,
-                    status: *status,
-                    title,
-                    summary,
-                    raw,
-                    scope,
-                    volumes,
-                    fields,
-                    errors,
-                    pending,
-                    secret_input: props.secret_input,
-                    details_expanded: props.details_expanded,
-                },
-                client,
-                mono_family,
-                palette,
-                is_copied_fn,
-                on_toggle_key,
-                on_mark_copied,
-                on_error_notice,
-                window,
-                cx,
-            )
-        }
+        } => render_bitlocker_card(
+            BitLockerCardProps {
+                session_id: props.session_id,
+                call_id: props.call_id,
+                status: *status,
+                title,
+                summary,
+                raw,
+                scope,
+                volumes,
+                fields,
+                errors,
+                pending: props.pending_bitlocker,
+                secret_input: props.secret_input,
+                details_expanded: props.details_expanded,
+            },
+            client,
+            mono_family,
+            palette,
+            is_copied_fn,
+            on_toggle_details,
+            on_mark_copied,
+            on_error_notice,
+            window,
+            cx,
+        ),
     }
 }
 
@@ -218,7 +210,7 @@ pub fn render_empty_tool_placeholder() -> impl IntoElement {
 
 /// Renders a semantic-icon-only notice/error row matching `.pen` (`14px` icon in semantic color +
 /// `12/16px` `text_secondary` text).
-pub(crate) fn render_special_notice_line(
+pub(crate) fn render_tool_notice_line(
     icon: IconName,
     icon_color: gpui_kit::Hsla,
     text: impl Into<SharedString>,
@@ -263,7 +255,6 @@ pub(crate) fn aligned_label_col_px<'a>(rows: impl IntoIterator<Item = &'a FieldR
 pub(crate) fn render_special_details_section<V: 'static>(
     toggle_id: SharedString,
     a11y_label: &'static str,
-    toggle_key: String,
     expanded: bool,
     call_capsule: Option<&str>,
     fields: &[FieldRow],
@@ -275,12 +266,15 @@ pub(crate) fn render_special_details_section<V: 'static>(
     mono_family: SharedString,
     palette: &DesktopPalette,
     is_copied_fn: &dyn Fn(&str) -> bool,
-    on_toggle: ToggleKeyFn,
+    on_toggle: ToggleDetailsFn,
     on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
     cx: &mut Context<V>,
 ) -> Option<gpui_kit::Div> {
     let has_raw = !raw.trim().is_empty();
-    let has_details = !fields.is_empty() || !errors.is_empty() || has_raw;
+    let fields = fields
+        .iter()
+        .filter(|row| !row.label.trim().is_empty() && !row.value.trim().is_empty());
+    let has_details = fields.clone().next().is_some() || !errors.is_empty() || has_raw;
     if left_footer.is_none() && !has_details {
         return None;
     }
@@ -317,7 +311,7 @@ pub(crate) fn render_special_details_section<V: 'static>(
                 .flex_shrink_0()
                 .text_color(palette.text_secondary)
                 .hover(|s| s.text_color(palette.text_primary))
-                .on_click(move |_, w, cx| (on_toggle)(toggle_key.clone(), w, cx))
+                .on_click(move |_, w, cx| (on_toggle)(w, cx))
                 .child(cjk_inline_label("详情"))
                 .child(
                     Icon::new(if expanded {
@@ -344,8 +338,8 @@ pub(crate) fn render_special_details_section<V: 'static>(
             );
         }
 
-        if !fields.is_empty() {
-            let label_w = aligned_label_col_px(fields);
+        if fields.clone().next().is_some() {
+            let label_w = aligned_label_col_px(fields.clone());
             let mut rows_col = div().w_full().flex().flex_col().gap(space::TIGHT);
             for row in fields {
                 rows_col = rows_col.child(
@@ -382,7 +376,7 @@ pub(crate) fn render_special_details_section<V: 'static>(
             } else {
                 (IconName::TriangleAlert, palette.status_warning)
             };
-            detail_col = detail_col.child(render_special_notice_line(
+            detail_col = detail_col.child(render_tool_notice_line(
                 err_icon,
                 err_color,
                 err.clone(),
@@ -392,7 +386,6 @@ pub(crate) fn render_special_details_section<V: 'static>(
 
         if has_raw {
             let copied = is_copied_fn(raw_block_id.as_ref());
-            let mark_cb = on_mark_copied;
             detail_col = detail_col.child(render_copyable_text_block(
                 raw_block_id,
                 raw.to_owned(),
@@ -400,7 +393,7 @@ pub(crate) fn render_special_details_section<V: 'static>(
                 mono_family,
                 copied,
                 palette,
-                move |cid, w, cx| mark_cb(cid, w, cx),
+                on_mark_copied,
                 cx,
             ));
         }

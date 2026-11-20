@@ -191,6 +191,62 @@ fn turn_segments_special_isolation_and_running_light_parity() {
     );
 }
 
+#[test]
+fn standalone_reads_preserve_order_and_process_expansion_identity() {
+    let entries = [json!({
+        "id": "a",
+        "role": "assistant",
+        "timestamp": 20,
+        "content": [
+            {"type": "toolCall", "id": "read-1", "name": "read"},
+            {"type": "toolCall", "id": "read-2", "name": "read"},
+            {"type": "toolCall", "id": "read-3", "name": "read"},
+            {"type": "toolCall", "id": "disk", "name": "disk"},
+            {"type": "toolCall", "id": "sys", "name": "sys"}
+        ]
+    })];
+    let (turns, _) = group_turns_and_results(&entries);
+    let parts = split_turn(&turns[0].assistants).process;
+    let image_result = json!({"content": [{"type": "image", "data": "AAAA"}]});
+    let mut results = std::collections::BTreeMap::from([
+        ("read-2".to_owned(), image_result.clone()),
+        (
+            "read-3".to_owned(),
+            json!({"content": [{"type": "image", "data": " "}]}),
+        ),
+    ]);
+
+    let before = build_turn_segments_with_results(parts.clone(), &results);
+    assert_eq!(before.len(), 4);
+    let process_anchor = before[2].expansion_anchor();
+    assert_eq!(process_anchor, Some((0, 2)));
+
+    results.insert("read-1".to_owned(), image_result);
+    let after = build_turn_segments_with_results(parts, &results);
+    assert_eq!(after.len(), 4);
+    assert_eq!(after[0].key, "process-start");
+    assert!(after[0].parts.is_empty());
+    assert_eq!(after[0].expansion_anchor(), None);
+    assert_eq!(after[1].kind, TurnSegmentKind::Visible);
+    assert_ne!(after[2].key, before[2].key);
+    assert_eq!(after[2].expansion_anchor(), process_anchor);
+    assert_eq!(
+        process_segment_label(&after[2].parts, &results, false).as_deref(),
+        Some("已完成 1 / 2 次工具调用")
+    );
+    let actual: Vec<_> = after[1]
+        .parts
+        .iter()
+        .flat_map(|part| match &part.part {
+            cst_desktop::workbench::turn_segments::ConversationPart::Tools(calls) => {
+                calls.iter().map(|call| call.id.as_str())
+            }
+            _ => panic!("expected standalone reads"),
+        })
+        .collect();
+    assert_eq!(actual, ["read-1", "read-2"]);
+}
+
 #[gpui_kit::test]
 async fn streaming_markdown_incremental_push_str_and_unclosed_code_fence(
     cx: &mut gpui_kit::TestAppContext,

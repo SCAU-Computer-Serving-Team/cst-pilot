@@ -11,7 +11,7 @@ use gpui_kit::{
 
 use crate::accessibility::A11yElementExt as _;
 use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
-use crate::tools::{render_special_details_section, render_special_notice_line};
+use crate::tools::{render_special_details_section, render_tool_notice_line};
 
 pub struct RunbookCardProps<'a> {
     pub call_id: &'a str,
@@ -68,27 +68,28 @@ pub fn render_runbook_card<V: 'static>(
     mono_family: SharedString,
     palette: &DesktopPalette,
     is_copied_fn: &dyn Fn(&str) -> bool,
-    on_toggle_details: crate::tools::ToggleKeyFn,
+    on_toggle_details: crate::tools::ToggleDetailsFn,
     on_open_runbook: OpenRunbookFn,
     on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
     cx: &mut Context<V>,
 ) -> gpui_kit::AnyElement {
     let tier_label = risk_tier_plain_label(props.level);
 
-    let (status_icon, status_color, status_text) = if props.planned {
-        (IconName::Clock3, palette.text_secondary, "待核对")
-    } else {
-        match props.status {
-            SpecialStatus::Running | SpecialStatus::Pending => {
-                (IconName::LoaderCircle, palette.accent_ink, "生成中")
+    let (status_icon, status_color, status_text) =
+        if props.planned && props.status == SpecialStatus::Success {
+            (IconName::Clock3, palette.text_secondary, "待核对")
+        } else {
+            match props.status {
+                SpecialStatus::Running | SpecialStatus::Pending => {
+                    (IconName::LoaderCircle, palette.accent_ink, "生成中")
+                }
+                SpecialStatus::Error => (IconName::CircleAlert, palette.status_danger, "生成失败"),
+                SpecialStatus::Degraded | SpecialStatus::Interrupted => {
+                    (IconName::TriangleAlert, palette.status_warning, "部分缺失")
+                }
+                _ => (IconName::CircleCheck, palette.status_success, "已生成"),
             }
-            SpecialStatus::Error => (IconName::CircleAlert, palette.status_danger, "生成失败"),
-            SpecialStatus::Degraded | SpecialStatus::Interrupted => {
-                (IconName::TriangleAlert, palette.status_warning, "部分缺失")
-            }
-            _ => (IconName::CircleCheck, palette.status_success, "已生成"),
-        }
-    };
+        };
 
     let mode_text = if props.planned {
         match props.version {
@@ -385,7 +386,7 @@ pub fn render_runbook_card<V: 'static>(
     }
 
     for err in props.errors {
-        card = card.child(render_special_notice_line(
+        card = card.child(render_tool_notice_line(
             IconName::TriangleAlert,
             palette.status_warning,
             err.clone(),
@@ -396,7 +397,6 @@ pub fn render_runbook_card<V: 'static>(
     if let Some(details_section) = render_special_details_section(
         SharedString::from(format!("runbook-detail-toggle-{}", props.call_id)),
         "命令清单详情",
-        format!("runbook-details-{}", props.call_id),
         props.details_expanded,
         None,
         props.fields,

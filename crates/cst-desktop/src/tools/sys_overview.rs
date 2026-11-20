@@ -35,7 +35,7 @@ pub fn render_sys_overview_card<V: 'static>(
     mono_family: SharedString,
     palette: &DesktopPalette,
     is_copied_fn: &dyn Fn(&str) -> bool,
-    on_toggle_details: crate::tools::ToggleKeyFn,
+    on_toggle_details: crate::tools::ToggleDetailsFn,
     on_mark_copied: impl Fn(SharedString, &mut Window, &mut Context<V>) + Clone + 'static,
     cx: &mut Context<V>,
 ) -> gpui_kit::AnyElement {
@@ -74,8 +74,6 @@ pub fn render_sys_overview_card<V: 'static>(
     } else {
         props.capacity.to_owned()
     };
-
-    let detail_key = format!("sys-overview-details-{}", props.call_id);
 
     let card_title = if props.title.trim().is_empty() {
         "整机概览"
@@ -219,7 +217,6 @@ pub fn render_sys_overview_card<V: 'static>(
     if let Some(details_section) = render_special_details_section(
         toggle_id,
         "整机概览详情",
-        detail_key,
         props.details_expanded,
         Some("sys(scope: \"overview\")"),
         props.fields,
