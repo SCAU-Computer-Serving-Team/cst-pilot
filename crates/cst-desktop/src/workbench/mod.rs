@@ -426,6 +426,7 @@ impl Render for WorkbenchView {
                         .items_center()
                         .gap(space::MD)
                         .min_w_0()
+                        .max_w(px(880.0))
                         .child(
                             Icon::new(IconName::MessageSquare)
                                 .size(px(16.0))

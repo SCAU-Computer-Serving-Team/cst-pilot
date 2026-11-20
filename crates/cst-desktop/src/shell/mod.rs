@@ -128,6 +128,7 @@ pub struct AppShell {
     branch_summarizing_sessions: BTreeSet<String>,
     session_subview_prior_focus: Option<FocusHandle>,
     sidebar_collapsed: bool,
+    auto_collapsed_narrow: bool,
     sidebar_batch_mode: bool,
     sidebar_selected_ids: BTreeSet<String>,
     sidebar_context_menu: Option<(String, Point<Pixels>)>,
@@ -187,7 +188,13 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) -> Self {
         let initial_snapshot = client.snapshot();
-        let sidebar_collapsed = initial_snapshot.desktop_settings.sidebar_collapsed;
+        let vp_w = f32::from(window.viewport_size().width);
+        let initial_narrow = resolved_geometry.width < layout::COMPACT_SIDEBAR_BREAKPOINT_WIDTH
+            || (vp_w > 1.0 && vp_w < layout::COMPACT_SIDEBAR_BREAKPOINT_WIDTH);
+        let auto_collapsed_narrow =
+            initial_narrow && !initial_snapshot.desktop_settings.sidebar_collapsed;
+        let sidebar_collapsed =
+            initial_snapshot.desktop_settings.sidebar_collapsed || auto_collapsed_narrow;
         let theme_preference = initial_snapshot.desktop_settings.theme;
         let _palette = apply_desktop_theme(theme_preference, Some(window), font_report, cx);
 
@@ -296,6 +303,7 @@ impl AppShell {
             branch_summarizing_sessions: BTreeSet::new(),
             session_subview_prior_focus: None,
             sidebar_collapsed,
+            auto_collapsed_narrow,
             sidebar_batch_mode: false,
             sidebar_selected_ids: BTreeSet::new(),
             sidebar_context_menu: None,
@@ -699,14 +707,26 @@ impl AppShell {
                     let prev_theme = this.theme_preference;
                     let prev_update_phase =
                         this.snapshot.update_state.as_ref().map(|u| u.status.phase);
+                    let prev_pref_collapsed = this.snapshot.desktop_settings.sidebar_collapsed;
                     this.snapshot = latest_snap;
-                    let collapsed = this.snapshot.desktop_settings.sidebar_collapsed;
-                    if collapsed && !this.sidebar_collapsed {
-                        this.dismiss_sidebar_menu(window, cx);
-                        this.sidebar_batch_mode = false;
-                        this.sidebar_selected_ids.clear();
+                    let pref_collapsed = this.snapshot.desktop_settings.sidebar_collapsed;
+                    if pref_collapsed != prev_pref_collapsed {
+                        let vp_w = f32::from(window.viewport_size().width);
+                        let is_narrow =
+                            vp_w > 1.0 && vp_w < layout::COMPACT_SIDEBAR_BREAKPOINT_WIDTH;
+                        if pref_collapsed {
+                            this.auto_collapsed_narrow = false;
+                        } else if is_narrow {
+                            this.auto_collapsed_narrow = true;
+                        }
+                        let collapsed = pref_collapsed || this.auto_collapsed_narrow;
+                        if collapsed && !this.sidebar_collapsed {
+                            this.dismiss_sidebar_menu(window, cx);
+                            this.sidebar_batch_mode = false;
+                            this.sidebar_selected_ids.clear();
+                        }
+                        this.sidebar_collapsed = collapsed;
                     }
-                    this.sidebar_collapsed = collapsed;
                     this.theme_preference = this.snapshot.desktop_settings.theme;
 
                     if prev_theme != this.theme_preference {
@@ -763,6 +783,24 @@ impl AppShell {
     fn on_window_geometry_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let vp = window.viewport_size();
         let is_min = vp.width <= px(1.0) || vp.height <= px(1.0);
+        if !is_min {
+            let is_narrow = f32::from(vp.width) < layout::COMPACT_SIDEBAR_BREAKPOINT_WIDTH;
+            if is_narrow && !self.sidebar_collapsed {
+                self.auto_collapsed_narrow = true;
+                self.sidebar_collapsed = true;
+                self.recent_drawer_open = false;
+                self.dismiss_sidebar_menu(window, cx);
+                self.sidebar_batch_mode = false;
+                self.sidebar_selected_ids.clear();
+                cx.notify();
+            } else if !is_narrow && self.auto_collapsed_narrow {
+                self.auto_collapsed_narrow = false;
+                if !self.snapshot.desktop_settings.sidebar_collapsed {
+                    self.sidebar_collapsed = false;
+                }
+                cx.notify();
+            }
+        }
         let bounds = window.bounds();
         let center_x = f32::from(bounds.origin.x) + f32::from(bounds.size.width) * 0.5;
         let center_y = f32::from(bounds.origin.y) + f32::from(bounds.size.height) * 0.5;
@@ -1012,6 +1050,7 @@ impl AppShell {
 
     pub fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let next_collapsed = !self.sidebar_collapsed;
+        self.auto_collapsed_narrow = false;
         self.sidebar_collapsed = next_collapsed;
         self.recent_drawer_open = false;
         self.sidebar_context_menu = None;

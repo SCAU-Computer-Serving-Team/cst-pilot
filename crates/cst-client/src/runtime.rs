@@ -221,6 +221,7 @@ impl CstClient {
             .map_err(|e| ClientError::BootstrapFailed(format!("无法创建客户端异步运行时：{e}")))?;
 
         let endpoint = runtime.block_on(ensure_server_running(kit_root, &options))?;
+        let initial_settings = runtime.block_on(endpoint.http.get_desktop_settings());
         let wakeup_rx = instance_guard.subscribe_wakeup();
         let handle = spawn_client_workers(
             runtime.handle(),
@@ -228,6 +229,21 @@ impl CstClient {
             wakeup_rx,
             ClientRuntimeOptions::default(),
         )?;
+        match initial_settings {
+            Ok(settings) => {
+                let mut guard = handle.core.snapshot.lock().expect("snapshot lock");
+                let mut next = (**guard).clone();
+                next.desktop_settings = settings;
+                *guard = Arc::new(next);
+            }
+            Err(ClientError::ConfigurationUnavailable(_)) => {
+                let mut guard = handle.core.snapshot.lock().expect("snapshot lock");
+                let mut next = (**guard).clone();
+                next.desktop_settings_corrupt = true;
+                *guard = Arc::new(next);
+            }
+            Err(_) => {}
+        }
 
         Ok(ClientBootstrapResult::Started(Self {
             handle,

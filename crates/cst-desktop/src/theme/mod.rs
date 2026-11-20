@@ -52,6 +52,7 @@ pub mod layout {
     pub const DEFAULT_WINDOW_HEIGHT: f32 = 800.0;
     pub const MIN_WINDOW_WIDTH: f32 = 1024.0;
     pub const MIN_WINDOW_HEIGHT: f32 = 640.0;
+    pub const COMPACT_SIDEBAR_BREAKPOINT_WIDTH: f32 = 1120.0;
 
     pub const SIDEBAR_WIDTH: Pixels = px(232.0);
     pub const TOPBAR_HEIGHT: Pixels = px(40.0);

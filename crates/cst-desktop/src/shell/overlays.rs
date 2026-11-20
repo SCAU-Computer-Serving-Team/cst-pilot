@@ -179,6 +179,7 @@ pub fn render_workspace_error_bar(
             .rounded(radius::ROW)
             .border_1()
             .border_color(palette.border_hairline)
+            .shadow(palette.craft_stack_shadows())
             .flex()
             .items_center()
             .child(
@@ -186,7 +187,7 @@ pub fn render_workspace_error_bar(
                     .relative()
                     .flex()
                     .items_center()
-                    .gap(space::SM)
+                    .gap(space::MD)
                     .min_w_0()
                     .child(
                         Icon::new(IconName::CircleAlert)
@@ -234,6 +235,7 @@ pub fn render_top_notice_banner(
             .rounded(radius::ROW)
             .border_1()
             .border_color(palette.border_hairline)
+            .shadow(palette.craft_stack_shadows())
             .flex()
             .items_center()
             .child(
