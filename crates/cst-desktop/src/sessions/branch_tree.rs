@@ -504,6 +504,13 @@ impl BranchTreeView {
             let res = client
                 .navigate_session_tree(sid.clone(), target_id, summarize, custom_instructions)
                 .await;
+            if res
+                .as_ref()
+                .is_ok_and(|val| val.get("cancelled").and_then(Value::as_bool) != Some(true))
+                && client.with_workspace(|ws| ws.active_session_id() == Some(sid.as_str()))
+            {
+                let _ = client.activate_session(Some(sid.clone())).await;
+            }
             let _ = weak.update(cx, |this, cx| {
                 this.pending_operations.remove(&sid);
                 if summarize {

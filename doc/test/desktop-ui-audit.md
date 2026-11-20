@@ -16,10 +16,10 @@
 | 区域 / Node ID | 核心核查对象 | 状态 | 进度与遗留说明 |
 |---|---|---|---|
 | `LKIQI` 设计规范 | 色彩（`AyvAS`）、字号排版（`H8sVa`）、圆角间距高度（`GYpym`）、窗口结构（`Mvvtr`）、材质透明度（`lRw5X`）、汉字 `2px` 光学对齐（`np3Ew`） | `[ ]` | 主题色、基础字号、`2/4/8/12px` 与 `np3Ew` 已用于主体页；`lRw5X` 降透明回退待随 `00C` 实测 |
-| `00A · 窗口与导航`（`FRLPg`） | `L081M1` 侧栏、`T1U1Xf` 窗控、`GElS8`/`MKlBE` 顶栏、`HUkqs` 对话标题栏、`h5AY3` 多选侧栏、`xWJOf` 子页标题栏、`VPWAF` 设置导航栏 | `[ ]` | 前 4 项随 `WSbcS`/`l84goO` 完成对齐；`h5AY3`、`xWJOf`、`VPWAF` 待随 `02`/`03` 画板实测 |
-| `00B · 按钮与输入`（`Ov79F`） | `ZWAs1` 输入框、`xRNmP` 主钮、`s2CZVU` 描边钮、`U6mIVP` 危险钮、`PP59g` 文字钮、`AxUEZ` 图标钮、`XtKij`/`i3VjFz` 复选框、`ZCGS3` 快捷键、`VngaB`/`gVNCA`/`PHFud` | `[ ]` | `ZWAs1`、`ZCGS3`、`gVNCA` 已对齐；复选框、`U6mIVP`、下拉框 `PHFud` 与表单校验态待实测 |
-| `00C · 菜单与弹窗`（`wbnNW`） | `UWt8w` 右键菜单、`UyJBj` 菜单项、`h1BufF` 顶部通知、`X2gAh` 顶部报错条、`sVucQ` 确认弹窗、`DZ0Fp` 遮罩、`H2p2z` 无遮罩浮层、`K3x72` 弹窗母版 | `[ ]` | `X2gAh`/`h1BufF` 已校准顶部 `16px` 定位；实际触发态与右键菜单、`sVucQ`、浮层毛玻璃待实测 |
-| `00D · 列表与消息`（`psLRr`） | `lzrMn` 会话行、`c4PWw` 信息行、`CpxAu` 用户消息、`b0aK5` 气泡栏、`VS7mw` 助手栏、`BuK2W` 工具状态行 | `[ ]` | 后四项已随 `l84goO` 完成核对；`lzrMn`（全部会话行）与 `c4PWw`（设置信息行）待核对 |
+| `00A · 窗口与导航`（`FRLPg`） | `L081M1` 侧栏、`T1U1Xf` 窗控、`GElS8`/`MKlBE` 顶栏、`HUkqs` 对话标题栏、`h5AY3` 多选侧栏、`xWJOf` 子页标题栏、`VPWAF` 设置导航栏 | `[ ]` | `L081M1`、`T1U1Xf`、`GElS8`/`MKlBE`、`HUkqs`、`h5AY3`（多选侧栏）与 `xWJOf`（子页标题栏）已完成双主题 `winapp` 核查；`VPWAF` 待随 `03` 画板实测 |
+| `00B · 按钮与输入`（`Ov79F`） | `ZWAs1` 输入框、`xRNmP` 主钮、`s2CZVU` 描边钮、`U6mIVP` 危险钮、`PP59g` 文字钮、`AxUEZ` 图标钮、`XtKij`/`i3VjFz` 复选框、`ZCGS3` 快捷键、`VngaB`/`gVNCA`/`PHFud` | `[ ]` | `ZWAs1`、`ZCGS3`、`gVNCA`、`XtKij`/`i3VjFz`（会话/导出勾选）已核对；`U6mIVP`、`PHFud` 与表单校验态待随 `03`/`04` 实测 |
+| `00C · 菜单与弹窗`（`wbnNW`） | `UWt8w` 右键菜单、`UyJBj` 菜单项、`h1BufF` 顶部通知、`X2gAh` 顶部报错条、`sVucQ` 确认弹窗、`DZ0Fp` 遮罩、`H2p2z` 无遮罩浮层、`K3x72` 弹窗母版 | `[ ]` | `UWt8w`/`UyJBj`、`h1BufF`/`X2gAh`（重命名空校验真窗报错条）、`DZ0Fp` 与 `H2p2z`/`K3x72` 已完成双主题核查；`sVucQ` 待随 `04` 退出弹窗实测 |
+| `00D · 列表与消息`（`psLRr`） | `lzrMn` 会话行、`c4PWw` 信息行、`CpxAu` 用户消息、`b0aK5` 气泡栏、`VS7mw` 助手栏、`BuK2W` 工具状态行 | `[ ]` | `lzrMn` 与后四项已完成双主题 `winapp` 核对；`c4PWw`（设置信息行）待随 `03` 核对 |
 | `00E · 工具与特殊工具`（`V9ohGI`） | `E9dWo9`/`VM8ko`/`VwO1J` 普通工具三卡、`wmkJw`/`JQMQZ`/`s3WzY`/`ABn8j` 特殊工具四卡 | `[x]` | 七类母版均已完成对齐与双主题验证；`ABn8j` 待决密码输入与 `400` 重试由 `tools_and_bitlocker` 无头集成测试实测，其余终态完成 `winapp` 截图核对 |
 | `00F · 背景着色器`（`gcj97`） | `jzHSt` 天空与 `k6JMV` 夜空着色器绑定与静止渲染 | `[ ]` | 静态首帧已在 `WSbcS` 验证；切换停帧与低功耗回退待结合动效阶段实测 |
 
@@ -41,9 +41,9 @@
 
 ### 02 · 会话管理（`C49doB`）
 
-- [ ] `Fp7xb` 全部会话（自然日分组、长标题 `lzrMn` 列表行、`h5AY3` 批量多选底栏/删除确认、搜索过滤与 `409` 删除冲突回滚）
-- [ ] `bliwY` 分支树（五种过滤模式切换、树节点间距与引导线、`Enter`/点击切换或派生操作）
-- [ ] `P7uGp` 会话导出（导出范围勾选项、预览区域、`artifacts/<日期>/sessions` 导出完成通知与打开目录按钮）
+- [x] `Fp7xb` 全部会话（自然日分组、长标题 `lzrMn` 列表行、`UWt8w`/`UyJBj` 右键菜单、重命名弹窗及空校验 `X2gAh`、`h5AY3` 侧栏多选与全部会话批量模式已完成双主题 `winapp` 截图核查及 `sol` 复核闭环；`409` 删除冲突回滚、失效多选清理与重命名竞态由 `settings_and_update` 与 `shell_and_mode_ui` 实测覆盖）
+- [x] `bliwY` 分支树（五种过滤模式、节点间距与 `2px` 引导线、底部快捷键提示条、`c1wymw` 跳转总结弹窗已完成双主题 `winapp` 截图核查及 `sol` 复核闭环，并补正同会话分支跳转后激活刷新；`Ctrl+O`/方向键/IME 隔离与 `Esc` 逐层退回由 `settings_and_update` 实测覆盖）
+- [x] `P7uGp` 会话导出（导出选项、格式/主题切换与 `CST Pilot` 预览区已完成双主题 `winapp` 截图核查；生成落盘通知、打开导出目录与离页取消轮询防误开目录由 `settings_and_update` 实测覆盖，真窗未拉起系统资源管理器）
 
 ### 03 · 设置（`Trond`）
 
