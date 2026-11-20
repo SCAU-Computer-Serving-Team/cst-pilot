@@ -26,6 +26,33 @@ use crate::theme::{
     render_subpage_header_xwjof, scale, space,
 };
 
+pub(crate) fn activates_button(event: &gpui::KeyDownEvent) -> bool {
+    !event.is_held
+        && event.keystroke.modifiers == gpui::Modifiers::default()
+        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+}
+
+pub(crate) fn move_picker_cursor(
+    event: &gpui::KeyDownEvent,
+    index: &mut usize,
+    count: usize,
+    scroll: &gpui::ScrollHandle,
+) -> bool {
+    if count == 0 || event.keystroke.modifiers != gpui::Modifiers::default() {
+        return false;
+    }
+    let last = count - 1;
+    *index = match event.keystroke.key.as_str() {
+        "up" => (*index).min(last).saturating_sub(1),
+        "down" => (*index + 1).min(last),
+        "home" => 0,
+        "end" => last,
+        _ => return false,
+    };
+    scroll.scroll_to_item(*index);
+    true
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SettingsCategory {
     #[default]
@@ -125,22 +152,36 @@ impl SettingsView {
     }
 
     pub fn set_category(&mut self, category: SettingsCategory, cx: &mut Context<Self>) {
+        if self.category == category {
+            return;
+        }
+        self.leave(cx);
         self.category = category;
         cx.notify();
     }
 
     pub fn open_custom_gateway_creator(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.category = SettingsCategory::Providers;
+        self.set_category(SettingsCategory::Providers, cx);
         self.providers_tab
             .update(cx, |pt, cx| pt.open_new_custom_provider(window, cx));
         cx.notify();
     }
 
-    pub fn dismiss_topmost_surface(&mut self, cx: &mut Context<Self>) -> bool {
+    pub fn leave(&mut self, cx: &mut Context<Self>) {
+        self.providers_tab.update(cx, ProvidersTabView::leave);
+        self.preferences_tab.update(cx, PreferencesTabView::leave);
+    }
+
+    pub fn has_dropdown(&self, cx: &gpui::App) -> bool {
+        self.category == SettingsCategory::Preferences
+            && self.preferences_tab.read(cx).has_dropdown()
+    }
+
+    pub fn dismiss_topmost_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.category == SettingsCategory::Preferences {
             return self
                 .preferences_tab
-                .update(cx, |pt, cx| pt.dismiss_dropdowns(cx));
+                .update(cx, |pt, cx| pt.dismiss_dropdowns(window, cx));
         }
         false
     }
@@ -189,8 +230,7 @@ impl Render for SettingsView {
                     .flex()
                     .items_center()
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.category = cat;
-                        cx.notify();
+                        this.set_category(cat, cx);
                     }))
                     .child(text_el)
                     .children(active.then(|| {

@@ -101,6 +101,19 @@ impl AppHttpClient {
         idempotency_key: Option<&str>,
         timeout: Option<Duration>,
     ) -> Result<Value, ClientError> {
+        let body = body.map(|value| reqwest::Body::from(value.to_string()));
+        self.request_json_body(method, path_and_query, body, idempotency_key, timeout)
+            .await
+    }
+
+    async fn request_json_body(
+        &self,
+        method: Method,
+        path_and_query: &str,
+        body: Option<reqwest::Body>,
+        idempotency_key: Option<&str>,
+        timeout: Option<Duration>,
+    ) -> Result<Value, ClientError> {
         let url = self.loopback_url(path_and_query)?;
         let is_read = method == Method::GET || method == Method::HEAD;
         let mut req = self
@@ -122,7 +135,8 @@ impl AppHttpClient {
                 .unwrap_or_else(|| format!("app-{}", Uuid::now_v7().simple()));
             req = req
                 .header("Idempotency-Key", key)
-                .json(body.unwrap_or(&json!({})));
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(body.unwrap_or_else(|| reqwest::Body::from("{}")));
         }
 
         let resp = req
@@ -1123,11 +1137,28 @@ impl AppHttpClient {
         .await
     }
 
-    pub async fn save_custom_provider(&self, payload: &Value) -> Result<Value, ClientError> {
-        self.request_value(
+    pub async fn save_custom_provider(
+        &self,
+        payload: &serde_json::Map<String, Value>,
+        key: Option<zeroize::Zeroizing<String>>,
+    ) -> Result<Value, ClientError> {
+        #[derive(serde::Serialize)]
+        struct CustomProviderBody<'a> {
+            #[serde(flatten)]
+            config: &'a serde_json::Map<String, Value>,
+            #[serde(rename = "apiKey", skip_serializing_if = "Option::is_none")]
+            key: Option<&'a str>,
+        }
+
+        let body = secret_json_body(&CustomProviderBody {
+            config: payload,
+            key: key.as_ref().map(|k| k.as_str()),
+        })?;
+        drop(key);
+        self.request_json_body(
             Method::POST,
             "/api/auth/custom",
-            Some(payload),
+            Some(body),
             None,
             Some(Duration::from_secs(20)),
         )
@@ -1242,16 +1273,22 @@ impl AppHttpClient {
         base_url: Option<&str>,
     ) -> Result<Value, ClientError> {
         let pid = encode_segment(provider_id);
-        let mut body = serde_json::Map::new();
-        body.insert("key".into(), Value::String(api_key.as_str().to_owned()));
-        drop(api_key);
-        if let Some(u) = base_url.filter(|s| !s.trim().is_empty()) {
-            body.insert("baseUrl".into(), Value::String(u.to_owned()));
+        #[derive(serde::Serialize)]
+        struct ApiKeyBody<'a> {
+            key: &'a str,
+            #[serde(rename = "baseUrl", skip_serializing_if = "Option::is_none")]
+            base_url: Option<&'a str>,
         }
-        self.request_value(
+
+        let body = secret_json_body(&ApiKeyBody {
+            key: api_key.as_str(),
+            base_url: base_url.filter(|s| !s.trim().is_empty()),
+        })?;
+        drop(api_key);
+        self.request_json_body(
             Method::PUT,
             &format!("/api/auth/{pid}/api-key"),
-            Some(&Value::Object(body)),
+            Some(body),
             None,
             Some(Duration::from_secs(15)),
         )
@@ -1269,6 +1306,13 @@ impl AppHttpClient {
         )
         .await
     }
+}
+
+fn secret_json_body(value: &impl serde::Serialize) -> Result<reqwest::Body, ClientError> {
+    let mut buffer = zeroize::Zeroizing::new(Vec::new());
+    serde_json::to_writer(&mut *buffer, value)
+        .map_err(|_| ClientError::Disconnected("无法编码凭据请求。".into()))?;
+    Ok(reqwest::Body::from(bytes::Bytes::from_owner(buffer)))
 }
 
 fn encode_segment(raw: &str) -> String {

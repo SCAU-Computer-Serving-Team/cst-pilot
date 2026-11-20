@@ -405,6 +405,25 @@ impl AppShell {
         subview: SessionSubView,
         cx: &mut Context<Self>,
     ) {
+        if self.route != route {
+            self.account_menu_open = false;
+            self.account_menu_prior_focus = None;
+            if self.route == ShellRoute::Login || route == ShellRoute::Login {
+                self.login_view.update(cx, |view, cx| {
+                    view.set_active(route == ShellRoute::Login, cx)
+                });
+            }
+            if self.route == ShellRoute::Settings {
+                self.settings_view.update(cx, SettingsView::leave);
+            }
+            if self.route == ShellRoute::Account {
+                self.account_view.update(cx, AccountView::leave);
+            }
+            if route == ShellRoute::Account {
+                self.account_view
+                    .update(cx, |view, cx| view.refresh_cstoa_quota(true, cx));
+            }
+        }
         if self.route != route || self.session_subview != subview {
             if self.route == ShellRoute::AllSessions {
                 self.all_sessions_view
@@ -472,6 +491,14 @@ impl AppShell {
                     .is_some_and(|update| update.status.phase == UpdatePhaseDto::Launching))
     }
 
+    fn close_account_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.account_menu_open = false;
+        if let Some(prev) = self.account_menu_prior_focus.take() {
+            prev.focus(window, cx);
+        }
+        cx.notify();
+    }
+
     fn blocks_workspace_shortcuts(&self, cx: &App) -> bool {
         self.shutting_down
             || self.exit_dialog.is_some()
@@ -485,8 +512,11 @@ impl AppShell {
             || (self.route == ShellRoute::Session
                 && self.session_subview == SessionSubView::Tree
                 && self.branch_tree_view.read(cx).has_summary_modal())
+            || self.account_menu_open
+            || (self.route == ShellRoute::Login && self.login_view.read(cx).has_dropdown())
+            || (self.route == ShellRoute::Settings && self.settings_view.read(cx).has_dropdown(cx))
             || (self.route == ShellRoute::Account
-                && self.account_view.read(cx).has_logout_confirm())
+                && self.account_view.read(cx).blocks_workspace_shortcuts())
             || self.snapshot.channel_mode == ChannelModeDto::WebActive
     }
 
@@ -1059,11 +1089,7 @@ impl AppShell {
             return true;
         }
         if self.account_menu_open {
-            self.account_menu_open = false;
-            if let Some(prev) = self.account_menu_prior_focus.take() {
-                prev.focus(window, cx);
-            }
-            cx.notify();
+            self.close_account_menu(window, cx);
             return true;
         }
         if self.recent_drawer_open {
@@ -1111,14 +1137,16 @@ impl AppShell {
             return true;
         }
         if self.route == ShellRoute::Login
-            && self.login_view.update(cx, |lv, cx| lv.dismiss_dropdown(cx))
+            && self
+                .login_view
+                .update(cx, |lv, cx| lv.dismiss_dropdown(window, cx))
         {
             return true;
         }
         if self.route == ShellRoute::Settings
             && self
                 .settings_view
-                .update(cx, |sv, cx| sv.dismiss_topmost_surface(cx))
+                .update(cx, |sv, cx| sv.dismiss_topmost_surface(window, cx))
         {
             return true;
         }
@@ -1590,6 +1618,9 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.route != ShellRoute::Settings {
+            return;
+        }
         match event {
             SettingsViewEvent::OpenUpdateDialog => {
                 self.open_update_dialog(window, cx);
@@ -1627,10 +1658,11 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.route != ShellRoute::Login {
+            return;
+        }
         match event {
             LoginViewEvent::NavigateToAccount => {
-                self.account_view
-                    .update(cx, |av, cx| av.refresh_cstoa_quota(true, cx));
                 self.set_route(ShellRoute::Account, cx);
                 cx.notify();
             }
@@ -1661,12 +1693,15 @@ impl AppShell {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.route != ShellRoute::Account {
+            return;
+        }
         match event {
             AccountViewEvent::OpenLoginTab(tab) => {
                 let target_tab = *tab;
+                self.set_route(ShellRoute::Login, cx);
                 self.login_view
                     .update(cx, |lv, cx| lv.set_tab(target_tab, cx));
-                self.set_route(ShellRoute::Login, cx);
                 cx.notify();
             }
             AccountViewEvent::LoggedOutCstoa => {
@@ -2171,10 +2206,10 @@ impl AppShell {
             .left_0()
             .right_0()
             .bottom_0()
-            .on_mouse_down(gpui::MouseButton::Left, move |_, _, cx| {
+            .occlude()
+            .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
                 ent_backdrop.update(cx, |this, cx| {
-                    this.account_menu_open = false;
-                    cx.notify();
+                    this.close_account_menu(window, cx);
                 });
             })
             .child(
@@ -2345,7 +2380,7 @@ impl AppShell {
                             .hover(|s| s.bg(palette.status_danger_subtle))
                             .on_click(move |_, window, cx| {
                                 ent_exit.update(cx, |this, cx| {
-                                    this.account_menu_open = false;
+                                    this.close_account_menu(window, cx);
                                     this.request_close_flow(window, cx);
                                 });
                             })

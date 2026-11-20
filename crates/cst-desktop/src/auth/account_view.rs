@@ -35,14 +35,15 @@ pub struct AccountView {
     logout_confirm_open: bool,
     logout_trap_focus: FocusHandle,
     logout_cancel_focus: FocusHandle,
-    logout_prior_focus: Option<FocusHandle>,
+    logout_trigger_focus: FocusHandle,
+    logout_confirm_focus: FocusHandle,
 }
 
 impl EventEmitter<AccountViewEvent> for AccountView {}
 
 impl AccountView {
     pub fn new(client: ClientHandle, cx: &mut Context<Self>) -> Self {
-        let mut this = Self {
+        Self {
             client,
             quota_text: None,
             quota_loading: false,
@@ -51,21 +52,28 @@ impl AccountView {
             logout_confirm_open: false,
             logout_trap_focus: cx.focus_handle(),
             logout_cancel_focus: cx.focus_handle().tab_stop(true),
-            logout_prior_focus: None,
-        };
-        this.refresh_cstoa_quota(true, cx);
-        this
+            logout_trigger_focus: cx.focus_handle().tab_stop(true),
+            logout_confirm_focus: cx.focus_handle().tab_stop(true),
+        }
     }
 
     pub fn has_logout_confirm(&self) -> bool {
         self.logout_confirm_open
     }
 
+    pub fn blocks_workspace_shortcuts(&self) -> bool {
+        self.logout_confirm_open || self.logging_out
+    }
+
+    pub fn leave(&mut self, cx: &mut Context<Self>) {
+        self.logout_confirm_open = false;
+        cx.notify();
+    }
+
     pub fn open_logout_confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.logging_out || self.logout_confirm_open {
             return;
         }
-        self.logout_prior_focus = window.focused(cx);
         self.logout_confirm_open = true;
         self.logout_cancel_focus.focus(window, cx);
         cx.notify();
@@ -76,9 +84,7 @@ impl AccountView {
             return false;
         }
         self.logout_confirm_open = false;
-        if let Some(prev) = self.logout_prior_focus.take() {
-            prev.focus(window, cx);
-        }
+        self.logout_trigger_focus.focus(window, cx);
         cx.notify();
         true
     }
@@ -115,8 +121,8 @@ impl AccountView {
         .detach();
     }
 
-    fn logout_cstoa_only(&mut self, cx: &mut Context<Self>) {
-        if self.logging_out {
+    fn logout_cstoa_only(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.logging_out || !self.dismiss_logout_confirm(window, cx) {
             return;
         }
         self.logging_out = true;
@@ -336,6 +342,14 @@ impl Render for AccountView {
                             .a11y_button("account-logout-cancel-btn", "取消")
                             .track_focus(&self.logout_cancel_focus)
                             .tab_index(0)
+                            .on_key_down(cx.listener(
+                                |this, event: &gpui::KeyDownEvent, window, cx| {
+                                    if crate::settings::activates_button(event) {
+                                        this.dismiss_logout_confirm(window, cx);
+                                        cx.stop_propagation();
+                                    }
+                                },
+                            ))
                             .h(height::CONTROL)
                             .px(space::MD)
                             .rounded(radius::CONTROL)
@@ -356,7 +370,16 @@ impl Render for AccountView {
                             .id("account-logout-confirm-btn")
                             .test_support()
                             .a11y_button("account-logout-confirm-btn", "退出 CSTOA")
+                            .track_focus(&self.logout_confirm_focus)
                             .tab_index(0)
+                            .on_key_down(cx.listener(
+                                |this, event: &gpui::KeyDownEvent, window, cx| {
+                                    if crate::settings::activates_button(event) {
+                                        this.logout_cstoa_only(window, cx);
+                                        cx.stop_propagation();
+                                    }
+                                },
+                            ))
                             .h(height::CONTROL)
                             .px(space::MD)
                             .rounded(radius::CONTROL)
@@ -366,8 +389,7 @@ impl Render for AccountView {
                             .items_center()
                             .hover(|s| s.bg(palette.status_danger_hover))
                             .on_click(cx.listener(|this, _, window, cx| {
-                                this.dismiss_logout_confirm(window, cx);
-                                this.logout_cstoa_only(cx);
+                                this.logout_cstoa_only(window, cx);
                             }))
                             .child(cjk_inline_label("退出 CSTOA")),
                     ),
@@ -380,6 +402,7 @@ impl Render for AccountView {
                 transparency_enabled,
                 scale_factor,
             )
+            .occlude()
             .absolute()
             .top_0()
             .left_0()
@@ -472,10 +495,12 @@ impl Render for AccountView {
                                             .flex()
                                             .items_center()
                                             .hover(|s| s.bg(palette.bg_surface))
-                                            .on_click(cx.listener(|_, _, _, cx| {
-                                                cx.emit(AccountViewEvent::OpenLoginTab(
-                                                    LoginMethodTab::CstoaQr,
-                                                ));
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                if !this.blocks_workspace_shortcuts() {
+                                                    cx.emit(AccountViewEvent::OpenLoginTab(
+                                                        LoginMethodTab::CstoaQr,
+                                                    ));
+                                                }
                                             }))
                                             .child(cjk_inline_label("重新扫码登录")),
                                     )
@@ -497,10 +522,12 @@ impl Render for AccountView {
                                             .flex()
                                             .items_center()
                                             .hover(|s| s.bg(palette.bg_surface))
-                                            .on_click(cx.listener(|_, _, _, cx| {
-                                                cx.emit(AccountViewEvent::OpenLoginTab(
-                                                    LoginMethodTab::ApiKey,
-                                                ));
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                if !this.blocks_workspace_shortcuts() {
+                                                    cx.emit(AccountViewEvent::OpenLoginTab(
+                                                        LoginMethodTab::ApiKey,
+                                                    ));
+                                                }
                                             }))
                                             .child(cjk_inline_label("APIKEY 登录")),
                                     )
@@ -516,6 +543,16 @@ impl Render for AccountView {
                                                     "退出 CSTOA"
                                                 },
                                             )
+                                            .track_focus(&self.logout_trigger_focus)
+                                            .tab_index(0)
+                                            .on_key_down(cx.listener(
+                                                |this, event: &gpui::KeyDownEvent, window, cx| {
+                                                    if crate::settings::activates_button(event) {
+                                                        this.open_logout_confirm(window, cx);
+                                                        cx.stop_propagation();
+                                                    }
+                                                },
+                                            ))
                                             .h(height::CONTROL)
                                             .px(space::MD)
                                             .rounded(radius::CONTROL)

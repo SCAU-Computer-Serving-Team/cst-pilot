@@ -586,9 +586,14 @@ pub async fn handle_models_route(
                         .into_iter()
                         .map(|m| format!("{}/{}", m.provider, m.id))
                         .collect();
-                    let covers_all = !patterns.is_empty()
-                        && patterns.len() == available_ids.len()
-                        && patterns.iter().all(|id| available_ids.contains(id));
+                    // Only collapse the implicit default order. A permutation of
+                    // every available model is still an explicit scope.
+                    let default_order = all_models
+                        .iter()
+                        .map(|m| format!("{}/{}", m.provider, m.id))
+                        .filter(|id| available_ids.contains(id));
+                    let covers_all =
+                        !patterns.is_empty() && patterns.iter().cloned().eq(default_order);
 
                     let save_res = if covers_all || patterns.is_empty() {
                         settings.set_enabled_models(None, SettingsScope::Global)

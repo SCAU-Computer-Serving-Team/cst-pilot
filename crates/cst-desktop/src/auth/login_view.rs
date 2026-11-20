@@ -1,8 +1,9 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use cst_client::{ClientError, ClientHandle};
 use gpui::{Image, StyledImage as _};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Input, InputContentType, InputEvent, InputState};
 use gpui_kit::{
@@ -48,7 +49,12 @@ pub struct LoginView {
     tab: LoginMethodTab,
     sky_time_secs: f32,
     qr_image: Option<Arc<Image>>,
-    qr_flow_id: Option<String>,
+    active: bool,
+    generation: u64,
+    qr_generation: u64,
+    qr_running: bool,
+    oauth_pending: bool,
+    window: gpui::AnyWindowHandle,
     qr_expires_at_ms: u64,
     qr_loading: bool,
     qr_error: Option<SharedString>,
@@ -57,6 +63,10 @@ pub struct LoginView {
     base_url_input: Entity<InputState>,
     api_key_error: Option<SharedString>,
     provider_dropdown_open: bool,
+    provider_trigger_focus: gpui::FocusHandle,
+    provider_menu_focus: gpui::FocusHandle,
+    provider_index: usize,
+    provider_scroll: gpui::ScrollHandle,
     saving_key: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -73,18 +83,28 @@ impl LoginView {
         let base_url_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("可选自定义 Base URL…"));
 
-        let key_sub = cx.subscribe(&api_key_input, |this, _, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) && this.api_key_error.take().is_some() {
-                cx.notify();
-            }
-        });
+        let subscriptions = [&api_key_input, &base_url_input]
+            .into_iter()
+            .map(|input| {
+                cx.subscribe(input, |this, _, event: &InputEvent, cx| {
+                    if matches!(event, InputEvent::Change) && this.api_key_error.take().is_some() {
+                        cx.notify();
+                    }
+                })
+            })
+            .collect();
 
         Self {
             client,
             tab: LoginMethodTab::CstoaQr,
             sky_time_secs: 0.0,
             qr_image: None,
-            qr_flow_id: None,
+            active: false,
+            generation: 0,
+            qr_generation: 0,
+            qr_running: false,
+            oauth_pending: false,
+            window: window.window_handle(),
             qr_expires_at_ms: 0,
             qr_loading: false,
             qr_error: None,
@@ -93,23 +113,55 @@ impl LoginView {
             base_url_input,
             api_key_error: None,
             provider_dropdown_open: false,
+            provider_trigger_focus: cx.focus_handle().tab_stop(true),
+            provider_menu_focus: cx.focus_handle(),
+            provider_index: 0,
+            provider_scroll: gpui::ScrollHandle::new(),
             saving_key: false,
-            _subscriptions: vec![key_sub],
+            _subscriptions: subscriptions,
         }
     }
 
-    pub fn set_tab(&mut self, tab: LoginMethodTab, cx: &mut Context<Self>) {
-        self.tab = tab;
-        self.provider_dropdown_open = false;
-        self.api_key_error = None;
+    pub fn set_active(&mut self, active: bool, cx: &mut Context<Self>) {
+        self.active = active;
+        if !active {
+            self.set_tab(LoginMethodTab::CstoaQr, cx);
+        }
         cx.notify();
     }
 
-    pub fn dismiss_dropdown(&mut self, cx: &mut Context<Self>) -> bool {
+    pub fn set_tab(&mut self, tab: LoginMethodTab, cx: &mut Context<Self>) {
+        self.generation += 1;
+        self.reset_qr();
+        self.tab = tab;
+        self.provider_dropdown_open = false;
+        self.api_key_error = None;
+        let key = self.api_key_input.downgrade();
+        let url = self.base_url_input.downgrade();
+        let window = self.window;
+        cx.spawn(async move |_, cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                let _ = key.update(cx, |input, cx| {
+                    input.set_value("", window, cx);
+                    input.set_masked(true, window, cx);
+                });
+                let _ = url.update(cx, |input, cx| input.set_value("", window, cx));
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    pub fn has_dropdown(&self) -> bool {
+        self.provider_dropdown_open
+    }
+
+    pub fn dismiss_dropdown(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if !self.provider_dropdown_open {
             return false;
         }
         self.provider_dropdown_open = false;
+        self.provider_trigger_focus.focus(window, cx);
         cx.notify();
         true
     }
@@ -118,44 +170,118 @@ impl LoginView {
         self.sky_time_secs = sky_time_secs;
     }
 
+    fn reset_qr(&mut self) {
+        self.qr_generation += 1;
+        self.qr_image = None;
+        self.qr_error = None;
+        self.qr_expires_at_ms = 0;
+        self.qr_loading = false;
+    }
+
     pub fn start_cstoa_qr_flow(&mut self, cx: &mut Context<Self>) {
-        if self.qr_loading {
+        if !self.active
+            || self.tab != LoginMethodTab::CstoaQr
+            || self.qr_running
+            || self.qr_image.is_some()
+            || self.qr_error.is_some()
+            || self.qr_expires_at_ms != 0
+        {
             return;
         }
+        self.qr_running = true;
         self.qr_loading = true;
-        self.qr_error = None;
         cx.notify();
 
         let client = self.client.clone();
+        let generation = self.qr_generation;
         cx.spawn(async move |weak, cx| {
-            let res = client
+            // Keep one worker until the previous flow has been cancelled. The server
+            // reuses an active flow when it gets another start for the same provider.
+            let started = client
                 .start_auth_flow("cstoa".into(), "oauth".into(), None)
                 .await;
-            let _ = weak.update(cx, |this, cx| {
-                this.qr_loading = false;
-                match res {
-                    Ok(val) => {
-                        if let Some(parsed) = parse_cstoa_oauth_payload(&val) {
+            let flow_id = started
+                .as_ref()
+                .ok()
+                .and_then(|val| val.get("flowId").or_else(|| val.get("id")))
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            let live = weak
+                .update(cx, |this, cx| {
+                    if this.qr_generation != generation {
+                        return false;
+                    }
+                    this.qr_loading = false;
+                    match started.ok().as_ref().and_then(parse_cstoa_oauth_payload) {
+                        Some(parsed) if flow_id.is_some() => {
+                            this.qr_expires_at_ms = parsed.expires_at_ms;
                             match rasterize_qr_image_offline(&parsed.verification_uri_complete) {
-                                Ok(img_arc) => {
-                                    this.qr_image = Some(img_arc);
-                                    this.qr_flow_id = parsed.flow_id;
-                                    this.qr_expires_at_ms = parsed.expires_at_ms;
-                                    this.qr_error = None;
-                                    this.poll_cstoa_oauth_completion(cx);
-                                }
-                                Err(err) => {
-                                    this.qr_error = Some(SharedString::from(err));
-                                }
+                                Ok(image) => this.qr_image = Some(image),
+                                Err(err) => this.qr_error = Some(err.into()),
                             }
-                        } else {
-                            this.qr_error =
-                                Some(SharedString::from("未能获取扫码登录地址，请重试。"));
+                        }
+                        _ => this.qr_error = Some("未能获取扫码登录地址，请重试。".into()),
+                    }
+                    cx.notify();
+                    this.qr_image.is_some()
+                })
+                .unwrap_or(false);
+
+            let mut succeeded = false;
+            if live && let Some(id) = flow_id.as_deref() {
+                loop {
+                    let current = weak
+                        .update(cx, |this, _| {
+                            this.qr_generation == generation
+                                && now_epoch_ms() < this.qr_expires_at_ms
+                        })
+                        .unwrap_or(false);
+                    if !current {
+                        break;
+                    }
+                    // Retry transient failures until expiry.
+                    if let Ok(status) = client
+                        .get_auth_flow_status("cstoa".into(), "oauth".into())
+                        .await
+                    {
+                        let is_current = status
+                            .get("flowId")
+                            .or_else(|| status.get("id"))
+                            .and_then(Value::as_str)
+                            == Some(id);
+                        let state = status
+                            .get("state")
+                            .or_else(|| status.get("status"))
+                            .and_then(Value::as_str);
+                        if is_current && matches!(state, Some("succeeded" | "completed" | "done")) {
+                            let _ = client.refresh_globals().await;
+                            let _ = client.refresh_models(None).await;
+                            succeeded = true;
+                            break;
+                        }
+                        if !is_current || matches!(state, Some("failed" | "cancelled" | "idle")) {
+                            let _ = weak.update(cx, |this, cx| {
+                                if this.qr_generation == generation {
+                                    this.reset_qr();
+                                    this.qr_error = Some("扫码登录已结束，请重试。".into());
+                                    cx.notify();
+                                }
+                            });
+                            break;
                         }
                     }
-                    Err(err) => {
-                        this.qr_error = Some(SharedString::from(err.to_string()));
-                    }
+                    cx.background_executor().timer(Duration::from_secs(1)).await;
+                }
+            }
+            if !succeeded && let Some(id) = flow_id {
+                let _ = client
+                    .cancel_auth_flow("cstoa".into(), "oauth".into(), Some(id))
+                    .await;
+            }
+            let _ = weak.update(cx, |this, cx| {
+                this.qr_running = false;
+                if succeeded && this.qr_generation == generation {
+                    cx.emit(LoginViewEvent::NavigateToAccount);
                 }
                 cx.notify();
             });
@@ -163,103 +289,133 @@ impl LoginView {
         .detach();
     }
 
-    fn poll_cstoa_oauth_completion(&mut self, cx: &mut Context<Self>) {
-        let client = self.client.clone();
-        cx.spawn(async move |weak, cx| {
-            let status_res = client
-                .get_auth_flow_status("cstoa".into(), "oauth".into())
-                .await;
-            if let Ok(st) = status_res {
-                let state_str = st
-                    .get("status")
-                    .or_else(|| st.get("state"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                if matches!(state_str, "succeeded" | "completed" | "done") {
-                    let _ = client.refresh_account().await;
-                    let _ = client.refresh_globals().await;
-                    let _ = client.refresh_models(None).await;
-                    let _ = weak.update(cx, |this, cx| {
-                        this.qr_image = None;
-                        cx.emit(LoginViewEvent::NavigateToAccount);
-                    });
-                }
-            }
-        })
-        .detach();
-    }
-
     fn start_provider_oauth(&mut self, provider_id: String, cx: &mut Context<Self>) {
+        if self.oauth_pending {
+            return;
+        }
+        self.oauth_pending = true;
+        let generation = self.generation;
         let client = self.client.clone();
         cx.spawn(async move |weak, cx| {
-            match client
-                .start_auth_flow(provider_id.clone(), "oauth".into(), None)
-                .await
-            {
-                Ok(val) => {
-                    if let Some(url) = val
-                        .get("url")
-                        .or_else(|| val.get("verificationUriComplete"))
-                        .and_then(Value::as_str)
-                    {
-                        open_url_in_trusted_browser(url);
+            let res = client
+                .start_auth_flow(provider_id, "oauth".into(), None)
+                .await;
+            let _ = weak.update(cx, |this, cx| {
+                this.oauth_pending = false;
+                if this.generation != generation {
+                    return;
+                }
+                match res {
+                    Ok(val) => {
+                        if let Some(url) = val
+                            .get("authUrl")
+                            .and_then(|a| a.get("url"))
+                            .or_else(|| val.get("url"))
+                            .or_else(|| val.get("verificationUriComplete"))
+                            .and_then(Value::as_str)
+                        {
+                            open_url_in_trusted_browser(url);
+                        }
                     }
+                    Err(err) => cx.emit(LoginViewEvent::ErrorMessage(err.to_string())),
                 }
-                Err(err) => {
-                    let _ = weak.update(cx, |_, cx| {
-                        cx.emit(LoginViewEvent::ErrorMessage(err.to_string()));
-                    });
-                }
-            }
+            });
         })
         .detach();
     }
 
-    fn submit_api_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn toggle_provider_menu(
+        &mut self,
+        choices: &[(String, String)],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.saving_key || self.dismiss_dropdown(window, cx) {
+            return;
+        }
+        self.provider_index = choices
+            .iter()
+            .position(|(id, _)| id == &self.selected_provider_id)
+            .unwrap_or(0);
+        self.provider_scroll.scroll_to_item(self.provider_index);
+        self.provider_dropdown_open = true;
+        self.provider_menu_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn select_api_key_provider(
+        &mut self,
+        provider: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.saving_key {
             return;
         }
-        let raw_key = Zeroizing::new(self.api_key_input.read(cx).value().trim().to_owned());
+        if self.selected_provider_id != provider {
+            self.selected_provider_id = provider.to_owned();
+            self.api_key_input.update(cx, |input, cx| {
+                input.set_value("", window, cx);
+                input.set_masked(true, window, cx);
+            });
+            self.base_url_input
+                .update(cx, |input, cx| input.set_value("", window, cx));
+            self.api_key_error = None;
+        }
+        self.dismiss_dropdown(window, cx);
+    }
+
+    fn submit_api_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.saving_key || !self.active || self.tab != LoginMethodTab::ApiKey {
+            return;
+        }
+        let text = Zeroizing::new(self.api_key_input.read(cx).text().to_string());
+        let raw_key = Zeroizing::new(text.trim().to_owned());
         if raw_key.is_empty() {
             self.api_key_error = Some("请输入有效的 API Key。".into());
             cx.notify();
             return;
         }
+        self.dismiss_dropdown(window, cx);
         self.api_key_error = None;
         let base_url = {
             let b = self.base_url_input.read(cx).value().trim().to_owned();
             (!b.is_empty()).then_some(b)
         };
         let provider = self.selected_provider_id.clone();
-
-        // Wipe UI input immediately so plaintext does not linger
-        self.api_key_input
-            .update(cx, |inp, cx| inp.set_value("", window, cx));
         self.saving_key = true;
         cx.notify();
 
+        let generation = self.generation;
         let client = self.client.clone();
-        cx.spawn(async move |weak, cx| {
+        cx.spawn_in(window, async move |weak, cx| {
             let res = client
                 .save_provider_api_key(provider, raw_key, base_url)
                 .await;
-            let _ = client.refresh_globals().await;
-            let _ = client.refresh_models(None).await;
-            let _ = weak.update(cx, |this, cx| {
+            if res.is_ok() {
+                let _ = client.refresh_globals().await;
+                let _ = client.refresh_models(None).await;
+            }
+            let _ = weak.update_in(cx, |this, window, cx| {
                 this.saving_key = false;
+                cx.notify();
+                if this.generation != generation {
+                    return;
+                }
                 match res {
                     Ok(_) => {
-                        this.api_key_error = None;
+                        this.api_key_input
+                            .update(cx, |input, cx| input.set_value("", window, cx));
                         cx.emit(LoginViewEvent::CredentialsSavedReturn);
                     }
-                    Err(ClientError::BadRequest { message, .. }) => {
-                        this.api_key_error = Some(message.into());
+                    Err(ClientError::BadRequest { .. }) => {
+                        this.api_key_error =
+                            Some("无法保存凭据，请检查 API Key 和服务地址。".into());
                     }
-                    Err(err) => {
-                        cx.emit(LoginViewEvent::ErrorMessage(err.to_string()));
-                    }
+                    Err(_) => cx.emit(LoginViewEvent::ErrorMessage(
+                        "保存凭据失败，请重试。".into(),
+                    )),
                 }
-                cx.notify();
             });
         })
         .detach();
@@ -272,27 +428,14 @@ impl LoginView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        // Auto-navigate to Account view as soon as global SSE `oauth_result` / `auth_changed` marks CSTOA signed in!
-        if self
-            .client
-            .snapshot()
-            .account
-            .as_ref()
-            .is_some_and(|a| a.signed_in)
+        if self.active
+            && self.qr_image.is_none()
+            && !self.qr_running
+            && self.qr_error.is_none()
+            && self.qr_expires_at_ms == 0
         {
             let ent = cx.entity();
-            cx.defer(move |cx| {
-                ent.update(cx, |_, cx| {
-                    cx.emit(LoginViewEvent::NavigateToAccount);
-                });
-            });
-        }
-
-        if self.qr_image.is_none() && !self.qr_loading && self.qr_error.is_none() {
-            let ent = cx.entity();
-            cx.defer(move |cx| {
-                ent.update(cx, |this, cx| this.start_cstoa_qr_flow(cx));
-            });
+            cx.defer(move |cx| ent.update(cx, |this, cx| this.start_cstoa_qr_flow(cx)));
         }
 
         let now = now_epoch_ms();
@@ -305,7 +448,6 @@ impl LoginView {
         };
 
         let has_live_qr = self.qr_image.is_some() && !expired;
-        let _ = &self.qr_flow_id;
         let qr_box = if let Some(ref qr_img) = self.qr_image
             && !expired
         {
@@ -330,15 +472,16 @@ impl LoginView {
                 )
                 .into_any_element()
         } else {
-            let placeholder_msg = if self.qr_loading {
-                SharedString::from("正在生成本地二维码…")
-            } else if expired {
-                SharedString::from("二维码已过期")
-            } else if let Some(ref err) = self.qr_error {
-                err.clone()
-            } else {
-                SharedString::from("点击下方刷新获取二维码")
-            };
+            let placeholder_msg =
+                if self.qr_loading || (self.qr_running && self.qr_error.is_none() && !expired) {
+                    SharedString::from("正在生成本地二维码…")
+                } else if expired {
+                    SharedString::from("二维码已过期")
+                } else if let Some(ref err) = self.qr_error {
+                    err.clone()
+                } else {
+                    SharedString::from("点击下方刷新获取二维码")
+                };
             div()
                 .id("cstoa-qr-refresh-placeholder")
                 .test_support()
@@ -438,8 +581,11 @@ impl LoginView {
                             .gap(space::TIGHT)
                             .hover(|s| s.bg(palette.bg_item_hover))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.qr_image = None;
-                                this.start_cstoa_qr_flow(cx);
+                                if !this.qr_loading {
+                                    this.reset_qr();
+                                    this.start_cstoa_qr_flow(cx);
+                                    cx.notify();
+                                }
                             }))
                             .child(
                                 Icon::new(IconName::RefreshCw)
@@ -567,6 +713,7 @@ impl Render for LoginView {
                 provider_menu_opt = self.provider_dropdown_open.then(|| {
                     let mut list = div()
                         .id("login-apikey-provider-menu-scroll")
+                        .track_scroll(&self.provider_scroll)
                         .w_full()
                         .max_h(px(220.0))
                         .overflow_y_scroll()
@@ -574,8 +721,8 @@ impl Render for LoginView {
                         .flex_col()
                         .gap(space::MICRO);
 
-                    for (pid, pname) in &key_providers {
-                        let active = &self.selected_provider_id == pid;
+                    for (idx, (pid, pname)) in key_providers.iter().enumerate() {
+                        let active = self.provider_index == idx;
                         let pid_click = pid.clone();
                         let opt_id = SharedString::from(format!("login-apikey-provider-{pid}"));
                         let opt_label = SharedString::from(pname.clone());
@@ -584,6 +731,7 @@ impl Render for LoginView {
                                 .id(opt_id.clone())
                                 .test_support()
                                 .a11y_listitem(opt_id, opt_label.clone(), active)
+                                .flex_shrink_0()
                                 .h(height::CONTROL)
                                 .px(space::SM)
                                 .rounded(radius::CONTROL)
@@ -598,11 +746,8 @@ impl Render for LoginView {
                                 .justify_between()
                                 .gap(space::SM)
                                 .hover(|s| s.bg(palette.bg_item_hover))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.selected_provider_id = pid_click.clone();
-                                    this.provider_dropdown_open = false;
-                                    this.api_key_error = None;
-                                    cx.notify();
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.select_api_key_provider(&pid_click, window, cx);
                                 }))
                                 .child(div().min_w_0().truncate().child(opt_label))
                                 .children(active.then(|| {
@@ -632,7 +777,31 @@ impl Render for LoginView {
                     .border_color(palette.border_hairline)
                     .shadow(palette.craft_stack_shadows())
                     .occlude()
-                    .child(list)
+                    .child(
+                        div()
+                            .w_full()
+                            .focus_trap("login-apikey-provider-focus", &self.provider_menu_focus)
+                            .on_key_down(cx.listener({
+                                let choices = key_providers.clone();
+                                move |this, event: &gpui::KeyDownEvent, window, cx| {
+                                    if crate::settings::move_picker_cursor(
+                                        event,
+                                        &mut this.provider_index,
+                                        choices.len(),
+                                        &this.provider_scroll,
+                                    ) {
+                                        cx.notify();
+                                        cx.stop_propagation();
+                                    } else if crate::settings::activates_button(event) {
+                                        if let Some((id, _)) = choices.get(this.provider_index) {
+                                            this.select_api_key_provider(id, window, cx);
+                                        }
+                                        cx.stop_propagation();
+                                    }
+                                }
+                            }))
+                            .child(list),
+                    )
                 });
 
                 div()
@@ -660,6 +829,17 @@ impl Render for LoginView {
                                         format!("服务提供商：{selected_provider_name}"),
                                         self.provider_dropdown_open,
                                     )
+                                    .track_focus(&self.provider_trigger_focus)
+                                    .tab_index(0)
+                                    .on_key_down(cx.listener({
+                                        let choices = key_providers.clone();
+                                        move |this, event: &gpui::KeyDownEvent, window, cx| {
+                                            if crate::settings::activates_button(event) {
+                                                this.toggle_provider_menu(&choices, window, cx);
+                                                cx.stop_propagation();
+                                            }
+                                        }
+                                    }))
                                     .w_full()
                                     .h(px(36.0))
                                     .px(space::MD)
@@ -677,9 +857,8 @@ impl Render for LoginView {
                                     .justify_between()
                                     .gap(space::SM)
                                     .hover(|s| s.bg(palette.bg_surface))
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.provider_dropdown_open = !this.provider_dropdown_open;
-                                        cx.notify();
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.toggle_provider_menu(&key_providers, window, cx);
                                     }))
                                     .child(
                                         div()
@@ -724,6 +903,7 @@ impl Render for LoginView {
                                         Input::new(&self.api_key_input)
                                             .accessibility_id("login-apikey-input")
                                             .content_type(InputContentType::Password)
+                                            .disabled(self.saving_key)
                                             .aria_label("API Key 密钥")
                                             .appearance(false)
                                             .bordered(false)
@@ -766,6 +946,7 @@ impl Render for LoginView {
                                     .child(
                                         Input::new(&self.base_url_input)
                                             .accessibility_id("login-baseurl-input")
+                                            .disabled(self.saving_key)
                                             .aria_label("自定义 Base URL")
                                             .appearance(false)
                                             .bordered(false)

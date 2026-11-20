@@ -48,7 +48,7 @@ pub fn rasterize_qr_image_offline(verification_uri_complete: &str) -> Result<Arc
     Ok(Arc::new(Image::from_bytes(ImageFormat::Png, png_bytes)))
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ParsedDeviceQrPayload {
     pub flow_id: Option<String>,
     pub verification_uri_complete: String,
@@ -65,12 +65,14 @@ pub fn parse_cstoa_oauth_payload(val: &Value) -> Option<ParsedDeviceQrPayload> {
         .map(str::to_owned);
 
     let auth_obj = val.get("auth").or_else(|| val.get("device"));
+    let device_code = val.get("deviceCode");
     let uri = val
         .get("verificationUriComplete")
         .or_else(|| val.get("verification_uri_complete"))
         .or_else(|| val.get("url"))
         .or_else(|| auth_obj.and_then(|a| a.get("verificationUriComplete")))
         .or_else(|| auth_obj.and_then(|a| a.get("url")))
+        .or_else(|| device_code.and_then(|d| d.get("verificationUri")))
         .and_then(Value::as_str)?
         .trim()
         .to_owned();
@@ -87,8 +89,9 @@ pub fn parse_cstoa_oauth_payload(val: &Value) -> Option<ParsedDeviceQrPayload> {
         .or_else(|| {
             val.get("expiresIn")
                 .or_else(|| auth_obj.and_then(|a| a.get("expiresIn")))
+                .or_else(|| device_code.and_then(|d| d.get("expiresInSeconds")))
                 .and_then(Value::as_u64)
-                .map(|secs| now + secs * 1000)
+                .map(|secs| now.saturating_add(secs.saturating_mul(1000)))
         })
         .unwrap_or(now + 300_000);
 

@@ -936,9 +936,13 @@ impl ClientHandle {
             .await
     }
 
-    pub async fn save_custom_provider(&self, payload: Value) -> Result<Value, ClientError> {
+    pub async fn save_custom_provider(
+        &self,
+        payload: serde_json::Map<String, Value>,
+        key: Option<zeroize::Zeroizing<String>>,
+    ) -> Result<Value, ClientError> {
         let http = self.core.http.clone();
-        self.spawn_tokio(async move { http.save_custom_provider(&payload).await })
+        self.spawn_tokio(async move { http.save_custom_provider(&payload, key).await })
             .await
     }
 

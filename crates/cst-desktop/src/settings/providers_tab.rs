@@ -121,6 +121,9 @@ pub struct ProvidersTabView {
     revision: Option<String>,
     editable_rows: Vec<EditableModelRow>,
     saving: bool,
+    loading: bool,
+    generation: u64,
+    window: gpui::AnyWindowHandle,
     key_error: Option<SharedString>,
     form_error: Option<SharedString>,
     _subscriptions: Vec<Subscription>,
@@ -147,17 +150,25 @@ impl ProvidersTabView {
                 .masked(true)
         });
 
-        let mut subs = Vec::new();
+        let mut subs = vec![cx.subscribe(&search_input, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        })];
         for inp in [&provider_id_input, &provider_name_input, &base_url_input] {
             subs.push(cx.subscribe(inp, |this, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Change) && this.form_error.take().is_some() {
+                if matches!(event, InputEvent::Change) {
+                    this.form_error = None;
+                    this.key_error = None;
                     cx.notify();
                 }
             }));
         }
         subs.push(
             cx.subscribe(&api_key_input, |this, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Change) && this.key_error.take().is_some() {
+                if matches!(event, InputEvent::Change) {
+                    this.form_error = None;
+                    this.key_error = None;
                     cx.notify();
                 }
             }),
@@ -178,6 +189,9 @@ impl ProvidersTabView {
             revision: None,
             editable_rows: Vec::new(),
             saving: false,
+            loading: false,
+            generation: 0,
+            window: window.window_handle(),
             key_error: None,
             form_error: None,
             _subscriptions: subs,
@@ -185,7 +199,7 @@ impl ProvidersTabView {
     }
 
     pub fn open_new_custom_provider(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.active_provider_id = None;
+        self.reset_form();
         self.creating_new_custom = true;
         self.inline_edit_mode = true;
         self.revision = None;
@@ -198,21 +212,53 @@ impl ProvidersTabView {
             .update(cx, |i, cx| i.set_value("", window, cx));
         self.base_url_input
             .update(cx, |i, cx| i.set_value("", window, cx));
-        self.api_key_input
+        self.clear_key(window, cx);
+        self.search_input
             .update(cx, |i, cx| i.set_value("", window, cx));
-        self.editable_rows.clear();
         self.append_blank_editable_row(window, cx);
         cx.notify();
     }
 
-    fn return_to_provider_list(&mut self, cx: &mut Context<Self>) {
+    pub fn leave(&mut self, cx: &mut Context<Self>) {
+        self.reset_form();
+        let key = self.api_key_input.downgrade();
+        let window = self.window;
+        cx.spawn(async move |_, cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                let _ = key.update(cx, |input, cx| {
+                    input.set_value("", window, cx);
+                    input.set_masked(true, window, cx);
+                });
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn return_to_provider_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.reset_form();
+        self.clear_key(window, cx);
+        cx.notify();
+    }
+
+    fn clear_key(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.api_key_input.update(cx, |input, cx| {
+            input.set_value("", window, cx);
+            input.set_masked(true, window, cx);
+        });
+    }
+
+    fn reset_form(&mut self) {
+        self.generation += 1;
+        self.loading = false;
+        self.revision = None;
+        self.editable_rows.clear();
         self.inline_edit_mode = false;
         self.creating_new_custom = false;
         self.active_provider_id = None;
         self.search_visible = false;
         self.key_error = None;
         self.form_error = None;
-        cx.notify();
     }
 
     fn select_provider(
@@ -229,38 +275,50 @@ impl ProvidersTabView {
             .and_then(|p| p.custom)
             .unwrap_or(false);
 
-        self.active_provider_id = Some(provider_id.clone());
-        self.creating_new_custom = false;
-        self.inline_edit_mode = is_custom;
-        self.api_key_input
+        self.reset_form();
+        self.clear_key(window, cx);
+        self.search_input
             .update(cx, |i, cx| i.set_value("", window, cx));
-        self.editable_rows.clear();
+        self.active_provider_id = Some(provider_id.clone());
+        self.inline_edit_mode = is_custom;
+        self.provider_id_input
+            .update(cx, |i, cx| i.set_value(provider_id.clone(), window, cx));
+        let pname = snap
+            .auth_providers
+            .as_ref()
+            .and_then(|list| list.iter().find(|p| p.id == provider_id))
+            .map(|p| p.name.clone())
+            .unwrap_or_default();
+        self.provider_name_input
+            .update(cx, |i, cx| i.set_value(pname, window, cx));
+        self.base_url_input
+            .update(cx, |i, cx| i.set_value("", window, cx));
 
         if is_custom {
+            self.loading = true;
+            let generation = self.generation;
             let client = self.client.clone();
-            let pid = provider_id.clone();
-            cx.spawn(async move |weak, cx| {
-                if let Ok(val) = client.get_custom_provider(pid).await {
-                    let _ = weak.update_in(cx, |this, window, cx| {
-                        this.populate_from_custom_json(&val, window, cx);
-                    });
-                }
+            cx.spawn_in(window, async move |weak, cx| {
+                let result = client.get_custom_provider(provider_id.clone()).await;
+                let _ = weak.update_in(cx, |this, window, cx| {
+                    if this.generation != generation {
+                        return;
+                    }
+                    this.loading = false;
+                    match result {
+                        Ok(val)
+                            if val.get("id").and_then(Value::as_str)
+                                == Some(provider_id.as_str())
+                                && val.get("revision").and_then(Value::as_str).is_some() =>
+                        {
+                            this.populate_from_custom_json(&val, window, cx);
+                        }
+                        _ => this.form_error = Some("无法读取服务配置，请返回列表重试。".into()),
+                    }
+                    cx.notify();
+                });
             })
             .detach();
-        } else {
-            let pname = snap
-                .auth_providers
-                .as_ref()
-                .and_then(|list| list.iter().find(|p| p.id == provider_id))
-                .map(|p| p.name.clone())
-                .unwrap_or_else(|| provider_id.clone());
-            self.provider_id_input
-                .update(cx, |i, cx| i.set_value(provider_id, window, cx));
-            self.provider_name_input
-                .update(cx, |i, cx| i.set_value(pname, window, cx));
-            self.base_url_input
-                .update(cx, |i, cx| i.set_value("", window, cx));
-            self.revision = None;
         }
         cx.notify();
     }
@@ -330,35 +388,10 @@ impl ProvidersTabView {
     }
 
     fn append_blank_editable_row(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.inline_edit_mode {
-            self.inline_edit_mode = true;
-            if let Some(ref pid) = self.active_provider_id
-                && let Some(models) = self.client.snapshot().models.as_ref()
-            {
-                for m in models.catalog.iter().filter(|m| &m.provider == pid) {
-                    let mid = m.id.clone();
-                    let mname = m.name.clone();
-                    let id_inp = cx.new(|cx| {
-                        let mut s = InputState::new(window, cx).placeholder("model-id");
-                        s.set_value(mid, window, cx);
-                        s
-                    });
-                    let name_inp = cx.new(|cx| {
-                        let mut s = InputState::new(window, cx).placeholder("显示名称");
-                        s.set_value(mname, window, cx);
-                        s
-                    });
-                    self.editable_rows.push(EditableModelRow {
-                        id_input: id_inp,
-                        name_input: name_inp,
-                        context_window: m.context_window.unwrap_or(128_000),
-                        max_tokens: m.max_tokens.unwrap_or(16_384),
-                        reasoning: m.reasoning,
-                        image: m.input.iter().any(|x| x == "image"),
-                    });
-                }
-            }
+        if !self.inline_edit_mode || self.loading || self.saving {
+            return;
         }
+        self.form_error = None;
 
         let id_input = cx.new(|cx| InputState::new(window, cx).placeholder("新模型 ID…"));
         let name_input = cx.new(|cx| InputState::new(window, cx).placeholder("模型名称…"));
@@ -390,8 +423,8 @@ impl ProvidersTabView {
         .detach();
     }
 
-    fn remove_active_provider_credentials(&mut self, cx: &mut Context<Self>) {
-        if self.saving {
+    fn remove_active_provider_credentials(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.saving || self.loading || (self.inline_edit_mode && self.revision.is_none()) {
             return;
         }
         let Some(provider) = self.active_provider_id.clone() else {
@@ -402,16 +435,32 @@ impl ProvidersTabView {
         cx.notify();
 
         let client = self.client.clone();
-        cx.spawn(async move |weak, cx| {
-            let res = client.logout_provider(provider).await;
-            let _ = client.refresh_globals().await;
-            let _ = client.refresh_models(None).await;
-            let _ = weak.update(cx, |this, cx| {
+        let revision = self.revision.clone();
+        let generation = self.generation;
+        cx.spawn_in(window, async move |weak, cx| {
+            let custom = revision.is_some();
+            let res = match revision {
+                Some(revision) => client.delete_custom_provider(provider, revision).await,
+                None => client.logout_provider(provider).await,
+            };
+            if res.is_ok() {
+                let _ = client.refresh_globals().await;
+                let _ = client.refresh_models(None).await;
+            }
+            let _ = weak.update_in(cx, |this, window, cx| {
                 this.saving = false;
+                cx.notify();
+                if this.generation != generation {
+                    return;
+                }
                 match res {
                     Ok(_) => {
-                        this.return_to_provider_list(cx);
-                        cx.emit(ProvidersTabEvent::Notice("已移除服务凭据。".into()));
+                        this.return_to_provider_list(window, cx);
+                        cx.emit(ProvidersTabEvent::Notice(if custom {
+                            "已删除自定义模型服务。".into()
+                        } else {
+                            "已移除服务凭据。".into()
+                        }));
                     }
                     Err(err) => {
                         cx.emit(ProvidersTabEvent::ErrorMessage(err.to_string()));
@@ -424,66 +473,81 @@ impl ProvidersTabView {
     }
 
     fn save_builtin_api_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.saving {
+        if self.saving || self.inline_edit_mode {
             return;
         }
         let Some(provider) = self.active_provider_id.clone() else {
             return;
         };
-        let raw_key = Zeroizing::new(self.api_key_input.read(cx).value().trim().to_owned());
+        let raw_key = self.read_key(cx);
         if raw_key.is_empty() {
             self.key_error = Some("请输入要更新的 API Key。".into());
             cx.notify();
             return;
         }
         self.key_error = None;
-        let base_url = {
-            let b = self.base_url_input.read(cx).value().trim().to_owned();
-            (!b.is_empty()).then_some(b)
-        };
-        self.api_key_input
-            .update(cx, |i, cx| i.set_value("", window, cx));
+        let base_url = self.base_url_input.read(cx).value().trim().to_owned();
         self.saving = true;
         cx.notify();
 
+        let generation = self.generation;
         let client = self.client.clone();
-        cx.spawn(async move |weak, cx| {
+        cx.spawn_in(window, async move |weak, cx| {
             let res = client
-                .save_provider_api_key(provider, raw_key, base_url)
+                .save_provider_api_key(
+                    provider,
+                    raw_key,
+                    (!base_url.is_empty()).then_some(base_url),
+                )
                 .await;
-            let _ = client.refresh_globals().await;
-            let _ = client.refresh_models(None).await;
-            let _ = weak.update(cx, |this, cx| {
+            if res.is_ok() {
+                let _ = client.refresh_globals().await;
+                let _ = client.refresh_models(None).await;
+            }
+            let _ = weak.update_in(cx, |this, window, cx| {
                 this.saving = false;
+                cx.notify();
+                if this.generation != generation {
+                    return;
+                }
                 match res {
                     Ok(_) => {
-                        this.key_error = None;
+                        this.clear_key(window, cx);
                         cx.emit(ProvidersTabEvent::CredentialsSaved);
                         cx.emit(ProvidersTabEvent::Notice("服务凭据已保存。".into()));
                     }
-                    Err(ClientError::BadRequest { message, .. }) => {
-                        this.key_error = Some(message.into());
+                    Err(ClientError::BadRequest { .. }) => {
+                        this.key_error = Some("无法保存凭据，请检查 API Key 和服务地址。".into());
                     }
-                    Err(err) => {
-                        cx.emit(ProvidersTabEvent::ErrorMessage(err.to_string()));
-                    }
+                    Err(_) => cx.emit(ProvidersTabEvent::ErrorMessage(
+                        "保存凭据失败，请重试。".into(),
+                    )),
                 }
-                cx.notify();
             });
         })
         .detach();
     }
 
+    fn read_key(&self, cx: &gpui::App) -> Zeroizing<String> {
+        let input = Zeroizing::new(self.api_key_input.read(cx).text().to_string());
+        Zeroizing::new(input.trim().to_owned())
+    }
+
     fn save_inline_provider_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.saving {
+        if self.saving
+            || self.loading
+            || !self.inline_edit_mode
+            || (!self.creating_new_custom && self.revision.is_none())
+        {
             return;
         }
-        let pid = self.provider_id_input.read(cx).value().trim().to_owned();
+        let pid = self
+            .active_provider_id
+            .clone()
+            .unwrap_or_else(|| self.provider_id_input.read(cx).value().trim().to_owned());
         let name = self.provider_name_input.read(cx).value().trim().to_owned();
         let base_url = self.base_url_input.read(cx).value().trim().to_owned();
-        let raw_key = Zeroizing::new(self.api_key_input.read(cx).value().trim().to_owned());
-        self.api_key_input
-            .update(cx, |i, cx| i.set_value("", window, cx));
+        let raw_key = self.read_key(cx);
 
         if pid.is_empty() || name.is_empty() || base_url.is_empty() {
             self.form_error = Some("请完整填写服务标识、显示名称与 Base URL。".into());
@@ -527,10 +591,7 @@ impl ProvidersTabView {
             "api".into(),
             Value::String(self.protocol.wire_value().to_owned()),
         );
-        if !raw_key.is_empty() {
-            payload.insert("apiKey".into(), Value::String(raw_key.as_str().to_owned()));
-        }
-        drop(raw_key);
+        let key = (!raw_key.is_empty()).then_some(raw_key);
         payload.insert("models".into(), Value::Array(models_arr));
         if let Some(ref rev) = self.revision {
             payload.insert("revision".into(), Value::String(rev.clone()));
@@ -540,14 +601,22 @@ impl ProvidersTabView {
         cx.notify();
 
         let client = self.client.clone();
-        cx.spawn(async move |weak, cx| {
-            let res = client.save_custom_provider(Value::Object(payload)).await;
-            let _ = client.refresh_globals().await;
-            let _ = client.refresh_models(None).await;
-            let _ = weak.update(cx, |this, cx| {
+        let generation = self.generation;
+        cx.spawn_in(window, async move |weak, cx| {
+            let res = client.save_custom_provider(payload, key).await;
+            if res.is_ok() {
+                let _ = client.refresh_globals().await;
+                let _ = client.refresh_models(None).await;
+            }
+            let _ = weak.update_in(cx, |this, window, cx| {
                 this.saving = false;
+                cx.notify();
+                if this.generation != generation {
+                    return;
+                }
                 match res {
                     Ok(saved) => {
+                        this.clear_key(window, cx);
                         this.revision = saved
                             .get("revision")
                             .and_then(Value::as_str)
@@ -557,9 +626,12 @@ impl ProvidersTabView {
                         cx.emit(ProvidersTabEvent::CredentialsSaved);
                         cx.emit(ProvidersTabEvent::Notice("模型服务配置已保存。".into()));
                     }
-                    Err(err) => {
-                        cx.emit(ProvidersTabEvent::ErrorMessage(err.to_string()));
+                    Err(ClientError::BadRequest { .. }) => {
+                        this.form_error = Some("无法保存模型服务，请检查配置和密钥。".into());
                     }
+                    Err(_) => cx.emit(ProvidersTabEvent::ErrorMessage(
+                        "保存模型服务失败，请重试。".into(),
+                    )),
                 }
                 cx.notify();
             });
@@ -585,8 +657,8 @@ impl ProvidersTabView {
                 .items_center()
                 .gap(space::XS)
                 .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.return_to_provider_list(cx);
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.return_to_provider_list(window, cx);
                 }))
                 .child(
                     Icon::new(IconName::ArrowLeft)
@@ -832,6 +904,7 @@ impl ProvidersTabView {
                     .child(
                         div().flex_1().child(
                             Input::new(&row.id_input)
+                                .disabled(self.saving)
                                 .accessibility_id(SharedString::from(format!(
                                     "providers-row-id-input-{idx}"
                                 )))
@@ -841,6 +914,7 @@ impl ProvidersTabView {
                     .child(
                         div().flex_1().child(
                             Input::new(&row.name_input)
+                                .disabled(self.saving)
                                 .accessibility_id(SharedString::from(format!(
                                     "providers-row-name-input-{idx}"
                                 )))
@@ -1023,6 +1097,11 @@ impl ProvidersTabView {
                                     .child(
                                         Input::new(&self.provider_id_input)
                                             .accessibility_id("providers-id-input")
+                                            .disabled(
+                                                self.loading
+                                                    || self.saving
+                                                    || !self.creating_new_custom,
+                                            )
                                             .aria_label("服务标识")
                                             .appearance(false)
                                             .bordered(false)
@@ -1065,6 +1144,7 @@ impl ProvidersTabView {
                                     .child(
                                         Input::new(&self.provider_name_input)
                                             .accessibility_id("providers-name-input")
+                                            .disabled(self.loading || self.saving)
                                             .aria_label("服务显示名称")
                                             .appearance(false)
                                             .bordered(false)
@@ -1126,6 +1206,7 @@ impl ProvidersTabView {
                                     .child(
                                         Input::new(&self.base_url_input)
                                             .accessibility_id("providers-baseurl-input")
+                                            .disabled(self.loading || self.saving)
                                             .aria_label("服务 Base URL")
                                             .appearance(false)
                                             .bordered(false)
@@ -1162,6 +1243,7 @@ impl ProvidersTabView {
                                     .child(
                                         Input::new(&self.api_key_input)
                                             .accessibility_id("providers-apikey-input")
+                                            .disabled(self.loading || self.saving)
                                             .content_type(InputContentType::Password)
                                             .aria_label("服务 API Key")
                                             .appearance(false)
@@ -1210,8 +1292,8 @@ impl ProvidersTabView {
                             .flex()
                             .items_center()
                             .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.return_to_provider_list(cx);
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.return_to_provider_list(window, cx);
                             }))
                             .child(cjk_inline_label("取消")),
                     )
@@ -1249,8 +1331,8 @@ impl ProvidersTabView {
                 (!self.creating_new_custom && self.active_provider_id.is_some()).then(|| {
                     render_remove_credentials_card(
                         palette,
-                        cx.listener(|this, _, _, cx| {
-                            this.remove_active_provider_credentials(cx);
+                        cx.listener(|this, _, window, cx| {
+                            this.remove_active_provider_credentials(window, cx);
                         }),
                     )
                 }),
@@ -1558,8 +1640,8 @@ impl Render for ProvidersTabView {
                 .children(is_configured.then(|| {
                     render_remove_credentials_card(
                         &palette,
-                        cx.listener(|this, _, _, cx| {
-                            this.remove_active_provider_credentials(cx);
+                        cx.listener(|this, _, window, cx| {
+                            this.remove_active_provider_credentials(window, cx);
                         }),
                     )
                 }));

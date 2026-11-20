@@ -466,13 +466,16 @@ impl Step6MockBackend {
                                     json!({
                                         "started": true,
                                         "flowId": "flow-qr-1",
-                                        "verificationUriComplete": "https://oa.cst.example.edu/qr?t=998877",
-                                        "expiresIn": 180
+                                        "state": "pending",
+                                        "deviceCode": {
+                                            "verificationUri": "https://oa.cst.example.edu/qr?t=998877",
+                                            "expiresInSeconds": 180
+                                        }
                                     }),
                                 ),
                                 ("GET", "/api/auth/cstoa/oauth/status") => (
                                     "HTTP/1.1 200 OK",
-                                    json!({ "status": "pending" }),
+                                    json!({ "state": "pending", "flowId": "flow-qr-1" }),
                                 ),
                                 ("POST", "/api/auth/cstoa/logout") => {
                                     guard.cstoa_signed_in = false;
@@ -902,10 +905,26 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         assert!(window.find("account-view").visible());
         window.click("account-cstoa-logout-btn", cx);
         assert!(window.find("account-logout-confirm-dialog").visible());
+        assert_eq!(
+            window.find("account-logout-cancel-btn").focused(),
+            Some(true)
+        );
+        window.press("ctrl-n", cx);
+        assert!(window.find("account-logout-confirm-dialog").visible());
         window.press("escape", cx);
         assert!(window.try_find("account-logout-confirm-dialog").is_none());
-        window.click("account-cstoa-logout-btn", cx);
-        window.click("account-logout-confirm-btn", cx);
+        assert_eq!(
+            window.find("account-cstoa-logout-btn").focused(),
+            Some(true)
+        );
+        window.press("enter", cx);
+        window.press("tab", cx);
+        assert_eq!(
+            window.find("account-logout-confirm-btn").focused(),
+            Some(true)
+        );
+        window.press("enter", cx);
+        window.press("enter", cx);
     })
     .unwrap();
 
@@ -917,6 +936,16 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
     cx.update_window(win_handle, |_, window, cx| {
         // Check Level-1 inline validation on empty APIKey login without leaving LoginView
         window.click("login-tab-apikey", cx);
+        window.click("login-apikey-provider-trigger", cx);
+        assert!(window.find("login-apikey-provider-popover").visible());
+        window.press("ctrl-n", cx);
+        assert!(window.find("login-apikey-provider-popover").visible());
+        window.press("escape", cx);
+        assert!(window.try_find("login-apikey-provider-popover").is_none());
+        assert_eq!(
+            window.find("login-apikey-provider-trigger").focused(),
+            Some(true)
+        );
         window.click("login-apikey-save-btn", cx);
         assert!(window.find("login-apikey-error-text").visible());
         window.click("login-tab-cstoa", cx);
