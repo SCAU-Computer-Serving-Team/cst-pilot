@@ -17,8 +17,8 @@ use crate::auth::cstoa_qr::{now_epoch_ms, parse_cstoa_oauth_payload, rasterize_q
 use crate::background::{SkyPreset, render_login_9_stop_fade, render_sky_background_rounded};
 use crate::shell::open_url_in_trusted_browser;
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
-    scale, space,
+    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height,
+    layout, radius, scale, space,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -276,6 +276,7 @@ impl LoginView {
             div()
                 .id("cstoa-qr-image-box")
                 .test_support()
+                .a11y_image("cstoa-qr-image-box", "CSTOA 扫码登录二维码")
                 .w(px(172.0))
                 .h(px(172.0))
                 .rounded(radius::ROW)
@@ -293,9 +294,19 @@ impl LoginView {
                 )
                 .into_any_element()
         } else {
+            let placeholder_msg = if self.qr_loading {
+                SharedString::from("正在生成本地二维码…")
+            } else if expired {
+                SharedString::from("二维码已过期")
+            } else if let Some(ref err) = self.qr_error {
+                err.clone()
+            } else {
+                SharedString::from("点击下方刷新获取二维码")
+            };
             div()
                 .id("cstoa-qr-refresh-placeholder")
                 .test_support()
+                .a11y_status("cstoa-qr-refresh-placeholder", placeholder_msg.clone())
                 .w(px(172.0))
                 .h(px(172.0))
                 .px(space::MD)
@@ -315,15 +326,7 @@ impl LoginView {
                         } else {
                             palette.text_secondary
                         })
-                        .child(if self.qr_loading {
-                            SharedString::from("正在生成本地二维码…")
-                        } else if expired {
-                            SharedString::from("二维码已过期")
-                        } else if let Some(ref err) = self.qr_error {
-                            err.clone()
-                        } else {
-                            SharedString::from("点击下方刷新获取二维码")
-                        }),
+                        .child(placeholder_msg),
                 )
                 .into_any_element()
         };
@@ -378,6 +381,7 @@ impl LoginView {
                         apply_scale(div(), scale::CAPTION_MEDIUM)
                             .id("cstoa-qr-refresh-btn")
                             .test_support()
+                            .a11y_button("cstoa-qr-refresh-btn", "刷新二维码")
                             .h(height::INLINE)
                             .px(space::XS)
                             .rounded(radius::CONTROL)
@@ -455,10 +459,13 @@ impl Render for LoginView {
                     for p in oauth_providers {
                         let pid = p.id.clone();
                         let pname = p.name.clone();
+                        let btn_id = SharedString::from(format!("login-oauth-btn-{pid}"));
+                        let btn_label = SharedString::from(format!("使用 {pname} 授权登录"));
                         col = col.child(
                             apply_scale(div(), scale::UI_MEDIUM)
-                                .id(SharedString::from(format!("login-oauth-btn-{pid}")))
+                                .id(btn_id.clone())
                                 .test_support()
+                                .a11y_button(btn_id, btn_label.clone())
                                 .w_full()
                                 .h(height::FIELD)
                                 .px(space::MD)
@@ -474,7 +481,7 @@ impl Render for LoginView {
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     this.start_provider_oauth(pid.clone(), cx);
                                 }))
-                                .child(SharedString::from(format!("使用 {pname} 授权登录")))
+                                .child(btn_label)
                                 .child(
                                     Icon::new(IconName::ExternalLink)
                                         .size(px(14.0))
@@ -506,10 +513,13 @@ impl Render for LoginView {
                 for (pid, pname) in key_providers {
                     let active = self.selected_provider_id == pid;
                     let pid_click = pid.clone();
+                    let pill_id = SharedString::from(format!("login-apikey-provider-{pid}"));
+                    let pill_label = SharedString::from(pname);
                     provider_pills = provider_pills.child(
                         apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .id(SharedString::from(format!("login-apikey-provider-{pid}")))
+                            .id(pill_id.clone())
                             .test_support()
+                            .a11y_tab(pill_id, pill_label.clone(), active)
                             .h(height::COMPACT)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -536,7 +546,7 @@ impl Render for LoginView {
                                 this.selected_provider_id = pid_click.clone();
                                 cx.notify();
                             }))
-                            .child(SharedString::from(pname)),
+                            .child(pill_label),
                     );
                 }
 
@@ -548,14 +558,29 @@ impl Render for LoginView {
                     .child(provider_pills)
                     .child(
                         Input::new(&self.api_key_input)
+                            .accessibility_id("login-apikey-input")
+                            .aria_label("API Key 密钥")
                             .h(height::FIELD)
                             .mask_toggle(),
                     )
-                    .child(Input::new(&self.base_url_input).h(height::FIELD))
+                    .child(
+                        Input::new(&self.base_url_input)
+                            .accessibility_id("login-baseurl-input")
+                            .aria_label("自定义 Base URL")
+                            .h(height::FIELD),
+                    )
                     .child(
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("login-apikey-save-btn")
                             .test_support()
+                            .a11y_button(
+                                "login-apikey-save-btn",
+                                if self.saving_key {
+                                    "正在保存"
+                                } else {
+                                    "保存凭据"
+                                },
+                            )
                             .w_full()
                             .h(height::CONTROL)
                             .px(space::LG)
@@ -704,6 +729,7 @@ impl Render for LoginView {
         div()
             .id("login-view-tm7yq")
             .test_support()
+            .a11y_region("login-view", "登录模型服务")
             .relative()
             .size_full()
             .overflow_hidden()
@@ -728,6 +754,7 @@ where
     apply_scale(div(), scale::CAPTION_MEDIUM)
         .id(id)
         .test_support()
+        .a11y_button(id, label)
         .h(height::COMPACT)
         .px(space::SM)
         .rounded(radius::CONTROL)

@@ -46,8 +46,8 @@ use crate::shell::window_bounds::{
     GEOMETRY_DEBOUNCE_MS, NormalBoundsTracker, ResolvedWindowGeometry, collect_app_displays,
 };
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, FontLoadReport, apply_desktop_theme, apply_scale,
-    cjk_inline_label, height, layout, radius, scale, space,
+    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, FontLoadReport, apply_desktop_theme,
+    apply_scale, cjk_inline_label, height, layout, radius, scale, space,
 };
 use crate::workbench::composer::SlashNavigationTarget;
 use crate::workbench::{WorkbenchEvent, WorkbenchView};
@@ -1379,6 +1379,10 @@ impl AppShell {
                                 div()
                                     .id("branch-summarizing-banner")
                                     .test_support()
+                                    .a11y_status(
+                                        "branch-summarizing-banner",
+                                        "正在生成所选分支的上下文总结",
+                                    )
                                     .w_full()
                                     .h(height::CONTROL)
                                     .px(space::GROUP)
@@ -1397,6 +1401,10 @@ impl AppShell {
                                         apply_scale(div(), scale::CAPTION_MEDIUM)
                                             .id("branch-summarizing-cancel-btn")
                                             .test_support()
+                                            .a11y_button(
+                                                "branch-summarizing-cancel-btn",
+                                                "取消总结",
+                                            )
                                             .h(height::INLINE)
                                             .px(space::SM)
                                             .rounded(radius::CONTROL)
@@ -1475,6 +1483,9 @@ impl AppShell {
             scale_factor,
         )
         .test_support()
+        .role(gpui::Role::Menu)
+        .accessibility_id("sidebar-session-context-menu")
+        .aria_label("会话右键菜单")
         .w(px(200.0))
         .p(space::XS)
         .rounded(radius::ROW)
@@ -1492,6 +1503,7 @@ impl AppShell {
                     apply_scale(div(), scale::UI)
                         .id("sidebar-ctx-rename")
                         .test_support()
+                        .a11y_menuitem("sidebar-ctx-rename", "重命名")
                         .relative()
                         .h(height::CONTROL)
                         .px(space::SM)
@@ -1539,6 +1551,7 @@ impl AppShell {
                     apply_scale(div(), scale::UI)
                         .id("sidebar-ctx-manage")
                         .test_support()
+                        .a11y_menuitem("sidebar-ctx-manage", "管理")
                         .relative()
                         .h(height::CONTROL)
                         .px(space::SM)
@@ -1576,6 +1589,7 @@ impl AppShell {
             apply_scale(div(), scale::UI)
                 .id("sidebar-ctx-delete")
                 .test_support()
+                .a11y_menuitem("sidebar-ctx-delete", "删除")
                 .relative()
                 .h(height::CONTROL)
                 .px(space::SM)
@@ -1679,6 +1693,7 @@ impl AppShell {
                 } else {
                     SharedString::from(sess.title.clone())
                 };
+                let drawer_row_id = SharedString::from(format!("drawer-session-{sid}"));
                 let ent = entity.clone();
                 rows = rows.child(
                     apply_scale(
@@ -1689,8 +1704,9 @@ impl AppShell {
                             scale::UI
                         },
                     )
-                    .id(SharedString::from(format!("drawer-session-{sid}")))
+                    .id(drawer_row_id.clone())
                     .test_support()
+                    .a11y_listitem(drawer_row_id, title.clone(), is_active)
                     .h(height::CONTROL)
                     .px(space::SM)
                     .rounded(radius::CONTROL)
@@ -1741,6 +1757,7 @@ impl AppShell {
                         scale_factor,
                     )
                     .test_support()
+                    .a11y_dialog("recent-sessions-drawer", "最近会话抽屉")
                     .w(px(264.0))
                     .p(space::XS)
                     .rounded(radius::ROW)
@@ -1762,6 +1779,7 @@ impl AppShell {
                         apply_scale(div(), scale::UI)
                             .id("drawer-open-all-sessions-btn")
                             .test_support()
+                            .a11y_button("drawer-open-all-sessions-btn", "查看全部会话")
                             .relative()
                             .h(height::CONTROL)
                             .px(space::SM)
@@ -1837,6 +1855,9 @@ impl AppShell {
                         scale_factor,
                     )
                     .test_support()
+                    .role(gpui::Role::Menu)
+                    .accessibility_id("account-popover-menu")
+                    .aria_label("账号与偏好菜单")
                     .w(px(216.0))
                     .p(space::XS)
                     .rounded(radius::ROW)
@@ -1850,6 +1871,14 @@ impl AppShell {
                         apply_scale(div(), scale::UI)
                             .id("account-menu-profile-btn")
                             .test_support()
+                            .a11y_menuitem(
+                                "account-menu-profile-btn",
+                                if logged_in {
+                                    "专属账号"
+                                } else {
+                                    "登录模型服务"
+                                },
+                            )
                             .relative()
                             .h(height::CONTROL)
                             .px(space::SM)
@@ -1885,6 +1914,7 @@ impl AppShell {
                         apply_scale(div(), scale::UI)
                             .id("account-menu-settings-btn")
                             .test_support()
+                            .a11y_menuitem("account-menu-settings-btn", "设置")
                             .relative()
                             .h(height::CONTROL)
                             .px(space::SM)
@@ -1912,6 +1942,7 @@ impl AppShell {
                         apply_scale(div(), scale::UI)
                             .id("account-menu-theme-btn")
                             .test_support()
+                            .a11y_menuitem("account-menu-theme-btn", format!("主题：{theme_label}"))
                             .relative()
                             .h(height::CONTROL)
                             .px(space::SM)
@@ -1956,6 +1987,7 @@ impl AppShell {
                         apply_scale(div(), scale::UI)
                             .id("account-menu-exit-btn")
                             .test_support()
+                            .a11y_menuitem("account-menu-exit-btn", "退出 CST Pilot")
                             .relative()
                             .h(height::CONTROL)
                             .px(space::SM)
@@ -2087,6 +2119,7 @@ impl Render for AppShell {
                     apply_scale(div(), scale::UI_MEDIUM)
                         .id("login-window-back-btn")
                         .test_support()
+                        .a11y_button("login-window-back-btn", "返回工作台")
                         .tab_index(0)
                         .absolute()
                         .left(space::SM)
@@ -2222,6 +2255,7 @@ impl Render for AppShell {
             let mut workspace_card = div()
                 .id("workspace-container")
                 .test_support()
+                .a11y_region("workspace-container", "工作区主视图")
                 .relative()
                 .size_full()
                 .rounded(radius::ROW)
@@ -2480,6 +2514,9 @@ impl Render for AppShell {
         let mut root = div()
             .id("cst-app-shell")
             .test_support()
+            .role(gpui::Role::Application)
+            .accessibility_id("cst-app-shell")
+            .aria_label("CST Pilot")
             .key_context(SHELL_KEY_CONTEXT)
             .track_focus(&self.root_focus)
             .relative()
@@ -2587,6 +2624,7 @@ impl Render for AppShell {
                         scale_factor,
                     )
                     .test_support()
+                    .a11y_dialog("rename-session-modal", "重命名对话")
                     .w(layout::MODAL_STANDARD_WIDTH)
                     .p(px(20.0))
                     .rounded(radius::ROW)
@@ -2601,7 +2639,13 @@ impl Render for AppShell {
                             .text_color(palette.text_primary)
                             .child(cjk_inline_label("重命名对话")),
                     )
-                    .child(div().relative().child(Input::new(&rm.input)))
+                    .child(
+                        div().relative().child(
+                            Input::new(&rm.input)
+                                .accessibility_id("rename-session-input")
+                                .aria_label("新会话标题"),
+                        ),
+                    )
                     .child(
                         div()
                             .relative()
@@ -2612,6 +2656,7 @@ impl Render for AppShell {
                                 apply_scale(div(), scale::UI_MEDIUM)
                                     .id("rename-session-cancel-btn")
                                     .test_support()
+                                    .a11y_button("rename-session-cancel-btn", "取消")
                                     .h(height::CONTROL)
                                     .px(space::MD)
                                     .rounded(radius::CONTROL)
@@ -2632,6 +2677,7 @@ impl Render for AppShell {
                                 apply_scale(div(), scale::UI_MEDIUM)
                                     .id("rename-session-confirm-btn")
                                     .test_support()
+                                    .a11y_button("rename-session-confirm-btn", "保存")
                                     .h(height::CONTROL)
                                     .px(space::LG)
                                     .rounded(radius::CONTROL)
@@ -2760,6 +2806,7 @@ impl Render for AppShell {
                         scale_factor,
                     )
                     .test_support()
+                    .a11y_dialog("web-switch-confirm-card", "切换到网页端确认")
                     .w(layout::MODAL_STANDARD_WIDTH)
                     .rounded(radius::ROW)
                     .border_1()
@@ -2795,6 +2842,7 @@ impl Render for AppShell {
                                 apply_scale(div(), scale::UI_MEDIUM)
                                     .id("web-switch-cancel-btn")
                                     .test_support()
+                                    .a11y_button("web-switch-cancel-btn", "取消")
                                     .h(height::CONTROL)
                                     .px(space::MD)
                                     .rounded(radius::CONTROL)
@@ -2815,6 +2863,7 @@ impl Render for AppShell {
                                 apply_scale(div(), scale::UI_MEDIUM)
                                     .id("web-switch-confirm-btn")
                                     .test_support()
+                                    .a11y_button("web-switch-confirm-btn", "继续切换")
                                     .h(height::CONTROL)
                                     .px(space::LG)
                                     .rounded(radius::CONTROL)

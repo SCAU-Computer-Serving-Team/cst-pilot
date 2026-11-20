@@ -11,7 +11,8 @@ use gpui_kit::{
 
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius,
+    scale, space,
 };
 
 /// Formats the human-readable Chinese summary lines for non-zero unfinished items in [`ExitCheckReport`].
@@ -101,6 +102,7 @@ pub fn render_exit_confirm_dialog(
         scale_factor,
     )
     .test_support()
+    .a11y_dialog("exit-confirm-dialog", "确认退出 CST Pilot")
     .w(layout::MODAL_STANDARD_WIDTH)
     .rounded(radius::ROW)
     .border_1()
@@ -150,6 +152,7 @@ pub fn render_exit_confirm_dialog(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("exit-dialog-cancel-btn")
                     .test_support()
+                    .a11y_button("exit-dialog-cancel-btn", "取消退出")
                     .track_focus(cancel_focus)
                     .tab_index(0)
                     .h(height::CONTROL)
@@ -175,6 +178,14 @@ pub fn render_exit_confirm_dialog(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("exit-dialog-confirm-btn")
                     .test_support()
+                    .a11y_button(
+                        "exit-dialog-confirm-btn",
+                        if exiting_in_progress {
+                            "正在退出"
+                        } else {
+                            "确认退出"
+                        },
+                    )
                     .track_focus(confirm_focus)
                     .tab_index(0)
                     .h(height::CONTROL)

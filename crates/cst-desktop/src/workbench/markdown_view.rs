@@ -11,11 +11,12 @@ use gpui_kit::base::text::{
 use gpui_kit::component::Icon;
 use gpui_kit::{
     App, AppContext as _, ClipboardItem, Context, CursorStyle, Entity, InteractiveElement,
-    IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    IntoElement, ParentElement, SharedString, StatefulInteractiveElement, Styled, TestSupportExt,
+    Window, div, px,
 };
 
 use crate::shell::open_url_in_trusted_browser;
-use crate::theme::{DesktopPalette, apply_scale, radius, scale, space};
+use crate::theme::{A11yElementExt as _, DesktopPalette, apply_scale, radius, scale, space};
 
 /// Maintains stable `Entity<TextViewState>` instances keyed by message/entry ID so streaming
 /// incremental deltas (`push_str`) and snapshot replacements (`set_text`) never recreate the view
@@ -145,8 +146,11 @@ pub fn render_assistant_markdown(
                     let map_click = Arc::clone(&copied_code_spans);
                     let weak_notify = state_weak.clone();
 
+                    let code_copy_id = SharedString::from(format!("md-code-copy-{span_start}"));
                     div()
-                        .id(SharedString::from(format!("md-code-copy-{span_start}")))
+                        .id(code_copy_id.clone())
+                        .test_support()
+                        .a11y_button(code_copy_id, "复制代码块")
                         .w(px(32.0))
                         .h(px(32.0))
                         .rounded(radius::CONTROL)
@@ -237,7 +241,9 @@ pub fn render_copyable_text_block<V: 'static>(
         .child(content_div.child(text_shared))
         .child(
             div()
-                .id(copy_btn_id)
+                .id(copy_btn_id.clone())
+                .test_support()
+                .a11y_button(copy_btn_id, "复制文本内容")
                 .absolute()
                 .top(space::XS)
                 .right(space::XS)

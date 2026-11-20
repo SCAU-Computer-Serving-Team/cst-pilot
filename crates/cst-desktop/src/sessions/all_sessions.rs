@@ -15,8 +15,8 @@ use gpui_kit::{
 
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
-    render_subpage_header_xwjof, scale, space,
+    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height,
+    layout, radius, render_subpage_header_xwjof, scale, space,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -449,6 +449,7 @@ impl AllSessionsView {
                         );
                     }
 
+                    let title_label = SharedString::from(title_str.clone());
                     left_row = left_row.child(
                         apply_scale(div(), scale::BODY)
                             .flex_1()
@@ -468,10 +469,12 @@ impl AllSessionsView {
                         );
                     }
                     if !batch_mode {
+                        let more_id = SharedString::from(format!("all-sessions-more-btn-{sid}"));
                         right_slot = right_slot.child(
                             div()
-                                .id(SharedString::from(format!("all-sessions-more-btn-{sid}")))
+                                .id(more_id.clone())
                                 .test_support()
+                                .a11y_button(more_id, format!("会话操作：{title_label}"))
                                 .w(height::CONTROL)
                                 .h(height::CONTROL)
                                 .rounded(radius::CONTROL)
@@ -508,58 +511,61 @@ impl AllSessionsView {
                         );
                     }
 
-                    elements.push(
-                        div()
-                            .id(SharedString::from(format!("all-sessions-row-{sid}")))
-                            .test_support()
-                            .w_full()
-                            .h(height::HEADER)
-                            .pl(space::MD)
-                            .pr(space::SM)
-                            .rounded(radius::CONTROL)
-                            .bg(if batch_mode && is_checked {
-                                palette.bg_item_active
-                            } else {
-                                gpui_kit::transparent_black()
-                            })
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap(space::MD)
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_mouse_down(MouseButton::Right, move |_, _, cx| {
-                                cx.stop_propagation();
-                                let s_id = sid_rclick.clone();
-                                let t_cur = title_rclick.clone();
-                                ent_rclick.update(cx, |this, cx| {
-                                    if !this.batch_mode {
-                                        this.context_menu = Some(ContextMenuTarget {
-                                            session_id: s_id,
-                                            current_title: t_cur,
-                                            anchor_top_px: anchor_y,
-                                        });
-                                        cx.notify();
+                    let row_id = SharedString::from(format!("all-sessions-row-{sid}"));
+                    let mut row_el = div()
+                        .id(row_id.clone())
+                        .test_support()
+                        .w_full()
+                        .h(height::HEADER)
+                        .pl(space::MD)
+                        .pr(space::SM)
+                        .rounded(radius::CONTROL)
+                        .bg(if batch_mode && is_checked {
+                            palette.bg_item_active
+                        } else {
+                            gpui_kit::transparent_black()
+                        })
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(space::MD)
+                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .on_mouse_down(MouseButton::Right, move |_, _, cx| {
+                            cx.stop_propagation();
+                            let s_id = sid_rclick.clone();
+                            let t_cur = title_rclick.clone();
+                            ent_rclick.update(cx, |this, cx| {
+                                if !this.batch_mode {
+                                    this.context_menu = Some(ContextMenuTarget {
+                                        session_id: s_id,
+                                        current_title: t_cur,
+                                        anchor_top_px: anchor_y,
+                                    });
+                                    cx.notify();
+                                }
+                            });
+                        })
+                        .on_click(move |_, _, cx| {
+                            let target = sid_click.clone();
+                            ent_click.update(cx, |this, cx| {
+                                this.context_menu = None;
+                                if this.batch_mode {
+                                    if !this.selected_ids.remove(&target) {
+                                        this.selected_ids.insert(target);
                                     }
-                                });
-                            })
-                            .on_click(move |_, _, cx| {
-                                let target = sid_click.clone();
-                                ent_click.update(cx, |this, cx| {
-                                    this.context_menu = None;
-                                    if this.batch_mode {
-                                        if !this.selected_ids.remove(&target) {
-                                            this.selected_ids.insert(target);
-                                        }
-                                        cx.notify();
-                                    } else {
-                                        cx.emit(AllSessionsEvent::OpenSession(target));
-                                    }
-                                });
-                            })
-                            .child(left_row)
-                            .child(right_slot)
-                            .into_any_element(),
-                    );
+                                    cx.notify();
+                                } else {
+                                    cx.emit(AllSessionsEvent::OpenSession(target));
+                                }
+                            });
+                        });
+                    if batch_mode {
+                        row_el = row_el.a11y_checkbox(row_id, title_label, is_checked);
+                    } else {
+                        row_el = row_el.a11y_listitem(row_id, title_label, false);
+                    }
+
+                    elements.push(row_el.child(left_row).child(right_slot).into_any_element());
                 }
             }
         }
@@ -612,6 +618,9 @@ impl AllSessionsView {
                             scale_factor,
                         )
                         .test_support()
+                        .role(gpui_kit::Role::Menu)
+                        .accessibility_id("all-sessions-context-menu")
+                        .aria_label("会话操作菜单")
                         .absolute()
                         .top(px(menu.anchor_top_px))
                         .right(space::SM)
@@ -630,6 +639,7 @@ impl AllSessionsView {
                             apply_scale(div(), scale::UI)
                                 .id("all-sessions-ctx-rename")
                                 .test_support()
+                                .a11y_menuitem("all-sessions-ctx-rename", "重命名")
                                 .relative()
                                 .h(height::CONTROL)
                                 .px(space::SM)
@@ -658,6 +668,7 @@ impl AllSessionsView {
                             apply_scale(div(), scale::UI)
                                 .id("all-sessions-ctx-manage")
                                 .test_support()
+                                .a11y_menuitem("all-sessions-ctx-manage", "管理")
                                 .relative()
                                 .h(height::CONTROL)
                                 .px(space::SM)
@@ -693,6 +704,7 @@ impl AllSessionsView {
                             apply_scale(div(), scale::UI)
                                 .id("all-sessions-ctx-delete")
                                 .test_support()
+                                .a11y_menuitem("all-sessions-ctx-delete", "删除")
                                 .relative()
                                 .h(height::CONTROL)
                                 .px(space::SM)
@@ -751,6 +763,7 @@ impl AllSessionsView {
                 scale_factor,
             )
             .test_support()
+            .a11y_dialog("all-sessions-rename-modal", "重命名会话")
             .w(layout::MODAL_STANDARD_WIDTH)
             .p(px(20.0))
             .rounded(radius::ROW)
@@ -766,9 +779,13 @@ impl AllSessionsView {
                     .child(cjk_inline_label("重命名会话")),
             )
             .child(
-                div()
-                    .relative()
-                    .child(Input::new(inp).h(height::FIELD).cleanable(true)),
+                div().relative().child(
+                    Input::new(inp)
+                        .accessibility_id("all-sessions-rename-input")
+                        .aria_label("会话标题")
+                        .h(height::FIELD)
+                        .cleanable(true),
+                ),
             )
             .child(
                 div()
@@ -780,6 +797,7 @@ impl AllSessionsView {
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("all-sessions-rename-cancel-btn")
                             .test_support()
+                            .a11y_button("all-sessions-rename-cancel-btn", "取消")
                             .h(height::CONTROL)
                             .px(space::MD)
                             .rounded(radius::CONTROL)
@@ -800,6 +818,7 @@ impl AllSessionsView {
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("all-sessions-rename-save-btn")
                             .test_support()
+                            .a11y_button("all-sessions-rename-save-btn", "保存")
                             .h(height::CONTROL)
                             .px(space::LG)
                             .rounded(radius::CONTROL)
@@ -848,6 +867,7 @@ impl Render for AllSessionsView {
             apply_scale(div(), scale::UI_MEDIUM)
                 .id("all-sessions-exit-batch-btn")
                 .test_support()
+                .a11y_button("all-sessions-exit-batch-btn", "完成批量管理")
                 .h(height::CONTROL)
                 .px(space::MD)
                 .rounded(radius::CONTROL)
@@ -866,6 +886,7 @@ impl Render for AllSessionsView {
             apply_scale(div(), scale::UI_MEDIUM)
                 .id("all-sessions-enter-batch-btn")
                 .test_support()
+                .a11y_button("all-sessions-manage-btn", "管理会话")
                 .h(height::CONTROL)
                 .px(space::MD)
                 .rounded(radius::CONTROL)
@@ -907,6 +928,14 @@ impl Render for AllSessionsView {
                             apply_scale(div(), scale::UI_MEDIUM)
                                 .id("all-sessions-select-all-btn")
                                 .test_support()
+                                .a11y_button(
+                                    "all-sessions-select-all-btn",
+                                    if all_selected {
+                                        "取消全选"
+                                    } else {
+                                        "全选"
+                                    },
+                                )
                                 .h(height::CONTROL)
                                 .px(space::SM)
                                 .rounded(radius::CONTROL)
@@ -927,6 +956,7 @@ impl Render for AllSessionsView {
                             apply_scale(div(), scale::UI_MEDIUM)
                                 .id("all-sessions-batch-delete-btn")
                                 .test_support()
+                                .a11y_button("all-sessions-batch-delete-btn", "批量删除所选会话")
                                 .h(height::CONTROL)
                                 .px(space::SM)
                                 .rounded(radius::CONTROL)
@@ -987,6 +1017,7 @@ impl Render for AllSessionsView {
         div()
             .id("all-sessions-view")
             .test_support()
+            .a11y_region("all-sessions-view", "全部会话")
             .relative()
             .size_full()
             .flex()

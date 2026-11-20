@@ -3,7 +3,8 @@ use gpui_kit::{
 };
 
 use crate::theme::{
-    DesktopPalette, apply_scale, cjk_inline_label, radius, render_kbd_zcgs3, scale, space,
+    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, radius, render_kbd_zcgs3,
+    scale, space,
 };
 
 pub fn render_shortcuts_tab(
@@ -35,6 +36,7 @@ pub fn render_shortcuts_tab(
     div()
         .id("settings-shortcuts-tab")
         .test_support()
+        .a11y_region("settings-shortcuts-tab", "快捷键列表")
         .w_full()
         .flex()
         .flex_col()

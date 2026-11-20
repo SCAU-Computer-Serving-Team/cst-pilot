@@ -20,7 +20,8 @@ use crate::background::{
     FrostedGlassSpec, SkyPreset, render_frosted_surface, render_sky_background_rounded,
 };
 use crate::theme::{
-    DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    A11yElementExt as _, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
+    scale, space,
 };
 use crate::workbench::composer::{ComposerHostEvent, ComposerView, SlashNavigationTarget};
 use crate::workbench::image_viewer::{LightboxImageTarget, render_image_lightbox_modal};
@@ -407,6 +408,7 @@ impl Render for WorkbenchView {
             let session_header = div()
                 .id("session-header-hukqs")
                 .test_support()
+                .a11y_region("session-header-hukqs", format!("对话标题：{session_title}"))
                 .w_full()
                 .h(height::HEADER)
                 .pl(space::GROUP)
@@ -440,6 +442,11 @@ impl Render for WorkbenchView {
                     div()
                         .id("session-header-more-btn")
                         .test_support()
+                        .a11y_toggle_button(
+                            "session-header-more-btn",
+                            "会话更多操作",
+                            self.header_menu_open,
+                        )
                         .track_focus(&self.header_more_focus)
                         .tab_index(0)
                         .w(height::COMPACT)
@@ -474,6 +481,7 @@ impl Render for WorkbenchView {
             let mut session_view = div()
                 .id("workspace-session-view")
                 .test_support()
+                .a11y_region("workspace-session-view", "会话工作台")
                 .relative()
                 .size_full()
                 .bg(palette.bg_workspace)
@@ -510,6 +518,9 @@ impl Render for WorkbenchView {
                     scale_factor,
                 )
                 .test_support()
+                .role(gpui::Role::Menu)
+                .accessibility_id("session-header-more-menu")
+                .aria_label("会话更多菜单")
                 .w(px(200.0))
                 .p(space::XS)
                 .rounded(radius::ROW)
@@ -523,6 +534,7 @@ impl Render for WorkbenchView {
                     apply_scale(div(), scale::UI)
                         .id("session-header-tree-btn")
                         .test_support()
+                        .a11y_menuitem("session-header-tree-btn", "分支树")
                         .relative()
                         .h(height::CONTROL)
                         .px(space::SM)
@@ -552,6 +564,7 @@ impl Render for WorkbenchView {
                     apply_scale(div(), scale::UI)
                         .id("session-header-export-btn")
                         .test_support()
+                        .a11y_menuitem("session-header-export-btn", "导出会话")
                         .relative()
                         .h(height::CONTROL)
                         .px(space::SM)
@@ -638,6 +651,7 @@ impl Render for WorkbenchView {
             div()
                 .id("workspace-home-view")
                 .test_support()
+                .a11y_region("workspace-home-view", "工作台欢迎主页")
                 .relative()
                 .size_full()
                 .child(
@@ -740,6 +754,7 @@ impl Render for WorkbenchView {
                 scale_factor,
             )
             .test_support()
+            .a11y_dialog("overwrite-draft-confirm-card", "覆盖当前输入框草稿")
             .w(layout::MODAL_STANDARD_WIDTH)
             .rounded(radius::ROW)
             .border_1()
@@ -777,6 +792,7 @@ impl Render for WorkbenchView {
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("overwrite-draft-keep-btn")
                             .test_support()
+                            .a11y_button("overwrite-draft-keep-btn", "保留原草稿")
                             .track_focus(&self.edit_confirm_keep_focus)
                             .tab_index(0)
                             .h(height::CONTROL)
@@ -801,6 +817,7 @@ impl Render for WorkbenchView {
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("overwrite-draft-confirm-btn")
                             .test_support()
+                            .a11y_button("overwrite-draft-confirm-btn", "覆盖草稿")
                             .track_focus(&self.edit_confirm_overwrite_focus)
                             .tab_index(0)
                             .h(height::CONTROL)

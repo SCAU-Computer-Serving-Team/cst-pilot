@@ -7,7 +7,8 @@ use gpui_kit::{
 
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius,
+    scale, space,
 };
 
 #[derive(Debug, Clone)]
@@ -69,6 +70,7 @@ pub fn render_missing_key_dialog(
             scale_factor,
         )
         .test_support()
+        .a11y_dialog("missing-key-dialog", title_text.clone())
         .w(layout::MODAL_STANDARD_WIDTH)
         .p(px(20.0))
         .rounded(radius::ROW)
@@ -112,6 +114,7 @@ pub fn render_missing_key_dialog(
                     apply_scale(div(), scale::UI_MEDIUM)
                         .id("missing-key-cancel-btn")
                         .test_support()
+                        .a11y_button("missing-key-cancel-btn", "取消")
                         .h(height::CONTROL)
                         .px(space::MD)
                         .rounded(radius::CONTROL)
@@ -129,6 +132,7 @@ pub fn render_missing_key_dialog(
                     apply_scale(div(), scale::UI_MEDIUM)
                         .id("missing-key-configure-btn")
                         .test_support()
+                        .a11y_button("missing-key-configure-btn", "去配置")
                         .h(height::CONTROL)
                         .px(space::LG)
                         .rounded(radius::CONTROL)

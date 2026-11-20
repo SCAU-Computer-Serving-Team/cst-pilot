@@ -22,7 +22,8 @@ use serde_json::Value;
 
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
+    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height,
+    radius, scale, space,
 };
 use crate::workbench::image_viewer::{LightboxImageTarget, gpui_image_from_handle};
 use crate::workbench::model_picker::{
@@ -1118,13 +1119,14 @@ impl ComposerView {
                     let is_sel = idx == *selected_idx;
                     let ent = entity.clone();
                     let icon = icon_for_token_key(item.short_label);
+                    let slash_id = SharedString::from(format!("slash-item-{}", item.short_label));
+                    let slash_label =
+                        SharedString::from(format!("{} {}", item.command, item.description));
                     scroll = scroll.child(
                         apply_scale(div(), scale::UI)
-                            .id(SharedString::from(format!(
-                                "slash-item-{}",
-                                item.short_label
-                            )))
+                            .id(slash_id.clone())
                             .test_support()
+                            .a11y_listitem(slash_id, slash_label, is_sel)
                             .h(height::CONTROL)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -1204,10 +1206,12 @@ impl ComposerView {
                 for (idx, path) in paths.iter().enumerate() {
                     let is_sel = idx == *selected_idx;
                     let ent = entity.clone();
+                    let file_id = SharedString::from(format!("file-completion-item-{idx}"));
                     scroll = scroll.child(
                         apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .id(SharedString::from(format!("file-completion-item-{idx}")))
+                            .id(file_id.clone())
                             .test_support()
+                            .a11y_listitem(file_id, path.clone(), is_sel)
                             .h(height::CONTROL)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -1446,10 +1450,16 @@ impl Render for ComposerView {
                 let ent_rm = entity.clone();
                 let gpui_img_open = gpui_img.clone();
 
+                let thumb_id = SharedString::from(format!("composer-draft-thumb-{idx}"));
+                let thumb_rm_id = SharedString::from(format!("composer-draft-thumb-rm-{idx}"));
+                let thumb_label = SharedString::from(format!("预览附图：{title}"));
+                let thumb_rm_label = SharedString::from(format!("移除附图：{title}"));
+
                 row = row.child(
                     div()
-                        .id(SharedString::from(format!("composer-draft-thumb-{idx}")))
+                        .id(thumb_id.clone())
                         .test_support()
+                        .a11y_button(thumb_id, thumb_label)
                         .relative()
                         .w(px(80.0))
                         .h(px(64.0))
@@ -1477,8 +1487,9 @@ impl Render for ComposerView {
                         )
                         .child(
                             div()
-                                .id(SharedString::from(format!("composer-draft-thumb-rm-{idx}")))
+                                .id(thumb_rm_id.clone())
                                 .test_support()
+                                .a11y_button(thumb_rm_id, thumb_rm_label)
                                 .absolute()
                                 .top(space::XS)
                                 .right(space::XS)
@@ -1511,6 +1522,8 @@ impl Render for ComposerView {
         let ent_tok = entity.clone();
         let ent_paste = entity.clone();
         let textarea_element = Textarea::new(&self.textarea)
+            .accessibility_id("composer-input")
+            .aria_label("对话输入框")
             .appearance(false)
             .bordered(false)
             .token(move |tok_ctx, _window, _cx| {
@@ -1519,6 +1532,8 @@ impl Render for ComposerView {
                 let token_icon = icon_for_token_key(tok.id().as_ref());
                 let span_range = tok_ctx.range();
                 let ent_click = ent_tok.clone();
+                let rm_id = SharedString::from(format!("inline-token-rm-{}", span_range.start));
+                let rm_label = SharedString::from(format!("移除标记：{label}"));
 
                 div()
                     .h(height::COMPACT)
@@ -1554,10 +1569,9 @@ impl Render for ComposerView {
                     )
                     .child(
                         div()
-                            .id(SharedString::from(format!(
-                                "inline-token-rm-{}",
-                                span_range.start
-                            )))
+                            .id(rm_id.clone())
+                            .test_support()
+                            .a11y_button(rm_id, rm_label)
                             .w(px(18.0))
                             .h(px(18.0))
                             .rounded(radius::CONTROL)
@@ -1628,6 +1642,7 @@ impl Render for ComposerView {
         let attach_btn = div()
             .id("composer-attach-btn")
             .test_support()
+            .a11y_button("composer-attach-btn", "添加图片附件")
             .w(height::COMPACT)
             .h(height::COMPACT)
             .rounded(radius::CONTROL)
@@ -1682,6 +1697,15 @@ impl Render for ComposerView {
         let model_btn = apply_scale(div(), scale::CAPTION_MEDIUM)
             .id("composer-model-picker-btn")
             .test_support()
+            .a11y_toggle_button(
+                "composer-model-picker-btn",
+                format!(
+                    "模型与思考强度：{} {}",
+                    cur_model_label,
+                    thinking_level_label(&cur_thinking)
+                ),
+                self.picker_open,
+            )
             .track_focus(&self.model_btn_focus)
             .tab_index(0)
             .h(height::COMPACT)
@@ -1738,6 +1762,14 @@ impl Render for ComposerView {
         let send_btn = div()
             .id("composer-send-btn-b0mrik")
             .test_support()
+            .a11y_button(
+                "composer-send-btn-b0mrik",
+                if is_abort_mode {
+                    "停止生成"
+                } else {
+                    "发送消息"
+                },
+            )
             .w(height::COMPACT)
             .h(height::COMPACT)
             .rounded(radius::CONTROL)
@@ -1809,6 +1841,7 @@ impl Render for ComposerView {
         let mut card = div()
             .id("composer-card-zwas1")
             .test_support()
+            .a11y_region("composer-card-zwas1", "消息输入卡片")
             .w_full()
             .min_h(px(88.0))
             .p(space::MD)

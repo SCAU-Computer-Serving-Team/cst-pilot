@@ -12,7 +12,8 @@ use gpui_kit::{
 use serde_json::Value;
 
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
+    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height,
+    radius, scale, space,
 };
 use crate::tools::normal_card::render_normal_tool_card;
 use crate::tools::{SpecialToolDispatchProps, render_special_tool_component};
@@ -578,6 +579,7 @@ impl Render for ExportView {
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("export-back-btn")
                     .test_support()
+                    .a11y_button("export-back-btn", "返回对话")
                     .h(height::CONTROL)
                     .px(space::SM)
                     .rounded(radius::CONTROL)
@@ -620,6 +622,7 @@ impl Render for ExportView {
                     apply_scale(div(), scale::UI_MEDIUM)
                         .id("export-open-dir-btn")
                         .test_support()
+                        .a11y_button("export-open-dir-btn", "打开保存目录")
                         .w_full()
                         .h(height::CONTROL)
                         .px(space::MD)
@@ -773,6 +776,14 @@ impl Render for ExportView {
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("export-generate-save-btn")
                             .test_support()
+                            .a11y_button(
+                                "export-save-btn",
+                                if self.exporting {
+                                    "正在生成"
+                                } else {
+                                    "生成并保存"
+                                },
+                            )
                             .w_full()
                             .h(height::CONTROL)
                             .px(space::LG)
@@ -801,6 +812,7 @@ impl Render for ExportView {
         div()
             .id("export-view-ntay1")
             .test_support()
+            .a11y_region("export-view", "导出会话")
             .size_full()
             .flex()
             .flex_col()
@@ -836,6 +848,7 @@ where
     apply_scale(div(), scale::CAPTION_MEDIUM)
         .id(id)
         .test_support()
+        .a11y_tab(id, label, active)
         .flex_1()
         .h(height::CONTROL)
         .px(space::XS)
@@ -877,6 +890,7 @@ where
     apply_scale(div(), scale::UI)
         .id(id)
         .test_support()
+        .a11y_checkbox(id, label, checked)
         .h(height::CONTROL)
         .rounded(radius::CONTROL)
         .flex()

@@ -14,8 +14,8 @@ use serde_json::Value;
 
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
-    render_subpage_header_xwjof, scale, space,
+    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height,
+    layout, radius, render_subpage_header_xwjof, scale, space,
 };
 use crate::workbench::turn_segments::extract_message_text;
 
@@ -45,6 +45,16 @@ impl TreeFilterMode {
             Self::UserOnly => "仅用户",
             Self::LabeledOnly => "仅标记",
             Self::All => "全部",
+        }
+    }
+
+    pub fn a11y_id(self) -> &'static str {
+        match self {
+            Self::Default => "tree-filter-default",
+            Self::NoTools => "tree-filter-no-tools",
+            Self::UserOnly => "tree-filter-user-only",
+            Self::LabeledOnly => "tree-filter-labeled-only",
+            Self::All => "tree-filter-all",
         }
     }
 
@@ -590,6 +600,7 @@ impl BranchTreeView {
             apply_scale(div(), scale::UI_MEDIUM)
                 .id("branch-mode-summary-btn")
                 .test_support()
+                .a11y_button("branch-mode-summary-btn", "直接总结")
                 .h(height::CONTROL)
                 .px(space::MD)
                 .rounded(radius::CONTROL)
@@ -608,6 +619,7 @@ impl BranchTreeView {
             apply_scale(div(), scale::UI_MEDIUM)
                 .id("branch-mode-summary-btn")
                 .test_support()
+                .a11y_button("branch-mode-summary-btn", "总结")
                 .h(height::CONTROL)
                 .px(space::LG)
                 .rounded(radius::CONTROL)
@@ -630,6 +642,7 @@ impl BranchTreeView {
             scale_factor,
         )
         .test_support()
+        .a11y_dialog("branch-summary-mode-card", "切换至所选分支节点")
         .w(px(424.0))
         .p(px(20.0))
         .rounded(radius::ROW)
@@ -664,6 +677,7 @@ impl BranchTreeView {
                     div()
                         .id("branch-summary-cancel-btn")
                         .test_support()
+                        .a11y_button("branch-summary-cancel-btn", "取消切换分支")
                         .w(height::COMPACT)
                         .h(height::COMPACT)
                         .rounded(radius::CONTROL)
@@ -700,6 +714,7 @@ impl BranchTreeView {
                     apply_scale(div(), scale::UI_MEDIUM)
                         .id("branch-mode-no-summary-btn")
                         .test_support()
+                        .a11y_button("branch-mode-no-summary-btn", "不总结")
                         .h(height::CONTROL)
                         .px(space::MD)
                         .rounded(radius::CONTROL)
@@ -719,6 +734,11 @@ impl BranchTreeView {
                     apply_scale(div(), scale::UI_MEDIUM)
                         .id("branch-mode-custom-summary-btn")
                         .test_support()
+                        .a11y_toggle_button(
+                            "branch-mode-custom-summary-btn",
+                            "自定义提示词总结",
+                            in_custom,
+                        )
                         .h(height::CONTROL)
                         .px(space::MD)
                         .rounded(radius::CONTROL)
@@ -759,6 +779,8 @@ impl BranchTreeView {
                     .child(
                         div().flex_1().child(
                             Input::new(&self.custom_prompt_input)
+                                .accessibility_id("branch-tree-custom-prompt-input")
+                                .aria_label("分支总结附加提示词")
                                 .h(height::FIELD)
                                 .cleanable(true),
                         ),
@@ -767,6 +789,7 @@ impl BranchTreeView {
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("branch-custom-summary-submit-btn")
                             .test_support()
+                            .a11y_button("branch-custom-summary-submit-btn", "执行总结")
                             .h(height::FIELD)
                             .px(space::LG)
                             .rounded(radius::CONTROL)
@@ -828,6 +851,7 @@ impl Render for BranchTreeView {
                 apply_scale(div(), scale::CAPTION_MEDIUM)
                     .id(SharedString::from(format!("tree-filter-{:?}", mode)))
                     .test_support()
+                    .a11y_tab(mode.a11y_id(), mode.label(), active)
                     .h(height::COMPACT)
                     .px(space::SM)
                     .rounded(radius::CONTROL)
@@ -882,6 +906,8 @@ impl Render for BranchTreeView {
                     .child(
                         div().w(px(208.0)).child(
                             Input::new(&self.search_input)
+                                .accessibility_id("branch-tree-search-input")
+                                .aria_label("搜索分支节点内容")
                                 .prefix(
                                     Icon::new(IconName::Search)
                                         .size(px(14.0))
@@ -901,6 +927,7 @@ impl Render for BranchTreeView {
                         apply_scale(div(), scale::UI)
                             .id("branch-tree-expand-all-btn")
                             .test_support()
+                            .a11y_button("branch-tree-expand-all-btn", "全部展开")
                             .h(height::CONTROL)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -915,6 +942,7 @@ impl Render for BranchTreeView {
                         apply_scale(div(), scale::UI)
                             .id("branch-tree-collapse-all-btn")
                             .test_support()
+                            .a11y_button("branch-tree-collapse-all-btn", "全部折叠")
                             .h(height::CONTROL)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -1025,10 +1053,14 @@ impl Render for BranchTreeView {
                 _ => ("节点", palette.text_muted),
             };
 
+            let row_id = SharedString::from(format!("tree-node-row-{nid}"));
+            let row_label = SharedString::from(format!("{}：{}", role_badge.0, node.summary_text));
+            let fork_id = SharedString::from(format!("tree-fork-btn-{nid}"));
             tree_col = tree_col.child(
                 div()
-                    .id(SharedString::from(format!("tree-node-row-{nid}")))
+                    .id(row_id.clone())
                     .test_support()
+                    .a11y_treeitem(row_id, row_label, is_active_leaf)
                     .w_full()
                     .h(height::FIELD)
                     .pr(space::SM)
@@ -1061,11 +1093,17 @@ impl Render for BranchTreeView {
                             .child(guides_row)
                             .children((node.is_segment_head && node.has_children_in_segment).then(
                                 || {
+                                    let col_btn_id = SharedString::from(format!(
+                                        "tree-collapse-btn-{nid_collapse}"
+                                    ));
                                     div()
-                                        .id(SharedString::from(format!(
-                                            "tree-collapse-btn-{nid_collapse}"
-                                        )))
+                                        .id(col_btn_id.clone())
                                         .test_support()
+                                        .a11y_toggle_button(
+                                            col_btn_id,
+                                            "折叠或展开分支段",
+                                            !is_collapsed,
+                                        )
                                         .w(px(18.0))
                                         .h(px(18.0))
                                         .rounded(radius::CONTROL)
@@ -1130,8 +1168,9 @@ impl Render for BranchTreeView {
                             }))
                             .children((node.role == "user").then(|| {
                                 apply_scale(div(), scale::CAPTION_MEDIUM)
-                                    .id(SharedString::from(format!("tree-fork-btn-{nid}")))
+                                    .id(fork_id.clone())
                                     .test_support()
+                                    .a11y_button(fork_id, "从此节点派生会话")
                                     .h(height::INLINE)
                                     .px(space::XS)
                                     .rounded(radius::CONTROL)
@@ -1152,6 +1191,7 @@ impl Render for BranchTreeView {
         let close_btn = div()
             .id("branch-tree-back-btn")
             .test_support()
+            .a11y_button("branch-tree-back-btn", "关闭分支树返回对话")
             .w(height::CONTROL)
             .h(height::CONTROL)
             .rounded(radius::CONTROL)
@@ -1176,6 +1216,7 @@ impl Render for BranchTreeView {
         div()
             .id("branch-tree-view")
             .test_support()
+            .a11y_region("branch-tree-view", "分支树视图")
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::on_key_down))
             .relative()

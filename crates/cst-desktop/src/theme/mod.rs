@@ -608,3 +608,172 @@ pub fn render_kbd_zcgs3(
         .flex_shrink_0()
         .child(keys.into())
 }
+
+/// Declarative GPUI accessibility helpers keeping UIA `AutomationId`, semantic roles, Chinese labels,
+/// and UIA state/action patterns (`Invoke`, `SelectionItem`, `Toggle`, `ExpandCollapse`) synchronized
+/// with zero runtime overhead when no external UIA client is attached.
+pub trait A11yElementExt: gpui_kit::StatefulInteractiveElement + Sized {
+    #[inline]
+    fn a11y_button(self, id: impl Into<SharedString>, label: impl Into<SharedString>) -> Self {
+        self.role(gpui_kit::Role::Button)
+            .accessibility_id(id)
+            .aria_label(label)
+    }
+
+    #[inline]
+    fn a11y_menuitem(self, id: impl Into<SharedString>, label: impl Into<SharedString>) -> Self {
+        self.role(gpui_kit::Role::MenuItem)
+            .accessibility_id(id)
+            .aria_label(label)
+    }
+
+    #[inline]
+    fn a11y_link(self, id: impl Into<SharedString>, label: impl Into<SharedString>) -> Self {
+        self.role(gpui_kit::Role::Link)
+            .accessibility_id(id)
+            .aria_label(label)
+    }
+
+    #[inline]
+    fn a11y_tab(
+        self,
+        id: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        selected: bool,
+    ) -> Self {
+        self.role(gpui_kit::Role::Tab)
+            .accessibility_id(id)
+            .aria_label(label)
+            .aria_selected(selected)
+    }
+
+    #[inline]
+    fn a11y_listitem(
+        self,
+        id: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        selected: bool,
+    ) -> Self {
+        self.role(gpui_kit::Role::ListItem)
+            .accessibility_id(id)
+            .aria_label(label)
+            .aria_selected(selected)
+    }
+
+    #[inline]
+    fn a11y_treeitem(
+        self,
+        id: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        selected: bool,
+    ) -> Self {
+        self.role(gpui_kit::Role::TreeItem)
+            .accessibility_id(id)
+            .aria_label(label)
+            .aria_selected(selected)
+    }
+
+    #[inline]
+    fn a11y_checkbox(
+        self,
+        id: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        checked: bool,
+    ) -> Self {
+        self.role(gpui_kit::Role::CheckBox)
+            .accessibility_id(id)
+            .aria_label(label)
+            .aria_toggled(if checked {
+                gpui_kit::Toggled::True
+            } else {
+                gpui_kit::Toggled::False
+            })
+    }
+
+    #[inline]
+    fn a11y_toggle_button(
+        self,
+        id: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        pressed: bool,
+    ) -> Self {
+        self.role(gpui_kit::Role::Button)
+            .accessibility_id(id)
+            .aria_label(label)
+            .aria_toggled(if pressed {
+                gpui_kit::Toggled::True
+            } else {
+                gpui_kit::Toggled::False
+            })
+    }
+
+    /// Disclosure / popover trigger exposing both `TogglePattern` (so plain `winapp ui invoke <id>`
+    /// toggles cleanly in both directions via `Action::Click`) and `ExpandCollapsePattern`
+    /// (so `--action expand` / `--action collapse` and `ExpandCollapseState` work accurately).
+    #[inline]
+    fn a11y_expandable(
+        self,
+        id: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        expanded: bool,
+        on_set_expanded: impl Fn(bool, &mut Window, &mut App) + Clone + 'static,
+    ) -> Self {
+        let on_expand = on_set_expanded.clone();
+        let on_collapse = on_set_expanded;
+        self.role(gpui_kit::Role::Button)
+            .accessibility_id(id)
+            .aria_label(label)
+            .aria_toggled(if expanded {
+                gpui_kit::Toggled::True
+            } else {
+                gpui_kit::Toggled::False
+            })
+            .aria_expanded(expanded)
+            .on_a11y_action(gpui_kit::AccessibleAction::Expand, move |_, window, cx| {
+                on_expand(true, window, cx);
+            })
+            .on_a11y_action(
+                gpui_kit::AccessibleAction::Collapse,
+                move |_, window, cx| {
+                    on_collapse(false, window, cx);
+                },
+            )
+    }
+
+    #[inline]
+    fn a11y_region(self, id: impl Into<SharedString>, label: impl Into<SharedString>) -> Self {
+        self.role(gpui_kit::Role::Region)
+            .accessibility_id(id)
+            .aria_label(label)
+    }
+
+    #[inline]
+    fn a11y_nav(self, id: impl Into<SharedString>, label: impl Into<SharedString>) -> Self {
+        self.role(gpui_kit::Role::Navigation)
+            .accessibility_id(id)
+            .aria_label(label)
+    }
+
+    #[inline]
+    fn a11y_dialog(self, id: impl Into<SharedString>, label: impl Into<SharedString>) -> Self {
+        self.role(gpui_kit::Role::Dialog)
+            .accessibility_id(id)
+            .aria_label(label)
+    }
+
+    #[inline]
+    fn a11y_status(self, id: impl Into<SharedString>, label: impl Into<SharedString>) -> Self {
+        self.role(gpui_kit::Role::Status)
+            .accessibility_id(id)
+            .aria_label(label)
+    }
+
+    #[inline]
+    fn a11y_image(self, id: impl Into<SharedString>, label: impl Into<SharedString>) -> Self {
+        self.role(gpui_kit::Role::Image)
+            .accessibility_id(id)
+            .aria_label(label)
+    }
+}
+
+impl<T: gpui_kit::StatefulInteractiveElement + Sized> A11yElementExt for T {}

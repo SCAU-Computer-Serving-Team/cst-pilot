@@ -12,7 +12,8 @@ use gpui_kit::{
 };
 
 use crate::theme::{
-    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius,
+    scale, space,
 };
 
 pub const MAX_RECENT_SIDEBAR_SESSIONS: usize = 20;
@@ -163,8 +164,9 @@ pub fn render_sidebar_l081m1(
             let sid_menu = sid.clone();
             let row_group = SharedString::from(format!("sidebar-row-grp-{sid}"));
 
+            let row_a11y_id = SharedString::from(format!("sidebar-session-row-{sid}"));
             let mut row = apply_scale(div(), row_scale)
-                .id(SharedString::from(format!("sidebar-session-row-{sid}")))
+                .id(row_a11y_id.clone())
                 .test_support()
                 .group(row_group.clone())
                 .h(height::CONTROL)
@@ -189,36 +191,42 @@ pub fn render_sidebar_l081m1(
                 });
 
             if batch_mode {
-                row = row.child(
-                    div()
-                        .w(px(16.0))
-                        .h(px(16.0))
-                        .rounded(radius::CONTROL)
-                        .border_1()
-                        .border_color(if is_checked {
-                            palette.accent_solid
-                        } else {
-                            palette.border_strong
-                        })
-                        .bg(if is_checked {
-                            palette.accent_solid
-                        } else {
-                            palette.bg_elevated
-                        })
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .flex_shrink_0()
-                        .when_some(is_checked.then_some(()), |d, ()| {
-                            d.child(
-                                Icon::new(IconName::Check)
-                                    .size(px(11.0))
-                                    .text_color(palette.text_on_accent),
-                            )
-                        }),
-                );
+                row = row
+                    .a11y_checkbox(row_a11y_id, title_text.clone(), is_checked)
+                    .child(
+                        div()
+                            .w(px(16.0))
+                            .h(px(16.0))
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(if is_checked {
+                                palette.accent_solid
+                            } else {
+                                palette.border_strong
+                            })
+                            .bg(if is_checked {
+                                palette.accent_solid
+                            } else {
+                                palette.bg_elevated
+                            })
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .flex_shrink_0()
+                            .when_some(is_checked.then_some(()), |d, ()| {
+                                d.child(
+                                    Icon::new(IconName::Check)
+                                        .size(px(11.0))
+                                        .text_color(palette.text_on_accent),
+                                )
+                            }),
+                    );
+            } else {
+                row = row.a11y_listitem(row_a11y_id, title_text.clone(), is_active);
             }
 
+            let menu_btn_id = SharedString::from(format!("sidebar-row-menu-btn-{sid}"));
+            let menu_btn_label = SharedString::from(format!("会话操作：{title_text}"));
             row = row
                 .child(
                     div()
@@ -229,8 +237,9 @@ pub fn render_sidebar_l081m1(
                 )
                 .child(
                     div()
-                        .id(SharedString::from(format!("sidebar-row-menu-btn-{sid}")))
+                        .id(menu_btn_id.clone())
                         .test_support()
+                        .a11y_button(menu_btn_id, menu_btn_label)
                         .w(px(20.0))
                         .h(px(20.0))
                         .rounded(radius::CONTROL)
@@ -278,6 +287,7 @@ pub fn render_sidebar_l081m1(
         div()
             .id("sidebar-search-clear-btn")
             .test_support()
+            .a11y_button("sidebar-search-clear-btn", "清空搜索")
             .w(px(20.0))
             .h(px(20.0))
             .rounded(radius::CONTROL)
@@ -300,6 +310,7 @@ pub fn render_sidebar_l081m1(
         apply_scale(div(), scale::CAPTION)
             .id("sidebar-search-kbd-btn")
             .test_support()
+            .a11y_button("sidebar-search-kbd-btn", "打开命令面板")
             .text_color(palette.text_muted)
             .flex_shrink_0()
             .hover(|s| s.text_color(palette.text_primary))
@@ -334,6 +345,8 @@ pub fn render_sidebar_l081m1(
         .child(
             div().flex_1().min_w_0().child(
                 Input::new(search_input)
+                    .accessibility_id("sidebar-search-box")
+                    .aria_label("搜索会话")
                     .appearance(false)
                     .bordered(false)
                     .focus_bordered(false)
@@ -343,10 +356,12 @@ pub fn render_sidebar_l081m1(
         .child(search_trailing);
 
     let has_checked_items = !selected_ids.is_empty();
+    let account_btn_label = SharedString::from(format!("账号菜单：{account_label}"));
 
     div()
         .id("sidebar-l081m1")
         .test_support()
+        .a11y_nav("sidebar-l081m1", "侧栏导航")
         .w(layout::SIDEBAR_WIDTH)
         .h_full()
         .flex_shrink_0()
@@ -397,6 +412,7 @@ pub fn render_sidebar_l081m1(
                                     div()
                                         .id("sidebar-collapse-btn")
                                         .test_support()
+                                        .a11y_button("sidebar-collapse-btn", "收起侧栏")
                                         .track_focus(collapse_btn_focus)
                                         .tab_index(0)
                                         .w(height::COMPACT)
@@ -417,6 +433,7 @@ pub fn render_sidebar_l081m1(
                                     div()
                                         .id("sidebar-new-session-btn")
                                         .test_support()
+                                        .a11y_button("sidebar-new-session-btn", "新建对话")
                                         .tab_index(0)
                                         .w(height::COMPACT)
                                         .h(height::COMPACT)
@@ -501,6 +518,10 @@ pub fn render_sidebar_l081m1(
                                                         apply_scale(div(), scale::CAPTION)
                                                             .id("sidebar-batch-select-all-btn")
                                                             .test_support()
+                                                            .a11y_button(
+                                                                "sidebar-batch-select-all-btn",
+                                                                "全选会话",
+                                                            )
                                                             .text_color(palette.text_secondary)
                                                             .hover(|s| {
                                                                 s.text_color(palette.text_primary)
@@ -517,6 +538,10 @@ pub fn render_sidebar_l081m1(
                                                                 apply_scale(div(), scale::CAPTION)
                                                                     .id("sidebar-batch-delete-btn")
                                                                     .test_support()
+                                                                    .a11y_button(
+                                                                        "sidebar-batch-delete-btn",
+                                                                        "批量删除所选会话",
+                                                                    )
                                                                     .text_color(
                                                                         palette.status_danger,
                                                                     )
@@ -552,6 +577,7 @@ pub fn render_sidebar_l081m1(
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("sidebar-account-btn")
                             .test_support()
+                            .a11y_button("sidebar-account-btn", account_btn_label)
                             .track_focus(account_btn_focus)
                             .tab_index(0)
                             .flex_1()
@@ -591,6 +617,7 @@ pub fn render_sidebar_l081m1(
                         div()
                             .id("sidebar-settings-btn")
                             .test_support()
+                            .a11y_button("sidebar-settings-btn", "打开设置")
                             .tab_index(0)
                             .w(height::COMPACT)
                             .h(height::COMPACT)
@@ -626,6 +653,7 @@ fn sidebar_nav_item(
     apply_scale(div(), if active { scale::UI_MEDIUM } else { scale::UI })
         .id(id)
         .test_support()
+        .a11y_button(id, label)
         .tab_index(0)
         .h(height::CONTROL)
         .px(space::SM)

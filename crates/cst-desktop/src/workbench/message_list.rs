@@ -21,8 +21,8 @@ use gpui_kit::{
 use serde_json::Value;
 
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
-    scale, space,
+    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height,
+    layout, radius, scale, space,
 };
 use crate::tools::bitlocker_card::{SecretInput, SecretInputEvent, find_pending_bitlocker_request};
 use crate::tools::normal_card::render_normal_tool_card_with_args;
@@ -397,10 +397,12 @@ impl MessageListView {
                 if let Some(img_arc) = self.resolve_image_part(session_id, part, cx) {
                     let ent_open = entity.clone();
                     let img_open = Arc::clone(&img_arc);
+                    let user_img_id = SharedString::from(format!("user-msg-img-{turn_key}-{idx}"));
                     img_row = img_row.child(
                         div()
-                            .id(SharedString::from(format!("user-msg-img-{turn_key}-{idx}")))
+                            .id(user_img_id.clone())
                             .test_support()
+                            .a11y_button(user_img_id, "预览用户消息附图")
                             .w(px(120.0))
                             .h(px(88.0))
                             .rounded(radius::ROW)
@@ -465,6 +467,7 @@ impl MessageListView {
             .gap(space::XS)
             .child(icon_action_24(
                 format!("user-copy-btn-{turn_key}"),
+                "复制用户消息",
                 if is_copied {
                     IconName::Check
                 } else {
@@ -490,6 +493,7 @@ impl MessageListView {
             ))
             .child(icon_action_24(
                 format!("user-edit-btn-{turn_key}"),
+                "编辑并重新提问",
                 IconName::Pencil,
                 palette.text_secondary,
                 false,
@@ -505,6 +509,7 @@ impl MessageListView {
             ))
             .child(icon_action_24(
                 format!("user-retry-btn-{turn_key}"),
+                "重试此轮提问",
                 IconName::RotateCcw,
                 palette.text_secondary,
                 false,
@@ -560,9 +565,12 @@ impl MessageListView {
                 let ent_open = entity.clone();
                 let img_open = Arc::clone(&gpui_img);
                 let dims = Some(handle.dimensions());
+                let ob_img_id = SharedString::from(format!("outbox-img-{mid}-{idx}"));
                 row = row.child(
                     div()
-                        .id(SharedString::from(format!("outbox-img-{mid}-{idx}")))
+                        .id(ob_img_id.clone())
+                        .test_support()
+                        .a11y_button(ob_img_id, "预览待发消息附图")
                         .w(px(80.0))
                         .h(px(64.0))
                         .rounded(radius::ROW)
@@ -656,6 +664,7 @@ impl MessageListView {
                     .gap(space::XS)
                     .child(icon_action_24(
                         format!("outbox-retry-{mid}"),
+                        "重试发送",
                         IconName::RotateCcw,
                         palette.text_secondary,
                         false,
@@ -680,6 +689,7 @@ impl MessageListView {
                     ))
                     .child(icon_action_24(
                         format!("outbox-edit-{mid}"),
+                        "回填编辑",
                         IconName::Pencil,
                         palette.text_secondary,
                         false,
@@ -702,6 +712,7 @@ impl MessageListView {
                     ))
                     .child(icon_action_24(
                         format!("outbox-remove-{mid}"),
+                        "移除待发消息",
                         IconName::Trash,
                         palette.status_danger,
                         false,
@@ -848,7 +859,10 @@ impl MessageListView {
                     self.secret_inputs
                         .entry(call.id.clone())
                         .or_insert_with(|| {
-                            let si = cx.new(SecretInput::new);
+                            let secret_a11y_id = format!("bitlocker-pwd-input-{}", call.id);
+                            let si = cx.new(move |cx| {
+                                SecretInput::with_accessibility_id(secret_a11y_id, cx)
+                            });
                             let sub = cx.subscribe(&si, move |this, si_ent, ev, cx| {
                                 match ev {
                                     SecretInputEvent::SubmitRequested => {
@@ -1156,8 +1170,9 @@ impl MessageListView {
 
                     let ent_seg = entity.clone();
                     let k_seg = seg_state_key.clone();
+                    let seg_hdr_id = SharedString::from(format!("process-hdr-{seg_state_key}"));
                     let mut seg_hdr = div()
-                        .id(SharedString::from(format!("process-hdr-{seg_state_key}")))
+                        .id(seg_hdr_id.clone())
                         .test_support()
                         .h(height::COMPACT)
                         .flex()
@@ -1167,15 +1182,34 @@ impl MessageListView {
                         .hover(|s| s.text_color(palette.text_primary));
 
                     if has_expandable_parts {
-                        seg_hdr = seg_hdr.on_click(move |_, _, cx| {
-                            let k = k_seg.clone();
-                            ent_seg.update(cx, |this, cx| {
-                                if !this.expanded_segments.remove(&k) {
-                                    this.expanded_segments.insert(k);
-                                }
-                                cx.notify();
+                        let ent_exp = ent_seg.clone();
+                        let k_exp = k_seg.clone();
+                        seg_hdr = seg_hdr
+                            .a11y_expandable(
+                                seg_hdr_id,
+                                header_text.clone(),
+                                seg_expanded,
+                                move |want_open, _, cx| {
+                                    let k = k_exp.clone();
+                                    ent_exp.update(cx, |this, cx| {
+                                        if want_open {
+                                            this.expanded_segments.insert(k);
+                                        } else {
+                                            this.expanded_segments.remove(&k);
+                                        }
+                                        cx.notify();
+                                    });
+                                },
+                            )
+                            .on_click(move |_, _, cx| {
+                                let k = k_seg.clone();
+                                ent_seg.update(cx, |this, cx| {
+                                    if !this.expanded_segments.remove(&k) {
+                                        this.expanded_segments.insert(k);
+                                    }
+                                    cx.notify();
+                                });
                             });
-                        });
                     }
 
                     seg_hdr = seg_hdr.child(render_running_light_label(
@@ -1256,12 +1290,14 @@ impl MessageListView {
                                 {
                                     let ent_open = entity.clone();
                                     let img_open = Arc::clone(&img_arc);
+                                    let asst_img_id = SharedString::from(format!(
+                                        "assistant-img-{turn_key}-{v_idx}"
+                                    ));
                                     assistant_stack = assistant_stack.child(
                                         div()
-                                            .id(SharedString::from(format!(
-                                                "assistant-img-{turn_key}-{v_idx}"
-                                            )))
+                                            .id(asst_img_id.clone())
                                             .test_support()
+                                            .a11y_button(asst_img_id, "预览诊断结果截图")
                                             .max_w(px(420.0))
                                             .rounded(radius::ROW)
                                             .border_1()
@@ -1330,12 +1366,12 @@ impl MessageListView {
                 let det_open = self.expanded_error_details.contains(&det_key);
                 let ent_det = entity.clone();
                 let k_det = det_key.clone();
+                let det_btn_id = SharedString::from(format!("assistant-err-detail-btn-{turn_key}"));
                 err_col = err_col.child(
                     apply_scale(div(), scale::CAPTION_MEDIUM)
-                        .id(SharedString::from(format!(
-                            "assistant-err-detail-btn-{turn_key}"
-                        )))
+                        .id(det_btn_id.clone())
                         .test_support()
+                        .a11y_toggle_button(det_btn_id, "错误详情", det_open)
                         .flex()
                         .items_center()
                         .gap(space::MICRO)
@@ -1449,6 +1485,7 @@ impl MessageListView {
                 .opacity(if is_live_turn { 0.35 } else { 1.0 })
                 .child(icon_action_24(
                     format!("assistant-copy-btn-{turn_key}"),
+                    "复制回复内容",
                     if is_copied {
                         IconName::Check
                     } else {
@@ -1474,6 +1511,7 @@ impl MessageListView {
                 ))
                 .child(icon_action_24(
                     format!("assistant-edit-btn-{turn_key}"),
+                    "编辑提问",
                     IconName::Pencil,
                     palette.text_secondary,
                     is_live_turn,
@@ -1489,6 +1527,7 @@ impl MessageListView {
                 ))
                 .child(icon_action_24(
                     format!("assistant-fork-btn-{turn_key}"),
+                    "从此节点派生新会话",
                     IconName::GitFork,
                     palette.text_secondary,
                     is_live_turn,
@@ -1506,6 +1545,7 @@ impl MessageListView {
                 ))
                 .child(icon_action_24(
                     format!("assistant-retry-btn-{turn_key}"),
+                    "重新生成回复",
                     IconName::RotateCcw,
                     palette.text_secondary,
                     is_live_turn,
@@ -1564,10 +1604,12 @@ impl MessageListView {
                 let ent_th = entity.clone();
                 let k_th = think_key.clone();
 
+                let think_hdr_id = SharedString::from(format!("thinking-hdr-{think_key}"));
                 // Collapsed: `"已思考"` + `gap(8px)` + `14px` arrow; hover brightens text without bg block
                 let hdr = apply_scale(div(), scale::UI)
-                    .id(SharedString::from(format!("thinking-hdr-{think_key}")))
+                    .id(think_hdr_id.clone())
                     .test_support()
+                    .a11y_toggle_button(think_hdr_id, "已思考", open)
                     .h(height::INLINE)
                     .flex()
                     .items_center()
@@ -1739,11 +1781,13 @@ impl Render for MessageListView {
         if hidden_earlier_count > 0 {
             let ent_more = entity.clone();
             let batch = hidden_earlier_count.min(DEFAULT_VISIBLE_TURN_WINDOW);
+            let earlier_label = format!("显示更早的消息（还有 {hidden_earlier_count} 轮）");
             list_col = list_col.child(
                 div().w_full().flex().justify_center().child(
                     apply_scale(div(), scale::CAPTION_MEDIUM)
                         .id("show-earlier-turns-btn")
                         .test_support()
+                        .a11y_button("show-earlier-turns-btn", earlier_label.clone())
                         .h(height::CONTROL)
                         .px(space::MD)
                         .rounded(radius::FULL)
@@ -1761,9 +1805,7 @@ impl Render for MessageListView {
                                 cx.notify();
                             });
                         })
-                        .child(cjk_inline_label(format!(
-                            "显示更早的消息（还有 {hidden_earlier_count} 轮）"
-                        ))),
+                        .child(cjk_inline_label(earlier_label)),
                 ),
             );
         }
@@ -1836,6 +1878,7 @@ impl Render for MessageListView {
                         div()
                             .id("scroll-to-bottom-btn")
                             .test_support()
+                            .a11y_button("scroll-to-bottom-btn", "回到底部")
                             .h(height::CONTROL)
                             .px(space::MD)
                             .rounded(radius::FULL)
@@ -1877,15 +1920,18 @@ fn format_timestamp_hhmm(ts_ms: u64) -> Option<String> {
 
 fn icon_action_24(
     id: impl Into<SharedString>,
+    label: &'static str,
     icon: IconName,
     icon_color: gpui_kit::Hsla,
     disabled: bool,
     palette: &DesktopPalette,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let id_shared = id.into();
     let mut btn = div()
-        .id(id.into())
+        .id(id_shared.clone())
         .test_support()
+        .a11y_button(id_shared, label)
         .w(height::INLINE)
         .h(height::INLINE)
         .rounded(radius::CONTROL)

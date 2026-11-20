@@ -14,7 +14,10 @@ use gpui_kit::{
 };
 use serde_json::Value;
 
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{
+    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale,
+    space,
+};
 use crate::workbench::image_viewer::{LightboxImageTarget, gpui_image_from_bytes};
 use crate::workbench::markdown_view::render_copyable_text_block;
 
@@ -189,17 +192,22 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
 
     let toggle_hdr = Rc::clone(&on_toggle_card);
     let key_hdr = card_key.clone();
+    let card_a11y_id = SharedString::from(format!("normal-tool-card-{call_id}"));
+    let hdr_a11y_id = SharedString::from(format!("normal-tool-hdr-{call_id}"));
+    let summary_label = SharedString::from(summary_text.clone());
 
     if !is_expanded {
         // Collapsed state (`BuK2W`): `28px` high, `px: 0`, transparent background, hover only brightens text.
         return div()
-            .id(SharedString::from(format!("normal-tool-card-{call_id}")))
+            .id(card_a11y_id.clone())
             .test_support()
+            .a11y_region(card_a11y_id, summary_label.clone())
             .w_full()
             .child(
                 apply_scale(div(), scale::UI)
-                    .id(SharedString::from(format!("normal-tool-hdr-{call_id}")))
+                    .id(hdr_a11y_id.clone())
                     .test_support()
+                    .a11y_toggle_button(hdr_a11y_id, summary_label, false)
                     .w_full()
                     .h(height::COMPACT)
                     .px(px(0.0))
@@ -268,8 +276,9 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
         );
 
     let header_row = apply_scale(div(), scale::UI)
-        .id(SharedString::from(format!("normal-tool-hdr-{call_id}")))
+        .id(hdr_a11y_id.clone())
         .test_support()
+        .a11y_toggle_button(hdr_a11y_id, summary_label.clone(), true)
         .w_full()
         .h(height::COMPACT)
         .flex()
@@ -361,12 +370,13 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                     let gpui_img = gpui_image_from_bytes(mime_type, bytes);
                     let img_open = Arc::clone(&gpui_img);
                     let lb_cb = Rc::clone(&on_open_lightbox);
+                    let read_img_id =
+                        SharedString::from(format!("tool-read-img-{call_id}-{blk_idx}"));
                     right_col = right_col.child(
                         div()
-                            .id(SharedString::from(format!(
-                                "tool-read-img-{call_id}-{blk_idx}"
-                            )))
+                            .id(read_img_id.clone())
                             .test_support()
+                            .a11y_button(read_img_id, "预览工具读取图片")
                             .w(px(160.0))
                             .h(px(112.0))
                             .rounded(radius::CONTROL)
@@ -479,8 +489,9 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                         )
                         .child(
                             div()
-                                .id(txt_copy_id)
+                                .id(txt_copy_id.clone())
                                 .test_support()
+                                .a11y_button(txt_copy_id, "复制输出内容")
                                 .w(height::COMPACT)
                                 .h(height::COMPACT)
                                 .flex_shrink_0()
@@ -517,12 +528,12 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
     if !card_view.raw.trim().is_empty() {
         let toggle_raw = Rc::clone(&on_toggle_raw);
         let rk = raw_key;
+        let raw_toggle_id = SharedString::from(format!("normal-tool-raw-toggle-{call_id}"));
         let mut raw_section = div().w_full().flex().flex_col().gap(space::TIGHT).child(
             apply_scale(div(), scale::CAPTION)
-                .id(SharedString::from(format!(
-                    "normal-tool-raw-toggle-{call_id}"
-                )))
+                .id(raw_toggle_id.clone())
                 .test_support()
+                .a11y_toggle_button(raw_toggle_id, "原始数据", is_raw_expanded)
                 .w_full()
                 .h(height::INLINE)
                 .flex()
@@ -574,8 +585,9 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
     }
 
     div()
-        .id(SharedString::from(format!("normal-tool-card-{call_id}")))
+        .id(card_a11y_id.clone())
         .test_support()
+        .a11y_region(card_a11y_id, summary_label)
         .w_full()
         .flex()
         .gap(space::SM)
@@ -710,7 +722,9 @@ fn render_inline_commands_list<V: 'static>(
                 )
                 .child(
                     div()
-                        .id(copy_id)
+                        .id(copy_id.clone())
+                        .test_support()
+                        .a11y_button(copy_id, "复制命令")
                         .w(height::CONTROL)
                         .h(height::CONTROL)
                         .flex_shrink_0()

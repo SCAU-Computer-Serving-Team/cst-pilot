@@ -10,7 +10,8 @@ use gpui_kit::{
 
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius,
+    scale, space,
 };
 
 /// `WebActive` takeover lock overlay (`cst-pilot-desktop.pen` 「01 · 工作台」 frame `sYHwZ`, card `WO6NQ`, `384px` wide).
@@ -52,6 +53,7 @@ pub fn render_web_active_lock_overlay(
         scale_factor,
     )
     .test_support()
+    .a11y_dialog("web-active-lock-overlay", "正在网页端使用")
     .w(layout::MODAL_STANDARD_WIDTH)
     .rounded(radius::ROW)
     .border_1()
@@ -100,6 +102,7 @@ pub fn render_web_active_lock_overlay(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("web-active-open-browser-btn")
                     .test_support()
+                    .a11y_button("web-active-open-browser-btn", "打开网页")
                     .tab_index(0)
                     .h(height::CONTROL)
                     .px(space::MD)
@@ -120,6 +123,7 @@ pub fn render_web_active_lock_overlay(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("web-active-switch-back-btn")
                     .test_support()
+                    .a11y_button("web-active-switch-back-btn", "切回桌面端")
                     .track_focus(switch_back_focus)
                     .tab_index(0)
                     .h(height::CONTROL)
@@ -168,6 +172,7 @@ pub fn render_workspace_error_bar(
                 scale_factor,
             )
             .test_support()
+            .a11y_status("workspace-top-error-bar", format!("错误：{message}"))
             .h(height::FIELD)
             .max_w(px(640.0))
             .px(space::LG)
@@ -222,6 +227,7 @@ pub fn render_top_notice_banner(
                 scale_factor,
             )
             .test_support()
+            .a11y_status("top-notice-banner", format!("提示：{message}"))
             .h(height::FIELD)
             .max_w(px(480.0))
             .px(space::LG)

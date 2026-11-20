@@ -21,8 +21,8 @@ use crate::settings::preferences_tab::{PreferencesTabEvent, PreferencesTabView};
 use crate::settings::providers_tab::{ProvidersTabEvent, ProvidersTabView};
 use crate::settings::shortcuts_tab::render_shortcuts_tab;
 use crate::theme::{
-    DesktopThemeGlobal, apply_desktop_theme, apply_scale, cjk_inline_label, height, layout,
-    render_subpage_header_xwjof, scale, space,
+    A11yElementExt as _, DesktopThemeGlobal, apply_desktop_theme, apply_scale, cjk_inline_label,
+    height, layout, render_subpage_header_xwjof, scale, space,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -48,6 +48,15 @@ impl SettingsCategory {
             Self::Providers => "模型服务",
             Self::Preferences => "模型偏好",
             Self::Shortcuts => "快捷键",
+        }
+    }
+
+    pub fn a11y_id(self) -> &'static str {
+        match self {
+            Self::General => "settings-tab-general",
+            Self::Providers => "settings-tab-providers",
+            Self::Preferences => "settings-tab-preferences",
+            Self::Shortcuts => "settings-tab-shortcuts",
         }
     }
 }
@@ -137,6 +146,9 @@ impl Render for SettingsView {
         let mut tab_bar = div()
             .id("settings-tabbar-vpwaf")
             .test_support()
+            .role(gpui_kit::Role::TabList)
+            .accessibility_id("settings-tabbar-vpwaf")
+            .aria_label("设置分类标签栏")
             .w_full()
             .h(height::FIELD)
             .border_b_1()
@@ -161,6 +173,7 @@ impl Render for SettingsView {
                 div()
                     .id(SharedString::from(format!("settings-tab-{:?}", cat)))
                     .test_support()
+                    .a11y_tab(cat.a11y_id(), cat.label(), active)
                     .relative()
                     .h_full()
                     .flex()
@@ -296,6 +309,7 @@ impl Render for SettingsView {
         div()
             .id("settings-view-vpwaf")
             .test_support()
+            .a11y_region("settings-view", "设置")
             .size_full()
             .flex()
             .flex_col()

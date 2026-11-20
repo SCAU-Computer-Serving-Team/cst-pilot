@@ -8,7 +8,8 @@ use gpui_kit::{
 
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius,
+    scale, space,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -99,6 +100,7 @@ pub fn render_update_dialog(
                 scale_factor,
             )
             .test_support()
+            .a11y_dialog("update-handoff-lock-card", "正在重启完成更新")
             .w(layout::MODAL_STANDARD_WIDTH)
             .p(px(20.0))
             .rounded(radius::ROW)
@@ -164,6 +166,7 @@ pub fn render_update_dialog(
         scale_factor,
     )
     .test_support()
+    .a11y_dialog("update-dialog-card", header_title.clone())
     .w(layout::MODAL_STANDARD_WIDTH)
     .p(px(20.0))
     .rounded(radius::ROW)
@@ -282,6 +285,7 @@ pub fn render_update_dialog(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("update-dialog-background-btn")
                     .test_support()
+                    .a11y_button("update-dialog-background-btn", "后台继续下载")
                     .h(height::CONTROL)
                     .px(space::MD)
                     .rounded(radius::CONTROL)
@@ -299,6 +303,7 @@ pub fn render_update_dialog(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("update-dialog-cancel-prepare-btn")
                     .test_support()
+                    .a11y_button("update-dialog-cancel-prepare-btn", "取消下载更新")
                     .h(height::CONTROL)
                     .px(space::MD)
                     .rounded(radius::CONTROL)
@@ -322,6 +327,7 @@ pub fn render_update_dialog(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("update-dialog-later-btn")
                     .test_support()
+                    .a11y_button("update-dialog-later-btn", "稍后")
                     .h(height::CONTROL)
                     .px(space::MD)
                     .rounded(radius::CONTROL)
@@ -339,6 +345,7 @@ pub fn render_update_dialog(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("update-dialog-launch-btn")
                     .test_support()
+                    .a11y_button("update-dialog-launch-btn", "立即重启更新")
                     .h(height::CONTROL)
                     .px(space::LG)
                     .rounded(radius::CONTROL)
@@ -360,6 +367,7 @@ pub fn render_update_dialog(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("update-dialog-later-btn")
                     .test_support()
+                    .a11y_button("update-dialog-later-btn", "稍后")
                     .h(height::CONTROL)
                     .px(space::MD)
                     .rounded(radius::CONTROL)
@@ -377,6 +385,7 @@ pub fn render_update_dialog(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("update-dialog-confirm-restart-btn")
                     .test_support()
+                    .a11y_button("update-dialog-confirm-restart-btn", "更新并重启")
                     .h(height::CONTROL)
                     .px(space::LG)
                     .rounded(radius::CONTROL)

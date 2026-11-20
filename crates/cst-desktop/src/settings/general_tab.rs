@@ -11,7 +11,10 @@ use gpui_kit::{
 };
 
 use crate::settings::update_dialog::{compute_update_progress_ratio, format_megabytes};
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{
+    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale,
+    space,
+};
 
 pub type SelectThemeFn = Rc<dyn Fn(ThemeModeDto, &mut Window, &mut App)>;
 pub type SelectDefaultViewFn = Rc<dyn Fn(DefaultViewDto, &mut Window, &mut App)>;
@@ -86,6 +89,7 @@ pub fn render_general_tab(
         apply_scale(div(), scale::UI_MEDIUM)
             .id("settings-update-cancel-btn-ohwrt")
             .test_support()
+            .a11y_button("settings-update-cancel-btn", "取消更新")
             .relative()
             .h(height::CONTROL)
             .px(space::MD)
@@ -125,6 +129,7 @@ pub fn render_general_tab(
         apply_scale(div(), scale::UI_MEDIUM)
             .id("settings-update-action-btn")
             .test_support()
+            .a11y_button("settings-update-action-btn", btn_label)
             .relative()
             .h(height::CONTROL)
             .px(space::MD)
@@ -144,6 +149,7 @@ pub fn render_general_tab(
     let mut update_card = div()
         .id("settings-update-card-c9or7k")
         .test_support()
+        .a11y_region("settings-update-card", "软件版本与更新")
         .relative()
         .w_full()
         .h(px(72.0))
@@ -219,6 +225,7 @@ pub fn render_general_tab(
     div()
         .id("settings-general-tab-q8tgb")
         .test_support()
+        .a11y_region("settings-general-tab", "常规设置")
         .w_full()
         .flex()
         .flex_col()
@@ -377,6 +384,7 @@ fn seg_pill(
 
     base.id(id)
         .test_support()
+        .a11y_tab(id, label, active)
         .h(height::INLINE)
         .px(space::MD)
         .rounded(radius::CONTROL)

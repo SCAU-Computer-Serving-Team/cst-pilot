@@ -10,7 +10,8 @@ use serde_json::{Value, json};
 use zeroize::Zeroizing;
 
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
+    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height,
+    radius, scale, space,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -511,6 +512,7 @@ impl ProvidersTabView {
             apply_scale(div(), scale::UI_MEDIUM)
                 .id("providers-back-to-list-btn")
                 .test_support()
+                .a11y_button("providers-back-to-list-btn", "返回模型服务列表")
                 .h(height::CONTROL)
                 .px(space::SM)
                 .rounded(radius::CONTROL)
@@ -557,6 +559,11 @@ impl ProvidersTabView {
                         div()
                             .id("providers-hdr-search-btn")
                             .test_support()
+                            .a11y_toggle_button(
+                                "providers-hdr-search-btn",
+                                "搜索模型",
+                                self.search_visible,
+                            )
                             .w(height::COMPACT)
                             .h(height::COMPACT)
                             .rounded(radius::CONTROL)
@@ -581,6 +588,7 @@ impl ProvidersTabView {
                         div()
                             .id("providers-hdr-refresh-btn")
                             .test_support()
+                            .a11y_button("providers-hdr-refresh-btn", "刷新模型目录")
                             .w(height::COMPACT)
                             .h(height::COMPACT)
                             .rounded(radius::CONTROL)
@@ -601,6 +609,7 @@ impl ProvidersTabView {
                         div()
                             .id("providers-hdr-add-model-btn")
                             .test_support()
+                            .a11y_button("providers-hdr-add-model-btn", "添加模型行")
                             .w(height::COMPACT)
                             .h(height::COMPACT)
                             .rounded(radius::CONTROL)
@@ -629,13 +638,12 @@ impl ProvidersTabView {
         let mut protocol_row = div().flex().flex_wrap().gap(space::XS);
         for proto in CustomApiProtocol::ALL {
             let active = self.protocol == proto;
+            let proto_id = SharedString::from(format!("custom-proto-{}", proto.wire_value()));
             protocol_row = protocol_row.child(
                 apply_scale(div(), scale::CAPTION_MEDIUM)
-                    .id(SharedString::from(format!(
-                        "custom-proto-{}",
-                        proto.wire_value()
-                    )))
+                    .id(proto_id.clone())
                     .test_support()
+                    .a11y_tab(proto_id, proto.label(), active)
                     .h(height::COMPACT)
                     .px(space::SM)
                     .rounded(radius::CONTROL)
@@ -745,6 +753,9 @@ impl ProvidersTabView {
             let image = row.image;
             let cw_text = format_token_window(row.context_window);
             let mt_text = format_token_window(row.max_tokens);
+            let cw_id = SharedString::from(format!("edit-row-cw-{idx}"));
+            let mt_id = SharedString::from(format!("edit-row-mt-{idx}"));
+            let rm_id = SharedString::from(format!("edit-row-remove-{idx}"));
 
             hairline_table = hairline_table.child(
                 div()
@@ -754,12 +765,29 @@ impl ProvidersTabView {
                     .flex()
                     .items_center()
                     .gap(space::SM)
-                    .child(div().flex_1().child(Input::new(&row.id_input)))
-                    .child(div().flex_1().child(Input::new(&row.name_input)))
+                    .child(
+                        div().flex_1().child(
+                            Input::new(&row.id_input)
+                                .accessibility_id(SharedString::from(format!(
+                                    "providers-row-id-input-{idx}"
+                                )))
+                                .aria_label(format!("第 {} 行模型 ID", idx + 1)),
+                        ),
+                    )
+                    .child(
+                        div().flex_1().child(
+                            Input::new(&row.name_input)
+                                .accessibility_id(SharedString::from(format!(
+                                    "providers-row-name-input-{idx}"
+                                )))
+                                .aria_label(format!("第 {} 行模型显示名称", idx + 1)),
+                        ),
+                    )
                     .child(
                         apply_scale(div(), scale::CAPTION)
-                            .id(SharedString::from(format!("edit-row-cw-{idx}")))
+                            .id(cw_id.clone())
                             .test_support()
+                            .a11y_button(cw_id, format!("切换上下文窗口：{cw_text}"))
                             .w(px(76.0))
                             .h(height::COMPACT)
                             .px(space::XS)
@@ -783,8 +811,9 @@ impl ProvidersTabView {
                     )
                     .child(
                         apply_scale(div(), scale::CAPTION)
-                            .id(SharedString::from(format!("edit-row-mt-{idx}")))
+                            .id(mt_id.clone())
                             .test_support()
+                            .a11y_button(mt_id, format!("切换最大输出：{mt_text}"))
                             .w(px(68.0))
                             .h(height::COMPACT)
                             .px(space::XS)
@@ -814,6 +843,7 @@ impl ProvidersTabView {
                             .justify_center()
                             .child(capability_checkbox(
                                 SharedString::from(format!("edit-row-reasoning-{idx}")),
+                                SharedString::from(format!("第 {} 行支持思考", idx + 1)),
                                 reasoning,
                                 palette,
                                 cx.listener(move |this, _, _, cx| {
@@ -832,6 +862,7 @@ impl ProvidersTabView {
                             .justify_center()
                             .child(capability_checkbox(
                                 SharedString::from(format!("edit-row-image-{idx}")),
+                                SharedString::from(format!("第 {} 行支持图片", idx + 1)),
                                 image,
                                 palette,
                                 cx.listener(move |this, _, _, cx| {
@@ -850,8 +881,9 @@ impl ProvidersTabView {
                             .justify_center()
                             .child(
                                 div()
-                                    .id(SharedString::from(format!("edit-row-remove-{idx}")))
+                                    .id(rm_id.clone())
                                     .test_support()
+                                    .a11y_button(rm_id, format!("移除第 {} 行模型", idx + 1))
                                     .w(height::COMPACT)
                                     .h(height::COMPACT)
                                     .rounded(radius::CONTROL)
@@ -886,26 +918,41 @@ impl ProvidersTabView {
                     .flex()
                     .gap(space::SM)
                     .child(
-                        div()
-                            .flex_1()
-                            .child(Input::new(&self.provider_id_input).h(height::FIELD)),
+                        div().flex_1().child(
+                            Input::new(&self.provider_id_input)
+                                .accessibility_id("providers-id-input")
+                                .aria_label("服务标识")
+                                .h(height::FIELD),
+                        ),
                     )
                     .child(
-                        div()
-                            .flex_1()
-                            .child(Input::new(&self.provider_name_input).h(height::FIELD)),
+                        div().flex_1().child(
+                            Input::new(&self.provider_name_input)
+                                .accessibility_id("providers-name-input")
+                                .aria_label("服务显示名称")
+                                .h(height::FIELD),
+                        ),
                     ),
             )
             .child(protocol_row)
-            .child(Input::new(&self.base_url_input).h(height::FIELD))
+            .child(
+                Input::new(&self.base_url_input)
+                    .accessibility_id("providers-baseurl-input")
+                    .aria_label("服务 Base URL")
+                    .h(height::FIELD),
+            )
             .child(
                 Input::new(&self.api_key_input)
+                    .accessibility_id("providers-apikey-input")
+                    .aria_label("服务 API Key")
                     .h(height::FIELD)
                     .mask_toggle(),
             )
             .child(self.render_group_header_with_3_icon_buttons("模型列表", palette, cx))
             .children(self.search_visible.then(|| {
                 Input::new(&self.search_input)
+                    .accessibility_id("providers-search-input")
+                    .aria_label("筛选模型")
                     .h(height::FIELD)
                     .cleanable(true)
             }))
@@ -919,6 +966,7 @@ impl ProvidersTabView {
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("providers-inline-cancel-btn")
                             .test_support()
+                            .a11y_button("providers-inline-cancel-btn", "取消")
                             .h(height::CONTROL)
                             .px(space::MD)
                             .rounded(radius::CONTROL)
@@ -938,6 +986,14 @@ impl ProvidersTabView {
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("providers-inline-save-btn")
                             .test_support()
+                            .a11y_button(
+                                "providers-inline-save-btn",
+                                if self.saving {
+                                    "正在保存"
+                                } else {
+                                    "保存"
+                                },
+                            )
                             .h(height::CONTROL)
                             .px(space::LG)
                             .rounded(radius::CONTROL)
@@ -971,6 +1027,7 @@ impl Render for ProvidersTabView {
             return div()
                 .id("settings-providers-tab")
                 .test_support()
+                .a11y_region("settings-providers-tab", "模型服务设置")
                 .w_full()
                 .flex()
                 .flex_col()
@@ -1111,6 +1168,7 @@ impl Render for ProvidersTabView {
             return div()
                 .id("settings-providers-tab")
                 .test_support()
+                .a11y_region("settings-providers-tab", "模型服务设置")
                 .w_full()
                 .flex()
                 .flex_col()
@@ -1133,6 +1191,8 @@ impl Render for ProvidersTabView {
                         .child(
                             div().flex_1().child(
                                 Input::new(&self.api_key_input)
+                                    .accessibility_id("providers-apikey-input")
+                                    .aria_label("服务 API Key")
                                     .h(height::FIELD)
                                     .mask_toggle(),
                             ),
@@ -1141,6 +1201,14 @@ impl Render for ProvidersTabView {
                             apply_scale(div(), scale::UI_MEDIUM)
                                 .id("providers-builtin-save-key-btn")
                                 .test_support()
+                                .a11y_button(
+                                    "providers-builtin-save-key-btn",
+                                    if self.saving {
+                                        "正在保存"
+                                    } else {
+                                        "保存密钥"
+                                    },
+                                )
                                 .h(height::FIELD)
                                 .px(space::LG)
                                 .rounded(radius::CONTROL)
@@ -1162,6 +1230,8 @@ impl Render for ProvidersTabView {
                 .child(self.render_group_header_with_3_icon_buttons("模型列表", &palette, cx))
                 .children(self.search_visible.then(|| {
                     Input::new(&self.search_input)
+                        .accessibility_id("providers-search-input")
+                        .aria_label("筛选模型")
                         .h(height::FIELD)
                         .cleanable(true)
                 }))
@@ -1223,6 +1293,14 @@ impl Render for ProvidersTabView {
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("providers-cstoa-action-btn")
                             .test_support()
+                            .a11y_button(
+                                "providers-cstoa-action-btn",
+                                if cstoa_signed_in {
+                                    "管理 CSTOA 账号"
+                                } else {
+                                    "扫码登录 CSTOA"
+                                },
+                            )
                             .h(height::CONTROL)
                             .px(space::MD)
                             .rounded(radius::CONTROL)
@@ -1262,10 +1340,16 @@ impl Render for ProvidersTabView {
                 ("尚未配置凭据", palette.status_warning)
             };
 
+            let row_id = SharedString::from(format!("provider-row-{pid}"));
+            let row_label = SharedString::from(format!("{}（{}）", prov.name, status_label));
+            let manage_id = SharedString::from(format!("provider-manage-btn-{pid_btn}"));
+            let manage_label = SharedString::from(format!("管理 {}", prov.name));
+
             merged_card = merged_card.child(
                 div()
-                    .id(SharedString::from(format!("provider-row-{pid}")))
+                    .id(row_id.clone())
                     .test_support()
+                    .a11y_listitem(row_id, row_label, false)
                     .w_full()
                     .h(px(72.0))
                     .px(space::LG)
@@ -1298,8 +1382,9 @@ impl Render for ProvidersTabView {
                     )
                     .child(
                         apply_scale(div(), scale::UI_MEDIUM)
-                            .id(SharedString::from(format!("provider-manage-btn-{pid_btn}")))
+                            .id(manage_id.clone())
                             .test_support()
+                            .a11y_button(manage_id, manage_label)
                             .h(height::CONTROL)
                             .px(space::MD)
                             .rounded(radius::CONTROL)
@@ -1322,6 +1407,7 @@ impl Render for ProvidersTabView {
         div()
             .id("settings-providers-tab")
             .test_support()
+            .a11y_region("settings-providers-tab", "模型服务设置")
             .w_full()
             .flex()
             .flex_col()
@@ -1341,6 +1427,7 @@ impl Render for ProvidersTabView {
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("providers-new-custom-btn")
                             .test_support()
+                            .a11y_button("providers-new-custom-btn", "添加服务")
                             .h(height::CONTROL)
                             .px(space::MD)
                             .rounded(radius::CONTROL)
@@ -1369,6 +1456,7 @@ impl Render for ProvidersTabView {
 
 fn capability_checkbox<F>(
     id: SharedString,
+    label: SharedString,
     checked: bool,
     palette: &DesktopPalette,
     on_click: F,
@@ -1377,8 +1465,9 @@ where
     F: Fn(&gpui::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
 {
     div()
-        .id(id)
+        .id(id.clone())
         .test_support()
+        .a11y_checkbox(id, label, checked)
         .w(px(16.0))
         .h(px(16.0))
         .rounded(radius::CONTROL)

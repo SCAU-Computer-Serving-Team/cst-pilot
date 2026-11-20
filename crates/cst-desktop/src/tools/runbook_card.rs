@@ -9,7 +9,10 @@ use gpui_kit::{
     StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
 };
 
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{
+    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale,
+    space,
+};
 
 pub struct RunbookCardProps<'a> {
     pub call_id: &'a str,
@@ -92,12 +95,21 @@ pub fn render_runbook_card<V: 'static>(
         "手动执行".to_owned()
     };
 
+    let card_title = if props.title.trim().is_empty() {
+        "修复命令清单"
+    } else {
+        props.title
+    };
     let mut card = div()
         .id(SharedString::from(format!(
             "special-runbook-card-{}",
             props.call_id
         )))
         .test_support()
+        .a11y_region(
+            SharedString::from(format!("runbook-card-{}", props.call_id)),
+            card_title,
+        )
         .w_full()
         .p(space::LG)
         .rounded(radius::SPECIAL)
@@ -197,6 +209,7 @@ pub fn render_runbook_card<V: 'static>(
             };
             let meta_str = format_shell_meta(&item.shell, item.admin);
 
+            let copy_label = SharedString::from(format!("复制命令：{desc_str}"));
             cmd_col =
                 cmd_col.child(
                     div()
@@ -251,8 +264,9 @@ pub fn render_runbook_card<V: 'static>(
                                 )
                                 .child(
                                     div()
-                                        .id(copy_id)
+                                        .id(copy_id.clone())
                                         .test_support()
+                                        .a11y_button(copy_id, copy_label)
                                         .w(height::CONTROL)
                                         .h(height::CONTROL)
                                         .flex_shrink_0()
@@ -334,13 +348,13 @@ pub fn render_runbook_card<V: 'static>(
                                 .child(SharedString::from(file_label)),
                         ),
                 )
-                .child(
+                .child({
+                    let open_btn_id =
+                        SharedString::from(format!("runbook-open-file-btn-{}", props.call_id));
                     apply_scale(div(), scale::CAPTION)
-                        .id(SharedString::from(format!(
-                            "runbook-open-file-btn-{}",
-                            props.call_id
-                        )))
+                        .id(open_btn_id.clone())
                         .test_support()
+                        .a11y_button(open_btn_id, "打开修复命令文件")
                         .cursor(CursorStyle::PointingHand)
                         .flex()
                         .items_center()
@@ -354,8 +368,8 @@ pub fn render_runbook_card<V: 'static>(
                             Icon::new(IconName::ExternalLink)
                                 .size(px(12.0))
                                 .text_color(palette.text_secondary),
-                        ),
-                ),
+                        )
+                }),
         );
     }
 

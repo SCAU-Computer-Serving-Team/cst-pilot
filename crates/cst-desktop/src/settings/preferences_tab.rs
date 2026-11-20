@@ -10,7 +10,8 @@ use gpui_kit::{
 };
 
 use crate::theme::{
-    DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
+    A11yElementExt as _, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale,
+    space,
 };
 
 #[derive(Debug, Clone)]
@@ -227,6 +228,7 @@ impl Render for PreferencesTabView {
             let mut menu = div()
                 .id("pref-default-model-popover")
                 .test_support()
+                .a11y_dialog("pref-default-model-popover", "选择默认模型")
                 .absolute()
                 .top(px(60.0))
                 .right(space::LG)
@@ -256,40 +258,38 @@ impl Render for PreferencesTabView {
                         current_default.is_some_and(|d| d.provider == m.provider && d.id == m.id);
                     let prov = m.provider.clone();
                     let mid = m.id.clone();
-                    menu =
-                        menu.child(
-                            apply_scale(div(), scale::UI)
-                                .id(SharedString::from(format!(
-                                    "pref-default-model-{prov}-{mid}"
-                                )))
-                                .test_support()
-                                .h(height::CONTROL)
-                                .px(space::SM)
-                                .rounded(radius::CONTROL)
-                                .bg(if is_def {
-                                    palette.bg_item_active
-                                } else {
-                                    gpui_kit::transparent_black()
-                                })
-                                .text_color(palette.text_primary)
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .gap(space::SM)
-                                .hover(|s| s.bg(palette.bg_item_hover))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.set_default_model(prov.clone(), mid.clone(), cx);
-                                    cx.stop_propagation();
-                                }))
-                                .child(div().min_w_0().truncate().child(SharedString::from(
-                                    format!("{} · {}", m.provider, m.name),
-                                )))
-                                .children(is_def.then(|| {
-                                    Icon::new(IconName::Check)
-                                        .size(px(13.0))
-                                        .text_color(palette.accent_ink)
-                                })),
-                        );
+                    let opt_id = SharedString::from(format!("pref-default-model-{prov}-{mid}"));
+                    let opt_label = SharedString::from(format!("{} · {}", m.provider, m.name));
+                    menu = menu.child(
+                        apply_scale(div(), scale::UI)
+                            .id(opt_id.clone())
+                            .test_support()
+                            .a11y_listitem(opt_id, opt_label.clone(), is_def)
+                            .h(height::CONTROL)
+                            .px(space::SM)
+                            .rounded(radius::CONTROL)
+                            .bg(if is_def {
+                                palette.bg_item_active
+                            } else {
+                                gpui_kit::transparent_black()
+                            })
+                            .text_color(palette.text_primary)
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(space::SM)
+                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.set_default_model(prov.clone(), mid.clone(), cx);
+                                cx.stop_propagation();
+                            }))
+                            .child(div().min_w_0().truncate().child(opt_label))
+                            .children(is_def.then(|| {
+                                Icon::new(IconName::Check)
+                                    .size(px(13.0))
+                                    .text_color(palette.accent_ink)
+                            })),
+                    );
                 }
             }
             dropdown_menu_opt = Some(menu);
@@ -329,6 +329,11 @@ impl Render for PreferencesTabView {
                 apply_scale(div(), scale::UI)
                     .id("pref-default-model-trigger")
                     .test_support()
+                    .a11y_toggle_button(
+                        "pref-default-model-trigger",
+                        format!("默认模型：{default_label}"),
+                        self.default_dropdown_open,
+                    )
                     .w(px(208.0))
                     .h(height::CONTROL)
                     .px(space::MD)
@@ -376,6 +381,7 @@ impl Render for PreferencesTabView {
                 apply_scale(div(), scale::CAPTION_MEDIUM)
                     .id("pref-filter-all")
                     .test_support()
+                    .a11y_tab("pref-filter-all", "全部", self.provider_filter.is_none())
                     .h(height::COMPACT)
                     .px(space::SM)
                     .rounded(radius::CONTROL)
@@ -407,10 +413,13 @@ impl Render for PreferencesTabView {
         for prov in providers_seen {
             let active = self.provider_filter.as_deref() == Some(prov.as_str());
             let p_click = prov.clone();
+            let filter_id = SharedString::from(format!("pref-filter-{prov}"));
+            let prov_label = SharedString::from(prov);
             filter_pills = filter_pills.child(
                 apply_scale(div(), scale::CAPTION_MEDIUM)
-                    .id(SharedString::from(format!("pref-filter-{prov}")))
+                    .id(filter_id.clone())
                     .test_support()
+                    .a11y_tab(filter_id, prov_label.clone(), active)
                     .h(height::COMPACT)
                     .px(space::SM)
                     .rounded(radius::CONTROL)
@@ -437,7 +446,7 @@ impl Render for PreferencesTabView {
                         this.provider_filter = Some(p_click.clone());
                         cx.notify();
                     }))
-                    .child(SharedString::from(prov)),
+                    .child(prov_label),
             );
         }
 
@@ -499,6 +508,8 @@ impl Render for PreferencesTabView {
                     .child(
                         div().w(px(208.0)).child(
                             Input::new(&self.search_input)
+                                .accessibility_id("preferences-search-input")
+                                .aria_label("搜索模型或服务")
                                 .prefix(
                                     Icon::new(IconName::Search)
                                         .size(px(14.0))
@@ -518,6 +529,7 @@ impl Render for PreferencesTabView {
                         apply_scale(div(), scale::UI)
                             .id("pref-select-all-btn")
                             .test_support()
+                            .a11y_button("pref-select-all-btn", "全选可见模型")
                             .h(height::CONTROL)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -534,6 +546,7 @@ impl Render for PreferencesTabView {
                         apply_scale(div(), scale::UI)
                             .id("pref-clear-all-btn")
                             .test_support()
+                            .a11y_button("pref-clear-all-btn", "清空可见模型")
                             .h(height::CONTROL)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -550,6 +563,7 @@ impl Render for PreferencesTabView {
                         apply_scale(div(), scale::UI)
                             .id("pref-refresh-btn")
                             .test_support()
+                            .a11y_button("pref-refresh-btn", "刷新模型列表")
                             .h(height::CONTROL)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -593,9 +607,14 @@ impl Render for PreferencesTabView {
             }
             let fid_chk = full_id.clone();
             let selected = idx == self.selected_row_idx;
+            let row_id = SharedString::from(format!("pref-enabled-row-{idx}"));
+            let chk_id = SharedString::from(format!("pref-toggle-enabled-{idx}"));
+            let up_id = SharedString::from(format!("pref-move-up-{idx}"));
+            let down_id = SharedString::from(format!("pref-move-down-{idx}"));
             let mut row = div()
-                .id(SharedString::from(format!("pref-enabled-row-{idx}")))
+                .id(row_id.clone())
                 .test_support()
+                .a11y_listitem(row_id, format!("{mname}（{prov}）"), selected)
                 .w_full()
                 .h(px(56.0))
                 .px(space::LG)
@@ -615,8 +634,9 @@ impl Render for PreferencesTabView {
                 }))
                 .child(
                     div()
-                        .id(SharedString::from(format!("pref-toggle-enabled-{idx}")))
+                        .id(chk_id.clone())
                         .test_support()
+                        .a11y_checkbox(chk_id, format!("启用模型：{mname}"), true)
                         .w(px(16.0))
                         .h(px(16.0))
                         .rounded(radius::CONTROL)
@@ -643,7 +663,7 @@ impl Render for PreferencesTabView {
                         .min_w_0()
                         .truncate()
                         .text_color(palette.text_primary)
-                        .child(SharedString::from(mname)),
+                        .child(SharedString::from(mname.clone())),
                 )
                 .child(
                     apply_scale(div(), scale::UI)
@@ -663,8 +683,9 @@ impl Render for PreferencesTabView {
                         .gap(space::MICRO)
                         .child(
                             div()
-                                .id(SharedString::from(format!("pref-move-up-{idx}")))
+                                .id(up_id.clone())
                                 .test_support()
+                                .a11y_button(up_id, format!("上移模型：{mname}"))
                                 .w(height::COMPACT)
                                 .h(height::COMPACT)
                                 .rounded(radius::CONTROL)
@@ -684,8 +705,9 @@ impl Render for PreferencesTabView {
                         )
                         .child(
                             div()
-                                .id(SharedString::from(format!("pref-move-down-{idx}")))
+                                .id(down_id.clone())
                                 .test_support()
+                                .a11y_button(down_id, format!("下移模型：{mname}"))
                                 .w(height::COMPACT)
                                 .h(height::COMPACT)
                                 .rounded(radius::CONTROL)
@@ -720,9 +742,15 @@ impl Render for PreferencesTabView {
                 continue;
             }
             let fid_add = full_id.clone();
+            let unchk_id = SharedString::from(format!("pref-unchecked-{full_id}"));
             let mut row = div()
-                .id(SharedString::from(format!("pref-unchecked-{full_id}")))
+                .id(unchk_id.clone())
                 .test_support()
+                .a11y_checkbox(
+                    unchk_id,
+                    format!("启用模型：{}（{}）", m.name, m.provider),
+                    false,
+                )
                 .w_full()
                 .h(px(56.0))
                 .px(space::LG)
@@ -779,6 +807,7 @@ impl Render for PreferencesTabView {
         div()
             .id("settings-preferences-tab")
             .test_support()
+            .a11y_region("settings-preferences-tab", "模型偏好设置")
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::on_key_down))
             .w_full()

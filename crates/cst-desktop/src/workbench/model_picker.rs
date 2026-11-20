@@ -13,7 +13,10 @@ use serde_json::Value;
 
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::shell::open_url_in_trusted_browser;
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{
+    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale,
+    space,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelPickerPage {
@@ -121,6 +124,10 @@ pub fn render_context_ring_button(
     div()
         .id("composer-context-ring-btn")
         .test_support()
+        .a11y_button(
+            "composer-context-ring-btn",
+            format!("上下文容量与额度（{pct:.0}%）"),
+        )
         .track_focus(trigger_focus)
         .tab_index(0)
         .w(height::COMPACT)
@@ -248,6 +255,7 @@ pub fn render_context_quota_popover(
         scale_factor,
     )
     .test_support()
+    .a11y_dialog("composer-context-popover-h5jg6d", "上下文容量与剩余额度")
     .w(px(336.0))
     .p(space::LG)
     .rounded(radius::ROW)
@@ -334,6 +342,14 @@ pub fn render_context_quota_popover(
         let mut more_btn = apply_scale(div(), scale::CAPTION_MEDIUM)
             .id("context-popover-more-btn")
             .test_support()
+            .a11y_button(
+                "context-popover-more-btn",
+                if provider == "cstoa" {
+                    "账号信息"
+                } else {
+                    "更多额度信息"
+                },
+            )
             .text_color(palette.accent_ink)
             .flex()
             .items_center()
@@ -464,6 +480,7 @@ pub fn render_context_quota_popover(
                         apply_scale(div(), scale::CAPTION_MEDIUM)
                             .id("context-popover-retry-quota-btn")
                             .test_support()
+                            .a11y_button("context-popover-retry-quota-btn", "重试查询额度")
                             .text_color(palette.accent_solid)
                             .on_click(move |_, w, cx| (retry_fn)(w, cx))
                             .child("重试"),
@@ -525,6 +542,7 @@ pub fn render_model_picker_popover(
         scale_factor,
     )
     .test_support()
+    .a11y_dialog("composer-model-picker-d8zzg", "模型与思考强度选择")
     .w(pop_width)
     .p(space::XS)
     .rounded(radius::ROW)
@@ -544,6 +562,10 @@ pub fn render_model_picker_popover(
                     apply_scale(div(), scale::CAPTION_MEDIUM)
                         .id("model-picker-goto-models")
                         .test_support()
+                        .a11y_menuitem(
+                            "model-picker-goto-models",
+                            format!("模型：{current_model_label}"),
+                        )
                         .relative()
                         .h(height::CONTROL)
                         .px(space::SM)
@@ -588,6 +610,10 @@ pub fn render_model_picker_popover(
                     apply_scale(div(), scale::CAPTION_MEDIUM)
                         .id("model-picker-goto-thinking")
                         .test_support()
+                        .a11y_menuitem(
+                            "model-picker-goto-thinking",
+                            format!("思考强度：{}", thinking_level_label(current_thinking)),
+                        )
                         .relative()
                         .h(height::CONTROL)
                         .px(space::SM)
@@ -633,6 +659,7 @@ pub fn render_model_picker_popover(
                     apply_scale(div(), scale::CAPTION_MEDIUM)
                         .id("model-picker-back-btn")
                         .test_support()
+                        .a11y_button("model-picker-back-btn", "返回上级菜单")
                         .relative()
                         .h(height::COMPACT)
                         .px(space::SM)
@@ -687,9 +714,11 @@ pub fn render_model_picker_popover(
                     } else {
                         m.name.clone()
                     };
+                    let opt_id = SharedString::from(format!("model-option-{prov}-{mid}"));
                     let mut row = apply_scale(div(), scale::CAPTION_MEDIUM)
-                        .id(SharedString::from(format!("model-option-{prov}-{mid}")))
+                        .id(opt_id.clone())
                         .test_support()
+                        .a11y_listitem(opt_id, label.clone(), is_cur)
                         .h(height::CONTROL)
                         .px(space::SM)
                         .rounded(radius::CONTROL)
@@ -727,6 +756,7 @@ pub fn render_model_picker_popover(
                     apply_scale(div(), scale::CAPTION_MEDIUM)
                         .id("thinking-picker-back-btn")
                         .test_support()
+                        .a11y_button("thinking-picker-back-btn", "返回上级菜单")
                         .relative()
                         .h(height::COMPACT)
                         .px(space::SM)
@@ -775,12 +805,13 @@ pub fn render_model_picker_popover(
                 let is_hi = idx == highlighted_idx;
                 let lv_owned = lv.clone();
                 let sel_fn = Rc::clone(&on_select_thinking);
+                let opt_id =
+                    SharedString::from(format!("thinking-option-{}", lv.to_ascii_lowercase()));
+                let lv_label = thinking_level_label(lv);
                 let mut row = apply_scale(div(), scale::CAPTION_MEDIUM)
-                    .id(SharedString::from(format!(
-                        "thinking-option-{}",
-                        lv.to_ascii_lowercase()
-                    )))
+                    .id(opt_id.clone())
                     .test_support()
+                    .a11y_listitem(opt_id, lv_label, is_cur)
                     .h(height::CONTROL)
                     .px(space::SM)
                     .rounded(radius::CONTROL)

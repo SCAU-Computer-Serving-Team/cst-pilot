@@ -9,7 +9,10 @@ use gpui_kit::{
 };
 use serde_json::Value;
 
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{
+    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale,
+    space,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VisibleQueueItem {
@@ -151,6 +154,7 @@ pub fn render_queue_bar(
     let mut list = div()
         .id("composer-queue-bar-rneha")
         .test_support()
+        .a11y_region("composer-queue-bar-rneha", "排队消息栏")
         .pb(space::XS)
         .border_b_1()
         .border_color(palette.border_subtle)
@@ -174,6 +178,9 @@ pub fn render_queue_bar(
             let commit_cb = Rc::clone(&cb.on_commit_edit);
             let cancel_cb = Rc::clone(&cb.on_cancel_edit);
             let iid_save = iid.clone();
+            let edit_input_id = SharedString::from(format!("queue-edit-input-{iid}"));
+            let save_btn_id = SharedString::from(format!("queue-save-btn-{iid}"));
+            let cancel_btn_id = SharedString::from(format!("queue-cancel-edit-btn-{iid}"));
 
             list = list.child(
                 div()
@@ -184,11 +191,18 @@ pub fn render_queue_bar(
                     .flex()
                     .items_center()
                     .gap(space::XS)
-                    .child(div().flex_1().min_w_0().child(Input::new(input_entity)))
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Input::new(input_entity)
+                                .accessibility_id(edit_input_id)
+                                .aria_label("编辑排队消息"),
+                        ),
+                    )
                     .child(
                         apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .id(SharedString::from(format!("queue-save-btn-{iid}")))
+                            .id(save_btn_id.clone())
                             .test_support()
+                            .a11y_button(save_btn_id, "保存排队消息")
                             .h(height::INLINE)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -203,8 +217,9 @@ pub fn render_queue_bar(
                     )
                     .child(
                         apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .id(SharedString::from(format!("queue-cancel-edit-btn-{iid}")))
+                            .id(cancel_btn_id.clone())
                             .test_support()
+                            .a11y_button(cancel_btn_id, "取消编辑排队消息")
                             .h(height::INLINE)
                             .px(space::SM)
                             .rounded(radius::CONTROL)
@@ -239,10 +254,12 @@ pub fn render_queue_bar(
                 let reorder_up = Rc::clone(&cb.on_reorder);
                 let mut next_ids = queued_ids.clone();
                 next_ids.swap(pos, pos - 1);
+                let up_id = SharedString::from(format!("queue-move-up-{iid}"));
                 actions = actions.child(
                     div()
-                        .id(SharedString::from(format!("queue-move-up-{iid}")))
+                        .id(up_id.clone())
                         .test_support()
+                        .a11y_button(up_id, "上移排队消息")
                         .w(height::INLINE)
                         .h(height::INLINE)
                         .rounded(radius::CONTROL)
@@ -264,10 +281,12 @@ pub fn render_queue_bar(
                 let reorder_down = Rc::clone(&cb.on_reorder);
                 let mut next_ids = queued_ids.clone();
                 next_ids.swap(pos, pos + 1);
+                let down_id = SharedString::from(format!("queue-move-down-{iid}"));
                 actions = actions.child(
                     div()
-                        .id(SharedString::from(format!("queue-move-down-{iid}")))
+                        .id(down_id.clone())
                         .test_support()
+                        .a11y_button(down_id, "下移排队消息")
                         .w(height::INLINE)
                         .h(height::INLINE)
                         .rounded(radius::CONTROL)
@@ -300,16 +319,27 @@ pub fn render_queue_bar(
             let edit_fn = Rc::clone(&cb.on_begin_edit);
             let iid_del = iid.clone();
             let del_fn = Rc::clone(&cb.on_delete);
+            let pri_id = SharedString::from(if is_failed {
+                format!("queue-retry-btn-{iid}")
+            } else {
+                format!("queue-steer-btn-{iid}")
+            });
+            let edit_id = SharedString::from(format!("queue-edit-btn-{iid}"));
+            let del_id = SharedString::from(format!("queue-delete-btn-{iid}"));
 
             actions = actions
                 .child(
                     apply_scale(div(), scale::CAPTION_MEDIUM)
-                        .id(SharedString::from(if is_failed {
-                            format!("queue-retry-btn-{iid}")
-                        } else {
-                            format!("queue-steer-btn-{iid}")
-                        }))
+                        .id(pri_id.clone())
                         .test_support()
+                        .a11y_button(
+                            pri_id,
+                            if is_failed {
+                                "重试排队消息"
+                            } else {
+                                "立即插队发送"
+                            },
+                        )
                         .h(height::INLINE)
                         .px(space::SM)
                         .rounded(radius::CONTROL)
@@ -341,8 +371,9 @@ pub fn render_queue_bar(
                 )
                 .child(
                     div()
-                        .id(SharedString::from(format!("queue-edit-btn-{iid}")))
+                        .id(edit_id.clone())
                         .test_support()
+                        .a11y_button(edit_id, "编辑排队消息")
                         .w(height::INLINE)
                         .h(height::INLINE)
                         .rounded(radius::CONTROL)
@@ -361,8 +392,9 @@ pub fn render_queue_bar(
                 )
                 .child(
                     div()
-                        .id(SharedString::from(format!("queue-delete-btn-{iid}")))
+                        .id(del_id.clone())
                         .test_support()
+                        .a11y_button(del_id, "删除排队消息")
                         .w(height::INLINE)
                         .h(height::INLINE)
                         .rounded(radius::CONTROL)

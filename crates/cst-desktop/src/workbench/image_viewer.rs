@@ -12,7 +12,10 @@ use gpui_kit::{
 };
 
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{
+    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale,
+    space,
+};
 
 #[derive(Debug, Clone)]
 pub struct LightboxImageTarget {
@@ -80,6 +83,7 @@ pub fn render_image_lightbox_modal(
         scale_factor,
     )
     .test_support()
+    .a11y_dialog("image-lightbox-card", format!("图片预览：{meta_label}"))
     .max_w(px(960.0))
     .max_h(px(680.0))
     .p(space::LG)
@@ -107,6 +111,7 @@ pub fn render_image_lightbox_modal(
                 div()
                     .id("image-lightbox-close-btn")
                     .test_support()
+                    .a11y_button("image-lightbox-close-btn", "关闭图片预览")
                     .track_focus(close_focus)
                     .tab_index(0)
                     .w(height::CONTROL)

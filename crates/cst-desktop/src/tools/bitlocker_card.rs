@@ -19,7 +19,8 @@ use serde_json::Value;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
+    A11yElementExt as _, DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height,
+    radius, scale, space,
 };
 
 /// Exact byte capacity for an 8×6 hyphenated BitLocker recovery password
@@ -74,12 +75,16 @@ impl Focusable for SecretInput {
 
 impl SecretInput {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        Self::with_accessibility_id("bitlocker-secret-input", cx)
+    }
+
+    pub fn with_accessibility_id(id: impl Into<SharedString>, cx: &mut Context<Self>) -> Self {
         let accessibility = InputAccessibility::new(Some(Role::PasswordInput))
             .with_label(Some(SharedString::from("BitLocker 恢复密码")))
             .with_placeholder(Some(SharedString::from(
                 "XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX",
             )))
-            .with_accessibility_id(Some(SharedString::from("bitlocker-secret-input")))
+            .with_accessibility_id(Some(id.into()))
             .with_value_exposed(false);
         debug_assert!(!accessibility.value_exposed());
 
@@ -487,6 +492,7 @@ impl Render for SecretInput {
         .left_0()
         .size_full();
 
+        let weak_for_a11y = cx.weak_entity();
         let mut field = div()
             .id("bitlocker-secret-input-box")
             .test_support()
@@ -509,6 +515,17 @@ impl Render for SecretInput {
                 cx.notify();
             }))
             .on_key_down(cx.listener(Self::handle_key_down))
+            .on_a11y_action(
+                gpui::AccessibleAction::SetValue,
+                move |data, _window, cx| {
+                    if let Some(gpui::accesskit::ActionData::Value(val)) = data {
+                        let guarded = Zeroizing::new(val.to_string());
+                        let _ = weak_for_a11y.update(cx, |this, cx| {
+                            let _ = this.try_paste_str(guarded.as_str(), cx);
+                        });
+                    }
+                },
+            )
             .child(input_handler_probe);
 
         if let Some(role) = self.accessibility.role() {
@@ -833,6 +850,10 @@ pub fn render_bitlocker_card<V: 'static>(
             props.call_id
         )))
         .test_support()
+        .a11y_region(
+            SharedString::from(format!("bitlocker-card-{}", props.call_id)),
+            header_title.clone(),
+        )
         .w_full()
         .p(space::LG)
         .rounded(radius::SPECIAL)
@@ -932,13 +953,15 @@ pub fn render_bitlocker_card<V: 'static>(
                                         .child(SharedString::from(key_id)),
                                 ),
                         )
-                        .child(
+                        .child({
+                            let copy_key_btn_id = SharedString::from(format!(
+                                "bitlocker-copy-key-id-{}",
+                                props.call_id
+                            ));
                             div()
-                                .id(SharedString::from(format!(
-                                    "bitlocker-copy-key-id-{}",
-                                    props.call_id
-                                )))
+                                .id(copy_key_btn_id.clone())
                                 .test_support()
+                                .a11y_button(copy_key_btn_id, "复制密钥 ID")
                                 .w(height::INLINE)
                                 .h(height::INLINE)
                                 .flex_shrink_0()
@@ -956,8 +979,8 @@ pub fn render_bitlocker_card<V: 'static>(
                                     Icon::new(IconName::Copy)
                                         .size(px(14.0))
                                         .text_color(palette.text_secondary),
-                                ),
-                        ),
+                                )
+                        }),
                 );
             }
 
@@ -996,6 +1019,13 @@ pub fn render_bitlocker_card<V: 'static>(
                                             props.call_id
                                         )))
                                         .test_support()
+                                        .a11y_button(
+                                            SharedString::from(format!(
+                                                "bitlocker-submit-btn-{}",
+                                                props.call_id
+                                            )),
+                                            "解锁",
+                                        )
                                         .h(height::CONTROL)
                                         .px(space::LG)
                                         .rounded(radius::CONTROL)
@@ -1067,6 +1097,13 @@ pub fn render_bitlocker_card<V: 'static>(
                                             props.call_id
                                         )))
                                         .test_support()
+                                        .a11y_button(
+                                            SharedString::from(format!(
+                                                "bitlocker-cancel-btn-{}",
+                                                props.call_id
+                                            )),
+                                            "取消",
+                                        )
                                         .h(height::CONTROL)
                                         .px(space::MD)
                                         .rounded(radius::CONTROL)
@@ -1109,6 +1146,13 @@ pub fn render_bitlocker_card<V: 'static>(
                                 props.call_id
                             )))
                             .test_support()
+                            .a11y_link(
+                                SharedString::from(format!(
+                                    "bitlocker-recovery-link-{}",
+                                    props.call_id
+                                )),
+                                "查找恢复密钥",
+                            )
                             .h(px(20.0))
                             .cursor(CursorStyle::PointingHand)
                             .flex()
@@ -1191,6 +1235,17 @@ pub fn render_bitlocker_card<V: 'static>(
                                         props.call_id
                                     )))
                                     .test_support()
+                                    .a11y_button(
+                                        SharedString::from(format!(
+                                            "bitlocker-confirm-btn-{}",
+                                            props.call_id
+                                        )),
+                                        if is_decrypt {
+                                            "确认关闭加密"
+                                        } else {
+                                            "确认执行"
+                                        },
+                                    )
                                     .h(height::CONTROL)
                                     .px(space::LG)
                                     .rounded(radius::CONTROL)
@@ -1231,6 +1286,13 @@ pub fn render_bitlocker_card<V: 'static>(
                                         props.call_id
                                     )))
                                     .test_support()
+                                    .a11y_button(
+                                        SharedString::from(format!(
+                                            "bitlocker-cancel-btn-{}",
+                                            props.call_id
+                                        )),
+                                        "取消",
+                                    )
                                     .h(height::CONTROL)
                                     .px(space::MD)
                                     .rounded(radius::CONTROL)
@@ -1340,6 +1402,14 @@ pub fn render_bitlocker_card<V: 'static>(
                                 props.call_id
                             )))
                             .test_support()
+                            .a11y_toggle_button(
+                                SharedString::from(format!(
+                                    "bitlocker-detail-toggle-{}",
+                                    props.call_id
+                                )),
+                                "BitLocker 详情",
+                                props.details_expanded,
+                            )
                             .h(height::INLINE)
                             .flex()
                             .items_center()

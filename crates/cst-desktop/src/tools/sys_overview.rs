@@ -6,7 +6,10 @@ use gpui_kit::{
     StatefulInteractiveElement, Styled, TestSupportExt, div, px, relative,
 };
 
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{
+    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale,
+    space,
+};
 
 pub struct SysOverviewProps<'a> {
     pub call_id: &'a str,
@@ -71,12 +74,21 @@ pub fn render_sys_overview_card(
     let has_details = !props.fields.is_empty() || !props.errors.is_empty();
     let detail_key = format!("sys-overview-details-{}", props.call_id);
 
+    let card_title = if props.title.trim().is_empty() {
+        "整机概览"
+    } else {
+        props.title
+    };
     let mut card = div()
         .id(SharedString::from(format!(
             "special-sys-overview-{}",
             props.call_id
         )))
         .test_support()
+        .a11y_region(
+            SharedString::from(format!("sys-overview-card-{}", props.call_id)),
+            card_title,
+        )
         .w_full()
         .p(space::LG)
         .rounded(radius::SPECIAL)
@@ -210,13 +222,13 @@ pub fn render_sys_overview_card(
 
         if has_details {
             let dk = detail_key;
+            let toggle_id =
+                SharedString::from(format!("sys-overview-detail-toggle-{}", props.call_id));
             bottom_bar = bottom_bar.child(
                 apply_scale(div(), scale::CAPTION)
-                    .id(SharedString::from(format!(
-                        "sys-overview-detail-toggle-{}",
-                        props.call_id
-                    )))
+                    .id(toggle_id.clone())
                     .test_support()
+                    .a11y_toggle_button(toggle_id, "整机概览详情", props.details_expanded)
                     .h(height::INLINE)
                     .flex()
                     .items_center()

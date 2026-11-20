@@ -7,7 +7,7 @@ use gpui_kit::{
 };
 
 use crate::theme::{
-    DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
+    A11yElementExt as _, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, radius,
     render_subpage_header_xwjof, scale, space,
 };
 use crate::workbench::model_picker::format_quota_balance;
@@ -219,6 +219,7 @@ impl Render for AccountView {
                                 div()
                                     .id("account-quota-refresh-btn")
                                     .test_support()
+                                    .a11y_button("account-quota-refresh-btn", "刷新剩余额度")
                                     .w(height::CONTROL)
                                     .h(height::CONTROL)
                                     .rounded(radius::CONTROL)
@@ -241,6 +242,7 @@ impl Render for AccountView {
         div()
             .id("account-view")
             .test_support()
+            .a11y_region("account-view", "账号信息")
             .size_full()
             .flex()
             .flex_col()
@@ -288,6 +290,14 @@ impl Render for AccountView {
                                     apply_scale(div(), scale::UI_MEDIUM)
                                         .id("account-cstoa-logout-btn")
                                         .test_support()
+                                        .a11y_button(
+                                            "account-logout-btn",
+                                            if self.logging_out {
+                                                "正在退出"
+                                            } else {
+                                                "退出 CSTOA 登录"
+                                            },
+                                        )
                                         .h(height::CONTROL)
                                         .px(space::MD)
                                         .rounded(radius::CONTROL)

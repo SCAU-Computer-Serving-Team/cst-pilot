@@ -9,7 +9,8 @@ use gpui_kit::{
 
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
-    DesktopThemeGlobal, apply_scale, cjk_inline_label, layout, radius, scale, space,
+    A11yElementExt as _, DesktopThemeGlobal, apply_scale, cjk_inline_label, layout, radius, scale,
+    space,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -260,6 +261,7 @@ impl Render for CommandPaletteModal {
                 scale_factor,
             )
             .test_support()
+            .a11y_dialog("command-palette-modal", "命令面板")
             .w(layout::PALETTE_MODAL_WIDTH)
             .max_h(px(460.0))
             .rounded(radius::ROW)

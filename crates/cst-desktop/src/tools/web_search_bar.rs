@@ -9,7 +9,10 @@ use gpui_kit::{
 };
 
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{
+    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale,
+    space,
+};
 
 pub struct WebSearchBarProps<'a> {
     pub call_id: &'a str,
@@ -131,12 +134,12 @@ pub fn render_web_search_bar(
         .text_color(palette.text_secondary),
     );
 
+    let hdr_id = SharedString::from(format!("web-search-bar-hdr-{}", props.call_id));
+    let hdr_label = SharedString::from(format!("{display_title}（{count_text}）"));
     let header_bar = div()
-        .id(SharedString::from(format!(
-            "web-search-bar-hdr-{}",
-            props.call_id
-        )))
+        .id(hdr_id.clone())
         .test_support()
+        .a11y_toggle_button(hdr_id, hdr_label, props.expanded)
         .w_full()
         .h(height::COMPACT)
         .flex()
@@ -158,6 +161,10 @@ pub fn render_web_search_bar(
             props.call_id
         )))
         .test_support()
+        .a11y_region(
+            SharedString::from(format!("web-search-card-{}", props.call_id)),
+            display_title,
+        )
         .relative()
         .w_full()
         .px(space::LG)

@@ -10,7 +10,8 @@ use gpui_kit::{
 };
 
 use crate::theme::{
-    DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius, scale, space,
+    A11yElementExt as _, DesktopPalette, apply_scale, cjk_inline_label, height, layout, radius,
+    scale, space,
 };
 
 pub type TopbarActionFn = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -71,6 +72,7 @@ pub fn render_topbar(
                 div()
                     .id("topbar-expand-sidebar-btn")
                     .test_support()
+                    .a11y_button("topbar-expand-sidebar-btn", "展开侧栏")
                     .track_focus(expand_btn_focus)
                     .tab_index(0)
                     .w(height::COMPACT)
@@ -98,6 +100,7 @@ pub fn render_topbar(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("topbar-recent-drawer-btn")
                     .test_support()
+                    .a11y_button("topbar-recent-drawer-btn", "最近会话抽屉")
                     .track_focus(recent_btn_focus)
                     .tab_index(0)
                     .h(height::COMPACT)
@@ -123,6 +126,7 @@ pub fn render_topbar(
             )
             .child(topbar_icon_btn(
                 "topbar-new-session-btn",
+                "新建对话",
                 IconName::SquarePen,
                 palette.text_primary,
                 palette,
@@ -130,6 +134,7 @@ pub fn render_topbar(
             ))
             .child(topbar_icon_btn(
                 "topbar-dashboard-btn",
+                "仪表盘",
                 IconName::LayoutDashboard,
                 palette.text_secondary,
                 palette,
@@ -147,6 +152,7 @@ pub fn render_topbar(
     let view_segmented = div()
         .id("topbar-view-segmented")
         .test_support()
+        .a11y_region("topbar-view-segmented", "工作区视图切换")
         .h(height::COMPACT)
         .p(space::MICRO)
         .rounded(px(6.0))
@@ -175,6 +181,7 @@ pub fn render_topbar(
     let web_btn = apply_scale(div(), scale::UI)
         .id("topbar-open-web-btn")
         .test_support()
+        .a11y_button("topbar-open-web-btn", "打开网页端")
         .tab_index(0)
         .h(height::COMPACT)
         .px(space::SM)
@@ -215,6 +222,7 @@ pub fn render_topbar(
                 div()
                     .id("topbar-account-btn")
                     .test_support()
+                    .a11y_button("topbar-account-btn", "账号菜单")
                     .track_focus(account_btn_focus)
                     .tab_index(0)
                     .w(height::COMPACT)
@@ -241,6 +249,7 @@ pub fn render_topbar(
             )
             .child(topbar_icon_btn(
                 "topbar-settings-btn",
+                "打开设置",
                 IconName::Settings,
                 palette.text_secondary,
                 palette,
@@ -261,6 +270,7 @@ pub fn render_topbar(
     div()
         .id(bar_id)
         .test_support()
+        .a11y_region(bar_id, "顶部工具栏")
         .w_full()
         .h(layout::TOPBAR_HEIGHT)
         .flex_shrink_0()
@@ -295,6 +305,7 @@ pub fn render_window_caption_controls(
             div()
                 .id("window-btn-minimize")
                 .test_support()
+                .a11y_button("window-btn-minimize", "最小化窗口")
                 .window_control_area(WindowControlArea::Min)
                 .w(px(40.0))
                 .h_full()
@@ -310,6 +321,14 @@ pub fn render_window_caption_controls(
             div()
                 .id("window-btn-maximize")
                 .test_support()
+                .a11y_button(
+                    "window-btn-maximize",
+                    if is_maximized {
+                        "还原窗口"
+                    } else {
+                        "最大化窗口"
+                    },
+                )
                 .window_control_area(WindowControlArea::Max)
                 .w(px(40.0))
                 .h_full()
@@ -332,6 +351,7 @@ pub fn render_window_caption_controls(
             div()
                 .id("window-btn-close")
                 .test_support()
+                .a11y_button("window-btn-close", "关闭窗口")
                 .window_control_area(WindowControlArea::Close)
                 .w(px(40.0))
                 .h_full()
@@ -359,6 +379,7 @@ fn view_segment_item(
     let base = apply_scale(div(), if active { scale::UI_MEDIUM } else { scale::UI })
         .id(id)
         .test_support()
+        .a11y_tab(id, label, active)
         .h(height::INLINE)
         .px(space::SM)
         .rounded(radius::CONTROL)
@@ -386,6 +407,7 @@ fn view_segment_item(
 
 fn topbar_icon_btn(
     id: &'static str,
+    label: &'static str,
     icon: IconName,
     icon_color: Hsla,
     palette: &DesktopPalette,
@@ -394,6 +416,7 @@ fn topbar_icon_btn(
     div()
         .id(id)
         .test_support()
+        .a11y_button(id, label)
         .tab_index(0)
         .w(height::COMPACT)
         .h(height::COMPACT)
