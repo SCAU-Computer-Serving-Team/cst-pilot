@@ -91,11 +91,17 @@ fn normalize_version_tag(raw: &str) -> &str {
     trimmed.strip_prefix('v').unwrap_or(trimmed)
 }
 
-fn read_kit_version_file(root: &Path) -> Result<String, String> {
+fn read_kit_version_file(
+    root: &Path,
+    compiled_build_version: Option<&str>,
+) -> Result<String, String> {
     let storage = Storage::new(root)?;
-    let bytes = storage
-        .read_limited(&storage.root.join("VERSION"), 4096)?
-        .ok_or_else(|| "缺少工具包 VERSION 文件。".to_owned())?;
+    let Some(bytes) = storage.read_limited(&storage.root.join("VERSION"), 4096)? else {
+        if compiled_build_version.is_none() && storage.root.join("Cargo.toml").is_file() {
+            return Ok(env!("CARGO_PKG_VERSION").to_owned());
+        }
+        return Err("缺少工具包 VERSION 文件。".to_owned());
+    };
     let text = std::str::from_utf8(&bytes).map_err(|_| "VERSION 文件编码无效。".to_owned())?;
     let line = text
         .lines()
@@ -108,6 +114,34 @@ fn read_kit_version_file(root: &Path) -> Result<String, String> {
         .filter(|v| !v.is_empty())
         .ok_or_else(|| "VERSION 文件格式无效。".to_owned())?;
     Ok(ver.to_owned())
+}
+
+fn resolve_sibling_kit_binaries(kit_root: &Path) -> Result<(PathBuf, PathBuf, PathBuf), String> {
+    let canonical_root = cst_os::strip_windows_verbatim_prefix(
+        &kit_root
+            .canonicalize()
+            .map_err(|e| format!("无法解析工具包根目录：{e}"))?,
+    );
+    let target_dir = canonical_root.join("target");
+
+    let bin_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.canonicalize().ok())
+        .map(|exe| cst_os::strip_windows_verbatim_prefix(&exe))
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        .filter(|dir| {
+            *dir == canonical_root
+                || dir
+                    .parent()
+                    .is_some_and(|parent| parent == target_dir.as_path())
+        })
+        .unwrap_or_else(|| canonical_root.clone());
+
+    Ok((
+        bin_dir.join("cst-pilot.exe"),
+        bin_dir.join("cst-server.exe"),
+        bin_dir.join("cst-updater.exe"),
+    ))
 }
 
 /// Fast local read-only `--health-check` executed BEFORE initializing GUI, DirectWrite, single-instance locks, or network.
@@ -129,7 +163,7 @@ pub fn run_desktop_health_check(
     }
 
     // 2. Kit VERSION & optional binary build version match
-    let disk_version = read_kit_version_file(kit_root)?;
+    let disk_version = read_kit_version_file(kit_root, compiled_build_version)?;
     if let Some(build_ver) = compiled_build_version
         .map(str::trim)
         .filter(|v| !v.is_empty())
@@ -202,31 +236,34 @@ pub fn run_desktop_health_check(
     Ok(disk_version)
 }
 
-/// Forwards `--ui web` to `<kit_root>/cst-server.exe --standalone-web --open-browser` under a sanitized environment.
+/// Forwards `--ui web` to `<bin_dir>/cst-server.exe --standalone-web --open-browser` under a sanitized environment.
 pub fn forward_standalone_web(kit_root: &Path) -> Result<(), String> {
     let canonical_root = cst_os::strip_windows_verbatim_prefix(
         &kit_root
             .canonicalize()
             .map_err(|e| format!("无法解析工具包根目录：{e}"))?,
     );
-    let server_exe = canonical_root.join("cst-server.exe");
+    let (_desktop_exe, server_exe, _updater_exe) = resolve_sibling_kit_binaries(&canonical_root)?;
     if !server_exe.is_file() {
         return Err("未找到同目录下的 cst-server.exe。".into());
+    }
+    let meta = std::fs::symlink_metadata(&server_exe)
+        .map_err(|e| format!("无法校验 cst-server.exe：{e}"))?;
+    if cst_os::is_reparse_or_symlink(&meta) {
+        return Err("cst-server.exe 不能是符号链接或重解析点。".into());
     }
     let canonical_exe = cst_os::strip_windows_verbatim_prefix(
         &server_exe
             .canonicalize()
             .map_err(|e| format!("无法校验 cst-server.exe 路径：{e}"))?,
     );
-    if canonical_exe.parent() != Some(canonical_root.as_path()) {
-        return Err("cst-server.exe 不位于当前工具包根目录内。".into());
-    }
 
     let tmp_dir = canonical_root.join(".state/tmp");
     let _ = std::fs::create_dir_all(&tmp_dir);
 
     let mut cmd = std::process::Command::new(&canonical_exe);
-    cmd.args(["--standalone-web", "--open-browser"])
+    cmd.args(["--standalone-web", "--open-browser", "--kit-root"])
+        .arg(&canonical_root)
         .current_dir(&canonical_root)
         .env_clear()
         .env("PI_CODING_AGENT_DIR", canonical_root.join("agent/home"))
@@ -285,7 +322,13 @@ pub fn open_desktop_shell_window(
 
 /// Runs the full desktop application lifecycle (`CstClient::bootstrap` + `gpui_kit::application`).
 pub fn run_desktop_app(kit_root: PathBuf, initial_ui: RestartUi) -> Result<(), String> {
-    let mut boot_opts = BootstrapOptions::default();
+    let (desktop_exe, server_exe, updater_exe) = resolve_sibling_kit_binaries(&kit_root)?;
+    let mut boot_opts = BootstrapOptions {
+        expected_desktop_exe: Some(desktop_exe),
+        expected_server_exe: Some(server_exe),
+        expected_updater_exe: Some(updater_exe),
+        ..BootstrapOptions::default()
+    };
     if std::env::var("CST_ALLOW_UNELEVATED").as_deref() == Ok("1") {
         boot_opts.require_elevation = false;
     }

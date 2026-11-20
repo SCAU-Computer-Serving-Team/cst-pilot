@@ -37,6 +37,13 @@
 
 ## 运行与调试
 
+项目内直接启动 Rust 桌面端（`--release` 编译并启动优化版，`--build` 增量重编开发版）：
+
+```powershell
+.\pi-desktop-rust.cmd
+.\pi-desktop-rust.cmd --release
+```
+
 构建前端并启动 Rust Web 独立服务：
 
 ```powershell
