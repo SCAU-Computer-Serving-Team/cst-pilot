@@ -118,6 +118,7 @@ LHM 隔离采集辅助程序需在安装 .NET 10 SDK 的构建机上验证，命
 1. [路由广度 E2E（bsk-e2e.md）](../web/test/bsk-e2e.md)：覆盖全部 15 个叶路由与 28 个页内交互分支。
 2. [长会话与状态机深度 E2E（bsk-deep-e2e.md）](../web/test/bsk-deep-e2e.md)：验证 500K 上下文自动压缩、瞬态重试、乐观发送对账，以及挂起交互桥与 33 会话聚合流分片。
 3. [用户体验量化 E2E（ux-e2e.md）](../web/test/ux-e2e.md)：通过 5 类浏览器注入探针在 6 种视口断点与极限数据夹具下量化检验几何对齐、动效连续性、输入法焦点与流式零抖动。
+4. [桌面端 UX 与交互性能 E2E（desktop/test/ux-e2e.md）](../desktop/test/ux-e2e.md)：通过 `winapp` + Win32 驱动、高配机 Job Object 限流档位、`test-support` 进程内探针与视觉像素校核，量化检验输入响应、切换、滚动、流式并发、停帧功耗与 7 组体验正确性。
 
 CI 自动化浏览器套件覆盖以下核心回归面：
 
