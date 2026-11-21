@@ -555,13 +555,20 @@ async fn headless_tools_17_cards_bitlocker_400_retry_ime_restore_unknown_review_
         ml.update(cx, |m, cx| m.scroll_to_top(cx));
         window.render_frame(cx);
 
-        // Expand process segment -> verify `normal-tool-card-tc-disk` & its `"原始数据"` disclosure
+        // Expand process segment -> advance past 240ms `collapse` height reveal -> verify `normal-tool-card-tc-disk` & its `"原始数据"` disclosure
         window.click("process-hdr-u-tools:process-start", cx);
+    })
+    .unwrap();
+    cx.executor().advance_clock(Duration::from_millis(260));
+    cx.update_window(win_handle, |_, window, cx| {
+        window.refresh();
+        window.render_frame(cx);
         assert!(window.find("normal-tool-hdr-tc-disk").visible());
         window.click("normal-tool-hdr-tc-disk", cx);
         assert!(window.find("normal-tool-raw-toggle-tc-disk").visible());
 
         // Scroll back to bottom so Runbook & BitLocker cards are inside viewport
+        let ml = shell.read(cx).workbench().read(cx).message_list().clone();
         ml.update(cx, |m, cx| m.scroll_to_bottom_and_follow(cx));
         window.render_frame(cx);
 

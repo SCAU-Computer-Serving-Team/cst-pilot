@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use cst_client::{ClientError, ClientHandle};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::{
@@ -11,7 +12,9 @@ use gpui_kit::{
 use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{
+    DesktopPalette, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VisibleQueueItem {
@@ -168,6 +171,8 @@ pub fn render_queue_bar(
     editing_item_id: Option<&str>,
     edit_input_state: Option<&Entity<InputState>>,
     palette: &DesktopPalette,
+    window: &mut Window,
+    cx: &mut App,
     cb: QueueBarCallbacks,
 ) -> Option<gpui_kit::AnyElement> {
     if queue.items.is_empty() {
@@ -472,10 +477,17 @@ pub fn render_queue_bar(
                 );
         }
 
+        let (flip_y, flip_state, flip_epoch) =
+            motion::sample_flip_offset_y("composer-queue", &iid, version, window, cx);
         list = list.child(
             div()
                 .id(SharedString::from(format!("queue-item-row-{iid}")))
                 .test_support()
+                .relative()
+                .top(flip_y)
+                .on_prepaint(move |bounds, window, cx| {
+                    motion::record_flip_bounds_y(&flip_state, flip_epoch, bounds, window, cx);
+                })
                 .h(height::CONTROL)
                 .border_t_1()
                 .border_color(palette.border_subtle)

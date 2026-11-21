@@ -23,6 +23,7 @@ use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::theme::motion::DesktopTooltipExt as _;
 use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
     scale, space,
@@ -1571,6 +1572,8 @@ impl Render for ComposerView {
                 self.editing_queue_item_id.as_deref(),
                 self.queue_edit_input.as_ref(),
                 &palette,
+                window,
+                cx,
                 QueueBarCallbacks {
                     on_steer: Rc::new(move |id, version, w, cx| {
                         q1.0.update(cx, |this, cx| {
@@ -1876,10 +1879,16 @@ impl Render for ComposerView {
 
         // 4. Bottom `28px` action bar (`QG05v`)
         let ent_attach = entity.clone();
+        let attach_press = motion::icon_press_state("composer-attach-btn", window, cx);
+        let attach_pressed = *attach_press.read(cx);
+        let ap_down = attach_press.clone();
+        let ap_up = attach_press.clone();
+        let ap_out = attach_press;
         let attach_btn = div()
             .id("composer-attach-btn")
             .test_support()
             .a11y_button("composer-attach-btn", "添加图片附件")
+            .desktop_tooltip("composer-attach-btn", "添加图片附件")
             .w(height::COMPACT)
             .h(height::COMPACT)
             .rounded(radius::CONTROL)
@@ -1887,6 +1896,24 @@ impl Render for ComposerView {
             .items_center()
             .justify_center()
             .hover(|s| s.bg(palette.bg_item_hover))
+            .on_mouse_down(gpui_kit::MouseButton::Left, move |_, _, cx| {
+                ap_down.update(cx, |s, cx| {
+                    *s = true;
+                    cx.notify();
+                });
+            })
+            .on_mouse_up(gpui_kit::MouseButton::Left, move |_, _, cx| {
+                ap_up.update(cx, |s, cx| {
+                    *s = false;
+                    cx.notify();
+                });
+            })
+            .on_mouse_up_out(gpui_kit::MouseButton::Left, move |_, _, cx| {
+                ap_out.update(cx, |s, cx| {
+                    *s = false;
+                    cx.notify();
+                });
+            })
             .on_click(move |_, _, cx| {
                 let rx = cx.prompt_for_paths(PathPromptOptions {
                     files: true,
@@ -1904,11 +1931,15 @@ impl Render for ComposerView {
                 })
                 .detach();
             })
-            .child(
+            .child(motion::animated_icon_press(
+                "composer-attach-btn",
+                attach_pressed,
                 Icon::new(IconName::Plus)
                     .size(px(16.0))
                     .text_color(palette.text_secondary),
-            );
+                window,
+                cx,
+            ));
 
         let ent_ctx_btn = entity.clone();
         let prov_for_ctx = cur_provider.clone();
@@ -2015,17 +2046,21 @@ impl Render for ComposerView {
         let is_abort_mode = abort_session_id.is_some();
 
         let ent_send = entity.clone();
+        let send_press = motion::icon_press_state("composer-send-btn-b0mrik", window, cx);
+        let send_pressed = *send_press.read(cx);
+        let sp_down = send_press.clone();
+        let sp_up = send_press.clone();
+        let sp_out = send_press;
+        let send_label = if is_abort_mode {
+            "停止生成"
+        } else {
+            "发送消息"
+        };
         let send_btn = div()
             .id("composer-send-btn-b0mrik")
             .test_support()
-            .a11y_button(
-                "composer-send-btn-b0mrik",
-                if is_abort_mode {
-                    "停止生成"
-                } else {
-                    "发送消息"
-                },
-            )
+            .a11y_button("composer-send-btn-b0mrik", send_label)
+            .desktop_tooltip("composer-send-btn-b0mrik", send_label)
             .w(height::COMPACT)
             .h(height::COMPACT)
             .rounded(radius::CONTROL)
@@ -2034,6 +2069,24 @@ impl Render for ComposerView {
             .items_center()
             .justify_center()
             .hover(|s| s.bg(palette.accent_hover))
+            .on_mouse_down(gpui_kit::MouseButton::Left, move |_, _, cx| {
+                sp_down.update(cx, |s, cx| {
+                    *s = true;
+                    cx.notify();
+                });
+            })
+            .on_mouse_up(gpui_kit::MouseButton::Left, move |_, _, cx| {
+                sp_up.update(cx, |s, cx| {
+                    *s = false;
+                    cx.notify();
+                });
+            })
+            .on_mouse_up_out(gpui_kit::MouseButton::Left, move |_, _, cx| {
+                sp_out.update(cx, |s, cx| {
+                    *s = false;
+                    cx.notify();
+                });
+            })
             .on_click(move |_, w, cx| {
                 if let Some(ref sid_abort) = abort_session_id {
                     let s = sid_abort.clone();
@@ -2052,15 +2105,21 @@ impl Render for ComposerView {
                     ent_send.update(cx, |this, cx| this.trigger_submit(w, cx));
                 }
             })
-            .child(if is_abort_mode {
-                Icon::new(IconName::Square)
-                    .size(px(12.0))
-                    .text_color(palette.text_on_accent)
-            } else {
-                Icon::new(IconName::ArrowUp)
-                    .size(px(14.0))
-                    .text_color(palette.text_on_accent)
-            });
+            .child(motion::animated_icon_press(
+                "composer-send-btn-b0mrik",
+                send_pressed,
+                if is_abort_mode {
+                    Icon::new(IconName::Square)
+                        .size(px(12.0))
+                        .text_color(palette.text_on_accent)
+                } else {
+                    Icon::new(IconName::ArrowUp)
+                        .size(px(14.0))
+                        .text_color(palette.text_on_accent)
+                },
+                window,
+                cx,
+            ));
 
         let right_cluster = div()
             .flex()
@@ -2084,11 +2143,15 @@ impl Render for ComposerView {
             .child(attach_btn)
             .child(right_cluster);
 
-        let card_border_color = if is_focused {
-            palette.border_focus
-        } else {
-            palette.border_strong
-        };
+        let focus_t =
+            motion::animated_state_progress("composer-card-focus", is_focused, window, cx);
+        let card_border_color =
+            motion::lerp_hsla(palette.border_strong, palette.border_focus, focus_t);
+        let card_shadows = motion::lerp_shadows(
+            &palette.composer_shadows(false),
+            &palette.composer_shadows(true),
+            focus_t,
+        );
 
         let ent_drop = entity.clone();
         let mut card = div()
@@ -2102,7 +2165,7 @@ impl Render for ComposerView {
             .border_1()
             .border_color(card_border_color)
             .bg(palette.bg_workspace)
-            .shadow(palette.composer_shadows(is_focused))
+            .shadow(card_shadows)
             .flex()
             .flex_col()
             .justify_between()

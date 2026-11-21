@@ -3,6 +3,7 @@ use std::sync::Arc;
 use cst_client::{ClientHandle, ModelChoiceDto, ModelsSnapshot};
 use gpui::KeyDownEvent;
 use gpui_kit::assets::IconName;
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -41,6 +42,7 @@ pub struct PreferencesTabView {
     picker_focus: FocusHandle,
     picker_index: usize,
     picker_scroll: gpui::ScrollHandle,
+    reorder_epoch: u64,
     _search_subscription: Subscription,
     focus_handle: FocusHandle,
 }
@@ -78,6 +80,7 @@ impl PreferencesTabView {
             picker_focus: cx.focus_handle(),
             picker_index: 0,
             picker_scroll: gpui::ScrollHandle::new(),
+            reorder_epoch: 0,
             _search_subscription: search_subscription,
             focus_handle: cx.focus_handle(),
         }
@@ -173,6 +176,7 @@ impl PreferencesTabView {
                 this.saving_scope = false;
                 if let Err(err) = res {
                     this.ordered_enabled_ids = previous;
+                    this.reorder_epoch = this.reorder_epoch.wrapping_add(1);
                     cx.emit(PreferencesTabEvent::ErrorMessage(format!(
                         "保存启用模型范围失败，已自动回滚：{err}"
                     )));
@@ -267,6 +271,7 @@ impl PreferencesTabView {
         }
         let prev = self.ordered_enabled_ids.clone();
         self.ordered_enabled_ids.swap(idx, target as usize);
+        self.reorder_epoch = self.reorder_epoch.wrapping_add(1);
         self.selected_row_idx = target as usize;
         cx.notify();
         self.save_scoped_with_rollback(prev, cx);
@@ -920,9 +925,21 @@ impl Render for PreferencesTabView {
             let chk_id = SharedString::from(format!("pref-toggle-enabled-{idx}"));
             let up_id = SharedString::from(format!("pref-move-up-{idx}"));
             let down_id = SharedString::from(format!("pref-move-down-{idx}"));
+            let (flip_y, flip_state, flip_epoch) = motion::sample_flip_offset_y(
+                "pref-enabled-models",
+                full_id,
+                self.reorder_epoch,
+                window,
+                cx,
+            );
             let mut row = div()
                 .id(row_id.clone())
                 .test_support()
+                .relative()
+                .top(flip_y)
+                .on_prepaint(move |bounds, window, cx| {
+                    motion::record_flip_bounds_y(&flip_state, flip_epoch, bounds, window, cx);
+                })
                 .a11y_listitem(row_id, format!("{mname}（{prov}）"), selected)
                 .w_full()
                 .h(px(56.0))

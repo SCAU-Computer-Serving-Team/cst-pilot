@@ -21,6 +21,7 @@ use gpui_kit::{
 use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
+use crate::theme::motion::DesktopTooltipExt as _;
 use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion,
     radius, scale, space,
@@ -1303,25 +1304,35 @@ impl MessageListView {
                         .gap(space::SM)
                         .child(header);
 
-                    if seg_expanded && has_expandable_parts {
-                        let mut expanded_col = div().w_full().flex().flex_col().gap(space::SM);
-
-                        for (part_idx, tp) in segment.parts.iter().enumerate() {
-                            expanded_col = expanded_col.child(self.render_process_part(
-                                session,
-                                &segment_id,
-                                part_idx,
-                                tp,
-                                tool_results,
-                                is_live_turn,
-                                mono_family.clone(),
-                                palette,
-                                entity,
-                                window,
-                                cx,
-                            ));
-                        }
-                        seg_box = seg_box.child(expanded_col);
+                    if has_expandable_parts
+                        && let Some(animated_body) = motion::animated_collapse(
+                            format!("process-body-{segment_id}"),
+                            seg_expanded,
+                            window,
+                            cx,
+                            |window, cx| {
+                                let mut expanded_col =
+                                    div().w_full().flex().flex_col().gap(space::SM);
+                                for (part_idx, tp) in segment.parts.iter().enumerate() {
+                                    expanded_col = expanded_col.child(self.render_process_part(
+                                        session,
+                                        &segment_id,
+                                        part_idx,
+                                        tp,
+                                        tool_results,
+                                        is_live_turn,
+                                        mono_family.clone(),
+                                        palette,
+                                        entity,
+                                        window,
+                                        cx,
+                                    ));
+                                }
+                                expanded_col.into_any_element()
+                            },
+                        )
+                    {
+                        seg_box = seg_box.child(animated_body);
                     }
 
                     assistant_stack = assistant_stack.child(seg_box);
@@ -2031,7 +2042,8 @@ fn icon_action_24_element(
     let mut btn = div()
         .id(id_shared.clone())
         .test_support()
-        .a11y_button(id_shared, label)
+        .a11y_button(id_shared.clone(), label)
+        .desktop_tooltip(id_shared, label)
         .w(height::INLINE)
         .h(height::INLINE)
         .rounded(radius::CONTROL)

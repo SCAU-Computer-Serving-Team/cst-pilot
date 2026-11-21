@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use cst_client::SessionSummary;
 use gpui_kit::assets::IconName;
+use gpui_kit::base::ElementExt as _;
 use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Input, InputState};
@@ -13,6 +14,7 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
+use crate::theme::motion::DesktopTooltipExt as _;
 use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
@@ -85,6 +87,7 @@ pub fn render_sidebar_l081m1(
     route: ShellRoute,
     active_session_id: Option<&str>,
     sessions: &[SessionSummary],
+    reorder_epoch: u64,
     window: &mut Window,
     cx: &mut App,
     search_input: &Entity<InputState>,
@@ -168,9 +171,16 @@ pub fn render_sidebar_l081m1(
             let row_group = SharedString::from(format!("sidebar-row-grp-{sid}"));
 
             let row_a11y_id = SharedString::from(format!("sidebar-session-row-{sid}"));
+            let (flip_y, flip_state, flip_epoch) =
+                motion::sample_flip_offset_y("sidebar-recent", &sid, reorder_epoch, window, cx);
             let mut row = apply_scale(div(), row_scale)
                 .id(row_a11y_id.clone())
                 .test_support()
+                .relative()
+                .top(flip_y)
+                .on_prepaint(move |bounds, window, cx| {
+                    motion::record_flip_bounds_y(&flip_state, flip_epoch, bounds, window, cx);
+                })
                 .group(row_group.clone())
                 .h(height::CONTROL)
                 .px(space::SM)
@@ -440,11 +450,21 @@ pub fn render_sidebar_l081m1(
                                 .flex()
                                 .items_center()
                                 .gap(space::XS)
-                                .child(
+                                .child({
+                                    let press_state = motion::icon_press_state(
+                                        "sidebar-collapse-btn",
+                                        window,
+                                        cx,
+                                    );
+                                    let pressed = *press_state.read(cx);
+                                    let ps_down = press_state.clone();
+                                    let ps_up = press_state.clone();
+                                    let ps_out = press_state;
                                     div()
                                         .id("sidebar-collapse-btn")
                                         .test_support()
                                         .a11y_button("sidebar-collapse-btn", "收起侧栏")
+                                        .desktop_tooltip("sidebar-collapse-btn", "收起侧栏")
                                         .track_focus(collapse_btn_focus)
                                         .tab_index(0)
                                         .w(height::COMPACT)
@@ -454,18 +474,59 @@ pub fn render_sidebar_l081m1(
                                         .items_center()
                                         .justify_center()
                                         .hover(|s| s.bg(palette.bg_item_hover))
+                                        .on_mouse_down(
+                                            gpui_kit::MouseButton::Left,
+                                            move |_, _, cx| {
+                                                ps_down.update(cx, |s, cx| {
+                                                    *s = true;
+                                                    cx.notify();
+                                                });
+                                            },
+                                        )
+                                        .on_mouse_up(
+                                            gpui_kit::MouseButton::Left,
+                                            move |_, _, cx| {
+                                                ps_up.update(cx, |s, cx| {
+                                                    *s = false;
+                                                    cx.notify();
+                                                });
+                                            },
+                                        )
+                                        .on_mouse_up_out(
+                                            gpui_kit::MouseButton::Left,
+                                            move |_, _, cx| {
+                                                ps_out.update(cx, |s, cx| {
+                                                    *s = false;
+                                                    cx.notify();
+                                                });
+                                            },
+                                        )
                                         .on_click(move |_, window, cx| (on_collapse)(window, cx))
-                                        .child(
+                                        .child(motion::animated_icon_press(
+                                            "sidebar-collapse-btn",
+                                            pressed,
                                             Icon::new(IconName::PanelLeft)
                                                 .size(px(16.0))
                                                 .text_color(palette.text_secondary),
-                                        ),
-                                )
-                                .child(
+                                            window,
+                                            cx,
+                                        ))
+                                })
+                                .child({
+                                    let press_state = motion::icon_press_state(
+                                        "sidebar-new-session-btn",
+                                        window,
+                                        cx,
+                                    );
+                                    let pressed = *press_state.read(cx);
+                                    let ps_down = press_state.clone();
+                                    let ps_up = press_state.clone();
+                                    let ps_out = press_state;
                                     div()
                                         .id("sidebar-new-session-btn")
                                         .test_support()
                                         .a11y_button("sidebar-new-session-btn", "新建对话")
+                                        .desktop_tooltip("sidebar-new-session-btn", "新建对话")
                                         .tab_index(0)
                                         .w(height::COMPACT)
                                         .h(height::COMPACT)
@@ -474,13 +535,44 @@ pub fn render_sidebar_l081m1(
                                         .items_center()
                                         .justify_center()
                                         .hover(|s| s.bg(palette.bg_item_hover))
+                                        .on_mouse_down(
+                                            gpui_kit::MouseButton::Left,
+                                            move |_, _, cx| {
+                                                ps_down.update(cx, |s, cx| {
+                                                    *s = true;
+                                                    cx.notify();
+                                                });
+                                            },
+                                        )
+                                        .on_mouse_up(
+                                            gpui_kit::MouseButton::Left,
+                                            move |_, _, cx| {
+                                                ps_up.update(cx, |s, cx| {
+                                                    *s = false;
+                                                    cx.notify();
+                                                });
+                                            },
+                                        )
+                                        .on_mouse_up_out(
+                                            gpui_kit::MouseButton::Left,
+                                            move |_, _, cx| {
+                                                ps_out.update(cx, |s, cx| {
+                                                    *s = false;
+                                                    cx.notify();
+                                                });
+                                            },
+                                        )
                                         .on_click(move |_, window, cx| (on_new)(window, cx))
-                                        .child(
+                                        .child(motion::animated_icon_press(
+                                            "sidebar-new-session-btn",
+                                            pressed,
                                             Icon::new(IconName::SquarePen)
                                                 .size(px(16.0))
                                                 .text_color(palette.text_primary),
-                                        ),
-                                ),
+                                            window,
+                                            cx,
+                                        ))
+                                }),
                         ),
                 )
                 // 2. Navigation & recent sessions body `pQpX5` (`gap: 16px`)
@@ -644,11 +736,18 @@ pub fn render_sidebar_l081m1(
                                     .child(cjk_inline_label(account_label)),
                             ),
                     )
-                    .child(
+                    .child({
+                        let press_state =
+                            motion::icon_press_state("sidebar-settings-btn", window, cx);
+                        let pressed = *press_state.read(cx);
+                        let ps_down = press_state.clone();
+                        let ps_up = press_state.clone();
+                        let ps_out = press_state;
                         div()
                             .id("sidebar-settings-btn")
                             .test_support()
                             .a11y_button("sidebar-settings-btn", "打开设置")
+                            .desktop_tooltip("sidebar-settings-btn", "打开设置")
                             .tab_index(0)
                             .w(height::COMPACT)
                             .h(height::COMPACT)
@@ -662,13 +761,35 @@ pub fn render_sidebar_l081m1(
                             .items_center()
                             .justify_center()
                             .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_mouse_down(gpui_kit::MouseButton::Left, move |_, _, cx| {
+                                ps_down.update(cx, |s, cx| {
+                                    *s = true;
+                                    cx.notify();
+                                });
+                            })
+                            .on_mouse_up(gpui_kit::MouseButton::Left, move |_, _, cx| {
+                                ps_up.update(cx, |s, cx| {
+                                    *s = false;
+                                    cx.notify();
+                                });
+                            })
+                            .on_mouse_up_out(gpui_kit::MouseButton::Left, move |_, _, cx| {
+                                ps_out.update(cx, |s, cx| {
+                                    *s = false;
+                                    cx.notify();
+                                });
+                            })
                             .on_click(move |_, w, cx| (on_settings)(w, cx))
-                            .child(
+                            .child(motion::animated_icon_press(
+                                "sidebar-settings-btn",
+                                pressed,
                                 Icon::new(IconName::Settings)
                                     .size(px(16.0))
                                     .text_color(palette.text_secondary),
-                            ),
-                    ),
+                                window,
+                                cx,
+                            ))
+                    }),
             ),
         )
 }

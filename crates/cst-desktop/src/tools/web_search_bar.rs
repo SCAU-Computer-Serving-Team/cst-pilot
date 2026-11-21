@@ -11,6 +11,7 @@ use gpui_kit::{
 
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::theme::motion::DesktopTooltipExt as _;
 use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
 };
@@ -90,6 +91,21 @@ pub fn render_web_search_bar(
                 .child(cjk_inline_label(display_title)),
         );
 
+    let warn_reason_text = if has_hover_issue {
+        Some(if props.errors.is_empty() {
+            if is_error {
+                "联网检索失败。".to_owned()
+            } else {
+                "部分检索词未能返回完整网页摘要。".to_owned()
+            }
+        } else {
+            props.errors.join("；")
+        })
+    } else {
+        None
+    };
+    let has_shared_tooltip_overlay = motion::window_tooltip_overlay(window, cx).is_some();
+
     if is_running {
         left_row = left_row.child(
             Icon::new(IconName::LoaderCircle)
@@ -104,24 +120,30 @@ pub fn render_web_search_bar(
         } else {
             (IconName::TriangleAlert, palette.status_warning)
         };
-        left_row = left_row.child(
-            div()
-                .id(SharedString::from(format!(
-                    "web-search-warn-icon-{}",
-                    props.call_id
-                )))
-                .test_support()
-                .w(px(16.0))
-                .h(px(16.0))
-                .flex_shrink_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .on_hover(move |hovered, w, cx| {
-                    (hover_cb)(wk_hover.clone(), *hovered, w, cx);
-                })
-                .child(Icon::new(badge_icon).size(px(15.0)).text_color(badge_color)),
-        );
+        let tooltip_elem_id =
+            SharedString::from(format!("web-search-warn-tooltip-{}", props.call_id));
+        let tooltip_text = SharedString::from(warn_reason_text.clone().unwrap_or_default());
+        let warn_icon = div()
+            .id(SharedString::from(format!(
+                "web-search-warn-icon-{}",
+                props.call_id
+            )))
+            .test_support()
+            .w(px(16.0))
+            .h(px(16.0))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(Icon::new(badge_icon).size(px(15.0)).text_color(badge_color));
+        let warn_icon = if has_shared_tooltip_overlay {
+            warn_icon.desktop_tooltip_with_hover(tooltip_elem_id, tooltip_text, true, None)
+        } else {
+            warn_icon.on_hover(move |hovered, w, cx| {
+                (hover_cb)(wk_hover.clone(), *hovered, w, cx);
+            })
+        };
+        left_row = left_row.child(warn_icon);
     } else if props.status == SpecialStatus::Success {
         left_row = left_row.child(
             Icon::new(IconName::CircleCheck)
@@ -239,16 +261,8 @@ pub fn render_web_search_bar(
         card = card.child(details);
     }
 
-    if has_hover_issue && props.warning_hovered {
-        let reason_text = if props.errors.is_empty() {
-            if is_error {
-                "联网检索失败。".to_owned()
-            } else {
-                "部分检索词未能返回完整网页摘要。".to_owned()
-            }
-        } else {
-            props.errors.join("；")
-        };
+    if has_hover_issue && props.warning_hovered && !has_shared_tooltip_overlay {
+        let reason_text = warn_reason_text.unwrap_or_default();
         card = card.child(
             div()
                 .absolute()

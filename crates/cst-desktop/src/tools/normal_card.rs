@@ -572,21 +572,30 @@ pub fn render_normal_tool_card_with_args<V: 'static>(
                 )),
         );
 
-        if is_raw_expanded {
-            let blk_id = SharedString::from(format!("tool-raw-block-{call_id}"));
-            let copied = is_copied_fn(blk_id.as_ref());
-            let mark_cb = on_mark_copied.clone();
-            raw_section = raw_section.child(render_copyable_text_block(
-                blk_id,
-                card_view.raw.clone(),
-                true,
-                mono_family,
-                copied,
-                palette,
-                move |cid, w, cx| mark_cb(cid, w, cx),
-                window,
-                cx,
-            ));
+        if let Some(raw_body) = motion::animated_collapse(
+            format!("normal-raw-body-{call_id}"),
+            is_raw_expanded,
+            window,
+            cx,
+            |window, cx| {
+                let blk_id = SharedString::from(format!("tool-raw-block-{call_id}"));
+                let copied = is_copied_fn(blk_id.as_ref());
+                let mark_cb = on_mark_copied.clone();
+                render_copyable_text_block(
+                    blk_id,
+                    card_view.raw.clone(),
+                    true,
+                    mono_family,
+                    copied,
+                    palette,
+                    move |cid, w, cx| mark_cb(cid, w, cx),
+                    window,
+                    cx,
+                )
+                .into_any_element()
+            },
+        ) {
+            raw_section = raw_section.child(raw_body);
         }
 
         right_col = right_col.child(raw_section);

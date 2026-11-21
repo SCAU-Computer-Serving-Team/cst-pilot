@@ -12,6 +12,7 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
+use crate::theme::motion::DesktopTooltipExt as _;
 use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
@@ -73,27 +74,74 @@ pub fn render_topbar(
                     .text_color(palette.text_primary)
                     .child(cjk_inline_label("CST Pilot")),
             )
-            .child(
+            .child({
+                let press_state = motion::icon_press_state("topbar-expand-sidebar-btn", window, cx);
+                let pressed = *press_state.read(cx);
+                let ps_down = press_state.clone();
+                let ps_up = press_state.clone();
+                let ps_out = press_state;
+                let hover_state =
+                    window.use_keyed_state("hover-topbar-expand-sidebar-btn", cx, |_, _| false);
+                let hovered = *hover_state.read(cx);
+                let hs = hover_state;
+                let hover_t = motion::animated_state_progress(
+                    "topbar-expand-sidebar-btn",
+                    hovered,
+                    window,
+                    cx,
+                );
                 div()
                     .id("topbar-expand-sidebar-btn")
                     .test_support()
                     .a11y_button("topbar-expand-sidebar-btn", "展开侧栏")
+                    .desktop_tooltip_with_hover(
+                        "tooltip-topbar-expand-sidebar-btn".into(),
+                        "展开侧栏".into(),
+                        false,
+                        Some(hs),
+                    )
                     .track_focus(expand_btn_focus)
                     .tab_index(0)
                     .w(height::COMPACT)
                     .h(height::COMPACT)
                     .rounded(radius::CONTROL)
+                    .bg(motion::lerp_hsla(
+                        gpui_kit::transparent_black(),
+                        palette.bg_item_hover,
+                        hover_t,
+                    ))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .hover(|s| s.bg(palette.bg_item_hover))
+                    .on_mouse_down(gpui_kit::MouseButton::Left, move |_, _, cx| {
+                        ps_down.update(cx, |s, cx| {
+                            *s = true;
+                            cx.notify();
+                        });
+                    })
+                    .on_mouse_up(gpui_kit::MouseButton::Left, move |_, _, cx| {
+                        ps_up.update(cx, |s, cx| {
+                            *s = false;
+                            cx.notify();
+                        });
+                    })
+                    .on_mouse_up_out(gpui_kit::MouseButton::Left, move |_, _, cx| {
+                        ps_out.update(cx, |s, cx| {
+                            *s = false;
+                            cx.notify();
+                        });
+                    })
                     .on_click(move |_, w, cx| (on_expand)(w, cx))
-                    .child(
+                    .child(motion::animated_icon_press(
+                        "topbar-expand-sidebar-btn",
+                        pressed,
                         Icon::new(IconName::PanelLeft)
                             .size(px(16.0))
                             .text_color(palette.text_secondary),
-                    ),
-            )
+                        window,
+                        cx,
+                    ))
+            })
             .child(div().w(px(1.0)).h(px(14.0)).bg(palette.border_strong))
             .child(
                 apply_scale(div(), scale::UI_MEDIUM)
@@ -133,6 +181,8 @@ pub fn render_topbar(
                 IconName::SquarePen,
                 palette.text_primary,
                 palette,
+                window,
+                cx,
                 move |w, cx| (on_new)(w, cx),
             ))
             .child(topbar_icon_btn(
@@ -141,6 +191,8 @@ pub fn render_topbar(
                 IconName::LayoutDashboard,
                 palette.text_secondary,
                 palette,
+                window,
+                cx,
                 move |w, cx| (on_dash)(w, cx),
             ))
     } else {
@@ -294,6 +346,7 @@ pub fn render_topbar(
                     .id("topbar-account-btn")
                     .test_support()
                     .a11y_button("topbar-account-btn", "账号菜单")
+                    .desktop_tooltip("topbar-account-btn", "账号菜单")
                     .track_focus(account_btn_focus)
                     .tab_index(0)
                     .w(height::COMPACT)
@@ -324,6 +377,8 @@ pub fn render_topbar(
                 IconName::Settings,
                 palette.text_secondary,
                 palette,
+                window,
+                cx,
                 move |w, cx| (on_set)(w, cx),
             ));
     }
@@ -486,26 +541,77 @@ fn view_segment_item(
         .child(cjk_inline_label(label))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn topbar_icon_btn(
     id: &'static str,
     label: &'static str,
     icon: IconName,
     icon_color: Hsla,
     palette: &DesktopPalette,
+    window: &mut Window,
+    cx: &mut App,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let press_state = motion::icon_press_state(id, window, cx);
+    let pressed = *press_state.read(cx);
+    let ps_down = press_state.clone();
+    let ps_up = press_state.clone();
+    let ps_out = press_state;
+    let hover_state = window.use_keyed_state(
+        gpui_kit::ElementId::Name(SharedString::from(format!("hover-{id}"))),
+        cx,
+        |_, _| false,
+    );
+    let hovered = *hover_state.read(cx);
+    let hs = hover_state;
+    let hover_t = motion::animated_state_progress(id, hovered, window, cx);
+
     div()
         .id(id)
         .test_support()
         .a11y_button(id, label)
+        .desktop_tooltip_with_hover(
+            SharedString::from(format!("tooltip-{id}")),
+            label.into(),
+            false,
+            Some(hs),
+        )
         .tab_index(0)
         .w(height::COMPACT)
         .h(height::COMPACT)
         .rounded(radius::CONTROL)
+        .bg(motion::lerp_hsla(
+            gpui_kit::transparent_black(),
+            palette.bg_item_hover,
+            hover_t,
+        ))
         .flex()
         .items_center()
         .justify_center()
-        .hover(|s| s.bg(palette.bg_item_hover))
+        .on_mouse_down(gpui_kit::MouseButton::Left, move |_, _, cx| {
+            ps_down.update(cx, |s, cx| {
+                *s = true;
+                cx.notify();
+            });
+        })
+        .on_mouse_up(gpui_kit::MouseButton::Left, move |_, _, cx| {
+            ps_up.update(cx, |s, cx| {
+                *s = false;
+                cx.notify();
+            });
+        })
+        .on_mouse_up_out(gpui_kit::MouseButton::Left, move |_, _, cx| {
+            ps_out.update(cx, |s, cx| {
+                *s = false;
+                cx.notify();
+            });
+        })
         .on_click(move |_, w, cx| on_click(w, cx))
-        .child(Icon::new(icon).size(px(16.0)).text_color(icon_color))
+        .child(motion::animated_icon_press(
+            id,
+            pressed,
+            Icon::new(icon).size(px(16.0)).text_color(icon_color),
+            window,
+            cx,
+        ))
 }

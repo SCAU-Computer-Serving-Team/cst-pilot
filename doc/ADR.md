@@ -51,3 +51,10 @@
 - **结论**：桌面端仅补充标准 GPUI 无障碍属性，由外部 `winapp ui` 与 `scripts/dev/desktop-{secret,record}.ps1` 完成交互调试与录制。
 - **依据**：桌面端构建与启动无需 `winapp`、PowerShell 脚本或 FFmpeg，Cargo 依赖保持不变。GPUI 按需构建无障碍树。
 - **放弃**：应用内嵌调试端口（增大体积与攻击面）；绑定 `gpui-agent` 库（引入代码耦合与维护成本）。
+
+## ADR-008：桌面端保留整数像素 ClearType 渲染，对 GPUI `Div` 容器缩放采用等价动效替代
+
+- **日期 / 状态**：`2026-11-21` · 已拍板
+- **结论**：桌面端不修改 `vendor/gpui-pre` 为 `Div` 增加子树仿射缩放矩阵。图标按钮采用 GPUI 原生 `Svg` `Transformation::scale(0.92)`，复选框采用 `canvas` + `PathBuilder::stroke` 真路径描边，悬停/聚焦采用 `150ms` 颜色与阴影插值，浮层/弹窗采用位移淡入、`d^3` 阴影渐强与 `150ms` 无交互退场，列表重排采用 `FLIP` 位置补偿。
+- **依据**：GPUI 文本光栅化与命中测试均建立在整数像素坐标系，强行缩放整棵 `Div` 子树会破坏 DirectWrite ClearType 清晰度并引入事件逆变换风险。
+- **放弃**：在 `vendor/gpui-pre` 侵入式改造 `Div` 仿射变换与命中矩阵。
