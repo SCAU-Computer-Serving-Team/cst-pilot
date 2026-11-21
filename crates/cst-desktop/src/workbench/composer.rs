@@ -1491,7 +1491,7 @@ impl ComposerView {
                 .left_0()
                 .right_0()
                 .bottom_full()
-                .pb(space::SM)
+                .pb(px(2.0))
                 .child(motion::animate_popover_enter(
                     "composer-comp-pop-anim",
                     pop,
@@ -2236,7 +2236,7 @@ impl Render for ComposerView {
                     .absolute()
                     .right(px(48.0))
                     .bottom_full()
-                    .pb(space::SM)
+                    .pb(px(2.0))
                     .child(render_context_quota_popover(
                         &cur_provider,
                         context_usage,
@@ -2275,9 +2275,9 @@ impl Render for ComposerView {
             wrapper = wrapper.child(
                 div()
                     .absolute()
-                    .right(px(36.0))
+                    .right(px(48.0))
                     .bottom_full()
-                    .pb(space::SM)
+                    .pb(px(2.0))
                     .child(render_model_picker_popover(
                         self.picker_page,
                         self.picker_slide.sample(window, cx),

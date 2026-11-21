@@ -58,3 +58,10 @@
 - **结论**：桌面端不修改 `vendor/gpui-pre` 为 `Div` 增加子树仿射缩放矩阵。图标按钮采用 GPUI 原生 `Svg` `Transformation::scale(0.92)`，复选框采用 `canvas` + `PathBuilder::stroke` 真路径描边，悬停/聚焦采用 `150ms` 颜色与阴影插值，浮层/弹窗采用位移淡入、`d^3` 阴影渐强与 `150ms` 无交互退场，列表重排采用 `FLIP` 位置补偿。
 - **依据**：GPUI 文本光栅化与命中测试均建立在整数像素坐标系，强行缩放整棵 `Div` 子树会破坏 DirectWrite ClearType 清晰度并引入事件逆变换风险。
 - **放弃**：在 `vendor/gpui-pre` 侵入式改造 `Div` 仿射变换与命中矩阵。
+
+## ADR-009：工作区 `dev` 配置开启依赖二级优化与包内一级优化
+
+- **日期 / 状态**：`2026-11-21` · 已拍板
+- **结论**：根 `Cargo.toml` `[profile.dev]` 设 `opt-level = 1` 并保持 `debug = 0`，`[profile.dev.package."*"]` 设 `opt-level = 2`。
+- **依据**：零优化下 GPUI 布局、DirectWrite 与毛玻璃 SDF 耗时达 `16–136ms` 触发明显掉帧；优化依赖后主屏与浮层交互降至 `2–3ms`。
+- **放弃**：保持全量 `opt-level = 0`（本地开发启动即卡顿）。
