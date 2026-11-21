@@ -138,6 +138,10 @@ impl WorkbenchView {
         self.lightbox.is_some()
     }
 
+    pub(crate) fn has_modal(&self) -> bool {
+        self.lightbox.is_some() || self.pending_edit_confirm.is_some()
+    }
+
     pub fn mark_left_home_route(&mut self) {
         self.welcome_stagger_done = true;
     }

@@ -2,7 +2,6 @@ use std::rc::Rc;
 
 use cst_client::{ClientError, ClientHandle};
 use gpui_kit::assets::IconName;
-use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::{
@@ -166,8 +165,10 @@ pub struct QueueBarCallbacks {
 
 /// Renders the temporary pending-message `QueueBar` (`cst-pilot-desktop.pen` 「01 · 工作台」 `rnehA`)
 /// inside the top of the composer container, supporting reorder (`version`), `↑ 立即` steer, inline edit, and delete.
+#[allow(clippy::too_many_arguments)]
 pub fn render_queue_bar(
     queue: &ParsedQueueSnapshot,
+    session_id: &str,
     editing_item_id: Option<&str>,
     edit_input_state: Option<&Entity<InputState>>,
     palette: &DesktopPalette,
@@ -224,7 +225,8 @@ pub fn render_queue_bar(
             .child(SharedString::from(header_text)),
     );
 
-    for item in &queue.items {
+    let flip_scope = SharedString::from(session_id.to_owned());
+    for (index, item) in queue.items.iter().enumerate() {
         let iid = item.id.clone();
         let is_editing = editing_item_id == Some(iid.as_str());
 
@@ -477,17 +479,20 @@ pub fn render_queue_bar(
                 );
         }
 
-        let (flip_y, flip_state, flip_epoch) =
-            motion::sample_flip_offset_y("composer-queue", &iid, version, window, cx);
+        let flip_y = motion::flip_row_offset_y(
+            "composer-queue",
+            &iid,
+            &flip_scope,
+            height::CONTROL * index as f32,
+            window,
+            cx,
+        );
         list = list.child(
             div()
                 .id(SharedString::from(format!("queue-item-row-{iid}")))
                 .test_support()
                 .relative()
                 .top(flip_y)
-                .on_prepaint(move |bounds, window, cx| {
-                    motion::record_flip_bounds_y(&flip_state, flip_epoch, bounds, window, cx);
-                })
                 .h(height::CONTROL)
                 .border_t_1()
                 .border_color(palette.border_subtle)

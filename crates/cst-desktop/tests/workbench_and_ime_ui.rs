@@ -811,12 +811,15 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
     // 4. Verify `QueueBar` (`rnehA`) reorder (`version = 7`) and `立即` steer!
     cx.update_window(win_handle, |_, window, cx| {
         assert!(window.find("session-header-hukqs").visible());
+        let q1_y = window.find("queue-item-row-q1").bounds().origin.y;
+        let q2_y = window.find("queue-item-row-q2").bounds().origin.y;
         window.click("queue-move-down-q1", cx);
-        // Projection changes the row order immediately, before the network response.
-        assert!(
-            window.find("queue-item-row-q2").bounds().origin.y
-                < window.find("queue-item-row-q1").bounds().origin.y
-        );
+        // Controls reflect the optimistic order immediately; FLIP starts the
+        // rows at their previous visual positions in that same frame.
+        assert!(window.try_find("queue-move-up-q1").is_some());
+        assert!(window.try_find("queue-move-down-q1").is_none());
+        assert_eq!(window.find("queue-item-row-q1").bounds().origin.y, q1_y);
+        assert_eq!(window.find("queue-item-row-q2").bounds().origin.y, q2_y);
     })
     .unwrap();
 

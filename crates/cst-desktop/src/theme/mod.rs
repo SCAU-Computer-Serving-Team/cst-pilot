@@ -63,31 +63,24 @@ pub mod layout {
     pub const LOGIN_SHADER_WIDTH: Pixels = px(864.0);
 }
 
+mod tooltip;
+
 /// Motion curves & durations strictly aligned with `design/storybook.html`.
 pub mod motion {
-    use std::cell::RefCell;
-    use std::collections::HashMap;
-    use std::rc::Rc;
     use std::time::{Duration, Instant};
 
     use gpui::{
-        Animation, AnimationExt as _, AnyElement, AppContext as _, BorrowAppContext as _, Bounds,
-        ContentMask, Element, ElementId, Entity, Global, GlobalElementId, InspectorElementId,
-        InteractiveElement as _, LayoutId, MouseButton, Overflow, ParentElement as _, PathBuilder,
-        Render, Rgba, StatefulInteractiveElement, Style, Transformation, WeakEntity, WindowId,
-        canvas, div, relative,
+        Animation, AnimationExt as _, AnyElement, ElementId, Entity, InteractiveElement as _,
+        MouseButton, ParentElement as _, PathBuilder, Rgba, StatefulInteractiveElement,
+        Subscription, Transformation, canvas, div,
     };
     use gpui_kit::assets::IconName;
     use gpui_kit::base::motion::{Transition, TransitionId, transition};
-    use gpui_kit::base::{TooltipOverlay, TooltipRequest, TooltipTransition};
     use gpui_kit::component::Icon;
     use gpui_kit::{
-        App, BoxShadow, Hsla, IntoElement, Pixels, SharedString, Styled, TestSupportExt as _,
-        Window, percentage, point, px, size,
+        App, BoxShadow, Hsla, IntoElement, Pixels, SharedString, Styled, Window, percentage, point,
+        px, size,
     };
-
-    use crate::background::{FrostedGlassSpec, render_frosted_surface};
-    use crate::theme::{DesktopThemeGlobal, apply_scale, radius, scale, space};
 
     pub const INSTANT: Duration = Duration::ZERO;
     pub const PRESS: Duration = Duration::from_millis(120);
@@ -371,138 +364,13 @@ pub mod motion {
         })
     }
 
-    #[derive(Clone, Copy, Default)]
-    struct CollapseHeightState {
-        height: Option<Pixels>,
+    struct CollapseState {
+        height: Pixels,
+        body_focus: gpui::FocusHandle,
     }
 
-    struct MeasuredCollapse {
-        id: ElementId,
-        opening: bool,
-        progress: f32,
-        child: AnyElement,
-    }
-
-    impl MeasuredCollapse {
-        fn target_height(&self, natural: Pixels) -> Pixels {
-            let scaled = natural * self.progress;
-            if self.opening {
-                scaled.max(natural.min(px(32.0)))
-            } else {
-                scaled
-            }
-        }
-    }
-
-    impl gpui::IntoElement for MeasuredCollapse {
-        type Element = Self;
-
-        fn into_element(self) -> Self::Element {
-            self
-        }
-    }
-
-    impl Element for MeasuredCollapse {
-        type RequestLayoutState = LayoutId;
-        type PrepaintState = Bounds<Pixels>;
-
-        fn id(&self) -> Option<ElementId> {
-            Some(self.id.clone())
-        }
-
-        fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-            None
-        }
-
-        fn request_layout(
-            &mut self,
-            global_id: Option<&GlobalElementId>,
-            _: Option<&InspectorElementId>,
-            window: &mut Window,
-            cx: &mut App,
-        ) -> (LayoutId, Self::RequestLayoutState) {
-            let child_layout_id = self.child.request_layout(window, cx);
-            let cached = global_id.and_then(|gid| {
-                window.with_element_state(gid, |state: Option<CollapseHeightState>, _| {
-                    let s = state.unwrap_or_default();
-                    (s.height, s)
-                })
-            });
-            let mut style = Style::default();
-            style.size.width = relative(1.0).into();
-            style.overflow.y = Overflow::Hidden;
-            if let Some(h) = cached {
-                style.size.height = self.target_height(h).into();
-            }
-            let layout_id = window.request_layout(style, [child_layout_id], cx);
-            (layout_id, child_layout_id)
-        }
-
-        fn prepaint(
-            &mut self,
-            global_id: Option<&GlobalElementId>,
-            _: Option<&InspectorElementId>,
-            bounds: Bounds<Pixels>,
-            child_layout_id: &mut Self::RequestLayoutState,
-            window: &mut Window,
-            cx: &mut App,
-        ) -> Self::PrepaintState {
-            let child_bounds = window.layout_bounds(*child_layout_id);
-            if let Some(gid) = global_id {
-                let changed =
-                    window.with_element_state(gid, |state: Option<CollapseHeightState>, _| {
-                        let mut s = state.unwrap_or_default();
-                        let next_h = child_bounds.size.height;
-                        let changed = next_h > px(0.0) && s.height != Some(next_h);
-                        if next_h > px(0.0) {
-                            s.height = Some(next_h);
-                        }
-                        (changed, s)
-                    });
-                if changed {
-                    window.request_animation_frame();
-                }
-            }
-            let clip_h = bounds
-                .size
-                .height
-                .min(self.target_height(child_bounds.size.height));
-            let clip_bounds =
-                Bounds::new(bounds.origin, size(bounds.size.width, clip_h.max(px(1.0))));
-            window.with_content_mask(
-                Some(ContentMask {
-                    bounds: clip_bounds,
-                }),
-                |window| {
-                    self.child.prepaint(window, cx);
-                },
-            );
-            clip_bounds
-        }
-
-        fn paint(
-            &mut self,
-            _: Option<&GlobalElementId>,
-            _: Option<&InspectorElementId>,
-            _: Bounds<Pixels>,
-            _: &mut Self::RequestLayoutState,
-            clip_bounds: &mut Self::PrepaintState,
-            window: &mut Window,
-            cx: &mut App,
-        ) {
-            window.with_content_mask(
-                Some(ContentMask {
-                    bounds: *clip_bounds,
-                }),
-                |window| {
-                    self.child.paint(window, cx);
-                },
-            );
-        }
-    }
-
-    /// Reversible measured height `collapse` transition (`240ms` open / `150ms` close, `ease_out`, `0ms` in `reduce_motion`).
-    /// Fully unmounts content once closed (`p <= 0.001`) and drops clipping once settled open (`p >= 0.999`).
+    /// Measures the unconstrained body even at rest, so nested and streaming
+    /// content can resize. Only the measured space remains during the exit.
     pub fn animated_collapse<C>(
         id: impl Into<SharedString>,
         open: bool,
@@ -513,51 +381,203 @@ pub mod motion {
     where
         C: std::ops::DerefMut<Target = App>,
     {
+        use gpui_kit::component::ElementExt as _;
+
         let key = id.into();
-        let tid: TransitionId = SharedString::from(format!("collapse-{key}")).into();
-        let dur = if open { NORMAL } else { SURFACE_CLOSE };
-        let p = transition(
-            tid,
+        let state_id = SharedString::from(format!("collapse-measure-{key}"));
+        let state = window.use_keyed_state(state_id, cx, |_, cx| CollapseState {
+            height: px(0.0),
+            body_focus: cx.focus_handle(),
+        });
+        let height = state.read(cx).height;
+        let body_focus = state.read(cx).body_focus.clone();
+        let duration = if open { NORMAL } else { SURFACE_CLOSE };
+        let progress = transition(
+            SharedString::from(format!("collapse-{key}")),
             if open { 1.0_f32 } else { 0.0 },
-            Transition::new(dur).ease(ease_out()),
+            Transition::new(duration).ease(ease_out()),
             window,
             cx,
         )
         .clamp(0.0, 1.0);
-        if !open && p <= 0.001 {
-            return None;
+
+        if !open {
+            if body_focus.contains_focused(window, cx) {
+                window.blur(cx);
+            }
+            return (progress > 0.001 && height > px(0.0)).then(|| {
+                div()
+                    .w_full()
+                    .flex_shrink_0()
+                    .h(height * progress)
+                    .into_any_element()
+            });
         }
+
+        let settled = progress >= 0.999;
+        let reveal = progress.max(0.15);
         let content = build_content(window, cx);
-        if open && p >= 0.999 {
-            return Some(content);
+        let body = div()
+            .id(key)
+            .track_focus(&body_focus)
+            .w_full()
+            .flex_shrink_0()
+            .on_prepaint(move |bounds, window, cx| {
+                if state.read(cx).height != bounds.size.height {
+                    state.update(cx, |state, _| state.height = bounds.size.height);
+                    if !settled {
+                        window.request_animation_frame();
+                    }
+                }
+            })
+            .child(content);
+        let wrapper = div().w_full().flex().flex_col().flex_shrink_0().child(body);
+        Some(if settled {
+            wrapper.into_any_element()
+        } else {
+            wrapper
+                .max_h((height * reveal).max(px(32.0)))
+                .overflow_hidden()
+                .opacity(0.01 + 0.99 * reveal)
+                .into_any_element()
+        })
+    }
+
+    pub struct PointerFlag {
+        active: bool,
+        _activation: Subscription,
+    }
+
+    impl PointerFlag {
+        pub(crate) fn keyed(
+            id: impl Into<ElementId>,
+            window: &mut Window,
+            cx: &mut App,
+        ) -> (bool, Entity<Self>) {
+            let state =
+                window.use_keyed_state(id, cx, |window, cx: &mut gpui::Context<Self>| Self {
+                    active: false,
+                    _activation: cx.observe_window_activation(window, |this, window, cx| {
+                        if !window.is_window_active() && this.active {
+                            this.active = false;
+                            cx.notify();
+                        }
+                    }),
+                });
+            if !window.is_window_active() || !window.is_window_hovered() {
+                Self::set(&state, false, cx);
+            }
+            (state.read(cx).active, state)
         }
-        let reveal_p = if open { p.max(0.15) } else { p };
-        let reveal_id = ElementId::Name(SharedString::from(format!("collapse-reveal-{key}")));
-        Some(
-            div()
-                .w_full()
-                .opacity(0.01 + 0.99 * reveal_p)
-                .child(MeasuredCollapse {
-                    id: reveal_id,
-                    opening: open,
-                    progress: reveal_p,
-                    child: content,
-                })
-                .into_any_element(),
+
+        pub(crate) fn set(state: &Entity<Self>, active: bool, cx: &mut App) {
+            if state.read(cx).active != active {
+                state.update(cx, |this, cx| {
+                    this.active = active;
+                    cx.notify();
+                });
+            }
+        }
+
+        pub(crate) fn enter(state: &Entity<Self>, window: &Window, cx: &mut App) {
+            Self::set(
+                state,
+                window.is_window_active() && window.is_window_hovered(),
+                cx,
+            );
+        }
+    }
+
+    pub(crate) fn icon_press_state(
+        id: &str,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (bool, Entity<PointerFlag>) {
+        PointerFlag::keyed(
+            SharedString::from(format!("icon-press-state-{id}")),
+            window,
+            cx,
         )
     }
 
-    /// Keyed pressed-state flag for icon buttons so `press` `scale(0.92)` animates smoothly (`120ms ease_out`).
-    pub fn icon_press_state(
-        id: impl Into<SharedString>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Entity<bool> {
-        let key = ElementId::Name(SharedString::from(format!(
-            "icon-press-state-{}",
-            id.into()
-        )));
-        window.use_keyed_state(key, cx, |_, _| false)
+    pub(crate) trait IconPressExt: StatefulInteractiveElement {
+        fn on_icon_press(self, state: Entity<PointerFlag>) -> Self {
+            let down = state.clone();
+            let up = state.clone();
+            let motion = state.clone();
+            self.on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                PointerFlag::enter(&down, window, cx);
+            })
+            .on_mouse_up(MouseButton::Left, move |_, _, cx| {
+                PointerFlag::set(&up, false, cx)
+            })
+            .on_mouse_up_out(MouseButton::Left, move |_, _, cx| {
+                PointerFlag::set(&state, false, cx)
+            })
+            .on_mouse_move(move |event, _, cx| {
+                if event.pressed_button != Some(MouseButton::Left) {
+                    PointerFlag::set(&motion, false, cx);
+                }
+            })
+        }
+    }
+
+    impl<E: StatefulInteractiveElement> IconPressExt for E {}
+
+    #[cfg(all(test, windows))]
+    #[gpui::test]
+    fn icon_press_clears_on_native_pointer_leave_and_deactivation(cx: &mut gpui::TestAppContext) {
+        use gpui::{AppContext as _, Context, InputEvent as _, MouseDownEvent, Render};
+        use gpui_kit::test::TestWindowExt as _;
+        use std::{cell::Cell, rc::Rc};
+
+        struct Probe(Rc<Cell<bool>>);
+        impl Render for Probe {
+            fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                let (pressed, state) = icon_press_state("press-probe", window, cx);
+                self.0.set(pressed);
+                div()
+                    .size_full()
+                    .child(div().id("press-probe").size(px(40.0)).on_icon_press(state))
+            }
+        }
+
+        let pressed = Rc::new(Cell::new(false));
+        let win = cx.add_window(|_, _| Probe(pressed.clone()));
+        let draw = |cx: &mut gpui::TestAppContext| {
+            cx.update_window(*win, |_, window, cx| window.render_frame(cx))
+                .unwrap();
+        };
+        let down = |cx: &mut gpui::TestAppContext| {
+            cx.update_window(*win, |_, window, cx| {
+                window.render_frame(cx);
+                window.dispatch_event(
+                    MouseDownEvent {
+                        button: MouseButton::Left,
+                        position: point(px(20.0), px(20.0)),
+                        ..Default::default()
+                    }
+                    .to_platform_input(),
+                    cx,
+                );
+            })
+            .unwrap();
+            draw(cx);
+            assert!(pressed.get());
+        };
+        cx.simulate_window_pointer_state(*win, true, true);
+        down(cx);
+        cx.simulate_window_pointer_state(*win, true, false);
+        draw(cx);
+        assert!(!pressed.get());
+
+        cx.simulate_window_pointer_state(*win, true, true);
+        down(cx);
+        cx.simulate_window_pointer_state(*win, false, false);
+        // Reactivate before a redraw; the activation observer must still reset the flag.
+        cx.simulate_window_pointer_state(*win, true, true);
+        draw(cx);
+        assert!(!pressed.get());
     }
 
     /// Applies `120ms ease_out` `scale(1.0 -> 0.92)` directly to an SVG `Icon` on press (`0ms` in `reduce_motion`).
@@ -667,301 +687,63 @@ pub mod motion {
         out
     }
 
-    #[derive(Clone, Copy, Default)]
-    pub struct FlipRowState {
-        last_y: Option<f32>,
-        last_epoch: u64,
-        anim: Option<(Instant, f32)>,
+    struct FlipRowState {
+        scope: SharedString,
+        y: Pixels,
+        anim: Option<(Instant, Pixels)>,
     }
 
-    /// Tracks vertical `FLIP` (`250ms ease_out`) reorder deltas for list rows without triggering on normal scroll.
-    /// Callers bump `reorder_epoch` only when list order changes (e.g. `Alt+Up/Down`, queue move, session reorder).
-    pub fn sample_flip_offset_y(
-        list_id: &str,
+    /// FLIP for fixed-stride rows. Use the unanimated list-local position so
+    /// scrolling, geometry and the previous transform cannot enter the delta.
+    /// A filter or session change establishes a new baseline.
+    pub fn flip_row_offset_y(
+        list_id: &'static str,
         item_key: &str,
-        reorder_epoch: u64,
+        scope: &SharedString,
+        y: Pixels,
         window: &mut Window,
         cx: &mut App,
-    ) -> (Pixels, Entity<FlipRowState>, u64) {
-        let state_id = ElementId::Name(SharedString::from(format!("flip-{list_id}-{item_key}")));
-        let state = window.use_keyed_state(state_id, cx, |_, _| FlipRowState {
-            last_y: None,
-            last_epoch: reorder_epoch,
-            anim: None,
-        });
-        let snap = *state.read(cx);
-        let offset = if cx.reduce_motion() {
-            if snap.anim.is_some() {
-                state.update(cx, |s, _| s.anim = None);
-            }
-            px(0.0)
-        } else if let Some((start, delta_y)) = snap.anim {
-            let elapsed = cx
-                .background_executor()
-                .now()
-                .saturating_duration_since(start);
-            if elapsed < FLIP_MOVE {
-                window.request_animation_frame();
-                let t =
-                    ease_out()((elapsed.as_secs_f32() / FLIP_MOVE.as_secs_f32()).clamp(0.0, 1.0));
-                px(delta_y * (1.0 - t))
-            } else {
-                state.update(cx, |s, _| s.anim = None);
-                px(0.0)
-            }
-        } else {
-            px(0.0)
-        };
-        (offset, state, reorder_epoch)
-    }
-
-    /// Updates a `FLIP` row's measured `origin.y` during prepaint; triggers animation only when `reorder_epoch` advanced.
-    pub fn record_flip_bounds_y(
-        state: &Entity<FlipRowState>,
-        reorder_epoch: u64,
-        bounds: Bounds<Pixels>,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        let new_y = f32::from(bounds.origin.y);
-        let reduce_motion = cx.reduce_motion();
-        let now = cx.background_executor().now();
-        let mut needs_frame = false;
-        state.update(cx, |s, _| {
-            if let Some(prev_y) = s.last_y
-                && reorder_epoch != s.last_epoch
-            {
-                let delta = prev_y - new_y;
-                if !reduce_motion && delta.abs() >= 1.0 && delta.abs() <= 480.0 {
-                    s.anim = Some((now, delta));
-                    needs_frame = true;
-                } else {
-                    s.anim = None;
+    ) -> Pixels {
+        let state = window.with_element_namespace(list_id, |window| {
+            window.use_keyed_state(SharedString::from(item_key.to_owned()), cx, |_, _| {
+                FlipRowState {
+                    scope: scope.clone(),
+                    y,
+                    anim: None,
                 }
-            }
-            s.last_y = Some(new_y);
-            s.last_epoch = reorder_epoch;
+            })
         });
-        if needs_frame {
+        let now = cx.background_executor().now();
+        let reduce_motion = cx.reduce_motion();
+        let offset = state.update(cx, |state, _| {
+            let mut offset = state.anim.map_or(px(0.0), |(start, delta)| {
+                let elapsed = now.saturating_duration_since(start);
+                delta
+                    * (1.0 - ease_out()((elapsed.as_secs_f32() / FLIP_MOVE.as_secs_f32()).min(1.0)))
+            });
+            if reduce_motion || state.scope != *scope {
+                offset = px(0.0);
+                state.anim = None;
+            } else if state.y != y {
+                let delta = state.y + offset - y;
+                state.anim =
+                    (delta.abs() >= px(1.0) && delta.abs() <= px(480.0)).then_some((now, delta));
+                offset = state.anim.map_or(px(0.0), |(_, delta)| delta);
+            } else if offset.abs() < px(0.01) {
+                offset = px(0.0);
+                state.anim = None;
+            }
+            state.scope = scope.clone();
+            state.y = y;
+            offset
+        });
+        if offset != px(0.0) {
             window.request_animation_frame();
         }
+        offset
     }
 
-    #[derive(Default)]
-    struct DesktopTooltipRegistry {
-        overlays: HashMap<WindowId, WeakEntity<TooltipOverlay>>,
-    }
-
-    impl Global for DesktopTooltipRegistry {}
-
-    /// Registers a window's shared [`TooltipOverlay`] so all icon buttons and warning tooltips share one cooldown group.
-    pub fn register_window_tooltip_overlay(
-        window: &Window,
-        overlay: &Entity<TooltipOverlay>,
-        cx: &mut App,
-    ) {
-        if cx.try_global::<DesktopTooltipRegistry>().is_none() {
-            cx.set_global(DesktopTooltipRegistry::default());
-        }
-        cx.update_global::<DesktopTooltipRegistry, _>(|reg, _| {
-            reg.overlays.retain(|_, weak| weak.upgrade().is_some());
-            reg.overlays
-                .insert(window.window_handle().window_id(), overlay.downgrade());
-        });
-    }
-
-    /// Returns the registered [`TooltipOverlay`] for `window`, if mounted.
-    pub fn window_tooltip_overlay(window: &Window, cx: &App) -> Option<Entity<TooltipOverlay>> {
-        let reg = cx.try_global::<DesktopTooltipRegistry>()?;
-        reg.overlays
-            .get(&window.window_handle().window_id())
-            .and_then(WeakEntity::upgrade)
-    }
-
-    /// Builds the shared [`TooltipOverlay`] with `storybook.html` enter/switch motion (`150ms` enter / `200ms` slide).
-    pub fn create_desktop_tooltip_overlay(cx: &mut App) -> Entity<TooltipOverlay> {
-        cx.new(|_| {
-            TooltipOverlay::new().render_with(|content_view, transition, _window, cx| {
-                if cx.reduce_motion() {
-                    return div().child(content_view).into_any_element();
-                }
-                match transition {
-                    TooltipTransition::Enter { epoch } => div()
-                        .child(content_view)
-                        .with_animation(
-                            ElementId::NamedInteger("desktop-tooltip-enter".into(), epoch as u64),
-                            Animation::new(FAST).with_easing(ease_out()),
-                            |el, d| {
-                                let t = d.clamp(0.0, 1.0);
-                                el.opacity(0.01 + 0.99 * t).mt(px(4.0 * (1.0 - t)))
-                            },
-                        )
-                        .into_any_element(),
-                    TooltipTransition::Switch {
-                        epoch,
-                        previous,
-                        current,
-                    } => {
-                        let same_row = (current.origin.y - previous.origin.y).abs() < px(12.0);
-                        if !same_row {
-                            return div().child(content_view).into_any_element();
-                        }
-                        let dx = f32::from(current.center().x - previous.center().x)
-                            .clamp(-240.0, 240.0);
-                        div()
-                            .child(content_view)
-                            .with_animation(
-                                ElementId::NamedInteger(
-                                    "desktop-tooltip-switch".into(),
-                                    epoch as u64,
-                                ),
-                                Animation::new(Duration::from_millis(200))
-                                    .with_easing(ease_in_out()),
-                                move |el, d| {
-                                    let t = d.clamp(0.0, 1.0);
-                                    el.ml(px(-dx * (1.0 - t)))
-                                },
-                            )
-                            .into_any_element()
-                    }
-                }
-            })
-        })
-    }
-
-    struct DesktopTooltipContentView {
-        elem_id: SharedString,
-        text: SharedString,
-        frosted: bool,
-    }
-
-    impl Render for DesktopTooltipContentView {
-        fn render(
-            &mut self,
-            window: &mut Window,
-            cx: &mut gpui::Context<Self>,
-        ) -> impl IntoElement {
-            let theme = DesktopThemeGlobal::current(cx);
-            let palette = theme.palette;
-            if self.frosted {
-                let transparency = theme.transparency_enabled;
-                let scale_factor = window.scale_factor();
-                return render_frosted_surface(
-                    self.elem_id.clone(),
-                    FrostedGlassSpec::popover_h2p2z(&palette),
-                    palette.bg_elevated,
-                    transparency,
-                    scale_factor,
-                )
-                .test_support()
-                .max_w(px(320.0))
-                .px(space::SM)
-                .py(space::XS)
-                .rounded(radius::CONTROL)
-                .border_1()
-                .border_color(palette.border_hairline)
-                .child(
-                    apply_scale(div(), scale::CAPTION)
-                        .relative()
-                        .text_color(palette.text_primary)
-                        .child(self.text.clone()),
-                )
-                .into_any_element();
-            }
-
-            div()
-                .id(self.elem_id.clone())
-                .test_support()
-                .max_w(px(280.0))
-                .px(space::SM)
-                .py(space::XS)
-                .rounded(radius::CONTROL)
-                .bg(palette.bg_elevated)
-                .border_1()
-                .border_color(palette.border_hairline)
-                .shadow(palette.craft_lift_shadows())
-                .child(
-                    apply_scale(div(), scale::CAPTION)
-                        .text_color(palette.text_primary)
-                        .child(self.text.clone()),
-                )
-                .into_any_element()
-        }
-    }
-
-    /// Attaches a tooltip backed by the window's shared [`TooltipOverlay`] (`400ms` delay / `300ms` cooldown group).
-    /// Also optionally updates a keyed `Entity<bool>` hover state inside the single GPUI `on_hover` listener.
-    pub trait DesktopTooltipExt:
-        StatefulInteractiveElement + gpui_kit::component::ElementExt + Sized
-    {
-        fn desktop_tooltip(
-            self,
-            trigger_key: impl Into<SharedString>,
-            text: impl Into<SharedString>,
-        ) -> Self {
-            let key = trigger_key.into();
-            let elem_id = SharedString::from(format!("tooltip-{key}"));
-            self.desktop_tooltip_with_hover(elem_id, text.into(), false, None)
-        }
-
-        fn desktop_tooltip_with_hover(
-            self,
-            tooltip_elem_id: SharedString,
-            text: SharedString,
-            frosted: bool,
-            hover_state: Option<Entity<bool>>,
-        ) -> Self {
-            let bounds_cell: Rc<RefCell<Bounds<Pixels>>> = Rc::new(RefCell::new(Bounds::default()));
-            let bounds_writer = bounds_cell.clone();
-            let bounds_reader = bounds_cell.clone();
-            self.on_prepaint(move |bounds, _, _| {
-                *bounds_writer.borrow_mut() = bounds;
-            })
-            .on_hover(move |hovered, window, cx| {
-                if let Some(ref hs) = hover_state {
-                    hs.update(cx, |s, cx| {
-                        if *s != *hovered {
-                            *s = *hovered;
-                            cx.notify();
-                        }
-                    });
-                }
-                let Some(overlay) = window_tooltip_overlay(window, cx) else {
-                    return;
-                };
-                if *hovered {
-                    let trigger_bounds = *bounds_reader.borrow();
-                    let elem_id = tooltip_elem_id.clone();
-                    let label = text.clone();
-                    overlay.update(cx, |o, cx| {
-                        let req = TooltipRequest::new(trigger_bounds, move |_, cx| {
-                            let elem_id = elem_id.clone();
-                            let label = label.clone();
-                            cx.new(|_| DesktopTooltipContentView {
-                                elem_id,
-                                text: label,
-                                frosted,
-                            })
-                            .into()
-                        })
-                        .with_offset(space::XS);
-                        o.request_show(req, window, cx);
-                    });
-                } else {
-                    overlay.update(cx, |o, cx| {
-                        o.request_hide(window, cx);
-                    });
-                }
-            })
-            .on_mouse_down(MouseButton::Left, |_, window, cx| {
-                if let Some(overlay) = window_tooltip_overlay(window, cx) {
-                    overlay.update(cx, |o, cx| o.hide(cx));
-                }
-            })
-        }
-    }
-
-    impl<E: StatefulInteractiveElement + gpui_kit::component::ElementExt> DesktopTooltipExt for E {}
+    pub use super::tooltip::{DesktopTooltipExt, DesktopTooltips, window_tooltip_overlay};
 
     /// The latest page replaces the content immediately. Keep any in-flight
     /// reveal so repeated navigation cannot drop the surface back to near zero.

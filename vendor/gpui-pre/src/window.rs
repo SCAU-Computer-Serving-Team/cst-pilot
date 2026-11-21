@@ -3200,6 +3200,15 @@ impl Window {
         self.platform_window.hide_soft_keyboard();
     }
 
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn set_test_pointer_state(&mut self, active: bool, hovered: bool, cx: &mut App) {
+        self.hovered.set(hovered);
+        if self.active.replace(active) != active {
+            self.activation_observers.clone().retain(|callback| callback(self, cx));
+        }
+        self.refresh();
+    }
+
     /// Returns whether this window is focused by the operating system (receiving key events).
     pub fn is_window_active(&self) -> bool {
         self.active.get()

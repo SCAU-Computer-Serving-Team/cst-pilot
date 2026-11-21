@@ -34,7 +34,7 @@ use gpui::{
     AppContext as _, Bounds, ContentMask, Point, ScaledPixels, Size, WindowsSurfaceDrawContext,
     WindowsSurfaceRenderer, px,
 };
-use gpui_kit::test::{TestAppContextExt, TestWindowExt};
+use gpui_kit::test::{TestAppContextExt, TestQueryExt, TestWindowExt};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -991,6 +991,12 @@ async fn narrow_sidebar_manual_override_and_drawer_follow_viewport_transitions(
         window.render_frame(cx);
         assert!(window.try_find("recent-sessions-drawer").is_none());
         window.press("ctrl-b", cx);
+    })
+    .unwrap();
+    cx.executor()
+        .advance_clock(cst_desktop::theme::motion::NORMAL);
+    cx.update_window(win, |_, window, cx| {
+        window.render_frame(cx);
         assert!(window.find("sidebar-l081m1").visible());
     })
     .unwrap();
@@ -1120,6 +1126,25 @@ async fn headless_gpui_shell_sidebar_drawer_escape_web_lock_and_exit_confirm(
     })
     .unwrap();
 
+    // Account menu exits without retaining its interactive surface or losing trigger focus.
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("topbar-account-btn", cx);
+        assert!(window.try_find("account-popover-menu").is_some());
+    })
+    .unwrap();
+    cx.executor()
+        .advance_clock(cst_desktop::theme::motion::POPOVER_OPEN);
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.press("escape", cx);
+        assert!(window.try_find("account-popover-menu").is_none());
+        assert_eq!(window.find("topbar-account-btn").focused(), Some(true));
+        // Reopen during the exit so the lock has a live menu to cancel.
+        window.click("topbar-account-btn", cx);
+        assert!(window.try_find("account-popover-menu").is_some());
+    })
+    .unwrap();
+
     // 4. `WebActive` lock overlay (`WO6NQ`) & `"切回桌面端"` recovery
     {
         backend.state.lock().unwrap().channel_mode = "web_active".to_owned();
@@ -1133,6 +1158,7 @@ async fn headless_gpui_shell_sidebar_drawer_escape_web_lock_and_exit_confirm(
     .await;
 
     cx.update_window(win_handle, |_, window, cx| {
+        assert!(window.try_find("account-popover-menu").is_none());
         window.click("web-active-switch-back-btn", cx);
     })
     .unwrap();
@@ -1142,6 +1168,11 @@ async fn headless_gpui_shell_sidebar_drawer_escape_web_lock_and_exit_confirm(
     })
     .await;
     assert_eq!(backend.state.lock().unwrap().web_closed_calls, 1);
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("account-popover-menu").is_none());
+    })
+    .unwrap();
 
     // 5. Close button (`window-btn-close`) with active session -> opens `pFooK` 384px exit dialog,
     //    initial focus on `"取消"`, `escape` dismisses safely without calling `/api/app/exit`!
@@ -1517,7 +1548,7 @@ async fn headless_gpui_motion_primitives_interruptible_reversal_reduce_motion_on
 }
 
 #[gpui::test]
-async fn milestone_g_motion_primitives_collapse_flip_checkstroke_and_tooltip_group(
+async fn milestone_g_motion_primitives_track_live_layout_and_cancel_stale_state(
     cx: &mut gpui::TestAppContext,
 ) {
     use std::cell::Cell;
@@ -1526,20 +1557,22 @@ async fn milestone_g_motion_primitives_collapse_flip_checkstroke_and_tooltip_gro
 
     use cst_desktop::theme::motion;
     use gpui_kit::{
-        Bounds, IntoElement as _, ParentElement as _, Styled as _, div, point, px, size,
+        InteractiveElement as _, IntoElement as _, ParentElement as _, Styled as _,
+        TestSupportExt as _, div, px,
     };
 
     struct MilestoneGProbe {
         checked: Rc<Cell<bool>>,
         collapsed_open: Rc<Cell<bool>>,
         hover_active: Rc<Cell<bool>>,
-        flip_epoch: Rc<Cell<u64>>,
+        flip_scope: Rc<Cell<&'static str>>,
+        body_height: Rc<Cell<f32>>,
+        body_focus: gpui::FocusHandle,
         flip_y_pos: Rc<Cell<f32>>,
         last_check_some: Rc<Cell<bool>>,
         last_collapse_some: Rc<Cell<bool>>,
         last_hover_p: Rc<Cell<f32>>,
         last_flip_offset: Rc<Cell<f32>>,
-        tooltip_overlay: gpui_kit::Entity<gpui_kit::base::TooltipOverlay>,
     }
 
     impl gpui_kit::Render for MilestoneGProbe {
@@ -1563,7 +1596,16 @@ async fn milestone_g_motion_primitives_collapse_flip_checkstroke_and_tooltip_gro
                 self.collapsed_open.get(),
                 window,
                 cx,
-                |_, _| div().h(px(80.0)).child("detail").into_any_element(),
+                |_, _| {
+                    div()
+                        .id("probe-body")
+                        .test_support()
+                        .track_focus(&self.body_focus)
+                        .h(px(self.body_height.get()))
+                        .flex_shrink_0()
+                        .child("detail")
+                        .into_any_element()
+                },
             );
             self.last_collapse_some.set(col.is_some());
 
@@ -1571,71 +1613,55 @@ async fn milestone_g_motion_primitives_collapse_flip_checkstroke_and_tooltip_gro
                 motion::animated_state_progress("probe-hover", self.hover_active.get(), window, cx);
             self.last_hover_p.set(hp);
 
-            let (flip_off, flip_state, flip_ep) = motion::sample_flip_offset_y(
-                "probe-list",
-                "row-a",
-                self.flip_epoch.get(),
-                window,
-                cx,
-            );
-            self.last_flip_offset.set(f32::from(flip_off));
-            motion::record_flip_bounds_y(
-                &flip_state,
-                flip_ep,
-                Bounds::new(
-                    point(px(0.0), px(self.flip_y_pos.get())),
-                    size(px(200.0), px(40.0)),
-                ),
-                window,
-                cx,
-            );
+            self.last_flip_offset
+                .set(f32::from(motion::flip_row_offset_y(
+                    "probe-list",
+                    "row-a",
+                    &self.flip_scope.get().into(),
+                    px(self.flip_y_pos.get()),
+                    window,
+                    cx,
+                )));
 
             div()
                 .size_full()
-                .children(chk)
+                .flex()
+                .flex_col()
+                .child(div().absolute().children(chk))
                 .children(col)
-                .child(self.tooltip_overlay.clone())
+                .child(
+                    div()
+                        .id("probe-tail")
+                        .test_support()
+                        .h(px(10.0))
+                        .flex_shrink_0(),
+                )
         }
     }
-
-    cx.update(|cx| {
-        gpui_kit::base::TooltipDefaults::new()
-            .with_show_delay(motion::TOOLTIP_INITIAL_DELAY)
-            .with_grace_period(motion::TOOLTIP_COOLDOWN)
-            .install(cx);
-    });
 
     let checked = Rc::new(Cell::new(false));
     let collapsed_open = Rc::new(Cell::new(false));
     let hover_active = Rc::new(Cell::new(false));
-    let flip_epoch = Rc::new(Cell::new(0_u64));
+    let flip_scope = Rc::new(Cell::new("initial"));
+    let body_height = Rc::new(Cell::new(80.0));
     let flip_y_pos = Rc::new(Cell::new(100.0_f32));
     let last_check_some = Rc::new(Cell::new(false));
     let last_collapse_some = Rc::new(Cell::new(false));
     let last_hover_p = Rc::new(Cell::new(0.0_f32));
     let last_flip_offset = Rc::new(Cell::new(0.0_f32));
 
-    let overlay_holder: Rc<
-        std::cell::RefCell<Option<gpui_kit::Entity<gpui_kit::base::TooltipOverlay>>>,
-    > = Rc::new(std::cell::RefCell::new(None));
-    let overlay_holder_clone = Rc::clone(&overlay_holder);
-
-    let win = cx.add_window(|window, cx| {
-        let overlay = motion::create_desktop_tooltip_overlay(cx);
-        motion::register_window_tooltip_overlay(window, &overlay, cx);
-        *overlay_holder_clone.borrow_mut() = Some(overlay.clone());
-        MilestoneGProbe {
-            checked: Rc::clone(&checked),
-            collapsed_open: Rc::clone(&collapsed_open),
-            hover_active: Rc::clone(&hover_active),
-            flip_epoch: Rc::clone(&flip_epoch),
-            flip_y_pos: Rc::clone(&flip_y_pos),
-            last_check_some: Rc::clone(&last_check_some),
-            last_collapse_some: Rc::clone(&last_collapse_some),
-            last_hover_p: Rc::clone(&last_hover_p),
-            last_flip_offset: Rc::clone(&last_flip_offset),
-            tooltip_overlay: overlay,
-        }
+    let win = cx.add_window(|_, cx| MilestoneGProbe {
+        checked: Rc::clone(&checked),
+        collapsed_open: Rc::clone(&collapsed_open),
+        hover_active: Rc::clone(&hover_active),
+        flip_scope: Rc::clone(&flip_scope),
+        body_height: Rc::clone(&body_height),
+        body_focus: cx.focus_handle(),
+        flip_y_pos: Rc::clone(&flip_y_pos),
+        last_check_some: Rc::clone(&last_check_some),
+        last_collapse_some: Rc::clone(&last_collapse_some),
+        last_hover_p: Rc::clone(&last_hover_p),
+        last_flip_offset: Rc::clone(&last_flip_offset),
     });
 
     // 1. Initial closed / unchecked / idle state
@@ -1648,44 +1674,32 @@ async fn milestone_g_motion_primitives_collapse_flip_checkstroke_and_tooltip_gro
     assert!((last_hover_p.get() - 0.0).abs() < 1e-4);
     assert!((last_flip_offset.get() - 0.0).abs() < 1e-4);
 
-    // 2. Scroll without epoch bump must NOT trigger FLIP
+    let sample = |cx: &mut gpui::TestAppContext| {
+        cx.update_window(*win, |_, window, cx| {
+            window.refresh();
+            window.render_frame(cx);
+        })
+        .unwrap();
+        last_flip_offset.get()
+    };
+    // Reordering down starts at the previous visual position, even on the first frame.
     flip_y_pos.set(160.0);
-    cx.update_window(*win, |_, window, cx| {
-        window.refresh();
-        window.render_frame(cx);
-    })
-    .unwrap();
-    assert!(
-        (last_flip_offset.get() - 0.0).abs() < 1e-4,
-        "normal scroll without reorder_epoch bump must not trigger FLIP"
-    );
-
-    // 3. Reorder WITH epoch bump triggers FLIP offset decaying back to 0 over 250ms
-    flip_epoch.set(1);
-    flip_y_pos.set(100.0);
-    cx.update_window(*win, |_, window, cx| {
-        window.refresh();
-        window.render_frame(cx);
-    })
-    .unwrap();
+    assert_eq!(sample(cx), -60.0);
     cx.executor().advance_clock(Duration::from_millis(60));
-    cx.update_window(*win, |_, window, cx| {
-        window.refresh();
-        window.render_frame(cx);
-    })
-    .unwrap();
-    let flip_mid = last_flip_offset.get();
-    assert!(
-        flip_mid > 1.0 && flip_mid < 60.0,
-        "FLIP reorder must smoothly decay offset from +60px toward 0, got {flip_mid}"
-    );
+    let mid = sample(cx);
+    assert!(mid > -60.0 && mid < 0.0);
+    // Reversing mid-flight preserves visual position. A filter/session switch never animates.
+    flip_y_pos.set(100.0);
+    assert!((sample(cx) - (60.0 + mid)).abs() < 0.001);
+    flip_scope.set("filtered");
+    flip_y_pos.set(20.0);
+    assert_eq!(sample(cx), 0.0);
+    flip_y_pos.set(501.0);
+    assert_eq!(sample(cx), 0.0);
+    flip_y_pos.set(21.0);
+    assert_eq!(sample(cx), 480.0);
     cx.executor().advance_clock(Duration::from_millis(250));
-    cx.update_window(*win, |_, window, cx| {
-        window.refresh();
-        window.render_frame(cx);
-    })
-    .unwrap();
-    assert!((last_flip_offset.get() - 0.0).abs() < 1e-3);
+    assert_eq!(sample(cx), 0.0);
 
     // 4. checkStroke + animated_collapse + 150ms hover progress
     checked.set(true);
@@ -1716,12 +1730,60 @@ async fn milestone_g_motion_primitives_collapse_flip_checkstroke_and_tooltip_gro
         "150ms hover progress should be mid-flight at 75ms, got {hover_mid}"
     );
 
-    // Close collapse & uncheck -> must remain animating briefly then cleanly unmount at 200ms
+    // Growth while still opening must increase the reveal. Once open the body
+    // follows its natural height, and the close starts at that last height.
+    body_height.set(200.0);
+    sample(cx);
+    cx.executor().advance_clock(Duration::from_millis(175));
+    sample(cx);
+    let tail_y = |cx: &mut gpui::TestAppContext| {
+        cx.update_window(*win, |_, window, _| {
+            window
+                .elements()
+                .into_iter()
+                .find(|el| el.path().last() == Some(&"probe-tail".into()))
+                .unwrap()
+                .bounds()
+                .origin
+                .y
+        })
+        .unwrap()
+    };
+    assert_eq!(tail_y(cx), px(200.0));
+    body_height.set(280.0);
+    sample(cx);
+    assert_eq!(tail_y(cx), px(280.0));
+    cx.update_window(*win, |probe, window, cx| {
+        probe
+            .downcast::<MilestoneGProbe>()
+            .unwrap()
+            .read(cx)
+            .body_focus
+            .clone()
+            .focus(window, cx)
+    })
+    .unwrap();
+
+    // Close collapse & uncheck: the height is animated but the subtree is already inert.
     checked.set(false);
     collapsed_open.set(false);
-    cx.update_window(*win, |_, window, cx| {
-        window.refresh();
-        window.render_frame(cx);
+    sample(cx);
+    assert_eq!(tail_y(cx), px(280.0));
+    cx.update_window(*win, |probe, window, cx| {
+        assert!(
+            !probe
+                .downcast::<MilestoneGProbe>()
+                .unwrap()
+                .read(cx)
+                .body_focus
+                .is_focused(window)
+        );
+        assert!(
+            !window
+                .elements()
+                .iter()
+                .any(|el| el.path().last() == Some(&"probe-body".into()))
+        );
     })
     .unwrap();
     cx.executor().advance_clock(Duration::from_millis(200));
@@ -1739,62 +1801,152 @@ async fn milestone_g_motion_primitives_collapse_flip_checkstroke_and_tooltip_gro
         "animated_collapse should unmount after 150ms close"
     );
 
-    // 5. TooltipOverlay shared group: 400ms initial delay + 300ms cooldown instant switch
-    let overlay = overlay_holder.borrow().clone().unwrap();
-    cx.update_window(*win, |_, window, cx| {
-        let bounds_a = Bounds::new(point(px(20.0), px(10.0)), size(px(28.0), px(28.0)));
-        overlay.update(cx, |o, cx| {
-            o.request_show(
-                gpui_kit::base::TooltipRequest::new(bounds_a, |_, cx| {
-                    cx.new(|_| EmptyView("tip-a")).into()
-                }),
-                window,
-                cx,
-            );
-        });
-    })
-    .unwrap();
-    cx.executor().advance_clock(Duration::from_millis(300));
-    cx.executor().run_until_parked();
-    // Before 400ms, tooltip must not be rendered yet; after +120ms (420ms total) it appears
-    cx.executor().advance_clock(Duration::from_millis(120));
-    cx.executor().run_until_parked();
+    // Reduced motion adopts the new layout without a transitional frame.
+    cx.update(|cx| cx.set_reduce_motion(true));
+    collapsed_open.set(true);
+    sample(cx);
+    assert_eq!(tail_y(cx), px(280.0));
+    collapsed_open.set(false);
+    sample(cx);
+    assert_eq!(tail_y(cx), px(0.0));
 
-    // Hide trigger A and enter trigger B within 100ms (< 300ms cooldown) -> switches immediately!
-    cx.update_window(*win, |_, window, cx| {
-        overlay.update(cx, |o, cx| o.request_hide(window, cx));
-    })
-    .unwrap();
-    cx.executor().advance_clock(Duration::from_millis(100));
-    cx.executor().run_until_parked();
-    cx.update_window(*win, |_, window, cx| {
-        let bounds_b = Bounds::new(point(px(60.0), px(10.0)), size(px(28.0), px(28.0)));
-        overlay.update(cx, |o, cx| {
-            o.request_show(
-                gpui_kit::base::TooltipRequest::new(bounds_b, |_, cx| {
-                    cx.new(|_| EmptyView("tip-b")).into()
-                }),
-                window,
-                cx,
-            );
-        });
-        window.refresh();
-        window.render_frame(cx);
-    })
-    .unwrap();
-
-    // Color & shadow lerp sanity
     let mid_col = motion::lerp_hsla(gpui_kit::transparent_black(), gpui_kit::white(), 0.5);
     assert!((mid_col.a - 0.5).abs() < 0.05);
+}
 
-    struct EmptyView(&'static str);
-    impl gpui_kit::Render for EmptyView {
+#[gpui::test]
+async fn desktop_tooltips_share_delay_but_not_window_or_anchor_lifetime(
+    cx: &mut gpui::TestAppContext,
+) {
+    use cst_desktop::theme::motion::{self, DesktopTooltipExt as _, DesktopTooltips};
+    use gpui_kit::{
+        InputEvent as _, InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent,
+        MouseMoveEvent, ParentElement as _, Styled as _, TestSupportExt as _, div, point,
+    };
+
+    struct Probe {
+        mounted: bool,
+        layer: gpui::Entity<DesktopTooltips>,
+    }
+    impl gpui::Render for Probe {
         fn render(
             &mut self,
-            _window: &mut gpui_kit::Window,
-            _cx: &mut gpui_kit::Context<Self>,
-        ) -> impl gpui_kit::IntoElement {
-            div().child(self.0)
+            _: &mut gpui::Window,
+            _: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            let trigger = |id| {
+                div()
+                    .id(id)
+                    .test_support()
+                    .w(px(40.0))
+                    .h(px(40.0))
+                    .desktop_tooltip(id, id)
+            };
+            div()
+                .size_full()
+                .flex()
+                .pl(px(12.0))
+                .pt(px(12.0))
+                .children(self.mounted.then(|| trigger("tip-a")))
+                .child(trigger("tip-b"))
+                .child(self.layer.clone())
         }
     }
+    cx.update(|cx| {
+        gpui_kit::base::TooltipDefaults::new()
+            .with_show_delay(motion::TOOLTIP_INITIAL_DELAY)
+            .with_grace_period(motion::TOOLTIP_COOLDOWN)
+            .install(cx);
+    });
+    let open = |cx: &mut gpui::TestAppContext| {
+        cx.add_window(|window, cx| Probe {
+            mounted: true,
+            layer: DesktopTooltips::install(window, cx),
+        })
+    };
+    let first = open(cx);
+    let second = open(cx);
+    let has = |cx: &mut gpui::TestAppContext, win, id: &str| {
+        cx.update_window(win, |_, window, cx| {
+            window.refresh();
+            window.render_frame(cx);
+            window
+                .elements()
+                .iter()
+                .any(|el| el.path().last() == Some(&gpui::SharedString::from(id.to_owned()).into()))
+        })
+        .unwrap()
+    };
+    let hover = |cx: &mut gpui::TestAppContext, win, id: &'static str| {
+        cx.update_window(win, |_, window, cx| window.hover(id, cx))
+            .unwrap();
+    };
+    let tick = |cx: &mut gpui::TestAppContext, ms| {
+        cx.executor().run_until_parked();
+        cx.executor().advance_clock(Duration::from_millis(ms));
+        cx.executor().run_until_parked();
+    };
+
+    cx.simulate_window_pointer_state(*first, true, true);
+    hover(cx, *first, "tip-a");
+    tick(cx, 399);
+    assert!(!has(cx, *first, "tooltip-tip-a"));
+    tick(cx, 1);
+    assert!(has(cx, *first, "tooltip-tip-a"));
+    assert!(!has(cx, *second, "tooltip-tip-a"));
+
+    hover(cx, *first, "tip-b");
+    assert!(has(cx, *first, "tooltip-tip-b"));
+    assert!(!has(cx, *first, "tooltip-tip-a"));
+    // A mouse-down outside any tooltip trigger cancels the visible grace period.
+    cx.update_window(*first, |_, window, cx| {
+        window.dispatch_event(
+            MouseDownEvent {
+                button: MouseButton::Right,
+                position: point(px(120.0), px(20.0)),
+                ..Default::default()
+            }
+            .to_platform_input(),
+            cx,
+        );
+    })
+    .unwrap();
+    assert!(!has(cx, *first, "tooltip-tip-b"));
+
+    hover(cx, *first, "tip-a");
+    tick(cx, 400);
+    assert!(has(cx, *first, "tooltip-tip-a"));
+    first
+        .update(cx, |probe, _, cx| {
+            probe.mounted = false;
+            cx.notify();
+        })
+        .unwrap();
+    // Move away and remove the hovered trigger before its normal leave delay expires.
+    cx.update_window(*first, |_, window, cx| {
+        window.dispatch_event(
+            MouseMoveEvent {
+                position: point(px(120.0), px(20.0)),
+                ..Default::default()
+            }
+            .to_platform_input(),
+            cx,
+        );
+    })
+    .unwrap();
+    has(cx, *first, "tooltip-tip-a");
+    tick(cx, 0);
+    assert!(!has(cx, *first, "tooltip-tip-a"));
+
+    hover(cx, *first, "tip-b");
+    tick(cx, 400);
+    assert!(has(cx, *first, "tooltip-tip-b"));
+    cx.simulate_window_pointer_state(*first, false, false);
+    cx.simulate_window_pointer_state(*second, true, true);
+    assert!(!has(cx, *first, "tooltip-tip-b"));
+    hover(cx, *second, "tip-a");
+    tick(cx, 399);
+    assert!(!has(cx, *second, "tooltip-tip-a"));
+    tick(cx, 1);
+    assert!(has(cx, *second, "tooltip-tip-a"));
 }

@@ -14,7 +14,7 @@ use cst_client::{
 };
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement as _;
-use gpui_kit::base::motion::{Transition, transition};
+use gpui_kit::base::motion::{Transition, TransitionState, transition};
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -182,9 +182,10 @@ pub struct AppShell {
     exit_trap_focus: FocusHandle,
     exit_cancel_focus: FocusHandle,
     exit_confirm_focus: FocusHandle,
-    tooltip_overlay: Entity<gpui_kit::base::TooltipOverlay>,
-    sidebar_session_order: Vec<String>,
-    sidebar_reorder_epoch: u64,
+    tooltip_overlay: Entity<motion::DesktopTooltips>,
+    sidebar_presence: TransitionState<f32>,
+    account_presence: TransitionState<f32>,
+    tooltip_session: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -311,13 +312,7 @@ impl AppShell {
             false
         });
 
-        let tooltip_overlay = motion::create_desktop_tooltip_overlay(cx);
-        motion::register_window_tooltip_overlay(window, &tooltip_overlay, cx);
-        let initial_session_order =
-            sidebar::filter_recent_sidebar_sessions(&initial_snapshot.sessions, "")
-                .into_iter()
-                .map(|s| s.id)
-                .collect();
+        let tooltip_overlay = motion::DesktopTooltips::install(window, cx);
 
         let mut shell = Self {
             client,
@@ -391,8 +386,9 @@ impl AppShell {
             exit_cancel_focus,
             exit_confirm_focus,
             tooltip_overlay,
-            sidebar_session_order: initial_session_order,
-            sidebar_reorder_epoch: 0,
+            sidebar_presence: TransitionState::default(),
+            account_presence: TransitionState::default(),
+            tooltip_session: None,
             _subscriptions: subscriptions,
         };
 
@@ -470,10 +466,14 @@ impl AppShell {
         subview: SessionSubView,
         cx: &mut Context<Self>,
     ) {
+        if self.route != route || self.session_subview != subview {
+            self.reset_account_menu();
+            self.tooltip_overlay
+                .update(cx, motion::DesktopTooltips::dismiss);
+        }
         if self.route != route {
-            self.account_menu_open = false;
-            self.account_menu_prior_focus = None;
             if self.route == ShellRoute::Login || route == ShellRoute::Login {
+                self.sidebar_presence = TransitionState::default();
                 self.set_banner_hovered(true, self.error_banner_timer.generation(), false, cx);
                 self.set_banner_hovered(false, self.notice_banner_timer.generation(), false, cx);
                 self.login_view.update(cx, |view, cx| {
@@ -574,15 +574,42 @@ impl AppShell {
         cx.notify();
     }
 
+    fn reset_account_menu(&mut self) {
+        self.account_menu_open = false;
+        self.account_menu_prior_focus = None;
+        self.account_presence = TransitionState::default();
+    }
+
+    fn toggle_account_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.account_menu_open {
+            self.close_account_menu(window, cx);
+        } else if !self.blocks_transient_surfaces(cx) {
+            let trigger = if self.sidebar_collapsed {
+                &self.topbar_account_focus
+            } else {
+                &self.sidebar_account_focus
+            };
+            self.account_menu_prior_focus = Some(trigger.clone());
+            trigger.focus(window, cx);
+            self.account_menu_open = true;
+            self.tooltip_overlay
+                .update(cx, motion::DesktopTooltips::dismiss);
+            cx.notify();
+        }
+    }
+
     fn close_account_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.account_menu_open = false;
-        if let Some(prev) = self.account_menu_prior_focus.take() {
-            prev.focus(window, cx);
-        }
+        let prior = self.account_menu_prior_focus.take();
+        self.restore_surface_focus(prior, window, cx);
         cx.notify();
     }
 
     fn blocks_workspace_shortcuts(&self, cx: &App) -> bool {
+        self.account_menu_open || self.blocks_transient_surfaces(cx)
+    }
+
+    fn blocks_transient_surfaces(&self, cx: &App) -> bool {
         self.shutting_down
             || self.exit_dialog.is_some()
             || self.update_dialog.open
@@ -595,7 +622,6 @@ impl AppShell {
             || (self.route == ShellRoute::Session
                 && self.session_subview == SessionSubView::Tree
                 && self.branch_tree_view.read(cx).has_summary_modal())
-            || self.account_menu_open
             || (self.route == ShellRoute::Login && self.login_view.read(cx).has_dropdown())
             || (self.route == ShellRoute::Settings && self.settings_view.read(cx).has_dropdown(cx))
             || (self.route == ShellRoute::Account
@@ -837,15 +863,6 @@ impl AppShell {
                     let prev_pref_collapsed = this.snapshot.desktop_settings.sidebar_collapsed;
                     let was_corrupt = this.snapshot.desktop_settings_corrupt;
                     this.snapshot = latest_snap;
-                    let next_order: Vec<String> =
-                        sidebar::filter_recent_sidebar_sessions(&this.snapshot.sessions, "")
-                            .into_iter()
-                            .map(|s| s.id)
-                            .collect();
-                    if next_order != this.sidebar_session_order {
-                        this.sidebar_session_order = next_order;
-                        this.sidebar_reorder_epoch = this.sidebar_reorder_epoch.wrapping_add(1);
-                    }
                     let pref_collapsed = this.snapshot.desktop_settings.sidebar_collapsed;
                     // A revision can arrive while SSE is offline, e.g. from an HTTP request.
                     // Ignore older echoes while a local manual preference is being saved.
@@ -939,6 +956,16 @@ impl AppShell {
         // survives moves, resizes within the same range and minimize/restore.
         if is_narrow != self.sidebar_viewport_narrow {
             self.sidebar_viewport_narrow = is_narrow;
+            self.sidebar_presence = TransitionState::default();
+            let account_open = self.account_menu_open;
+            self.reset_account_menu();
+            if account_open
+                && self.route != ShellRoute::Login
+                && !self.blocks_transient_surfaces(cx)
+            {
+                self.sidebar_toggle_focus().focus(window, cx);
+            }
+
             if is_narrow && !self.sidebar_collapsed {
                 self.auto_collapsed_narrow = true;
                 self.set_sidebar_collapsed(true, window, cx);
@@ -1204,6 +1231,9 @@ impl AppShell {
             return;
         }
         self.sidebar_collapsed = collapsed;
+        self.reset_account_menu();
+        self.tooltip_overlay
+            .update(cx, motion::DesktopTooltips::dismiss);
         let focus_disappears = if collapsed {
             let search_focus = self.sidebar_search_input.read(cx).focus_handle(cx);
             self.sidebar_collapse_focus.is_focused(window)
@@ -2714,6 +2744,19 @@ impl Render for AppShell {
             self.dismiss_sidebar_menu(window, cx);
         }
         let web_locked = self.snapshot.channel_mode == ChannelModeDto::WebActive;
+        let active_chat =
+            self.route == ShellRoute::Session && self.session_subview == SessionSubView::Chat;
+        let transient_blocked = self.blocks_transient_surfaces(cx)
+            || (active_chat && self.workbench.read(cx).has_modal());
+        if transient_blocked {
+            self.reset_account_menu();
+        }
+        let tooltip_blocked = transient_blocked || self.account_menu_open;
+        self.tooltip_overlay
+            .update(cx, |layer, cx| layer.set_blocked(tooltip_blocked, cx));
+        if web_locked {
+            self.sidebar_presence = TransitionState::default();
+        }
         let hw_diag_active = has_active_hardware_diagnostic(&self.snapshot);
         let sky_time = self.shader_scheduler.sample_for_window(
             self.route.uses_sky_shader(),
@@ -2727,6 +2770,11 @@ impl Render for AppShell {
             .client
             .with_workspace(|ws| (ws.active_session_id().map(str::to_owned), ws.active_view()));
 
+        if self.tooltip_session != active_session_id {
+            self.tooltip_session.clone_from(&active_session_id);
+            self.tooltip_overlay
+                .update(cx, motion::DesktopTooltips::dismiss);
+        }
         let wb_session_id = match self.route {
             ShellRoute::Session => active_session_id.clone(),
             _ => None,
@@ -2940,13 +2988,7 @@ impl Render for AppShell {
                             e6.update(cx, |this, cx| this.trigger_open_web(false, w, cx));
                         }),
                         on_toggle_account_menu: Rc::new(move |w, cx| {
-                            e7.update(cx, |this, cx| {
-                                this.account_menu_open = !this.account_menu_open;
-                                if this.account_menu_open {
-                                    this.account_menu_prior_focus = w.focused(cx);
-                                }
-                                cx.notify();
-                            });
+                            e7.update(cx, |this, cx| this.toggle_account_menu(w, cx));
                         }),
                         on_open_settings: Rc::new(move |_, cx| {
                             e8.update(cx, |this, cx| {
@@ -3061,19 +3103,21 @@ impl Render for AppShell {
                 .bg(palette.bg_shell);
 
             let sidebar_open = !self.sidebar_collapsed;
-            let sidebar_progress = transition(
-                "shell-expanded-sidebar-presence",
-                if sidebar_open { 1.0_f32 } else { 0.0 },
-                Transition::new(if sidebar_open {
-                    motion::NORMAL
-                } else {
-                    motion::SURFACE_CLOSE
-                })
-                .ease(motion::ease_out()),
-                window,
-                cx,
-            )
-            .clamp(0.0, 1.0);
+            let sidebar_progress = self
+                .sidebar_presence
+                .sample(
+                    if sidebar_open { 1.0_f32 } else { 0.0 },
+                    Transition::new(if sidebar_open {
+                        motion::NORMAL
+                    } else {
+                        motion::SURFACE_CLOSE
+                    })
+                    .ease(motion::ease_out()),
+                    window,
+                    cx,
+                )
+                .value
+                .clamp(0.0, 1.0);
 
             if sidebar_open {
                 let search_query = self.sidebar_search_input.read(cx).value().to_string();
@@ -3095,7 +3139,6 @@ impl Render for AppShell {
                     self.route,
                     active_session_id.as_deref(),
                     &sidebar_sessions,
-                    self.sidebar_reorder_epoch,
                     window,
                     cx,
                     &self.sidebar_search_input,
@@ -3217,13 +3260,7 @@ impl Render for AppShell {
                             });
                         }),
                         on_toggle_account_menu: Rc::new(move |w, cx| {
-                            s10.update(cx, |this, cx| {
-                                this.account_menu_open = !this.account_menu_open;
-                                if this.account_menu_open {
-                                    this.account_menu_prior_focus = w.focused(cx);
-                                }
-                                cx.notify();
-                            });
+                            s10.update(cx, |this, cx| this.toggle_account_menu(w, cx));
                         }),
                         on_open_settings: Rc::new(move |_, cx| {
                             s11.update(cx, |this, cx| {
@@ -3360,19 +3397,21 @@ impl Render for AppShell {
             }
 
             let account_open = self.account_menu_open;
-            let account_progress = transition(
-                "shell-account-menu-presence",
-                if account_open { 1.0_f32 } else { 0.0 },
-                Transition::new(if account_open {
-                    motion::POPOVER_OPEN
-                } else {
-                    motion::SURFACE_CLOSE
-                })
-                .ease(motion::ease_out()),
-                window,
-                cx,
-            )
-            .clamp(0.0, 1.0);
+            let account_progress = self
+                .account_presence
+                .sample(
+                    if account_open { 1.0_f32 } else { 0.0 },
+                    Transition::new(if account_open {
+                        motion::POPOVER_OPEN
+                    } else {
+                        motion::SURFACE_CLOSE
+                    })
+                    .ease(motion::ease_out()),
+                    window,
+                    cx,
+                )
+                .value
+                .clamp(0.0, 1.0);
             if account_open {
                 root = root.child(self.render_account_popover(
                     account_progress,

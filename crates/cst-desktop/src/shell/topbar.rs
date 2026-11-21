@@ -12,7 +12,7 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
-use crate::theme::motion::DesktopTooltipExt as _;
+use crate::theme::motion::{DesktopTooltipExt as _, IconPressExt as _};
 use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
@@ -75,15 +75,10 @@ pub fn render_topbar(
                     .child(cjk_inline_label("CST Pilot")),
             )
             .child({
-                let press_state = motion::icon_press_state("topbar-expand-sidebar-btn", window, cx);
-                let pressed = *press_state.read(cx);
-                let ps_down = press_state.clone();
-                let ps_up = press_state.clone();
-                let ps_out = press_state;
-                let hover_state =
-                    window.use_keyed_state("hover-topbar-expand-sidebar-btn", cx, |_, _| false);
-                let hovered = *hover_state.read(cx);
-                let hs = hover_state;
+                let (pressed, press_state) =
+                    motion::icon_press_state("topbar-expand-sidebar-btn", window, cx);
+                let (hovered, hs) =
+                    motion::PointerFlag::keyed("hover-topbar-expand-sidebar-btn", window, cx);
                 let hover_t = motion::animated_state_progress(
                     "topbar-expand-sidebar-btn",
                     hovered,
@@ -113,24 +108,7 @@ pub fn render_topbar(
                     .flex()
                     .items_center()
                     .justify_center()
-                    .on_mouse_down(gpui_kit::MouseButton::Left, move |_, _, cx| {
-                        ps_down.update(cx, |s, cx| {
-                            *s = true;
-                            cx.notify();
-                        });
-                    })
-                    .on_mouse_up(gpui_kit::MouseButton::Left, move |_, _, cx| {
-                        ps_up.update(cx, |s, cx| {
-                            *s = false;
-                            cx.notify();
-                        });
-                    })
-                    .on_mouse_up_out(gpui_kit::MouseButton::Left, move |_, _, cx| {
-                        ps_out.update(cx, |s, cx| {
-                            *s = false;
-                            cx.notify();
-                        });
-                    })
+                    .on_icon_press(press_state)
                     .on_click(move |_, w, cx| (on_expand)(w, cx))
                     .child(motion::animated_icon_press(
                         "topbar-expand-sidebar-btn",
@@ -552,18 +530,12 @@ fn topbar_icon_btn(
     cx: &mut App,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    let press_state = motion::icon_press_state(id, window, cx);
-    let pressed = *press_state.read(cx);
-    let ps_down = press_state.clone();
-    let ps_up = press_state.clone();
-    let ps_out = press_state;
-    let hover_state = window.use_keyed_state(
+    let (pressed, press_state) = motion::icon_press_state(id, window, cx);
+    let (hovered, hs) = motion::PointerFlag::keyed(
         gpui_kit::ElementId::Name(SharedString::from(format!("hover-{id}"))),
+        window,
         cx,
-        |_, _| false,
     );
-    let hovered = *hover_state.read(cx);
-    let hs = hover_state;
     let hover_t = motion::animated_state_progress(id, hovered, window, cx);
 
     div()
@@ -588,24 +560,7 @@ fn topbar_icon_btn(
         .flex()
         .items_center()
         .justify_center()
-        .on_mouse_down(gpui_kit::MouseButton::Left, move |_, _, cx| {
-            ps_down.update(cx, |s, cx| {
-                *s = true;
-                cx.notify();
-            });
-        })
-        .on_mouse_up(gpui_kit::MouseButton::Left, move |_, _, cx| {
-            ps_up.update(cx, |s, cx| {
-                *s = false;
-                cx.notify();
-            });
-        })
-        .on_mouse_up_out(gpui_kit::MouseButton::Left, move |_, _, cx| {
-            ps_out.update(cx, |s, cx| {
-                *s = false;
-                cx.notify();
-            });
-        })
+        .on_icon_press(press_state)
         .on_click(move |_, w, cx| on_click(w, cx))
         .child(motion::animated_icon_press(
             id,
