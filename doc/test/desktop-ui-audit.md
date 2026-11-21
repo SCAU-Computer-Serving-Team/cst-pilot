@@ -32,7 +32,7 @@
 - [x] `WSbcS` 主页（含 `p2HWHP` 展开态、`OeuCo` 收起态、`PuezS` 深色态、双圆弧标识、无阴影主标题与 `600×88` 输入框；已完成双主题 `winapp` 视觉核查、`h1BufF` 顶部通知定位实测及 `sol` 复核闭环）
 - [x] `WSbcS / xdA96` 主页 `X2gAh` 顶部报错条实机触发态截图验证（`X2gAh` 已补充 `12px` 间距与 L2 阴影对齐，并在双主题 `winapp` 主页断连保存失败场景完成触发态真窗截图验证）
 - [x] `l84goO` 对话（含 `s0bIf`/`FY9tR` 对话排版、过程折叠头、Markdown 标题/表格/代码块/行内代码深浅色对比、`s4IJwS` 中断与报错详情、`ivhR0` 原比例灯箱、`qFaoI` 深色与本地 SSE 实时流式输出；已完成双主题 `winapp` 真窗核查，并通过 `sol` 工程复核及灯箱冒泡/尺寸/弹窗语义修复与复测）
-- [ ] `l84goO / KLzVw & GM9WU` 长会话上滑出现 `40px` 黑底「回到底部」悬浮按钮与 `507` 本机失败用户气泡（`CircleAlert` 图标）真窗触发截图（静态结构已按 `.pen` 修正并通过编译，受限于 UIA 未暴露 `ScrollPattern` 尚待触发态截图）
+- [ ] `l84goO / KLzVw & GM9WU` 长会话上滑出现 `40px` 黑底「回到底部」悬浮按钮与 `507` 本机失败用户气泡（`CircleAlert` 图标）真窗触发截图（`KLzVw` 已通过 Win32 滚轮在浅深双主题真窗完成触发态截图与 `scroll-to-bottom-btn` 核验；`GM9WU` 静态与无头集成测试已覆盖，真窗触发态截图待非锁屏桌面补采）
 - [x] `zdtJ6` 对话中的工具混排流与多工具折叠切换（已修正独立 `read` 图片脱离折叠段并保持折叠锚点 `expansion_anchor` 不串位，已完成双主题 `winapp` 与 `workbench_and_ime_ui` 单测验证）
 - [ ] `Ed7xS` 终端（内置 TUI 视图切换、顶栏分段控件 `topbar-view-gui-btn` / `topbar-view-tui-btn`、窄幅与草稿衔接；阶段 10 待开发：`crates/cst-tui` 尚未创建，点击「终端」切换呈现占位说明「窗口内置终端视图将在阶段 10 开放。」）
 - [x] `juqeU` 状态提示与软件更新（`h1BufF` 顶部通知、`WO6NQ` 更新/凭据缺省弹层、`pFooK` 退出确认「继续使用」/「停止任务并退出」与红标已完成双主题 `winapp` 截图核查；更新下载进度、取消与交接锁屏、焦点陷阱与降级草稿检查由 `settings_and_update` 与 `shell_and_mode_ui` 实测覆盖，无线上签名更新包实机截图）
@@ -77,11 +77,11 @@
 
 ### 21 项动效原语与曲线核查
 
-- [ ] **基础按压与悬停组（`press` / `hover` / `focus`）**：`120ms`（`PRESS`）/ `150ms`（`FAST`）与 `ease_out`（`cubic-bezier(0.22, 1, 0.36, 1)`）常量已对齐，窗口启动与激活时同步系统 `SPI_GETCLIENTAREAANIMATION` 开关；受限于 GPUI `Div` 不支持容器级 `scale(0.97)`/`scale(0.92)` 变换及背景色/聚焦阴影 `150ms` 渐变动效，悬停与聚焦采用即时状态切换
-- [ ] **浮层与弹窗组（`popover` / `modal` / `toast`）**：已完成 `220ms`/`240ms` `ease_out` 透明度与位移入场（阴影按 `d^3` 渐强）、`2600ms` 顶部通知/报错条 `BannerCountdownState`（`timer_epoch` 防重用 + 悬停暂停/恢复 + 切页/遮挡/替换清悬停），并完成双主题 `winapp` 与 `shell_and_mode_ui` 实测；受限于 GPUI `Div` 无容器 `scale(0.96)`，通用浮层与弹窗采用纯位移淡入且关闭时为保持 `Esc` 单帧归还焦点同步卸载（`0ms`），未实现通用 `150ms` 退场动画
-- [ ] **展开与位移组（`collapse` / `chevron` / `flip` / `pageSlide` / `sidebarShift` / `drawer`）**：`chevron`（`240ms ease_out` `0->180°`/`0->90°`）、`pageSlide`（`SettingsView` 与 `ModelPickerPage` `±8px` `240ms` 可折返）、`sidebarShift`（`h5AY3` `24px` 右移可折返）与 `recent-sessions-drawer`（`240ms` 开/`150ms` 关中途可折返且关即卸交互/无障碍节点）已通过 `shell_and_mode_ui` 与双主题 `winapp`（含 5 帧序列与 `sol` 复核）实测；剩余差距：工具/思考块 `collapse` 尚无高度插值，展开侧栏 `sidebar-drawer-enter` 仅入场动效，会话/排队/模型列表重排尚无 `flip` 位置追踪
-- [x] **反馈与指示组（`checkStroke` / `iconSwap` / `segPill` / `tabIndicator`）**：`iconSwap`（`240ms ease_spring` `0.65 -> 1` 无模糊缩放、`CopyFeedbackTracker` 基于 `BTreeMap` 于 `1600ms` 复原并支持连点重置）、`segPill`（`240ms ease_in_out`、按视图作用域隔离边界与自适应重帧）与 `tabIndicator`（`VPWAF` `240ms ease_in_out`、`on_children_prepainted` 测量折返）均通过无头测试与双主题 `winapp` 实测（含设置页 5 帧序列）；GPUI `Icon` 不暴露原始 SVG `stroke-dashoffset` 路径描边，复选勾选改以 `340ms`/`150ms` `ease_spring` 缩放实现
-- [ ] **零延迟与节律组（`tooltipGroup` / `welcomeStagger` / `streamAppend` / `runningLight` / `shaderFreeze`）**：`Ctrl+K` 面板 `0ms` 瞬开、欢迎屏 `40ms` 错位 `<=300ms` 单次播放（站内返回不重播）、流式追加不破坏选区且尊重 `reduce_motion`、`RunningLight` `2000ms` 线性 5 字素扫光并在离屏（`!intersects content_mask`）/失焦/不可见/`WebActive`/硬件诊断/`reduce_motion` 冻结 `0 FPS`，以及着色器 `0 FPS` 停帧与系统 `减少动态` 同步均已通过单测与无头测试；`TooltipDefaults`（`400ms` 延迟/`300ms` 冷却）已在窗口初始化安装，但各图标按钮尚未挂载 `.tooltip(...)`，`web-search-warn-tooltip` 为独立悬停提示未接入同组冷却
+- [x] **基础按压与悬停组（`press` / `hover` / `focus`）**：`120ms`（`PRESS`）/ `150ms`（`FAST`）与 `ease_out`（`cubic-bezier(0.22, 1, 0.36, 1)`）已对齐并同步系统 `SPI_GETCLIENTAREAANIMATION`；图标按钮接入 `120ms` `Transformation::scale(0.92)`（`animated_icon_press`，支持移出窗口与失焦自动复原），顶栏图标与输入框接入 `150ms` 背景色/聚焦边框与阴影插值（`animated_state_progress`、`lerp_hsla`、`lerp_shadows`）；GPUI `Div` 容器级 `scale(0.97)` 已按 [ADR-008](../ADR.md) 登记等价替代方案
+- [x] **浮层与弹窗组（`popover` / `modal` / `toast`）**：已完成 `220ms`/`240ms` `ease_out` 位移淡入（阴影按 `d^3` 渐强）、`2600ms` 顶部通知/报错条 `BannerCountdownState`（`timer_epoch` 防重用 + 悬停暂停/恢复 + 切页/遮挡/替换清悬停），以及最近会话抽屉与账号菜单可折返 `150ms` 无交互退场（关闭首帧即卸交互/无障碍节点并保持 `Esc` 单帧归焦），并经 `shell_and_mode_ui` 与双主题 `winapp` 核实；容器级 `scale(0.96)` 已按 [ADR-008](../ADR.md) 登记替代
+- [x] **展开与位移组（`collapse` / `chevron` / `flip` / `pageSlide` / `sidebarShift` / `drawer`）**：过程块与工具原始数据已接入 `MeasuredCollapse` 可折返测量高度插值（`240ms` 开 / `150ms` 关，关闭首帧即卸子交互控件并持续跟踪动态内容高度）；展开侧栏已补齐 `240ms`/`150ms` 双向滑移；侧栏会话、模型偏好与排队栏已接入列表内相对坐标 `FLIP` 位置追踪（不因滚动、筛选或切会话误触发）；`chevron`、`pageSlide`、`sidebarShift` 与 `recent-sessions-drawer` 均经 `shell_and_mode_ui` 与 `sol` 复核实测
+- [x] **反馈与指示组（`checkStroke` / `iconSwap` / `segPill` / `tabIndicator`）**：复选勾选已改用 GPUI `canvas` + `PathBuilder::stroke` 实现真矢量两段路径描边动画（`340ms` 勾选 / `150ms` 取消，已通过双主题 `winapp` 核对）；`iconSwap`（`240ms ease_spring` `0.65 -> 1` + `1600ms` 连点重置）、`segPill` 与 `tabIndicator` 均通过无头测试与双主题 `winapp` 实测
+- [x] **零延迟与节律组（`tooltipGroup` / `welcomeStagger` / `streamAppend` / `runningLight` / `shaderFreeze`）**：`Ctrl+K` `0ms` 瞬开、欢迎屏单次错位、`RunningLight` 离屏停帧、着色器 `0 FPS` 停帧与减少动态同步均已实测；已实现按窗口隔离的共享 `TooltipOverlay` 冷却组（`theme/tooltip.rs`，`400ms` 初始延迟 / `300ms` 冷却直切，切页/弹窗/失焦/卸载自动清旧提示），挂载于顶栏、侧栏、输入栏、消息操作栏图标按钮并接入 `web-search-warn-tooltip`，已通过 `desktop_tooltips_share_delay_but_not_window_or_anchor_lifetime` 与双主题 `winapp` 核对
 
 ---
 
