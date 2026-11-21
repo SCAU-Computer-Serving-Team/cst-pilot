@@ -125,6 +125,36 @@ function Invoke-UiaById {
     return $false
 }
 
+function Get-UiaBoundingRect {
+    param(
+        [intptr]$Hwnd,
+        [string]$AutomationId,
+        [int]$TimeoutMs = 2000
+    )
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $root = [Windows.Automation.AutomationElement]::FromHandle($Hwnd)
+    $cond = [Windows.Automation.PropertyCondition]::new(
+        [Windows.Automation.AutomationElement]::AutomationIdProperty,
+        $AutomationId
+    )
+    while ($sw.ElapsedMilliseconds -lt $TimeoutMs) {
+        $el = $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $cond)
+        if ($el) {
+            $r = $el.Current.BoundingRectangle
+            if (-not $r.IsEmpty -and $r.Width -gt 0 -and $r.Height -gt 0) {
+                return [pscustomobject]@{
+                    Left = [Math]::Round($r.Left, 2)
+                    Top = [Math]::Round($r.Top, 2)
+                    Right = [Math]::Round($r.Right, 2)
+                    Bottom = [Math]::Round($r.Bottom, 2)
+                }
+            }
+        }
+        Start-Sleep -Milliseconds 30
+    }
+    return $null
+}
+
 function Wait-DesktopWindowHandle {
     param([Diagnostics.Process]$Process, [int]$TimeoutMs = 10000)
     $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -639,8 +669,19 @@ try {
         $p1Snap = Invoke-ProbeRequest -Port $port -Path '/probe'
         $popoverShot = Join-Path $shotDir '02-popover-light.png'
         Save-DesktopScreenshot -Hwnd $hwnd -Path $popoverShot
-        # Close context popover
+        $composerRect = Get-UiaBoundingRect -Hwnd $hwnd -AutomationId 'composer-card-zwas1'
+        $ctxPopoverRect = Get-UiaBoundingRect -Hwnd $hwnd -AutomationId 'composer-context-popover-h5jg6d'
+        $ctxPopoverAboveCard = ($null -ne $composerRect -and $null -ne $ctxPopoverRect -and $ctxPopoverRect.Bottom -le $composerRect.Top)
+        # Close context popover and capture Model Picker upward floating geometry
         $null = Invoke-UiaById -Hwnd $hwnd -AutomationId 'composer-context-ring-btn' -TimeoutMs 2000
+        Start-Sleep -Milliseconds 120
+        $null = Invoke-UiaById -Hwnd $hwnd -AutomationId 'composer-model-picker-btn' -TimeoutMs 2000
+        Start-Sleep -Milliseconds 260
+        $modelPickerRect = Get-UiaBoundingRect -Hwnd $hwnd -AutomationId 'composer-model-picker-d8zzg'
+        $modelPickerAboveCard = ($null -ne $composerRect -and $null -ne $modelPickerRect -and $modelPickerRect.Bottom -le $composerRect.Top)
+        $modelPickerShot = Join-Path $shotDir '02b-model-picker-light.png'
+        Save-DesktopScreenshot -Hwnd $hwnd -Path $modelPickerShot
+        $null = Invoke-UiaById -Hwnd $hwnd -AutomationId 'composer-model-picker-btn' -TimeoutMs 2000
         Start-Sleep -Milliseconds 120
 
         # --- P2-2: Settings 4 tabs + AllSessions switch ---
@@ -886,6 +927,8 @@ try {
             }
             p1_controls = @{
                 iconFailCount = $iconFailCount
+                contextPopoverAboveComposer = $ctxPopoverAboveCard
+                modelPickerAboveComposer = $modelPickerAboveCard
                 inputP50Ms = [Math]::Round([double]$p1Snap.input_latency.p50_ms, 2)
                 inputP95Ms = [Math]::Round([double]$p1Snap.input_latency.p95_ms, 2)
                 inputMaxMs = [Math]::Round([double]$p1Snap.input_latency.max_ms, 2)
