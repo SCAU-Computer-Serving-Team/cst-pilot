@@ -170,6 +170,7 @@ impl SettingsView {
         if self.category == category {
             return;
         }
+        crate::ux_probe::mark_input("settings_tab");
         self.close_tab_surfaces(cx);
         let old_idx = self.category.index();
         let new_idx = category.index();

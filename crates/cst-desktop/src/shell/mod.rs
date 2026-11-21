@@ -467,6 +467,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         if self.route != route || self.session_subview != subview {
+            crate::ux_probe::mark_input("route_switch");
             self.reset_account_menu();
             self.tooltip_overlay
                 .update(cx, motion::DesktopTooltips::dismiss);
@@ -1017,6 +1018,7 @@ impl AppShell {
         if self.command_palette.is_none() && self.blocks_workspace_shortcuts(cx) {
             return;
         }
+        crate::ux_probe::mark_input("command_palette");
         if let Some(palette_ent) = self.command_palette.take() {
             self.command_palette_sub = None;
             if let Some(pf) = palette_ent.read(cx).prior_focus() {
@@ -1266,6 +1268,7 @@ impl AppShell {
     }
 
     pub fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        crate::ux_probe::mark_input("toggle_sidebar");
         let next_collapsed = !self.sidebar_collapsed;
         self.auto_collapsed_narrow = false;
         self.set_sidebar_collapsed(next_collapsed, window, cx);
@@ -1690,6 +1693,7 @@ impl AppShell {
     }
 
     fn activate_session_by_id(&mut self, session_id: String, cx: &mut Context<Self>) {
+        crate::ux_probe::mark_input("session_switch");
         self.set_route(ShellRoute::Session, cx);
         self.recent_drawer_open = false;
         self.recent_drawer_prior_focus = None;
@@ -2726,6 +2730,7 @@ impl AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let frame_started = crate::ux_probe::is_enabled().then(std::time::Instant::now);
         let theme_global = DesktopThemeGlobal::current(cx);
         let palette = theme_global.palette;
         let mono_family = theme_global.mono_font_family;
@@ -3063,6 +3068,9 @@ impl Render for AppShell {
                     .border_1()
                     .border_color(palette.border_subtle),
             );
+            if let Some(layer) = crate::ux_probe::bounds_probe_layer("workspace", None) {
+                workspace_card = workspace_card.child(layer);
+            }
 
             let framed_workspace = if self.sidebar_collapsed {
                 div()
@@ -3800,6 +3808,40 @@ impl Render for AppShell {
         }
 
         root = root.child(self.tooltip_overlay.clone());
+
+        if let Some(started) = frame_started {
+            let route_name = match self.route {
+                ShellRoute::Home => "home",
+                ShellRoute::Session => match self.session_subview {
+                    SessionSubView::Chat => "session:chat",
+                    SessionSubView::Tree => "session:tree",
+                    SessionSubView::Export => "session:export",
+                },
+                ShellRoute::AllSessions => "all_sessions",
+                ShellRoute::Settings => "settings",
+                ShellRoute::Account => "account",
+                ShellRoute::Login => "login",
+            };
+            crate::ux_probe::record_render(
+                started,
+                crate::ux_probe::ShellProbeState {
+                    route: route_name.to_owned(),
+                    active_session_id,
+                    viewport_width: f32::from(viewport_size.width),
+                    viewport_height: f32::from(viewport_size.height),
+                    scale_factor,
+                    sidebar_collapsed: self.sidebar_collapsed,
+                    window_active: window.is_window_active(),
+                    reduce_motion: cx.reduce_motion(),
+                    transparency_enabled,
+                    web_active: web_locked,
+                    forced_warp: crate::ux_probe::forced_warp_enabled(),
+                },
+            );
+            if let Some(layer) = crate::ux_probe::bounds_probe_layer("shell", Some(started)) {
+                root = root.child(layer);
+            }
+        }
 
         root
     }

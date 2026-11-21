@@ -2113,6 +2113,14 @@ impl Render for ComposerView {
             &palette.composer_shadows(true),
             focus_t,
         );
+        if crate::ux_probe::is_enabled() {
+            let rgba_val = card_border_color.to_rgb();
+            crate::ux_probe::record_composer_style(
+                is_focused,
+                [rgba_val.r, rgba_val.g, rgba_val.b, rgba_val.a],
+                card_shadows.len(),
+            );
+        }
 
         let ent_drop = entity.clone();
         let mut card = div()
@@ -2200,6 +2208,9 @@ impl Render for ComposerView {
         card = card
             .child(div().w_full().min_h(px(24.0)).child(textarea_element))
             .child(action_bar);
+        if let Some(layer) = crate::ux_probe::bounds_probe_layer("composer", None) {
+            card = card.relative().child(layer);
+        }
 
         // Outer relative wrapper (`card` first, upward floating popovers `p2biT` / `d8zzg` / `h5jG6d` painted above `card`)
         let mut wrapper = div().relative().w_full().child(card);

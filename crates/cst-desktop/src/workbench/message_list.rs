@@ -93,6 +93,9 @@ pub struct MessageListView {
     turn_started_instants: BTreeMap<String, Instant>,
     attachment_cache: BTreeMap<String, Arc<Image>>,
     attachment_loading: BTreeSet<String>,
+    cached_grouped_key: Option<(usize, usize, u64)>,
+    cached_grouped_turns: Arc<Vec<Turn>>,
+    cached_grouped_results: Arc<BTreeMap<String, Value>>,
 }
 
 impl EventEmitter<MessageListEvent> for MessageListView {}
@@ -119,6 +122,9 @@ impl MessageListView {
             turn_started_instants: BTreeMap::new(),
             attachment_cache: BTreeMap::new(),
             attachment_loading: BTreeSet::new(),
+            cached_grouped_key: None,
+            cached_grouped_turns: Arc::new(Vec::new()),
+            cached_grouped_results: Arc::new(BTreeMap::new()),
         }
     }
 
@@ -157,6 +163,9 @@ impl MessageListView {
         self.copy_tracker = CopyFeedbackTracker::default();
         self.markdown_store.clear();
         self.turn_started_instants.clear();
+        self.cached_grouped_key = None;
+        self.cached_grouped_turns = Arc::new(Vec::new());
+        self.cached_grouped_results = Arc::new(BTreeMap::new());
         self.scroll_handle.scroll_to_bottom();
         cx.notify();
     }
@@ -307,6 +316,7 @@ impl MessageListView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        crate::ux_probe::mark_input("scroll_wheel");
         let pixel_delta = event.delta.pixel_delta(window.rem_size());
         let offset = self.scroll_handle.offset();
         let max_offset = self.scroll_handle.max_offset();
@@ -1832,39 +1842,60 @@ impl Render for MessageListView {
             }
         }
 
-        // Merge `session.messages` with live `streaming_assistant` when running
-        let mut combined_entries: Vec<Value> = session.messages.as_ref().clone();
-        if session.running
-            && let Some(ref streaming) = session.streaming_assistant
-        {
-            let stream_id = streaming
-                .get("id")
-                .or_else(|| streaming.get("message").and_then(|m| m.get("id")))
-                .and_then(Value::as_str);
-            let replaced = if let Some(sid_str) = stream_id {
-                if let Some(last) = combined_entries.last_mut() {
-                    let last_id = last
+        // Reuse grouped turns for settled sessions so scrolling & hover frames skip cloning
+        // hundreds of JSON entries and re-grouping the entire history.
+        let (turns, tool_results): (Arc<Vec<Turn>>, Arc<BTreeMap<String, Value>>) =
+            if !session.running && session.streaming_assistant.is_none() {
+                let cache_key = (
+                    Arc::as_ptr(&session.messages) as usize,
+                    session.messages.len(),
+                    session.revision,
+                );
+                if self.cached_grouped_key != Some(cache_key) {
+                    let (t, tr) = group_turns_and_results(session.messages.as_ref());
+                    self.cached_grouped_turns = Arc::new(t);
+                    self.cached_grouped_results = Arc::new(tr);
+                    self.cached_grouped_key = Some(cache_key);
+                }
+                (
+                    Arc::clone(&self.cached_grouped_turns),
+                    Arc::clone(&self.cached_grouped_results),
+                )
+            } else {
+                self.cached_grouped_key = None;
+                let mut combined_entries: Vec<Value> = session.messages.as_ref().clone();
+                if session.running
+                    && let Some(ref streaming) = session.streaming_assistant
+                {
+                    let stream_id = streaming
                         .get("id")
-                        .or_else(|| last.get("message").and_then(|m| m.get("id")))
+                        .or_else(|| streaming.get("message").and_then(|m| m.get("id")))
                         .and_then(Value::as_str);
-                    if last_id == Some(sid_str) {
-                        *last = streaming.clone();
-                        true
+                    let replaced = if let Some(sid_str) = stream_id {
+                        if let Some(last) = combined_entries.last_mut() {
+                            let last_id = last
+                                .get("id")
+                                .or_else(|| last.get("message").and_then(|m| m.get("id")))
+                                .and_then(Value::as_str);
+                            if last_id == Some(sid_str) {
+                                *last = streaming.clone();
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
                     } else {
                         false
+                    };
+                    if !replaced {
+                        combined_entries.push(streaming.clone());
                     }
-                } else {
-                    false
                 }
-            } else {
-                false
+                let (t, tr) = group_turns_and_results(&combined_entries);
+                (Arc::new(t), Arc::new(tr))
             };
-            if !replaced {
-                combined_entries.push(streaming.clone());
-            }
-        }
-
-        let (turns, tool_results) = group_turns_and_results(&combined_entries);
         let live_turn_idx = active_turn_index(&turns, session.running);
         let running_light_allowed = !reduce_motion
             && snap.channel_mode != cst_client::ChannelModeDto::WebActive
@@ -1910,6 +1941,7 @@ impl Render for MessageListView {
                         .items_center()
                         .hover(|s| s.bg(palette.bg_item_hover))
                         .on_click(move |_, _, cx| {
+                            crate::ux_probe::mark_input("show_earlier");
                             ent_more.update(cx, |this, cx| {
                                 this.visible_turn_limit += batch;
                                 this.scroll_handle.scroll_to_top_of_item(batch);
@@ -1959,6 +1991,17 @@ impl Render for MessageListView {
 
         let show_scroll_bottom_btn =
             !self.auto_follow_bottom && self.scroll_handle.max_offset().y > px(36.0);
+        if crate::ux_probe::is_enabled() {
+            crate::ux_probe::record_scroll(
+                f32::from(self.scroll_handle.offset().y),
+                f32::from(self.scroll_handle.max_offset().y),
+                self.auto_follow_bottom,
+                show_scroll_bottom_btn,
+            );
+            if let Some(layer) = crate::ux_probe::bounds_probe_layer("message_col", None) {
+                list_col = list_col.relative().child(layer);
+            }
+        }
 
         let mut outer = div()
             .id("session-message-list-viewport")
@@ -1977,6 +2020,9 @@ impl Render for MessageListView {
                     .on_scroll(cx.listener(Self::on_scroll_wheel))
                     .child(list_col),
             );
+        if let Some(layer) = crate::ux_probe::bounds_probe_layer("scroll_area", None) {
+            outer = outer.child(layer);
+        }
 
         if show_scroll_bottom_btn {
             let ent_btm = entity.clone();

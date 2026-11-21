@@ -37,9 +37,10 @@ pub struct SurfaceRuntimeDiagnostics {
 }
 
 pub fn surface_diagnostics() -> SurfaceRuntimeDiagnostics {
+    let forced_warp = crate::ux_probe::forced_warp_enabled();
     SurfaceRuntimeDiagnostics {
-        supports_sm50: SUPPORTS_SM50.load(Ordering::Relaxed),
-        is_software_adapter: IS_SOFTWARE_ADAPTER.load(Ordering::Relaxed),
+        supports_sm50: !forced_warp && SUPPORTS_SM50.load(Ordering::Relaxed),
+        is_software_adapter: forced_warp || IS_SOFTWARE_ADAPTER.load(Ordering::Relaxed),
         sky_draw_count: SKY_DRAW_COUNT.load(Ordering::Relaxed),
         frosted_draw_count: FROSTED_DRAW_COUNT.load(Ordering::Relaxed),
         device_build_count: DEVICE_BUILD_COUNT.load(Ordering::Relaxed),
@@ -47,11 +48,11 @@ pub fn surface_diagnostics() -> SurfaceRuntimeDiagnostics {
 }
 
 pub fn d3d_sm50_supported() -> bool {
-    SUPPORTS_SM50.load(Ordering::Relaxed)
+    !crate::ux_probe::forced_warp_enabled() && SUPPORTS_SM50.load(Ordering::Relaxed)
 }
 
 pub fn d3d_is_software_adapter() -> bool {
-    IS_SOFTWARE_ADAPTER.load(Ordering::Relaxed)
+    crate::ux_probe::forced_warp_enabled() || IS_SOFTWARE_ADAPTER.load(Ordering::Relaxed)
 }
 
 /// Explicitly drops cached D3D11 pipeline objects so the next frame rebuilds them cleanly

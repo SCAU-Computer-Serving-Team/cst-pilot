@@ -7,6 +7,7 @@ pub mod settings;
 pub mod shell;
 pub mod theme;
 pub mod tools;
+pub mod ux_probe;
 pub mod workbench;
 
 pub mod shaders {
@@ -354,6 +355,7 @@ pub(crate) fn sync_system_reduce_motion(cx: &mut App) {
 
 /// Runs the full desktop application lifecycle (`CstClient::bootstrap` + `gpui_kit::application`).
 pub fn run_desktop_app(kit_root: PathBuf, initial_ui: RestartUi) -> Result<(), String> {
+    ux_probe::init_if_requested(Some(&kit_root));
     let (desktop_exe, server_exe, updater_exe) = resolve_sibling_kit_binaries(&kit_root)?;
     let mut boot_opts = BootstrapOptions {
         allow_uac_server_spawn: cfg!(windows),
@@ -370,12 +372,14 @@ pub fn run_desktop_app(kit_root: PathBuf, initial_ui: RestartUi) -> Result<(), S
         ClientBootstrapResult::ActivatedExisting { .. } => return Ok(()),
         ClientBootstrapResult::Started(c) => c,
     };
+    ux_probe::mark_bootstrap_done();
 
     let handle = client.handle().clone();
     gpui_kit::application()
         .with_assets(gpui_kit::assets::AllAssets)
         .run(move |cx| {
             let font_report = load_bundled_fonts(&kit_root, cx);
+            ux_probe::mark_fonts_loaded();
             gpui_kit::init(cx);
             register_shell_keys(cx);
             cx.set_global(OwnedClientGlobal(client));
@@ -383,6 +387,7 @@ pub fn run_desktop_app(kit_root: PathBuf, initial_ui: RestartUi) -> Result<(), S
 
             let shell = open_desktop_shell_window(handle, Some(font_report), cx)
                 .expect("failed to open CST Pilot desktop window");
+            ux_probe::mark_window_opened();
             if initial_ui == RestartUi::Tui {
                 shell.update(cx, |this, cx| {
                     this.show_top_notice("内置终端视图将在阶段 10 开放，已进入桌面图形界面。", cx);

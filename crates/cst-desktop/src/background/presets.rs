@@ -40,7 +40,9 @@ impl SkyPreset {
     /// Fallback multi-stop linear gradient `(top, bottom)` for GPUs below D3D Feature Level `11_0`.
     pub fn fallback_gradient_stops(self) -> (Hsla, Hsla) {
         match self {
-            Self::HomeLight => (rgba(0xEEF3_FCFF).into(), rgba(0xFBF9_F7FF).into()),
+            // Keep light home fallback in the same deep-to-sky blue range as `blue-hour.glsl`
+            // so the white welcome heading stays readable (`>= 4.5:1`) under WARP / `< 11_0`.
+            Self::HomeLight => (rgba(0x1E2A_6CFF).into(), rgba(0x8AA2_DDFF).into()),
             Self::HomeDark => (rgba(0x1319_2BFF).into(), rgba(0x0D0D_11FF).into()),
             Self::LoginLight => (rgba(0xE6F2_FFFF).into(), rgba(0x80B3_FFFF).into()),
             Self::LoginDark => (rgba(0x4A5A_A0FF).into(), rgba(0x1C1C_1CFF).into()),
