@@ -467,6 +467,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         if self.route != route || self.session_subview != subview {
+            #[cfg(feature = "test-support")]
             crate::ux_probe::mark_input("route_switch");
             self.reset_account_menu();
             self.tooltip_overlay
@@ -1018,6 +1019,7 @@ impl AppShell {
         if self.command_palette.is_none() && self.blocks_workspace_shortcuts(cx) {
             return;
         }
+        #[cfg(feature = "test-support")]
         crate::ux_probe::mark_input("command_palette");
         if let Some(palette_ent) = self.command_palette.take() {
             self.command_palette_sub = None;
@@ -1268,6 +1270,7 @@ impl AppShell {
     }
 
     pub fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        #[cfg(feature = "test-support")]
         crate::ux_probe::mark_input("toggle_sidebar");
         let next_collapsed = !self.sidebar_collapsed;
         self.auto_collapsed_narrow = false;
@@ -1693,6 +1696,7 @@ impl AppShell {
     }
 
     fn activate_session_by_id(&mut self, session_id: String, cx: &mut Context<Self>) {
+        #[cfg(feature = "test-support")]
         crate::ux_probe::mark_input("session_switch");
         self.set_route(ShellRoute::Session, cx);
         self.recent_drawer_open = false;
@@ -2730,6 +2734,7 @@ impl AppShell {
 
 impl Render for AppShell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(feature = "test-support")]
         let frame_started = crate::ux_probe::is_enabled().then(std::time::Instant::now);
         let theme_global = DesktopThemeGlobal::current(cx);
         let palette = theme_global.palette;
@@ -3068,6 +3073,7 @@ impl Render for AppShell {
                     .border_1()
                     .border_color(palette.border_subtle),
             );
+            #[cfg(feature = "test-support")]
             if let Some(layer) = crate::ux_probe::bounds_probe_layer("workspace", None) {
                 workspace_card = workspace_card.child(layer);
             }
@@ -3809,6 +3815,7 @@ impl Render for AppShell {
 
         root = root.child(self.tooltip_overlay.clone());
 
+        #[cfg(feature = "test-support")]
         if let Some(started) = frame_started {
             let route_name = match self.route {
                 ShellRoute::Home => "home",

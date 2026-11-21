@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import struct
 import zlib
 from pathlib import Path
 from typing import Any
+
+MAX_SCREENSHOT_PIXELS = 32 * 1024 * 1024
 
 
 def _paeth(a: int, b: int, c: int) -> int:
@@ -37,19 +38,33 @@ def decode_png_rgb(path: Path) -> tuple[int, int, bytearray]:
     pos = 8
     width = height = bit_depth = color_type = interlace = 0
     idat_chunks: list[bytes] = []
-    while pos + 8 <= len(data):
-        length, ctype = struct.unpack(">I4s", data[pos : pos + 8])
+    seen_end = False
+    while pos + 12 <= len(data):
+        length, ctype = struct.unpack_from(">I4s", data, pos)
+        if pos + 12 + length > len(data):
+            raise ValueError(f"Truncated PNG chunk: {path}")
         chunk = data[pos + 8 : pos + 8 + length]
-        pos += 12 + length
+        if pos == 8 and ctype != b"IHDR":
+            raise ValueError(f"Missing PNG header: {path}")
         if ctype == b"IHDR":
-            width, height, bit_depth, color_type, _comp, _filt, interlace = struct.unpack(
+            if pos != 8 or length != 13:
+                raise ValueError(f"Invalid PNG header: {path}")
+            width, height, bit_depth, color_type, comp, filt, interlace = struct.unpack(
                 ">IIBBBBB", chunk
             )
+            if not width or not height or width * height > MAX_SCREENSHOT_PIXELS:
+                raise ValueError(f"Unsupported PNG dimensions {width}x{height}: {path}")
+            if comp != 0 or filt != 0:
+                raise ValueError(f"Unsupported PNG compression or filter method: {path}")
         elif ctype == b"IDAT":
             idat_chunks.append(chunk)
-        elif ctype == b"IEND":
+        elif ctype == b"IEND" and not length:
+            seen_end = True
             break
+        pos += 12 + length
 
+    if not seen_end or not idat_chunks:
+        raise ValueError(f"Incomplete PNG: {path}")
     if bit_depth != 8 or interlace != 0:
         raise ValueError(f"Unsupported PNG format (depth={bit_depth}, interlace={interlace}): {path}")
     bpp_map = {0: 1, 2: 3, 6: 4}
@@ -58,7 +73,11 @@ def decode_png_rgb(path: Path) -> tuple[int, int, bytearray]:
     bpp = bpp_map[color_type]
     stride = width * bpp
 
-    raw = zlib.decompress(b"".join(idat_chunks))
+    raw_len = (stride + 1) * height
+    decoder = zlib.decompressobj()
+    raw = decoder.decompress(b"".join(idat_chunks), raw_len + 1)
+    if len(raw) != raw_len or not decoder.eof or decoder.unused_data:
+        raise ValueError(f"Invalid PNG scanline data: {path}")
     rgb = bytearray(width * height * 3)
     prev_row = bytearray(stride)
     cur_row = bytearray(stride)
@@ -116,13 +135,15 @@ def decode_png_rgb(path: Path) -> tuple[int, int, bytearray]:
 
 
 def _clamp_roi(w: int, h: int, roi: list[int] | None) -> tuple[int, int, int, int]:
-    if not roi:
+    if roi is None:
         return 0, 0, w, h
-    x, y, rw, rh = [int(v) for v in roi]
-    x0 = max(0, min(w - 1, x))
-    y0 = max(0, min(h - 1, y))
-    x1 = max(x0 + 1, min(w, x0 + rw))
-    y1 = max(y0 + 1, min(h, y0 + rh))
+    x, y, rw, rh = roi
+    if any(type(v) is not int for v in roi) or rw <= 0 or rh <= 0:
+        raise ValueError("ROI requires integer [x, y, width, height] with positive dimensions")
+    x0, y0 = max(0, x), max(0, y)
+    x1, y1 = min(w, x + rw), min(h, y + rh)
+    if x0 >= x1 or y0 >= y1:
+        raise ValueError("ROI does not intersect the image")
     return x0, y0, x1, y1
 
 
@@ -168,7 +189,7 @@ def analyze_freeze_diff(img_a: Path, img_b: Path, roi: list[int] | None = None) 
             m = max(dr, dg, db)
             if m > max_diff:
                 max_diff = m
-    mean_l1 = total_abs / max(1, count * 3)
+    mean_l1 = total_abs / (count * 3)
     return {
         "pass": max_diff == 0,
         "roi": [x0, y0, x1 - x0, y1 - y0],
@@ -216,9 +237,12 @@ def analyze_surface_elevation(img_path: Path, box: list[int], is_dark: bool = Fa
     w, h, rgb = decode_png_rgb(img_path)
     x0, y0, x1, y1 = _clamp_roi(w, h, box)
 
+    inset = max(12, (x1 - x0) // 6)
+    mid_x0, mid_x1 = x0 + inset, x1 - inset
+    if mid_x1 - mid_x0 < 2 or y1 - y0 <= 10:
+        return {"shadowDetected": False, "reason": "box_too_small"}
+
     def row_mean_luma(y: int, rx0: int, rx1: int) -> float:
-        if y < 0 or y >= h or rx1 <= rx0:
-            return 0.0
         row_off = y * w * 3
         s = 0.0
         for x in range(rx0, rx1):
@@ -226,14 +250,11 @@ def analyze_surface_elevation(img_path: Path, box: list[int], is_dark: bool = Fa
             s += 0.299 * rgb[idx] + 0.587 * rgb[idx + 1] + 0.114 * rgb[idx + 2]
         return s / (rx1 - rx0)
 
-    mid_x0 = x0 + max(12, (x1 - x0) // 6)
-    mid_x1 = x1 - max(12, (x1 - x0) // 6)
-
     # Outer bottom shadow decay profile using only in-bounds offsets below the card
     shadow_profile: dict[str, float] = {}
     valid_samples: list[tuple[int, float]] = []
     for dy in (2, 6, 12, 16, 24):
-        if y1 + dy < h - 1:
+        if y1 + dy < h:
             val = round(row_mean_luma(y1 + dy, mid_x0, mid_x1), 2)
             shadow_profile[f"dy_{dy}px"] = val
             valid_samples.append((dy, val))
@@ -253,11 +274,11 @@ def analyze_surface_elevation(img_path: Path, box: list[int], is_dark: bool = Fa
     # Horizontal gradient smoothness inside the top portion of the card (detects smooth blur vs harsh noise)
     grad_sum = 0.0
     grad_cnt = 0
-    gy0 = min(h - 1, y0 + 6)
-    gy1 = min(h - 1, y0 + min(48, max(8, (y1 - y0) // 3)))
+    gy0 = y0 + 6
+    gy1 = min(y1, y0 + min(48, max(8, (y1 - y0) // 3)))
     for y in range(gy0, gy1):
         row_off = y * w * 3
-        for x in range(mid_x0, max(mid_x0 + 1, mid_x1 - 1)):
+        for x in range(mid_x0, mid_x1 - 1):
             i0 = row_off + x * 3
             i1 = i0 + 3
             grad_sum += (
@@ -266,7 +287,7 @@ def analyze_surface_elevation(img_path: Path, box: list[int], is_dark: bool = Fa
                 + abs(rgb[i1 + 2] - rgb[i0 + 2])
             ) / 3.0
             grad_cnt += 1
-    mean_grad = round(grad_sum / max(1, grad_cnt), 3)
+    mean_grad = round(grad_sum / grad_cnt, 3)
 
     return {
         "box": [x0, y0, x1 - x0, y1 - y0],
@@ -293,19 +314,22 @@ def main() -> int:
     for item in manifest.get("checks", []):
         name = item["name"]
         kind = item["kind"]
-        if kind == "freeze_diff":
-            res = analyze_freeze_diff(Path(item["imageA"]), Path(item["imageB"]), item.get("roi"))
-        elif kind == "contrast":
-            res = analyze_contrast(
-                Path(item["image"]), item.get("roi"), float(item.get("minRatio", 4.5))
-            )
-        elif kind == "elevation":
-            res = analyze_surface_elevation(
-                Path(item["image"]), item["box"], bool(item.get("isDark", False))
-            )
-            res["pass"] = bool(res["shadowDetected"])
-        else:
-            res = {"pass": False, "reason": f"unknown_kind:{kind}"}
+        try:
+            if kind == "freeze_diff":
+                res = analyze_freeze_diff(Path(item["imageA"]), Path(item["imageB"]), item.get("roi"))
+            elif kind == "contrast":
+                res = analyze_contrast(
+                    Path(item["image"]), item.get("roi"), float(item.get("minRatio", 4.5))
+                )
+            elif kind == "elevation":
+                res = analyze_surface_elevation(
+                    Path(item["image"]), item["box"], bool(item.get("isDark", False))
+                )
+                res["pass"] = res["shadowDetected"]
+            else:
+                res = {"pass": False, "reason": f"unknown_kind:{kind}"}
+        except (ValueError, OSError, zlib.error) as exc:
+            res = {"pass": False, "reason": str(exc)}
 
         results["checks"][name] = res
         if not res.get("pass", False):

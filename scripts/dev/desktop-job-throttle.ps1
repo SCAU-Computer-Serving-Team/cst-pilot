@@ -13,6 +13,8 @@ param(
     [ValidateRange(5, 100)]
     [int]$CpuHardCapPercent = 25,
 
+    # Time to keep this script open. Windows keeps the limits until the attached
+    # test process exits, even after this script closes its job handle.
     [Parameter()]
     [ValidateRange(1, 600)]
     [int]$HoldSeconds = 10
@@ -72,6 +74,13 @@ public sealed class CstDesktopJobThrottle : IDisposable
     private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
 
     [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetProcessAffinityMask(
+        IntPtr hProcess, out UIntPtr processMask, out UIntPtr systemMask);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetActiveProcessorCount(ushort groupNumber);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr hObject);
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -92,10 +101,37 @@ public sealed class CstDesktopJobThrottle : IDisposable
             throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateJobObjectW failed");
         }
 
+        IntPtr hProc = IntPtr.Zero;
         try
         {
-            int cores = Math.Max(1, Math.Min(maxLogicalCores, Environment.ProcessorCount));
-            ulong mask = cores >= 64 ? ulong.MaxValue : ((1UL << cores) - 1UL);
+            hProc = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION,
+                false, (uint)processId);
+            if (hProc == IntPtr.Zero)
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "OpenProcess failed for Job assignment");
+            }
+            if (!GetProcessAffinityMask(hProc, out UIntPtr processMask, out _))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "GetProcessAffinityMask failed");
+            }
+
+            // Use CPUs allowed by the target's current affinity, not necessarily CPU 0 and 1.
+            ulong allowed = processMask.ToUInt64();
+            ulong mask = 0;
+            int cores = 0;
+            for (int bit = 0; bit < UIntPtr.Size * 8 && cores < maxLogicalCores; bit++)
+            {
+                ulong candidate = 1UL << bit;
+                if ((allowed & candidate) != 0)
+                {
+                    mask |= candidate;
+                    cores++;
+                }
+            }
+            if (cores == 0)
+            {
+                throw new InvalidOperationException("No single-group process affinity mask is available");
+            }
             var basic = new JOBOBJECT_BASIC_LIMIT_INFORMATION
             {
                 LimitFlags = JOB_OBJECT_LIMIT_AFFINITY,
@@ -117,11 +153,15 @@ public sealed class CstDesktopJobThrottle : IDisposable
             }
 
             int clampedPct = Math.Max(1, Math.Min(100, cpuHardCapPercent));
-            // Windows JOBOBJECT_CPU_RATE_CONTROL_INFORMATION.CpuRate is relative to ALL logical cores
-            // (10000 = 100% of total machine CPU). Scale by (cores / ProcessorCount) so HardCap truly
-            // constrains the assigned core slice on high-core-count developer machines.
-            double effectiveSystemPct = ((double)cores * clampedPct) / Math.Max(1, Environment.ProcessorCount);
-            uint cpuRate = (uint)Math.Max(100, Math.Min(10000, (int)Math.Round(effectiveSystemPct * 100.0)));
+            // For a top-level job, CpuRate is relative to all active logical CPUs.
+            // An enclosing rate-controlled job can further constrain this cap.
+            uint systemCores = GetActiveProcessorCount(0xFFFF); // ALL_PROCESSOR_GROUPS
+            if (systemCores == 0)
+            {
+                throw new InvalidOperationException("No active logical processors reported");
+            }
+            double effectiveSystemPct = ((double)cores * clampedPct) / systemCores;
+            uint cpuRate = (uint)Math.Max(1, Math.Min(10000, (int)Math.Round(effectiveSystemPct * 100.0)));
             var rate = new JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
             {
                 ControlFlags = JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP,
@@ -142,29 +182,24 @@ public sealed class CstDesktopJobThrottle : IDisposable
                 Marshal.FreeHGlobal(ratePtr);
             }
 
-            IntPtr hProc = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, false, (uint)processId);
-            if (hProc == IntPtr.Zero)
+            var throttle = new CstDesktopJobThrottle(job);
+            if (!AssignProcessToJobObject(job, hProc))
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "OpenProcess failed for Job assignment");
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "AssignProcessToJobObject failed");
             }
-            try
-            {
-                if (!AssignProcessToJobObject(job, hProc))
-                {
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "AssignProcessToJobObject failed");
-                }
-            }
-            finally
-            {
-                CloseHandle(hProc);
-            }
-
-            return new CstDesktopJobThrottle(job);
+            return throttle;
         }
         catch
         {
             CloseHandle(job);
             throw;
+        }
+        finally
+        {
+            if (hProc != IntPtr.Zero)
+            {
+                CloseHandle(hProc);
+            }
         }
     }
 
@@ -222,22 +257,27 @@ function Get-ProcessResourceSample {
     if (-not $proc) {
         return $null
     }
-    $gui = [CstDesktopJobThrottle]::QueryGuiHandles($ProcessId)
-    return [pscustomobject]@{
-        timestamp = (Get-Date).ToString('o')
-        phase = $Phase
-        role = $Role
-        pid = $ProcessId
-        cpuMs = [Math]::Round($proc.TotalProcessorTime.TotalMilliseconds, 2)
-        privateMb = [Math]::Round($proc.PrivateMemorySize64 / 1MB, 2)
-        workingSetMb = [Math]::Round($proc.WorkingSet64 / 1MB, 2)
-        handles = $proc.HandleCount
-        gdiObjects = $gui[0]
-        userObjects = $gui[1]
+    try {
+        $gui = [CstDesktopJobThrottle]::QueryGuiHandles($ProcessId)
+        return [pscustomobject]@{
+            timestamp = (Get-Date).ToString('o')
+            phase = $Phase
+            role = $Role
+            pid = $ProcessId
+            cpuMs = [Math]::Round($proc.TotalProcessorTime.TotalMilliseconds, 2)
+            privateMb = [Math]::Round($proc.PrivateMemorySize64 / 1MB, 2)
+            workingSetMb = [Math]::Round($proc.WorkingSet64 / 1MB, 2)
+            handles = $proc.HandleCount
+            gdiObjects = $gui[0]
+            userObjects = $gui[1]
+        }
+    } finally {
+        $proc.Dispose()
     }
 }
 
 if ($AttachPid -gt 0) {
+    Write-Warning 'Use only with isolated test processes. Job limits remain until the process exits.'
     $throttle = Invoke-DesktopJobThrottle -ProcessId $AttachPid -Cores $MaxLogicalCores -CpuCapPercent $CpuHardCapPercent
     try {
         $result = [pscustomobject]@{

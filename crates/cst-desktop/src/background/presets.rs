@@ -40,9 +40,9 @@ impl SkyPreset {
     /// Fallback multi-stop linear gradient `(top, bottom)` for GPUs below D3D Feature Level `11_0`.
     pub fn fallback_gradient_stops(self) -> (Hsla, Hsla) {
         match self {
-            // Keep light home fallback in the same deep-to-sky blue range as `blue-hour.glsl`
-            // so the white welcome heading stays readable (`>= 4.5:1`) under WARP / `< 11_0`.
-            Self::HomeLight => (rgba(0x1E2A_6CFF).into(), rgba(0x8AA2_DDFF).into()),
+            // Both stops (and the colors between them) meet 4.5:1 against the white heading,
+            // including when a short or resized window moves the heading down the gradient.
+            Self::HomeLight => (rgba(0x1E2A_6CFF).into(), rgba(0x6072_ABFF).into()),
             Self::HomeDark => (rgba(0x1319_2BFF).into(), rgba(0x0D0D_11FF).into()),
             Self::LoginLight => (rgba(0xE6F2_FFFF).into(), rgba(0x80B3_FFFF).into()),
             Self::LoginDark => (rgba(0x4A5A_A0FF).into(), rgba(0x1C1C_1CFF).into()),
@@ -291,4 +291,28 @@ pub fn generate_rounded_rect_sdf_rgba16f(
         }
     }
     texels
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn light_home_fallback_meets_white_heading_contrast() {
+        let (top, bottom) = SkyPreset::HomeLight.fallback_gradient_stops();
+        for color in [top, bottom] {
+            let rgb = color.to_rgb();
+            let linear = |c: f32| {
+                if c <= 0.04045 {
+                    c / 12.92
+                } else {
+                    ((c + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            let luminance =
+                0.2126 * linear(rgb.r) + 0.7152 * linear(rgb.g) + 0.0722 * linear(rgb.b);
+            assert_eq!(rgb.a, 1.0);
+            assert!(1.05 / (luminance + 0.05) >= 4.5);
+        }
+    }
 }

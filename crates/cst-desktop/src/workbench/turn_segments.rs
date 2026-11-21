@@ -744,6 +744,7 @@ pub fn render_running_light_label(
             gpui_kit::canvas(
                 |bounds, window, _| {
                     if bounds.intersects(&window.content_mask().bounds) {
+                        #[cfg(feature = "test-support")]
                         crate::ux_probe::record_running_light_frame();
                         window.request_animation_frame();
                     }

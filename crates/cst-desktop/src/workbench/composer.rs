@@ -2113,6 +2113,7 @@ impl Render for ComposerView {
             &palette.composer_shadows(true),
             focus_t,
         );
+        #[cfg(feature = "test-support")]
         if crate::ux_probe::is_enabled() {
             let rgba_val = card_border_color.to_rgb();
             crate::ux_probe::record_composer_style(
@@ -2208,6 +2209,7 @@ impl Render for ComposerView {
         card = card
             .child(div().w_full().min_h(px(24.0)).child(textarea_element))
             .child(action_bar);
+        #[cfg(feature = "test-support")]
         if let Some(layer) = crate::ux_probe::bounds_probe_layer("composer", None) {
             card = card.relative().child(layer);
         }

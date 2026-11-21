@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
@@ -72,6 +72,30 @@ struct PendingSecretInput {
 }
 
 type ProcessExpansionKey = (String, (usize, usize));
+type GroupedTurns = (Vec<Turn>, BTreeMap<String, Value>);
+
+struct GroupedTurnCache {
+    // Keeping a Weak prevents address reuse and makes Arc::make_mut change identity
+    // even if the store has the only strong reference. It doesn't pin the JSON.
+    source: Weak<Vec<Value>>,
+    grouped: Arc<GroupedTurns>,
+}
+
+impl GroupedTurnCache {
+    fn for_messages(cache: &mut Option<Self>, messages: &Arc<Vec<Value>>) -> Arc<GroupedTurns> {
+        if let Some(cached) = cache
+            && std::ptr::eq(cached.source.as_ptr(), Arc::as_ptr(messages))
+        {
+            return Arc::clone(&cached.grouped);
+        }
+        let grouped = Arc::new(group_turns_and_results(messages));
+        *cache = Some(Self {
+            source: Arc::downgrade(messages),
+            grouped: Arc::clone(&grouped),
+        });
+        grouped
+    }
+}
 
 pub struct MessageListView {
     client: ClientHandle,
@@ -93,9 +117,7 @@ pub struct MessageListView {
     turn_started_instants: BTreeMap<String, Instant>,
     attachment_cache: BTreeMap<String, Arc<Image>>,
     attachment_loading: BTreeSet<String>,
-    cached_grouped_key: Option<(usize, usize, u64)>,
-    cached_grouped_turns: Arc<Vec<Turn>>,
-    cached_grouped_results: Arc<BTreeMap<String, Value>>,
+    grouped_turn_cache: Option<GroupedTurnCache>,
 }
 
 impl EventEmitter<MessageListEvent> for MessageListView {}
@@ -122,9 +144,7 @@ impl MessageListView {
             turn_started_instants: BTreeMap::new(),
             attachment_cache: BTreeMap::new(),
             attachment_loading: BTreeSet::new(),
-            cached_grouped_key: None,
-            cached_grouped_turns: Arc::new(Vec::new()),
-            cached_grouped_results: Arc::new(BTreeMap::new()),
+            grouped_turn_cache: None,
         }
     }
 
@@ -163,9 +183,7 @@ impl MessageListView {
         self.copy_tracker = CopyFeedbackTracker::default();
         self.markdown_store.clear();
         self.turn_started_instants.clear();
-        self.cached_grouped_key = None;
-        self.cached_grouped_turns = Arc::new(Vec::new());
-        self.cached_grouped_results = Arc::new(BTreeMap::new());
+        self.grouped_turn_cache = None;
         self.scroll_handle.scroll_to_bottom();
         cx.notify();
     }
@@ -316,6 +334,7 @@ impl MessageListView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        #[cfg(feature = "test-support")]
         crate::ux_probe::mark_input("scroll_wheel");
         let pixel_delta = event.delta.pixel_delta(window.rem_size());
         let offset = self.scroll_handle.offset();
@@ -1820,6 +1839,7 @@ impl Render for MessageListView {
         };
 
         let Some(session) = snap.loaded_sessions.get(sid).cloned() else {
+            self.grouped_turn_cache = None;
             self.retain_seen_secret_inputs(false, cx);
             return div()
                 .id("message-list-loading")
@@ -1844,59 +1864,44 @@ impl Render for MessageListView {
 
         // Reuse grouped turns for settled sessions so scrolling & hover frames skip cloning
         // hundreds of JSON entries and re-grouping the entire history.
-        let (turns, tool_results): (Arc<Vec<Turn>>, Arc<BTreeMap<String, Value>>) =
-            if !session.running && session.streaming_assistant.is_none() {
-                let cache_key = (
-                    Arc::as_ptr(&session.messages) as usize,
-                    session.messages.len(),
-                    session.revision,
-                );
-                if self.cached_grouped_key != Some(cache_key) {
-                    let (t, tr) = group_turns_and_results(session.messages.as_ref());
-                    self.cached_grouped_turns = Arc::new(t);
-                    self.cached_grouped_results = Arc::new(tr);
-                    self.cached_grouped_key = Some(cache_key);
-                }
-                (
-                    Arc::clone(&self.cached_grouped_turns),
-                    Arc::clone(&self.cached_grouped_results),
-                )
-            } else {
-                self.cached_grouped_key = None;
-                let mut combined_entries: Vec<Value> = session.messages.as_ref().clone();
-                if session.running
-                    && let Some(ref streaming) = session.streaming_assistant
-                {
-                    let stream_id = streaming
-                        .get("id")
-                        .or_else(|| streaming.get("message").and_then(|m| m.get("id")))
-                        .and_then(Value::as_str);
-                    let replaced = if let Some(sid_str) = stream_id {
-                        if let Some(last) = combined_entries.last_mut() {
-                            let last_id = last
-                                .get("id")
-                                .or_else(|| last.get("message").and_then(|m| m.get("id")))
-                                .and_then(Value::as_str);
-                            if last_id == Some(sid_str) {
-                                *last = streaming.clone();
-                                true
-                            } else {
-                                false
-                            }
+        let grouped = if !session.running && session.streaming_assistant.is_none() {
+            GroupedTurnCache::for_messages(&mut self.grouped_turn_cache, &session.messages)
+        } else {
+            self.grouped_turn_cache = None;
+            let mut combined_entries: Vec<Value> = session.messages.as_ref().clone();
+            if session.running
+                && let Some(ref streaming) = session.streaming_assistant
+            {
+                let stream_id = streaming
+                    .get("id")
+                    .or_else(|| streaming.get("message").and_then(|m| m.get("id")))
+                    .and_then(Value::as_str);
+                let replaced = if let Some(sid_str) = stream_id {
+                    if let Some(last) = combined_entries.last_mut() {
+                        let last_id = last
+                            .get("id")
+                            .or_else(|| last.get("message").and_then(|m| m.get("id")))
+                            .and_then(Value::as_str);
+                        if last_id == Some(sid_str) {
+                            *last = streaming.clone();
+                            true
                         } else {
                             false
                         }
                     } else {
                         false
-                    };
-                    if !replaced {
-                        combined_entries.push(streaming.clone());
                     }
+                } else {
+                    false
+                };
+                if !replaced {
+                    combined_entries.push(streaming.clone());
                 }
-                let (t, tr) = group_turns_and_results(&combined_entries);
-                (Arc::new(t), Arc::new(tr))
-            };
-        let live_turn_idx = active_turn_index(&turns, session.running);
+            }
+            Arc::new(group_turns_and_results(&combined_entries))
+        };
+        let (turns, tool_results) = grouped.as_ref();
+        let live_turn_idx = active_turn_index(turns, session.running);
         let running_light_allowed = !reduce_motion
             && snap.channel_mode != cst_client::ChannelModeDto::WebActive
             && !crate::background::has_active_hardware_diagnostic(&snap);
@@ -1941,6 +1946,7 @@ impl Render for MessageListView {
                         .items_center()
                         .hover(|s| s.bg(palette.bg_item_hover))
                         .on_click(move |_, _, cx| {
+                            #[cfg(feature = "test-support")]
                             crate::ux_probe::mark_input("show_earlier");
                             ent_more.update(cx, |this, cx| {
                                 this.visible_turn_limit += batch;
@@ -1969,7 +1975,7 @@ impl Render for MessageListView {
                 idx,
                 turn,
                 parent_entry_id,
-                &tool_results,
+                tool_results,
                 is_live,
                 mono_family.clone(),
                 reduce_motion,
@@ -1991,6 +1997,7 @@ impl Render for MessageListView {
 
         let show_scroll_bottom_btn =
             !self.auto_follow_bottom && self.scroll_handle.max_offset().y > px(36.0);
+        #[cfg(feature = "test-support")]
         if crate::ux_probe::is_enabled() {
             crate::ux_probe::record_scroll(
                 f32::from(self.scroll_handle.offset().y),
@@ -2020,6 +2027,7 @@ impl Render for MessageListView {
                     .on_scroll(cx.listener(Self::on_scroll_wheel))
                     .child(list_col),
             );
+        #[cfg(feature = "test-support")]
         if let Some(layer) = crate::ux_probe::bounds_probe_layer("scroll_area", None) {
             outer = outer.child(layer);
         }
@@ -2137,4 +2145,40 @@ fn now_epoch_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grouped_turn_cache_reuses_only_the_same_message_allocation() {
+        let user =
+            |id: &str| serde_json::json!({"id": id, "message": {"role": "user", "content": id}});
+        let mut messages = Arc::new(vec![user("first")]);
+        let mut cache = None;
+        let first = GroupedTurnCache::for_messages(&mut cache, &messages);
+        assert!(Arc::ptr_eq(
+            &first,
+            &GroupedTurnCache::for_messages(&mut cache, &messages)
+        ));
+
+        Arc::make_mut(&mut messages)[0] = user("updated");
+        let updated = GroupedTurnCache::for_messages(&mut cache, &messages);
+        assert!(!Arc::ptr_eq(&first, &updated));
+        assert_eq!(
+            updated.0[0].user.as_ref().unwrap().id.as_deref(),
+            Some("updated")
+        );
+
+        let source = cache.as_ref().unwrap().source.clone();
+        drop(messages);
+        assert!(
+            source.upgrade().is_none(),
+            "the cache must not pin message history"
+        );
+        let new_session = Arc::new(vec![user("next")]);
+        let next = GroupedTurnCache::for_messages(&mut cache, &new_session);
+        assert_eq!(next.0[0].user.as_ref().unwrap().id.as_deref(), Some("next"));
+    }
 }

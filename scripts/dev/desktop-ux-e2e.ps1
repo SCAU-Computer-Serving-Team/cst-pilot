@@ -18,14 +18,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $env:WINAPP_CLI_TELEMETRY_OPTOUT = '1'
-$env:PI_OFFLINE = '1'
-$env:CST_ALLOW_UNELEVATED = '1'
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
     $dateStamp = Get-Date -Format 'yyyy-MM-dd'
     $baseTmp = if (Test-Path 'F:\') { 'F:\tmp' } else { 'E:\tmp' }
-    $OutputDir = Join-Path $baseTmp "$dateStamp\desktop-ux-e2e"
+    $runId = [Guid]::NewGuid().ToString('N')
+    $OutputDir = Join-Path $baseTmp "$dateStamp\desktop-ux-e2e-$runId"
 }
 
 . (Join-Path $PSScriptRoot 'desktop-job-throttle.ps1')
@@ -34,6 +33,7 @@ if (-not ('CstUxWin32' -as [type])) {
     Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
     Add-Type -TypeDefinition @'
 using System;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 
 public static class CstUxWin32
@@ -41,33 +41,32 @@ public static class CstUxWin32
     public const uint WM_MOUSEWHEEL = 0x020A;
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
-
-    [StructLayout(LayoutKind.Sequential)]
     public struct POINT { public int X; public int Y; }
 
     [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
+    private static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
 
     [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+    private static extern bool PostMessageW(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool PostMessageW(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+    private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
 
-    [DllImport("user32.dll")]
-    public static extern bool IsWindow(IntPtr hWnd);
+    public static void ResizeWindow(IntPtr hWnd, int x, int y, int width, int height)
+    {
+        if (!MoveWindow(hWnd, x, y, width, height, true))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "MoveWindow failed");
+    }
 
-    [DllImport("user32.dll")]
-    public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
-
-    public static bool SendWheelAt(IntPtr hWnd, int delta, int clientX, int clientY)
+    public static void SendWheelAt(IntPtr hWnd, int delta, int clientX, int clientY)
     {
         POINT pt = new POINT { X = clientX, Y = clientY };
-        ClientToScreen(hWnd, ref pt);
+        if (!ClientToScreen(hWnd, ref pt))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "ClientToScreen failed");
         IntPtr wParam = (IntPtr)((delta << 16) & unchecked((int)0xFFFF0000));
         IntPtr lParam = (IntPtr)(((pt.Y & 0xFFFF) << 16) | (pt.X & 0xFFFF));
-        return PostMessageW(hWnd, WM_MOUSEWHEEL, wParam, lParam);
+        if (!PostMessageW(hWnd, WM_MOUSEWHEEL, wParam, lParam))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "PostMessageW failed");
     }
 }
 '@
@@ -127,10 +126,13 @@ function Invoke-UiaById {
 }
 
 function Wait-DesktopWindowHandle {
-    param([int]$ProcessId, [int]$TimeoutMs = 10000)
+    param([Diagnostics.Process]$Process, [int]$TimeoutMs = 10000)
     $sw = [Diagnostics.Stopwatch]::StartNew()
     while ($sw.ElapsedMilliseconds -lt $TimeoutMs) {
-        $raw = & winapp ui list-windows -a $ProcessId --json 2>$null
+        if ($Process.HasExited) {
+            throw "隔离桌面端提前退出（exit=$($Process.ExitCode)）。"
+        }
+        $raw = & winapp ui list-windows -a $Process.Id --json 2>$null
         if ($LASTEXITCODE -eq 0 -and $raw) {
             $wins = @($raw | ConvertFrom-Json)
             $win = $wins | Where-Object { $_.width -ge 400 -and $_.className -eq 'Zed::Window' } | Select-Object -First 1
@@ -140,14 +142,14 @@ function Wait-DesktopWindowHandle {
         }
         Start-Sleep -Milliseconds 40
     }
-    throw "等待 PID=$ProcessId 主窗口超时（${TimeoutMs}ms）。"
+    throw "等待 PID=$($Process.Id) 主窗口超时（${TimeoutMs}ms）。"
 }
 
 function Expand-IsolatedKit {
     param([string]$KitRoot, [string]$SourceBinDir)
 
     if (Test-Path -LiteralPath $KitRoot) {
-        Remove-Item -LiteralPath $KitRoot -Recurse -Force
+        throw "隔离目录已存在，请使用新的 -OutputDir：$KitRoot"
     }
     $homeDir = Join-Path $KitRoot 'agent\home'
     $sessionsDir = Join-Path $homeDir 'sessions'
@@ -336,6 +338,46 @@ function Expand-IsolatedKit {
     (Get-Item -LiteralPath (Join-Path $sessionsDir 'sess-ux-long.jsonl')).LastWriteTimeUtc = $baseTs.AddHours(1).UtcDateTime
 }
 
+function Close-IsolatedProcess {
+    param([Diagnostics.Process]$Process)
+    try {
+        if (-not $Process.HasExited) {
+            $Process.Kill($true)
+            if (-not $Process.WaitForExit(3000)) {
+                Write-Warning "等待隔离进程 PID=$($Process.Id) 退出超时。"
+            }
+        }
+    } catch {
+        Write-Warning "无法停止隔离进程 PID=$($Process.Id)：$($_.Exception.Message)"
+    } finally {
+        $Process.Dispose()
+    }
+}
+
+function Save-DesktopScreenshot {
+    param([intptr]$Hwnd, [string]$Path)
+    $result = & winapp ui screenshot -w "$($Hwnd.ToInt64())" -o $Path --json
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "截图失败：$Path ($result)"
+    }
+}
+
+function Get-ChatContrastRoi {
+    param([pscustomobject]$Snapshot)
+    $bounds = $Snapshot.bounds.workspace
+    $scale = [double]$Snapshot.shell.scale_factor
+    if ($Snapshot.shell.route -ne 'session:chat' -or $bounds.Count -ne 4 -or
+        $bounds[2] -le 80.0 -or $bounds[3] -le 200.0 -or $scale -le 0.0) {
+        throw '缺少当前对话截图的探针坐标。'
+    }
+    return @(
+        [int][Math]::Round(($bounds[0] + 40.0) * $scale),
+        [int][Math]::Round(($bounds[1] + 40.0) * $scale),
+        [int][Math]::Round(($bounds[2] - 80.0) * $scale),
+        [int][Math]::Round(($bounds[3] - 200.0) * $scale)
+    )
+}
+
 function Open-IsolatedServer {
     param([string]$KitRoot)
     $serverExe = Join-Path $KitRoot 'cst-server.exe'
@@ -352,30 +394,36 @@ function Open-IsolatedServer {
     $psi.Environment['CST_ALLOW_UNELEVATED'] = '1'
     $proc = [Diagnostics.Process]::Start($psi)
 
-    $sw = [Diagnostics.Stopwatch]::StartNew()
-    while ($sw.ElapsedMilliseconds -lt 15000) {
-        if ($proc.HasExited) {
-            throw "隔离 cst-server.exe 提前退出（exit=$($proc.ExitCode)）。"
-        }
-        if (Test-Path -LiteralPath $stateFile) {
-            try {
-                $info = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
-                if ($info.port -and $info.token) {
-                    $null = Invoke-RestMethod -Uri "http://127.0.0.1:$($info.port)/api/health" -TimeoutSec 2
-                    return [pscustomobject]@{
-                        Process = $proc
-                        Port = [int]$info.port
-                        Token = [string]$info.token
-                    }
-                }
-            } catch {
-                Start-Sleep -Milliseconds 100
+    $ready = $false
+    try {
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        while ($sw.ElapsedMilliseconds -lt 15000) {
+            if ($proc.HasExited) {
+                throw "隔离 cst-server.exe 提前退出（exit=$($proc.ExitCode)）。"
             }
+            if (Test-Path -LiteralPath $stateFile) {
+                try {
+                    $info = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
+                    if ($info.port -and $info.token) {
+                        $null = Invoke-RestMethod -Uri "http://127.0.0.1:$($info.port)/api/health" -TimeoutSec 2
+                        $result = [pscustomobject]@{
+                            Process = $proc
+                            Port = [int]$info.port
+                            Token = [string]$info.token
+                        }
+                        $ready = $true
+                        return $result
+                    }
+                } catch {
+                    Write-Verbose $_.Exception.Message
+                }
+            }
+            Start-Sleep -Milliseconds 100
         }
-        Start-Sleep -Milliseconds 100
+        throw '隔离 cst-server.exe 启动超时。'
+    } finally {
+        if (-not $ready) { Close-IsolatedProcess -Process $proc }
     }
-    try { $proc.Kill() } catch { Write-Verbose $_.Exception.Message }
-    throw '隔离 cst-server.exe 启动超时。'
 }
 
 function Open-DesktopInstance {
@@ -405,53 +453,63 @@ function Open-DesktopInstance {
 
     $launchSw = [Diagnostics.Stopwatch]::StartNew()
     $proc = [Diagnostics.Process]::Start($psi)
+    $ready = $false
     $throttle = $null
-    if ($ApplyOldPcThrottle) {
-        $throttle = Invoke-DesktopJobThrottle -ProcessId $proc.Id -Cores 2 -CpuCapPercent 25
-    }
-
-    $probePort = 0
-    while ($launchSw.ElapsedMilliseconds -lt 15000) {
-        if (Test-Path -LiteralPath $ProbeFile) {
-            try {
-                $pf = Get-Content -LiteralPath $ProbeFile -Raw | ConvertFrom-Json
-                if ($pf.port) {
-                    $probePort = [int]$pf.port
-                    break
-                }
-            } catch {
-                Start-Sleep -Milliseconds 30
-            }
+    try {
+        if ($ApplyOldPcThrottle) {
+            $throttle = Invoke-DesktopJobThrottle -ProcessId $proc.Id -Cores 2 -CpuCapPercent 25
         }
-        Start-Sleep -Milliseconds 30
-    }
-    if ($probePort -eq 0) {
-        if ($throttle) { $throttle.Dispose() }
-        try { $proc.Kill() } catch { Write-Verbose $_.Exception.Message }
-        throw '等待桌面端 UX 探针就绪超时。'
-    }
 
-    $hwnd = Wait-DesktopWindowHandle -ProcessId $proc.Id -TimeoutMs 20000
-    # Wait until first frame is recorded and UIA tree responds
-    $snap = $null
-    while ($launchSw.ElapsedMilliseconds -lt 25000) {
-        try {
-            $snap = Invoke-ProbeRequest -Port $probePort -Path '/probe'
-            if ($null -ne $snap.startup.first_frame_ms) { break }
-        } catch {
+        $probePort = 0
+        while ($launchSw.ElapsedMilliseconds -lt 15000) {
+            if ($proc.HasExited) {
+                throw "隔离桌面端提前退出（exit=$($proc.ExitCode)）。"
+            }
+            if (Test-Path -LiteralPath $ProbeFile) {
+                try {
+                    $pf = Get-Content -LiteralPath $ProbeFile -Raw | ConvertFrom-Json
+                    if ($pf.pid -eq $proc.Id -and $pf.port -ge 1 -and $pf.port -le 65535) {
+                        $probePort = [int]$pf.port
+                        break
+                    }
+                } catch {
+                    Write-Verbose $_.Exception.Message
+                }
+            }
             Start-Sleep -Milliseconds 30
         }
-        Start-Sleep -Milliseconds 30
-    }
-    $interactiveMs = [Math]::Round($launchSw.Elapsed.TotalMilliseconds, 2)
+        if ($probePort -eq 0) { throw '等待桌面端 UX 探针就绪超时。' }
 
-    return [pscustomobject]@{
-        Process = $proc
-        Throttle = $throttle
-        ProbePort = $probePort
-        Hwnd = $hwnd
-        InteractiveMs = $interactiveMs
-        InitialSnap = $snap
+        $hwnd = Wait-DesktopWindowHandle -Process $proc -TimeoutMs 20000
+        while ($launchSw.ElapsedMilliseconds -lt 25000) {
+            if ($proc.HasExited) {
+                throw "隔离桌面端提前退出（exit=$($proc.ExitCode)）。"
+            }
+            try {
+                $snap = Invoke-ProbeRequest -Port $probePort -Path '/probe'
+                if ($snap.pid -eq $proc.Id -and $null -ne $snap.startup.first_frame_ms) {
+                    $result = [pscustomobject]@{
+                        Process = $proc
+                        Throttle = $throttle
+                        ProbePort = $probePort
+                        Hwnd = $hwnd
+                        InteractiveMs = [Math]::Round($launchSw.Elapsed.TotalMilliseconds, 2)
+                        InitialSnap = $snap
+                    }
+                    $ready = $true
+                    return $result
+                }
+            } catch {
+                Write-Verbose $_.Exception.Message
+            }
+            Start-Sleep -Milliseconds 30
+        }
+        throw '等待桌面端首帧超时。'
+    } finally {
+        if (-not $ready) {
+            try { Close-IsolatedProcess -Process $proc }
+            finally { if ($throttle) { $throttle.Dispose() } }
+        }
     }
 }
 
@@ -463,27 +521,16 @@ function Close-DesktopInstance {
     if (-not $Instance) { return 0.0 }
     $sw = [Diagnostics.Stopwatch]::StartNew()
     try {
-        if (-not $Instance.Process.HasExited) {
-            if ($Graceful) {
+        if ($Graceful -and -not $Instance.Process.HasExited) {
+            try {
                 $clickedClose = Invoke-UiaById -Hwnd $Instance.Hwnd -AutomationId 'window-btn-close' -TimeoutMs 2000
-                if (-not $clickedClose) {
-                    $null = $Instance.Process.CloseMainWindow()
-                }
-                if (-not $Instance.Process.WaitForExit(5000)) {
-                    $Instance.Process.Kill()
-                    $null = $Instance.Process.WaitForExit(2000)
-                }
-            } else {
-                $Instance.Process.Kill()
-                $null = $Instance.Process.WaitForExit(2000)
-            }
+                if (-not $clickedClose) { $null = $Instance.Process.CloseMainWindow() }
+                $null = $Instance.Process.WaitForExit(5000)
+            } catch { Write-Verbose $_.Exception.Message }
         }
-    } catch {
-        try { $Instance.Process.Kill() } catch { Write-Verbose $_.Exception.Message }
     } finally {
-        if ($Instance.Throttle) {
-            $Instance.Throttle.Dispose()
-        }
+        try { Close-IsolatedProcess -Process $Instance.Process }
+        finally { if ($Instance.Throttle) { $Instance.Throttle.Dispose() } }
     }
     return [Math]::Round($sw.Elapsed.TotalMilliseconds, 2)
 }
@@ -496,7 +543,7 @@ function Switch-ThemeMode {
         -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 5
 }
 
-function Restore-DesktopBaselineSettings {
+function Restore-DesktopBaseline {
     param([pscustomobject]$Server)
     $headers = @{ Authorization = "Bearer $($Server.Token)" }
     $body = @{
@@ -515,18 +562,20 @@ $timelineRows = [Collections.Generic.List[object]]::new()
 $visualChecks = [Collections.Generic.List[object]]::new()
 $profileReports = [ordered]@{}
 
-$server = Open-IsolatedServer -KitRoot $kitRoot
+$server = $null
 $inst = $null
 $serverExitedGracefully = $false
 $serverGracefulExitMs = $null
 try {
-    foreach ($profile in $Profiles) {
-        $isOldPc = ($profile -eq 'H-OldPC')
-        $isWarp = ($profile -eq 'H-WARP')
-        $shotDir = Join-Path $OutputDir "screenshots\$profile"
+    $server = Open-IsolatedServer -KitRoot $kitRoot
+    for ($profileIndex = 0; $profileIndex -lt $Profiles.Count; $profileIndex++) {
+        $profileName = $Profiles[$profileIndex]
+        $isOldPc = ($profileName -eq 'H-OldPC')
+        $isWarp = ($profileName -eq 'H-WARP')
+        $shotDir = Join-Path $OutputDir "screenshots\$profileName"
         New-Item -ItemType Directory -Force -Path $shotDir | Out-Null
-        $probeFile = Join-Path $kitRoot ".state\ux-probe-$profile.json"
-        Restore-DesktopBaselineSettings -Server $server
+        $probeFile = Join-Path $kitRoot ".state\ux-probe-$profileName.json"
+        Restore-DesktopBaseline -Server $server
 
         # --- P5-1: Cold start benchmark ---
         $runs = if ($isWarp) { 1 } else { $ColdStartRuns }
@@ -546,17 +595,19 @@ try {
         $port = $inst.ProbePort
         $hwnd = $inst.Hwnd
         Start-Sleep -Milliseconds 400
-        $timelineRows.Add((Get-ProcessResourceSample -ProcessId $inst.Process.Id -Role 'desktop' -Phase "$profile:boot"))
-        $timelineRows.Add((Get-ProcessResourceSample -ProcessId $server.Process.Id -Role 'server' -Phase "$profile:boot"))
+        $timelineRows.Add((Get-ProcessResourceSample -ProcessId $inst.Process.Id -Role 'desktop' -Phase "${profileName}:boot"))
+        $timelineRows.Add((Get-ProcessResourceSample -ProcessId $server.Process.Id -Role 'server' -Phase "${profileName}:boot"))
 
         # Ensure standard 1280x800 logical window (convert to physical pixels using scale_factor)
         $winSf = [double]$inst.InitialSnap.shell.scale_factor
         if ($winSf -le 0.0) { $winSf = 1.0 }
-        $null = [CstUxWin32]::MoveWindow($hwnd, 40, 40, [int][Math]::Round(1280 * $winSf), [int][Math]::Round(800 * $winSf), $true)
+        [CstUxWin32]::ResizeWindow($hwnd, 40, 40, [int][Math]::Round(1280 * $winSf), [int][Math]::Round(800 * $winSf))
         Start-Sleep -Milliseconds 350
 
         $homeShotLight = Join-Path $shotDir '01-home-light.png'
-        $null = & winapp ui screenshot -w "$($hwnd.ToInt64())" -o $homeShotLight --json
+        Save-DesktopScreenshot -Hwnd $hwnd -Path $homeShotLight
+        $homeSnap = Invoke-ProbeRequest -Port $port -Path '/probe'
+        $homeSf = [double]$homeSnap.shell.scale_factor
 
         # --- P1-2 & P1-4: Icon buttons & frosted glass popovers ---
         $null = Invoke-ProbeRequest -Port $port -Method POST -Path '/probe/reset'
@@ -587,7 +638,7 @@ try {
         }
         $p1Snap = Invoke-ProbeRequest -Port $port -Path '/probe'
         $popoverShot = Join-Path $shotDir '02-popover-light.png'
-        $null = & winapp ui screenshot -w "$($hwnd.ToInt64())" -o $popoverShot --json
+        Save-DesktopScreenshot -Hwnd $hwnd -Path $popoverShot
         # Close context popover
         $null = Invoke-UiaById -Hwnd $hwnd -AutomationId 'composer-context-ring-btn' -TimeoutMs 2000
         Start-Sleep -Milliseconds 120
@@ -627,7 +678,7 @@ try {
         $null = Invoke-UiaById -Hwnd $hwnd -AutomationId 'sidebar-session-row-sess-ux-long' -TimeoutMs 3000
         Start-Sleep -Milliseconds 350
         $chatLightShot = Join-Path $shotDir '03-long-chat-light.png'
-        $null = & winapp ui screenshot -w "$($hwnd.ToInt64())" -o $chatLightShot --json
+        Save-DesktopScreenshot -Hwnd $hwnd -Path $chatLightShot
         $d1WideSnap = Invoke-ProbeRequest -Port $port -Path '/probe'
 
         # --- P3-1 & D5: 120 continuous wheel events on 130-turn F-LongHistory ---
@@ -663,13 +714,13 @@ try {
         $afterBottomSnap = Invoke-ProbeRequest -Port $port -Path '/probe'
 
         # --- P2-3: 30-step resize 1600x900 -> 1024x640 (crosses 1120px auto-collapse) -> 1280x800 ---
-        $null = [CstUxWin32]::MoveWindow($hwnd, 20, 20, [int][Math]::Round(1520 * $winSf), [int][Math]::Round(840 * $winSf), $true)
+        [CstUxWin32]::ResizeWindow($hwnd, 20, 20, [int][Math]::Round(1520 * $winSf), [int][Math]::Round(840 * $winSf))
         Start-Sleep -Milliseconds 250
         $null = Invoke-ProbeRequest -Port $port -Method POST -Path '/probe/reset'
         for ($step = 1; $step -le 30; $step++) {
             $rw = [int][Math]::Round((1520 - (496.0 * $step / 30.0)) * $winSf)
             $rh = [int][Math]::Round((840 - (200.0 * $step / 30.0)) * $winSf)
-            $null = [CstUxWin32]::MoveWindow($hwnd, 20, 20, $rw, $rh, $true)
+            [CstUxWin32]::ResizeWindow($hwnd, 20, 20, $rw, $rh)
             Start-Sleep -Milliseconds 16
         }
         Start-Sleep -Milliseconds 250
@@ -677,7 +728,7 @@ try {
         for ($step = 1; $step -le 20; $step++) {
             $rw = [int][Math]::Round((1024 + (256.0 * $step / 20.0)) * $winSf)
             $rh = [int][Math]::Round((640 + (160.0 * $step / 20.0)) * $winSf)
-            $null = [CstUxWin32]::MoveWindow($hwnd, 40, 40, $rw, $rh, $true)
+            [CstUxWin32]::ResizeWindow($hwnd, 40, 40, $rw, $rh)
             Start-Sleep -Milliseconds 16
         }
         Start-Sleep -Milliseconds 250
@@ -686,23 +737,23 @@ try {
         # --- P5-2 & P5-3: 10s Static Chat Page Idle Zero-Redraw & Pixel Freeze Audit ---
         Start-Sleep -Milliseconds 400
         $null = Invoke-ProbeRequest -Port $port -Method POST -Path '/probe/reset'
-        $idleStartDesktop = Get-ProcessResourceSample -ProcessId $inst.Process.Id -Role 'desktop' -Phase "$profile:idle_start"
-        $idleStartServer = Get-ProcessResourceSample -ProcessId $server.Process.Id -Role 'server' -Phase "$profile:idle_start"
+        $idleStartDesktop = Get-ProcessResourceSample -ProcessId $inst.Process.Id -Role 'desktop' -Phase "${profileName}:idle_start"
+        $idleStartServer = Get-ProcessResourceSample -ProcessId $server.Process.Id -Role 'server' -Phase "${profileName}:idle_start"
         $timelineRows.Add($idleStartDesktop)
         $timelineRows.Add($idleStartServer)
         $idleShot0 = Join-Path $shotDir '04-idle-t0.png'
-        $null = & winapp ui screenshot -w "$($hwnd.ToInt64())" -o $idleShot0 --json
+        Save-DesktopScreenshot -Hwnd $hwnd -Path $idleShot0
 
         for ($tick = 1; $tick -le 40; $tick++) {
             Start-Sleep -Milliseconds 250
-            $timelineRows.Add((Get-ProcessResourceSample -ProcessId $inst.Process.Id -Role 'desktop' -Phase "$profile:idle"))
+            $timelineRows.Add((Get-ProcessResourceSample -ProcessId $inst.Process.Id -Role 'desktop' -Phase "${profileName}:idle"))
             if ($tick % 4 -eq 0) {
-                $timelineRows.Add((Get-ProcessResourceSample -ProcessId $server.Process.Id -Role 'server' -Phase "$profile:idle"))
+                $timelineRows.Add((Get-ProcessResourceSample -ProcessId $server.Process.Id -Role 'server' -Phase "${profileName}:idle"))
             }
         }
-        $idleEndDesktop = Get-ProcessResourceSample -ProcessId $inst.Process.Id -Role 'desktop' -Phase "$profile:idle_end"
+        $idleEndDesktop = Get-ProcessResourceSample -ProcessId $inst.Process.Id -Role 'desktop' -Phase "${profileName}:idle_end"
         $idleShot10 = Join-Path $shotDir '04-idle-t10.png'
-        $null = & winapp ui screenshot -w "$($hwnd.ToInt64())" -o $idleShot10 --json
+        Save-DesktopScreenshot -Hwnd $hwnd -Path $idleShot10
         $p5IdleSnap = Invoke-ProbeRequest -Port $port -Path '/probe'
 
         $logicalCores = [Environment]::ProcessorCount
@@ -710,7 +761,7 @@ try {
         $idleCpuPct = [Math]::Round(($idleCpuDeltaMs / 10000.0 / $logicalCores) * 100.0, 3)
 
         # --- P6-2: Repeated session & popover soak (memory / handle stability + latency drift) ---
-        $soakBase = Get-ProcessResourceSample -ProcessId $inst.Process.Id -Role 'desktop' -Phase "$profile:soak_base"
+        $soakBase = Get-ProcessResourceSample -ProcessId $inst.Process.Id -Role 'desktop' -Phase "${profileName}:soak_base"
         $firstRoundMs = [Collections.Generic.List[double]]::new()
         $lastRoundMs = [Collections.Generic.List[double]]::new()
         for ($iter = 1; $iter -le 20; $iter++) {
@@ -730,14 +781,15 @@ try {
             Start-Sleep -Milliseconds 50
         }
         Start-Sleep -Seconds 3
-        $soakAfter = Get-ProcessResourceSample -ProcessId $inst.Process.Id -Role 'desktop' -Phase "$profile:soak_after"
+        $soakAfter = Get-ProcessResourceSample -ProcessId $inst.Process.Id -Role 'desktop' -Phase "${profileName}:soak_after"
         $timelineRows.Add($soakAfter)
 
         # --- D7: Dark theme switch & screenshot for visual contrast check ---
         Switch-ThemeMode -Server $server -Theme 'dark'
         Start-Sleep -Milliseconds 450
         $chatDarkShot = Join-Path $shotDir '05-long-chat-dark.png'
-        $null = & winapp ui screenshot -w "$($hwnd.ToInt64())" -o $chatDarkShot --json
+        Save-DesktopScreenshot -Hwnd $hwnd -Path $chatDarkShot
+        $chatDarkSnap = Invoke-ProbeRequest -Port $port -Path '/probe'
         Switch-ThemeMode -Server $server -Theme 'light'
         Start-Sleep -Milliseconds 250
 
@@ -753,50 +805,39 @@ try {
             $centerErrPx = [Math]::Round([Math]::Abs($leftGap - $rightGap), 2)
         }
 
-        $chatRoi = if ($wsB) {
-            @(
-                [int][Math]::Round(([double]$wsB[0] + 40.0) * $sf),
-                [int][Math]::Round(([double]$wsB[1] + 40.0) * $sf),
-                [int][Math]::Round(([Math]::Max(200.0, [double]$wsB[2] - 80.0)) * $sf),
-                [int][Math]::Round(([Math]::Max(180.0, [double]$wsB[3] - 200.0)) * $sf)
-            )
-        } else {
-            @(300, 120, 720, 480)
+        if ($compB.Count -ne 4 -or $compB[2] -le 0 -or $compB[3] -le 0) {
+            throw '缺少浅色对话截图中的输入框坐标。'
         }
-        $compBox = if ($compB) {
-            @(
-                [int][Math]::Round([double]$compB[0] * $sf),
-                [int][Math]::Round([double]$compB[1] * $sf),
-                [int][Math]::Round([double]$compB[2] * $sf),
-                [int][Math]::Round([double]$compB[3] * $sf)
-            )
-        } else {
-            @(348, 678, 816, 88)
-        }
+        $compBox = @(
+            [int][Math]::Round([double]$compB[0] * $sf),
+            [int][Math]::Round([double]$compB[1] * $sf),
+            [int][Math]::Round([double]$compB[2] * $sf),
+            [int][Math]::Round([double]$compB[3] * $sf)
+        )
 
         # Queue visual pixel checks for this profile
         $visualChecks.Add(@{
-            name = "${profile}_idle_freeze_diff"
+            name = "${profileName}_idle_freeze_diff"
             kind = 'freeze_diff'
             imageA = $idleShot0
             imageB = $idleShot10
         })
         $visualChecks.Add(@{
-            name = "${profile}_chat_light_contrast"
+            name = "${profileName}_chat_light_contrast"
             kind = 'contrast'
             image = $chatLightShot
-            roi = $chatRoi
+            roi = Get-ChatContrastRoi -Snapshot $d1WideSnap
             minRatio = 4.5
         })
         $visualChecks.Add(@{
-            name = "${profile}_chat_dark_contrast"
+            name = "${profileName}_chat_dark_contrast"
             kind = 'contrast'
             image = $chatDarkShot
-            roi = $chatRoi
+            roi = Get-ChatContrastRoi -Snapshot $chatDarkSnap
             minRatio = 4.5
         })
         $visualChecks.Add(@{
-            name = "${profile}_composer_elevation_light"
+            name = "${profileName}_composer_elevation_light"
             kind = 'elevation'
             image = $chatLightShot
             box = $compBox
@@ -804,20 +845,20 @@ try {
         })
         if ($isWarp) {
             $visualChecks.Add(@{
-                name = "${profile}_home_fallback_heading_contrast"
+                name = "${profileName}_home_fallback_heading_contrast"
                 kind = 'contrast'
                 image = $homeShotLight
                 roi = @(
-                    [int][Math]::Round(520 * $sf),
-                    [int][Math]::Round(310 * $sf),
-                    [int][Math]::Round(420 * $sf),
-                    [int][Math]::Round(110 * $sf)
+                    [int][Math]::Round(520 * $homeSf),
+                    [int][Math]::Round(310 * $homeSf),
+                    [int][Math]::Round(420 * $homeSf),
+                    [int][Math]::Round(110 * $homeSf)
                 )
                 minRatio = 4.5
             })
         }
 
-        $isLastProfile = ($profile -eq $Profiles[$Profiles.Count - 1])
+        $isLastProfile = ($profileIndex -eq $Profiles.Count - 1)
         $exitMs = Close-DesktopInstance -Instance $inst -Graceful:$isLastProfile
         $inst = $null
         if ($isLastProfile -and $server -and $server.Process) {
@@ -829,7 +870,7 @@ try {
         $firstMed = Get-Percentile -Values $firstRoundMs.ToArray() -Percent 50
         $lastMed = Get-Percentile -Values $lastRoundMs.ToArray() -Percent 50
 
-        $profileReports[$profile] = [ordered]@{
+        $profileReports[$profileName] = [ordered]@{
             hardware = @{
                 throttledJobObject = $isOldPc
                 forcedWarp = $isWarp
@@ -907,17 +948,13 @@ try {
         }
     }
 } finally {
-    if ($inst) {
-        $null = Close-DesktopInstance -Instance $inst
-    }
-    $serverExitSw = [Diagnostics.Stopwatch]::StartNew()
     try {
-        if ($server -and $server.Process -and -not $server.Process.HasExited) {
-            $server.Process.Kill()
-            $null = $server.Process.WaitForExit(3000)
-        }
-    } catch { Write-Verbose $_.Exception.Message }
-    $serverExitMs = [Math]::Round($serverExitSw.Elapsed.TotalMilliseconds, 2)
+        if ($inst) { $null = Close-DesktopInstance -Instance $inst }
+    } finally {
+        $serverExitSw = [Diagnostics.Stopwatch]::StartNew()
+        if ($server) { Close-IsolatedProcess -Process $server.Process }
+        $serverExitMs = [Math]::Round($serverExitSw.Elapsed.TotalMilliseconds, 2)
+    }
 }
 
 # Export 250ms dual-process timeline CSV
