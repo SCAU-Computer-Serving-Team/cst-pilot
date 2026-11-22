@@ -30,7 +30,7 @@ param(
 if (-not $IsWindows) { throw 'Job Object throttling requires Windows.' }
 
 if (-not ('CstDesktopJobThrottle' -as [type])) {
-    Add-Type -TypeDefinition @'
+    Add-Type -ErrorAction Stop -TypeDefinition @'
 using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
@@ -319,8 +319,13 @@ function Invoke-DesktopJobThrottle {
         [int]$MemoryLimitMB = 0,
         [switch]$BelowNormalPriority
     )
-    return [CstDesktopJobThrottle]::CreateAndAssign(
-        $ProcessId, $Cores, $CpuCapPercent, $MemoryLimitMB, [bool]$BelowNormalPriority)
+    # A Win32 failure must stop the caller before it reports success.
+    try {
+        return [CstDesktopJobThrottle]::CreateAndAssign(
+            $ProcessId, $Cores, $CpuCapPercent, $MemoryLimitMB, [bool]$BelowNormalPriority)
+    } catch {
+        throw
+    }
 }
 
 function Get-ProcessResourceSample {

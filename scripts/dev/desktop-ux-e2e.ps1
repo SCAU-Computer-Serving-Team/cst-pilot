@@ -50,7 +50,7 @@ public static class CstUxWin32
     private static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
 
     [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+    private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr value);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool PostMessageW(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
@@ -58,23 +58,35 @@ public static class CstUxWin32
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
 
-    public static void EnablePerMonitorDpiV2()
+    private static IntPtr SetDpiContext(IntPtr value)
     {
-        // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4; ignore failure if already set.
-        SetProcessDpiAwarenessContext((IntPtr)(-4));
+        IntPtr previous = SetThreadDpiAwarenessContext(value);
+        if (previous == IntPtr.Zero)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "SetThreadDpiAwarenessContext failed");
+        return previous;
     }
 
     public static void ResizeWindow(IntPtr hWnd, int x, int y, int width, int height)
     {
-        if (!MoveWindow(hWnd, x, y, width, height, true))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "MoveWindow failed");
+        IntPtr previous = SetDpiContext((IntPtr)(-4)); // PerMonitorV2
+        try
+        {
+            if (!MoveWindow(hWnd, x, y, width, height, true))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "MoveWindow failed");
+        }
+        finally { SetDpiContext(previous); }
     }
 
     public static void SendWheelAt(IntPtr hWnd, int delta, int clientX, int clientY)
     {
+        IntPtr previous = SetDpiContext((IntPtr)(-4));
         POINT pt = new POINT { X = clientX, Y = clientY };
-        if (!ClientToScreen(hWnd, ref pt))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "ClientToScreen failed");
+        try
+        {
+            if (!ClientToScreen(hWnd, ref pt))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "ClientToScreen failed");
+        }
+        finally { SetDpiContext(previous); }
         SendWheelAtScreen(hWnd, delta, pt.X, pt.Y);
     }
 
@@ -90,8 +102,6 @@ public static class CstUxWin32
 }
 '@
 }
-[CstUxWin32]::EnablePerMonitorDpiV2()
-
 function Get-Percentile {
     param([double[]]$Values, [double]$Percent)
     if (-not $Values -or $Values.Count -eq 0) { return 0.0 }
@@ -641,6 +651,7 @@ Expand-IsolatedKit -KitRoot $kitRoot -SourceBinDir $BinDir
 $timelineRows = [Collections.Generic.List[object]]::new()
 $visualChecks = [Collections.Generic.List[object]]::new()
 $profileReports = [ordered]@{}
+$assertionFailures = [Collections.Generic.List[string]]::new()
 
 $server = $null
 $inst = $null
@@ -763,6 +774,12 @@ try {
         Save-DesktopScreenshot -Hwnd $hwnd -Path $modelPickerShot
         $null = Invoke-UiaById -Hwnd $hwnd -AutomationId 'composer-model-picker-btn' -TimeoutMs 2000
         Start-Sleep -Milliseconds 120
+        if (-not $ctxPopoverAboveCard -or -not $modelPickerAboveCard) {
+            $assertionFailures.Add("${profileName} P1-4: 两个浮层均应位于输入框上方。")
+        }
+        if ($iconFailCount -ne 0 -or $p1Snap.input_latency.count -ne $iconActions.Count) {
+            $assertionFailures.Add("${profileName} P1-2: 控件调用失败 $iconFailCount 次，采样 $($p1Snap.input_latency.count)/$($iconActions.Count)。")
+        }
 
         # --- P2-2: Switch settings tabs and check the legacy TUI option ---
         if (-not (Invoke-UiaById -Hwnd $hwnd -AutomationId 'sidebar-settings-btn' -TimeoutMs 2500)) {
@@ -824,26 +841,39 @@ try {
         # --- P2-1: Switch 10 sidebar sessions ---
         $null = Invoke-ProbeRequest -Port $port -Method POST -Path '/probe/reset'
         $sessionIds = @('sess-ux-long') + (1..9 | ForEach-Object { "sess-mix-$('{0:D2}' -f $_)" })
-        $sessLatencies = [Collections.Generic.List[double]]::new()
         $sessSwitchFails = 0
         foreach ($sid in $sessionIds) {
             if (-not (Invoke-UiaById -Hwnd $hwnd -AutomationId "sidebar-session-row-$sid" -TimeoutMs 2500)) {
                 $sessSwitchFails++
             }
             Start-Sleep -Milliseconds 120
-            $sSnap = Invoke-ProbeRequest -Port $port -Path '/probe'
-            if ($sSnap.input_latency.recent.Count -gt 0) {
-                $sessLatencies.Add([double]$sSnap.input_latency.recent[0].latency_ms)
-            }
         }
         $p2SessSnap = Invoke-ProbeRequest -Port $port -Path '/probe'
+        $sessLatencies = @($p2SessSnap.input_latency.recent | ForEach-Object { [double]$_.latency_ms })
+        if ($sessSwitchFails -ne 0 -or $sessLatencies.Count -ne $sessionIds.Count) {
+            $assertionFailures.Add("${profileName} P2-1: 会话切换调用失败 $sessSwitchFails 次，采样 $($sessLatencies.Count)/$($sessionIds.Count)。")
+        }
 
         # Switch back to F-LongHistory for P3, D1, D5, P5-2
-        $null = Invoke-UiaById -Hwnd $hwnd -AutomationId 'sidebar-session-row-sess-ux-long' -TimeoutMs 3000
-        Start-Sleep -Milliseconds 350
+        $framesBeforeLongChat = [int64]$p2SessSnap.frame_pacing.total_frames
+        if (-not (Invoke-UiaById -Hwnd $hwnd -AutomationId 'sidebar-session-row-sess-ux-long' -TimeoutMs 3000)) {
+            throw '未能打开 F-LongHistory。'
+        }
+        $chatReady = $false
+        $chatWait = [Diagnostics.Stopwatch]::StartNew()
+        while ($chatWait.ElapsedMilliseconds -lt 10000) {
+            $d1WideSnap = Invoke-ProbeRequest -Port $port -Path '/probe'
+            if ($d1WideSnap.shell.active_session_id -eq 'sess-ux-long' -and
+                $d1WideSnap.scroll.max_offset_y -gt 36 -and
+                [int64]$d1WideSnap.frame_pacing.total_frames -gt $framesBeforeLongChat) {
+                $chatReady = $true
+                break
+            }
+            Start-Sleep -Milliseconds 50
+        }
+        if (-not $chatReady) { throw '等待 F-LongHistory 绘制及滚动区域就绪超时。' }
         $chatLightShot = Join-Path $shotDir '03-long-chat-light.png'
         Save-DesktopScreenshot -Hwnd $hwnd -Path $chatLightShot
-        $d1WideSnap = Invoke-ProbeRequest -Port $port -Path '/probe'
 
         # --- P3-1 & D5: 120 continuous wheel events on 130-turn F-LongHistory ---
         $wheelX = [int][Math]::Round(760 * $winSf)
@@ -1070,8 +1100,8 @@ try {
             }
             p2_switching = @{
                 sessionSwitchFails = $sessSwitchFails
-                sessionSwitchP50Ms = Get-Percentile -Values $sessLatencies.ToArray() -Percent 50
-                sessionSwitchP95Ms = Get-Percentile -Values $sessLatencies.ToArray() -Percent 95
+                sessionSwitchP50Ms = Get-Percentile -Values $sessLatencies -Percent 50
+                sessionSwitchP95Ms = Get-Percentile -Values $sessLatencies -Percent 95
                 sessionPaintP95Ms = [Math]::Round([double]$p2SessSnap.frame_pacing.paint_us_p95 / 1000.0, 2)
                 settingsTabsInputP95Ms = [Math]::Round([double]$p2TabsSnap.input_latency.p95_ms, 2)
                 settingsTabsOver16ms = $p2TabsSnap.frame_pacing.frames_over_16ms
@@ -1150,12 +1180,20 @@ $timelineRows | Where-Object { $null -ne $_ } | Export-Csv -Path $csvPath -NoTyp
 $manifestPath = Join-Path $OutputDir 'visual-manifest.json'
 $visualOutPath = Join-Path $OutputDir 'visual-audit.json'
 @{ checks = $visualChecks } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
-$pyAuditOut = & python (Join-Path $PSScriptRoot 'desktop-visual-audit.py') --manifest $manifestPath --output $visualOutPath
+$pyAuditOut = & {
+    # Pixel failures return 1 and still produce a report.
+    $PSNativeCommandUseErrorActionPreference = $false
+    & python (Join-Path $PSScriptRoot 'desktop-visual-audit.py') --manifest $manifestPath --output $visualOutPath
+}
 $visualExitCode = $LASTEXITCODE
 if ($visualExitCode -gt 1 -or -not (Test-Path -LiteralPath $visualOutPath -PathType Leaf)) {
     throw "desktop-visual-audit.py 执行失败：$pyAuditOut"
 }
 $visualReport = Get-Content -LiteralPath $visualOutPath -Raw | ConvertFrom-Json
+
+if ($visualExitCode -ne 0 -or $visualReport.allPassed -ne $true) {
+    $assertionFailures.Add("像素检查未通过：$visualOutPath")
+}
 
 $fullReport = [ordered]@{
     generatedAt = (Get-Date).ToString('o')
@@ -1168,12 +1206,13 @@ $fullReport = [ordered]@{
     serverExitedGracefully = $serverExitedGracefully
     serverGracefulExitMs = $serverGracefulExitMs
     profiles = $profileReports
+    assertionFailures = $assertionFailures
     visualAudit = $visualReport
 }
 
 $reportPath = Join-Path $OutputDir 'ux-perf-report.json'
 $fullReport | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $reportPath -Encoding utf8NoBOM
 Write-Output ($fullReport | ConvertTo-Json -Depth 10)
-if ($visualExitCode -ne 0 -or $visualReport.allPassed -ne $true) {
-    throw "像素检查未通过：$visualOutPath"
+if ($assertionFailures.Count -ne 0) {
+    throw ($assertionFailures -join [Environment]::NewLine)
 }

@@ -17,8 +17,8 @@ flowchart LR
     end
 
     subgraph Probes["进程内探针 (仅 test-support + 环境变量开启)"]
-        P1["InputLatencyProbe<br/>输入到首帧 Present 延迟"]
-        P2["FramePacingProbe<br/>update / prepaint / paint / present 逐帧耗时"]
+        P1["InputLatencyProbe<br/>处理器打点到 CPU 绘制完成"]
+        P2["FramePacingProbe<br/>渲染、CPU 绘制与相邻帧间隔"]
         P3["StyleAndGeometryProbe<br/>实时 Bounds / 滚动偏移 / RGBA 与 BoxShadow 计算值"]
         P4["FocusAndResourceProbe<br/>焦点栈 / IME / 着色器帧数 / SVG 与纹理计数"]
     end
@@ -42,8 +42,8 @@ flowchart LR
 
 | 观测器 | 采集机制 | 覆盖指标与判据 |
 |---|---|---|
-| `InputLatencyProbe` | 在 GPUI 事件入口记录输入时刻，在当次重绘 `Present` 完成记录落屏时刻 | 点击、打字、`Ctrl+K`、菜单展开、切会话、切标签页、窗口切回的端到端视觉响应时间（`Input-to-Next-Paint`） |
-| `FramePacingProbe` | 固定长度环形缓冲记录每帧 `update`、`prepaint`、`paint`、`present` 微秒耗时，以及主线程长帧与停帧计数 | 滚动、缩放窗口、流式输出、着色器与毛玻璃叠加下的帧耗时 `P50 / P95 / P99`、掉帧占比与静息零重绘 |
+| `InputLatencyProbe` | 在已接入探针的事件处理器打点，到下一次 CPU 侧绘制结束为止 | 自动子集覆盖点击、浮层开关、切会话和切标签页。采样不计入跨进程 UIA 等待、GPU 提交或显示器落屏 |
+| `FramePacingProbe` | 固定长度缓冲区记录渲染、CPU 绘制与相邻帧间隔，统计长帧及重绘次数 | 分别查看 CPU 绘制和帧间隔的分位数。停顿后的帧间隔包含停顿时间；该值不等于单帧绘制耗时 |
 | `StyleAndGeometryProbe` | 在 `Prepaint` 阶段导出标记节点的等价计算样式（`Bounds`、滚动偏移、`background` RGBA、`BoxShadow` 参数、`opacity`、字号行高） | 同列对齐误差 `≤ 1px`、悬停浮层边距 `≥ 16px`、阴影 `d^3` 渐强与背景渐变数值核对、中途打断相邻帧连续性 |
 | `FocusAndResourceProbe` | 监听 `FocusHandle` 轨迹、IME 组合拦截计数、`ShaderFrameScheduler` 绘制计数、SVG 图集重光栅化次数与离屏纹理数量 | `Esc` 单帧归焦、密文 `55` 字节清零、6 类停帧场景 `0 FPS`、高密度图标同屏无重复光栅化 |
 | `VisualPixelAnalyzer` | 对截图与录屏帧执行 ROI 像素分析（边缘亮度梯度、外围阴影衰减、相邻帧 `L1` 差分、局部前景背景 WCAG 相对亮度） | 核验 D3D11 毛玻璃模糊、L4 `1px` 顶光、L2 三层阴影真实渲染、停帧期零像素变化与最终呈现对比度 `≥ 4.5:1` |
@@ -72,6 +72,8 @@ flowchart LR
 ### 2.2 开发机资源限制与补测档位
 
 使用 Release 构建和 `cst-desktop/test-support` 特性。脚本自动运行 `H-Dev`、`H-ThinLight`、`H-OldPC` 和 `H-WARP`。GPU 锁频、DPI 切换与慢 I/O 需要单独配置。
+
+自动子集用 UIA 边界检查两个输入框浮层位于输入框上方，用截图辅助目视检查绘制层级；UIA 边界无法证明绘制顺序。浮层位置错误、控件调用失败或控件／会话切换采样缺失时，脚本写入 `assertionFailures` 并以非零退出。
 
 | 档位代号 | 硬件限制与环境配置 | 模拟目标场景 | 交叉维度 |
 |---|---|---|---|
@@ -287,5 +289,5 @@ UX 报告的 17 项像素检查全部通过。[兼容性报告](windows-compat.m
 
 ### 6.4 覆盖边界与待补测项
 
-1. 自动子集通过 UIA、Win32 `WM_MOUSEWHEEL` 与 `MoveWindow` 驱动（脚本已启用 `PerMonitorV2` DPI 感知、导出 `intervalP50Ms / intervalP95Ms`，并将全部控件延迟改由进程内 `ux_probe::mark_input` 采样；`200%` DPI `H-WARP` 复测 `F:\tmp\2026-11-22\anomaly-fix-verify` 中全部 7 张截图均为 `2560×1600` 且像素校核通过）。还需在前台会话补测中文 IME、模型筛选、实时流式交互与设备重置；如需单独拆出 GPU 提交耗时，可在 `DirectXRenderer::draw()` / `Present` 补探针，并在核显设备复现受限显存带宽与 `H-ThinLight + H-GpuClamp` 组合负载。旧系统和中国大陆特制版按[真机验收清单](windows-compat.md#42-最小验收项10-项勾选通过失败并附截图或日志)补测。
+1. 自动子集通过 UIA、Win32 `WM_MOUSEWHEEL` 与 `MoveWindow` 驱动（窗口缩放、坐标转换使用线程级 `PerMonitorV2` DPI 感知，脚本导出 `intervalP50Ms / intervalP95Ms`，并将全部控件延迟改由进程内 `ux_probe::mark_input` 采样；`200%` DPI `H-WARP` 复测 `F:\tmp\2026-11-22\anomaly-fix-verify` 中全部 7 张截图均为 `2560×1600` 且像素校核通过）。还需在前台会话补测中文 IME、模型筛选、实时流式交互与设备重置；如需单独拆出 GPU 提交耗时，可在 `DirectXRenderer::draw()` / `Present` 补探针，并在核显设备复现受限显存带宽与 `H-ThinLight + H-GpuClamp` 组合负载。旧系统和中国大陆特制版按[真机验收清单](windows-compat.md#42-最小验收项10-项勾选通过失败并附截图或日志)补测。
 2. 不启用 `test-support` 时，`ux_probe` 模块不参与编译。启用后仍需设置 `CST_DESKTOP_UX_PROBE=1` 才会开启探针。
