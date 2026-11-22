@@ -2,14 +2,14 @@
 [CmdletBinding(PositionalBinding = $false)]
 param(
     [Parameter()]
-    [string]$BinDir = 'F:\tmp\2026-11-20\target\release',
+    [string]$BinDir = (Join-Path $PSScriptRoot '..\..\target\release'),
 
     [Parameter()]
     [string]$OutputDir = '',
 
     [Parameter()]
-    [ValidateSet('H-Dev', 'H-OldPC', 'H-WARP')]
-    [string[]]$Profiles = @('H-Dev', 'H-OldPC', 'H-WARP'),
+    [ValidateSet('H-Dev', 'H-ThinLight', 'H-OldPC', 'H-WARP')]
+    [string[]]$Profiles = @('H-Dev', 'H-ThinLight', 'H-OldPC', 'H-WARP'),
 
     [Parameter()]
     [ValidateRange(1, 10)]
@@ -27,6 +27,9 @@ if ([string]::IsNullOrWhiteSpace($OutputDir)) {
     $OutputDir = Join-Path $baseTmp "$dateStamp\desktop-ux-e2e-$runId"
 }
 
+$OutputDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDir)
+$BinDir = (Resolve-Path -LiteralPath $BinDir).ProviderPath
+$fixtureModelCount = 400
 . (Join-Path $PSScriptRoot 'desktop-job-throttle.ps1')
 
 if (-not ('CstUxWin32' -as [type])) {
@@ -63,8 +66,15 @@ public static class CstUxWin32
         POINT pt = new POINT { X = clientX, Y = clientY };
         if (!ClientToScreen(hWnd, ref pt))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "ClientToScreen failed");
+        SendWheelAtScreen(hWnd, delta, pt.X, pt.Y);
+    }
+
+    public static void SendWheelAtScreen(IntPtr hWnd, int delta, int x, int y)
+    {
+        if (x < short.MinValue || x > short.MaxValue || y < short.MinValue || y > short.MaxValue)
+            throw new ArgumentException("Wheel screen point does not fit signed 16-bit coordinates.");
         IntPtr wParam = (IntPtr)((delta << 16) & unchecked((int)0xFFFF0000));
-        IntPtr lParam = (IntPtr)(((pt.Y & 0xFFFF) << 16) | (pt.X & 0xFFFF));
+        IntPtr lParam = (IntPtr)(((y & 0xFFFF) << 16) | (x & 0xFFFF));
         if (!PostMessageW(hWnd, WM_MOUSEWHEEL, wParam, lParam))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "PostMessageW failed");
     }
@@ -87,7 +97,7 @@ function Invoke-ProbeRequest {
         [string]$Method = 'GET',
         [string]$Path = '/probe'
     )
-    return Invoke-RestMethod -Method $Method -Uri "http://127.0.0.1:$Port$Path" -TimeoutSec 5
+    return Invoke-RestMethod -Method $Method -Uri "http://127.0.0.1:$Port$Path" -NoProxy -TimeoutSec 5
 }
 
 function Invoke-UiaById {
@@ -155,6 +165,29 @@ function Get-UiaBoundingRect {
     return $null
 }
 
+function Get-UiaModelRows {
+    param([intptr]$Hwnd)
+    $root = [Windows.Automation.AutomationElement]::FromHandle($Hwnd)
+    foreach ($el in $root.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)) {
+        $current = $el.Current
+        if ($current.AutomationId -match '^pref-enabled-row-(\d+)$') {
+            $index = [int]$Matches[1]
+            $rect = $current.BoundingRectangle
+            if (-not $current.IsOffscreen -and -not $rect.IsEmpty -and $rect.Width -gt 0 -and $rect.Height -gt 0) {
+                [pscustomobject]@{ Index = $index; Rect = $rect }
+            }
+        }
+    }
+}
+
+function Test-UiaElementPresent {
+    param([intptr]$Hwnd, [string]$AutomationId)
+    $root = [Windows.Automation.AutomationElement]::FromHandle($Hwnd)
+    $cond = [Windows.Automation.PropertyCondition]::new(
+        [Windows.Automation.AutomationElement]::AutomationIdProperty, $AutomationId)
+    return ($null -ne $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $cond))
+}
+
 function Wait-DesktopWindowHandle {
     param([Diagnostics.Process]$Process, [int]$TimeoutMs = 10000)
     $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -206,12 +239,12 @@ function Expand-IsolatedKit {
     Copy-Item -LiteralPath (Join-Path $repoRoot 'agent\home\APPEND_SYSTEM.md') -Destination (Join-Path $homeDir 'APPEND_SYSTEM.md') -Force
     Copy-Item -Path (Join-Path $repoRoot 'agent\home\skills\*') -Destination $skillsDir -Recurse -Force
 
-    # 1. Generate F-AuthAndModels + F-IconWall (60 enabled models catalog)
-    $modelItems = for ($i = 1; $i -le 60; $i++) {
+    # 1. Generate F-AuthAndModels + F-IconWall + F-LargeModels (400 enabled models catalog)
+    $modelItems = for ($i = 1; $i -le $fixtureModelCount; $i++) {
         @{
-            id = "ux-bench-model-$('{0:D2}' -f $i)"
-            name = "Bench Model $('{0:D2}' -f $i)"
-            api = 'openai-responses'
+            id = "ux-bench-model-$('{0:D3}' -f $i)"
+            name = "Bench Model $('{0:D3}' -f $i)"
+            api = 'openai-completions'
             reasoning = ($i % 2 -eq 0)
             input = @('text', 'image')
             cost = @{ input = 0; output = 0; cacheRead = 0; cacheWrite = 0 }
@@ -224,16 +257,20 @@ function Expand-IsolatedKit {
             'ux-bench' = @{
                 baseUrl = 'http://127.0.0.1:9/v1'
                 apiKey = 'test-offline-key'
-                api = 'openai-responses'
+                api = 'openai-completions'
                 models = $modelItems
             }
         }
     } | ConvertTo-Json -Depth 6
     Set-Content -LiteralPath (Join-Path $homeDir 'models.json') -Value $modelsJson -Encoding utf8NoBOM
 
+    @{
+        enabledModels = @($modelItems | ForEach-Object { "ux-bench/$($_.id)" })
+    } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $homeDir 'settings.json') -Encoding utf8NoBOM
+
     $desktopSettings = @{
         theme = 'light'
-        defaultView = 'desktop'
+        defaultView = 'tui'
         sidebarCollapsed = $false
         window = @{ width = 1280; height = 800 }
     } | ConvertTo-Json -Depth 4
@@ -290,7 +327,7 @@ function Expand-IsolatedKit {
                     content = @(
                         @{ type = 'toolCall'; id = $tcId; name = $toolName; arguments = @{ action = 'overview'; turn = $t } }
                     )
-                    api = 'openai-responses'; provider = 'ux-bench'; model = 'ux-bench-model-01'
+                    api = 'openai-completions'; provider = 'ux-bench'; model = 'ux-bench-model-001'
                     usage = @{ input = 120; output = 40; cacheRead = 0; cacheWrite = 0; totalTokens = 160; cost = @{ input = 0; output = 0; cacheRead = 0; cacheWrite = 0; total = 0 } }
                     stopReason = 'toolUse'; timestamp = $tsAt.ToUnixTimeMilliseconds(); durationMs = 240
                 }
@@ -324,7 +361,7 @@ function Expand-IsolatedKit {
             message = @{
                 role = 'assistant'
                 content = @(@{ type = 'text'; text = $aText })
-                api = 'openai-responses'; provider = 'ux-bench'; model = 'ux-bench-model-01'
+                api = 'openai-completions'; provider = 'ux-bench'; model = 'ux-bench-model-001'
                 usage = @{ input = 200; output = 120; cacheRead = 0; cacheWrite = 0; totalTokens = 320; cost = @{ input = 0; output = 0; cacheRead = 0; cacheWrite = 0; total = 0 } }
                 stopReason = 'stop'; timestamp = $tsA.ToUnixTimeMilliseconds(); durationMs = 310
             }
@@ -354,7 +391,7 @@ function Expand-IsolatedKit {
                 message = @{
                     role = 'assistant'
                     content = @(@{ type = 'text'; text = "会话 $sid 核验通过：CPU、内存、磁盘与核心驱动状态均在正常阈值范围内。" })
-                    api = 'openai-responses'; provider = 'ux-bench'; model = 'ux-bench-model-01'
+                    api = 'openai-completions'; provider = 'ux-bench'; model = 'ux-bench-model-001'
                     usage = @{ input = 90; output = 60; cacheRead = 0; cacheWrite = 0; totalTokens = 150; cost = @{ input = 0; output = 0; cacheRead = 0; cacheWrite = 0; total = 0 } }
                     stopReason = 'stop'; timestamp = $ts.AddSeconds(5).ToUnixTimeMilliseconds(); durationMs = 180
                 }
@@ -435,7 +472,7 @@ function Open-IsolatedServer {
                 try {
                     $info = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
                     if ($info.port -and $info.token) {
-                        $null = Invoke-RestMethod -Uri "http://127.0.0.1:$($info.port)/api/health" -TimeoutSec 2
+                        $null = Invoke-RestMethod -Uri "http://127.0.0.1:$($info.port)/api/health" -NoProxy -TimeoutSec 2
                         $result = [pscustomobject]@{
                             Process = $proc
                             Port = [int]$info.port
@@ -461,7 +498,7 @@ function Open-DesktopInstance {
         [string]$KitRoot,
         [string]$ProbeFile,
         [bool]$ForceWarp,
-        [bool]$ApplyOldPcThrottle
+        [string]$ThrottleProfile = 'H-Dev'
     )
     if (Test-Path -LiteralPath $ProbeFile) { Remove-Item -LiteralPath $ProbeFile -Force }
     $desktopExe = Join-Path $KitRoot 'cst-pilot.exe'
@@ -486,8 +523,10 @@ function Open-DesktopInstance {
     $ready = $false
     $throttle = $null
     try {
-        if ($ApplyOldPcThrottle) {
-            $throttle = Invoke-DesktopJobThrottle -ProcessId $proc.Id -Cores 2 -CpuCapPercent 25
+        if ($ThrottleProfile -eq 'H-OldPC') {
+            $throttle = Invoke-DesktopJobThrottle -ProcessId $proc.Id -Cores 2 -CpuCapPercent 25 -MemoryLimitMB 512
+        } elseif ($ThrottleProfile -eq 'H-ThinLight') {
+            $throttle = Invoke-DesktopJobThrottle -ProcessId $proc.Id -Cores 4 -CpuCapPercent 40 -MemoryLimitMB 640 -BelowNormalPriority
         }
 
         $probePort = 0
@@ -570,7 +609,7 @@ function Switch-ThemeMode {
     $headers = @{ Authorization = "Bearer $($Server.Token)" }
     $body = @{ theme = $Theme } | ConvertTo-Json -Compress
     $null = Invoke-RestMethod -Method Patch -Uri "http://127.0.0.1:$($Server.Port)/api/app/settings" `
-        -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 5
+        -Headers $headers -ContentType 'application/json' -Body $body -NoProxy -TimeoutSec 5
 }
 
 function Restore-DesktopBaseline {
@@ -581,10 +620,11 @@ function Restore-DesktopBaseline {
         sidebarCollapsed = $false
     } | ConvertTo-Json -Compress
     $null = Invoke-RestMethod -Method Patch -Uri "http://127.0.0.1:$($Server.Port)/api/app/settings" `
-        -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 5
+        -Headers $headers -ContentType 'application/json' -Body $body -NoProxy -TimeoutSec 5
 }
 
-New-Item -ItemType Directory -Force -Path $OutputDir, (Join-Path $OutputDir 'screenshots') | Out-Null
+# Reusing a kit can overwrite files or attach to an earlier run's server.
+New-Item -ItemType Directory -Path $OutputDir | Out-Null
 $kitRoot = Join-Path $OutputDir 'kit'
 Expand-IsolatedKit -KitRoot $kitRoot -SourceBinDir $BinDir
 
@@ -598,9 +638,20 @@ $serverExitedGracefully = $false
 $serverGracefulExitMs = $null
 try {
     $server = Open-IsolatedServer -KitRoot $kitRoot
+    $catalog = Invoke-RestMethod -Uri "http://127.0.0.1:$($server.Port)/api/models" `
+        -Headers @{ Authorization = "Bearer $($server.Token)" } -NoProxy -TimeoutSec 5
+    $fixtureIds = @(1..$fixtureModelCount | ForEach-Object { 'ux-bench/ux-bench-model-{0:D3}' -f $_ })
+    $readyFixtureIds = @($catalog.models | Where-Object { $_.provider -eq 'ux-bench' -and $_.credentialReady } |
+        ForEach-Object { "ux-bench/$($_.id)" })
+    if ($readyFixtureIds.Count -ne $fixtureModelCount -or
+        @($fixtureIds | Where-Object { $_ -notin $readyFixtureIds -or $_ -notin $catalog.enabled }).Count -ne 0) {
+        throw "F-LargeModels: 隔离后端没有加载全部 $fixtureModelCount 个已启用模型。"
+    }
+
     for ($profileIndex = 0; $profileIndex -lt $Profiles.Count; $profileIndex++) {
         $profileName = $Profiles[$profileIndex]
         $isOldPc = ($profileName -eq 'H-OldPC')
+        $isThinLight = ($profileName -eq 'H-ThinLight')
         $isWarp = ($profileName -eq 'H-WARP')
         $shotDir = Join-Path $OutputDir "screenshots\$profileName"
         New-Item -ItemType Directory -Force -Path $shotDir | Out-Null
@@ -612,7 +663,7 @@ try {
         $firstFrames = [Collections.Generic.List[double]]::new()
         $interactiveTimes = [Collections.Generic.List[double]]::new()
         for ($r = 1; $r -le $runs; $r++) {
-            $inst = Open-DesktopInstance -KitRoot $kitRoot -ProbeFile $probeFile -ForceWarp:$isWarp -ApplyOldPcThrottle:$isOldPc
+            $inst = Open-DesktopInstance -KitRoot $kitRoot -ProbeFile $probeFile -ForceWarp:$isWarp -ThrottleProfile $profileName
             $firstFrames.Add([double]$inst.InitialSnap.startup.first_frame_ms)
             $interactiveTimes.Add([double]$inst.InteractiveMs)
             if ($r -lt $runs) {
@@ -622,6 +673,14 @@ try {
             }
         }
 
+        $jobLimits = if ($inst.Throttle) {
+            @{
+                logicalCores = $inst.Throttle.LogicalCores
+                cpuRate = $inst.Throttle.CpuRate
+                processCommitLimitBytes = $inst.Throttle.ProcessCommitLimitBytes
+                belowNormalPriority = $inst.Throttle.BelowNormalPriority
+            }
+        }
         $port = $inst.ProbePort
         $hwnd = $inst.Hwnd
         Start-Sleep -Milliseconds 400
@@ -684,18 +743,62 @@ try {
         $null = Invoke-UiaById -Hwnd $hwnd -AutomationId 'composer-model-picker-btn' -TimeoutMs 2000
         Start-Sleep -Milliseconds 120
 
-        # --- P2-2: Settings 4 tabs + AllSessions switch ---
+        # --- P2-2: Switch settings tabs and check the legacy TUI option ---
         $null = Invoke-ProbeRequest -Port $port -Method POST -Path '/probe/reset'
-        $null = Invoke-UiaById -Hwnd $hwnd -AutomationId 'sidebar-settings-btn' -TimeoutMs 2500
-        Start-Sleep -Milliseconds 150
+        if (-not (Invoke-UiaById -Hwnd $hwnd -AutomationId 'sidebar-settings-btn' -TimeoutMs 2500)) {
+            throw 'P2-2: 无法打开设置页。'
+        }
         foreach ($tabId in @('settings-tab-providers', 'settings-tab-preferences', 'settings-tab-shortcuts', 'settings-tab-general')) {
             $null = Invoke-ProbeRequest -Port $port -Method POST -Path "/probe/mark?label=$tabId"
-            $null = Invoke-UiaById -Hwnd $hwnd -AutomationId $tabId -TimeoutMs 2500
+            if (-not (Invoke-UiaById -Hwnd $hwnd -AutomationId $tabId -TimeoutMs 2500)) {
+                throw "P2-2: 无法切换到 $tabId。"
+            }
             Start-Sleep -Milliseconds 120
         }
-        $null = Invoke-UiaById -Hwnd $hwnd -AutomationId 'sidebar-all-sessions-btn' -TimeoutMs 2500
-        Start-Sleep -Milliseconds 150
         $p2TabsSnap = Invoke-ProbeRequest -Port $port -Path '/probe'
+        if ($null -eq (Get-UiaBoundingRect -Hwnd $hwnd -AutomationId 'settings-general-tab')) {
+            throw 'P2-2: 未进入常规设置，无法校验默认终端选项。'
+        }
+        $tuiViewOptionPresent = Test-UiaElementPresent -Hwnd $hwnd -AutomationId 'settings-view-tui'
+        if ($tuiViewOptionPresent) {
+            throw 'P2-2: 常规设置仍包含默认终端选项。'
+        }
+
+        # P3-5: UIA supplies physical screen coordinates for WM_MOUSEWHEEL.
+        if (-not (Invoke-UiaById -Hwnd $hwnd -AutomationId 'settings-tab-preferences' -TimeoutMs 2500) -or
+            $null -eq (Get-UiaBoundingRect -Hwnd $hwnd -AutomationId 'pref-enabled-row-0')) {
+            throw 'P3-5: 未打开模型偏好页或找不到首个已启用模型。'
+        }
+        Start-Sleep -Milliseconds 250
+        $prefStartRows = @(Get-UiaModelRows -Hwnd $hwnd | Sort-Object Index)
+        if ($prefStartRows.Count -eq 0 -or $prefStartRows.Count -ge $fixtureModelCount) {
+            throw 'P3-5: 模型列表的可见行数异常。'
+        }
+        $targetRow = $prefStartRows[[int][Math]::Floor($prefStartRows.Count / 2)].Rect
+        $prefWheelX = [int][Math]::Round($targetRow.X + $targetRow.Width / 2)
+        $prefWheelY = [int][Math]::Round($targetRow.Y + $targetRow.Height / 2)
+        $null = Invoke-ProbeRequest -Port $port -Method POST -Path '/probe/reset'
+        for ($w = 1; $w -le 40; $w++) {
+            [CstUxWin32]::SendWheelAtScreen($hwnd, -240, $prefWheelX, $prefWheelY)
+            Start-Sleep -Milliseconds 16
+        }
+        Start-Sleep -Milliseconds 150
+        $prefDownRows = @(Get-UiaModelRows -Hwnd $hwnd | Sort-Object Index)
+        for ($w = 1; $w -le 20; $w++) {
+            [CstUxWin32]::SendWheelAtScreen($hwnd, 240, $prefWheelX, $prefWheelY)
+            Start-Sleep -Milliseconds 16
+        }
+        Start-Sleep -Milliseconds 150
+        $p3PrefScrollSnap = Invoke-ProbeRequest -Port $port -Path '/probe'
+        $prefUpRows = @(Get-UiaModelRows -Hwnd $hwnd | Sort-Object Index)
+        if ($prefDownRows.Count -eq 0 -or $prefUpRows.Count -eq 0 -or
+            $prefDownRows[0].Index -le $prefStartRows[0].Index -or $prefUpRows[0].Index -ge $prefDownRows[0].Index -or
+            $p3PrefScrollSnap.frame_pacing.window_frames -le 0) {
+            throw 'P3-5: 滚轮未在两个方向更新模型行，或没有采到重绘帧。'
+        }
+        if (-not (Invoke-UiaById -Hwnd $hwnd -AutomationId 'sidebar-all-sessions-btn' -TimeoutMs 2500)) {
+            throw 'P2-2: 无法打开全部会话。'
+        }
 
         # --- P2-1: Switch 10 sidebar sessions ---
         $null = Invoke-ProbeRequest -Port $port -Method POST -Path '/probe/reset'
@@ -778,6 +881,7 @@ try {
         # --- P5-2 & P5-3: 10s Static Chat Page Idle Zero-Redraw & Pixel Freeze Audit ---
         Start-Sleep -Milliseconds 400
         $null = Invoke-ProbeRequest -Port $port -Method POST -Path '/probe/reset'
+        $idleSw = [Diagnostics.Stopwatch]::StartNew()
         $idleStartDesktop = Get-ProcessResourceSample -ProcessId $inst.Process.Id -Role 'desktop' -Phase "${profileName}:idle_start"
         $idleStartServer = Get-ProcessResourceSample -ProcessId $server.Process.Id -Role 'server' -Phase "${profileName}:idle_start"
         $timelineRows.Add($idleStartDesktop)
@@ -793,13 +897,17 @@ try {
             }
         }
         $idleEndDesktop = Get-ProcessResourceSample -ProcessId $inst.Process.Id -Role 'desktop' -Phase "${profileName}:idle_end"
+        $idleElapsedMs = $idleSw.Elapsed.TotalMilliseconds
         $idleShot10 = Join-Path $shotDir '04-idle-t10.png'
         Save-DesktopScreenshot -Hwnd $hwnd -Path $idleShot10
         $p5IdleSnap = Invoke-ProbeRequest -Port $port -Path '/probe'
 
         $logicalCores = [Environment]::ProcessorCount
+        if ($null -eq $idleStartDesktop -or $null -eq $idleEndDesktop) {
+            throw '缺少桌面端静置阶段的资源样本。'
+        }
         $idleCpuDeltaMs = [Math]::Max(0.0, $idleEndDesktop.cpuMs - $idleStartDesktop.cpuMs)
-        $idleCpuPct = [Math]::Round(($idleCpuDeltaMs / 10000.0 / $logicalCores) * 100.0, 3)
+        $idleCpuPct = [Math]::Round(($idleCpuDeltaMs / $idleElapsedMs / $logicalCores) * 100.0, 3)
 
         # --- P6-2: Repeated session & popover soak (memory / handle stability + latency drift) ---
         $soakBase = Get-ProcessResourceSample -ProcessId $inst.Process.Id -Role 'desktop' -Phase "${profileName}:soak_base"
@@ -913,7 +1021,9 @@ try {
 
         $profileReports[$profileName] = [ordered]@{
             hardware = @{
-                throttledJobObject = $isOldPc
+                throttledJobObject = ($isOldPc -or $isThinLight)
+                throttleProfile = $profileName
+                job = $jobLimits
                 forcedWarp = $isWarp
                 supportsSm50 = $d1WideSnap.surface.supports_sm50
                 isSoftwareAdapter = $d1WideSnap.surface.is_software_adapter
@@ -942,6 +1052,12 @@ try {
                 sessionPaintP95Ms = [Math]::Round([double]$p2SessSnap.frame_pacing.paint_us_p95 / 1000.0, 2)
                 settingsTabsInputP95Ms = [Math]::Round([double]$p2TabsSnap.input_latency.p95_ms, 2)
                 settingsTabsOver16ms = $p2TabsSnap.frame_pacing.frames_over_16ms
+                tuiDefaultViewRemoved = (-not $tuiViewOptionPresent)
+                prefFixtureModelCount = $readyFixtureIds.Count
+                prefVirtualScrollFrames = $p3PrefScrollSnap.frame_pacing.window_frames
+                prefVirtualScrollRenderP95Ms = [Math]::Round([double]$p3PrefScrollSnap.frame_pacing.render_us_p95 / 1000.0, 2)
+                prefVirtualScrollPaintP95Ms = [Math]::Round([double]$p3PrefScrollSnap.frame_pacing.paint_us_p95 / 1000.0, 2)
+                prefVirtualScrollOver16ms = $p3PrefScrollSnap.frame_pacing.frames_over_16ms
                 resizePaintP95Ms = [Math]::Round([double]$p2ResizeSnap.frame_pacing.paint_us_p95 / 1000.0, 2)
                 resizeOver16ms = $p2ResizeSnap.frame_pacing.frames_over_16ms
                 narrowAutoCollapsed = [bool]$narrowSnap.shell.sidebar_collapsed
@@ -1009,7 +1125,8 @@ $manifestPath = Join-Path $OutputDir 'visual-manifest.json'
 $visualOutPath = Join-Path $OutputDir 'visual-audit.json'
 @{ checks = $visualChecks } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8NoBOM
 $pyAuditOut = & python (Join-Path $PSScriptRoot 'desktop-visual-audit.py') --manifest $manifestPath --output $visualOutPath
-if ($LASTEXITCODE -ne 0) {
+$visualExitCode = $LASTEXITCODE
+if ($visualExitCode -gt 1 -or -not (Test-Path -LiteralPath $visualOutPath -PathType Leaf)) {
     throw "desktop-visual-audit.py 执行失败：$pyAuditOut"
 }
 $visualReport = Get-Content -LiteralPath $visualOutPath -Raw | ConvertFrom-Json
@@ -1030,4 +1147,7 @@ $fullReport = [ordered]@{
 
 $reportPath = Join-Path $OutputDir 'ux-perf-report.json'
 $fullReport | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $reportPath -Encoding utf8NoBOM
-Write-Output ($fullReport | ConvertTo-Json -Depth 6)
+Write-Output ($fullReport | ConvertTo-Json -Depth 10)
+if ($visualExitCode -ne 0 -or $visualReport.allPassed -ne $true) {
+    throw "像素检查未通过：$visualOutPath"
+}

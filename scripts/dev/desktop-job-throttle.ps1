@@ -13,6 +13,13 @@ param(
     [ValidateRange(5, 100)]
     [int]$CpuHardCapPercent = 25,
 
+    [Parameter()]
+    [ValidateRange(0, 16384)]
+    [int]$MemoryLimitMB = 0,
+
+    [Parameter()]
+    [switch]$BelowNormalPriority,
+
     # Time to keep this script open. Windows keeps the limits until the attached
     # test process exits, even after this script closes its job handle.
     [Parameter()]
@@ -20,7 +27,7 @@ param(
     [int]$HoldSeconds = 10
 )
 
-$ErrorActionPreference = 'Stop'
+if (-not $IsWindows) { throw 'Job Object throttling requires Windows.' }
 
 if (-not ('CstDesktopJobThrottle' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -30,9 +37,12 @@ using System.Runtime.InteropServices;
 
 public sealed class CstDesktopJobThrottle : IDisposable
 {
-    private const int JobObjectBasicLimitInformation = 2;
+    private const int JobObjectExtendedLimitInformation = 9;
     private const int JobObjectCpuRateControlInformation = 15;
     private const uint JOB_OBJECT_LIMIT_AFFINITY = 0x00000010;
+    private const uint JOB_OBJECT_LIMIT_PRIORITY_CLASS = 0x00000020;
+    private const uint JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x00000100;
+    private const uint BELOW_NORMAL_PRIORITY_CLASS = 0x00004000;
     private const uint JOB_OBJECT_CPU_RATE_CONTROL_ENABLE = 0x00000001;
     private const uint JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP = 0x00000004;
     private const uint PROCESS_SET_QUOTA = 0x0100;
@@ -54,6 +64,28 @@ public sealed class CstDesktopJobThrottle : IDisposable
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct IO_COUNTERS
+    {
+        public ulong ReadOperationCount;
+        public ulong WriteOperationCount;
+        public ulong OtherOperationCount;
+        public ulong ReadTransferCount;
+        public ulong WriteTransferCount;
+        public ulong OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    {
+        public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+        public IO_COUNTERS IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
     {
         public uint ControlFlags;
@@ -65,7 +97,11 @@ public sealed class CstDesktopJobThrottle : IDisposable
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool SetInformationJobObject(
-        IntPtr hJob, int infoClass, IntPtr lpJobObjectInfo, uint cbJobObjectInfoLength);
+        IntPtr hJob, int infoClass, in JOBOBJECT_EXTENDED_LIMIT_INFORMATION info, uint size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetInformationJobObject(
+        IntPtr hJob, int infoClass, in JOBOBJECT_CPU_RATE_CONTROL_INFORMATION info, uint size);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
@@ -77,8 +113,11 @@ public sealed class CstDesktopJobThrottle : IDisposable
     private static extern bool GetProcessAffinityMask(
         IntPtr hProcess, out UIntPtr processMask, out UIntPtr systemMask);
 
-    [DllImport("kernel32.dll")]
+    [DllImport("kernel32.dll", SetLastError = true)]
     private static extern uint GetActiveProcessorCount(ushort groupNumber);
+
+    [DllImport("kernel32.dll")]
+    private static extern ushort GetActiveProcessorGroupCount();
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr hObject);
@@ -88,17 +127,52 @@ public sealed class CstDesktopJobThrottle : IDisposable
 
     private IntPtr _jobHandle;
 
-    private CstDesktopJobThrottle(IntPtr handle)
+    public int LogicalCores { get; }
+    public uint CpuRate { get; }
+    public ulong ProcessCommitLimitBytes { get; }
+    public bool BelowNormalPriority { get; }
+
+    private CstDesktopJobThrottle(IntPtr handle, int cores, uint cpuRate, ulong memoryLimit, bool belowNormal)
     {
         _jobHandle = handle;
+        LogicalCores = cores;
+        CpuRate = cpuRate;
+        ProcessCommitLimitBytes = memoryLimit;
+        BelowNormalPriority = belowNormal;
+    }
+
+    private static Win32Exception LastError(string api)
+    {
+        int code = Marshal.GetLastWin32Error();
+        return new Win32Exception(code, $"{api} failed ({code}): {new Win32Exception(code).Message}");
     }
 
     public static CstDesktopJobThrottle CreateAndAssign(int processId, int maxLogicalCores, int cpuHardCapPercent)
     {
+        return CreateAndAssign(processId, maxLogicalCores, cpuHardCapPercent, 0, false);
+    }
+
+    public static CstDesktopJobThrottle CreateAndAssign(
+        int processId, int maxLogicalCores, int cpuHardCapPercent, int memoryLimitMb, bool belowNormalPriority)
+    {
+        if (processId <= 0)
+            throw new ArgumentOutOfRangeException(nameof(processId));
+        if (maxLogicalCores < 1 || maxLogicalCores > UIntPtr.Size * 8)
+            throw new ArgumentOutOfRangeException(nameof(maxLogicalCores));
+        if (cpuHardCapPercent < 5 || cpuHardCapPercent > 100)
+            throw new ArgumentOutOfRangeException(nameof(cpuHardCapPercent));
+        if (memoryLimitMb < 0 || memoryLimitMb > 16384)
+            throw new ArgumentOutOfRangeException(nameof(memoryLimitMb));
+        ulong memoryLimit = (ulong)memoryLimitMb * 1024UL * 1024UL;
+        if (UIntPtr.Size == 4 && memoryLimit > uint.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(memoryLimitMb), "Commit limit does not fit a 32-bit SIZE_T.");
+        if (GetActiveProcessorGroupCount() != 1)
+            throw new NotSupportedException("Job throttling requires a single active processor group.");
+
         IntPtr job = CreateJobObjectW(IntPtr.Zero, null);
         if (job == IntPtr.Zero)
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateJobObjectW failed");
+            throw LastError("CreateJobObjectW");
         }
 
         IntPtr hProc = IntPtr.Zero;
@@ -108,11 +182,11 @@ public sealed class CstDesktopJobThrottle : IDisposable
                 false, (uint)processId);
             if (hProc == IntPtr.Zero)
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "OpenProcess failed for Job assignment");
+                throw LastError("OpenProcess for Job assignment");
             }
             if (!GetProcessAffinityMask(hProc, out UIntPtr processMask, out _))
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "GetProcessAffinityMask failed");
+                throw LastError("GetProcessAffinityMask");
             }
 
             // Use CPUs allowed by the target's current affinity, not necessarily CPU 0 and 1.
@@ -132,60 +206,53 @@ public sealed class CstDesktopJobThrottle : IDisposable
             {
                 throw new InvalidOperationException("No single-group process affinity mask is available");
             }
-            var basic = new JOBOBJECT_BASIC_LIMIT_INFORMATION
+            uint limitFlags = JOB_OBJECT_LIMIT_AFFINITY;
+            uint priorityClass = 0;
+            if (belowNormalPriority)
             {
-                LimitFlags = JOB_OBJECT_LIMIT_AFFINITY,
-                Affinity = new UIntPtr(mask)
-            };
-            IntPtr basicPtr = Marshal.AllocHGlobal(Marshal.SizeOf<JOBOBJECT_BASIC_LIMIT_INFORMATION>());
-            try
+                limitFlags |= JOB_OBJECT_LIMIT_PRIORITY_CLASS;
+                priorityClass = BELOW_NORMAL_PRIORITY_CLASS;
+            }
+            if (memoryLimit > 0)
+                limitFlags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+            var extended = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION
             {
-                Marshal.StructureToPtr(basic, basicPtr, false);
-                if (!SetInformationJobObject(job, JobObjectBasicLimitInformation, basicPtr,
-                    (uint)Marshal.SizeOf<JOBOBJECT_BASIC_LIMIT_INFORMATION>()))
+                BasicLimitInformation = new JOBOBJECT_BASIC_LIMIT_INFORMATION
                 {
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "SetInformationJobObject(BasicLimit) failed");
-                }
-            }
-            finally
+                    LimitFlags = limitFlags,
+                    Affinity = new UIntPtr(mask),
+                    PriorityClass = priorityClass
+                },
+                ProcessMemoryLimit = new UIntPtr(memoryLimit)
+            };
+            if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, in extended,
+                (uint)Marshal.SizeOf<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>()))
             {
-                Marshal.FreeHGlobal(basicPtr);
+                throw LastError("SetInformationJobObject(ExtendedLimit)");
             }
-
-            int clampedPct = Math.Max(1, Math.Min(100, cpuHardCapPercent));
             // For a top-level job, CpuRate is relative to all active logical CPUs.
             // An enclosing rate-controlled job can further constrain this cap.
             uint systemCores = GetActiveProcessorCount(0xFFFF); // ALL_PROCESSOR_GROUPS
             if (systemCores == 0)
             {
-                throw new InvalidOperationException("No active logical processors reported");
+                throw LastError("GetActiveProcessorCount");
             }
-            double effectiveSystemPct = ((double)cores * clampedPct) / systemCores;
-            uint cpuRate = (uint)Math.Max(1, Math.Min(10000, (int)Math.Round(effectiveSystemPct * 100.0)));
+            uint cpuRate = Math.Max(1U, (uint)cores * (uint)cpuHardCapPercent * 100U / systemCores);
             var rate = new JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
             {
                 ControlFlags = JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP,
                 CpuRate = cpuRate
             };
-            IntPtr ratePtr = Marshal.AllocHGlobal(Marshal.SizeOf<JOBOBJECT_CPU_RATE_CONTROL_INFORMATION>());
-            try
+            if (!SetInformationJobObject(job, JobObjectCpuRateControlInformation, in rate,
+                (uint)Marshal.SizeOf<JOBOBJECT_CPU_RATE_CONTROL_INFORMATION>()))
             {
-                Marshal.StructureToPtr(rate, ratePtr, false);
-                if (!SetInformationJobObject(job, JobObjectCpuRateControlInformation, ratePtr,
-                    (uint)Marshal.SizeOf<JOBOBJECT_CPU_RATE_CONTROL_INFORMATION>()))
-                {
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "SetInformationJobObject(CpuRateControl) failed");
-                }
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(ratePtr);
+                throw LastError("SetInformationJobObject(CpuRateControl)");
             }
 
-            var throttle = new CstDesktopJobThrottle(job);
+            var throttle = new CstDesktopJobThrottle(job, cores, cpuRate, memoryLimit, belowNormalPriority);
             if (!AssignProcessToJobObject(job, hProc))
             {
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "AssignProcessToJobObject failed");
+                throw LastError("AssignProcessToJobObject");
             }
             return throttle;
         }
@@ -203,23 +270,27 @@ public sealed class CstDesktopJobThrottle : IDisposable
         }
     }
 
-    public static uint[] QueryGuiHandles(int processId)
+    public static uint?[] QueryGuiHandles(int processId)
     {
         IntPtr hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, (uint)processId);
         if (hProc == IntPtr.Zero)
         {
-            return new uint[] { 0, 0 };
+            return new uint?[] { null, null };
         }
         try
         {
-            uint gdi = GetGuiResources(hProc, 0);
-            uint user = GetGuiResources(hProc, 1);
-            return new uint[] { gdi, user };
+            return new uint?[] { QueryGuiCount(hProc, 0), QueryGuiCount(hProc, 1) };
         }
         finally
         {
             CloseHandle(hProc);
         }
+    }
+
+    private static uint? QueryGuiCount(IntPtr process, uint flag)
+    {
+        uint count = GetGuiResources(process, flag);
+        return count == 0 && Marshal.GetLastWin32Error() != 0 ? (uint?)null : count;
     }
 
     public void Dispose()
@@ -238,11 +309,18 @@ function Invoke-DesktopJobThrottle {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
+        [ValidateRange(1, [int]::MaxValue)]
         [int]$ProcessId,
+        [ValidateRange(1, 64)]
         [int]$Cores = 2,
-        [int]$CpuCapPercent = 25
+        [ValidateRange(5, 100)]
+        [int]$CpuCapPercent = 25,
+        [ValidateRange(0, 16384)]
+        [int]$MemoryLimitMB = 0,
+        [switch]$BelowNormalPriority
     )
-    return [CstDesktopJobThrottle]::CreateAndAssign($ProcessId, $Cores, $CpuCapPercent)
+    return [CstDesktopJobThrottle]::CreateAndAssign(
+        $ProcessId, $Cores, $CpuCapPercent, $MemoryLimitMB, [bool]$BelowNormalPriority)
 }
 
 function Get-ProcessResourceSample {
@@ -278,12 +356,16 @@ function Get-ProcessResourceSample {
 
 if ($AttachPid -gt 0) {
     Write-Warning 'Use only with isolated test processes. Job limits remain until the process exits.'
-    $throttle = Invoke-DesktopJobThrottle -ProcessId $AttachPid -Cores $MaxLogicalCores -CpuCapPercent $CpuHardCapPercent
+    $throttle = Invoke-DesktopJobThrottle -ProcessId $AttachPid -Cores $MaxLogicalCores -CpuCapPercent $CpuHardCapPercent -MemoryLimitMB $MemoryLimitMB -BelowNormalPriority:$BelowNormalPriority
     try {
         $result = [pscustomobject]@{
             pid = $AttachPid
             maxLogicalCores = $MaxLogicalCores
             cpuHardCapPercent = $CpuHardCapPercent
+            selectedLogicalCores = $throttle.LogicalCores
+            cpuRate = $throttle.CpuRate
+            memoryLimitMb = $MemoryLimitMB
+            belowNormalPriority = [bool]$BelowNormalPriority
             holdSeconds = $HoldSeconds
             status = 'throttled'
         }

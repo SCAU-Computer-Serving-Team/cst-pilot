@@ -26,7 +26,7 @@
 | [auth](auth/SPEC.md) | `crates/cst-kit/src/auth/`、`crates/cst-server/src/routes/{auth,models}.rs` | [SPEC](auth/SPEC.md) · [ARCHITECTURE](auth/ARCHITECTURE.md) · [API](auth/API.md) |
 | [telemetry](telemetry/SPEC.md) | `crates/cst-kit/src/telemetry/`、`cst-pilot-server` | [SPEC](telemetry/SPEC.md) · [ARCHITECTURE](telemetry/ARCHITECTURE.md) · [API](telemetry/API.md) · [OPERATIONS](telemetry/OPERATIONS.md) |
 | [web](web/SPEC.md) | `src/web/frontend/`、`crates/cst-server/src/exports/`、`design/cst-pilot-web.pen` | [SPEC](web/SPEC.md) · [ARCHITECTURE](web/ARCHITECTURE.md) · [API](web/API.md) · [路由广度 E2E](web/test/bsk-e2e.md) · [深度状态机 E2E](web/test/bsk-deep-e2e.md) · [UX 量化 E2E](web/test/ux-e2e.md) |
-| [desktop](desktop/SPEC.md) | `design/cst-pilot-desktop.pen`、`crates/{cst-client,cst-desktop}`、`scripts/dev/desktop-{secret,record}.ps1` | [SPEC](desktop/SPEC.md) · [ARCHITECTURE](desktop/ARCHITECTURE.md) · [CLI 自动化手册](desktop/test/winapp-cli.md) · [UX 与性能 E2E](desktop/test/ux-e2e.md) |
+| [desktop](desktop/SPEC.md) | `design/cst-pilot-desktop.pen`、`crates/{cst-client,cst-desktop}`、`scripts/dev/desktop-{secret,record}.ps1` | [SPEC](desktop/SPEC.md) · [ARCHITECTURE](desktop/ARCHITECTURE.md) · [CLI 自动化手册](desktop/test/winapp-cli.md) · [UX 与性能 E2E](desktop/test/ux-e2e.md) · [Windows 兼容性与真机验收](desktop/test/windows-compat.md) |
 | [release](release/SPEC.md) | `crates/cst-updater/`、`crates/cst-kit/src/update/`、`src/web/frontend/scripts/`、`pack/` | [SPEC](release/SPEC.md) · [ARCHITECTURE](release/ARCHITECTURE.md) |
 
 ## Rust 子包设计与路线图

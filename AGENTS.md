@@ -38,6 +38,16 @@
 
 ## 运行与调试
 
+本地执行任何 Cargo 编译、检查与测试（含触发编译的启动脚本）前，**必须**先设置当前 PowerShell 进程的 CPU 亲和性，预留 2 个逻辑核心给系统（16 核对应 `0x3FFF`，上限 87.5%）。**禁止**未设置 CPU 亲和性直接运行 `cargo`。`cargo` 与 `rustc` 等子进程自动继承该硬性限制：
+
+```powershell
+$keep = [Math]::Min(62, [Math]::Max(1, [Environment]::ProcessorCount - 2))
+(Get-Process -Id $PID).ProcessorAffinity = [IntPtr](([int64]1 -shl $keep) - 1)
+# 可选：调低进程优先级
+# (Get-Process -Id $PID).PriorityClass = 'BelowNormal'
+cargo check --workspace --all-targets --locked
+```
+
 项目内直接启动 Rust 桌面端（`--release` 编译并启动优化版，`--build` 增量重编开发版）：
 
 ```powershell

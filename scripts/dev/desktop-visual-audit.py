@@ -302,18 +302,69 @@ def analyze_surface_elevation(img_path: Path, box: list[int], is_dark: bool = Fa
     }
 
 
+def analyze_vertical_seam(
+    path: Path, roi: list[int] | None, max_spike_luma: float = 3.0
+) -> dict[str, Any]:
+    """Scan columns inside ROI for any 1px vertical seam spike against immediate left/right neighbors."""
+    if not 0.0 <= max_spike_luma <= 255.0:
+        raise ValueError("maxSpikeLuma must be between 0 and 255")
+    if not isinstance(roi, list) or len(roi) != 4:
+        raise ValueError("vertical_seam requires ROI [x, y, width, height]")
+    w, h, rgb = decode_png_rgb(path)
+    x0, y0, x1, y1 = _clamp_roi(w, h, roi)
+    if x1 - x0 < 3:
+        raise ValueError("vertical_seam ROI must intersect at least three image columns")
+
+    # Use scaled integer sums so equal-brightness columns and threshold ties
+    # don't depend on floating-point rounding during accumulation.
+    col_sums: list[int] = []
+    for x in range(x0, x1):
+        acc = 0
+        for y in range(y0, y1):
+            idx = (y * w + x) * 3
+            acc += 299 * rgb[idx] + 587 * rgb[idx + 1] + 114 * rgb[idx + 2]
+        col_sums.append(acc)
+
+    max_spike_sum = 0
+    max_spike_x = None
+    for i in range(1, len(col_sums) - 1):
+        left_diff = col_sums[i] - col_sums[i - 1]
+        right_diff = col_sums[i] - col_sums[i + 1]
+        # A one-pixel line contrasts with both neighbors in the same direction.
+        # Using the smaller contrast avoids flagging a step or monotonic gradient.
+        if left_diff * right_diff > 0:
+            spike_sum = min(abs(left_diff), abs(right_diff))
+            if spike_sum > max_spike_sum:
+                max_spike_sum = spike_sum
+                max_spike_x = x0 + i
+
+    max_spike = max_spike_sum / (1000 * (y1 - y0))
+    return {
+        "roi": [x0, y0, x1 - x0, y1 - y0],
+        "maxSpikeLuma": round(max_spike, 3),
+        "maxSpikeX": max_spike_x,
+        "maxAllowedSpike": max_spike_luma,
+        "pass": max_spike <= max_spike_luma,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Desktop UX E2E visual pixel analyzer")
     parser.add_argument("--manifest", required=True, help="Input JSON manifest of visual checks")
     parser.add_argument("--output", required=True, help="Output JSON report path")
     args = parser.parse_args()
 
-    manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
+    manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8-sig"))
+    checks = manifest.get("checks") if isinstance(manifest, dict) else None
+    if not isinstance(checks, list) or not checks:
+        parser.error("manifest requires a non-empty checks list")
     results: dict[str, Any] = {"checks": {}, "allPassed": True}
 
-    for item in manifest.get("checks", []):
-        name = item["name"]
-        kind = item["kind"]
+    for item in checks:
+        name = item.get("name") if isinstance(item, dict) else None
+        if not isinstance(name, str) or not name.strip() or name in results["checks"]:
+            parser.error("each check requires a non-empty, unique name")
+        kind = item.get("kind")
         try:
             if kind == "freeze_diff":
                 res = analyze_freeze_diff(Path(item["imageA"]), Path(item["imageB"]), item.get("roi"))
@@ -326,9 +377,15 @@ def main() -> int:
                     Path(item["image"]), item["box"], bool(item.get("isDark", False))
                 )
                 res["pass"] = res["shadowDetected"]
+            elif kind == "vertical_seam":
+                res = analyze_vertical_seam(
+                    Path(item["image"]),
+                    item.get("roi"),
+                    float(item.get("maxSpikeLuma", 3.0)),
+                )
             else:
                 res = {"pass": False, "reason": f"unknown_kind:{kind}"}
-        except (ValueError, OSError, zlib.error) as exc:
+        except (KeyError, TypeError, ValueError, OSError, zlib.error) as exc:
             res = {"pass": False, "reason": str(exc)}
 
         results["checks"][name] = res
@@ -339,7 +396,7 @@ def main() -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"output": str(out_path), "allPassed": results["allPassed"]}, ensure_ascii=False))
-    return 0
+    return 0 if results["allPassed"] else 1
 
 
 if __name__ == "__main__":
