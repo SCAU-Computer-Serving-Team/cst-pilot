@@ -2299,6 +2299,8 @@ impl Render for AppShell {
                         }),
                         on_toggle_recent_drawer: Rc::new(move |w, cx| {
                             e2.update(cx, |this, cx| {
+                                #[cfg(feature = "test-support")]
+                                crate::ux_probe::mark_input("recent_drawer");
                                 if this.recent_drawer_open {
                                     this.close_recent_drawer(w, cx);
                                 } else {

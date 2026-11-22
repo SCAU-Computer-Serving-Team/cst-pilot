@@ -1961,6 +1961,8 @@ impl Render for ComposerView {
             move |w, cx| {
                 let p = prov_for_ctx.clone();
                 ent_ctx_btn.update(cx, |this, cx| {
+                    #[cfg(feature = "test-support")]
+                    crate::ux_probe::mark_input("context_popover");
                     this.clear_completion();
                     this.close_picker();
                     this.context_popover_open = !this.context_popover_open;
@@ -2000,6 +2002,8 @@ impl Render for ComposerView {
             .hover(|s| s.bg(palette.bg_item_hover))
             .on_click(move |_, w, cx| {
                 ent_picker_btn.update(cx, |this, cx| {
+                    #[cfg(feature = "test-support")]
+                    crate::ux_probe::mark_input("model_picker");
                     this.clear_completion();
                     this.context_popover_open = false;
                     this.context_prior_focus = None;

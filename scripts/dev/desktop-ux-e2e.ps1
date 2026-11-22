@@ -50,10 +50,19 @@ public static class CstUxWin32
     private static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool bRepaint);
 
     [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern bool PostMessageW(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+
+    public static void EnablePerMonitorDpiV2()
+    {
+        // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4; ignore failure if already set.
+        SetProcessDpiAwarenessContext((IntPtr)(-4));
+    }
 
     public static void ResizeWindow(IntPtr hWnd, int x, int y, int width, int height)
     {
@@ -81,6 +90,7 @@ public static class CstUxWin32
 }
 '@
 }
+[CstUxWin32]::EnablePerMonitorDpiV2()
 
 function Get-Percentile {
     param([double[]]$Values, [double]$Percent)
@@ -690,8 +700,18 @@ try {
         # Ensure standard 1280x800 logical window (convert to physical pixels using scale_factor)
         $winSf = [double]$inst.InitialSnap.shell.scale_factor
         if ($winSf -le 0.0) { $winSf = 1.0 }
+        $preResizeFrames = [int64]$inst.InitialSnap.frame_pacing.total_frames
         [CstUxWin32]::ResizeWindow($hwnd, 40, 40, [int][Math]::Round(1280 * $winSf), [int][Math]::Round(800 * $winSf))
-        Start-Sleep -Milliseconds 350
+        $resizeWait = [Diagnostics.Stopwatch]::StartNew()
+        while ($resizeWait.ElapsedMilliseconds -lt 1500) {
+            $curSnap = Invoke-ProbeRequest -Port $port -Path '/probe'
+            if ([Math]::Abs([double]$curSnap.shell.viewport_width - 1280.0) -le 32.0 -and
+                [int64]$curSnap.frame_pacing.total_frames -gt $preResizeFrames) {
+                break
+            }
+            Start-Sleep -Milliseconds 40
+        }
+        Start-Sleep -Milliseconds 250
 
         $homeShotLight = Join-Path $shotDir '01-home-light.png'
         Save-DesktopScreenshot -Hwnd $hwnd -Path $homeShotLight
@@ -699,6 +719,8 @@ try {
         $homeSf = [double]$homeSnap.shell.scale_factor
 
         # --- P1-2 & P1-4: Icon buttons & frosted glass popovers ---
+        # Each control calls in-process `ux_probe::mark_input()` inside its click handler so
+        # cross-process UIA InvokePattern overhead never contaminates app input latency.
         $null = Invoke-ProbeRequest -Port $port -Method POST -Path '/probe/reset'
         $iconActions = @(
             'composer-context-ring-btn',
@@ -719,7 +741,6 @@ try {
         )
         $iconFailCount = 0
         foreach ($aid in $iconActions) {
-            $null = Invoke-ProbeRequest -Port $port -Method POST -Path "/probe/mark?label=icon_$aid"
             if (-not (Invoke-UiaById -Hwnd $hwnd -AutomationId $aid -TimeoutMs 2500)) {
                 $iconFailCount++
             }
@@ -744,12 +765,12 @@ try {
         Start-Sleep -Milliseconds 120
 
         # --- P2-2: Switch settings tabs and check the legacy TUI option ---
-        $null = Invoke-ProbeRequest -Port $port -Method POST -Path '/probe/reset'
         if (-not (Invoke-UiaById -Hwnd $hwnd -AutomationId 'sidebar-settings-btn' -TimeoutMs 2500)) {
             throw 'P2-2: 无法打开设置页。'
         }
+        Start-Sleep -Milliseconds 120
+        $null = Invoke-ProbeRequest -Port $port -Method POST -Path '/probe/reset'
         foreach ($tabId in @('settings-tab-providers', 'settings-tab-preferences', 'settings-tab-shortcuts', 'settings-tab-general')) {
-            $null = Invoke-ProbeRequest -Port $port -Method POST -Path "/probe/mark?label=$tabId"
             if (-not (Invoke-UiaById -Hwnd $hwnd -AutomationId $tabId -TimeoutMs 2500)) {
                 throw "P2-2: 无法切换到 $tabId。"
             }
@@ -806,7 +827,6 @@ try {
         $sessLatencies = [Collections.Generic.List[double]]::new()
         $sessSwitchFails = 0
         foreach ($sid in $sessionIds) {
-            $null = Invoke-ProbeRequest -Port $port -Method POST -Path "/probe/mark?label=sess_$sid"
             if (-not (Invoke-UiaById -Hwnd $hwnd -AutomationId "sidebar-session-row-$sid" -TimeoutMs 2500)) {
                 $sessSwitchFails++
             }
@@ -1039,10 +1059,13 @@ try {
                 iconFailCount = $iconFailCount
                 contextPopoverAboveComposer = $ctxPopoverAboveCard
                 modelPickerAboveComposer = $modelPickerAboveCard
+                inputSampleCount = $p1Snap.input_latency.count
                 inputP50Ms = [Math]::Round([double]$p1Snap.input_latency.p50_ms, 2)
                 inputP95Ms = [Math]::Round([double]$p1Snap.input_latency.p95_ms, 2)
                 inputMaxMs = [Math]::Round([double]$p1Snap.input_latency.max_ms, 2)
                 paintP95Ms = [Math]::Round([double]$p1Snap.frame_pacing.paint_us_p95 / 1000.0, 2)
+                intervalP50Ms = [Math]::Round([double]$p1Snap.frame_pacing.interval_us_p50 / 1000.0, 2)
+                intervalP95Ms = [Math]::Round([double]$p1Snap.frame_pacing.interval_us_p95 / 1000.0, 2)
                 frostedDraws = $p1Snap.surface.frosted_draw_count
             }
             p2_switching = @{
@@ -1059,6 +1082,7 @@ try {
                 prefVirtualScrollPaintP95Ms = [Math]::Round([double]$p3PrefScrollSnap.frame_pacing.paint_us_p95 / 1000.0, 2)
                 prefVirtualScrollOver16ms = $p3PrefScrollSnap.frame_pacing.frames_over_16ms
                 resizePaintP95Ms = [Math]::Round([double]$p2ResizeSnap.frame_pacing.paint_us_p95 / 1000.0, 2)
+                resizeIntervalP95Ms = [Math]::Round([double]$p2ResizeSnap.frame_pacing.interval_us_p95 / 1000.0, 2)
                 resizeOver16ms = $p2ResizeSnap.frame_pacing.frames_over_16ms
                 narrowAutoCollapsed = [bool]$narrowSnap.shell.sidebar_collapsed
             }
@@ -1069,6 +1093,8 @@ try {
                 paintP50Ms = [Math]::Round([double]$p3ScrollSnap.frame_pacing.paint_us_p50 / 1000.0, 2)
                 paintP95Ms = [Math]::Round([double]$p3ScrollSnap.frame_pacing.paint_us_p95 / 1000.0, 2)
                 paintP99Ms = [Math]::Round([double]$p3ScrollSnap.frame_pacing.paint_us_p99 / 1000.0, 2)
+                intervalP50Ms = [Math]::Round([double]$p3ScrollSnap.frame_pacing.interval_us_p50 / 1000.0, 2)
+                intervalP95Ms = [Math]::Round([double]$p3ScrollSnap.frame_pacing.interval_us_p95 / 1000.0, 2)
                 over16msFrames = $p3ScrollSnap.frame_pacing.frames_over_16ms
                 over33msFrames = $p3ScrollSnap.frame_pacing.frames_over_33ms
                 scrollUpDetachedFollow = (-not [bool]$afterScrollUpSnap.scroll.auto_follow_bottom)

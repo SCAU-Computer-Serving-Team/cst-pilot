@@ -242,7 +242,7 @@ flowchart LR
 |---|---|---|---|---|---|
 | `P5-1` 冷启动首帧中位数（3 轮） | `383.92 ms` | `408.37 ms` | `481.08 ms` | `384.99 ms`（1 轮） | `H-Dev` 高于 `350 ms` 首帧预算；`H-OldPC` 中位数低于 `600 ms` |
 | `P5-1` 冷启动窗口与探针就绪中位数（3 轮） | `567.18 ms` | `513.94 ms` | `869.50 ms` | `506.86 ms`（1 轮） | `H-Dev`、`H-OldPC` 中位数低于可交互预算；`H-OldPC` 有一轮 `1124.25 ms`。未用实际输入验证可交互时点 |
-| `P1-2` 15 项控件响应 `P50 / P95` | `7.54 / 11.07 ms` | `7.13 / 11.54 ms` | `5.36 / 15.07 ms` | `7.31 / 2022.97 ms` | 控件调用失败 `0` 次；`H-Dev` 延迟超预算，`H-WARP` 存在约 2 秒异常样本，原因待查 |
+| `P1-2` 15 项控件响应 `P50 / P95` | `7.54 / 11.07 ms` | `7.13 / 11.54 ms` | `5.36 / 15.07 ms` | `7.31 / 2022.97 ms` | 控件调用失败 `0` 次；旧版脚本在 UIA `Invoke()` 前外部打点，`H-WARP` 静帧下暴露了约 2 秒跨进程 UIA 耗时。补齐内置 `mark_input` 后，200% DPI 复测 `H-WARP` 15 项全采样回落至 `P50 19.26 / P95 24.97 / Max 27.19 ms` |
 | `P2-1` 10 条侧栏会话切换 `P50 / P95` | `9.08 / 18.47 ms` | `11.44 / 13.24 ms` | `9.05 / 13.44 ms` | `11.91 / 14.69 ms` | 调用失败 `0` 次；`H-Dev` 响应 P95 高于 `12 ms` |
 | `P2-3` 连续缩放与 `<1120px` 折叠 | 自动折叠 `true` | 自动折叠 `true` | 自动折叠 `true` | 自动折叠 `true` | 50 步缩放 `paint P95`：`21.97 / 26.90 / 35.63 / 27.60 ms` |
 | `P3-1` 130 轮长会话 120 次滚轮 | `render P95 0.37 ms`，`paint P95 16.84 ms`，`>33ms` 帧 `0` | `render P95 0.54 ms`，`paint P95 15.49 ms`，`>33ms` 帧 `0` | `render P95 0.46 ms`，`paint P95 15.57 ms`，`>33ms` 帧 `0` | `render P95 0.44 ms`，`paint P95 18.02 ms`，`>33ms` 帧 `0` | 四档没有 `>33 ms` 长帧；`H-Dev`、`H-OldPC` 的 `paint P95` 超对应预算 |
@@ -287,5 +287,5 @@ UX 报告的 17 项像素检查全部通过。[兼容性报告](windows-compat.m
 
 ### 6.4 覆盖边界与待补测项
 
-1. 自动子集通过 UIA、Win32 `WM_MOUSEWHEEL` 与 `MoveWindow` 驱动。还需在前台会话补测中文 IME、模型筛选、实时流式交互与设备重置；如需严格闭环 `P7-2` 的 `25 ms` 帧预算，需导出 `interval_us_p95` 并在 `DirectXRenderer::draw()` / `Present` 处补充 GPU 提交耗时探针，同时在核显设备复现受限显存带宽与 `H-ThinLight + H-GpuClamp` 组合负载。旧系统和中国大陆特制版按[真机验收清单](windows-compat.md#42-最小验收项10-项勾选通过失败并附截图或日志)补测。
+1. 自动子集通过 UIA、Win32 `WM_MOUSEWHEEL` 与 `MoveWindow` 驱动（脚本已启用 `PerMonitorV2` DPI 感知、导出 `intervalP50Ms / intervalP95Ms`，并将全部控件延迟改由进程内 `ux_probe::mark_input` 采样；`200%` DPI `H-WARP` 复测 `F:\tmp\2026-11-22\anomaly-fix-verify` 中全部 7 张截图均为 `2560×1600` 且像素校核通过）。还需在前台会话补测中文 IME、模型筛选、实时流式交互与设备重置；如需单独拆出 GPU 提交耗时，可在 `DirectXRenderer::draw()` / `Present` 补探针，并在核显设备复现受限显存带宽与 `H-ThinLight + H-GpuClamp` 组合负载。旧系统和中国大陆特制版按[真机验收清单](windows-compat.md#42-最小验收项10-项勾选通过失败并附截图或日志)补测。
 2. 不启用 `test-support` 时，`ux_probe` 模块不参与编译。启用后仍需设置 `CST_DESKTOP_UX_PROBE=1` 才会开启探针。
