@@ -136,14 +136,19 @@ pub(crate) fn configure_dwm_dark_mode(hwnd: HWND, appearance: WindowAppearance) 
         WindowAppearance::Dark | WindowAppearance::VibrantDark => true.into(),
         WindowAppearance::Light | WindowAppearance::VibrantLight => false.into(),
     };
-    unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_USE_IMMERSIVE_DARK_MODE,
-            &dark_mode_enabled as *const _ as _,
-            std::mem::size_of::<BOOL>() as u32,
-        )
-        .log_err();
+    let value = &dark_mode_enabled as *const BOOL as _;
+    let size = std::mem::size_of::<BOOL>() as u32;
+    let result = unsafe { DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, value, size) };
+    let result = match result {
+        Err(error) if error.code() == E_INVALIDARG => {
+            // Some Windows 10 builds recognize the undocumented attribute 19.
+            const LEGACY_IMMERSIVE_DARK_MODE: DWMWINDOWATTRIBUTE = DWMWINDOWATTRIBUTE(19);
+            unsafe { DwmSetWindowAttribute(hwnd, LEGACY_IMMERSIVE_DARK_MODE, value, size) }
+        }
+        result => result,
+    };
+    if !matches!(&result, Err(error) if error.code() == E_INVALIDARG) {
+        result.log_err();
     }
 }
 
