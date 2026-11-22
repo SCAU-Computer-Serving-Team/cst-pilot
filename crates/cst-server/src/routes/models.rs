@@ -172,12 +172,19 @@ pub async fn handle_models_route(
             .map(|m| m.provider.clone())
             .collect();
 
-        let web_settings = state.web_settings.read().await.map_err(ApiError::from)?;
-        let patterns = settings.get_enabled_models().unwrap_or_default();
+        // Both inputs form one logical scope; do not read them mid-write.
+        let (patterns, empty_model_scope) = {
+            let _guard = state.locks.lock("model-scoped").await;
+            let web_settings = state.web_settings.read().await.map_err(ApiError::from)?;
+            (
+                settings.get_enabled_models().unwrap_or_default(),
+                web_settings.empty_model_scope,
+            )
+        };
         let mut enabled: Option<Vec<String>> = None;
         let mut unavailable_enabled: Vec<String> = Vec::new();
         let mut scope_rules = Vec::new();
-        if patterns.is_empty() && web_settings.empty_model_scope {
+        if patterns.is_empty() && empty_model_scope {
             enabled = Some(Vec::new());
         } else if !patterns.is_empty() {
             let available_ids: HashSet<String> = available
@@ -567,6 +574,17 @@ pub async fn handle_models_route(
                 ));
             }
         };
+        let preserve_explicit = match obj.get("preserveExplicit") {
+            None => false,
+            Some(Value::Bool(value)) => *value,
+            _ => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "请求的模型范围无效",
+                ));
+            }
+        };
         if empty_flag && !patterns.is_empty() {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
@@ -612,8 +630,9 @@ pub async fn handle_models_route(
                         .iter()
                         .map(|m| format!("{}/{}", m.provider, m.id))
                         .filter(|id| available_ids.contains(id));
-                    let covers_all =
-                        !patterns.is_empty() && patterns.iter().cloned().eq(default_order);
+                    let covers_all = !preserve_explicit
+                        && !patterns.is_empty()
+                        && patterns.iter().cloned().eq(default_order);
 
                     let old_empty = state
                         .web_settings

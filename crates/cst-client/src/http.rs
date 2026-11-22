@@ -1107,6 +1107,15 @@ impl AppHttpClient {
         patterns: &[String],
         empty: bool,
     ) -> Result<Value, ClientError> {
+        self.save_model_scope(patterns, empty, false).await
+    }
+
+    pub(crate) async fn save_model_scope(
+        &self,
+        patterns: &[String],
+        empty: bool,
+        preserve_explicit: bool,
+    ) -> Result<Value, ClientError> {
         let mut body = serde_json::Map::new();
         body.insert(
             "patterns".into(),
@@ -1114,6 +1123,9 @@ impl AppHttpClient {
         );
         if empty {
             body.insert("empty".into(), Value::Bool(true));
+        }
+        if preserve_explicit {
+            body.insert("preserveExplicit".into(), Value::Bool(true));
         }
         self.request_value(
             Method::POST,

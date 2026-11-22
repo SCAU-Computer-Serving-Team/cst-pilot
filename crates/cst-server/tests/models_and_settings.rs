@@ -150,6 +150,11 @@ async fn kit_host_shares_single_catalog_maintenance_task_when_individual_session
 #[tokio::test]
 async fn saving_an_unrelated_model_keeps_the_original_scope_rule() {
     let fixture = TestKitDir::new();
+    fs::write(
+        fixture.0.join("agent/home/auth.json"),
+        json!({ "deepseek": { "type": "api_key", "key": "test-offline-key" } }).to_string(),
+    )
+    .unwrap();
     let kit = Kit::new(&fixture.0).unwrap();
     let oa = OaClient::new("https://oa.example").unwrap();
     let auth = AuthRuntime::create(&fixture.0, Channel::Gui, oa)
@@ -218,9 +223,57 @@ async fn saving_an_unrelated_model_keeps_the_original_scope_rule() {
         .unwrap()
         .error_for_status()
         .unwrap();
-    let settings: Value = serde_json::from_slice(&fs::read(settings_path).unwrap()).unwrap();
+    let settings: Value = serde_json::from_slice(&fs::read(&settings_path).unwrap()).unwrap();
     assert_eq!(settings["enabledModels"], json!([wildcard, unmatched]));
+
+    let ready = host_available_ids(&snapshot);
+    assert!(!ready.is_empty());
+    for (key, preserve_explicit, expected) in [
+        ("legacy-default-order", false, Value::Null),
+        ("explicit-default-order", true, json!(ready)),
+    ] {
+        let result: Value = client
+            .post(format!("{}/api/models/scoped", server.base_url()))
+            .header("X-CST-Client", "app")
+            .header("Idempotency-Key", key)
+            .bearer_auth(server.app_token())
+            .json(&json!({ "patterns": ready, "preserveExplicit": preserve_explicit }))
+            .send()
+            .await
+            .unwrap()
+            .error_for_status()
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(result["enabled"], expected);
+        let settings: Value = serde_json::from_slice(&fs::read(&settings_path).unwrap()).unwrap();
+        assert_eq!(settings["enabledModels"], expected);
+    }
     server.shutdown().await;
+}
+
+fn host_available_ids(snapshot: &Value) -> Vec<String> {
+    let full_id = |model: &Value| {
+        format!(
+            "{}/{}",
+            model["provider"].as_str().unwrap(),
+            model["id"].as_str().unwrap()
+        )
+    };
+    let ready: std::collections::HashSet<_> = snapshot["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(full_id)
+        .collect();
+    snapshot["catalog"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(full_id)
+        .filter(|id| ready.contains(id))
+        .collect()
 }
 
 #[tokio::test]

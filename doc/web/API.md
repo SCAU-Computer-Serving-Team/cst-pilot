@@ -90,7 +90,7 @@ CSTOA 远端网关协议见 [../auth/API.md](../auth/API.md)。本机模型与�
 | `POST` | `/api/models/refresh` | 正文 `{}`，强制刷新已配置服务商目录，返回 `{ aborted, failedProviders }` |
 | `POST` | `/api/models/select` | 切换指定 `sessionId` 的模型（未传 `sessionId` 时仅返回所选描述，不修改默认值） |
 | `POST` | `/api/models/default` | 正文 `{ provider, modelId }`，保存三端共用的新会话默认模型 |
-| `POST` | `/api/models/scoped` | 正文 `{ patterns: string[], empty?: boolean }`，保存启用模型范围并同步更新内存中已加载会话的范围视图 |
+| `POST` | `/api/models/scoped` | 正文 `{ patterns: string[], empty?: boolean, preserveExplicit?: boolean }`，保存启用模型范围并同步到已加载会话。`preserveExplicit: true` 保留非空显式规则，即使结果与默认范围及顺序完全一致 |
 | `POST` | `/api/models/thinking` | 按 `sessionId` 修改思考强度档位 |
 | `GET` | `/api/auth` | 返回全部服务商的配置状态、凭据类型、登录能力、`custom` 与 `requiresLogin` 标记 |
 | `GET` / `POST` / `DELETE` | `/api/auth/custom/<provider>`、`/api/auth/custom` | 读取（仅含 `apiKeySet` 与 `revision`）、保存或删除自定义兼容模型服务 |

@@ -190,11 +190,10 @@ impl PreferencesTabView {
     fn save_scoped_with_rollback(&mut self, previous: ModelScope, cx: &mut Context<Self>) {
         self.saving_scope = true;
         let next = self.enabled_scope.patterns();
-        let empty = next.is_empty();
         let client = self.client.clone();
 
         cx.spawn(async move |weak, cx| {
-            let res = client.set_scoped_models(next, empty).await;
+            let res = client.set_explicit_model_scope(next).await;
             let refreshed = client.refresh_models(None).await.is_ok();
             let _ = weak.update(cx, |this, cx| {
                 this.saving_scope = false;

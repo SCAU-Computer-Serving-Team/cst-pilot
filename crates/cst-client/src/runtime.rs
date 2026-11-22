@@ -961,6 +961,19 @@ impl ClientHandle {
             .await
     }
 
+    /// Saves an explicit scope even when it currently matches the implicit default order.
+    pub async fn set_explicit_model_scope(
+        &self,
+        patterns: Vec<String>,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.save_model_scope(&patterns, patterns.is_empty(), true)
+                .await
+        })
+        .await
+    }
+
     pub async fn get_custom_provider(&self, provider_id: String) -> Result<Value, ClientError> {
         let http = self.core.http.clone();
         self.spawn_tokio(async move { http.get_custom_provider(&provider_id).await })
