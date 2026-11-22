@@ -101,6 +101,9 @@ impl SseParser {
                     if let Some(frame) = self.process_line(&line) {
                         frames.push(frame);
                     }
+                    if self.discard_frame {
+                        frames.clear();
+                    }
                 }
                 self.line_buf.clear();
             } else if self.discard_frame {
@@ -113,8 +116,11 @@ impl SseParser {
             } else {
                 self.discard_frame = true;
                 self.overflowed = true;
+                frames.clear();
             }
         }
+        // The consumers publish a reset/overflow before these frames. Do not
+        // reinsert frames from before the gap after the reset.
         frames
     }
 
@@ -519,7 +525,11 @@ pub async fn run_multiplex_sse_loop(
                 if let Some(ref id) = frame.id {
                     last_cursor = Some(id.clone());
                 }
-                let raw_cost = frame.data.len().saturating_add(96);
+                let raw_cost = frame
+                    .data
+                    .len()
+                    .saturating_add(frame.id.as_ref().map_or(0, String::len))
+                    .saturating_add(96);
                 match frame.event.as_str() {
                     "heartbeat" => {}
                     "reset" => {
@@ -655,6 +665,19 @@ mod tests {
                 data: "\nok".into(),
             }],
         );
+    }
+
+    #[test]
+    fn overflow_does_not_requeue_earlier_frames_from_the_same_chunk() {
+        let chunk = format!(
+            "id: before\ndata: ok\n\ndata: {}\n\nid: after\ndata: ok\n\n",
+            "a".repeat(MAX_SSE_EVENT_BYTES)
+        );
+        let mut parser = SseParser::default();
+        let frames = parser.feed(chunk.as_bytes());
+        assert!(parser.take_overflow());
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].id.as_deref(), Some("after"));
     }
 
     #[tokio::test]
