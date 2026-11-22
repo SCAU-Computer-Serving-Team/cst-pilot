@@ -1,3 +1,4 @@
+use std::io::Read as _;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -228,6 +229,30 @@ impl Focusable for ComposerView {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
         self.textarea.read(cx).presentation().focus_handle().clone()
     }
+}
+
+fn find_model_choice<'a>(
+    models: &'a cst_client::ModelsSnapshot,
+    provider: &str,
+    id: &str,
+) -> Option<&'a cst_client::ModelChoiceDto> {
+    models
+        .selected
+        .iter()
+        .chain(models.models.iter())
+        .chain(models.catalog.iter())
+        .chain(models.default_model.iter())
+        .find(|m| m.provider == provider && m.id == id)
+}
+
+fn active_thinking_levels<'a>(
+    models: &'a cst_client::ModelsSnapshot,
+    provider: &str,
+    id: &str,
+) -> &'a [String] {
+    find_model_choice(models, provider, id)
+        .map(|m| m.thinking_levels.as_slice())
+        .unwrap_or_default()
 }
 
 impl ComposerView {
@@ -602,7 +627,8 @@ impl ComposerView {
         let empty_models = cst_client::ModelsSnapshot::default();
         let models = snap.models.as_deref().unwrap_or(&empty_models);
         let scoped = resolve_scoped_models(models);
-        let levels = &models.thinking_levels;
+        let (provider, id, _, _) = self.current_model_choice(&snap);
+        let levels = active_thinking_levels(models, &provider, &id);
         let count = match self.picker_page {
             ModelPickerPage::Main => 2,
             ModelPickerPage::Models => scoped.len(),
@@ -669,11 +695,22 @@ impl ComposerView {
             let _ = weak.update(cx, |this, cx| {
                 this.model_change_pending = false;
                 match res {
-                    Ok(_) => {
+                    Ok(model) => {
+                        let selected =
+                            serde_json::from_value::<cst_client::ModelChoiceDto>(model).ok();
                         this.client.with_workspace_mut(|ws| {
-                            let draft = ws.draft_mut(key);
+                            let draft = ws.draft_mut(key.clone());
                             draft.selected_provider = Some(provider);
                             draft.selected_model_id = Some(model_id);
+                            let previous = draft.selected_thinking_level.take();
+                            if let Some(selected) = selected {
+                                draft.selected_thinking_level = previous
+                                    .filter(|level| {
+                                        matches!(key, DraftKey::NewSession)
+                                            && selected.thinking_levels.contains(level)
+                                    })
+                                    .or(selected.thinking_level);
+                            }
                         });
                     }
                     Err(e) => cx.emit(ComposerHostEvent::ErrorMessage(e.to_string())),
@@ -970,17 +1007,7 @@ impl ComposerView {
                 let res = cx
                     .background_executor()
                     .spawn(async move {
-                        let meta = std::fs::metadata(&path).map_err(|e| {
-                            ClientError::InvalidImage(format!("无法读取图片文件：{e}"))
-                        })?;
-                        if meta.len() > cst_client::workspace::MAX_SUBMISSION_IMAGE_BYTES as u64 {
-                            return Err(ClientError::ImageBudgetExceeded(
-                                "单张图片原始体积超过 12 MiB 上限。".into(),
-                            ));
-                        }
-                        let bytes = std::fs::read(&path).map_err(|e| {
-                            ClientError::InvalidImage(format!("无法读取图片字节：{e}"))
-                        })?;
+                        let bytes = read_attachment_file(&path)?;
                         let fname = path.file_name().and_then(|s| s.to_str()).map(str::to_owned);
                         let pool = client.with_workspace(|ws| ws.image_pool().clone());
                         let handle = pool.admit_image(bytes, fname)?;
@@ -1037,9 +1064,9 @@ impl ComposerView {
             let draft = self.client.with_workspace_mut(|ws| ws.take_draft(&key));
             self.pull_from_workspace(window, cx);
             let client = self.client.clone();
-            cx.spawn(async move |weak, cx| {
+            cx.spawn_in(window, async move |weak, cx| {
                 let res = client.compact_session(sid, None).await;
-                let _ = weak.update(cx, |this, cx| {
+                let _ = weak.update_in(cx, |this, window, cx| {
                     this.submitting = None;
                     match res {
                         Ok(_) => cx.emit(ComposerHostEvent::TopNotice(
@@ -1049,6 +1076,7 @@ impl ComposerView {
                             this.client.with_workspace_mut(|ws| {
                                 ws.restore_draft_if_empty(key, draft);
                             });
+                            this.reconcile_external_draft_changes(window, cx);
                             cx.emit(ComposerHostEvent::ErrorMessage(e.to_string()));
                         }
                     }
@@ -1217,10 +1245,8 @@ impl ComposerView {
             .and_then(|o| o.1.clone())
             .or_else(|| base_model.map(|m| m.id.clone()))
             .unwrap_or_else(|| "未选择模型".to_owned());
-        let model_label = models_ref
-            .catalog
-            .iter()
-            .find(|m| m.provider == provider && m.id == model_id)
+        let active_model = find_model_choice(models_ref, &provider, &model_id);
+        let model_label = active_model
             .map(|m| {
                 if m.name.trim().is_empty() {
                     m.id.clone()
@@ -1231,8 +1257,12 @@ impl ComposerView {
             .unwrap_or_else(|| model_id.clone());
         let thinking = draft_override
             .and_then(|o| o.2)
-            .or_else(|| base_model.and_then(|m| m.thinking_level.clone()))
-            .unwrap_or_else(|| "medium".to_owned());
+            .or_else(|| active_model.and_then(|m| m.thinking_level.clone()));
+        let levels = active_thinking_levels(models_ref, &provider, &model_id);
+        let thinking = thinking
+            .filter(|level| levels.contains(level))
+            .or_else(|| levels.first().cloned())
+            .unwrap_or_else(|| "off".to_owned());
 
         (provider, model_id, model_label, thinking)
     }
@@ -1279,7 +1309,7 @@ impl ComposerView {
         let comp = self.completion.as_ref()?;
         let mut pop = render_frosted_surface(
             "composer-completion-popover-p2bit",
-            FrostedGlassSpec::popover_h2p2z(palette),
+            FrostedGlassSpec::popover(palette),
             palette.bg_elevated,
             transparency_enabled,
             scale_factor,
@@ -2272,6 +2302,7 @@ impl Render for ComposerView {
             let ent_page = entity.clone();
             let ent_sel_m = entity.clone();
             let ent_sel_t = entity.clone();
+            let levels = active_thinking_levels(models_ref, &cur_provider, &cur_model_id);
             wrapper = wrapper.child(
                 div()
                     .absolute()
@@ -2287,7 +2318,7 @@ impl Render for ComposerView {
                         &cur_provider,
                         &cur_model_id,
                         &cur_model_label,
-                        &models_ref.thinking_levels,
+                        levels,
                         &cur_thinking,
                         &palette,
                         transparency_enabled,
@@ -2313,6 +2344,22 @@ impl Render for ComposerView {
 
         wrapper
     }
+}
+
+fn read_attachment_file(path: &std::path::Path) -> Result<Vec<u8>, ClientError> {
+    const LIMIT: usize = cst_client::workspace::MAX_SUBMISSION_IMAGE_BYTES;
+    let file = std::fs::File::open(path)
+        .map_err(|e| ClientError::InvalidImage(format!("无法读取图片文件：{e}")))?;
+    let mut bytes = Vec::new();
+    file.take(LIMIT as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| ClientError::InvalidImage(format!("无法读取图片字节：{e}")))?;
+    if bytes.len() > LIMIT {
+        return Err(ClientError::ImageBudgetExceeded(
+            "单张图片原始体积超过 12 MiB 上限。".into(),
+        ));
+    }
+    Ok(bytes)
 }
 
 fn build_input_content_from_draft(draft: &ComposerDraft) -> InputContent {

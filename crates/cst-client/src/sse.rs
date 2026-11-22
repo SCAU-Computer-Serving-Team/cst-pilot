@@ -74,8 +74,10 @@ pub struct SseParser {
     line_buf: Vec<u8>,
     event_name: String,
     event_id: Option<String>,
-    data_lines: Vec<String>,
-    data_bytes: usize,
+    data: String,
+    has_data: bool,
+    discard_frame: bool,
+    overflowed: bool,
 }
 
 impl SseParser {
@@ -86,21 +88,43 @@ impl SseParser {
                 if self.line_buf.last() == Some(&b'\r') {
                     self.line_buf.pop();
                 }
-                let line = String::from_utf8_lossy(&self.line_buf).into_owned();
+                if self.discard_frame {
+                    if self.line_buf.is_empty() {
+                        self.discard_frame = false;
+                        self.event_name.clear();
+                        self.event_id = None;
+                        self.data.clear();
+                        self.has_data = false;
+                    }
+                } else {
+                    let line = String::from_utf8_lossy(&self.line_buf).into_owned();
+                    if let Some(frame) = self.process_line(&line) {
+                        frames.push(frame);
+                    }
+                }
                 self.line_buf.clear();
-                if let Some(frame) = self.process_line(&line) {
-                    frames.push(frame);
+            } else if self.discard_frame {
+                // Track only enough to recognize the next blank line (LF or CRLF).
+                if self.line_buf.len() < 2 {
+                    self.line_buf.push(byte);
                 }
             } else if self.line_buf.len() < MAX_SSE_EVENT_BYTES {
                 self.line_buf.push(byte);
+            } else {
+                self.discard_frame = true;
+                self.overflowed = true;
             }
         }
         frames
     }
 
+    fn take_overflow(&mut self) -> bool {
+        std::mem::take(&mut self.overflowed)
+    }
+
     fn process_line(&mut self, line: &str) -> Option<ParsedSseFrame> {
         if line.is_empty() {
-            if self.data_lines.is_empty() && self.event_name.is_empty() && self.event_id.is_none() {
+            if !self.has_data && self.event_name.is_empty() && self.event_id.is_none() {
                 return None;
             }
             let event = if self.event_name.is_empty() {
@@ -109,9 +133,8 @@ impl SseParser {
                 std::mem::take(&mut self.event_name)
             };
             let id = self.event_id.take();
-            let data = self.data_lines.join("\n");
-            self.data_lines.clear();
-            self.data_bytes = 0;
+            let data = std::mem::take(&mut self.data);
+            self.has_data = false;
             return Some(ParsedSseFrame { event, id, data });
         }
 
@@ -131,9 +154,18 @@ impl SseParser {
             "id" if !raw_val.contains('\0') => {
                 self.event_id = Some(raw_val.to_owned());
             }
-            "data" if self.data_bytes.saturating_add(raw_val.len()) <= MAX_SSE_EVENT_BYTES => {
-                self.data_bytes += raw_val.len();
-                self.data_lines.push(raw_val.to_owned());
+            "data" => {
+                let bytes = self.data.len() + usize::from(self.has_data) + raw_val.len();
+                if bytes > MAX_SSE_EVENT_BYTES {
+                    self.discard_frame = true;
+                    self.overflowed = true;
+                } else {
+                    if self.has_data {
+                        self.data.push('\n');
+                    }
+                    self.data.push_str(raw_val);
+                    self.has_data = true;
+                }
             }
             _ => {}
         }
@@ -193,13 +225,14 @@ struct MultiplexQueueInner {
     queued_bytes: usize,
     max_bytes: usize,
     overflow_generation: Option<u64>,
-    closed: bool,
+    sender_count: usize,
+    receiver_closed: bool,
 }
 
 /// Non-blocking byte-bounded sender for multiplex business SSE signals.
 /// When queued frames exceed `max_bytes`, drops queued payloads and coalesces a `QueueOverflow`
-/// signal so socket draining never stalls and client memory stays strictly bounded.
-#[derive(Clone)]
+/// signal so socket draining never stalls. The cap applies to the estimated size of all
+/// queued envelopes, including control signals.
 pub struct BoundedMultiplexSender {
     inner: Arc<Mutex<MultiplexQueueInner>>,
     notify: Arc<Notify>,
@@ -218,7 +251,8 @@ pub fn bounded_multiplex_channel(
         queued_bytes: 0,
         max_bytes: max_bytes.max(256),
         overflow_generation: None,
-        closed: false,
+        sender_count: 1,
+        receiver_closed: false,
     }));
     let notify = Arc::new(Notify::new());
     (
@@ -230,33 +264,62 @@ pub fn bounded_multiplex_channel(
     )
 }
 
+impl Clone for BoundedMultiplexSender {
+    fn clone(&self) -> Self {
+        self.inner
+            .lock()
+            .expect("multiplex queue lock")
+            .sender_count += 1;
+        Self {
+            inner: Arc::clone(&self.inner),
+            notify: Arc::clone(&self.notify),
+        }
+    }
+}
+
+impl Drop for BoundedMultiplexSender {
+    fn drop(&mut self) {
+        let mut guard = self.inner.lock().expect("multiplex queue lock");
+        guard.sender_count -= 1;
+        if guard.sender_count == 0 {
+            self.notify.notify_one();
+        }
+    }
+}
+
+impl Drop for BoundedMultiplexReceiver {
+    fn drop(&mut self) {
+        let mut guard = self.inner.lock().expect("multiplex queue lock");
+        guard.receiver_closed = true;
+        guard.queue.clear();
+    }
+}
+
 impl BoundedMultiplexSender {
     pub fn send(&self, envelope: MultiplexEnvelope, approx_bytes: usize) {
         let cost = approx_bytes.max(64);
         let mut guard = self.inner.lock().expect("multiplex queue lock");
-        if guard.closed {
+        if guard.receiver_closed {
             return;
         }
-        // Control signals (`StreamReady`, `Reset*`, `Disconnected`) are always admitted unless
-        // an overflow is already pending; bulky data frames trigger overflow if over budget.
-        let is_control = matches!(
-            envelope.signal,
-            MultiplexSignal::StreamReady { .. }
-                | MultiplexSignal::ResetGlobal
-                | MultiplexSignal::ResetSession { .. }
-                | MultiplexSignal::Disconnected
-                | MultiplexSignal::QueueOverflow
-        );
-        if !is_control && guard.queued_bytes.saturating_add(cost) > guard.max_bytes {
+        if guard.queued_bytes.saturating_add(cost) > guard.max_bytes
+            || matches!(envelope.signal, MultiplexSignal::QueueOverflow)
+        {
+            // A cancelled stream may still have frames in the queue. Report the newest
+            // affected generation so the reducer can recover its active subscriptions.
+            guard.overflow_generation = guard
+                .queue
+                .iter()
+                .map(|(_, env)| env.mux_generation)
+                .chain(guard.overflow_generation)
+                .chain(Some(envelope.mux_generation))
+                .max();
             guard.queue.clear();
             guard.queued_bytes = 0;
-            guard.overflow_generation = Some(envelope.mux_generation);
-            drop(guard);
-            self.notify.notify_one();
-            return;
+        } else {
+            guard.queued_bytes += cost;
+            guard.queue.push_back((cost, envelope));
         }
-        guard.queued_bytes = guard.queued_bytes.saturating_add(cost);
-        guard.queue.push_back((cost, envelope));
         drop(guard);
         self.notify.notify_one();
     }
@@ -279,7 +342,7 @@ impl BoundedMultiplexReceiver {
                     guard.queued_bytes = guard.queued_bytes.saturating_sub(cost);
                     return Some(env);
                 }
-                if guard.closed {
+                if guard.sender_count == 0 {
                     return None;
                 }
             }
@@ -337,7 +400,11 @@ pub async fn run_keepalive_sse_loop(
                 let _ = tx.send(KeepaliveSignal::Disconnected);
                 break;
             };
-            for frame in parser.feed(&bytes) {
+            let frames = parser.feed(&bytes);
+            if parser.take_overflow() {
+                let _ = tx.send(KeepaliveSignal::Reset);
+            }
+            for frame in frames {
                 if let Some(ref id) = frame.id {
                     last_event_id = Some(id.clone());
                 }
@@ -432,7 +499,18 @@ pub async fn run_multiplex_sse_loop(
                 );
                 break;
             };
-            for frame in parser.feed(&bytes) {
+            let frames = parser.feed(&bytes);
+            if parser.take_overflow() {
+                tx.send(
+                    MultiplexEnvelope {
+                        mux_generation,
+                        vector_cursors: BTreeMap::new(),
+                        signal: MultiplexSignal::QueueOverflow,
+                    },
+                    0,
+                );
+            }
+            for frame in frames {
                 let vector_cursors = frame
                     .id
                     .as_deref()
@@ -550,5 +628,54 @@ pub async fn run_multiplex_sse_loop(
             _ = mode_cancel.cancelled() => break,
             _ = tokio::time::sleep(Duration::from_millis(150)) => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discards_over_budget_data_with_separators_and_recovers_on_next_frame() {
+        let mut parser = SseParser::default();
+        let prefix = format!(
+            "id: old\r\ndata: {}\r\n",
+            "a".repeat(MAX_SSE_EVENT_BYTES - 10)
+        );
+        assert!(parser.feed(prefix.as_bytes()).is_empty());
+        assert!(parser.feed(b"data: 0123456789\r\n\r").is_empty());
+        assert!(parser.take_overflow());
+
+        let frames = parser.feed(b"\nid: next\r\ndata:\r\ndata: ok\r\n\r\n");
+        assert_eq!(
+            frames,
+            [ParsedSseFrame {
+                event: "message".into(),
+                id: Some("next".into()),
+                data: "\nok".into(),
+            }],
+        );
+    }
+
+    #[tokio::test]
+    async fn control_signals_are_bounded_and_only_the_last_sender_closes_the_queue() {
+        let (sender, mut receiver) = bounded_multiplex_channel(256);
+        let old_stream = sender.clone();
+        for generation in [2, 2, 2, 2, 1] {
+            old_stream.send(
+                MultiplexEnvelope {
+                    mux_generation: generation,
+                    vector_cursors: BTreeMap::new(),
+                    signal: MultiplexSignal::Disconnected,
+                },
+                64,
+            );
+        }
+        drop(old_stream);
+        let overflow = receiver.recv().await.unwrap();
+        assert_eq!(overflow.mux_generation, 2);
+        assert!(matches!(overflow.signal, MultiplexSignal::QueueOverflow));
+        drop(sender);
+        assert!(receiver.recv().await.is_none());
     }
 }

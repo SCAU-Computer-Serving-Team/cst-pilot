@@ -81,7 +81,7 @@ pub fn render_update_dialog(
     if dialog.handoff_locked || dialog.launch_pending || phase == UpdatePhaseDto::Launching {
         return render_frosted_surface(
             "update-handoff-lock-scrim",
-            FrostedGlassSpec::scrim_dz0fp(palette),
+            FrostedGlassSpec::scrim(palette),
             palette.bg_scrim,
             transparency_enabled,
             scale_factor,
@@ -104,7 +104,7 @@ pub fn render_update_dialog(
                     "update-handoff-lock-anim",
                     render_frosted_surface(
                         "update-handoff-lock-card",
-                        FrostedGlassSpec::modal_k3x72(palette, 8.0),
+                        FrostedGlassSpec::modal(palette, 8.0),
                         palette.bg_modal,
                         transparency_enabled,
                         scale_factor,
@@ -172,7 +172,7 @@ pub fn render_update_dialog(
 
     let mut card = render_frosted_surface(
         card_id,
-        FrostedGlassSpec::modal_k3x72(palette, 8.0),
+        FrostedGlassSpec::modal(palette, 8.0),
         palette.bg_modal,
         transparency_enabled,
         scale_factor,
@@ -422,7 +422,7 @@ pub fn render_update_dialog(
 
     render_frosted_surface(
         scrim_id,
-        FrostedGlassSpec::scrim_dz0fp(palette),
+        FrostedGlassSpec::scrim(palette),
         palette.bg_scrim,
         transparency_enabled,
         scale_factor,

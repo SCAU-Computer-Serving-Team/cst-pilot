@@ -37,12 +37,34 @@ pub struct AccountView {
     logout_cancel_focus: FocusHandle,
     logout_trigger_focus: FocusHandle,
     logout_confirm_focus: FocusHandle,
+    _revision_task: gpui::Task<()>,
+    quota_task: Option<gpui::Task<()>>,
+    profile_error: Option<SharedString>,
 }
 
 impl EventEmitter<AccountViewEvent> for AccountView {}
 
 impl AccountView {
     pub fn new(client: ClientHandle, cx: &mut Context<Self>) -> Self {
+        let mut rev_rx = client.subscribe_revisions();
+        let revision_task = cx.spawn(async move |weak, cx| {
+            let mut previous = None;
+            while rev_rx.changed().await.is_ok() {
+                let alive = weak
+                    .update(cx, |this, cx| {
+                        let account = this.client.snapshot().account.clone();
+                        if previous != account {
+                            previous = account;
+                            this.profile_error = None;
+                            cx.notify();
+                        }
+                    })
+                    .is_ok();
+                if !alive {
+                    break;
+                }
+            }
+        });
         Self {
             client,
             quota_text: None,
@@ -54,6 +76,9 @@ impl AccountView {
             logout_cancel_focus: cx.focus_handle().tab_stop(true),
             logout_trigger_focus: cx.focus_handle().tab_stop(true),
             logout_confirm_focus: cx.focus_handle().tab_stop(true),
+            _revision_task: revision_task,
+            quota_task: None,
+            profile_error: None,
         }
     }
 
@@ -67,6 +92,11 @@ impl AccountView {
 
     pub fn leave(&mut self, cx: &mut Context<Self>) {
         self.logout_confirm_open = false;
+        self.quota_task.take();
+        self.quota_loading = false;
+        self.quota_text = None;
+        self.quota_error = None;
+        self.profile_error = None;
         cx.notify();
     }
 
@@ -89,27 +119,32 @@ impl AccountView {
         true
     }
 
-    pub fn refresh_cstoa_quota(&mut self, force_refresh: bool, cx: &mut Context<Self>) {
+    pub fn refresh_cstoa_quota(&mut self, cx: &mut Context<Self>) {
         if self.quota_loading {
             return;
         }
         self.quota_loading = true;
         self.quota_error = None;
+        self.profile_error = None;
         cx.notify();
 
         let client = self.client.clone();
-        cx.spawn(async move |weak, cx| {
-            let res = client
-                .get_provider_quota("cstoa".into(), force_refresh)
-                .await;
+        self.quota_task = Some(cx.spawn(async move |weak, cx| {
+            // The account and quota endpoints share the upstream profile cache.
+            let account = client.refresh_account().await;
+            let res = client.get_provider_quota("cstoa".into(), false).await;
             let _ = weak.update(cx, |this, cx| {
                 this.quota_loading = false;
+                this.profile_error = account.err().map(|err| err.to_string().into());
                 match res {
                     Ok(val) => {
-                        this.quota_text = Some(SharedString::from(
-                            format_quota_balance(&val).unwrap_or_else(|| "已就绪".to_owned()),
-                        ));
-                        this.quota_error = None;
+                        this.quota_text = format_quota_balance(&val).map(SharedString::from);
+                        if this.quota_text.is_none() {
+                            this.quota_error = val
+                                .get("reason")
+                                .and_then(serde_json::Value::as_str)
+                                .map(SharedString::from);
+                        }
                     }
                     Err(err) => {
                         this.quota_error = Some(SharedString::from(err.to_string()));
@@ -117,8 +152,7 @@ impl AccountView {
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        }));
     }
 
     fn logout_cstoa_only(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -161,10 +195,33 @@ impl Render for AccountView {
         let account = snap.account.as_ref();
         let name = account
             .and_then(|a| a.profile.name.as_deref())
-            .unwrap_or("科协队员");
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or(if self.quota_loading {
+                "查询中…"
+            } else {
+                "未提供姓名"
+            });
         let student_id = account
             .and_then(|a| a.profile.student_id.as_deref())
-            .unwrap_or("未提供学号");
+            .filter(|id| !id.trim().is_empty())
+            .unwrap_or(if self.quota_loading {
+                "查询中…"
+            } else {
+                "未提供学号"
+            });
+        let profile_error = (!self.quota_loading)
+            .then(|| {
+                self.profile_error
+                    .clone()
+                    .or_else(|| {
+                        account
+                            .and_then(|a| a.profile.reason.as_deref())
+                            .filter(|reason| !reason.trim().is_empty())
+                            .map(SharedString::from)
+                    })
+                    .filter(|reason| self.quota_error.as_ref() != Some(reason))
+            })
+            .flatten();
 
         let quota_display = if self.quota_loading {
             SharedString::from("查询中…")
@@ -274,7 +331,7 @@ impl Render for AccountView {
                                     .justify_center()
                                     .hover(|s| s.bg(palette.bg_item_hover))
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        this.refresh_cstoa_quota(true, cx);
+                                        this.refresh_cstoa_quota(cx);
                                     }))
                                     .child(
                                         Icon::new(IconName::RefreshCw)
@@ -285,11 +342,20 @@ impl Render for AccountView {
                     ),
             );
 
+        let info_card = info_card.children(profile_error.map(|err| {
+            apply_scale(div(), scale::UI)
+                .border_t_1()
+                .border_color(palette.border_subtle)
+                .p(space::LG)
+                .text_color(palette.text_secondary)
+                .child(err)
+        }));
+
         let confirm_modal_opt = self.logout_confirm_open.then(|| {
             let scale_factor = window.scale_factor();
             let card = render_frosted_surface(
                 "account-logout-confirm-dialog",
-                FrostedGlassSpec::modal_k3x72(&palette, f32::from(radius::ROW)),
+                FrostedGlassSpec::modal(&palette, f32::from(radius::ROW)),
                 palette.bg_elevated,
                 transparency_enabled,
                 scale_factor,
@@ -397,7 +463,7 @@ impl Render for AccountView {
 
             render_frosted_surface(
                 "account-logout-confirm-scrim",
-                FrostedGlassSpec::scrim_dz0fp(&palette),
+                FrostedGlassSpec::scrim(&palette),
                 palette.bg_scrim,
                 transparency_enabled,
                 scale_factor,

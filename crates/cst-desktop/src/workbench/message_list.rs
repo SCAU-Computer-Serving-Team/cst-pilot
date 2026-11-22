@@ -19,6 +19,7 @@ use gpui_kit::{
     Subscription, TestSupportExt, Window, div, img, px,
 };
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::accessibility::A11yElementExt as _;
 use crate::theme::motion::DesktopTooltipExt as _;
@@ -117,6 +118,7 @@ pub struct MessageListView {
     turn_started_instants: BTreeMap<String, Instant>,
     attachment_cache: BTreeMap<String, Arc<Image>>,
     attachment_loading: BTreeSet<String>,
+    attachment_generation: u64,
     grouped_turn_cache: Option<GroupedTurnCache>,
 }
 
@@ -144,6 +146,7 @@ impl MessageListView {
             turn_started_instants: BTreeMap::new(),
             attachment_cache: BTreeMap::new(),
             attachment_loading: BTreeSet::new(),
+            attachment_generation: 0,
             grouped_turn_cache: None,
         }
     }
@@ -184,6 +187,9 @@ impl MessageListView {
         self.markdown_store.clear();
         self.turn_started_instants.clear();
         self.grouped_turn_cache = None;
+        self.attachment_cache.clear();
+        self.attachment_loading.clear();
+        self.attachment_generation = self.attachment_generation.wrapping_add(1);
         self.scroll_handle.scroll_to_bottom();
         cx.notify();
     }
@@ -374,9 +380,13 @@ impl MessageListView {
         let sid = session_id.to_owned();
         let aid = attachment_id.to_owned();
         let mime = mime_type.to_owned();
+        let generation = self.attachment_generation;
         cx.spawn(async move |weak, cx| {
             let res = client.get_session_attachment_bytes(sid, aid).await;
             let _ = weak.update(cx, |this, cx| {
+                if generation != this.attachment_generation {
+                    return;
+                }
                 this.attachment_loading.remove(&cache_key);
                 if let Ok(bytes) = res {
                     let img_arc = gpui_image_from_bytes(&mime, bytes);
@@ -397,7 +407,7 @@ impl MessageListView {
         if let Some(ref b64) = part.data_base64
             && !b64.is_empty()
         {
-            let cache_key = format!("inline:{}:{}", b64.len(), &b64[..b64.len().min(32)]);
+            let cache_key = inline_image_key(&part.mime_type, b64);
             if let Some(existing) = self.attachment_cache.get(&cache_key) {
                 return Some(Arc::clone(existing));
             }
@@ -2079,6 +2089,10 @@ impl Render for MessageListView {
     }
 }
 
+fn inline_image_key(mime_type: &str, base64: &str) -> String {
+    format!("inline:{mime_type}:{:x}", Sha256::digest(base64.as_bytes()))
+}
+
 fn format_timestamp_hhmm(ts_ms: u64) -> Option<String> {
     let dt = DateTime::from_timestamp_millis(ts_ms as i64)?;
     Some(dt.with_timezone(&Local).format("%H:%M").to_string())
@@ -2150,6 +2164,16 @@ fn now_epoch_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inline_images_with_a_shared_prefix_have_distinct_cache_keys() {
+        let prefix = "a".repeat(32);
+        assert_ne!(
+            inline_image_key("image/png", &format!("{prefix}1234")),
+            inline_image_key("image/png", &format!("{prefix}5678")),
+        );
+        let _ = inline_image_key("image/png", "aé易✋aé易✋aé易✋aé易✋");
+    }
 
     #[test]
     fn grouped_turn_cache_reuses_only_the_same_message_allocation() {

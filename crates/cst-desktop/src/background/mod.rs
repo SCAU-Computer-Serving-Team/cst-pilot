@@ -253,19 +253,30 @@ pub fn render_login_9_stop_fade(palette: &DesktopPalette) -> Div {
         .flex()
         .flex_row();
 
-    for pair in stops.windows(2) {
+    let last_idx = stops.len().saturating_sub(2);
+    for (idx, pair) in stops.windows(2).enumerate() {
         let (p0, a0) = pair[0];
         let (p1, a1) = pair[1];
         let seg_w = ((p1 - p0) * total_w).max(1.0);
-        let mut c0 = palette.bg_workspace;
-        c0.a = a0;
-        let mut c1 = palette.bg_workspace;
-        c1.a = a1;
-        row = row.child(div().w(px(seg_w)).h_full().bg(linear_gradient(
-            90.0,
-            linear_color_stop(c0, 0.0),
-            linear_color_stop(c1, 1.0),
-        )));
+        let is_solid_tail = idx == last_idx && a0 >= 1.0 && a1 >= 1.0;
+        let seg = if is_solid_tail {
+            div()
+                .flex_1()
+                .min_w(px(seg_w))
+                .h_full()
+                .bg(palette.bg_workspace)
+        } else {
+            let mut c0 = palette.bg_workspace;
+            c0.a = a0;
+            let mut c1 = palette.bg_workspace;
+            c1.a = a1;
+            div().w(px(seg_w)).h_full().bg(linear_gradient(
+                90.0,
+                linear_color_stop(c0, 0.0),
+                linear_color_stop(c1, 1.0),
+            ))
+        };
+        row = row.child(seg);
     }
     row
 }

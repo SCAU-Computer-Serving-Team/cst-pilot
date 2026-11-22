@@ -57,7 +57,7 @@ pub fn render_image_lightbox_modal(
 
     let scrim = render_frosted_surface(
         "image-lightbox-scrim",
-        FrostedGlassSpec::scrim_dz0fp(palette),
+        FrostedGlassSpec::scrim(palette),
         palette.bg_scrim,
         transparency_enabled,
         scale_factor,

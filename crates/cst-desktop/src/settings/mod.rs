@@ -7,9 +7,7 @@ pub mod update_dialog;
 use std::cell::Cell;
 use std::rc::Rc;
 
-use cst_client::{
-    ClientHandle, DefaultViewDto, DesktopSettingsPatchDto, ThemeModeDto, UpdatePhaseDto,
-};
+use cst_client::{ClientHandle, DesktopSettingsPatchDto, ThemeModeDto, UpdatePhaseDto};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::{
@@ -327,7 +325,6 @@ impl Render for SettingsView {
 
         let entity = cx.entity();
         let e_theme = entity.clone();
-        let e_view = entity.clone();
         let e_check = entity.clone();
         let e_cancel = entity.clone();
 
@@ -357,25 +354,6 @@ impl Render for SettingsView {
                         })
                         .detach();
                         cx.notify();
-                    });
-                }),
-                Rc::new(move |default_view: DefaultViewDto, _, cx| {
-                    e_view.update(cx, |this, cx| {
-                        let c = this.client.clone();
-                        cx.spawn(async move |weak, cx| {
-                            let res = c
-                                .patch_desktop_settings(DesktopSettingsPatchDto {
-                                    default_view: Some(default_view),
-                                    ..DesktopSettingsPatchDto::default()
-                                })
-                                .await;
-                            if let Err(err) = res {
-                                let _ = weak.update(cx, |_, cx| {
-                                    cx.emit(SettingsViewEvent::ErrorMessage(err.to_string()));
-                                });
-                            }
-                        })
-                        .detach();
                     });
                 }),
                 Rc::new(move |_, cx| {

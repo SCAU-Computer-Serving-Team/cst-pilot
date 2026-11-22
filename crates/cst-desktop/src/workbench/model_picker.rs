@@ -251,7 +251,7 @@ pub fn render_context_quota_popover(
 
     let mut card = render_frosted_surface(
         "composer-context-popover-h5jg6d",
-        FrostedGlassSpec::popover_h2p2z(palette),
+        FrostedGlassSpec::popover(palette),
         palette.bg_elevated,
         transparency_enabled,
         scale_factor,
@@ -555,7 +555,7 @@ pub fn render_model_picker_popover(
 
     let mut card = render_frosted_surface(
         "composer-model-picker-d8zzg",
-        FrostedGlassSpec::popover_h2p2z(palette),
+        FrostedGlassSpec::popover(palette),
         palette.bg_elevated,
         transparency_enabled,
         scale_factor,

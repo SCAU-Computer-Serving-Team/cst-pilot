@@ -18,6 +18,9 @@ use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
 
+#[doc(hidden)]
+pub use self::render_sidebar as render_sidebar_l081m1;
+
 pub const MAX_RECENT_SIDEBAR_SESSIONS: usize = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,7 +85,7 @@ pub fn filter_recent_sidebar_sessions(
 
 /// Full-height `232px` sidebar (`cst-pilot-desktop.pen` 「01 · 工作台」 master `L081M1` / `h5AY3`).
 #[allow(clippy::too_many_arguments)]
-pub fn render_sidebar_l081m1(
+pub fn render_sidebar(
     route: ShellRoute,
     active_session_id: Option<&str>,
     sessions: &[SessionSummary],

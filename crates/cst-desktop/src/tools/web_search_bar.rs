@@ -272,7 +272,7 @@ pub fn render_web_search_bar(
                 .child(
                     render_frosted_surface(
                         format!("web-search-warn-tooltip-{}", props.call_id),
-                        FrostedGlassSpec::popover_h2p2z(palette),
+                        FrostedGlassSpec::popover(palette),
                         palette.bg_elevated,
                         transparency_enabled,
                         scale_factor,

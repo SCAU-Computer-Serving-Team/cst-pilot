@@ -1,8 +1,6 @@
 use std::rc::Rc;
 
-use cst_client::{
-    DefaultViewDto, DesktopSettingsDto, ThemeModeDto, UpdatePhaseDto, UpdateStateDto,
-};
+use cst_client::{DesktopSettingsDto, ThemeModeDto, UpdatePhaseDto, UpdateStateDto};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::{
@@ -15,7 +13,6 @@ use crate::settings::update_dialog::{compute_update_progress_ratio, format_megab
 use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
 
 pub type SelectThemeFn = Rc<dyn Fn(ThemeModeDto, &mut Window, &mut App)>;
-pub type SelectDefaultViewFn = Rc<dyn Fn(DefaultViewDto, &mut Window, &mut App)>;
 pub type UpdateCardActionFn = Rc<dyn Fn(&mut Window, &mut App)>;
 
 /// Renders the `常规` settings tab (`cst-pilot-desktop.pen` 「03 · 设置」 `q8TgB`):
@@ -30,7 +27,6 @@ pub fn render_general_tab(
     mono_family: SharedString,
     palette: &DesktopPalette,
     on_select_theme: SelectThemeFn,
-    on_select_default_view: SelectDefaultViewFn,
     on_check_or_open_update: UpdateCardActionFn,
     on_cancel_update: UpdateCardActionFn,
 ) -> impl IntoElement {
@@ -217,8 +213,6 @@ pub fn render_general_tab(
     let t_sys = Rc::clone(&on_select_theme);
     let t_light = Rc::clone(&on_select_theme);
     let t_dark = Rc::clone(&on_select_theme);
-    let v_gui = Rc::clone(&on_select_default_view);
-    let v_tui = Rc::clone(&on_select_default_view);
 
     div()
         .id("settings-general-tab-q8tgb")
@@ -321,26 +315,16 @@ pub fn render_general_tab(
                                         .h(height::CONTROL)
                                         .p(space::XS)
                                         .rounded(radius::ROW)
-                                        .bg(palette.bg_surface)
+                                        .px(space::SM)
                                         .flex()
                                         .items_center()
-                                        .gap(space::MICRO)
-                                        .child(seg_pill(
-                                            "settings-view-gui",
-                                            IconName::Layers,
-                                            "图形",
-                                            desktop_settings.default_view == DefaultViewDto::Gui,
-                                            palette,
-                                            move |w, cx| (v_gui)(DefaultViewDto::Gui, w, cx),
-                                        ))
-                                        .child(seg_pill(
-                                            "settings-view-tui",
-                                            IconName::SquareTerminal,
-                                            "终端",
-                                            desktop_settings.default_view == DefaultViewDto::Tui,
-                                            palette,
-                                            move |w, cx| (v_tui)(DefaultViewDto::Tui, w, cx),
-                                        )),
+                                        .gap(space::XS)
+                                        .text_color(palette.text_secondary)
+                                        .child(Icon::new(IconName::Layers).size(px(14.0)))
+                                        .child(
+                                            apply_scale(div(), scale::UI)
+                                                .child(cjk_inline_label("图形")),
+                                        ),
                                 ),
                         ),
                 ),

@@ -64,8 +64,23 @@ pub struct FrostedGlassSpec {
 }
 
 impl FrostedGlassSpec {
-    /// Tier 2 unmasked popover / menu / top error notice (`H2p2z`).
+    #[doc(hidden)]
     pub fn popover_h2p2z(palette: &DesktopPalette) -> Self {
+        Self::popover(palette)
+    }
+
+    #[doc(hidden)]
+    pub fn modal_k3x72(palette: &DesktopPalette, corner_radius_px: f32) -> Self {
+        Self::modal(palette, corner_radius_px)
+    }
+
+    #[doc(hidden)]
+    pub fn scrim_dz0fp(palette: &DesktopPalette) -> Self {
+        Self::scrim(palette)
+    }
+
+    /// Tier 2 unmasked popover / menu / top error notice (`H2p2z`).
+    pub fn popover(palette: &DesktopPalette) -> Self {
         Self {
             blur_px: 10.0,
             refract_px: 0.0,
@@ -80,7 +95,7 @@ impl FrostedGlassSpec {
     }
 
     /// Tier 3 masked modal dialog / command palette (`K3x72`).
-    pub fn modal_k3x72(palette: &DesktopPalette, corner_radius_px: f32) -> Self {
+    pub fn modal(palette: &DesktopPalette, corner_radius_px: f32) -> Self {
         Self {
             blur_px: 10.0,
             refract_px: 0.0,
@@ -95,7 +110,7 @@ impl FrostedGlassSpec {
     }
 
     /// Full-window blurred modal backdrop scrim (`DZ0Fp`).
-    pub fn scrim_dz0fp(palette: &DesktopPalette) -> Self {
+    pub fn scrim(palette: &DesktopPalette) -> Self {
         Self {
             blur_px: 14.0,
             refract_px: 0.0,

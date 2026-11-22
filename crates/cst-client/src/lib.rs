@@ -32,8 +32,9 @@ pub use session_store::{FinishLoadingOutcome, SessionStore, SessionViewSnapshot}
 pub use state::{
     AccountStatusDto, AppHealthDto, ChannelModeDto, ClientSnapshot, DefaultViewDto,
     DesktopSettingsDto, DesktopSettingsPatchDto, LifecycleReportDto, MissingKeyClaimDto,
-    ModelChoiceDto, ModelsSnapshot, ProviderStatusDto, SessionSummary, ThemeModeDto, UiHintsDto,
-    UpdatePhaseDto, UpdateStateDto, UpdateStatusDto, WebOpenDto,
+    ModelChoiceDto, ModelScopeMatchDto, ModelScopeRuleDto, ModelsSnapshot, ProviderStatusDto,
+    SessionSummary, ThemeModeDto, UiHintsDto, UpdatePhaseDto, UpdateStateDto, UpdateStatusDto,
+    WebOpenDto,
 };
 pub use tool_presenter::{
     CardStatus, CommandItem, FieldRow, ListingItem, NoticeStatus, SpecialStatus, SpecialToolKind,

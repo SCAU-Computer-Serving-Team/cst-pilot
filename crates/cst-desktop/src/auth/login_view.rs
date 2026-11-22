@@ -15,7 +15,9 @@ use serde_json::Value;
 use zeroize::Zeroizing;
 
 use crate::accessibility::A11yElementExt as _;
-use crate::auth::cstoa_qr::{now_epoch_ms, parse_cstoa_oauth_payload, rasterize_qr_image_offline};
+use crate::auth::cstoa_qr::{
+    extract_cstoa_oauth_error, now_epoch_ms, parse_cstoa_oauth_payload, rasterize_qr_image_offline,
+};
 use crate::background::{
     FrostedGlassSpec, SkyPreset, render_frosted_surface, render_login_9_stop_fade,
     render_sky_background_rounded,
@@ -53,6 +55,7 @@ pub struct LoginView {
     generation: u64,
     qr_generation: u64,
     qr_running: bool,
+    active_qr_flow_id: Option<String>,
     oauth_pending: bool,
     window: gpui::AnyWindowHandle,
     qr_expires_at_ms: u64,
@@ -103,6 +106,7 @@ impl LoginView {
             generation: 0,
             qr_generation: 0,
             qr_running: false,
+            active_qr_flow_id: None,
             oauth_pending: false,
             window: window.window_handle(),
             qr_expires_at_ms: 0,
@@ -132,7 +136,7 @@ impl LoginView {
 
     pub fn set_tab(&mut self, tab: LoginMethodTab, cx: &mut Context<Self>) {
         self.generation += 1;
-        self.reset_qr();
+        self.reset_qr(cx);
         self.tab = tab;
         self.provider_dropdown_open = false;
         self.api_key_error = None;
@@ -170,12 +174,21 @@ impl LoginView {
         self.sky_time_secs = sky_time_secs;
     }
 
-    fn reset_qr(&mut self) {
+    fn reset_qr(&mut self, cx: &mut Context<Self>) {
         self.qr_generation += 1;
+        // The current worker owns cancellation (even while start is still in
+        // flight). Keep its running flag until cancellation finishes so a
+        // replacement start cannot reuse a flow about to be cancelled.
         self.qr_image = None;
         self.qr_error = None;
         self.qr_expires_at_ms = 0;
         self.qr_loading = false;
+        cx.notify();
+    }
+
+    pub fn refresh_cstoa_qr_flow(&mut self, cx: &mut Context<Self>) {
+        self.reset_qr(cx);
+        self.start_cstoa_qr_flow(cx);
     }
 
     pub fn start_cstoa_qr_flow(&mut self, cx: &mut Context<Self>) {
@@ -195,8 +208,6 @@ impl LoginView {
         let client = self.client.clone();
         let generation = self.qr_generation;
         cx.spawn(async move |weak, cx| {
-            // Keep one worker until the previous flow has been cancelled. The server
-            // reuses an active flow when it gets another start for the same provider.
             let started = client
                 .start_auth_flow("cstoa".into(), "oauth".into(), None)
                 .await;
@@ -206,33 +217,59 @@ impl LoginView {
                 .and_then(|val| val.get("flowId").or_else(|| val.get("id")))
                 .and_then(Value::as_str)
                 .map(str::to_owned);
+            let started_state = started
+                .as_ref()
+                .ok()
+                .and_then(|val| val.get("state").or_else(|| val.get("status")))
+                .and_then(Value::as_str);
+            let mut succeeded = matches!(started_state, Some("succeeded" | "completed" | "done"));
+            let started_terminal =
+                succeeded || matches!(started_state, Some("failed" | "cancelled" | "idle"));
             let live = weak
                 .update(cx, |this, cx| {
                     if this.qr_generation != generation {
                         return false;
                     }
                     this.qr_loading = false;
-                    match started.ok().as_ref().and_then(parse_cstoa_oauth_payload) {
-                        Some(parsed) if flow_id.is_some() => {
-                            this.qr_expires_at_ms = parsed.expires_at_ms;
-                            match rasterize_qr_image_offline(&parsed.verification_uri_complete) {
-                                Ok(image) => this.qr_image = Some(image),
-                                Err(err) => this.qr_error = Some(err.into()),
+                    match &started {
+                        Ok(_) if succeeded => {}
+                        Ok(val) if !started_terminal => match parse_cstoa_oauth_payload(val) {
+                            Some(parsed) if flow_id.is_some() => {
+                                this.active_qr_flow_id = flow_id.clone();
+                                this.qr_expires_at_ms = parsed.expires_at_ms;
+                                match rasterize_qr_image_offline(&parsed.verification_uri_complete)
+                                {
+                                    Ok(image) => this.qr_image = Some(image),
+                                    Err(err) => this.qr_error = Some(err.into()),
+                                }
                             }
+                            _ => {
+                                let msg = extract_cstoa_oauth_error(val)
+                                    .unwrap_or_else(|| "未能获取扫码登录地址，请重试。".into());
+                                this.qr_error = Some(msg.into());
+                            }
+                        },
+                        Ok(val) => {
+                            let msg = extract_cstoa_oauth_error(val)
+                                .unwrap_or_else(|| "未能获取扫码登录地址，请重试。".into());
+                            this.qr_error = Some(msg.into());
                         }
-                        _ => this.qr_error = Some("未能获取扫码登录地址，请重试。".into()),
+                        Err(err) => {
+                            this.qr_error = Some(err.to_string().into());
+                        }
                     }
                     cx.notify();
                     this.qr_image.is_some()
                 })
                 .unwrap_or(false);
 
-            let mut succeeded = false;
+            let mut already_terminal = started_terminal;
             if live && let Some(id) = flow_id.as_deref() {
                 loop {
                     let current = weak
                         .update(cx, |this, _| {
                             this.qr_generation == generation
+                                && this.active_qr_flow_id.as_deref() == Some(id)
                                 && now_epoch_ms() < this.qr_expires_at_ms
                         })
                         .unwrap_or(false);
@@ -254,34 +291,55 @@ impl LoginView {
                             .or_else(|| status.get("status"))
                             .and_then(Value::as_str);
                         if is_current && matches!(state, Some("succeeded" | "completed" | "done")) {
-                            let _ = client.refresh_globals().await;
-                            let _ = client.refresh_models(None).await;
                             succeeded = true;
                             break;
                         }
                         if !is_current || matches!(state, Some("failed" | "cancelled" | "idle")) {
+                            already_terminal = true;
+                            let err_msg = is_current
+                                .then(|| extract_cstoa_oauth_error(&status))
+                                .flatten()
+                                .unwrap_or_else(|| "扫码登录已结束，请重试。".into());
                             let _ = weak.update(cx, |this, cx| {
                                 if this.qr_generation == generation {
-                                    this.reset_qr();
-                                    this.qr_error = Some("扫码登录已结束，请重试。".into());
+                                    this.active_qr_flow_id = None;
+                                    this.qr_image = None;
+                                    this.qr_expires_at_ms = 0;
+                                    this.qr_loading = false;
+                                    this.qr_error = Some(err_msg.into());
                                     cx.notify();
                                 }
                             });
                             break;
                         }
                     }
+                    let _ = weak.update(cx, |this, cx| {
+                        if generation == this.qr_generation {
+                            cx.notify();
+                        }
+                    });
                     cx.background_executor().timer(Duration::from_secs(1)).await;
                 }
             }
-            if !succeeded && let Some(id) = flow_id {
+            if succeeded {
+                // Globals also reloads the account, model catalog and auth status.
+                let _ = client.refresh_globals().await;
+            }
+            if !succeeded
+                && !already_terminal
+                && let Some(id) = flow_id
+            {
                 let _ = client
                     .cancel_auth_flow("cstoa".into(), "oauth".into(), Some(id))
                     .await;
             }
             let _ = weak.update(cx, |this, cx| {
                 this.qr_running = false;
+                this.active_qr_flow_id = None;
                 if succeeded && this.qr_generation == generation {
                     cx.emit(LoginViewEvent::NavigateToAccount);
+                } else if this.qr_generation != generation {
+                    this.start_cstoa_qr_flow(cx);
                 }
                 cx.notify();
             });
@@ -425,7 +483,6 @@ impl LoginView {
         &mut self,
         mono_family: SharedString,
         palette: &DesktopPalette,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         if self.active
@@ -441,7 +498,6 @@ impl LoginView {
         let now = now_epoch_ms();
         let expired = self.qr_expires_at_ms > 0 && now >= self.qr_expires_at_ms;
         let rem_secs = if self.qr_expires_at_ms > now {
-            window.request_animation_frame();
             Some(self.qr_expires_at_ms.saturating_sub(now).div_ceil(1000))
         } else {
             None
@@ -582,8 +638,7 @@ impl LoginView {
                             .hover(|s| s.bg(palette.bg_item_hover))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 if !this.qr_loading {
-                                    this.reset_qr();
-                                    this.start_cstoa_qr_flow(cx);
+                                    this.refresh_cstoa_qr_flow(cx);
                                     cx.notify();
                                 }
                             }))
@@ -606,7 +661,8 @@ impl Render for LoginView {
         let mono_family = theme_global.mono_font_family;
         let scale_factor = window.scale_factor();
 
-        // Underlying left `864×800` absolute sky canvas (`tM7YQ` / `jiQRy`) with 9-stop horizontal fade
+        // Underlying left `864×800` absolute sky canvas (`tM7YQ` / `jiQRy`) with `.pen` `856px`
+        // sky shader inset (`rtOFG` / `Q3yEX8`) over solid `$bg-workspace` + 9-stop horizontal fade.
         let left_canvas = div()
             .id("login-sky-canvas-864")
             .test_support()
@@ -617,12 +673,15 @@ impl Render for LoginView {
             .w(layout::LOGIN_SHADER_WIDTH)
             .h_full()
             .overflow_hidden()
-            .child(render_sky_background_rounded(
-                SkyPreset::login_for_theme(palette.mode),
-                self.sky_time_secs,
-                1.0,
-                [0.0; 4],
-                scale_factor,
+            .bg(palette.bg_workspace)
+            .child(div().w(px(856.0)).h_full().overflow_hidden().child(
+                render_sky_background_rounded(
+                    SkyPreset::login_for_theme(palette.mode),
+                    self.sky_time_secs,
+                    1.0,
+                    [0.0; 4],
+                    scale_factor,
+                ),
             ))
             .child(render_login_9_stop_fade(&palette));
 
@@ -636,7 +695,7 @@ impl Render for LoginView {
         let mut provider_menu_opt = None;
         let tab_content = match self.tab {
             LoginMethodTab::CstoaQr => self
-                .render_cstoa_qr_pane(mono_family, &palette, window, cx)
+                .render_cstoa_qr_pane(mono_family, &palette, cx)
                 .into_any_element(),
             LoginMethodTab::OAuth => {
                 let mut col = div().w_full().flex().flex_col().gap(space::SM);
@@ -763,7 +822,7 @@ impl Render for LoginView {
                             "login-apikey-provider-pop-anim",
                             render_frosted_surface(
                                 "login-apikey-provider-popover",
-                                FrostedGlassSpec::popover_h2p2z(&palette),
+                                FrostedGlassSpec::popover(&palette),
                                 palette.bg_elevated,
                                 transparency_enabled,
                                 scale_factor,
@@ -1106,7 +1165,7 @@ impl Render for LoginView {
                                     .text_color(palette.text_secondary)
                                     .child(match self.tab {
                                         LoginMethodTab::CstoaQr => {
-                                            "使用微信扫描二维码登录科协专属服务"
+                                            "使用手机扫描二维码，在 OA 页面完成授权"
                                         }
                                         LoginMethodTab::ApiKey => {
                                             "各服务凭据独立保存，就绪即可开始诊断"

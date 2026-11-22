@@ -49,7 +49,7 @@ pub fn render_missing_key_dialog(
 
     render_frosted_surface(
         "missing-key-scrim-ywnbk",
-        FrostedGlassSpec::scrim_dz0fp(palette),
+        FrostedGlassSpec::scrim(palette),
         palette.bg_scrim,
         transparency_enabled,
         scale_factor,
@@ -72,7 +72,7 @@ pub fn render_missing_key_dialog(
                 "missing-key-dialog-anim",
                 render_frosted_surface(
                     "missing-key-dialog-e7fety",
-                    FrostedGlassSpec::modal_k3x72(palette, 8.0),
+                    FrostedGlassSpec::modal(palette, 8.0),
                     palette.bg_modal,
                     transparency_enabled,
                     scale_factor,

@@ -536,7 +536,7 @@ impl Render for WorkbenchView {
 
                 let menu_card = render_frosted_surface(
                     "session-header-more-menu",
-                    FrostedGlassSpec::popover_h2p2z(&palette),
+                    FrostedGlassSpec::popover(&palette),
                     palette.bg_elevated,
                     transparency_enabled,
                     scale_factor,
@@ -801,7 +801,7 @@ impl Render for WorkbenchView {
 
             let scrim = render_frosted_surface(
                 "overwrite-draft-confirm-scrim",
-                FrostedGlassSpec::scrim_dz0fp(&palette),
+                FrostedGlassSpec::scrim(&palette),
                 palette.bg_scrim,
                 transparency_enabled,
                 scale_factor,
@@ -824,7 +824,7 @@ impl Render for WorkbenchView {
 
             let card = render_frosted_surface(
                 "overwrite-draft-confirm-card",
-                FrostedGlassSpec::modal_k3x72(&palette, 8.0),
+                FrostedGlassSpec::modal(&palette, 8.0),
                 palette.bg_modal,
                 transparency_enabled,
                 scale_factor,

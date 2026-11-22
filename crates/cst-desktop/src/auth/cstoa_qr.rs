@@ -4,8 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use gpui::{Image, ImageFormat};
 use image::{Rgba, RgbaImage};
-use qrcode::QrCode;
 use qrcode::types::Color as QrColor;
+use qrcode::{EcLevel, QrCode};
 use serde_json::Value;
 
 /// Pure-Rust in-memory QR code rasterizer (`qrcode` -> `RgbaImage` -> `gpui::Image`).
@@ -16,9 +16,10 @@ pub fn rasterize_qr_image_offline(verification_uri_complete: &str) -> Result<Arc
         return Err("授权链接为空，无法生成二维码。".into());
     }
 
-    let code = QrCode::new(trimmed.as_bytes()).map_err(|e| format!("二维码编码失败：{e}"))?;
+    let code = QrCode::with_error_correction_level(trimmed.as_bytes(), EcLevel::M)
+        .map_err(|e| format!("二维码编码失败：{e}"))?;
     let width_modules = code.width();
-    let quiet_zone = 3usize;
+    let quiet_zone = 4usize;
     let total_modules = width_modules + quiet_zone * 2;
     let scale = (216usize / total_modules.max(1)).max(4);
     let img_px = (total_modules * scale) as u32;
@@ -72,6 +73,7 @@ pub fn parse_cstoa_oauth_payload(val: &Value) -> Option<ParsedDeviceQrPayload> {
         .or_else(|| val.get("url"))
         .or_else(|| auth_obj.and_then(|a| a.get("verificationUriComplete")))
         .or_else(|| auth_obj.and_then(|a| a.get("url")))
+        .or_else(|| device_code.and_then(|d| d.get("verificationUriComplete")))
         .or_else(|| device_code.and_then(|d| d.get("verificationUri")))
         .and_then(Value::as_str)?
         .trim()
@@ -100,6 +102,18 @@ pub fn parse_cstoa_oauth_payload(val: &Value) -> Option<ParsedDeviceQrPayload> {
         verification_uri_complete: uri,
         expires_at_ms,
     })
+}
+
+pub fn extract_cstoa_oauth_error(val: &Value) -> Option<String> {
+    val.get("error")
+        .and_then(|err| {
+            err.as_str()
+                .or_else(|| err.get("message").and_then(Value::as_str))
+        })
+        .or_else(|| val.get("message").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
 }
 
 pub fn now_epoch_ms() -> u64 {

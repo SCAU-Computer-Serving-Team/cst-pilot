@@ -69,7 +69,7 @@ pub fn render_exit_confirm_dialog(
 
     let scrim = render_frosted_surface(
         "exit-dialog-scrim",
-        FrostedGlassSpec::scrim_dz0fp(palette),
+        FrostedGlassSpec::scrim(palette),
         palette.bg_scrim,
         transparency_enabled,
         scale_factor,
@@ -96,7 +96,7 @@ pub fn render_exit_confirm_dialog(
 
     let card = render_frosted_surface(
         "exit-dialog-card-pfook",
-        FrostedGlassSpec::modal_k3x72(palette, 8.0),
+        FrostedGlassSpec::modal(palette, 8.0),
         palette.bg_modal,
         transparency_enabled,
         scale_factor,

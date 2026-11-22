@@ -147,6 +147,18 @@ fn default_true() -> bool {
     true
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelScopeMatchDto {
+    pub id: String,
+    pub pattern: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelScopeRuleDto {
+    pub pattern: String,
+    pub matches: Vec<ModelScopeMatchDto>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelsSnapshot {
@@ -158,6 +170,8 @@ pub struct ModelsSnapshot {
     pub enabled: Option<Vec<String>>,
     #[serde(default)]
     pub unavailable_enabled: Vec<String>,
+    #[serde(default)]
+    pub scope_rules: Option<Vec<ModelScopeRuleDto>>,
     #[serde(default)]
     pub selected: Option<ModelChoiceDto>,
     #[serde(default)]

@@ -1,7 +1,10 @@
+mod scope;
+
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cst_client::{ClientHandle, ModelChoiceDto, ModelsSnapshot};
-use gpui::KeyDownEvent;
+use gpui::{KeyDownEvent, ScrollStrategy, UniformListScrollHandle, uniform_list};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::Icon;
@@ -18,11 +21,31 @@ use crate::theme::{
     DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
 };
 
+use self::scope::ModelScope;
+
 #[derive(Debug, Clone)]
 pub enum PreferencesTabEvent {
     Notice(String),
     ErrorMessage(String),
 }
+
+#[derive(Clone)]
+enum PrefRowItem {
+    Enabled {
+        ordered_idx: usize,
+        full_id: String,
+        provider: String,
+        name: String,
+    },
+    Unchecked {
+        full_id: String,
+        provider: String,
+        name: String,
+    },
+}
+
+const PREF_LIST_ROW_HEIGHT_PX: f32 = 56.0;
+const PREF_LIST_MAX_VISIBLE_ROWS: usize = 8;
 
 pub struct PreferencesTabView {
     client: ClientHandle,
@@ -30,8 +53,10 @@ pub struct PreferencesTabView {
     provider_filter: Option<String>,
     default_dropdown_open: bool,
     filter_dropdown_open: bool,
-    ordered_enabled_ids: Vec<String>,
-    selected_row_idx: usize,
+    enabled_scope: ModelScope,
+    selected_row_id: Option<String>,
+    visible_enabled_indices: Vec<usize>,
+    visible_filter_key: Option<(Option<String>, String)>,
     observed_models: Option<Arc<ModelsSnapshot>>,
     saving_scope: bool,
     saving_default: bool,
@@ -41,6 +66,8 @@ pub struct PreferencesTabView {
     picker_focus: FocusHandle,
     picker_index: usize,
     picker_scroll: gpui::ScrollHandle,
+    default_picker_scroll: UniformListScrollHandle,
+    list_scroll: UniformListScrollHandle,
     _search_subscription: Subscription,
     focus_handle: FocusHandle,
 }
@@ -67,8 +94,10 @@ impl PreferencesTabView {
             provider_filter: None,
             default_dropdown_open: false,
             filter_dropdown_open: false,
-            ordered_enabled_ids: Vec::new(),
-            selected_row_idx: 0,
+            enabled_scope: ModelScope::default(),
+            selected_row_id: None,
+            visible_enabled_indices: Vec::new(),
+            visible_filter_key: None,
             observed_models: None,
             saving_scope: false,
             saving_default: false,
@@ -78,6 +107,8 @@ impl PreferencesTabView {
             picker_focus: cx.focus_handle(),
             picker_index: 0,
             picker_scroll: gpui::ScrollHandle::new(),
+            default_picker_scroll: UniformListScrollHandle::new(),
+            list_scroll: UniformListScrollHandle::new(),
             _search_subscription: search_subscription,
             focus_handle: cx.focus_handle(),
         }
@@ -125,8 +156,14 @@ impl PreferencesTabView {
         self.default_dropdown_open = default_model;
         self.filter_dropdown_open = !default_model;
         self.picker_index = index;
-        self.picker_scroll = gpui::ScrollHandle::new();
-        self.picker_scroll.scroll_to_item(index);
+        if default_model {
+            self.default_picker_scroll = UniformListScrollHandle::new();
+            self.default_picker_scroll
+                .scroll_to_item(index, ScrollStrategy::Nearest);
+        } else {
+            self.picker_scroll = gpui::ScrollHandle::new();
+            self.picker_scroll.scroll_to_item(index);
+        }
         self.picker_focus.focus(window, cx);
         cx.notify();
     }
@@ -147,22 +184,12 @@ impl PreferencesTabView {
             return;
         }
         self.observed_models = Some(models.clone());
-        self.ordered_enabled_ids = models.enabled.clone().unwrap_or_else(|| {
-            models
-                .catalog
-                .iter()
-                .filter(|m| m.credential_ready)
-                .map(|m| format!("{}/{}", m.provider, m.id))
-                .collect()
-        });
-        self.selected_row_idx = self
-            .selected_row_idx
-            .min(self.ordered_enabled_ids.len().saturating_sub(1));
+        self.enabled_scope = ModelScope::from_snapshot(models);
     }
 
-    fn save_scoped_with_rollback(&mut self, previous: Vec<String>, cx: &mut Context<Self>) {
+    fn save_scoped_with_rollback(&mut self, previous: ModelScope, cx: &mut Context<Self>) {
         self.saving_scope = true;
-        let next = self.ordered_enabled_ids.clone();
+        let next = self.enabled_scope.patterns();
         let empty = next.is_empty();
         let client = self.client.clone();
 
@@ -172,7 +199,7 @@ impl PreferencesTabView {
             let _ = weak.update(cx, |this, cx| {
                 this.saving_scope = false;
                 if let Err(err) = res {
-                    this.ordered_enabled_ids = previous;
+                    this.enabled_scope = previous;
                     cx.emit(PreferencesTabEvent::ErrorMessage(format!(
                         "保存启用模型范围失败，已自动回滚：{err}"
                     )));
@@ -180,9 +207,6 @@ impl PreferencesTabView {
                 if refreshed {
                     this.sync_from_snapshot();
                 }
-                this.selected_row_idx = this
-                    .selected_row_idx
-                    .min(this.ordered_enabled_ids.len().saturating_sub(1));
                 cx.notify();
             });
         })
@@ -193,12 +217,8 @@ impl PreferencesTabView {
         if self.saving_scope {
             return;
         }
-        let prev = self.ordered_enabled_ids.clone();
-        if let Some(pos) = self.ordered_enabled_ids.iter().position(|x| x == &full_id) {
-            self.ordered_enabled_ids.remove(pos);
-        } else {
-            self.ordered_enabled_ids.push(full_id);
-        }
+        let prev = self.enabled_scope.clone();
+        self.enabled_scope.toggle(full_id);
         cx.notify();
         self.save_scoped_with_rollback(prev, cx);
     }
@@ -207,13 +227,8 @@ impl PreferencesTabView {
         if self.saving_scope {
             return;
         }
-        let prev = self.ordered_enabled_ids.clone();
-        for fid in visible_full_ids {
-            if !self.ordered_enabled_ids.contains(&fid) {
-                self.ordered_enabled_ids.push(fid);
-            }
-        }
-        if self.ordered_enabled_ids != prev {
+        let prev = self.enabled_scope.clone();
+        if self.enabled_scope.select(visible_full_ids) {
             cx.notify();
             self.save_scoped_with_rollback(prev, cx);
         }
@@ -223,10 +238,11 @@ impl PreferencesTabView {
         if self.saving_scope {
             return;
         }
-        let prev = self.ordered_enabled_ids.clone();
-        self.ordered_enabled_ids
-            .retain(|id| !visible_full_ids.contains(id));
-        if self.ordered_enabled_ids != prev {
+        let prev = self.enabled_scope.clone();
+        if self
+            .enabled_scope
+            .clear(visible_full_ids.iter().map(String::as_str))
+        {
             cx.notify();
             self.save_scoped_with_rollback(prev, cx);
         }
@@ -257,17 +273,23 @@ impl PreferencesTabView {
         if self.saving_scope {
             return;
         }
-        let len = self.ordered_enabled_ids.len();
-        if idx >= len {
+        let Some(position) = self.visible_enabled_indices.iter().position(|&i| i == idx) else {
+            return;
+        };
+        let Some(target_position) = position.checked_add_signed(delta) else {
+            return;
+        };
+        let Some(&target) = self.visible_enabled_indices.get(target_position) else {
+            return;
+        };
+        let selected = self.enabled_scope.model_id_at(idx).map(str::to_owned);
+        let prev = self.enabled_scope.clone();
+        if !self.enabled_scope.swap(idx, target) {
             return;
         }
-        let target = idx as isize + delta;
-        if target < 0 || (target as usize) >= len {
-            return;
-        }
-        let prev = self.ordered_enabled_ids.clone();
-        self.ordered_enabled_ids.swap(idx, target as usize);
-        self.selected_row_idx = target as usize;
+        self.selected_row_id = selected;
+        self.list_scroll
+            .scroll_to_item(target_position, ScrollStrategy::Nearest);
         cx.notify();
         self.save_scoped_with_rollback(prev, cx);
     }
@@ -299,19 +321,28 @@ impl PreferencesTabView {
         .detach();
     }
 
-    fn on_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let ks = &event.keystroke;
         if self.has_dropdown() {
             return;
         }
-        if ks.modifiers.alt {
+        if ks.modifiers.alt && self.focus_handle.is_focused(window) && !self.saving_scope {
+            let Some(idx) = self
+                .visible_enabled_indices
+                .iter()
+                .copied()
+                .find(|&idx| self.enabled_scope.model_id_at(idx) == self.selected_row_id.as_deref())
+                .or_else(|| self.visible_enabled_indices.first().copied())
+            else {
+                return;
+            };
             match ks.key.as_str() {
                 "up" => {
-                    self.move_enabled_row(self.selected_row_idx, -1, cx);
+                    self.move_enabled_row(idx, -1, cx);
                     cx.stop_propagation();
                 }
                 "down" => {
-                    self.move_enabled_row(self.selected_row_idx, 1, cx);
+                    self.move_enabled_row(idx, 1, cx);
                     cx.stop_propagation();
                 }
                 _ => {}
@@ -331,20 +362,47 @@ impl Render for PreferencesTabView {
         let models_snap = snap.models.as_ref();
 
         let catalog: &[ModelChoiceDto] = models_snap.map(|m| m.catalog.as_slice()).unwrap_or(&[]);
+        // Only expose logged-in / credential-ready providers and models on the Preferences tab.
+        let ready_models: Vec<&ModelChoiceDto> = models_snap
+            .into_iter()
+            .flat_map(|m| &m.models)
+            .filter(|m| m.credential_ready && m.catalog_present)
+            .collect();
+        let mut ready_by_key: HashMap<(&str, &str), &ModelChoiceDto> =
+            HashMap::with_capacity(ready_models.len());
+        for m in &ready_models {
+            ready_by_key.insert((m.provider.as_str(), m.id.as_str()), *m);
+        }
         let current_default = models_snap.and_then(|m| m.default_model.as_ref());
 
         let default_label = current_default
             .map(|d| {
-                catalog
-                    .iter()
-                    .find(|m| m.provider == d.provider && m.id == d.id)
-                    .map(|m| m.name.clone())
-                    .unwrap_or_else(|| d.id.clone())
+                ready_by_key
+                    .get(&(d.provider.as_str(), d.id.as_str()))
+                    .copied()
+                    .or_else(|| {
+                        catalog
+                            .iter()
+                            .find(|m| m.provider == d.provider && m.id == d.id)
+                    })
+                    .map(|m| {
+                        if m.name.trim().is_empty() {
+                            m.id.clone()
+                        } else {
+                            m.name.clone()
+                        }
+                    })
+                    .unwrap_or_else(|| {
+                        if d.name.trim().is_empty() {
+                            d.id.clone()
+                        } else {
+                            d.name.clone()
+                        }
+                    })
             })
             .unwrap_or_else(|| "选择默认模型".to_owned());
 
         // 1. Default model `72px` card with `208×32px` custom dropdown trigger + frosted popover (`H2p2z`)
-        let ready_models: Vec<_> = catalog.iter().filter(|m| m.credential_ready).collect();
         let choices: Vec<_> = ready_models
             .iter()
             .map(|m| (m.provider.clone(), m.id.clone()))
@@ -358,82 +416,109 @@ impl Render for PreferencesTabView {
             .unwrap_or(0);
         let mut dropdown_menu_opt = None;
         if self.default_dropdown_open {
-            let mut items = div()
-                .id("pref-default-model-scroll")
-                .track_scroll(&self.picker_scroll)
-                .w_full()
-                .max_h(px(280.0))
-                .overflow_y_scroll()
-                .flex()
-                .flex_col()
-                .gap(space::MICRO);
-
-            if ready_models.is_empty() {
-                items = items.child(
-                    apply_scale(div(), scale::CAPTION)
-                        .p(space::SM)
-                        .text_color(palette.text_muted)
-                        .child("暂无已配置凭据的可用模型"),
-                );
+            let items = if ready_models.is_empty() {
+                div()
+                    .id("pref-default-model-scroll")
+                    .w_full()
+                    .child(
+                        apply_scale(div(), scale::CAPTION)
+                            .p(space::SM)
+                            .text_color(palette.text_muted)
+                            .child("暂无已登录服务的可用模型"),
+                    )
+                    .into_any_element()
             } else {
-                for (idx, m) in ready_models.iter().enumerate() {
-                    let is_def = idx == self.picker_index;
-                    let prov = m.provider.clone();
-                    let mid = m.id.clone();
-                    let opt_id = SharedString::from(format!("pref-default-model-{prov}-{mid}"));
-                    let mname_label = SharedString::from(m.name.clone());
-                    let prov_label = SharedString::from(m.provider.clone());
-                    let opt_aria = SharedString::from(format!("{} · {}", m.provider, m.name));
-                    items = items.child(
-                        apply_scale(div(), scale::UI)
-                            .id(opt_id.clone())
-                            .test_support()
-                            .a11y_listitem(opt_id, opt_aria, is_def)
-                            .flex_shrink_0()
-                            .h(height::CONTROL)
-                            .px(space::SM)
-                            .rounded(radius::CONTROL)
-                            .bg(if is_def {
-                                palette.bg_item_active
+                let default_rows: Arc<Vec<(String, String, String)>> = Arc::new(
+                    ready_models
+                        .iter()
+                        .map(|m| {
+                            let label = if m.name.trim().is_empty() {
+                                m.id.clone()
                             } else {
-                                gpui_kit::transparent_black()
-                            })
-                            .text_color(palette.text_primary)
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap(space::SM)
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.set_default_model(prov.clone(), mid.clone(), window, cx);
-                                cx.stop_propagation();
-                            }))
-                            .child(div().flex_1().min_w_0().truncate().child(mname_label))
-                            .child(
-                                div()
+                                m.name.clone()
+                            };
+                            (m.provider.clone(), m.id.clone(), label)
+                        })
+                        .collect(),
+                );
+                let row_count = default_rows.len();
+                let list_h = px((row_count as f32 * 32.0).min(280.0));
+                uniform_list(
+                    "pref-default-model-scroll",
+                    row_count,
+                    cx.processor(move |this, range: std::ops::Range<usize>, _window, cx| {
+                        range
+                            .map(|idx| {
+                                let (prov, mid, mname) = &default_rows[idx];
+                                let is_def = idx == this.picker_index;
+                                let prov_c = prov.clone();
+                                let mid_c = mid.clone();
+                                let opt_id =
+                                    SharedString::from(format!("pref-default-model-{prov}-{mid}"));
+                                let mname_label = SharedString::from(mname.clone());
+                                let prov_label = SharedString::from(prov.clone());
+                                let opt_aria = SharedString::from(format!("{prov} · {mname}"));
+                                apply_scale(div(), scale::UI)
+                                    .id(opt_id.clone())
+                                    .test_support()
+                                    .a11y_listitem(opt_id, opt_aria, is_def)
+                                    .flex_shrink_0()
+                                    .w_full()
+                                    .h(height::CONTROL)
+                                    .px(space::SM)
+                                    .rounded(radius::CONTROL)
+                                    .bg(if is_def {
+                                        palette.bg_item_active
+                                    } else {
+                                        gpui_kit::transparent_black()
+                                    })
+                                    .text_color(palette.text_primary)
                                     .flex()
                                     .items_center()
-                                    .gap(space::XS)
-                                    .flex_shrink_0()
+                                    .justify_between()
+                                    .gap(space::SM)
+                                    .hover(|s| s.bg(palette.bg_item_hover))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        this.set_default_model(
+                                            prov_c.clone(),
+                                            mid_c.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }))
+                                    .child(div().flex_1().min_w_0().truncate().child(mname_label))
                                     .child(
-                                        apply_scale(div(), scale::CAPTION)
-                                            .text_color(palette.text_muted)
-                                            .child(prov_label),
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(space::XS)
+                                            .flex_shrink_0()
+                                            .child(
+                                                apply_scale(div(), scale::CAPTION)
+                                                    .text_color(palette.text_muted)
+                                                    .child(prov_label),
+                                            )
+                                            .children(is_def.then(|| {
+                                                Icon::new(IconName::Check)
+                                                    .size(px(13.0))
+                                                    .text_color(palette.accent_ink)
+                                            })),
                                     )
-                                    .children(is_def.then(|| {
-                                        Icon::new(IconName::Check)
-                                            .size(px(13.0))
-                                            .text_color(palette.accent_ink)
-                                    })),
-                            ),
-                    );
-                }
-            }
+                            })
+                            .collect()
+                    }),
+                )
+                .track_scroll(&self.default_picker_scroll)
+                .w_full()
+                .h(list_h)
+                .into_any_element()
+            };
             let menu = motion::animate_popover_enter(
                 "pref-default-model-pop-anim",
                 render_frosted_surface(
                     "pref-default-model-popover",
-                    FrostedGlassSpec::popover_h2p2z(&palette),
+                    FrostedGlassSpec::popover(&palette),
                     palette.bg_elevated,
                     transparency_enabled,
                     scale_factor,
@@ -451,15 +536,38 @@ impl Render for PreferencesTabView {
                         .w_full()
                         .focus_trap("pref-default-model-focus", &self.picker_focus)
                         .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                            if super::move_picker_cursor(
-                                event,
-                                &mut this.picker_index,
-                                choices.len(),
-                                &this.picker_scroll,
-                            ) {
-                                cx.notify();
-                                cx.stop_propagation();
-                            } else if super::activates_button(event) {
+                            if !choices.is_empty() {
+                                let moved = match event.keystroke.key.as_str() {
+                                    "down" => {
+                                        this.picker_index = (this.picker_index + 1) % choices.len();
+                                        true
+                                    }
+                                    "up" => {
+                                        this.picker_index = this
+                                            .picker_index
+                                            .checked_sub(1)
+                                            .unwrap_or(choices.len() - 1);
+                                        true
+                                    }
+                                    "home" => {
+                                        this.picker_index = 0;
+                                        true
+                                    }
+                                    "end" => {
+                                        this.picker_index = choices.len() - 1;
+                                        true
+                                    }
+                                    _ => false,
+                                };
+                                if moved {
+                                    this.default_picker_scroll
+                                        .scroll_to_item(this.picker_index, ScrollStrategy::Nearest);
+                                    cx.notify();
+                                    cx.stop_propagation();
+                                    return;
+                                }
+                            }
+                            if super::activates_button(event) {
                                 if let Some((provider, model)) = choices.get(this.picker_index) {
                                     this.set_default_model(
                                         provider.clone(),
@@ -564,20 +672,21 @@ impl Render for PreferencesTabView {
 
         // 2. Search + Provider filter `PHFud` dropdown (`zjoqr`) + `"全选 / 清空 / 刷新"` ghost buttons (`I8Og18`)
         let mut providers_seen = Vec::new();
-        for m in catalog {
-            if !providers_seen.contains(&m.provider) {
+        let mut providers_seen_set = HashSet::new();
+        for m in &ready_models {
+            if providers_seen_set.insert(m.provider.as_str()) {
                 providers_seen.push(m.provider.clone());
             }
         }
-        let filter_label = self
+        let active_provider_filter = self
             .provider_filter
             .as_deref()
-            .unwrap_or("全部服务")
-            .to_owned();
+            .filter(|pf| providers_seen_set.contains(*pf));
+        let filter_label = active_provider_filter.unwrap_or("全部服务").to_owned();
 
         let filter_index = providers_seen
             .iter()
-            .position(|p| Some(p) == self.provider_filter.as_ref())
+            .position(|p| Some(p.as_str()) == active_provider_filter)
             .map_or(0, |index| index + 1);
         let filter_menu_opt = self.filter_dropdown_open.then(|| {
             let choices = providers_seen.clone();
@@ -668,7 +777,7 @@ impl Render for PreferencesTabView {
                     "pref-filter-pop-anim",
                     render_frosted_surface(
                         "pref-filter-popover",
-                        FrostedGlassSpec::popover_h2p2z(&palette),
+                        FrostedGlassSpec::popover(&palette),
                         palette.bg_elevated,
                         transparency_enabled,
                         scale_factor,
@@ -714,8 +823,13 @@ impl Render for PreferencesTabView {
         });
 
         let search_q = self.search_input.read(cx).value().trim().to_lowercase();
+        let filter_key = (active_provider_filter.map(str::to_owned), search_q.clone());
+        if self.visible_filter_key.as_ref() != Some(&filter_key) {
+            self.visible_filter_key = Some(filter_key);
+            self.list_scroll = UniformListScrollHandle::new();
+        }
         let matches_query = |prov: &str, mid: &str, mname: &str| -> bool {
-            if let Some(ref pf) = self.provider_filter
+            if let Some(pf) = active_provider_filter
                 && prov != pf
             {
                 return false;
@@ -731,29 +845,61 @@ impl Render for PreferencesTabView {
             true
         };
 
-        let mut visible_full_ids: Vec<String> = Vec::new();
-        for full_id in &self.ordered_enabled_ids {
-            let (prov, mid) = full_id.split_once('/').unwrap_or(("", full_id.as_str()));
-            let mname = catalog
-                .iter()
-                .find(|m| m.provider == prov && m.id == mid)
-                .map(|m| m.name.as_str())
-                .unwrap_or(mid);
+        let mut visible_rows: Vec<PrefRowItem> = Vec::with_capacity(ready_models.len());
+        let mut visible_full_ids: Vec<String> = Vec::with_capacity(ready_models.len());
+        let mut enabled_ready_keys: HashSet<(&str, &str)> =
+            HashSet::with_capacity(ready_models.len());
+        let mut enabled_ready_count = 0usize;
+
+        let mut visible_enabled_indices = Vec::new();
+        for (ordered_idx, full_id) in self.enabled_scope.model_rows() {
+            let Some((prov, mid)) = full_id.split_once('/') else {
+                continue;
+            };
+            let Some(m) = ready_by_key.get(&(prov, mid)).copied() else {
+                continue;
+            };
+            enabled_ready_keys.insert((prov, mid));
+            enabled_ready_count += 1;
+            let mname = if m.name.trim().is_empty() {
+                m.id.as_str()
+            } else {
+                m.name.as_str()
+            };
             if matches_query(prov, mid, mname) {
-                visible_full_ids.push(full_id.clone());
+                visible_full_ids.push(full_id.to_owned());
+                visible_enabled_indices.push(ordered_idx);
+                visible_rows.push(PrefRowItem::Enabled {
+                    ordered_idx,
+                    full_id: full_id.to_owned(),
+                    provider: prov.to_owned(),
+                    name: mname.to_owned(),
+                });
             }
         }
-        for m in catalog {
-            let full_id = format!("{}/{}", m.provider, m.id);
-            if !self.ordered_enabled_ids.contains(&full_id)
-                && matches_query(&m.provider, &m.id, &m.name)
-            {
-                visible_full_ids.push(full_id);
+        for m in &ready_models {
+            if enabled_ready_keys.contains(&(m.provider.as_str(), m.id.as_str())) {
+                continue;
+            }
+            let mname = if m.name.trim().is_empty() {
+                m.id.as_str()
+            } else {
+                m.name.as_str()
+            };
+            if matches_query(&m.provider, &m.id, mname) {
+                let full_id = format!("{}/{}", m.provider, m.id);
+                visible_full_ids.push(full_id.clone());
+                visible_rows.push(PrefRowItem::Unchecked {
+                    full_id,
+                    provider: m.provider.clone(),
+                    name: mname.to_owned(),
+                });
             }
         }
 
+        self.visible_enabled_indices = visible_enabled_indices;
         let vis_for_all = visible_full_ids.clone();
-        let vis_for_clear = visible_full_ids.clone();
+        let vis_for_clear = visible_full_ids;
 
         let filter_row = div()
             .w_full()
@@ -893,254 +1039,309 @@ impl Render for PreferencesTabView {
                     .child(cjk_inline_label("刷新")),
             );
 
-        // 3. Enabled models `56px` rows (`16×16` checkbox + `16/24` model name + `140px` `14/20` provider + reorder)
+        // 3. Enabled & unchecked logged-in models virtualized in `uniform_list` (`56px` uniform rows)
+        let row_count = visible_rows.len();
         let mut list_card = div()
             .w_full()
             .rounded(radius::ROW)
             .border_1()
             .border_color(palette.border_subtle)
             .bg(palette.bg_workspace)
+            .overflow_hidden()
             .flex()
             .flex_col();
 
-        let flip_scope = SharedString::from(format!("{:?}:{search_q}", self.provider_filter));
-        let mut rendered_count = 0usize;
-        for (idx, full_id) in self.ordered_enabled_ids.iter().enumerate() {
-            let (prov, mid) = full_id.split_once('/').unwrap_or(("", full_id.as_str()));
-            let mname = catalog
-                .iter()
-                .find(|m| m.provider == prov && m.id == mid)
-                .map(|m| m.name.clone())
-                .unwrap_or_else(|| mid.to_owned());
-            if !matches_query(prov, mid, &mname) {
-                continue;
-            }
-            let fid_chk = full_id.clone();
-            let selected = idx == self.selected_row_idx;
-            let row_id = SharedString::from(format!("pref-enabled-row-{idx}"));
-            let chk_id = SharedString::from(format!("pref-toggle-enabled-{idx}"));
-            let up_id = SharedString::from(format!("pref-move-up-{idx}"));
-            let down_id = SharedString::from(format!("pref-move-down-{idx}"));
-            let flip_y = motion::flip_row_offset_y(
-                "pref-enabled-models",
-                full_id,
-                &flip_scope,
-                px(56.0) * rendered_count as f32,
-                window,
-                cx,
-            );
-            let mut row = div()
-                .id(row_id.clone())
-                .test_support()
-                .relative()
-                .top(flip_y)
-                .a11y_listitem(row_id, format!("{mname}（{prov}）"), selected)
-                .w_full()
-                .h(px(56.0))
-                .px(space::LG)
-                .bg(if selected {
-                    palette.bg_item_active
-                } else {
-                    gpui_kit::transparent_black()
-                })
-                .flex()
-                .items_center()
-                .gap(space::MD)
-                .hover(|s| s.bg(palette.bg_item_hover))
-                .on_click(cx.listener(move |this, _, w, cx| {
-                    this.selected_row_idx = idx;
-                    this.focus_handle.focus(w, cx);
-                    cx.notify();
-                }))
-                .child({
-                    let chk_mark = motion::animated_checkbox_mark(
-                        format!("pref-chk-{full_id}"),
-                        true,
-                        px(11.0),
-                        palette.text_on_accent,
-                        window,
-                        cx,
-                    );
-                    div()
-                        .id(chk_id.clone())
-                        .test_support()
-                        .a11y_checkbox(chk_id, format!("启用模型：{mname}"), true)
-                        .w(px(16.0))
-                        .h(px(16.0))
-                        .rounded(radius::CONTROL)
-                        .border_1()
-                        .border_color(palette.accent_solid)
-                        .bg(palette.accent_solid)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .flex_shrink_0()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_model_enabled(fid_chk.clone(), cx);
-                            cx.stop_propagation();
-                        }))
-                        .children(chk_mark)
-                })
-                .child(
-                    apply_scale(div(), scale::BODY)
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .text_color(palette.text_primary)
-                        .child(SharedString::from(mname.clone())),
-                )
-                .child(
-                    apply_scale(div(), scale::UI)
-                        .w(px(140.0))
-                        .flex_shrink_0()
-                        .truncate()
-                        .text_color(palette.text_secondary)
-                        .child(SharedString::from(prov.to_owned())),
-                )
-                .child(
-                    div()
-                        .w(px(60.0))
-                        .flex_shrink_0()
-                        .flex()
-                        .items_center()
-                        .justify_end()
-                        .gap(space::MICRO)
-                        .child(
-                            div()
-                                .id(up_id.clone())
-                                .test_support()
-                                .a11y_button(up_id, format!("上移模型：{mname}"))
-                                .w(height::COMPACT)
-                                .h(height::COMPACT)
-                                .rounded(radius::CONTROL)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .hover(|s| s.bg(palette.bg_item_hover))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.move_enabled_row(idx, -1, cx);
-                                    cx.stop_propagation();
-                                }))
-                                .child(
-                                    Icon::new(IconName::ArrowUp)
-                                        .size(px(13.0))
-                                        .text_color(palette.text_secondary),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .id(down_id.clone())
-                                .test_support()
-                                .a11y_button(down_id, format!("下移模型：{mname}"))
-                                .w(height::COMPACT)
-                                .h(height::COMPACT)
-                                .rounded(radius::CONTROL)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .hover(|s| s.bg(palette.bg_item_hover))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.move_enabled_row(idx, 1, cx);
-                                    cx.stop_propagation();
-                                }))
-                                .child(
-                                    Icon::new(IconName::ArrowDown)
-                                        .size(px(13.0))
-                                        .text_color(palette.text_secondary),
-                                ),
-                        ),
-                );
-            if rendered_count > 0 {
-                row = row.border_t_1().border_color(palette.border_subtle);
-            }
-            rendered_count += 1;
-            list_card = list_card.child(row);
-        }
-
-        // Unchecked catalog models (`56px` rows)
-        for m in catalog {
-            let full_id = format!("{}/{}", m.provider, m.id);
-            if self.ordered_enabled_ids.contains(&full_id)
-                || !matches_query(&m.provider, &m.id, &m.name)
-            {
-                continue;
-            }
-            let fid_add = full_id.clone();
-            let unchk_id = SharedString::from(format!("pref-unchecked-{full_id}"));
-            let mut row = div()
-                .id(unchk_id.clone())
-                .test_support()
-                .a11y_checkbox(
-                    unchk_id,
-                    format!("启用模型：{}（{}）", m.name, m.provider),
-                    false,
-                )
-                .w_full()
-                .h(px(56.0))
-                .px(space::LG)
-                .flex()
-                .items_center()
-                .gap(space::MD)
-                .hover(|s| s.bg(palette.bg_item_hover))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.toggle_model_enabled(fid_add.clone(), cx);
-                }))
-                .child({
-                    let unchk_mark = motion::animated_checkbox_mark(
-                        format!("pref-chk-{full_id}"),
-                        false,
-                        px(11.0),
-                        palette.text_on_accent,
-                        window,
-                        cx,
-                    );
-                    div()
-                        .w(px(16.0))
-                        .h(px(16.0))
-                        .rounded(radius::CONTROL)
-                        .border_1()
-                        .border_color(palette.border_strong)
-                        .bg(palette.bg_workspace)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .flex_shrink_0()
-                        .children(unchk_mark)
-                })
-                .child(
-                    apply_scale(div(), scale::BODY)
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .text_color(palette.text_secondary)
-                        .child(SharedString::from(m.name.clone())),
-                )
-                .child(
-                    apply_scale(div(), scale::UI)
-                        .w(px(140.0))
-                        .flex_shrink_0()
-                        .truncate()
-                        .text_color(palette.text_secondary)
-                        .child(SharedString::from(m.provider.clone())),
-                )
-                .child(div().w(px(60.0)).flex_shrink_0());
-            if rendered_count > 0 {
-                row = row.border_t_1().border_color(palette.border_subtle);
-            }
-            rendered_count += 1;
-            list_card = list_card.child(row);
-        }
-
-        if rendered_count == 0 {
+        if row_count == 0 {
             list_card = list_card.child(
                 apply_scale(div(), scale::UI)
                     .p(space::LG)
                     .text_color(palette.text_muted)
-                    .child("暂无匹配的模型项"),
+                    .child(if ready_models.is_empty() {
+                        "暂无已登录服务的可用模型，请先在「模型服务」中登录"
+                    } else {
+                        "暂无匹配的模型项"
+                    }),
+            );
+        } else {
+            let flip_scope = SharedString::from(format!("{:?}:{search_q}", active_provider_filter));
+            let rows_arc = Arc::new(visible_rows);
+            let viewport_h =
+                px((row_count.min(PREF_LIST_MAX_VISIBLE_ROWS) as f32) * PREF_LIST_ROW_HEIGHT_PX);
+            list_card = list_card.child(
+                uniform_list(
+                    "pref-models-virtual-list",
+                    row_count,
+                    cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
+                        range
+                            .map(|vis_idx| match &rows_arc[vis_idx] {
+                                PrefRowItem::Enabled {
+                                    ordered_idx,
+                                    full_id,
+                                    provider,
+                                    name,
+                                } => {
+                                    let idx = *ordered_idx;
+                                    let can_move_up = vis_idx > 0;
+                                    let can_move_down =
+                                        vis_idx + 1 < this.visible_enabled_indices.len();
+                                    let fid_chk = full_id.clone();
+                                    let fid_select = full_id.clone();
+                                    let selected = this.selected_row_id.as_ref() == Some(full_id);
+                                    let row_id =
+                                        SharedString::from(format!("pref-enabled-row-{idx}"));
+                                    let chk_id =
+                                        SharedString::from(format!("pref-toggle-enabled-{idx}"));
+                                    let up_id = SharedString::from(format!("pref-move-up-{idx}"));
+                                    let down_id =
+                                        SharedString::from(format!("pref-move-down-{idx}"));
+                                    let flip_y = motion::flip_row_offset_y(
+                                        "pref-enabled-models",
+                                        full_id,
+                                        &flip_scope,
+                                        px(PREF_LIST_ROW_HEIGHT_PX) * vis_idx as f32,
+                                        window,
+                                        cx,
+                                    );
+                                    let mut row = div()
+                                        .id(row_id.clone())
+                                        .test_support()
+                                        .relative()
+                                        .top(flip_y)
+                                        .a11y_listitem(
+                                            row_id,
+                                            format!("{name}（{provider}）"),
+                                            selected,
+                                        )
+                                        .w_full()
+                                        .h(px(PREF_LIST_ROW_HEIGHT_PX))
+                                        .px(space::LG)
+                                        .bg(if selected {
+                                            palette.bg_item_active
+                                        } else {
+                                            gpui_kit::transparent_black()
+                                        })
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::MD)
+                                        .hover(|s| s.bg(palette.bg_item_hover))
+                                        .on_click(cx.listener(move |this, _, w, cx| {
+                                            this.selected_row_id = Some(fid_select.clone());
+                                            this.focus_handle.focus(w, cx);
+                                            cx.notify();
+                                        }))
+                                        .child({
+                                            let chk_mark = motion::animated_checkbox_mark(
+                                                format!("pref-chk-{full_id}"),
+                                                true,
+                                                px(11.0),
+                                                palette.text_on_accent,
+                                                window,
+                                                cx,
+                                            );
+                                            div()
+                                                .id(chk_id.clone())
+                                                .test_support()
+                                                .a11y_checkbox(
+                                                    chk_id,
+                                                    format!("启用模型：{name}"),
+                                                    true,
+                                                )
+                                                .w(px(16.0))
+                                                .h(px(16.0))
+                                                .rounded(radius::CONTROL)
+                                                .border_1()
+                                                .border_color(palette.accent_solid)
+                                                .bg(palette.accent_solid)
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .flex_shrink_0()
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.toggle_model_enabled(fid_chk.clone(), cx);
+                                                    cx.stop_propagation();
+                                                }))
+                                                .children(chk_mark)
+                                        })
+                                        .child(
+                                            apply_scale(div(), scale::BODY)
+                                                .flex_1()
+                                                .min_w_0()
+                                                .truncate()
+                                                .text_color(palette.text_primary)
+                                                .child(SharedString::from(name.clone())),
+                                        )
+                                        .child(
+                                            apply_scale(div(), scale::UI)
+                                                .w(px(140.0))
+                                                .flex_shrink_0()
+                                                .truncate()
+                                                .text_color(palette.text_secondary)
+                                                .child(SharedString::from(provider.clone())),
+                                        )
+                                        .child(
+                                            div()
+                                                .w(px(60.0))
+                                                .flex_shrink_0()
+                                                .flex()
+                                                .items_center()
+                                                .justify_end()
+                                                .gap(space::MICRO)
+                                                .child(
+                                                    div()
+                                                        .id(up_id.clone())
+                                                        .test_support()
+                                                        .a11y_button(
+                                                            up_id,
+                                                            format!("上移模型：{name}"),
+                                                        )
+                                                        .w(height::COMPACT)
+                                                        .h(height::COMPACT)
+                                                        .rounded(radius::CONTROL)
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .hover(|s| s.bg(palette.bg_item_hover))
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                if can_move_up {
+                                                                    this.move_enabled_row(
+                                                                        idx, -1, cx,
+                                                                    );
+                                                                }
+                                                                cx.stop_propagation();
+                                                            },
+                                                        ))
+                                                        .child(
+                                                            Icon::new(IconName::ArrowUp)
+                                                                .size(px(13.0))
+                                                                .text_color(palette.text_secondary),
+                                                        ),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .id(down_id.clone())
+                                                        .test_support()
+                                                        .a11y_button(
+                                                            down_id,
+                                                            format!("下移模型：{name}"),
+                                                        )
+                                                        .w(height::COMPACT)
+                                                        .h(height::COMPACT)
+                                                        .rounded(radius::CONTROL)
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .hover(|s| s.bg(palette.bg_item_hover))
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                if can_move_down {
+                                                                    this.move_enabled_row(
+                                                                        idx, 1, cx,
+                                                                    );
+                                                                }
+                                                                cx.stop_propagation();
+                                                            },
+                                                        ))
+                                                        .child(
+                                                            Icon::new(IconName::ArrowDown)
+                                                                .size(px(13.0))
+                                                                .text_color(palette.text_secondary),
+                                                        ),
+                                                ),
+                                        );
+                                    if vis_idx > 0 {
+                                        row = row.border_t_1().border_color(palette.border_subtle);
+                                    }
+                                    // GPUI positions the uniform-list item root itself. Move
+                                    // the child so the FLIP offset also moves its hitboxes.
+                                    div()
+                                        .w_full()
+                                        .h(px(PREF_LIST_ROW_HEIGHT_PX))
+                                        .child(row)
+                                        .into_any_element()
+                                }
+                                PrefRowItem::Unchecked {
+                                    full_id,
+                                    provider,
+                                    name,
+                                } => {
+                                    let fid_add = full_id.clone();
+                                    let unchk_id =
+                                        SharedString::from(format!("pref-unchecked-{full_id}"));
+                                    let mut row = div()
+                                        .id(unchk_id.clone())
+                                        .test_support()
+                                        .a11y_checkbox(
+                                            unchk_id,
+                                            format!("启用模型：{name}（{provider}）"),
+                                            false,
+                                        )
+                                        .w_full()
+                                        .h(px(PREF_LIST_ROW_HEIGHT_PX))
+                                        .px(space::LG)
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::MD)
+                                        .hover(|s| s.bg(palette.bg_item_hover))
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.toggle_model_enabled(fid_add.clone(), cx);
+                                        }))
+                                        .child({
+                                            let unchk_mark = motion::animated_checkbox_mark(
+                                                format!("pref-chk-{full_id}"),
+                                                false,
+                                                px(11.0),
+                                                palette.text_on_accent,
+                                                window,
+                                                cx,
+                                            );
+                                            div()
+                                                .w(px(16.0))
+                                                .h(px(16.0))
+                                                .rounded(radius::CONTROL)
+                                                .border_1()
+                                                .border_color(palette.border_strong)
+                                                .bg(palette.bg_workspace)
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .flex_shrink_0()
+                                                .children(unchk_mark)
+                                        })
+                                        .child(
+                                            apply_scale(div(), scale::BODY)
+                                                .flex_1()
+                                                .min_w_0()
+                                                .truncate()
+                                                .text_color(palette.text_secondary)
+                                                .child(SharedString::from(name.clone())),
+                                        )
+                                        .child(
+                                            apply_scale(div(), scale::UI)
+                                                .w(px(140.0))
+                                                .flex_shrink_0()
+                                                .truncate()
+                                                .text_color(palette.text_secondary)
+                                                .child(SharedString::from(provider.clone())),
+                                        )
+                                        .child(div().w(px(60.0)).flex_shrink_0());
+                                    if vis_idx > 0 {
+                                        row = row.border_t_1().border_color(palette.border_subtle);
+                                    }
+                                    row.into_any_element()
+                                }
+                            })
+                            .collect()
+                    }),
+                )
+                .track_scroll(&self.list_scroll)
+                .w_full()
+                .flex_shrink_0()
+                .h(viewport_h),
             );
         }
 
-        let enabled_count = self.ordered_enabled_ids.len();
+        let enabled_count = enabled_ready_count;
 
         div()
             .id("settings-preferences-tab")

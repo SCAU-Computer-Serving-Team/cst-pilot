@@ -128,7 +128,7 @@ pub fn render_web_active_lock_overlay(
 
     let scrim = render_frosted_surface(
         "web-active-scrim",
-        FrostedGlassSpec::scrim_dz0fp(palette),
+        FrostedGlassSpec::scrim(palette),
         palette.bg_scrim,
         transparency_enabled,
         scale_factor,
@@ -146,7 +146,7 @@ pub fn render_web_active_lock_overlay(
 
     let card = render_frosted_surface(
         "web-active-card-wo6nq",
-        FrostedGlassSpec::modal_k3x72(palette, 8.0),
+        FrostedGlassSpec::modal(palette, 8.0),
         palette.bg_modal,
         transparency_enabled,
         scale_factor,
@@ -264,7 +264,7 @@ pub fn render_workspace_error_bar(
     let label = single_line_banner_label(&message);
     let card = render_frosted_surface(
         "workspace-top-error-bar",
-        FrostedGlassSpec::popover_h2p2z(palette),
+        FrostedGlassSpec::popover(palette),
         palette.bg_elevated,
         transparency_enabled,
         scale_factor,
@@ -327,7 +327,7 @@ pub fn render_top_notice_banner(
     let label = single_line_banner_label(&message);
     let card = render_frosted_surface(
         "top-notice-banner",
-        FrostedGlassSpec::popover_h2p2z(palette),
+        FrostedGlassSpec::popover(palette),
         palette.bg_elevated,
         transparency_enabled,
         scale_factor,

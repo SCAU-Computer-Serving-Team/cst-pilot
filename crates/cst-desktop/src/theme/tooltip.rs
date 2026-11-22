@@ -236,7 +236,7 @@ impl Render for DesktopTooltipContentView {
             let scale_factor = window.scale_factor();
             return render_frosted_surface(
                 self.elem_id.clone(),
-                FrostedGlassSpec::popover_h2p2z(&palette),
+                FrostedGlassSpec::popover(&palette),
                 palette.bg_elevated,
                 transparency,
                 scale_factor,

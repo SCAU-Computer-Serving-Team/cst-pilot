@@ -234,7 +234,7 @@ impl Render for CommandPaletteModal {
 
         render_frosted_surface(
             "command-palette-scrim-x9p2zr",
-            FrostedGlassSpec::scrim_dz0fp(&palette),
+            FrostedGlassSpec::scrim(&palette),
             palette.bg_scrim,
             transparency_enabled,
             scale_factor,
@@ -258,7 +258,7 @@ impl Render for CommandPaletteModal {
         .child(
             render_frosted_surface(
                 "command-palette-modal-i70mz",
-                FrostedGlassSpec::modal_k3x72(&palette, 8.0),
+                FrostedGlassSpec::modal(&palette, 8.0),
                 palette.bg_modal,
                 transparency_enabled,
                 scale_factor,

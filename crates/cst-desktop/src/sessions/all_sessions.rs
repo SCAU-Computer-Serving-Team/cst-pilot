@@ -677,7 +677,7 @@ impl AllSessionsView {
                                 "all-sessions-ctx-anim",
                                 render_frosted_surface(
                                     "all-sessions-context-menu-uwt8w",
-                                    FrostedGlassSpec::popover_h2p2z(palette),
+                                    FrostedGlassSpec::popover(palette),
                                     palette.bg_elevated,
                                     transparency_enabled,
                                     scale_factor,
@@ -807,7 +807,7 @@ impl AllSessionsView {
     ) -> gpui_kit::AnyElement {
         let modal_card = render_frosted_surface(
             "all-sessions-rename-modal",
-            FrostedGlassSpec::modal_k3x72(palette, 8.0),
+            FrostedGlassSpec::modal(palette, 8.0),
             palette.bg_modal,
             transparency_enabled,
             scale_factor,
@@ -913,7 +913,7 @@ impl AllSessionsView {
 
         render_frosted_surface(
             "all-sessions-rename-scrim",
-            FrostedGlassSpec::scrim_dz0fp(palette),
+            FrostedGlassSpec::scrim(palette),
             palette.bg_scrim,
             transparency_enabled,
             scale_factor,
