@@ -86,7 +86,7 @@ CSTOA 远端网关协议见 [../auth/API.md](../auth/API.md)。本机模型与�
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| `GET` | `/api/models` | 返回可用模型 `models`、完整目录 `catalog`、`defaultModel`、启用范围及可选 `sessionId` 的当前模型与支持思考档位 `thinkingLevels` |
+| `GET` | `/api/models` | 返回可用模型 `models`、完整目录 `catalog`、`defaultModel`、启用范围及可选 `sessionId` 的当前模型与支持思考档位 `thinkingLevels`。显式范围的 `scopeRules` 按保存顺序返回原表达式 `pattern` 和匹配项 `matches: { id, pattern }[]`；默认范围返回 `null` |
 | `POST` | `/api/models/refresh` | 正文 `{}`，强制刷新已配置服务商目录，返回 `{ aborted, failedProviders }` |
 | `POST` | `/api/models/select` | 切换指定 `sessionId` 的模型（未传 `sessionId` 时仅返回所选描述，不修改默认值） |
 | `POST` | `/api/models/default` | 正文 `{ provider, modelId }`，保存三端共用的新会话默认模型 |

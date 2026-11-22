@@ -1,17 +1,25 @@
 pub mod ant_ling;
 pub mod anthropic;
+pub mod baseten;
+pub mod cerebras;
+pub mod cloudflare_ai_gateway;
 pub mod deepseek;
 #[cfg(any(test, feature = "test-support"))]
 pub mod faux;
+pub mod fireworks;
 pub mod github_copilot;
 pub mod google;
+pub mod groq;
 pub mod huggingface;
+pub mod meta;
 pub mod minimax;
 pub mod moonshot;
+pub mod nvidia;
 pub mod openai;
 pub mod opencode;
 pub mod openrouter;
 pub mod qwen;
+pub mod together;
 pub mod typesafe;
 pub mod vercel_ai_gateway;
 pub mod xai;
@@ -98,7 +106,7 @@ pub(crate) fn build_standard_provider_with_filter(
     .expect("built-in provider configuration is valid")
 }
 
-/// 返回全部 26 个内置服务商实例。
+/// 返回全部 37 个内置服务商实例（对齐上游 `@earendil-works/pi-ai` 1.5.1 中使用标准对话/分类器协议的服务商）。
 pub fn builtin_providers() -> Vec<Provider> {
     vec![
         deepseek::deepseek_provider(),
@@ -112,7 +120,10 @@ pub fn builtin_providers() -> Vec<Provider> {
         qwen::qwen_token_plan_cn_provider(),
         qwen::qwen_token_plan_provider(),
         qwen::qwen_token_plan_individual_provider(),
+        qwen::qwen_token_plan_individual_cn_provider(),
         xiaomi::xiaomi_token_plan_cn_provider(),
+        xiaomi::xiaomi_token_plan_ams_provider(),
+        xiaomi::xiaomi_token_plan_sgp_provider(),
         xiaomi::xiaomi_provider(),
         ant_ling::ant_ling_provider(),
         openai::openai_provider(),
@@ -127,10 +138,18 @@ pub fn builtin_providers() -> Vec<Provider> {
         vercel_ai_gateway::vercel_ai_gateway_provider(),
         huggingface::huggingface_provider(),
         github_copilot::github_copilot_provider(),
+        baseten::baseten_provider(),
+        cerebras::cerebras_provider(),
+        cloudflare_ai_gateway::cloudflare_ai_gateway_provider(),
+        fireworks::fireworks_provider(),
+        groq::groq_provider(),
+        meta::meta_provider(),
+        nvidia::nvidia_provider(),
+        together::together_provider(),
     ]
 }
 
-/// 创建已预装全部 26 个内置服务商的 Models 容器。
+/// 创建已预装全部 37 个内置服务商的 Models 容器。
 pub fn builtin_models(options: Option<CreateModelsOptions>) -> Models {
     let models = create_models(options);
     for provider in builtin_providers() {

@@ -148,6 +148,82 @@ async fn kit_host_shares_single_catalog_maintenance_task_when_individual_session
 }
 
 #[tokio::test]
+async fn saving_an_unrelated_model_keeps_the_original_scope_rule() {
+    let fixture = TestKitDir::new();
+    let kit = Kit::new(&fixture.0).unwrap();
+    let oa = OaClient::new("https://oa.example").unwrap();
+    let auth = AuthRuntime::create(&fixture.0, Channel::Gui, oa)
+        .await
+        .unwrap();
+    let host = KitHost::new(
+        kit,
+        auth,
+        TelemetryOptions::default(),
+        UpdateOptions::Disabled,
+    )
+    .await
+    .unwrap();
+    let settings_path = host.kit().agent_dir().join("settings.json");
+    let wildcard = "DeepSeek/*:high";
+    let unrelated = "anthropic/claude-fable-5";
+    let unmatched = "missing-provider/*";
+    fs::write(
+        &settings_path,
+        json!({ "enabledModels": [wildcard, unrelated, unmatched] }).to_string(),
+    )
+    .unwrap();
+
+    let mut cfg = ServerConfig::new(&fixture.0);
+    cfg.port = Some(0);
+    cfg.acquire_instance_lock = false;
+    let server = RunningServer::start(host, cfg).await.unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let snapshot: Value = client
+        .get(format!("{}/api/models", server.base_url()))
+        .header("X-CST-Client", "app")
+        .bearer_auth(server.app_token())
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let rules = snapshot["scopeRules"].as_array().unwrap();
+    assert_eq!(rules.len(), 3, "{rules:?}");
+    assert_eq!(rules[0]["pattern"], wildcard);
+    assert!(rules[0]["matches"].as_array().unwrap().iter().any(|m| {
+        m["id"] == "deepseek/deepseek-flash" && m["pattern"] == "deepseek/deepseek-flash:high"
+    }));
+    assert_eq!(rules[1]["matches"][0]["id"], unrelated);
+    assert_eq!(rules[2], json!({ "pattern": unmatched, "matches": [] }));
+    let saved: Vec<_> = rules
+        .iter()
+        .filter_map(|rule| {
+            rule["pattern"]
+                .as_str()
+                .filter(|pattern| *pattern != unrelated)
+        })
+        .collect();
+
+    client
+        .post(format!("{}/api/models/scoped", server.base_url()))
+        .header("X-CST-Client", "app")
+        .header("Idempotency-Key", "remove-unrelated-model")
+        .bearer_auth(server.app_token())
+        .json(&json!({ "patterns": saved }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+    let settings: Value = serde_json::from_slice(&fs::read(settings_path).unwrap()).unwrap();
+    assert_eq!(settings["enabledModels"], json!([wildcard, unmatched]));
+    server.shutdown().await;
+}
+
+#[tokio::test]
 async fn three_end_theme_isolation_and_activity_gate_exemptions() {
     let fixture = TestKitDir::new();
     let kit = Kit::new(&fixture.0).unwrap();

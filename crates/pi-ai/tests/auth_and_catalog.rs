@@ -23,9 +23,9 @@ use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
 #[test]
-fn all_26_builtin_providers_load_and_reject_contradictory_model_types() {
+fn all_37_builtin_providers_load_and_reject_contradictory_model_types() {
     let providers = builtin_providers();
-    assert_eq!(providers.len(), 26);
+    assert_eq!(providers.len(), 37);
 
     let models = builtin_models(None);
     let all = models.get_all_models(None);
@@ -38,8 +38,28 @@ fn all_26_builtin_providers_load_and_reject_contradictory_model_types() {
     let ds_flash = models
         .get_model("deepseek", "deepseek-flash")
         .expect("deepseek-flash must exist");
-    assert_eq!(ds_flash.api, known_api::OPENAI_RESPONSES);
+    assert_eq!(ds_flash.api, known_api::OPENAI_COMPLETIONS);
     assert_eq!(ds_flash.base_url, "https://api.deepseek.com");
+    assert!(ds_flash.reasoning);
+    let tmap = ds_flash
+        .thinking_level_map
+        .as_ref()
+        .expect("deepseek-flash must expose thinkingLevelMap");
+    assert_eq!(
+        tmap.get(&pi_ai::ModelThinkingLevel::Low)
+            .and_then(|v| v.as_deref()),
+        Some("low")
+    );
+    assert_eq!(
+        tmap.get(&pi_ai::ModelThinkingLevel::High)
+            .and_then(|v| v.as_deref()),
+        Some("high")
+    );
+    assert_eq!(
+        tmap.get(&pi_ai::ModelThinkingLevel::Max)
+            .and_then(|v| v.as_deref()),
+        Some("max")
+    );
 
     // S6: 标记为 type: "chat" 但缺少必填 maxTokens 的损坏 JSON 必须反序列化报错，禁止被误判为 ClassifierModel
     let mut broken_chat = serde_json::to_value(&ds_flash).unwrap();
@@ -683,16 +703,9 @@ async fn models_collection_streams_mock_deepseek_via_credential_store() {
             let mut buf = vec![0u8; 4096];
             let _ = socket.read(&mut buf).await;
             let sse = concat!(
-                "event: response.created\n",
-                "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_m1\"}}\n\n",
-                "event: response.output_item.added\n",
-                "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_m1\",\"role\":\"assistant\",\"status\":\"in_progress\",\"content\":[]}}\n\n",
-                "event: response.output_text.delta\n",
-                "data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"7\"}\n\n",
-                "event: response.output_item.done\n",
-                "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_m1\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"7\"}]}}\n\n",
-                "event: response.completed\n",
-                "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_m1\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":20,\"output_tokens\":2,\"total_tokens\":22}}}\n\n"
+                "data: {\"id\":\"chatcmpl_m1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"7\"},\"finish_reason\":null}]}\n\n",
+                "data: {\"id\":\"chatcmpl_m1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":2,\"total_tokens\":22}}\n\n",
+                "data: [DONE]\n\n"
             );
             let resp = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\n\r\n{}",

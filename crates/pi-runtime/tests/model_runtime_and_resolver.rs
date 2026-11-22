@@ -478,7 +478,10 @@ async fn credential_changes_update_other_isolated_view_without_recomposition() {
     // Both views use the same persisted config/native baseline, independent catalogs.
     rt.register_provider(provider("mock", None));
     let isolated = rt.fork_isolated_view();
-    isolated.register_provider(provider("mock", None));
+    assert!(isolated.models().get_provider("mock").is_some());
+    isolated.register_provider(provider("only-in-fork", None));
+    rt.rebuild_baseline_providers();
+    assert!(rt.models().get_provider("only-in-fork").is_none());
     rt.set_runtime_api_key("mock", "mock-key").await.unwrap();
     assert!(isolated.has_configured_auth("mock"));
     rt.remove_runtime_api_key("mock").await.unwrap();

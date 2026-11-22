@@ -432,7 +432,10 @@ pub fn create_provider(input: CreateProviderOptions) -> Result<Provider, String>
     })
 }
 
-fn stream_error(model: &Model, message: impl Into<String>) -> AssistantMessageEventStream {
+pub(crate) fn stream_error(
+    model: &Model,
+    message: impl Into<String>,
+) -> AssistantMessageEventStream {
     let stream = create_assistant_message_event_stream();
     let mut err_msg = AssistantMessage::new_pending(model);
     err_msg.stop_reason = StopReason::Error;
