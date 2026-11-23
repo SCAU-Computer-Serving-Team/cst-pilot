@@ -1022,3 +1022,132 @@ async fn home_uncertain_recovery_concurrent_draft_protection_and_outbox_actions(
 
     handle.stop();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn session_send_lost_202_reconciles_by_original_message_id_without_duplicate_post() {
+    use controlled_http::{RawReply, spawn_controlled_server};
+    use cst_client::outbox::OutboxItemState;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::mpsc;
+
+    let fixture = ServerFixture::new();
+    let post_count = Arc::new(AtomicUsize::new(0));
+    let persisted_ids: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let queried_ids: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let pc_h = Arc::clone(&post_count);
+    let pid_h = Arc::clone(&persisted_ids);
+    let qid_h = Arc::clone(&queried_ids);
+
+    let (port, _requests) = spawn_controlled_server(move |req| {
+        let pc = Arc::clone(&pc_h);
+        let pids = Arc::clone(&pid_h);
+        let qids = Arc::clone(&qid_h);
+        async move {
+            if req.target == "/api/app/events" {
+                let (tx, rx) = mpsc::unbounded_channel();
+                let _ = tx.send("event: heartbeat\ndata: {}\n\n".to_owned());
+                std::mem::forget(tx);
+                return RawReply::SseStream(rx);
+            }
+            if req.target.starts_with("/api/events/stream?") {
+                let (tx, rx) = mpsc::unbounded_channel();
+                let _ = tx.send(
+                    "id: global:g0:1\nevent: state\ndata: {\"type\":\"stream_ready\",\"subscribedSessions\":[]}\n\n"
+                        .to_owned(),
+                );
+                std::mem::forget(tx);
+                return RawReply::SseStream(rx);
+            }
+            if req.target == "/api/sessions/s-202/messages" && req.method == "POST" {
+                pc.fetch_add(1, Ordering::SeqCst);
+                let body_val: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+                let msg_id = body_val["id"].as_str().unwrap().to_owned();
+                // Server persisted and accepted the message, then TCP dropped BEFORE delivering 202!
+                pids.lock().unwrap().push(msg_id);
+                return RawReply::DropConnection;
+            }
+            if let Some(id) = req.target.strip_prefix("/api/sessions/s-202/messages/")
+                && req.method == "GET"
+            {
+                qids.lock().unwrap().push(id.to_owned());
+                let exists = pids.lock().unwrap().iter().any(|x| x == id);
+                return RawReply::Json {
+                    status: 200,
+                    body: if exists {
+                        json!({ "item": { "id": id, "status": "pending" } })
+                    } else {
+                        json!({ "item": null })
+                    },
+                };
+            }
+            RawReply::Json {
+                status: 200,
+                body: json!({
+                    "version": "v0.9.5",
+                    "channelMode": "app_active",
+                    "commands": [],
+                    "sessions": [],
+                    "providers": [],
+                    "loggedIn": false,
+                    "models": [],
+                    "catalog": [],
+                    "theme": "light",
+                    "defaultView": "gui",
+                    "sidebarCollapsed": false,
+                    "windowMaximized": false,
+                    "currentVersion": "v0.9.5",
+                    "status": { "phase": "unavailable", "message": "未启用" }
+                }),
+            }
+        }
+    })
+    .await;
+
+    let self_id = ProcessIdentity::current().unwrap();
+    let handle = CstClient::from_verified_endpoint(
+        &tokio::runtime::Handle::current(),
+        VerifiedServerEndpoint {
+            kit_root: fixture.root.clone(),
+            pid: self_id.pid,
+            process_created: self_id.created,
+            port,
+            version: "v0.9.5".into(),
+            http: AppHttpClient::new(port, "test-token").unwrap(),
+            spawned_by_client: false,
+        },
+        None,
+    )
+    .unwrap();
+
+    handle.with_workspace_mut(|ws| {
+        ws.draft_mut(DraftKey::Session("s-202".into())).text = "丢 202 响应测试消息".into();
+    });
+    let err = handle
+        .submit_draft(DraftKey::Session("s-202".into()))
+        .await
+        .unwrap_err();
+    assert!(err.is_disconnected());
+
+    let orig_cmid = handle.with_outbox(|ob| {
+        let items = ob.session_items("s-202");
+        assert_eq!(items.len(), 1);
+        assert!(matches!(items[0].state, OutboxItemState::Uncertain { .. }));
+        items[0].client_message_id.clone()
+    });
+    assert_eq!(post_count.load(Ordering::SeqCst), 1);
+
+    // Reconcile queries `GET /api/sessions/s-202/messages/<orig_cmid>`, finds it accepted,
+    // and clears outbox WITHOUT issuing any duplicate POST!
+    let rec = handle.reconcile_uncertain_outbox_detailed().await.unwrap();
+    assert_eq!(rec.resolved_count, 1);
+    assert_eq!(post_count.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        queried_ids.lock().unwrap().as_slice(),
+        &[orig_cmid.as_str()]
+    );
+    assert_eq!(handle.with_outbox(|ob| ob.total_unresolved_count()), 0);
+
+    handle.stop();
+}

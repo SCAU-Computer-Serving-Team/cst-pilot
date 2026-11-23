@@ -436,3 +436,202 @@ async fn auto_compaction_three_cases_paired_omission_and_transient_retry_work() 
             .is_some()
     );
 }
+
+#[tokio::test]
+async fn double_overflow_stops_after_single_compact_and_retry_without_looping() {
+    let models = Arc::new(Models::default());
+    let reg = register_faux_provider(&models);
+
+    let mut overflow_err = faux_text_message("");
+    overflow_err.stop_reason = StopReason::Error;
+    overflow_err.error_message =
+        Some("prompt is too long: 210000 tokens > 200000 maximum".to_owned());
+
+    reg.set_responses(vec![
+        // Attempt 1: overflow -> triggers single auto-compaction + retry
+        FauxResponseStep::Static(overflow_err.clone()),
+        // Compaction summary (history + split-turn prefix)
+        FauxResponseStep::Static(faux_text_message("## Goal\nCompacted once")),
+        FauxResponseStep::Static(faux_text_message(
+            "## Original Request\nCompacted split turn prefix",
+        )),
+        // Attempt 2 (post-compaction retry): overflows AGAIN after compaction timestamp -> must stop!
+        FauxResponseStep::Dynamic(Arc::new(move |_, _, _| {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            overflow_err.clone()
+        })),
+    ]);
+
+    let sm = SessionManager::in_memory("/proj", None, None).unwrap();
+    let mut opts = AgentSessionOptions::new("/proj", reg.model.clone(), models.clone(), sm);
+    opts.compaction_settings = CompactionSettings {
+        enabled: true,
+        reserve_tokens: 1000,
+        keep_recent_tokens: 20,
+    };
+    opts.retry_policy = RetryPolicy {
+        enabled: false,
+        ..RetryPolicy::default()
+    };
+
+    let session = AgentSession::new(opts).unwrap();
+    let events = Arc::new(Mutex::new(Vec::<AgentSessionEvent>::new()));
+    let ev_clone = events.clone();
+    let _unsub = session.subscribe(Arc::new(move |ev| {
+        ev_clone.lock().unwrap().push(ev);
+    }));
+
+    session
+        .with_session_manager_mut(|sm| {
+            sm.append_message(AgentMessage::User(UserMessage::new(
+                "prior turn 1 question ".repeat(40),
+            )))?;
+            sm.append_message(AgentMessage::Assistant(faux_text_message(
+                "prior turn 1 answer ".repeat(40),
+            )))?;
+            sm.append_message(AgentMessage::User(UserMessage::new(
+                "prior turn 2 question ".repeat(40),
+            )))?;
+            sm.append_message(AgentMessage::Assistant(faux_text_message(
+                "prior turn 2 answer ".repeat(40),
+            )))
+        })
+        .unwrap();
+    session.refresh_finalized_context();
+
+    session
+        .prompt("trigger double overflow ".repeat(20), None)
+        .await
+        .unwrap();
+
+    let recorded = events.lock().unwrap().clone();
+    let successful_compactions = recorded
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                AgentSessionEvent::CompactionEnd {
+                    reason: CompactionReason::Overflow,
+                    result: Some(_),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(
+        successful_compactions, 1,
+        "overflow recovery must compact at most once; recorded={recorded:#?}"
+    );
+
+    assert!(
+        recorded.iter().any(|e| matches!(
+            e,
+            AgentSessionEvent::CompactionEnd {
+                reason: CompactionReason::Overflow,
+                result: None,
+                aborted: false,
+                will_retry: false,
+                error_message: Some(msg),
+            } if msg.contains("after one compact-and-retry attempt")
+        )),
+        "second overflow must emit explicit failure event and stop"
+    );
+}
+
+#[tokio::test]
+async fn threshold_compaction_calibrates_500k_window_boundary() {
+    let models = Arc::new(Models::default());
+    let reg = register_faux_provider(&models);
+    let mut big_model = reg.model.clone();
+    big_model.context_window = 500_000;
+
+    let mut at_boundary = faux_text_message("at 500k boundary reply");
+    at_boundary.usage = Usage {
+        input: 470_000,
+        output: 10_000,
+        cache_read: 0,
+        cache_write: 0,
+        cache_write_1h: None,
+        reasoning: None,
+        total_tokens: 480_000,
+        cost: UsageCost::default(),
+    };
+
+    let mut over_threshold = faux_text_message("over 500k threshold reply");
+    over_threshold.usage = Usage {
+        input: 470_001,
+        output: 10_000,
+        cache_read: 0,
+        cache_write: 0,
+        cache_write_1h: None,
+        reasoning: None,
+        total_tokens: 480_001,
+        cost: UsageCost::default(),
+    };
+
+    reg.set_responses(vec![
+        FauxResponseStep::Static(at_boundary),
+        FauxResponseStep::Static(over_threshold),
+        FauxResponseStep::Static(faux_text_message("## Goal\nCompacted at 500K boundary")),
+    ]);
+
+    let sm = SessionManager::in_memory("/proj", None, None).unwrap();
+    let mut opts = AgentSessionOptions::new("/proj", big_model, models.clone(), sm);
+    opts.compaction_settings = CompactionSettings {
+        enabled: true,
+        reserve_tokens: 20_000,
+        keep_recent_tokens: 20,
+    };
+
+    let session = AgentSession::new(opts).unwrap();
+    let events = Arc::new(Mutex::new(Vec::<AgentSessionEvent>::new()));
+    let ev_clone = events.clone();
+    let _unsub = session.subscribe(Arc::new(move |ev| {
+        ev_clone.lock().unwrap().push(ev);
+    }));
+
+    session
+        .with_session_manager_mut(|sm| {
+            sm.append_message(AgentMessage::User(UserMessage::new(
+                "seed history 1 ".repeat(40),
+            )))?;
+            sm.append_message(AgentMessage::Assistant(faux_text_message(
+                "seed answer 1 ".repeat(40),
+            )))?;
+            sm.append_message(AgentMessage::User(UserMessage::new(
+                "seed history 2 ".repeat(40),
+            )))?;
+            sm.append_message(AgentMessage::Assistant(faux_text_message(
+                "seed answer 2 ".repeat(40),
+            )))
+        })
+        .unwrap();
+    session.refresh_finalized_context();
+
+    // 480,000 == (500,000 - 20,000) -> strict `>` MUST NOT trigger compaction
+    session.prompt("turn at boundary", None).await.unwrap();
+    assert!(
+        !events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, AgentSessionEvent::CompactionStart { .. })),
+        "480,000 tokens must not trigger threshold compaction on 500K/20K window (strict >)"
+    );
+
+    // 480,001 > (500,000 - 20,000) -> MUST trigger Threshold compaction without retry
+    session.prompt("turn over threshold", None).await.unwrap();
+    assert!(
+        events.lock().unwrap().iter().any(|e| matches!(
+            e,
+            AgentSessionEvent::CompactionEnd {
+                reason: CompactionReason::Threshold,
+                aborted: false,
+                will_retry: false,
+                result: Some(_),
+                ..
+            }
+        )),
+        "480,001 tokens must trigger threshold compaction on 500K/20K window"
+    );
+}
