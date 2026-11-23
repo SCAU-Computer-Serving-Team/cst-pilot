@@ -3537,7 +3537,7 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
   .draft-thumb-remove:active { transform: scale(0.92); }
 
   .sidebar-specimen {
-    width: 232px;
+    width: 248px;
     background: var(--bg-shell);
     border-radius: var(--radius-row);
     box-shadow: inset 0 0 0 1px var(--border-subtle), var(--craft-lift);
@@ -3549,8 +3549,8 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
   }
   .sidebar-row-item {
     position: relative;
-    height: 32px;
-    padding: 0 8px;
+    height: 36px;
+    padding: 0 12px;
     border-radius: 4px;
     display: flex;
     align-items: center;
@@ -3561,8 +3561,8 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
   .sidebar-row-item[data-selected="true"] { background: var(--bg-item-active); }
   .sidebar-row-chk {
     position: absolute;
-    left: 8px;
-    top: 8px;
+    left: 12px;
+    top: 10px;
     opacity: 0;
     transform: scale(0.9);
     pointer-events: none;
@@ -3998,7 +3998,8 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
       "tooltipGroup": { "initialDelayMs": 400, "openMs": 150, "cooldownMs": 300, "adjacentSwitchMs": 0, "easing": "--ease-out", "props": ["opacity", "transform"], "reducedMotion": "0ms" },
       "welcomeStagger": { "stepMs": 40, "maxTotalMs": 300, "itemDurationMs": 220, "easing": "--ease-out", "props": ["opacity", "transform"], "from": "translateY(10px)", "oneShotPerSession": true, "reducedMotion": "0ms" },
       "streamAppend": { "containerReplay": false, "preserveSelection": true, "noBlur": true, "reducedMotion": "static" },
-      "runningLight": { "cycleMs": 2000, "easing": "linear", "props": ["--running-glyph-strength"], "window": "5 glyphs", "pauseOnHidden": true, "reducedMotion": "freeze static" },
+      "specialCardEnter": { "duration": "240ms", "easing": "--ease-out", "props": ["transform", "opacity"], "from": "translateY(14px)", "oneShotPerCard": true, "reducedMotion": "0ms" },
+      "runningLight": { "cycleMs": 2000, "easing": "linear", "props": ["--running-glyph-strength"], "window": "5 glyphs", "pauseOnHidden": true, "digitOnlyRoll": "仅变更十进制位垂直滚动(180ms ease-out ±6px)，静态前缀与未变位保持静止", "reducedMotion": "freeze static" },
       "shaderFreeze": { "activeFps": "vsync 60-240Hz", "freezeFps": 0, "freezeTriggers": ["leave-page", "window-blur", "reduced-motion", "sys(gpu)/sys(sensor) sampling"] }
     },
     "primitiveToStory": {
@@ -4075,6 +4076,7 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     "CpxAu":  "816 × 自适应",
     "b0aK5":  "自适应 × 24 px",
     "VS7mw":  "自适应 × 24 px",
+    "ln9GA":  "816 × 自适应",
     "BuK2W":  "816 × 28 px",
     "E9dWo9": "816 × 自适应",
     "VM8ko":  "816 × 自适应",
@@ -4125,8 +4127,9 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     "composer":             { "category": "app",      "order": 7 },
     "user-message":         { "category": "app",      "order": 8 },
     "message-actions":      { "category": "app",      "order": 9, "zh": "消息操作栏", "en": "Message Actions", "keywords": "气泡 助手 扫光" },
-    "session-row":          { "category": "app",      "order": 10 },
-    "info-row":             { "category": "app",      "order": 11 },
+    "compaction-summary":   { "category": "app",      "order": 10, "zh": "上下文压缩消息", "en": "Compaction Summary", "keywords": "压缩 compact 折叠 摘要" },
+    "session-row":          { "category": "app",      "order": 11 },
+    "info-row":             { "category": "app",      "order": 12 },
     "tool-status-row":      { "category": "tools",    "order": 1 },
     "tool-summary-card":    { "category": "tools",    "order": 2, "zh": "概览卡片",   "en": "Summary Card",    "keywords": "普通工具" },
     "tool-ranking-card":    { "category": "tools",    "order": 3, "zh": "排行卡片",   "en": "Ranking Card",    "keywords": "普通工具" },
@@ -4169,6 +4172,7 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     "composer":             ["focus", "flip", "popover", "pageSlide"],
     "user-message":         ["hover", "modal"],
     "message-actions":      ["runningLight", "iconSwap", "streamAppend", "hover"],
+    "compaction-summary":   ["collapse", "chevron", "iconSwap", "runningLight"],
     "session-row":          ["hover"],
     "info-row":             [],
     "tool-status-row":      ["collapse", "chevron", "runningLight"],
@@ -5137,66 +5141,69 @@ const STORIES = [
       `;
 
       stageEl.innerHTML = `
-        <div class="sidebar-specimen" id="sb00a-box" data-pen-id="L081M1" style="width:232px;min-height:520px;padding:0 16px 12px 16px;">
+        <div class="sidebar-specimen" id="sb00a-box" data-pen-id="L081M1" style="width:248px;min-height:540px;padding:0 16px 12px 16px;">
           <div style="display:flex;flex-direction:column;gap:8px;width:100%;">
             <!-- b50Q7Y 侧栏首行 · 40px -->
             <div style="height:40px;padding:0 0 0 8px;display:flex;align-items:center;justify-content:space-between;">
               <span style="font-size:16px;font-weight:600;color:var(--text-primary);">CST Pilot</span>
-              <div style="display:flex;align-items:center;gap:4px;">
-                <button type="button" class="btn-icon sm-28" id="sb00a-collapse-btn" title="收起侧栏">${icon("panel-left", 16)}</button>
-                <button type="button" class="btn-icon sm-28" id="sb00a-new-btn" style="color:var(--text-primary);" title="新建对话">${icon("square-pen", 16)}</button>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <button type="button" class="btn-icon" id="sb00a-collapse-btn" style="width:32px;height:32px;" title="收起侧栏">${icon("panel-left", 18)}</button>
+                <button type="button" class="btn-icon" id="sb00a-new-btn" style="width:32px;height:32px;color:var(--text-primary);" title="新建对话">${icon("square-pen", 18)}</button>
               </div>
             </div>
 
             <!-- pQpX5 侧栏导航与历史 · gap 16px -->
             <div style="display:flex;flex-direction:column;gap:16px;">
-              <!-- oq4G4 搜索记录框 · 32px $border-hairline (组件内实时过滤会话) -->
-              <div class="sb-sidebar-search" id="sb00a-search-box" style="height:32px;padding:0 8px;">
-                <span style="color:var(--text-secondary);display:inline-flex;flex-shrink:0;">${icon("search", 16)}</span>
-                <input type="text" id="sb00a-search-input" placeholder="搜索" autocomplete="off" style="font-size:14px;" />
-                <button type="button" class="btn-icon xs-24" id="sb00a-search-clear" style="display:none;" aria-label="清空">${icon("x", 13)}</button>
+              <!-- oq4G4 搜索记录框 · 36px $border-hairline (组件内实时过滤会话) -->
+              <div class="sb-sidebar-search" id="sb00a-search-box" style="height:36px;padding:0 12px;">
+                <span style="color:var(--text-secondary);display:inline-flex;flex-shrink:0;">${icon("search", 18)}</span>
+                <input type="text" id="sb00a-search-input" placeholder="搜索" autocomplete="off" style="font-size:16px;" />
+                <button type="button" class="btn-icon xs-24" id="sb00a-search-clear" style="display:none;" aria-label="清空">${icon("x", 14)}</button>
                 <span id="sb00a-search-kbd" style="font-size:12px;color:var(--text-muted);flex-shrink:0;">Ctrl+K</span>
               </div>
 
               <!-- WKJAy 主功能导航 · 仪表盘 / 全部会话 -->
-              <div style="display:flex;flex-direction:column;gap:4px;">
-                <button type="button" class="sidebar-row-item" id="sb00a-nav-dash" data-selected="false" style="gap:8px;">
-                  <span style="color:var(--text-secondary);display:inline-flex;">${icon("layout-dashboard", 16)}</span>
-                  <span style="font-size:14px;color:var(--text-primary);">仪表盘</span>
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                <button type="button" class="sidebar-row-item" id="sb00a-nav-dash" data-selected="false" style="gap:12px;">
+                  <span style="color:var(--text-secondary);display:inline-flex;">${icon("layout-dashboard", 18)}</span>
+                  <span style="font-size:16px;color:var(--text-primary);">仪表盘</span>
                 </button>
-                <button type="button" class="sidebar-row-item" id="sb00a-nav-all" data-selected="false" style="gap:8px;">
-                  <span style="color:var(--text-secondary);display:inline-flex;">${icon("history", 16)}</span>
-                  <span style="font-size:14px;color:var(--text-primary);">全部会话</span>
+                <button type="button" class="sidebar-row-item" id="sb00a-nav-all" data-selected="false" style="gap:12px;">
+                  <span style="color:var(--text-secondary);display:inline-flex;">${icon("history", 18)}</span>
+                  <span style="font-size:16px;color:var(--text-primary);">全部会话</span>
                 </button>
               </div>
 
               <!-- CzUNm 最近会话组 -->
-              <div style="display:flex;flex-direction:column;gap:12px;">
-                <div style="height:24px;padding:0 8px;display:flex;align-items:center;justify-content:space-between;">
-                  <span style="font-size:12px;font-weight:500;color:var(--text-muted);">最近</span>
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <div style="height:28px;padding:0 12px;display:flex;align-items:center;justify-content:space-between;">
+                  <span style="font-size:16px;font-weight:500;color:var(--text-muted);">最近</span>
                   <div style="display:inline-flex;align-items:center;gap:8px;">
-                    <button type="button" id="sb00a-sel-all" class="inline-disclosure" style="display:none;font-size:12px;">全选</button>
-                    <button type="button" id="sb00a-del-inline" style="display:none;font-size:12px;color:var(--status-danger);">删除</button>
+                    <button type="button" id="sb00a-sel-all" class="inline-disclosure" style="display:none;font-size:16px;">全选</button>
+                    <button type="button" id="sb00a-del-inline" style="display:none;font-size:16px;color:var(--status-danger);">删除</button>
                   </div>
                 </div>
-                <div id="sb00a-list" style="display:flex;flex-direction:column;gap:4px;"></div>
+                <div id="sb00a-list" style="display:flex;flex-direction:column;gap:6px;"></div>
               </div>
             </div>
           </div>
 
-          <!-- fMdf9 账户与设置 · 20x20 T 头像 + Tim2354 + 设置图标 -->
+          <!-- fMdf9 账户与设置 · 24x24 T 头像 + Tim2354 + 右下角设置菜单按钮 -->
           <div style="position:relative;width:100%;">
-            <div style="height:32px;padding:0 2px 0 8px;border-radius:4px;display:flex;align-items:center;justify-content:space-between;">
-              <button type="button" id="sb00a-acct-btn" style="display:inline-flex;align-items:center;gap:8px;">
-                <span style="width:20px;height:20px;border-radius:999px;background:var(--bg-item-active);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--text-primary);">T</span>
-                <span style="font-size:14px;font-weight:500;color:var(--text-primary);">Tim2354</span>
+            <div style="height:36px;padding:0 2px 0 12px;border-radius:4px;display:flex;align-items:center;justify-content:space-between;">
+              <button type="button" id="sb00a-acct-btn" style="display:inline-flex;align-items:center;gap:12px;">
+                <span style="width:24px;height:24px;border-radius:999px;background:var(--bg-item-active);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--text-primary);">T</span>
+                <span style="font-size:16px;font-weight:500;color:var(--text-primary);">Tim2354</span>
               </button>
-              <button type="button" class="btn-icon sm-28" id="sb00a-gear-btn" title="设置">${icon("settings", 16)}</button>
+              <button type="button" class="btn-icon" id="sb00a-gear-btn" style="width:32px;height:32px;" title="菜单">${icon("settings", 18)}</button>
             </div>
-            <div class="tier-2-glass pop-surface context-menu" id="sb00a-acct-pop" data-dir="up" data-align="left" data-open="false" style="position:absolute;left:0;bottom:38px;z-index:25;">
+            <div class="tier-2-glass pop-surface context-menu" id="sb00a-acct-pop" data-dir="up" data-align="left" data-open="false" style="position:absolute;left:248px;bottom:0;z-index:25;">
+              <div style="padding:8px;font-size:14px;font-weight:500;color:var(--text-primary);">Tim2354 · 2024011354</div>
+              <div class="menu-sep"></div>
               <button type="button" class="menu-row" data-acct-act="账号信息"><span class="menu-row-left">${icon("user", 15)}<span>账号信息</span></span></button>
               <button type="button" class="menu-row" data-acct-act="设置"><span class="menu-row-left">${icon("settings", 15)}<span>设置</span></span></button>
               <button type="button" class="menu-row" data-acct-act="主题外观"><span class="menu-row-left">${icon("sun", 15)}<span>主题</span></span><span style="font-size:12px;color:var(--text-muted);">跟随系统</span></button>
+              <button type="button" class="menu-row" data-acct-act="反馈问题"><span class="menu-row-left">${icon("info", 15)}<span>反馈问题</span></span></button>
               <div class="menu-sep"></div>
               <button type="button" class="menu-row danger" data-acct-act="退出 CST Pilot"><span class="menu-row-left">${icon("x", 15)}<span>退出 CST Pilot</span></span></button>
             </div>
@@ -5243,7 +5250,7 @@ const STORIES = [
           return `
             <button type="button" class="sidebar-row-item" data-row-id="${it.id}" data-selected="${isSel}">
               <span class="chk-box sidebar-row-chk" data-checked="${isChecked}">${icon("check", 11)}</span>
-              <span class="sidebar-row-label" style="font-size:14px;text-align:left;color:${textColor};font-weight:${weight};">${escapeHtml(it.title)}</span>
+              <span class="sidebar-row-label" style="font-size:16px;text-align:left;color:${textColor};font-weight:${weight};">${escapeHtml(it.title)}</span>
             </button>
           `;
         }).join("");
@@ -5330,8 +5337,9 @@ const STORIES = [
         renderRows();
         sInp.focus();
       });
-      stageEl.querySelector("#sb00a-gear-btn").addEventListener("click", () => {
-        showToast({ text: "打开应用设置页（组件模拟）" });
+      stageEl.querySelector("#sb00a-gear-btn").addEventListener("click", (e) => {
+        e.stopPropagation();
+        acctPop.dataset.open = acctPop.dataset.open === "true" ? "false" : "true";
       });
       delBtn.addEventListener("click", (e) => {
         openAlertDialog({
@@ -5442,15 +5450,16 @@ const STORIES = [
           <div data-pen-id="${collapsed ? "MKlBE" : "GElS8"}" style="width:100%;height:40px;background:var(--bg-shell);border:1px solid var(--border-subtle);border-radius:8px;display:flex;align-items:center;justify-content:${collapsed ? "space-between" : "flex-end"};padding-left:${collapsed ? "24px" : "12px"};overflow:hidden;">
             ${collapsed ? `
               <div style="display:flex;align-items:center;gap:4px;height:40px;">
-                <span style="font-size:16px;font-weight:600;color:var(--text-primary);">CST Pilot</span>
+                <span style="font-size:16px;font-weight:600;color:var(--text-primary);padding-right:4px;">CST Pilot</span>
                 <button type="button" class="btn-icon sm-28" id="tb-exp" title="展开侧栏">${icon("panel-left", 16)}</button>
-                <span style="width:1px;height:14px;background:var(--border-strong);margin:0 2px;"></span>
-                <button type="button" class="btn-ghost" style="height:28px;padding:0 8px;gap:6px;color:var(--text-primary);font-weight:500;">
-                  <span style="color:var(--text-secondary);display:inline-flex;">${icon("history", 14)}</span>
+                <span style="width:1px;height:14px;background:var(--border-strong);margin:0 4px;"></span>
+                <button type="button" class="btn-ghost" style="height:28px;padding:0 6px 0 8px;gap:6px;color:var(--text-primary);font-weight:500;">
+                  <span style="color:var(--text-secondary);display:inline-flex;">${icon("message-square", 16)}</span>
                   <span>最近会话</span>
                   <span style="color:var(--text-secondary);display:inline-flex;">${icon("chevron-down", 12)}</span>
                 </button>
-                <button type="button" class="btn-icon sm-28" style="color:var(--text-primary);" title="新对话">${icon("square-pen", 16)}</button>
+                <button type="button" class="btn-icon sm-28" title="会话更多操作">${icon("ellipsis-vertical", 16)}</button>
+                <button type="button" class="btn-icon sm-28" title="新对话">${icon("square-pen", 16)}</button>
                 <button type="button" class="btn-icon sm-28" title="仪表盘">${icon("layout-dashboard", 16)}</button>
               </div>
             ` : ""}
@@ -5524,14 +5533,14 @@ const STORIES = [
     states: [
       { name: "展开态右栏", sub: "GElS8", html: `<div style="height:28px;padding:2px;border-radius:6px;background:var(--bg-surface);display:inline-flex;gap:2px;font-size:13px;"><span style="height:24px;padding:0 8px;border-radius:4px;background:var(--bg-elevated);border:1px solid var(--border-subtle);display:inline-flex;align-items:center;gap:4px;font-weight:500;">${icon("monitor",13)}图形</span><span style="height:24px;padding:0 8px;color:var(--text-secondary);display:inline-flex;align-items:center;gap:4px;">${icon("square-terminal",13)}终端</span></div>` },
       { name: "网页入口", sub: "w8L6zJ", html: `<span class="btn-ghost" style="height:28px;padding:0 8px;gap:4px;">${icon("globe",14)}<span>网页</span>${icon("arrow-up-right",12)}</span>` },
-      { name: "收起态抽屉钮", sub: "MKlBE · G3Ro9", html: `<span class="btn-ghost" style="height:28px;padding:0 8px;gap:6px;color:var(--text-primary);font-weight:500;">${icon("history",14)}<span>最近会话</span>${icon("chevron-down",12)}</span>` }
+      { name: "收起态会话钮", sub: "MKlBE · G3Ro9", html: `<span class="btn-ghost" style="height:28px;padding:0 6px 0 8px;gap:6px;color:var(--text-primary);font-weight:500;">${icon("message-square",16)}<span>最近会话</span>${icon("chevron-down",12)}</span>` }
     ],
     hosts: {
-      gpui: { note: "桌面端无边框窗口顶部 40px 栏，收起侧栏时自动切换为 MKlBE 补齐最近会话抽屉、头像与设置入口。", html: `<span class="mono" style="font-size:12px;">GElS8 (1048×40) ↔ MKlBE (1280×40)</span>` },
+      gpui: { note: "桌面端无边框窗口顶部 40px 栏，收起侧栏时自动切换为 MKlBE；处于对话工作区时隐藏 HUkqs 并将当前会话标题移入 G3Ro9（限 5 字且第 5 字右半区羽化渐变），紧右侧显示会话更多操作钮（oCuU3，ellipsis-vertical），左侧所有工具图标统一 16px 与 $text-secondary 光学观感。", html: `<span class="mono" style="font-size:12px;">GElS8 (1048×40) ↔ MKlBE (1280×40)</span>` },
       web: { note: "浏览器环境不渲染右侧 T1U1Xf 窗口三键与「网页 ↗」跳转钮。", html: `<span class="mono" style="font-size:12px;">省略窗口控制三键与网页自跳入口</span>` }
     },
     contracts: [
-      ["侧栏收起补偿", "侧栏收起后顶栏由 GElS8 切为 MKlBE，左侧补齐最近会话抽屉钮与新对话/仪表盘，右侧补齐 T 头像与设置钮", "全部关键入口零丢失"],
+      ["侧栏收起补偿", "侧栏收起后顶栏由 GElS8 切为 MKlBE，左侧补齐会话下拉钮（对话页展示当前 5 字羽化标题，其他页展示最近会话）、会话更多操作钮（对话页展示）、新对话与仪表盘，右侧补齐 T 头像与设置钮", "下拉菜单与会话更多菜单均左对齐触发按钮并从下方贴合展开"],
       ["开启网页锁定", "点击「网页 ↗」前检查未发草稿；开启后桌面覆盖 WebActive 毛玻璃遮罩锁死桌面写操作", "点击遮罩中央退出网页端即刻恢复"]
     ]
   },
@@ -5578,10 +5587,10 @@ const STORIES = [
       stageEl.querySelector("#cap-close").addEventListener("click", (e) => {
         if (busyTask) {
           openAlertDialog({
-            title: "任务运行中，确认退出？",
-            desc: "退出前将有序终止后台正在执行的诊断工具。",
-            confirmText: "停止任务并退出",
-            cancelText: "继续使用",
+            title: "退出 CST Pilot？",
+            desc: "有运行中的任务，退出将立即中断。",
+            confirmText: "退出",
+            cancelText: "取消",
             danger: true,
             defaultSafeFocus: true,
             triggerEl: e.currentTarget,
@@ -5708,11 +5717,15 @@ const STORIES = [
       function render() {
         const v = variants[idx];
         host.innerHTML = `
-          <div data-pen-id="xWJOf" style="width:100%;height:44px;background:var(--bg-workspace);border-bottom:1px solid var(--border-subtle);padding:0 16px 0 24px;display:flex;align-items:center;justify-content:space-between;">
-            <div style="display:flex;align-items:center;gap:12px;">
+          <div data-pen-id="xWJOf" style="width:100%;height:44px;background:var(--bg-workspace);border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;">
+            <div style="flex:1;display:flex;align-items:center;padding-left:24px;">
+              <button type="button" class="btn-icon sm-28" aria-label="返回上一个场景">${icon("arrow-left", 16)}</button>
+            </div>
+            <div style="width:min(816px, calc(100% - 120px));display:flex;align-items:center;gap:12px;">
               <span style="color:var(--text-secondary);display:inline-flex;">${icon(v.icon, 16)}</span>
               <span class="cjk" style="font-size:16px;font-weight:600;color:var(--text-primary);">${v.title}</span>
             </div>
+            <div style="flex:1;display:flex;align-items:center;justify-content:flex-end;padding-right:16px;"></div>
           </div>
         `;
       }
@@ -5749,12 +5762,12 @@ const STORIES = [
     thumb: `
       <div style="height:32px;border-bottom:1px solid var(--border-subtle);display:inline-flex;align-items:center;gap:16px;font-size:12px;">
         <span style="color:var(--text-secondary);">常规</span>
-        <span style="height:32px;display:inline-flex;align-items:center;border-bottom:2px solid var(--accent-solid);font-weight:600;">模型服务</span>
+        <span style="height:32px;display:inline-flex;align-items:center;border-bottom:2px solid var(--accent-solid);font-weight:600;">提供商</span>
         <span style="color:var(--text-secondary);">模型偏好</span>
       </div>
     `,
     mount(stageEl, controlsEl) {
-      const tabs = ["常规", "模型服务", "模型偏好", "快捷键"];
+      const tabs = ["常规", "提供商", "模型偏好", "快捷键"];
       let activeIdx = 1;
       let dirty = false;
 
@@ -5824,7 +5837,7 @@ const STORIES = [
       requestAnimationFrame(syncTabs);
     },
     states: [
-      { name: "激活项", sub: "16px/600 + 2px Line", html: `<div style="height:40px;display:inline-flex;align-items:center;border-bottom:2px solid var(--accent-solid);font-size:16px;font-weight:600;">模型服务</div>` },
+      { name: "激活项", sub: "16px/600 + 2px Line", html: `<div style="height:40px;display:inline-flex;align-items:center;border-bottom:2px solid var(--accent-solid);font-size:16px;font-weight:600;">提供商</div>` },
       { name: "未激活项", sub: "16px/400", html: `<div style="height:40px;display:inline-flex;align-items:center;font-size:16px;color:var(--text-secondary);">常规</div>` }
     ],
     hosts: {
@@ -6319,7 +6332,7 @@ const STORIES = [
       { name: "禁用态", sub: "Disabled", html: `<button class="tier-1-btn-outline" disabled><span style="color:var(--text-secondary);display:inline-flex;">${icon("plus",16)}</span><span>次要操作</span></button>` }
     ],
     hosts: {
-      gpui: { note: "用于取消、添加服务与拉取模型等次级动作；弹窗内取消钮隐藏左侧加号图标。", html: `<div style="display:flex;gap:8px;"><button class="tier-1-btn-outline"><span style="color:var(--text-secondary);display:inline-flex;">${icon("plus",16)}</span><span>次要操作</span></button><button class="tier-1-btn-outline"><span>取消</span></button></div>` },
+      gpui: { note: "用于取消、添加提供商与拉取模型等次级动作；弹窗内取消钮隐藏左侧加号图标。", html: `<div style="display:flex;gap:8px;"><button class="tier-1-btn-outline"><span style="color:var(--text-secondary);display:inline-flex;">${icon("plus",16)}</span><span>次要操作</span></button><button class="tier-1-btn-outline"><span>取消</span></button></div>` },
       web: { note: "顶沿附 1px 内高光，浅深双主题自动切换描边对比度。", html: `<button class="tier-1-btn-outline"><span>取消</span></button>` }
     },
     contracts: [
@@ -6651,7 +6664,7 @@ const STORIES = [
       { name: "输入聚焦", sub: "Focused", html: `<div class="search-box" data-force="focus" style="width:200px;padding:0 12px;"><span style="color:var(--text-muted);display:inline-flex;">${icon("search",16)}</span><span style="font-size:14px;">deepseek</span></div>` }
     ],
     hosts: {
-      gpui: { note: "280×32px 紧凑实时过滤框，用于全部会话与模型服务列表。", html: `<span class="mono" style="font-size:12px;">gVNCA · 280 × 32px</span>` },
+      gpui: { note: "280×32px 紧凑实时过滤框，用于全部会话与提供商列表。", html: `<span class="mono" style="font-size:12px;">gVNCA · 280 × 32px</span>` },
       web: { note: "两段式 Esc：有词先清词，无词退焦点；组合态内不打断拼音。", html: `<span class="mono" style="font-size:12px;">两段式 Esc + IME 保护</span>` }
     },
     contracts: [
@@ -7505,6 +7518,65 @@ const STORIES = [
     contracts: [
       ["单字素扫光与停帧", "按 Unicode 字素推进五字明度权重，完成后冻结为「已工作 N 秒」并解锁底部 VS7mw", "减少动态开启时禁用扫光"]
     ]
+  },
+
+  /* @story:compaction-summary | pen:ln9GA | cat:chat */
+  {
+    id: "compaction-summary",
+    category: "00D",
+    zh: "上下文压缩消息",
+    en: "Compaction Summary",
+    penIds: ["ln9GA"],
+    meta: [
+      ["母版尺寸", "816 × 自适应 · 折叠头 32px 底边 1px $bg-surface"],
+      ["默认状态", "作为 Assistant 回复块插入消息流，默认折叠，点击展开摘要正文"]
+    ],
+    mount(stageEl, controlsEl) {
+      let open = false;
+      controlsEl.innerHTML = "";
+      stageEl.classList.add("stretch");
+      stageEl.innerHTML = `
+        <div style="width:100%;max-width:816px;margin:0 auto;">
+          <button type="button" id="cs-row" data-pen-id="ln9GA" class="inline-disclosure" style="width:100%;height:32px;justify-content:space-between;border-bottom:1px solid var(--bg-surface);">
+            <span style="display:inline-flex;align-items:center;gap:8px;">
+              <span style="color:var(--text-secondary);display:inline-flex;">${icon("minimize-2", 16)}</span>
+              <span class="cjk" style="font-size:16px;font-weight:500;color:var(--text-primary);">上下文已压缩</span>
+              <span class="cjk" style="font-size:14px;color:var(--text-muted);">压缩前 148k tokens</span>
+              <span id="cs-chev" style="color:var(--text-secondary);display:inline-flex;transition:transform var(--normal) var(--ease-out);">${icon("chevron-right", 16)}</span>
+            </span>
+            <span class="mono" style="font-size:14px;color:var(--text-secondary);">14:35</span>
+          </button>
+          <div class="collapse-box" id="cs-body" data-open="false" style="height:0;opacity:0;">
+            <div style="margin-top:12px;padding:12px 16px;border-radius:4px;background:var(--bg-surface);font-size:14px;line-height:1.57;color:var(--text-primary);display:flex;flex-direction:column;gap:8px;">
+              <div>已完成 C 盘空间与硬件概况排查：当前系统盘剩余 18.4 GB（已用 92.2%），主要占用为休眠文件 hiberfil.sys（12.8 GB）与用户目录软件缓存（30.8 GB）。</div>
+              <div style="color:var(--text-secondary);">待继续跟进：已生成清理命令清单但尚未执行，下一步排查开机启动慢与后台高负载进程。</div>
+            </div>
+            <div style="margin-top:8px;height:24px;display:flex;align-items:center;">
+              <button type="button" class="btn-icon xs-24" id="cs-copy" title="复制压缩摘要">${icon("copy", 14)}</button>
+            </div>
+          </div>
+        </div>
+      `;
+      const chev = stageEl.querySelector("#cs-chev");
+      const body = stageEl.querySelector("#cs-body");
+      stageEl.querySelector("#cs-row").addEventListener("click", () => {
+        open = !open;
+        chev.style.transform = open ? "rotate(90deg)" : "rotate(0deg)";
+        toggleCollapse(body, open);
+      });
+      stageEl.querySelector("#cs-copy").addEventListener("click", () => showToast({ text: "已复制压缩摘要" }));
+    },
+    states: [
+      { name: "默认折叠", sub: "ln9GA (32px)", html: `<div style="width:280px;height:32px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--bg-surface);font-size:14px;"><span style="display:inline-flex;align-items:center;gap:6px;">${icon("minimize-2",15)}<span style="font-weight:500;">上下文已压缩</span><span style="font-size:12px;color:var(--text-muted);">148k</span></span><span class="mono" style="font-size:12px;color:var(--text-secondary);">14:35</span></div>` },
+      { name: "压缩进行中", sub: "RunningLight", html: `<div style="display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--text-secondary);">${icon("minimize-2",15)}<span>正在压缩上下文…</span></div>` }
+    ],
+    hosts: {
+      gpui: { note: "执行 /compact 后作为 Assistant 回复块插入消息流，默认折叠，点击展开 $bg-surface 摘要正文与复制按钮。", html: `<span class="mono" style="font-size:12px;">ln9GA · 816px · 默认折叠</span>` },
+      web: { note: "与桌面端共享 compactionSummary 角色，支持默认折叠与导出展开。", html: `<span class="mono" style="font-size:12px;">SummaryEntry (compactionSummary)</span>` }
+    },
+    contracts: [
+      ["折叠展开与消息保留", "压缩完成后保留压缩前历史消息并在当前位置插入默认折叠的压缩气泡，不清空上文对话流", "进行中展示 RunningLight 扫光"]
+    ]
   }
 ,
   
@@ -7591,7 +7663,7 @@ const STORIES = [
             <span style="color:var(--status-success);display:inline-flex;padding-top:3px;">${icon("circle-check", 16)}</span>
             <span class="std-tool-line"></span>
           </div>
-          <div class="std-tool-body" style="gap:12px;">
+          <div class="std-tool-body" style="gap:8px;">
             <div style="height:22px;display:flex;align-items:center;justify-content:space-between;">
               <span style="font-size:14px;color:var(--text-secondary);">disk(space) · 已完成</span>
               <span style="display:inline-flex;align-items:center;gap:8px;">
@@ -7604,16 +7676,16 @@ const STORIES = [
               <span class="mono" style="font-size:12px;color:var(--text-secondary);">disk(scope: "space")</span>
             </div>
 
-            <div style="display:flex;flex-direction:column;gap:4px;font-size:12px;">
+            <div style="display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--text-secondary);">
               <div style="font-weight:500;color:var(--text-secondary);">卷 C:</div>
-              <div style="height:20px;display:flex;align-items:center;gap:12px;"><span style="width:72px;color:var(--text-secondary);">总容量</span><span>953.9 GB</span></div>
-              <div style="height:20px;display:flex;align-items:center;gap:12px;"><span style="width:72px;color:var(--text-secondary);">剩余</span><span>74.2 GB · 已用 92.2%</span></div>
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:72px;">总容量</span><span>953.9 GB</span></div>
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:72px;">剩余</span><span>74.2 GB · 已用 92.2%</span></div>
             </div>
 
-            <div style="display:flex;flex-direction:column;gap:4px;font-size:12px;">
+            <div style="display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--text-secondary);">
               <div style="font-weight:500;color:var(--text-secondary);">卷 D:</div>
-              <div style="height:20px;display:flex;align-items:center;gap:12px;"><span style="width:72px;color:var(--text-secondary);">总容量</span><span>1863 GB</span></div>
-              <div style="height:20px;display:flex;align-items:center;gap:12px;"><span style="width:72px;color:var(--text-secondary);">剩余</span><span>612.4 GB · 已用 67.1%</span></div>
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:72px;">总容量</span><span>1863 GB</span></div>
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:72px;">剩余</span><span>612.4 GB · 已用 67.1%</span></div>
             </div>
 
             <div>
@@ -7654,13 +7726,13 @@ const STORIES = [
     en: "Tool Ranking Card",
     penIds: ["VM8ko"],
     meta: [
-      ["母版尺寸", "宽 816px · 统计标量键宽 84px · 排行名称列宽 200px"],
-      ["母版内容", "disk(usage) · wiztree-mft · Top 3 路径与容量百分比"]
+      ["母版尺寸", "宽 816px · 统计标量键宽 84px · 排行名称列宽 160px"],
+      ["母版内容", "disk(usage) · wiztree-mft · 统一 $text-secondary 次要文字色与 18px 紧凑行距"]
     ],
     thumb: `
-      <div style="display:flex;gap:6px;font-size:10px;width:176px;">
+      <div style="display:flex;gap:6px;font-size:10px;width:176px;color:var(--text-secondary);">
         <div style="display:flex;flex-direction:column;align-items:center;"><span style="color:var(--status-success);">${icon("circle-check",11)}</span><span style="width:2px;flex:1;background:var(--border-subtle);margin-top:2px;"></span></div>
-        <div style="display:flex;flex-direction:column;gap:3px;"><span>C:\\hiberfil.sys</span><span style="color:var(--text-secondary);">25.4 GB · 10.7%</span></div>
+        <div style="display:flex;flex-direction:column;gap:2px;"><span>C:\\hiberfil.sys</span><span>25.4 GB · 10.7%</span></div>
       </div>
     `,
     mount(stageEl, controlsEl) {
@@ -7672,7 +7744,7 @@ const STORIES = [
             <span style="color:var(--status-success);display:inline-flex;padding-top:3px;">${icon("circle-check", 16)}</span>
             <span class="std-tool-line"></span>
           </div>
-          <div class="std-tool-body" style="gap:12px;">
+          <div class="std-tool-body" style="gap:8px;">
             <div style="height:22px;display:flex;align-items:center;justify-content:space-between;">
               <span style="font-size:14px;color:var(--text-secondary);">disk(usage) · 已完成</span>
               <span style="display:inline-flex;align-items:center;gap:8px;">
@@ -7685,17 +7757,17 @@ const STORIES = [
               <span class="mono" style="font-size:12px;color:var(--text-secondary);">disk(scope: "usage", path: "C:\\\\", top: 3)</span>
             </div>
 
-            <div style="display:flex;flex-direction:column;gap:4px;font-size:12px;">
-              <div style="height:20px;display:flex;align-items:center;gap:12px;"><span style="width:84px;color:var(--text-secondary);">统计方式</span><span class="mono">wiztree-mft</span></div>
-              <div style="height:20px;display:flex;align-items:center;gap:12px;"><span style="width:84px;color:var(--text-secondary);">扫描根</span><span class="mono">C:\\</span></div>
-              <div style="height:20px;display:flex;align-items:center;gap:12px;"><span style="width:84px;color:var(--text-secondary);">总大小</span><span>238.4 GB</span></div>
-              <div style="height:20px;display:flex;align-items:center;gap:12px;"><span style="width:84px;color:var(--text-secondary);">扫描统计</span><span>412850 个文件 · 用时 1.8s</span></div>
+            <div style="display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--text-secondary);">
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:84px;">统计方式</span><span class="mono">wiztree-mft</span></div>
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:84px;">扫描根</span><span class="mono">C:\\</span></div>
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:84px;">总大小</span><span>238.4 GB</span></div>
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:84px;">扫描统计</span><span>412850 个文件 · 用时 1.8s</span></div>
             </div>
 
-            <div style="display:flex;flex-direction:column;gap:4px;font-size:12px;">
-              <div style="height:24px;display:flex;align-items:center;gap:12px;"><span style="width:200px;color:var(--text-primary);">C:\\Users\\Owner\\AppData\\Local</span><span style="color:var(--text-secondary);">43.6 GB · 18.3%</span></div>
-              <div style="height:24px;display:flex;align-items:center;gap:12px;"><span style="width:200px;color:var(--text-primary);">C:\\hiberfil.sys</span><span style="color:var(--text-secondary);">25.4 GB · 10.7%</span></div>
-              <div style="height:24px;display:flex;align-items:center;gap:12px;"><span style="width:200px;color:var(--text-primary);">C:\\Windows\\Temp</span><span style="color:var(--text-secondary);">18.2 GB · 7.6%</span></div>
+            <div style="display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--text-secondary);">
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">C:\\Users\\Owner\\AppData\\Local</span><span>43.6 GB · 18.3%</span></div>
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">C:\\hiberfil.sys</span><span>25.4 GB · 10.7%</span></div>
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">C:\\Windows\\Temp</span><span>18.2 GB · 7.6%</span></div>
             </div>
 
             <div style="height:24px;display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--text-secondary);">
@@ -7707,14 +7779,14 @@ const STORIES = [
       `;
     },
     states: [
-      { name: "排行列表行", sub: "VM8ko Row", html: `<div style="display:flex;gap:12px;font-size:12px;"><span style="width:120px;">C:\\hiberfil.sys</span><span style="color:var(--text-secondary);">25.4 GB · 10.7%</span></div>` }
+      { name: "排行列表行", sub: "VM8ko Row", html: `<div style="display:flex;gap:8px;font-size:12px;color:var(--text-secondary);"><span style="width:120px;">C:\\hiberfil.sys</span><span>25.4 GB · 10.7%</span></div>` }
     ],
     hosts: {
-      gpui: { note: "上方 84px 键宽展示扫描统计标量，下方 200px 路径列配容量与占比文本，纯净无花哨彩条。", html: `<span class="mono" style="font-size:12px;">VM8ko · 84px 标量列 + 200px 排行名列</span>` },
+      gpui: { note: "上方 84px 键宽展示扫描统计标量，下方 160px 路径列配容量与占比，统一 $text-secondary 与 18px 紧凑行距。", html: `<span class="mono" style="font-size:12px;">VM8ko · 84px 标量列 + 160px 排行名列</span>` },
       web: { note: "超长路径自动省略并支持拖选复制。", html: `<span class="mono" style="font-size:12px;">双段式标量 + Top N 行</span>` }
     },
     contracts: [
-      ["列宽对齐", "标量组键宽固定 84px，排行组名称列固定 200px，保持垂直视线工整", "不额外堆叠进度条背景"]
+      ["列宽对齐", "标量组键宽固定 84px，排行组名称列固定 160px，普通工具卡正文统一降一档为 $text-secondary", "不额外堆叠进度条背景"]
     ]
   },
 
@@ -7744,7 +7816,7 @@ const STORIES = [
             <span style="color:var(--status-success);display:inline-flex;padding-top:3px;">${icon("circle-check", 16)}</span>
             <span class="std-tool-line"></span>
           </div>
-          <div class="std-tool-body" style="gap:12px;">
+          <div class="std-tool-body" style="gap:8px;">
             <div style="height:22px;display:flex;align-items:center;justify-content:space-between;">
               <span style="font-size:14px;color:var(--text-secondary);">eventlog(detail) · 已完成</span>
               <span style="display:inline-flex;align-items:center;gap:8px;">
@@ -7757,12 +7829,12 @@ const STORIES = [
               <span class="mono" style="font-size:12px;color:var(--text-secondary);">eventlog(scope: "detail", logName: "System", recordId: 48291)</span>
             </div>
 
-            <div style="display:flex;flex-direction:column;gap:4px;font-size:12px;">
-              <div style="height:20px;display:flex;align-items:center;gap:12px;"><span style="width:84px;color:var(--text-secondary);">记录号</span><span class="mono">48291</span></div>
-              <div style="height:20px;display:flex;align-items:center;gap:12px;"><span style="width:84px;color:var(--text-secondary);">级别</span><span>关键</span></div>
-              <div style="height:20px;display:flex;align-items:center;gap:12px;"><span style="width:84px;color:var(--text-secondary);">提供程序</span><span class="mono">Microsoft-Windows-Kernel-Power</span></div>
-              <div style="height:20px;display:flex;align-items:center;gap:12px;"><span style="width:84px;color:var(--text-secondary);">事件 ID</span><span class="mono">41</span></div>
-              <div style="height:20px;display:flex;align-items:center;gap:12px;"><span style="width:84px;color:var(--text-secondary);">机器</span><span class="mono">LAPTOP-LENOVO</span></div>
+            <div style="display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--text-secondary);">
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:84px;">记录号</span><span class="mono">48291</span></div>
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:84px;">级别</span><span>关键</span></div>
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:84px;">提供程序</span><span class="mono">Microsoft-Windows-Kernel-Power</span></div>
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:84px;">事件 ID</span><span class="mono">41</span></div>
+              <div style="height:18px;display:flex;align-items:center;gap:8px;"><span style="width:84px;">机器</span><span class="mono">LAPTOP-LENOVO</span></div>
             </div>
 
             <div style="padding:12px;border-radius:4px;background:var(--bg-surface);display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
@@ -8438,7 +8510,7 @@ const STORIES = [
             html: `
               <div class="settings-tabs-bar" id="meio-tabs" style="max-width:260px;gap:20px;">
                 <button type="button" class="btn-ghost" data-tab-idx="0" data-active="true" style="padding:0 2px;height:40px;color:var(--text-primary);font-weight:500;">通用</button>
-                <button type="button" class="btn-ghost" data-tab-idx="1" data-active="false" style="padding:0 2px;height:40px;">模型服务</button>
+                <button type="button" class="btn-ghost" data-tab-idx="1" data-active="false" style="padding:0 2px;height:40px;">提供商</button>
                 <button type="button" class="btn-ghost" data-tab-idx="2" data-active="false" style="padding:0 2px;height:40px;">关于</button>
                 <span class="settings-tab-line" id="meio-tab-line"></span>
               </div>

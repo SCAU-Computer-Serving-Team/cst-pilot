@@ -472,8 +472,8 @@ fn d3d_compile_hlsl(_hlsl: &str, _entry: &str, _target: &str, _source_name: &str
 
 #[cfg(windows)]
 fn embed_windows_resources(repo_root: &Path, out_dir: &Path) {
-    let logo_png_path = repo_root.join("assets/logo.png");
-    println!("cargo:rerun-if-changed={}", logo_png_path.display());
+    let app_icon_path = repo_root.join("assets/cst-pilot.ico");
+    println!("cargo:rerun-if-changed={}", app_icon_path.display());
 
     let require_admin = std::env::var_os("CARGO_FEATURE_ADMIN_MANIFEST").is_some()
         || std::env::var("CST_MANIFEST_REQUIRE_ADMIN").as_deref() == Ok("1");
@@ -524,14 +524,18 @@ fn embed_windows_resources(repo_root: &Path, out_dir: &Path) {
 
     let mut rc_content =
         String::from("#define RT_MANIFEST 24\n1 RT_MANIFEST \"cst-pilot.manifest.xml\"\n");
-    if let Ok(png_bytes) = fs::read(&logo_png_path)
-        && png_bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A])
-    {
-        let ico_bytes = wrap_png_as_ico(&png_bytes);
-        let ico_path = out_dir.join("cst-pilot.ico");
-        fs::write(&ico_path, ico_bytes).expect("write cst-pilot.ico");
-        rc_content.push_str("1 ICON \"cst-pilot.ico\"\n");
-    }
+    let ico_bytes = fs::read(&app_icon_path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", app_icon_path.display()));
+    assert!(
+        ico_bytes.len() >= 22
+            && ico_bytes[0..4] == [0, 0, 1, 0]
+            && u16::from_le_bytes([ico_bytes[4], ico_bytes[5]]) >= 1,
+        "{} is not a valid Windows ICO file",
+        app_icon_path.display()
+    );
+    let ico_path = out_dir.join("cst-pilot.ico");
+    fs::write(&ico_path, ico_bytes).expect("write cst-pilot.ico");
+    rc_content.push_str("1 ICON \"cst-pilot.ico\"\n");
 
     let rc_path = out_dir.join("cst-pilot.rc");
     fs::write(&rc_path, rc_content).expect("write cst-pilot.rc");
@@ -539,35 +543,4 @@ fn embed_windows_resources(repo_root: &Path, out_dir: &Path) {
     embed_resource::compile(&rc_path, embed_resource::NONE)
         .manifest_required()
         .expect("embed cst-pilot Windows manifest & icon");
-}
-
-#[cfg(windows)]
-fn wrap_png_as_ico(png_bytes: &[u8]) -> Vec<u8> {
-    // Parse IHDR width/height (bytes 16..24 big-endian u32; >= 256 encoded as 0 in ICONDIRENTRY)
-    let (w_byte, h_byte) = if png_bytes.len() >= 24 {
-        let w = u32::from_be_bytes([png_bytes[16], png_bytes[17], png_bytes[18], png_bytes[19]]);
-        let h = u32::from_be_bytes([png_bytes[20], png_bytes[21], png_bytes[22], png_bytes[23]]);
-        (
-            if w >= 256 { 0u8 } else { w as u8 },
-            if h >= 256 { 0u8 } else { h as u8 },
-        )
-    } else {
-        (0u8, 0u8)
-    };
-    let mut ico = Vec::with_capacity(22 + png_bytes.len());
-    // ICONDIR: reserved=0, type=1 (icon), count=1
-    ico.extend_from_slice(&0u16.to_le_bytes());
-    ico.extend_from_slice(&1u16.to_le_bytes());
-    ico.extend_from_slice(&1u16.to_le_bytes());
-    // ICONDIRENTRY (16 bytes)
-    ico.push(w_byte);
-    ico.push(h_byte);
-    ico.push(0); // color count
-    ico.push(0); // reserved
-    ico.extend_from_slice(&1u16.to_le_bytes()); // color planes
-    ico.extend_from_slice(&32u16.to_le_bytes()); // bits per pixel
-    ico.extend_from_slice(&(png_bytes.len() as u32).to_le_bytes());
-    ico.extend_from_slice(&22u32.to_le_bytes()); // offset to PNG payload
-    ico.extend_from_slice(png_bytes);
-    ico
 }
