@@ -1,7 +1,7 @@
 use super::scan::TopN;
 use super::walk::{WalkBudget, WalkLimits, linked};
 use super::win_native::{Control, rounded};
-use super::wz_index::{WzIndex, path_key};
+use super::wz_index::{WzIndex, display_path, path_key};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -44,27 +44,15 @@ pub fn run(
     let entries = fs::read_dir(target).map_err(|_| "无法列出目标目录。")?;
     let mut items = Vec::new();
     let mut budget = WalkBudget::new(limits);
+    let mut enumeration = WalkBudget::new(limits);
     let mut children_truncated = false;
     for entry in entries {
-        if control.cancel.is_cancelled() {
-            control.check()?;
-        }
-        if items.len() >= limits.entries {
+        if !enumeration.take(control)? {
             budget.incomplete = true;
             children_truncated = true;
             break;
         }
         let entry = entry.map_err(|_| "无法读取目录子项。")?;
-        if !budget.take(control)? {
-            budget.incomplete = true;
-            items.push(Item {
-                name: entry.file_name().to_string_lossy().into_owned(),
-                kind: "unknown",
-                bytes: None,
-            });
-            children_truncated = true;
-            break;
-        }
         let path = entry.path();
         let key = path_key(&path);
         let cached_dir = snapshot.as_ref().and_then(|s| s.dirs.get(&key)).copied();
@@ -77,7 +65,7 @@ pub fn run(
             Ok(meta) if meta.is_dir() => {
                 let size = if let Some(bytes) = cached_dir {
                     Some(bytes)
-                } else if !budget.incomplete {
+                } else if !budget.exhausted && budget.take(control)? {
                     Some(super::walk::size(
                         &path,
                         &mut budget,
@@ -124,7 +112,7 @@ pub fn run(
         .iter()
         .filter_map(|i| i.bytes)
         .fold(0u64, u64::saturating_add);
-    let mut result = json!({"path":target.to_string_lossy(),"totalChildren":items.len(),"totalSize":format_bytes(total),"method":if snapshot.is_some(){"wiztree-index"}else{"walk"},"entries":items.iter().take(top).map(|i|json!({"name":i.name,"type":i.kind,"bytes":i.bytes,"size":i.bytes.map(format_bytes),"pct":if budget.incomplete || total==0 {None}else{i.bytes.map(|v|rounded(v as f64/total as f64*100.0,1))}})).collect::<Vec<_>>()});
+    let mut result = json!({"path":display_path(target),"totalChildren":items.len(),"totalSize":format_bytes(total),"method":if snapshot.is_some(){"wiztree-index"}else{"walk"},"entries":items.iter().take(top).map(|i|json!({"name":i.name,"type":i.kind,"bytes":i.bytes,"size":i.bytes.map(format_bytes),"pct":if budget.incomplete || total==0 {None}else{i.bytes.map(|v|rounded(v as f64/total as f64*100.0,1))}})).collect::<Vec<_>>()});
     if items.len() > top {
         let omitted = &items[top..];
         result["omitted"] = json!({"count":omitted.len(),"unknownCount":omitted.iter().filter(|i|i.bytes.is_none()).count(),"size":format_bytes(omitted.iter().filter_map(|i|i.bytes).fold(0u64,u64::saturating_add)),"note":"已按已知大小截断，未知大小不参与排序"});

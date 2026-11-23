@@ -7,7 +7,15 @@ fn main() {
         .and_then(|n| n.to_str())
         .unwrap_or("")
         .to_owned();
-    let root = exe.parent().unwrap().to_owned();
+    let parent = exe.parent().unwrap();
+    let root = if parent
+        .file_name()
+        .is_some_and(|n| n.eq_ignore_ascii_case("app"))
+    {
+        parent.parent().unwrap().to_owned()
+    } else {
+        parent.to_owned()
+    };
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("--health-check") {
         let mode = fs::read_to_string(root.join(".state/health-mode")).unwrap_or_default();

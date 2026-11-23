@@ -30,7 +30,7 @@ impl KitFixture {
         let workspace_b = workspace_b.canonicalize().unwrap();
 
         for name in SKILL_NAMES {
-            let skill_file = root.join(format!("agent/home/skills/{name}/SKILL.md"));
+            let skill_file = root.join(format!("app/skills/{name}/SKILL.md"));
             fs::create_dir_all(skill_file.parent().unwrap()).unwrap();
             fs::write(
                 skill_file,
@@ -38,8 +38,9 @@ impl KitFixture {
             )
             .unwrap();
         }
+        fs::create_dir_all(root.join("app/prompts")).unwrap();
         fs::write(
-            root.join("agent/home/APPEND_SYSTEM.md"),
+            root.join("app/prompts/APPEND_SYSTEM.md"),
             "CST Pilot 固定诊断规则。",
         )
         .unwrap();
@@ -425,8 +426,8 @@ async fn fork_before_first_user_message_with_metadata_parent_keeps_source_lock_a
     assert_ne!(forked_id, source_id);
 
     // Source session still holds its cross-process session owner lock without interruption.
-    assert!(SessionOwnerLock::acquire(pool.agent_dir(), &source_id).is_err());
-    assert!(SessionOwnerLock::acquire(pool.agent_dir(), &forked_id).is_err());
+    assert!(SessionOwnerLock::acquire(pool.config_dir(), &source_id).is_err());
+    assert!(SessionOwnerLock::acquire(pool.config_dir(), &forked_id).is_err());
 
     // Forked session branched before the first user message, so it has 0 conversation messages and is unflushed on disk,
     // but `unflushed/<forked_id>.json` was atomically written!

@@ -93,24 +93,28 @@ fn ensure_private_parent(path: &Path) -> Result<(), String> {
 
 impl DedicatedFileLockGuard {
     pub fn acquire(target_path: &Path) -> Result<Self, String> {
-        Self::acquire_cancellable(target_path, None)
+        let lock_path = lock_path_for(target_path);
+        Self::acquire_at_cancellable(&lock_path, None)
+    }
+
+    pub fn acquire_at(lock_path: &Path) -> Result<Self, String> {
+        Self::acquire_at_cancellable(lock_path, None)
     }
 
     pub async fn acquire_async(target_path: &Path) -> Result<Self, String> {
         let cancel = tokio_util::sync::CancellationToken::new();
         let _cancel_on_drop = cancel.clone().drop_guard();
-        let path = target_path.to_owned();
-        tokio::task::spawn_blocking(move || Self::acquire_cancellable(&path, Some(&cancel)))
+        let lock_path = lock_path_for(target_path);
+        tokio::task::spawn_blocking(move || Self::acquire_at_cancellable(&lock_path, Some(&cancel)))
             .await
             .map_err(|_| "Configuration lock task failed".to_owned())?
     }
 
-    fn acquire_cancellable(
-        target_path: &Path,
+    fn acquire_at_cancellable(
+        lock_path: &Path,
         cancel: Option<&tokio_util::sync::CancellationToken>,
     ) -> Result<Self, String> {
-        let lock_path = lock_path_for(target_path);
-        ensure_private_parent(&lock_path)?;
+        ensure_private_parent(lock_path)?;
 
         let mut options = OpenOptions::new();
         options.read(true).write(true).create(true).truncate(false);
@@ -125,7 +129,7 @@ impl DedicatedFileLockGuard {
             if cancel.is_some_and(|c| c.is_cancelled()) {
                 return Err("Configuration lock cancelled".to_owned());
             }
-            match options.open(&lock_path) {
+            match options.open(lock_path) {
                 Ok(file) => break file,
                 Err(err)
                     if cfg!(windows)

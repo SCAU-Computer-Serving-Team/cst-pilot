@@ -16,6 +16,7 @@ pub struct SessionViewSnapshot {
     pub event_cursor: Option<SessionCursor>,
     pub leaf_id: Option<String>,
     pub running: bool,
+    pub compacting: bool,
     pub messages: Arc<Vec<Value>>,
     pub entries: Arc<Vec<Value>>,
     pub context_usage: Option<Value>,
@@ -38,6 +39,10 @@ impl SessionViewSnapshot {
             .and_then(parse_single_cursor);
         let leaf_id = obj.get("leafId").and_then(Value::as_str).map(str::to_owned);
         let running = obj.get("running").and_then(Value::as_bool).unwrap_or(false);
+        let compacting = obj
+            .get("compacting")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let messages_vec = obj
             .get("messages")
             .and_then(Value::as_array)
@@ -60,6 +65,7 @@ impl SessionViewSnapshot {
             event_cursor,
             leaf_id,
             running,
+            compacting,
             messages: Arc::new(messages_vec),
             entries: Arc::new(entries_vec),
             context_usage: obj.get("contextUsage").cloned(),
@@ -105,6 +111,7 @@ enum SlotState {
         buffered: Vec<BufferedSessionFrame>,
         buffered_bytes: usize,
         overflowed: bool,
+        previous: Option<(Arc<SessionViewSnapshot>, u64)>,
     },
     Ready {
         snapshot: Arc<SessionViewSnapshot>,
@@ -244,14 +251,23 @@ impl SessionStore {
                 buffered: Vec::new(),
                 buffered_bytes: 0,
                 overflowed: false,
+                previous: None,
             },
         );
         Some(generation)
     }
 
-    /// Forces `session_id` back into `Loading` under a new generation (invalidating any older in-flight HTTP fetch).
+    /// Start a new generation while continuing to serve the last usable snapshot.
     pub fn reset_to_loading(&mut self, session_id: &str) -> u64 {
         let generation = self.alloc_generation();
+        let previous = match self.slots.remove(session_id) {
+            Some(SlotState::Ready {
+                snapshot,
+                last_touched,
+            }) => Some((snapshot, last_touched)),
+            Some(SlotState::Loading { previous, .. }) => previous,
+            None => None,
+        };
         self.slots.insert(
             session_id.to_owned(),
             SlotState::Loading {
@@ -259,14 +275,25 @@ impl SessionStore {
                 buffered: Vec::new(),
                 buffered_bytes: 0,
                 overflowed: false,
+                previous,
             },
         );
         generation
     }
 
+    pub(crate) fn has_reload_fallback(&self, session_id: &str) -> bool {
+        matches!(
+            self.slots.get(session_id),
+            Some(SlotState::Loading {
+                previous: Some(_),
+                ..
+            })
+        )
+    }
+
     pub fn cancel_loading(&mut self, session_id: &str) {
-        if matches!(self.slots.get(session_id), Some(SlotState::Loading { .. })) {
-            self.slots.remove(session_id);
+        if let Some(generation) = self.loading_generation(session_id) {
+            self.cancel_loading_if_generation(session_id, generation);
         }
     }
 
@@ -275,7 +302,19 @@ impl SessionStore {
             self.slots.get(session_id),
             Some(SlotState::Loading { generation: g, .. }) if *g == generation
         ) {
-            self.slots.remove(session_id);
+            if let Some(SlotState::Loading {
+                previous: Some((snapshot, last_touched)),
+                ..
+            }) = self.slots.remove(session_id)
+            {
+                self.slots.insert(
+                    session_id.to_owned(),
+                    SlotState::Ready {
+                        snapshot,
+                        last_touched,
+                    },
+                );
+            }
             return true;
         }
         false
@@ -316,21 +355,21 @@ impl SessionStore {
         let Some(mut snap) = SessionViewSnapshot::from_http_payload(http_payload, rev)
             .filter(|snapshot| snapshot.id == session_id)
         else {
-            self.slots.remove(session_id);
             return FinishLoadingOutcome::InvalidPayload;
         };
 
-        let (buffered, overflowed) = match self.slots.remove(session_id) {
-            Some(SlotState::Loading {
-                buffered,
-                overflowed,
-                ..
-            }) => (buffered, overflowed),
-            _ => (Vec::new(), false),
+        let Some(SlotState::Loading {
+            buffered,
+            overflowed,
+            ..
+        }) = self.slots.get_mut(session_id)
+        else {
+            unreachable!("generation already checked");
         };
-        if overflowed {
+        if *overflowed {
             return FinishLoadingOutcome::BufferOverflowNeedsReload;
         }
+        let buffered = std::mem::take(buffered);
 
         for frame in buffered {
             let frame_cursor = match &frame {
@@ -370,59 +409,11 @@ impl SessionStore {
         event: Value,
         approx_bytes: usize,
     ) -> bool {
-        let max_buf = self.max_loading_buffer_bytes;
-        match self.slots.get_mut(session_id) {
-            Some(SlotState::Loading {
-                buffered,
-                buffered_bytes,
-                overflowed,
-                ..
-            }) => {
-                if !*overflowed {
-                    let cost = approx_bytes.max(64);
-                    if buffered_bytes.saturating_add(cost) > max_buf {
-                        buffered.clear();
-                        *buffered_bytes = 0;
-                        *overflowed = true;
-                    } else {
-                        *buffered_bytes += cost;
-                        buffered.push(BufferedSessionFrame::SessionEvent { cursor, event });
-                    }
-                }
-                false
-            }
-            Some(SlotState::Ready {
-                snapshot,
-                last_touched,
-            }) => {
-                let disp = evaluate_frame_cursor(&snapshot.event_cursor, &cursor);
-                if matches!(disp, CursorDisposition::SkipAlreadyCovered) {
-                    return false;
-                }
-                let mut updated = (**snapshot).clone();
-                apply_frame_to_snapshot(
-                    &mut updated,
-                    BufferedSessionFrame::SessionEvent {
-                        cursor: cursor.clone(),
-                        event,
-                    },
-                );
-                if matches!(
-                    disp,
-                    CursorDisposition::ApplyAndAdvance | CursorDisposition::EpochMismatch
-                ) && cursor.is_some()
-                {
-                    updated.event_cursor = cursor;
-                }
-                updated.revision = self.next_revision;
-                self.next_revision = self.next_revision.wrapping_add(1);
-                *last_touched = self.next_touch;
-                self.next_touch = self.next_touch.wrapping_add(1);
-                *snapshot = Arc::new(updated);
-                true
-            }
-            None => false,
-        }
+        self.apply_frame(
+            session_id,
+            BufferedSessionFrame::SessionEvent { cursor, event },
+            approx_bytes,
+        )
     }
 
     pub fn apply_queue_snapshot(
@@ -432,59 +423,71 @@ impl SessionStore {
         queue: Value,
         approx_bytes: usize,
     ) -> bool {
-        let max_buf = self.max_loading_buffer_bytes;
-        match self.slots.get_mut(session_id) {
+        self.apply_frame(
+            session_id,
+            BufferedSessionFrame::QueueSnapshot { cursor, queue },
+            approx_bytes,
+        )
+    }
+
+    fn apply_frame(
+        &mut self,
+        session_id: &str,
+        frame: BufferedSessionFrame,
+        approx_bytes: usize,
+    ) -> bool {
+        let (snapshot, last_touched) = match self.slots.get_mut(session_id) {
             Some(SlotState::Loading {
                 buffered,
                 buffered_bytes,
                 overflowed,
+                previous,
                 ..
             }) => {
                 if !*overflowed {
                     let cost = approx_bytes.max(64);
-                    if buffered_bytes.saturating_add(cost) > max_buf {
+                    if buffered_bytes.saturating_add(cost) > self.max_loading_buffer_bytes {
                         buffered.clear();
                         *buffered_bytes = 0;
                         *overflowed = true;
                     } else {
                         *buffered_bytes += cost;
-                        buffered.push(BufferedSessionFrame::QueueSnapshot { cursor, queue });
+                        buffered.push(frame.clone());
                     }
                 }
-                false
+                let Some((snapshot, last_touched)) = previous else {
+                    return false;
+                };
+                (snapshot, last_touched)
             }
             Some(SlotState::Ready {
                 snapshot,
                 last_touched,
-            }) => {
-                let disp = evaluate_frame_cursor(&snapshot.event_cursor, &cursor);
-                if matches!(disp, CursorDisposition::SkipAlreadyCovered) {
-                    return false;
-                }
-                let mut updated = (**snapshot).clone();
-                apply_frame_to_snapshot(
-                    &mut updated,
-                    BufferedSessionFrame::QueueSnapshot {
-                        cursor: cursor.clone(),
-                        queue,
-                    },
-                );
-                if matches!(
-                    disp,
-                    CursorDisposition::ApplyAndAdvance | CursorDisposition::EpochMismatch
-                ) && cursor.is_some()
-                {
-                    updated.event_cursor = cursor;
-                }
-                updated.revision = self.next_revision;
-                self.next_revision = self.next_revision.wrapping_add(1);
-                *last_touched = self.next_touch;
-                self.next_touch = self.next_touch.wrapping_add(1);
-                *snapshot = Arc::new(updated);
-                true
-            }
-            None => false,
+            }) => (snapshot, last_touched),
+            None => return false,
+        };
+        let cursor = match &frame {
+            BufferedSessionFrame::SessionEvent { cursor, .. }
+            | BufferedSessionFrame::QueueSnapshot { cursor, .. } => cursor.clone(),
+        };
+        let disposition = evaluate_frame_cursor(&snapshot.event_cursor, &cursor);
+        if disposition == CursorDisposition::SkipAlreadyCovered {
+            return false;
         }
+        let mut updated = (**snapshot).clone();
+        apply_frame_to_snapshot(&mut updated, frame);
+        if matches!(
+            disposition,
+            CursorDisposition::ApplyAndAdvance | CursorDisposition::EpochMismatch
+        ) {
+            updated.event_cursor = cursor;
+        }
+        updated.revision = self.next_revision;
+        self.next_revision = self.next_revision.wrapping_add(1);
+        *last_touched = self.next_touch;
+        self.next_touch = self.next_touch.wrapping_add(1);
+        *snapshot = Arc::new(updated);
+        true
     }
 
     /// Evicts oldest unpinned sessions when cached count > `max_sessions` or total bytes > `max_bytes`.
@@ -531,8 +534,15 @@ impl SessionStore {
     pub fn export_ready_map(&self) -> BTreeMap<String, Arc<SessionViewSnapshot>> {
         let mut out = BTreeMap::new();
         for (id, state) in &self.slots {
-            if let SlotState::Ready { snapshot, .. } = state {
-                out.insert(id.clone(), Arc::clone(snapshot));
+            match state {
+                SlotState::Ready { snapshot, .. }
+                | SlotState::Loading {
+                    previous: Some((snapshot, _)),
+                    ..
+                } => {
+                    out.insert(id.clone(), Arc::clone(snapshot));
+                }
+                SlotState::Loading { .. } => {}
             }
         }
         out
@@ -597,6 +607,12 @@ fn apply_frame_to_snapshot(snap: &mut SessionViewSnapshot, frame: BufferedSessio
                         apply_assistant_delta(&mut snap.streaming_assistant, delta_ev);
                     }
                 }
+                "compaction_start" => {
+                    snap.compacting = true;
+                }
+                "compaction_end" => {
+                    snap.compacting = false;
+                }
                 "message_end" => {
                     if let Some(msg) = ev.get("message") {
                         if msg.get("role").and_then(Value::as_str) == Some("assistant") {
@@ -605,6 +621,9 @@ fn apply_frame_to_snapshot(snap: &mut SessionViewSnapshot, frame: BufferedSessio
                         if msg.get("role").and_then(Value::as_str) != Some("system") {
                             let added_bytes = serde_json::to_vec(msg).map(|b| b.len()).unwrap_or(0);
                             let previous_bytes = upsert_message(&mut snap.messages, msg.clone());
+                            if !snap.entries.is_empty() {
+                                upsert_entry_message(&mut snap.entries, msg.clone());
+                            }
                             snap.estimated_bytes = snap
                                 .estimated_bytes
                                 .saturating_sub(previous_bytes)
@@ -690,6 +709,33 @@ fn upsert_message(messages: &mut Arc<Vec<Value>>, msg: Value) -> usize {
     0
 }
 
+fn upsert_entry_message(entries: &mut Arc<Vec<Value>>, msg: Value) {
+    let vec = Arc::make_mut(entries);
+    let key = message_dedup_key(&msg);
+    if let Some(existing) = vec.iter_mut().find(|entry| {
+        let em = entry.get("message").unwrap_or(entry);
+        *em == msg || (key.is_some() && key == message_dedup_key(em))
+    }) {
+        if let Some(obj) = existing.as_object_mut()
+            && obj.contains_key("message")
+        {
+            obj.insert("message".to_owned(), msg);
+        } else {
+            *existing = msg;
+        }
+        return;
+    }
+    let synthetic_id = format!(
+        "stream-{}-{}",
+        msg.get("role").and_then(Value::as_str).unwrap_or("msg"),
+        msg.get("timestamp").and_then(Value::as_u64).unwrap_or(0)
+    );
+    vec.push(json!({
+        "id": synthetic_id,
+        "message": msg,
+    }));
+}
+
 fn apply_assistant_delta(slot: &mut Option<Value>, delta_ev: &Value) {
     let Some(kind) = delta_ev.get("type").and_then(Value::as_str) else {
         return;
@@ -756,6 +802,50 @@ mod tests {
         };
         assert_eq!(snap.messages.as_slice(), &[assistant]);
         assert_eq!(snap.event_cursor, Some(("ep1".into(), 5)));
+    }
+
+    #[test]
+    fn failed_reload_keeps_visible_snapshot_and_merges_later_sse_on_retry() {
+        let mut store = SessionStore::default();
+        let initial = store.begin_loading_if_absent("s1").unwrap();
+        assert!(matches!(
+            store.finish_loading_snapshot(
+                "s1",
+                initial,
+                json!({"id":"s1", "eventCursor":"ep:3", "compacting":true}),
+            ),
+            FinishLoadingOutcome::Installed(_)
+        ));
+
+        let reload = store.reset_to_loading("s1");
+        assert!(store.export_ready_map()["s1"].compacting);
+        assert!(matches!(
+            store.finish_loading_snapshot("s1", reload, Value::Null),
+            FinishLoadingOutcome::InvalidPayload
+        ));
+        assert!(store.has_reload_fallback("s1"));
+
+        assert!(store.apply_session_event(
+            "s1",
+            Some(("ep".into(), 4)),
+            json!({"type":"compaction_end"}),
+            64
+        ));
+        assert!(!store.export_ready_map()["s1"].compacting);
+        let message = json!({"role":"assistant", "timestamp":123, "content":"post-reload"});
+        store.apply_session_event(
+            "s1",
+            Some(("ep".into(), 5)),
+            json!({"type":"message_end","message":message}),
+            96,
+        );
+        let FinishLoadingOutcome::Installed(loaded) =
+            store.finish_loading_snapshot("s1", reload, json!({"id":"s1", "eventCursor":"ep:4"}))
+        else {
+            panic!("expected recovered snapshot");
+        };
+        assert_eq!(loaded.messages.as_slice(), &[message]);
+        assert_eq!(loaded.event_cursor, Some(("ep".into(), 5)));
     }
 
     #[test]

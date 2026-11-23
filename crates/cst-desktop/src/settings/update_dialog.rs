@@ -52,6 +52,7 @@ pub fn compute_update_progress_ratio(update_state: Option<&UpdateStateDto>) -> O
 /// - `Phase::Ready` / `handoff_locked`: `"立即重启更新"`, `409 session_busy_for_update` warning, or `"正在重启完成更新…"` lock screen.
 #[allow(clippy::too_many_arguments)]
 pub fn render_update_dialog(
+    scrim_progress: f32,
     dialog: &UpdateDialogState,
     update_state: Option<&UpdateStateDto>,
     mono_family: SharedString,
@@ -81,11 +82,12 @@ pub fn render_update_dialog(
     if dialog.handoff_locked || dialog.launch_pending || phase == UpdatePhaseDto::Launching {
         return render_frosted_surface(
             "update-handoff-lock-scrim",
-            FrostedGlassSpec::scrim(palette),
+            FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
             palette.bg_scrim,
             transparency_enabled,
             scale_factor,
         )
+        .opacity(0.01 + 0.99 * scrim_progress)
         .test_support()
         .absolute()
         .top_0()
@@ -422,11 +424,12 @@ pub fn render_update_dialog(
 
     render_frosted_surface(
         scrim_id,
-        FrostedGlassSpec::scrim(palette),
+        FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
         palette.bg_scrim,
         transparency_enabled,
         scale_factor,
     )
+    .opacity(0.01 + 0.99 * scrim_progress)
     .test_support()
     .absolute()
     .top_0()

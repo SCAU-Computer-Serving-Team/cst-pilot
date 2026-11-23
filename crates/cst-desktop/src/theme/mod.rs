@@ -54,10 +54,11 @@ pub mod layout {
     pub const MIN_WINDOW_HEIGHT: f32 = 640.0;
     pub const COMPACT_SIDEBAR_BREAKPOINT_WIDTH: f32 = 1120.0;
 
-    pub const SIDEBAR_WIDTH: Pixels = px(232.0);
+    pub const SIDEBAR_WIDTH: Pixels = px(248.0);
     pub const TOPBAR_HEIGHT: Pixels = px(40.0);
     pub const SHELL_FRAME_INSET: Pixels = px(8.0);
     pub const CENTER_COLUMN_MAX_WIDTH: Pixels = px(816.0);
+    pub const SUBPAGE_HORIZONTAL_INSET: Pixels = px(64.0);
     pub const MODAL_STANDARD_WIDTH: Pixels = px(384.0);
     pub const PALETTE_MODAL_WIDTH: Pixels = px(520.0);
     pub const LOGIN_SHADER_WIDTH: Pixels = px(864.0);
@@ -98,6 +99,7 @@ pub mod motion {
     pub const SLOW: Duration = Duration::from_millis(340);
     pub const ICON_SWAP_RESTORE: Duration = Duration::from_millis(1600);
     pub const RUNNING_LIGHT_CYCLE: Duration = Duration::from_millis(2000);
+    pub const SPINNER_CYCLE: Duration = Duration::from_millis(850);
     pub const BANNER_AUTO_DISMISS: Duration = Duration::from_millis(2600);
     pub const TOOLTIP_INITIAL_DELAY: Duration = Duration::from_millis(400);
     pub const TOOLTIP_COOLDOWN: Duration = Duration::from_millis(300);
@@ -238,6 +240,52 @@ pub mod motion {
         )
     }
 
+    /// One-shot upward glide (`240ms` `ease_out`, `+14px -> 0` + fade `0.01 -> 1.0`) for newly
+    /// mounted special diagnostic cards. Keyed via `window.use_keyed_state` so subsequent
+    /// streaming updates never restart the entrance; `0ms` when `reduce_motion` or `!animate`.
+    pub fn animate_card_enter(
+        id: impl Into<SharedString>,
+        el: AnyElement,
+        animate: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        let key = id.into();
+        let reduce_motion = cx.reduce_motion();
+        let now = cx.background_executor().now();
+        let state_id = SharedString::from(format!("special-card-enter-{key}"));
+        let state = window.use_keyed_state(state_id, cx, |_, _| {
+            if animate && !reduce_motion {
+                Some(now)
+            } else {
+                None
+            }
+        });
+        if reduce_motion {
+            state.update(cx, |started, _| *started = None);
+            return el;
+        }
+        let started_opt = *state.read(cx);
+        let Some(started) = started_opt else {
+            return el;
+        };
+        let elapsed = now.saturating_duration_since(started);
+        if elapsed >= NORMAL {
+            state.update(cx, |s, _| *s = None);
+            return el;
+        }
+        window.request_animation_frame();
+        let raw = (elapsed.as_secs_f32() / NORMAL.as_secs_f32()).clamp(0.0, 1.0);
+        let t = ease_out()(raw);
+        div()
+            .w_full()
+            .relative()
+            .top(px(14.0 * (1.0 - t)))
+            .opacity(0.01 + 0.99 * t)
+            .child(el)
+            .into_any_element()
+    }
+
     /// Returns an interruptible `Icon` rotated cleanly (`base_down`: `0->180deg` dropdown; `!base_down`: `0->90deg` disclosure).
     pub fn animated_chevron(
         id: impl Into<SharedString>,
@@ -271,6 +319,67 @@ pub mod motion {
         .rotate(percentage(turns))
     }
 
+    /// Continuous `850ms` linear spinner (`storybook.html` `.spin-icon`) using GPU SVG rotation.
+    /// Freezes at `0 FPS` when `!animate_allowed`, `reduce_motion`, unfocused, minimized, or scrolled offscreen.
+    pub fn animated_spinner(
+        id: impl Into<SharedString>,
+        size_px: Pixels,
+        color: Hsla,
+        animate_allowed: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        let vp = window.viewport_size();
+        let minimized = f32::from(vp.width) <= 1.0 || f32::from(vp.height) <= 1.0;
+        let should_spin = animate_allowed
+            && !cx.reduce_motion()
+            && window.is_window_active()
+            && window.is_visible()
+            && !minimized;
+        if !should_spin {
+            return Icon::new(IconName::LoaderCircle)
+                .size(size_px)
+                .text_color(color)
+                .into_any_element();
+        }
+        let state_id = SharedString::from(format!("spinner-start-{}", id.into()));
+        let started_at =
+            window.use_keyed_state(state_id, cx, |_, cx| cx.background_executor().now());
+        let elapsed_ms = cx
+            .background_executor()
+            .now()
+            .saturating_duration_since(*started_at.read(cx))
+            .as_millis();
+        let cycle_ms = SPINNER_CYCLE.as_millis();
+        let turns = (elapsed_ms % cycle_ms) as f32 / cycle_ms as f32;
+        div()
+            .relative()
+            .size(size_px)
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                canvas(
+                    |bounds, window, _| {
+                        if bounds.intersects(&window.content_mask().bounds) {
+                            window.request_animation_frame();
+                        }
+                    },
+                    |_, (), _, _| {},
+                )
+                .absolute()
+                .size_full(),
+            )
+            .child(
+                Icon::new(IconName::LoaderCircle)
+                    .size(size_px)
+                    .text_color(color)
+                    .rotate(percentage(turns)),
+            )
+            .into_any_element()
+    }
+
     /// Returns a spring-scaled copy/check icon (`240ms ease_spring`, `0.65 -> 1.0`, zero blur).
     pub fn animated_copy_icon(
         id: impl Into<SharedString>,
@@ -300,7 +409,58 @@ pub mod motion {
         .transform(Transformation::scale(size(s, s)))
     }
 
-    /// Renders an interruptible vector `checkStroke` path animation (`340ms` check / `150ms` uncheck) via GPUI `canvas` + `PathBuilder::stroke`.
+    /// Animates a modal backdrop scrim fade-in (`240ms` `ease_out`, `0ms` in `reduce_motion`).
+    pub fn animate_scrim_enter<E: IntoElement + Styled + 'static>(
+        id: impl Into<gpui::ElementId>,
+        el: E,
+    ) -> impl IntoElement {
+        el.with_animation(
+            id,
+            Animation::new(MODAL_OPEN).with_easing(ease_out()),
+            move |el, d| {
+                let raw = d.clamp(0.0, 1.0);
+                el.opacity(0.01 + 0.99 * raw)
+            },
+        )
+    }
+
+    /// Samples an interruptible `0.0 <-> 1.0` surface presence transition (`open_dur` open / `SURFACE_CLOSE` close).
+    pub fn surface_presence(
+        id: impl Into<TransitionId>,
+        open: bool,
+        open_dur: Duration,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> f32 {
+        transition(
+            id,
+            if open { 1.0_f32 } else { 0.0 },
+            Transition::new(if open { open_dur } else { SURFACE_CLOSE }).ease(ease_out()),
+            window,
+            cx,
+        )
+        .clamp(0.0, 1.0)
+    }
+
+    /// Keyed `120ms ease_out` press progress (`0.0 <-> 1.0`) for button press tint feedback.
+    pub fn animated_press_progress(
+        id: impl Into<SharedString>,
+        pressed: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> f32 {
+        let tid: TransitionId = SharedString::from(format!("press-bg-{}", id.into())).into();
+        transition(
+            tid,
+            if pressed { 1.0_f32 } else { 0.0 },
+            Transition::new(PRESS).ease(ease_out()),
+            window,
+            cx,
+        )
+        .clamp(0.0, 1.0)
+    }
+
+    /// Renders an interruptible vector `checkStroke` path animation (`340ms ease_spring` check / `150ms ease_out` uncheck) via GPUI `canvas` + `PathBuilder::stroke`.
     pub fn animated_checkbox_mark(
         id: impl Into<SharedString>,
         checked: bool,
@@ -311,14 +471,12 @@ pub mod motion {
     ) -> Option<AnyElement> {
         let tid: TransitionId = SharedString::from(format!("chk-{}", id.into())).into();
         let dur = if checked { SLOW } else { SURFACE_CLOSE };
-        let p = transition(
-            tid,
-            if checked { 1.0 } else { 0.0 },
-            Transition::new(dur).ease(ease_out()),
-            window,
-            cx,
-        )
-        .clamp(0.0, 1.0);
+        let t = if checked {
+            Transition::new(dur).ease(ease_spring())
+        } else {
+            Transition::new(dur).ease(ease_out())
+        };
+        let p = transition(tid, if checked { 1.0 } else { 0.0 }, t, window, cx).clamp(0.0, 1.0);
         (p > 0.01).then(|| {
             canvas(
                 move |_, _, _| {},
@@ -369,54 +527,121 @@ pub mod motion {
         body_focus: gpui::FocusHandle,
     }
 
+    /// Context adapter allowing `animated_collapse*` to accept either `&mut App` or `&mut Context<T>`.
+    pub trait CollapseAppCx {
+        fn as_app(&self) -> &App;
+        fn as_app_mut(&mut self) -> &mut App;
+    }
+
+    impl CollapseAppCx for App {
+        fn as_app(&self) -> &App {
+            self
+        }
+
+        fn as_app_mut(&mut self) -> &mut App {
+            self
+        }
+    }
+
+    impl<T: 'static> CollapseAppCx for gpui::Context<'_, T> {
+        fn as_app(&self) -> &App {
+            self
+        }
+
+        fn as_app_mut(&mut self) -> &mut App {
+            self
+        }
+    }
+
     /// Measures the unconstrained body even at rest, so nested and streaming
     /// content can resize. Only the measured space remains during the exit.
-    pub fn animated_collapse<C>(
+    pub fn animated_collapse<C: CollapseAppCx>(
         id: impl Into<SharedString>,
         open: bool,
         window: &mut Window,
         cx: &mut C,
         build_content: impl FnOnce(&mut Window, &mut C) -> AnyElement,
-    ) -> Option<AnyElement>
-    where
-        C: std::ops::DerefMut<Target = App>,
-    {
+    ) -> Option<AnyElement> {
+        animated_collapse_impl(id, open, false, window, cx, |_, window, cx| {
+            build_content(window, cx)
+        })
+    }
+
+    /// Interruptible collapse (`240ms` open / `150ms` close) that preserves a visual-only
+    /// (`interactive = false`) snapshot of the content while closing so collapsed panels
+    /// clip and fade smoothly instead of flashing a blank gap.
+    pub fn animated_collapse_with_exit<C: CollapseAppCx>(
+        id: impl Into<SharedString>,
+        open: bool,
+        window: &mut Window,
+        cx: &mut C,
+        build_content: impl FnOnce(bool, &mut Window, &mut C) -> AnyElement,
+    ) -> Option<AnyElement> {
+        animated_collapse_impl(id, open, true, window, cx, build_content)
+    }
+
+    fn animated_collapse_impl<C: CollapseAppCx>(
+        id: impl Into<SharedString>,
+        open: bool,
+        render_inert_on_exit: bool,
+        window: &mut Window,
+        cx: &mut C,
+        build_content: impl FnOnce(bool, &mut Window, &mut C) -> AnyElement,
+    ) -> Option<AnyElement> {
         use gpui_kit::component::ElementExt as _;
 
         let key = id.into();
         let state_id = SharedString::from(format!("collapse-measure-{key}"));
-        let state = window.use_keyed_state(state_id, cx, |_, cx| CollapseState {
+        let state = window.use_keyed_state(state_id, cx.as_app_mut(), |_, cx| CollapseState {
             height: px(0.0),
             body_focus: cx.focus_handle(),
         });
-        let height = state.read(cx).height;
-        let body_focus = state.read(cx).body_focus.clone();
+        let height = state.read(cx.as_app()).height;
+        let body_focus = state.read(cx.as_app()).body_focus.clone();
         let duration = if open { NORMAL } else { SURFACE_CLOSE };
         let progress = transition(
             SharedString::from(format!("collapse-{key}")),
             if open { 1.0_f32 } else { 0.0 },
             Transition::new(duration).ease(ease_out()),
             window,
-            cx,
+            cx.as_app_mut(),
         )
         .clamp(0.0, 1.0);
 
         if !open {
-            if body_focus.contains_focused(window, cx) {
-                window.blur(cx);
+            if body_focus.contains_focused(window, cx.as_app()) {
+                window.blur(cx.as_app_mut());
             }
-            return (progress > 0.001 && height > px(0.0)).then(|| {
+            if progress <= 0.001 || height <= px(0.0) {
+                return None;
+            }
+            if render_inert_on_exit {
+                let inert_content = build_content(false, window, cx);
+                return Some(
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .flex_shrink_0()
+                        .h(height * progress)
+                        .overflow_hidden()
+                        .opacity(0.01 + 0.99 * progress)
+                        .child(div().w_full().flex_shrink_0().child(inert_content))
+                        .into_any_element(),
+                );
+            }
+            return Some(
                 div()
                     .w_full()
                     .flex_shrink_0()
                     .h(height * progress)
-                    .into_any_element()
-            });
+                    .into_any_element(),
+            );
         }
 
         let settled = progress >= 0.999;
-        let reveal = progress.max(0.15);
-        let content = build_content(window, cx);
+        let reveal = progress.max(0.01);
+        let content = build_content(true, window, cx);
         let body = div()
             .id(key)
             .track_focus(&body_focus)
@@ -435,10 +660,15 @@ pub mod motion {
         Some(if settled {
             wrapper.into_any_element()
         } else {
+            let clip_h = if height > px(0.0) {
+                (height * reveal).max(px(1.0))
+            } else {
+                px(1.0)
+            };
             wrapper
-                .max_h((height * reveal).max(px(32.0)))
+                .max_h(clip_h)
                 .overflow_hidden()
-                .opacity(0.01 + 0.99 * reveal)
+                .opacity(0.01 + 0.99 * progress)
                 .into_any_element()
         })
     }
@@ -719,7 +949,8 @@ pub mod motion {
             let mut offset = state.anim.map_or(px(0.0), |(start, delta)| {
                 let elapsed = now.saturating_duration_since(start);
                 delta
-                    * (1.0 - ease_out()((elapsed.as_secs_f32() / FLIP_MOVE.as_secs_f32()).min(1.0)))
+                    * (1.0
+                        - ease_in_out()((elapsed.as_secs_f32() / FLIP_MOVE.as_secs_f32()).min(1.0)))
             });
             if reduce_motion || state.scope != *scope {
                 offset = px(0.0);
@@ -745,10 +976,429 @@ pub mod motion {
 
     pub use super::tooltip::{DesktopTooltipExt, DesktopTooltips, window_tooltip_overlay};
 
-    /// The latest page replaces the content immediately. Keep any in-flight
-    /// reveal so repeated navigation cannot drop the surface back to near zero.
+    /// Segment of an inline status label partitioned into stationary text vs contiguous ASCII digits.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum LabelSegment<'a> {
+        Static(&'a str),
+        Digits(&'a str),
+    }
+
+    /// Partitions `text` into alternating `Static` and contiguous ASCII `Digits` (`0..=9`) segments.
+    pub fn split_label_digits(text: &str) -> Vec<LabelSegment<'_>> {
+        let mut out = Vec::new();
+        let bytes = text.as_bytes();
+        let mut idx = 0usize;
+        while idx < bytes.len() {
+            let start = idx;
+            let is_digit = bytes[idx].is_ascii_digit();
+            idx += 1;
+            while idx < bytes.len() && bytes[idx].is_ascii_digit() == is_digit {
+                idx += 1;
+            }
+            let slice = &text[start..idx];
+            if is_digit {
+                out.push(LabelSegment::Digits(slice));
+            } else {
+                out.push(LabelSegment::Static(slice));
+            }
+        }
+        out
+    }
+
+    /// Minimal transition plan between two inline status labels.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum DigitDiffPlan {
+        /// Strings are identical; zero motion.
+        Unchanged,
+        /// Non-digit static skeleton changed (e.g. `工作中 52s` -> `已工作 52.3s`); cross-slide whole label.
+        FullSwap,
+        /// Static skeleton is identical; only changed decimal places roll independently.
+        /// Each tuple is `(digit_run_idx, right_place_idx, prev_digit, next_digit, roll_up)`.
+        DigitsOnly(Vec<(usize, usize, Option<char>, char, bool)>),
+    }
+
+    /// Computes the minimal rolling diff between `prev` and `next`.
+    ///
+    /// Algorithm specification:
+    /// 1. Split both strings into alternating `Static` and `Digits` runs via [`split_label_digits`].
+    /// 2. If run count, run kinds, or any `Static` slice differs, return [`DigitDiffPlan::FullSwap`].
+    /// 3. For each `Digits` run, compare right-to-left by decimal place value (`place = 0` is ones,
+    ///    `place = 1` is tens, ...). Unchanged places stay stationary.
+    /// 4. Roll direction is upward (`roll_up = true`) when numeric value increases or digit count grows,
+    ///    and downward (`roll_up = false`) when numeric value decreases.
+    pub fn plan_label_digit_diff(prev: &str, next: &str) -> DigitDiffPlan {
+        if prev == next {
+            return DigitDiffPlan::Unchanged;
+        }
+        let prev_segs = split_label_digits(prev);
+        let next_segs = split_label_digits(next);
+        if prev_segs.len() != next_segs.len() {
+            return DigitDiffPlan::FullSwap;
+        }
+        let mut digit_run_idx = 0usize;
+        let mut changes = Vec::new();
+        for (p, n) in prev_segs.iter().zip(next_segs.iter()) {
+            match (p, n) {
+                (LabelSegment::Static(ps), LabelSegment::Static(ns)) => {
+                    if ps != ns {
+                        return DigitDiffPlan::FullSwap;
+                    }
+                }
+                (LabelSegment::Digits(pd), LabelSegment::Digits(nd)) => {
+                    if pd != nd {
+                        let roll_up = match nd.len().cmp(&pd.len()) {
+                            std::cmp::Ordering::Greater => true,
+                            std::cmp::Ordering::Less => false,
+                            std::cmp::Ordering::Equal => nd >= pd,
+                        };
+                        let p_bytes = pd.as_bytes();
+                        let n_bytes = nd.as_bytes();
+                        for (pos, &nb) in n_bytes.iter().enumerate() {
+                            let place = n_bytes.len() - 1 - pos;
+                            let prev_digit = p_bytes
+                                .len()
+                                .checked_sub(1 + place)
+                                .map(|idx| p_bytes[idx] as char);
+                            let next_digit = nb as char;
+                            if prev_digit != Some(next_digit) {
+                                changes.push((
+                                    digit_run_idx,
+                                    place,
+                                    prev_digit,
+                                    next_digit,
+                                    roll_up,
+                                ));
+                            }
+                        }
+                    }
+                    digit_run_idx += 1;
+                }
+                _ => return DigitDiffPlan::FullSwap,
+            }
+        }
+        if changes.is_empty() {
+            DigitDiffPlan::FullSwap
+        } else {
+            DigitDiffPlan::DigitsOnly(changes)
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct DigitSlotSwap {
+        prev: Option<char>,
+        roll_up: bool,
+        started_at: Instant,
+    }
+
+    struct StatusLabelState {
+        current: SharedString,
+        full_swap: Option<(SharedString, Instant)>,
+        digit_swaps: std::collections::BTreeMap<(usize, usize), DigitSlotSwap>,
+    }
+
+    #[derive(Clone, Copy)]
+    struct ActiveDigitSwap {
+        prev: Option<char>,
+        progress: f32,
+        dir: f32,
+    }
+
+    type ActiveDigitSwaps = std::collections::BTreeMap<(usize, usize), ActiveDigitSwap>;
+
+    /// Digit-aware inline status label with `RunningLight` per-grapheme highlight sweep.
+    ///
+    /// When only numbers change (e.g. `工作中 52s` -> `工作中 53s` or `59s` -> `60s`), stationary
+    /// characters stay pinned while ONLY the changed decimal places roll vertically (`180ms ease_out`,
+    /// `±6px`). When the static skeleton changes (e.g. `工作中 52s` -> `已工作 52.3s`), performs a single
+    /// whole-label cross-slide.
+    #[allow(clippy::too_many_arguments)]
+    pub fn animated_status_label(
+        id: impl Into<SharedString>,
+        text: impl Into<SharedString>,
+        sweep_allowed: bool,
+        sweep_started_at: Instant,
+        base_color: Hsla,
+        highlight_color: Hsla,
+        typography: super::TypographyScale,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        let key = id.into();
+        let next_text = text.into();
+        let state_id = SharedString::from(format!("status-label-swap-{key}"));
+        let initial_text = next_text.clone();
+        let state = window.use_keyed_state(state_id, cx, |_, _| StatusLabelState {
+            current: initial_text,
+            full_swap: None,
+            digit_swaps: std::collections::BTreeMap::new(),
+        });
+        let now = cx.background_executor().now();
+        let reduce_motion = cx.reduce_motion();
+        let swap_duration = FLIP_ENTER;
+
+        let (active_full_swap, active_digits): (Option<(SharedString, f32)>, ActiveDigitSwaps) =
+            state.update(cx, |st, _| {
+                if st.current != next_text {
+                    if reduce_motion {
+                        st.current = next_text.clone();
+                        st.full_swap = None;
+                        st.digit_swaps.clear();
+                    } else {
+                        match plan_label_digit_diff(st.current.as_ref(), next_text.as_ref()) {
+                            DigitDiffPlan::Unchanged => {}
+                            DigitDiffPlan::FullSwap => {
+                                let prev = std::mem::replace(&mut st.current, next_text.clone());
+                                st.full_swap = Some((prev, now));
+                                st.digit_swaps.clear();
+                            }
+                            DigitDiffPlan::DigitsOnly(changes) => {
+                                st.current = next_text.clone();
+                                st.full_swap = None;
+                                for (run_idx, place, prev_digit, _next_digit, roll_up) in changes {
+                                    st.digit_swaps.insert(
+                                        (run_idx, place),
+                                        DigitSlotSwap {
+                                            prev: prev_digit,
+                                            roll_up,
+                                            started_at: now,
+                                        },
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                if reduce_motion {
+                    st.full_swap = None;
+                    st.digit_swaps.clear();
+                    return (None, ActiveDigitSwaps::new());
+                }
+
+                let full = if let Some((prev, started)) = st.full_swap.clone() {
+                    let elapsed = now.saturating_duration_since(started);
+                    if elapsed < swap_duration {
+                        let raw =
+                            (elapsed.as_secs_f32() / swap_duration.as_secs_f32()).clamp(0.0, 1.0);
+                        Some((prev, ease_out()(raw)))
+                    } else {
+                        st.full_swap = None;
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                let mut digits = ActiveDigitSwaps::new();
+                st.digit_swaps.retain(|&(run_idx, place), swap| {
+                    let elapsed = now.saturating_duration_since(swap.started_at);
+                    if elapsed < swap_duration {
+                        let raw =
+                            (elapsed.as_secs_f32() / swap_duration.as_secs_f32()).clamp(0.0, 1.0);
+                        let dir = if swap.roll_up { 1.0 } else { -1.0 };
+                        digits.insert(
+                            (run_idx, place),
+                            ActiveDigitSwap {
+                                prev: swap.prev,
+                                progress: ease_out()(raw),
+                                dir,
+                            },
+                        );
+                        true
+                    } else {
+                        false
+                    }
+                });
+
+                (full, digits)
+            });
+
+        let vp = window.viewport_size();
+        let minimized = f32::from(vp.width) <= 1.0 || f32::from(vp.height) <= 1.0;
+        let should_sweep = sweep_allowed
+            && !reduce_motion
+            && window.is_window_active()
+            && window.is_visible()
+            && !minimized;
+        let phase = if should_sweep {
+            let cycle_ms = RUNNING_LIGHT_CYCLE.as_millis();
+            (sweep_started_at.elapsed().as_millis() % cycle_ms) as f32 / cycle_ms as f32
+        } else {
+            0.0
+        };
+
+        let render_line =
+            |line_text: &str, enable_sweep: bool, digit_anims: &ActiveDigitSwaps| -> AnyElement {
+                let total_glyphs = crate::workbench::turn_segments::light_glyphs(line_text).len();
+                if !enable_sweep && digit_anims.is_empty() {
+                    return super::apply_scale(div(), typography)
+                        .text_color(base_color)
+                        .child(super::cjk_inline_label(line_text.to_owned()))
+                        .into_any_element();
+                }
+
+                let mut row = super::apply_scale(div(), typography)
+                    .pb(super::space::MICRO)
+                    .relative()
+                    .flex()
+                    .items_center();
+
+                if enable_sweep {
+                    row = row.child(
+                        canvas(
+                            |bounds, window, _| {
+                                if bounds.intersects(&window.content_mask().bounds) {
+                                    #[cfg(feature = "test-support")]
+                                    crate::ux_probe::record_running_light_frame();
+                                    window.request_animation_frame();
+                                }
+                            },
+                            |_, (), _, _| {},
+                        )
+                        .absolute()
+                        .size_full(),
+                    );
+                }
+
+                let mut glyph_idx = 0usize;
+                let mut digit_run_idx = 0usize;
+                for seg in split_label_digits(line_text) {
+                    match seg {
+                        LabelSegment::Static(text_part) => {
+                            if enable_sweep {
+                                for g in crate::workbench::turn_segments::light_glyphs(text_part) {
+                                    let col = crate::workbench::turn_segments::glyph_blend_color(
+                                        base_color,
+                                        highlight_color,
+                                        glyph_idx,
+                                        total_glyphs,
+                                        phase,
+                                    );
+                                    row = row.child(
+                                        div()
+                                            .text_color(col)
+                                            .child(SharedString::from(g.to_owned())),
+                                    );
+                                    glyph_idx += 1;
+                                }
+                            } else {
+                                let part_glyphs =
+                                    crate::workbench::turn_segments::light_glyphs(text_part).len();
+                                row = row.child(
+                                    div()
+                                        .text_color(base_color)
+                                        .child(SharedString::from(text_part.to_owned())),
+                                );
+                                glyph_idx += part_glyphs;
+                            }
+                        }
+                        LabelSegment::Digits(digits_str) => {
+                            let d_bytes = digits_str.as_bytes();
+                            for (pos, &b) in d_bytes.iter().enumerate() {
+                                let ch = b as char;
+                                let place = d_bytes.len() - 1 - pos;
+                                let col = if enable_sweep {
+                                    crate::workbench::turn_segments::glyph_blend_color(
+                                        base_color,
+                                        highlight_color,
+                                        glyph_idx,
+                                        total_glyphs,
+                                        phase,
+                                    )
+                                } else {
+                                    base_color
+                                };
+                                if let Some(&ActiveDigitSwap {
+                                    prev: prev_opt,
+                                    progress,
+                                    dir,
+                                }) = digit_anims.get(&(digit_run_idx, place))
+                                {
+                                    let mut slot = div()
+                                        .relative()
+                                        .overflow_hidden()
+                                        .flex()
+                                        .items_center()
+                                        .child(
+                                            div()
+                                                .relative()
+                                                .top(px(6.0 * dir * (1.0 - progress)))
+                                                .opacity(0.01 + 0.99 * progress)
+                                                .text_color(col)
+                                                .child(SharedString::from(ch.to_string())),
+                                        );
+                                    if let Some(prev_ch) = prev_opt {
+                                        let exit_op = (1.0 - progress * 1.5).clamp(0.0, 1.0);
+                                        if exit_op > 0.01 {
+                                            slot = slot.child(
+                                                div()
+                                                    .absolute()
+                                                    .left_0()
+                                                    .top(px(-6.0 * dir * progress))
+                                                    .opacity(exit_op)
+                                                    .text_color(col)
+                                                    .child(SharedString::from(prev_ch.to_string())),
+                                            );
+                                        }
+                                    }
+                                    row = row.child(slot);
+                                } else {
+                                    row = row.child(
+                                        div()
+                                            .text_color(col)
+                                            .child(SharedString::from(ch.to_string())),
+                                    );
+                                }
+                                glyph_idx += 1;
+                            }
+                            digit_run_idx += 1;
+                        }
+                    }
+                }
+                row.into_any_element()
+            };
+
+        if !active_digits.is_empty() || active_full_swap.is_some() {
+            window.request_animation_frame();
+        }
+
+        let current_el = render_line(next_text.as_ref(), should_sweep, &active_digits);
+        let Some((prev_text, progress)) = active_full_swap else {
+            return current_el;
+        };
+
+        let empty_digits = std::collections::BTreeMap::new();
+        let prev_el = render_line(prev_text.as_ref(), false, &empty_digits);
+        let exit_op = (1.0 - progress * 1.5).clamp(0.0, 1.0);
+        let mut wrap = div()
+            .relative()
+            .overflow_hidden()
+            .flex()
+            .items_center()
+            .child(
+                div()
+                    .relative()
+                    .top(px(6.0 * (1.0 - progress)))
+                    .opacity(0.01 + 0.99 * progress)
+                    .child(current_el),
+            );
+        if exit_op > 0.01 {
+            wrap = wrap.child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top(px(-6.0 * progress))
+                    .opacity(exit_op)
+                    .whitespace_nowrap()
+                    .child(prev_el),
+            );
+        }
+        wrap.into_any_element()
+    }
+
+    /// Interruptible horizontal page slide (`240ms ease_out`, `±8px`, `0ms` in `reduce_motion`).
+    /// Rapid consecutive triggers restart smoothly from the current opacity floor without flashing to zero.
     #[derive(Default)]
-    pub(crate) struct PageSlide(Option<(Instant, f32)>);
+    pub(crate) struct PageSlide(Option<(Instant, f32, f32)>);
 
     impl PageSlide {
         pub(crate) fn start(&mut self, direction: f32, cx: &App) {
@@ -757,24 +1407,381 @@ pub mod motion {
                 return;
             }
             let now = cx.background_executor().now();
-            if self.0.is_none_or(|(start, _)| now - start >= NORMAL) {
-                self.0 = Some((now, direction));
-            }
+            let start_opacity = match self.0 {
+                Some((prev_start, _, prev_floor))
+                    if now.saturating_duration_since(prev_start) < NORMAL =>
+                {
+                    let elapsed = now.saturating_duration_since(prev_start);
+                    let t =
+                        ease_out()((elapsed.as_secs_f32() / NORMAL.as_secs_f32()).clamp(0.0, 1.0));
+                    (prev_floor + (1.0 - prev_floor) * t).clamp(0.25, 0.72)
+                }
+                _ => 0.01,
+            };
+            self.0 = Some((now, direction, start_opacity));
         }
 
         pub(crate) fn sample(&mut self, window: &Window, cx: &App) -> (f32, Pixels) {
-            if let Some((start, direction)) = self.0
+            if let Some((start, direction, floor)) = self.0
                 && !cx.reduce_motion()
             {
-                let elapsed = cx.background_executor().now() - start;
+                let elapsed = cx
+                    .background_executor()
+                    .now()
+                    .saturating_duration_since(start);
                 if elapsed < NORMAL {
                     window.request_animation_frame();
-                    let t = ease_out()(elapsed.as_secs_f32() / NORMAL.as_secs_f32());
-                    return (0.01 + 0.99 * t, px(8.0 * direction * (1.0 - t)));
+                    let t =
+                        ease_out()((elapsed.as_secs_f32() / NORMAL.as_secs_f32()).clamp(0.0, 1.0));
+                    return (floor + (1.0 - floor) * t, px(8.0 * direction * (1.0 - t)));
                 }
             }
             self.0 = None;
             (1.0, px(0.0))
+        }
+    }
+
+    /// Interruptible gentle content reveal (e.g. Session A -> B message surface, header title glide, export preview).
+    #[derive(Default)]
+    pub(crate) struct SurfaceReveal(Option<(Instant, Duration, f32, f32)>);
+
+    impl SurfaceReveal {
+        pub(crate) fn start(&mut self, duration: Duration, dy_px: f32, floor: f32, cx: &App) {
+            if cx.reduce_motion() || duration.is_zero() {
+                self.0 = None;
+                return;
+            }
+            let now = cx.background_executor().now();
+            let next_floor = match self.0 {
+                Some((prev_start, prev_dur, _, prev_floor))
+                    if now.saturating_duration_since(prev_start) < prev_dur =>
+                {
+                    let elapsed = now.saturating_duration_since(prev_start);
+                    let t = ease_out()(
+                        (elapsed.as_secs_f32() / prev_dur.as_secs_f32()).clamp(0.0, 1.0),
+                    );
+                    let current = prev_floor + (1.0 - prev_floor) * t;
+                    (current * 0.65).clamp(floor, 0.72)
+                }
+                _ => floor.clamp(0.01, 0.99),
+            };
+            self.0 = Some((now, duration, dy_px, next_floor));
+        }
+
+        pub(crate) fn clear(&mut self) {
+            self.0 = None;
+        }
+
+        pub(crate) fn sample(&mut self, window: &Window, cx: &App) -> (f32, Pixels) {
+            if let Some((start, dur, dy_px, floor)) = self.0
+                && !cx.reduce_motion()
+            {
+                let elapsed = cx
+                    .background_executor()
+                    .now()
+                    .saturating_duration_since(start);
+                if elapsed < dur {
+                    window.request_animation_frame();
+                    let t = ease_out()((elapsed.as_secs_f32() / dur.as_secs_f32()).clamp(0.0, 1.0));
+                    return (floor + (1.0 - floor) * t, px(dy_px * (1.0 - t)));
+                }
+            }
+            self.0 = None;
+            (1.0, px(0.0))
+        }
+    }
+
+    fn eased_window(
+        elapsed: Duration,
+        delay: Duration,
+        duration: Duration,
+        curve: impl Fn(f32) -> f32,
+    ) -> f32 {
+        if elapsed <= delay {
+            return 0.0;
+        }
+        let local = elapsed.saturating_sub(delay);
+        if local >= duration || duration.is_zero() {
+            return 1.0;
+        }
+        curve((local.as_secs_f32() / duration.as_secs_f32()).clamp(0.0, 1.0)).clamp(0.0, 1.0)
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum RouteTransitionKind {
+        /// Home -> Workspace (`Session` / `Settings` / `Account` / `AllSessions`):
+        /// Sky curtain slides UP (`0..240ms`), destination reveals smoothly underneath (`60..300ms`).
+        HomeToWorkspace,
+        /// Workspace -> Home:
+        /// Sky sweeps DOWN (`0..240ms`), BrandArcs/Greeting/Composer settle in (`50..300ms`).
+        WorkspaceToHome,
+        /// Hierarchical drill-in (`Chat -> Tree`, `Chat -> Export`): `240ms ease_out`, `+8px -> 0`.
+        SlideForward,
+        /// Hierarchical return (`Tree -> Chat`, `Export -> Chat`): `240ms ease_out`, `-8px -> 0`.
+        SlideBackward,
+        /// Sibling workspace pages (`Chat <-> Settings/Account/AllSessions`, `Any <-> Login`): `220ms ease_out`, `+6px -> 0`.
+        CrossFade,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub(crate) struct HomeExitCurtainSample {
+        pub(crate) sky_progress: f32,
+        pub(crate) mark_opacity: f32,
+        pub(crate) mark_dy: Pixels,
+        pub(crate) greeting_opacity: f32,
+        pub(crate) greeting_dy: Pixels,
+        pub(crate) footer_opacity: f32,
+        pub(crate) footer_dy: Pixels,
+        pub(crate) frozen_sky_time: f32,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub(crate) struct HomeEnterSample {
+        pub(crate) sky_progress: f32,
+        pub(crate) arcs_opacity: f32,
+        pub(crate) arcs_dy: f32,
+        pub(crate) title_opacity: f32,
+        pub(crate) title_dy: f32,
+        pub(crate) composer_opacity: f32,
+        pub(crate) composer_dy: f32,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub(crate) struct ChatEnterSample {
+        pub(crate) header_opacity: f32,
+        pub(crate) header_dy: Pixels,
+        pub(crate) messages_opacity: f32,
+        pub(crate) messages_dy: Pixels,
+        pub(crate) composer_opacity: f32,
+        pub(crate) composer_dy: Pixels,
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub(crate) struct RouteTransitionSample {
+        pub(crate) container_opacity: f32,
+        pub(crate) container_dx: Pixels,
+        pub(crate) container_dy: Pixels,
+        pub(crate) home_exit_curtain: Option<HomeExitCurtainSample>,
+        pub(crate) home_enter: Option<HomeEnterSample>,
+        pub(crate) chat_enter: Option<ChatEnterSample>,
+    }
+
+    impl Default for RouteTransitionSample {
+        fn default() -> Self {
+            Self {
+                container_opacity: 1.0,
+                container_dx: px(0.0),
+                container_dy: px(0.0),
+                home_exit_curtain: None,
+                home_enter: None,
+                chat_enter: None,
+            }
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct ActiveRouteTransition {
+        started: Instant,
+        kind: RouteTransitionKind,
+        floor_opacity: f32,
+        frozen_sky_time: f32,
+    }
+
+    /// Choreographed workspace route transition aligned with web's full-coverage transitions
+    /// and desktop `storybook.html` tokens (`FAST=150ms`, `OPEN=220ms`, `NORMAL=240ms`, `RESIZE=300ms`,
+    /// `ease_out`/`ease_in_out`, interruptible, `0ms` in `reduce_motion`).
+    #[derive(Default)]
+    pub(crate) struct RouteTransition(Option<ActiveRouteTransition>);
+
+    impl RouteTransition {
+        pub(crate) fn start(&mut self, kind: RouteTransitionKind, frozen_sky_time: f32, cx: &App) {
+            if cx.reduce_motion() {
+                self.0 = None;
+                return;
+            }
+            let now = cx.background_executor().now();
+            let floor_opacity = match self.0 {
+                Some(prev)
+                    if now.saturating_duration_since(prev.started)
+                        < Self::duration_for(prev.kind) =>
+                {
+                    let prev_dur = Self::duration_for(prev.kind);
+                    let elapsed = now.saturating_duration_since(prev.started);
+                    let t = ease_out()(
+                        (elapsed.as_secs_f32() / prev_dur.as_secs_f32()).clamp(0.0, 1.0),
+                    );
+                    let current = prev.floor_opacity + (1.0 - prev.floor_opacity) * t;
+                    current.clamp(0.25, 0.72)
+                }
+                _ => 0.01,
+            };
+            self.0 = Some(ActiveRouteTransition {
+                started: now,
+                kind,
+                floor_opacity,
+                frozen_sky_time,
+            });
+        }
+
+        fn duration_for(kind: RouteTransitionKind) -> Duration {
+            match kind {
+                RouteTransitionKind::HomeToWorkspace | RouteTransitionKind::WorkspaceToHome => {
+                    Duration::from_millis(300)
+                }
+                RouteTransitionKind::SlideForward | RouteTransitionKind::SlideBackward => NORMAL,
+                RouteTransitionKind::CrossFade => POPOVER_OPEN,
+            }
+        }
+
+        pub(crate) fn sample(
+            &mut self,
+            dest_is_chat: bool,
+            window: &Window,
+            cx: &App,
+        ) -> RouteTransitionSample {
+            let Some(active) = self.0 else {
+                return RouteTransitionSample::default();
+            };
+            if cx.reduce_motion() {
+                self.0 = None;
+                return RouteTransitionSample::default();
+            }
+            let total = Self::duration_for(active.kind);
+            let elapsed = cx
+                .background_executor()
+                .now()
+                .saturating_duration_since(active.started);
+            if elapsed >= total {
+                self.0 = None;
+                return RouteTransitionSample::default();
+            }
+            window.request_animation_frame();
+
+            match active.kind {
+                RouteTransitionKind::HomeToWorkspace => {
+                    let sky_p = eased_window(elapsed, Duration::ZERO, NORMAL, ease_in_out());
+                    let mark_p = eased_window(
+                        elapsed,
+                        Duration::ZERO,
+                        Duration::from_millis(180),
+                        ease_in_out(),
+                    );
+                    let foot_p = eased_window(elapsed, Duration::ZERO, FAST, ease_in_out());
+                    let home_exit_curtain = (elapsed < NORMAL).then_some(HomeExitCurtainSample {
+                        sky_progress: sky_p,
+                        mark_opacity: (1.0 - mark_p).clamp(0.0, 1.0),
+                        mark_dy: px(-24.0 * mark_p),
+                        greeting_opacity: (1.0 - mark_p).clamp(0.0, 1.0),
+                        greeting_dy: px(-12.0 * mark_p),
+                        footer_opacity: (1.0 - foot_p).clamp(0.0, 1.0),
+                        footer_dy: px(12.0 * foot_p),
+                        frozen_sky_time: active.frozen_sky_time,
+                    });
+
+                    if dest_is_chat {
+                        let hdr_t = eased_window(
+                            elapsed,
+                            Duration::from_millis(60),
+                            POPOVER_OPEN,
+                            ease_out(),
+                        );
+                        let msg_t = eased_window(
+                            elapsed,
+                            Duration::from_millis(90),
+                            Duration::from_millis(190),
+                            ease_out(),
+                        );
+                        let cmp_t =
+                            eased_window(elapsed, Duration::from_millis(60), NORMAL, ease_out());
+                        RouteTransitionSample {
+                            container_opacity: 1.0,
+                            container_dx: px(0.0),
+                            container_dy: px(0.0),
+                            home_exit_curtain,
+                            home_enter: None,
+                            chat_enter: Some(ChatEnterSample {
+                                header_opacity: 0.01 + 0.99 * hdr_t,
+                                header_dy: px(-8.0 * (1.0 - hdr_t)),
+                                messages_opacity: 0.01 + 0.99 * msg_t,
+                                messages_dy: px(6.0 * (1.0 - msg_t)),
+                                composer_opacity: 0.01 + 0.99 * cmp_t,
+                                composer_dy: px(12.0 * (1.0 - cmp_t)),
+                            }),
+                        }
+                    } else {
+                        let body_t = eased_window(
+                            elapsed,
+                            Duration::from_millis(80),
+                            POPOVER_OPEN,
+                            ease_out(),
+                        );
+                        RouteTransitionSample {
+                            container_opacity: 0.01 + 0.99 * body_t,
+                            container_dx: px(0.0),
+                            container_dy: px(8.0 * (1.0 - body_t)),
+                            home_exit_curtain,
+                            home_enter: None,
+                            chat_enter: None,
+                        }
+                    }
+                }
+                RouteTransitionKind::WorkspaceToHome => {
+                    let sky_p = eased_window(elapsed, Duration::ZERO, NORMAL, ease_out());
+                    let arcs_t =
+                        eased_window(elapsed, Duration::from_millis(50), NORMAL, ease_out());
+                    let title_t = eased_window(
+                        elapsed,
+                        Duration::from_millis(65),
+                        Duration::from_millis(230),
+                        ease_out(),
+                    );
+                    let comp_t =
+                        eased_window(elapsed, Duration::from_millis(80), POPOVER_OPEN, ease_out());
+                    RouteTransitionSample {
+                        container_opacity: 1.0,
+                        container_dx: px(0.0),
+                        container_dy: px(0.0),
+                        home_exit_curtain: None,
+                        home_enter: Some(HomeEnterSample {
+                            sky_progress: sky_p,
+                            arcs_opacity: 0.01 + 0.99 * arcs_t,
+                            arcs_dy: -24.0 * (1.0 - arcs_t),
+                            title_opacity: 0.01 + 0.99 * title_t,
+                            title_dy: -12.0 * (1.0 - title_t),
+                            composer_opacity: 0.01 + 0.99 * comp_t,
+                            composer_dy: 12.0 * (1.0 - comp_t),
+                        }),
+                        chat_enter: None,
+                    }
+                }
+                RouteTransitionKind::SlideForward | RouteTransitionKind::SlideBackward => {
+                    let dir = if active.kind == RouteTransitionKind::SlideForward {
+                        1.0
+                    } else {
+                        -1.0
+                    };
+                    let t = eased_window(elapsed, Duration::ZERO, NORMAL, ease_out());
+                    RouteTransitionSample {
+                        container_opacity: active.floor_opacity + (1.0 - active.floor_opacity) * t,
+                        container_dx: px(8.0 * dir * (1.0 - t)),
+                        container_dy: px(0.0),
+                        home_exit_curtain: None,
+                        home_enter: None,
+                        chat_enter: None,
+                    }
+                }
+                RouteTransitionKind::CrossFade => {
+                    let t = eased_window(elapsed, Duration::ZERO, POPOVER_OPEN, ease_out());
+                    RouteTransitionSample {
+                        container_opacity: active.floor_opacity + (1.0 - active.floor_opacity) * t,
+                        container_dx: px(0.0),
+                        container_dy: px(6.0 * (1.0 - t)),
+                        home_exit_curtain: None,
+                        home_enter: None,
+                        chat_enter: None,
+                    }
+                }
+            }
         }
     }
 
@@ -1205,51 +2212,152 @@ pub fn apply_desktop_theme(
     palette
 }
 
+pub type SubpageBackFn = std::rc::Rc<dyn Fn(&mut gpui_kit::Window, &mut gpui_kit::App)>;
+
 /// Renders the shared full-width `44px` subpage header master `xWJOf` (`cst-pilot-desktop.pen` 「00A · 窗口与导航」):
-/// `pl: 24px, pr: 16px`, bottom `1px $border-subtle`, left `16px` icon + `12px` gap + `16/24 @ 600` title,
-/// and an optional trailing slot on the right.
+/// - Center track (`max_w: 816px`, `px: 64px` outer inset): `deTmS` (`16px` icon + `12px` gap + `16/24 @ 600` title),
+///   strictly aligned with the `816px` centered page content column below (e.g., `常规` tab in `q8TgB`) at every window width.
+/// - Left back button (`28×28`, `arrow-left`) anchors at `left: 24px` without perturbing center track symmetry.
+/// - Optional `trailing` control anchors at `right: 16px`.
+#[allow(clippy::too_many_arguments)]
 pub fn render_subpage_header_xwjof(
     id: impl Into<gpui_kit::ElementId>,
     icon: gpui_kit::assets::IconName,
     title: impl Into<SharedString>,
     trailing: Option<gpui_kit::AnyElement>,
+    on_back: Option<SubpageBackFn>,
     palette: &DesktopPalette,
+    window: &mut gpui_kit::Window,
+    cx: &mut gpui_kit::App,
 ) -> impl gpui_kit::IntoElement {
-    use gpui_kit::{InteractiveElement as _, ParentElement as _, Styled as _, TestSupportExt as _};
+    use crate::accessibility::A11yElementExt as _;
+    use crate::theme::motion::{DesktopTooltipExt as _, IconPressExt as _};
+    use gpui_kit::{
+        InteractiveElement as _, ParentElement as _, StatefulInteractiveElement as _, Styled as _,
+        TestSupportExt as _,
+    };
+
+    let header_id: gpui_kit::ElementId = id.into();
+    let back_id_str = SharedString::from(format!("{header_id}-back-btn"));
+    let track_id_str = SharedString::from(format!("{header_id}-title-track"));
+
+    let back_slot = if let Some(back_cb) = on_back {
+        let (pressed, press_state) = motion::icon_press_state(back_id_str.as_ref(), window, cx);
+        let (hovered, hs) = motion::PointerFlag::keyed(format!("hover-{back_id_str}"), window, cx);
+        let hover_t = motion::animated_state_progress(back_id_str.clone(), hovered, window, cx);
+        let press_t = motion::animated_press_progress(back_id_str.clone(), pressed, window, cx);
+        let bg = motion::lerp_hsla(
+            motion::lerp_hsla(
+                gpui_kit::transparent_black(),
+                palette.bg_item_hover,
+                hover_t,
+            ),
+            palette.bg_active_press,
+            press_t,
+        );
+        let fg = motion::lerp_hsla(palette.text_secondary, palette.text_primary, hover_t);
+        Some(
+            gpui_kit::div()
+                .id(back_id_str.clone())
+                .test_support()
+                .a11y_button(back_id_str.clone(), "返回")
+                .desktop_tooltip_with_hover(
+                    SharedString::from(format!("tooltip-{back_id_str}")),
+                    "返回".into(),
+                    false,
+                    Some(hs),
+                )
+                .tab_index(0)
+                .w(height::COMPACT)
+                .h(height::COMPACT)
+                .rounded(radius::CONTROL)
+                .bg(bg)
+                .flex()
+                .items_center()
+                .justify_center()
+                .on_icon_press(press_state)
+                .on_click(move |_, w, cx| (back_cb)(w, cx))
+                .child(motion::animated_icon_press(
+                    back_id_str,
+                    pressed,
+                    gpui_kit::component::Icon::new(gpui_kit::assets::IconName::ArrowLeft)
+                        .size(px(16.0))
+                        .text_color(fg),
+                    window,
+                    cx,
+                )),
+        )
+    } else {
+        None
+    };
+
     let mut bar = gpui_kit::div()
-        .id(id)
+        .id(header_id)
         .test_support()
+        .relative()
         .w_full()
         .h(height::HEADER)
         .flex_shrink_0()
-        .pl(space::GROUP)
-        .pr(space::LG)
-        .bg(palette.bg_workspace)
+        .px(layout::SUBPAGE_HORIZONTAL_INSET)
         .border_b_1()
         .border_color(palette.border_subtle)
         .flex()
         .items_center()
-        .justify_between()
+        .justify_center()
         .child(
             gpui_kit::div()
+                .id(track_id_str)
+                .test_support()
+                .w_full()
+                .max_w(layout::CENTER_COLUMN_MAX_WIDTH)
+                .min_w_0()
+                .h_full()
                 .flex()
                 .items_center()
-                .gap(space::MD)
-                .min_w_0()
                 .child(
-                    gpui_kit::component::Icon::new(icon)
-                        .size(px(16.0))
-                        .text_color(palette.text_secondary),
-                )
-                .child(
-                    apply_scale(gpui_kit::div(), scale::BODY_SEMIBOLD)
-                        .text_color(palette.text_primary)
-                        .truncate()
-                        .child(cjk_inline_label(title)),
+                    gpui_kit::div()
+                        .flex()
+                        .items_center()
+                        .gap(space::MD)
+                        .min_w_0()
+                        .child(
+                            gpui_kit::component::Icon::new(icon)
+                                .size(px(16.0))
+                                .text_color(palette.text_secondary),
+                        )
+                        .child(
+                            apply_scale(gpui_kit::div(), scale::BODY_SEMIBOLD)
+                                .text_color(palette.text_primary)
+                                .truncate()
+                                .child(cjk_inline_label(title)),
+                        ),
                 ),
         );
+
+    if let Some(back_el) = back_slot {
+        bar = bar.child(
+            gpui_kit::div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left(space::GROUP)
+                .flex()
+                .items_center()
+                .child(back_el),
+        );
+    }
+
     if let Some(right_el) = trailing {
-        bar = bar.child(right_el);
+        bar = bar.child(
+            gpui_kit::div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .right(space::LG)
+                .flex()
+                .items_center()
+                .child(right_el),
+        );
     }
     bar
 }

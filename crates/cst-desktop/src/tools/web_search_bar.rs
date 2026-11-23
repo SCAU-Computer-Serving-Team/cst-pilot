@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use std::time::Instant;
 
 use cst_client::tool_presenter::{FieldRow, SpecialStatus};
 use gpui::{Animation, AnimationExt as _};
@@ -27,6 +28,8 @@ pub struct WebSearchBarProps<'a> {
     pub errors: &'a [String],
     pub expanded: bool,
     pub warning_hovered: bool,
+    pub running_light_allowed: bool,
+    pub started_at: Option<Instant>,
 }
 
 /// Renders the standalone Web Search persistent bar (`web_search`, `cst-pilot-desktop.pen` `JQMQZ`).
@@ -74,6 +77,25 @@ pub fn render_web_search_bar(
         title => title,
     };
 
+    let title_el = if is_running && props.running_light_allowed {
+        crate::workbench::turn_segments::render_running_light_label_with_scale(
+            display_title,
+            true,
+            props.started_at.unwrap_or_else(Instant::now),
+            palette.text_secondary,
+            palette.text_primary,
+            scale::BODY_MEDIUM,
+            window,
+        )
+        .into_any_element()
+    } else {
+        apply_scale(div(), scale::BODY_MEDIUM)
+            .truncate()
+            .text_color(palette.text_primary)
+            .child(cjk_inline_label(display_title))
+            .into_any_element()
+    };
+
     let mut left_row = div()
         .flex()
         .items_center()
@@ -84,12 +106,7 @@ pub fn render_web_search_bar(
                 .size(px(14.0))
                 .text_color(palette.accent_ink),
         )
-        .child(
-            apply_scale(div(), scale::BODY_MEDIUM)
-                .truncate()
-                .text_color(palette.text_primary)
-                .child(cjk_inline_label(display_title)),
-        );
+        .child(title_el);
 
     let warn_reason_text = if has_hover_issue {
         Some(if props.errors.is_empty() {
@@ -107,11 +124,14 @@ pub fn render_web_search_bar(
     let has_shared_tooltip_overlay = motion::window_tooltip_overlay(window, cx).is_some();
 
     if is_running {
-        left_row = left_row.child(
-            Icon::new(IconName::LoaderCircle)
-                .size(px(14.0))
-                .text_color(palette.accent_ink),
-        );
+        left_row = left_row.child(motion::animated_spinner(
+            format!("web-search-spin-{}", props.call_id),
+            px(14.0),
+            palette.accent_ink,
+            props.running_light_allowed,
+            window,
+            cx,
+        ));
     } else if has_hover_issue {
         let wk_hover = warn_key;
         let hover_cb = Rc::clone(&on_hover_warning);
@@ -219,46 +239,56 @@ pub fn render_web_search_bar(
         .gap(space::MD)
         .child(header_bar);
 
-    if expanded {
-        let mut details = div()
-            .w_full()
-            .pt(space::XS)
-            .flex()
-            .flex_col()
-            .gap(space::SM);
-
-        for q in props.queries {
-            details = details.child(
-                apply_scale(div(), scale::CAPTION)
+    if has_details
+        && let Some(animated_details) = motion::animated_collapse_with_exit(
+            format!("web-search-details-{}", props.call_id),
+            expanded,
+            window,
+            cx,
+            |_interactive, _, _| {
+                let mut details = div()
                     .w_full()
-                    .text_color(palette.text_primary)
-                    .child(SharedString::from(q.clone())),
-            );
-        }
-
-        for row in props.fields {
-            details = details.child(
-                div()
+                    .pt(space::XS)
                     .flex()
-                    .items_start()
-                    .justify_between()
-                    .gap(space::MD)
-                    .child(
-                        apply_scale(div(), scale::CAPTION)
-                            .text_color(palette.text_secondary)
-                            .child(SharedString::from(row.label.clone())),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION)
-                            .flex_1()
-                            .min_w_0()
-                            .text_color(palette.text_primary)
-                            .child(SharedString::from(row.value.clone())),
-                    ),
-            );
-        }
+                    .flex_col()
+                    .gap(space::SM);
 
-        card = card.child(details);
+                for q in props.queries {
+                    details = details.child(
+                        apply_scale(div(), scale::CAPTION)
+                            .w_full()
+                            .text_color(palette.text_primary)
+                            .child(SharedString::from(q.clone())),
+                    );
+                }
+
+                for row in props.fields {
+                    details = details.child(
+                        div()
+                            .flex()
+                            .items_start()
+                            .justify_between()
+                            .gap(space::MD)
+                            .child(
+                                apply_scale(div(), scale::CAPTION)
+                                    .text_color(palette.text_secondary)
+                                    .child(SharedString::from(row.label.clone())),
+                            )
+                            .child(
+                                apply_scale(div(), scale::CAPTION)
+                                    .flex_1()
+                                    .min_w_0()
+                                    .text_color(palette.text_primary)
+                                    .child(SharedString::from(row.value.clone())),
+                            ),
+                    );
+                }
+
+                details.into_any_element()
+            },
+        )
+    {
+        card = card.child(animated_details);
     }
 
     if has_hover_issue && props.warning_hovered && !has_shared_tooltip_overlay {

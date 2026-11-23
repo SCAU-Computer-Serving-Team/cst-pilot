@@ -592,7 +592,7 @@ async fn bitlocker_verification_projection_and_export_http_routes() {
     let dir = TempDirGuard::new("export-http-routes");
     let kit_root = dir.path().canonicalize().unwrap();
     for name in SKILL_NAMES {
-        let p = kit_root.join(format!("agent/home/skills/{name}/SKILL.md"));
+        let p = kit_root.join(format!("app/skills/{name}/SKILL.md"));
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(
             p,
@@ -600,8 +600,9 @@ async fn bitlocker_verification_projection_and_export_http_routes() {
         )
         .unwrap();
     }
+    fs::create_dir_all(kit_root.join("app/prompts")).unwrap();
     fs::write(
-        kit_root.join("agent/home/APPEND_SYSTEM.md"),
+        kit_root.join("app/prompts/APPEND_SYSTEM.md"),
         "CST Pilot 固定诊断规则。",
     )
     .unwrap();

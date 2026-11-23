@@ -8,18 +8,24 @@ use crate::runbook::storage::{Storage, StorageAtomicExt};
 
 #[derive(Clone)]
 pub(crate) struct LocalFiles {
+    pub kit_root: PathBuf,
     pub base: Storage,
+    pub tel_rel: PathBuf,
     pub owner: Arc<Owner>,
 }
 impl LocalFiles {
     pub fn new(root: &Path, owner: Arc<Owner>) -> Result<Self, String> {
+        let layout = cst_os::KitLayout::new(root)?;
+        let (base, data_rel) = crate::kit::open_data_storage(&layout, true)?;
         Ok(Self {
-            base: Storage::new(root)?,
+            kit_root: layout.root().to_path_buf(),
+            base,
+            tel_rel: data_rel.join("telemetry"),
             owner,
         })
     }
     pub fn path(&self, name: &str) -> PathBuf {
-        self.base.root.join("agent/home/telemetry").join(name)
+        self.base.root.join(&self.tel_rel).join(name)
     }
     pub fn transaction<T>(
         &self,
@@ -27,7 +33,7 @@ impl LocalFiles {
         cancel: &CancellationToken,
         operation: impl FnOnce() -> Result<T, String>,
     ) -> Result<T, String> {
-        let _lock = FileLock::acquire(&self.base.root, path, &self.owner.proof(), cancel)?;
+        let _lock = FileLock::acquire(&self.kit_root, path, &self.owner.proof(), cancel)?;
         operation().map_err(|_| "遥测本地文件事务失败。".into())
     }
     pub fn read(&self, path: &Path, limit: usize) -> Result<Option<Vec<u8>>, String> {
@@ -50,6 +56,11 @@ impl LocalFiles {
         bytes: &[u8],
         cancel: &CancellationToken,
     ) -> Result<(), String> {
+        let relative = path
+            .parent()
+            .and_then(|p| p.strip_prefix(&self.base.root).ok())
+            .ok_or("遥测文件路径无效。")?;
+        let _lease = self.base.pin_directory(relative, true)?;
         self.base.atomic(path, bytes, true, cancel)
     }
     pub fn remove_exact(&self, path: &Path, expected: &[u8]) -> Result<(), String> {

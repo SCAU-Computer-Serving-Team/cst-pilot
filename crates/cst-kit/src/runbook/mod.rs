@@ -14,16 +14,52 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 pub struct RunbookStore {
+    layout: cst_os::KitLayout,
     storage: Storage,
     root_state: Arc<crate::kit::KitRootState>,
 }
 impl RunbookStore {
     pub fn new(root: impl AsRef<Path>) -> Result<Self, String> {
-        let root_state = crate::kit::root_state_for(root.as_ref())?;
+        let layout = cst_os::KitLayout::new(root.as_ref())?;
+        let root_state = crate::kit::root_state_for(layout.root())?;
         Ok(Self {
-            storage: Storage::new(root.as_ref())?,
+            storage: Storage::new(layout.root())?,
+            layout,
             root_state,
         })
+    }
+    async fn locked_plans<T, F>(&self, cancel: CancellationToken, task: F) -> Result<T, String>
+    where
+        T: Send + 'static,
+        F: FnOnce(&Storage, &Path, &Storage, &CancellationToken) -> Result<T, String>
+            + Send
+            + 'static,
+    {
+        let activity = self.root_state.gate.enter()?;
+        let writers = self.root_state.runbook_writes.clone();
+        let child = cancel.child_token();
+        let _cancel_on_drop = child.clone().drop_guard();
+        let permit = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err("命令交付已取消。".into()),
+            permit = writers.lock_owned() => permit,
+        };
+        let layout = self.layout.clone();
+        let root_storage = self.storage.clone();
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let _activity = activity;
+            cancelled(&child)?;
+            let (plan_storage, data_rel) = crate::kit::open_data_storage(&layout, true)?;
+            let plans_rel = data_rel.join("plans");
+            let _lease = plan_storage.pin_directory(&plans_rel, true)?;
+            let dir = plan_storage.directory(&plans_rel, false)?;
+            let _lock = DirectoryLock::acquire(&dir)?;
+            cancelled(&child)?;
+            task(&plan_storage, &plans_rel, &root_storage, &child)
+        })
+        .await
+        .map_err(|_| "命令交付工作线程异常退出。".to_string())?
     }
     async fn locked<T, F>(
         &self,
@@ -94,7 +130,7 @@ pub fn definitions(root: &Path) -> Result<Vec<ToolDefinition>, String> {
     let mut plan = ToolDefinition::from_typed(
         "command_plan",
         "Command Plan",
-        "保存或修订手动修复方案，返回完整命令、稳定 ID 与版本。只写工具包 agent/home/command-plans，不执行命令。",
+        "保存或修订手动修复方案，返回完整命令、稳定 ID 与版本。只写工具包 data/plans，不执行命令。",
         move |_, input: PlanInput, cancel, _, _| {
             let store = plan_store.clone();
             async move { diagnostic_result(store.plan(input, cancel.unwrap_or_default()).await?) }

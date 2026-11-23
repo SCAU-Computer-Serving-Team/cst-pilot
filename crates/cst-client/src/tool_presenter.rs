@@ -1500,18 +1500,23 @@ fn ranking_metrics_of(
             },
         ];
     }
-    let has_size = entry.get("size").is_some_and(|v| !v.is_null());
+    let has_size_key = entry.contains_key("size");
     entry
         .iter()
-        .filter(|(field, _)| {
+        .filter(|(field, value)| {
             let f = field.as_str();
             !NAME_KEYS.contains(&f)
                 && !matches!(f, "type" | "pid" | "engtypes" | "ext")
-                && (f != "bytes" || !has_size)
+                && (f != "bytes" || !has_size_key)
+                && !(f == "pct" && value.is_null())
         })
         .map(|(field, value)| FieldRow {
             label: resolve_label(tool_name, scope, field),
-            value: measure(field, Some(value)),
+            value: if field == "size" && value.is_null() {
+                "大小未知".into()
+            } else {
+                measure(field, Some(value))
+            },
         })
         .collect()
 }
@@ -2680,6 +2685,27 @@ pub struct ToolPresenterCache {
 }
 
 impl ToolPresenterCache {
+    pub fn get_cached_normal(
+        &self,
+        call_id: &str,
+        result_revision: u64,
+    ) -> Option<Arc<ToolCardView>> {
+        self.normal
+            .get(&(call_id.to_owned(), result_revision))
+            .map(Arc::clone)
+    }
+
+    pub fn get_cached_special(
+        &self,
+        call_id: &str,
+        result_revision: u64,
+        live: bool,
+    ) -> Option<Arc<SpecialToolView>> {
+        self.special
+            .get(&(call_id.to_owned(), result_revision, live))
+            .map(Arc::clone)
+    }
+
     pub fn get_or_map_normal(
         &mut self,
         call: &ToolCallInput,

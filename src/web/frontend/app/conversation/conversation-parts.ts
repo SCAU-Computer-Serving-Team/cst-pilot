@@ -54,15 +54,21 @@ export type Turn = { user?: TurnEntry; assistants: TurnEntry[]; summary?: TurnEn
 
 /** 允许进入对话流与滑窗计数的消息角色白名单；排除 toolResult 与内部元数据角色（如 system）。 */
 export function isConversationMessage(message: { role?: unknown }): boolean {
-	return message.role === "user" || message.role === "assistant" || message.role === "branchSummary";
+	return (
+		message.role === "user" ||
+		message.role === "assistant" ||
+		message.role === "branchSummary" ||
+		message.role === "compactionSummary"
+	);
 }
 
-/** 按用户消息切分轮次；开头的孤立助手消息（例如被截断的历史）自成一轮，分支总结独占一块。 */
+/** 按用户消息切分轮次；开头的孤立助手消息（例如被截断的历史）自成一轮，分支总结与上下文压缩独占一块。 */
 export function groupTurns(entries: TurnEntry[]): Turn[] {
 	const turns: Turn[] = [];
 	for (const entry of entries) {
 		if (entry.message.role === "user") turns.push({ user: entry, assistants: [] });
-		else if (entry.message.role === "branchSummary") turns.push({ summary: entry, assistants: [] });
+		else if (entry.message.role === "branchSummary" || entry.message.role === "compactionSummary")
+			turns.push({ summary: entry, assistants: [] });
 		else if (entry.message.role === "assistant") {
 			const last = turns.at(-1);
 			if (last && !last.summary) last.assistants.push(entry);

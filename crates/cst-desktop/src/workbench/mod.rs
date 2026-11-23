@@ -51,9 +51,13 @@ struct PendingEditDraftConfirm {
 pub struct WorkbenchView {
     client: ClientHandle,
     active_session_id: Option<String>,
+    sidebar_collapsed: bool,
     sky_time: f32,
     welcome_stagger_start: Option<Instant>,
     welcome_stagger_done: bool,
+    home_enter: Option<motion::HomeEnterSample>,
+    chat_enter: Option<motion::ChatEnterSample>,
+    title_reveal: motion::SurfaceReveal,
     home_composer: Entity<ComposerView>,
     session_composer: Entity<ComposerView>,
     message_list: Entity<MessageListView>,
@@ -102,9 +106,13 @@ impl WorkbenchView {
         Self {
             client,
             active_session_id: initial_sid,
+            sidebar_collapsed: false,
             sky_time: 0.0,
             welcome_stagger_start: None,
             welcome_stagger_done,
+            home_enter: None,
+            chat_enter: None,
+            title_reveal: motion::SurfaceReveal::default(),
             home_composer,
             session_composer,
             message_list,
@@ -150,6 +158,29 @@ impl WorkbenchView {
         self.welcome_stagger_done
     }
 
+    pub(crate) fn bound_session_id(&self) -> Option<&str> {
+        self.active_session_id.as_deref()
+    }
+
+    pub(crate) fn set_route_transition_samples(
+        &mut self,
+        home_enter: Option<motion::HomeEnterSample>,
+        chat_enter: Option<motion::ChatEnterSample>,
+    ) {
+        self.home_enter = home_enter;
+        self.chat_enter = chat_enter;
+    }
+
+    pub fn set_sidebar_collapsed(&mut self, collapsed: bool) {
+        if self.sidebar_collapsed != collapsed {
+            self.sidebar_collapsed = collapsed;
+            if collapsed {
+                self.header_menu_open = false;
+                self.header_menu_prior_focus = None;
+            }
+        }
+    }
+
     pub fn sync_route_and_sky(
         &mut self,
         session_id: Option<String>,
@@ -159,10 +190,16 @@ impl WorkbenchView {
     ) {
         self.sky_time = sky_time;
         if self.active_session_id != session_id {
+            let switching_sessions = self.active_session_id.is_some() && session_id.is_some();
             if session_id.is_some() {
                 self.welcome_stagger_done = true;
             }
             self.active_session_id = session_id.clone();
+            if switching_sessions {
+                self.title_reveal.start(motion::FAST, 4.0, 0.25, cx);
+            } else {
+                self.title_reveal.clear();
+            }
             self.header_menu_open = false;
             self.header_menu_prior_focus = None;
             self.pending_edit_confirm = None;
@@ -427,12 +464,27 @@ impl Render for WorkbenchView {
                 .unwrap_or_else(|| "当前对话".to_owned());
 
             let ent_more = entity.clone();
+            let (title_op, title_dy) = self.title_reveal.sample(window, cx);
+            let (hdr_op, hdr_dy, msg_op, msg_dy, cmp_op, cmp_dy) = match self.chat_enter {
+                Some(sample) => (
+                    sample.header_opacity,
+                    sample.header_dy,
+                    sample.messages_opacity,
+                    sample.messages_dy,
+                    sample.composer_opacity,
+                    sample.composer_dy,
+                ),
+                None => (1.0, px(0.0), 1.0, px(0.0), 1.0, px(0.0)),
+            };
 
             // `44px` (`height::HEADER`) session header bar (`HUkqs`)
             let session_header = div()
                 .id("session-header-hukqs")
                 .test_support()
                 .a11y_region("session-header-hukqs", format!("对话标题：{session_title}"))
+                .relative()
+                .top(hdr_dy)
+                .opacity(hdr_op)
                 .w_full()
                 .h(height::HEADER)
                 .pl(space::GROUP)
@@ -445,6 +497,9 @@ impl Render for WorkbenchView {
                 .gap(space::MD)
                 .child(
                     div()
+                        .relative()
+                        .top(title_dy)
+                        .opacity(title_op)
                         .flex()
                         .items_center()
                         .gap(space::MD)
@@ -509,13 +564,27 @@ impl Render for WorkbenchView {
                 .a11y_region("workspace-session-view", "会话工作台")
                 .relative()
                 .size_full()
-                .bg(palette.bg_workspace)
                 .flex()
                 .flex_col()
-                .child(session_header)
-                .child(self.message_list.clone())
+                .children((!self.sidebar_collapsed).then_some(session_header))
                 .child(
                     div()
+                        .relative()
+                        .top(msg_dy)
+                        .opacity(msg_op)
+                        .flex_1()
+                        .min_h_0()
+                        .min_w_0()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .child(self.message_list.clone()),
+                )
+                .child(
+                    div()
+                        .relative()
+                        .top(cmp_dy)
+                        .opacity(cmp_op)
                         .w_full()
                         .px(space::GROUP)
                         .pb(space::MD)
@@ -529,7 +598,7 @@ impl Render for WorkbenchView {
                         ),
                 );
 
-            if self.header_menu_open {
+            if self.header_menu_open && !self.sidebar_collapsed {
                 let ent_backdrop = entity.clone();
                 let ent_tree = entity.clone();
                 let ent_exp = entity.clone();
@@ -670,27 +739,53 @@ impl Render for WorkbenchView {
 
             session_view.into_any_element()
         } else {
-            let home_pending = self.client.with_outbox(|ob| ob.home_item().is_some());
             let reduce_motion = cx.reduce_motion();
-            let (arcs_op, arcs_y, title_op, title_y, comp_op, comp_y) =
-                if self.welcome_stagger_done || reduce_motion {
+            let viewport_h = (f32::from(window.viewport_size().height)
+                - f32::from(layout::TOPBAR_HEIGHT))
+            .max(400.0);
+            let (
+                sky_y,
+                sky_op,
+                arcs_op,
+                arcs_y,
+                title_op,
+                title_y,
+                comp_op,
+                comp_y,
+                foot_op,
+                foot_y,
+            ) = if let Some(enter) = self.home_enter.filter(|_| !reduce_motion) {
+                self.welcome_stagger_done = true;
+                (
+                    -viewport_h * (1.0 - enter.sky_progress),
+                    0.25 + 0.75 * enter.sky_progress,
+                    enter.arcs_opacity,
+                    enter.arcs_dy,
+                    enter.title_opacity,
+                    enter.title_dy,
+                    enter.composer_opacity,
+                    enter.composer_dy,
+                    enter.composer_opacity,
+                    enter.composer_dy,
+                )
+            } else if self.welcome_stagger_done || reduce_motion {
+                self.welcome_stagger_done = true;
+                (0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0)
+            } else {
+                let now = cx.background_executor().now();
+                let started = *self.welcome_stagger_start.get_or_insert(now);
+                let elapsed = now.saturating_duration_since(started);
+                if elapsed >= motion::WELCOME_MAX_TOTAL {
                     self.welcome_stagger_done = true;
-                    (1.0, 0.0, 1.0, 0.0, 1.0, 0.0)
+                    (0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0)
                 } else {
-                    let now = cx.background_executor().now();
-                    let started = *self.welcome_stagger_start.get_or_insert(now);
-                    let elapsed = now.saturating_duration_since(started);
-                    if elapsed >= motion::WELCOME_MAX_TOTAL {
-                        self.welcome_stagger_done = true;
-                        (1.0, 0.0, 1.0, 0.0, 1.0, 0.0)
-                    } else {
-                        window.request_animation_frame();
-                        let (a_op, a_y) = motion::welcome_stagger_progress(0, elapsed, false);
-                        let (t_op, t_y) = motion::welcome_stagger_progress(1, elapsed, false);
-                        let (c_op, c_y) = motion::welcome_stagger_progress(2, elapsed, false);
-                        (a_op, a_y, t_op, t_y, c_op, c_y)
-                    }
-                };
+                    window.request_animation_frame();
+                    let (a_op, a_y) = motion::welcome_stagger_progress(0, elapsed, false);
+                    let (t_op, t_y) = motion::welcome_stagger_progress(1, elapsed, false);
+                    let (c_op, c_y) = motion::welcome_stagger_progress(2, elapsed, false);
+                    (0.0, 1.0, a_op, a_y, t_op, t_y, c_op, c_y, c_op, c_y)
+                }
+            };
 
             // Home welcome canvas (`p2HWHP` / `PuezS` with `blue-hour.glsl` rounded sky + `600px` centered composer)
             div()
@@ -702,10 +797,11 @@ impl Render for WorkbenchView {
                 .child(
                     div()
                         .absolute()
-                        .top_0()
+                        .top(px(sky_y))
                         .left_0()
                         .right_0()
-                        .bottom_0()
+                        .h_full()
+                        .opacity(sky_op)
                         .child(render_sky_background_rounded(
                             SkyPreset::home_for_theme(palette.mode),
                             self.sky_time,
@@ -744,7 +840,7 @@ impl Render for WorkbenchView {
                                                 .w_full()
                                                 .h_full()
                                                 .opacity(arcs_op)
-                                                .mt(px(arcs_y))
+                                                .top(px(arcs_y))
                                                 .child(render_home_brand_arcs()),
                                         )
                                         .child(
@@ -762,17 +858,12 @@ impl Render for WorkbenchView {
                                 )
                                 .child(
                                     div()
+                                        .relative()
                                         .w_full()
                                         .opacity(comp_op)
-                                        .mt(px(comp_y))
+                                        .top(px(comp_y))
                                         .child(self.home_composer.clone()),
-                                )
-                                .children(home_pending.then(|| {
-                                    apply_scale(div(), scale::CAPTION)
-                                        .pt(space::MD)
-                                        .text_color(rgba(0xFFFF_FFBF))
-                                        .child("正在创建新对话并提交消息…")
-                                })),
+                                ),
                         ),
                 )
                 .child(
@@ -780,7 +871,8 @@ impl Render for WorkbenchView {
                         .absolute()
                         .left_0()
                         .right_0()
-                        .bottom(px(17.0))
+                        .bottom(px(17.0 - foot_y))
+                        .opacity(foot_op)
                         .flex()
                         .justify_center()
                         .child(
@@ -794,6 +886,13 @@ impl Render for WorkbenchView {
 
         let mut root = div().relative().size_full().child(body);
 
+        let edit_confirm_p = motion::surface_presence(
+            "overwrite-draft-scrim-p",
+            self.pending_edit_confirm.is_some(),
+            motion::MODAL_OPEN,
+            window,
+            cx,
+        );
         if self.pending_edit_confirm.is_some() {
             let ent_scrim = entity.clone();
             let ent_keep = entity.clone();
@@ -801,11 +900,12 @@ impl Render for WorkbenchView {
 
             let scrim = render_frosted_surface(
                 "overwrite-draft-confirm-scrim",
-                FrostedGlassSpec::scrim(&palette),
+                FrostedGlassSpec::scrim(&palette).with_opacity(edit_confirm_p),
                 palette.bg_scrim,
                 transparency_enabled,
                 scale_factor,
             )
+            .opacity(0.01 + 0.99 * edit_confirm_p)
             .test_support()
             .absolute()
             .top_0()
@@ -824,7 +924,7 @@ impl Render for WorkbenchView {
 
             let card = render_frosted_surface(
                 "overwrite-draft-confirm-card",
-                FrostedGlassSpec::modal(&palette, 8.0),
+                FrostedGlassSpec::modal(&palette, 8.0).with_opacity(edit_confirm_p),
                 palette.bg_modal,
                 transparency_enabled,
                 scale_factor,
@@ -939,9 +1039,17 @@ impl Render for WorkbenchView {
             );
         }
 
+        let lightbox_scrim_p = motion::surface_presence(
+            "image-lightbox-scrim-p",
+            self.lightbox.is_some(),
+            motion::MODAL_OPEN,
+            window,
+            cx,
+        );
         if let Some(ref target) = self.lightbox {
             let ent_close = entity.clone();
             root = root.child(render_image_lightbox_modal(
+                lightbox_scrim_p,
                 target,
                 &palette,
                 transparency_enabled,
@@ -963,7 +1071,7 @@ impl Render for WorkbenchView {
 
 /// Renders the `280×280` concentric brand arc graphic (`cst-pilot-desktop.pen` 「01 · 工作台」 `lbYEI`:
 /// outer `280×280` `tnt5a` & inner `244×244` `Nc5f1`, `3.5px` stroke, `45°..315°` sweep, white vertical fade).
-fn render_home_brand_arcs() -> impl IntoElement {
+pub(crate) fn render_home_brand_arcs() -> impl IntoElement {
     div()
         .absolute()
         .top_0()

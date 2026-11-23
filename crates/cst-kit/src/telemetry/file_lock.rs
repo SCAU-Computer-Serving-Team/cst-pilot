@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use serde_json::{Value, json};
+use sha2::Digest;
 use tokio::sync::OwnedMutexGuard;
 use tokio_util::sync::CancellationToken;
 
@@ -21,6 +22,11 @@ pub struct FileLock {
 }
 
 impl FileLock {
+    pub fn lock_path_for(root: &Path, target: &Path) -> Result<PathBuf, String> {
+        let storage = Storage::new(root)?;
+        Ok(lock_path_in_storage(&storage, target))
+    }
+
     pub fn acquire(
         root: &Path,
         target: &Path,
@@ -39,16 +45,9 @@ impl FileLock {
             }
         };
         let storage = Storage::new(root)?;
-        let relative = target
-            .parent()
-            .and_then(|p| p.strip_prefix(&storage.root).ok())
-            .ok_or("遥测事务路径超出工具包。")?;
-        let parent = storage.pin_directory(relative, true)?;
-        let name = target
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or("遥测文件名无效。")?;
-        let path = target.with_file_name(format!("{name}.lock"));
+        let locks_rel = Path::new(".state/locks");
+        let parent = storage.pin_directory(locks_rel, true)?;
+        let path = lock_path_in_storage(&storage, target);
         let bytes = serde_json::to_vec(&json!({"pid":std::process::id(),"proof":proof}))
             .map_err(|_| "遥测事务锁无法编码。")?;
         for attempt in 0..=100 {
@@ -199,6 +198,15 @@ fn reclaim(storage: &Storage, path: &Path, proof: &Proof, cancel: &CancellationT
         }
     }
     clean_known(storage, &recovery);
+}
+
+fn lock_path_in_storage(storage: &Storage, target: &Path) -> PathBuf {
+    let target_key = target.to_string_lossy().replace('\\', "/").to_lowercase();
+    let digest = sha2::Sha256::digest(target_key.as_bytes());
+    storage
+        .root
+        .join(".state/locks")
+        .join(format!("telemetry-{digest:x}.lock"))
 }
 
 fn clean_known(storage: &Storage, path: &Path) {

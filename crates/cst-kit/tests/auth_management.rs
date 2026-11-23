@@ -22,11 +22,11 @@ struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!("cst-management-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(root.join("agent/home")).unwrap();
+        fs::create_dir_all(root.join("data/config")).unwrap();
         Self(root.canonicalize().unwrap())
     }
     fn file(&self, name: &str) -> PathBuf {
-        self.0.join("agent/home").join(name)
+        self.0.join("data/config").join(name)
     }
     fn write(&self, name: &str, value: Value) {
         fs::write(self.file(name), value.to_string()).unwrap();
@@ -35,9 +35,14 @@ impl Fixture {
         serde_json::from_slice(&fs::read(self.file(name)).unwrap()).unwrap()
     }
     fn resources(&self) {
-        fs::write(self.file("APPEND_SYSTEM.md"), "固定诊断规则。").unwrap();
+        fs::create_dir_all(self.0.join("app/prompts")).unwrap();
+        fs::write(
+            self.0.join("app/prompts/APPEND_SYSTEM.md"),
+            "固定诊断规则。",
+        )
+        .unwrap();
         for name in SKILL_NAMES {
-            let dir = self.file(&format!("skills/{name}"));
+            let dir = self.0.join(format!("app/skills/{name}"));
             fs::create_dir_all(&dir).unwrap();
             fs::write(
                 dir.join("SKILL.md"),

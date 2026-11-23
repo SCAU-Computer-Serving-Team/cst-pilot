@@ -100,7 +100,7 @@ impl ScanSnapshot {
         extensions.sort_by(|a, b| b.1.0.cmp(&a.1.0).then_with(|| a.0.cmp(b.0)));
         json!({
             "method":if filesystem.is_some_and(|fs| fs.eq_ignore_ascii_case("NTFS")) {"wiztree-mft"} else {"wiztree-walk"},
-            "root":root.to_string_lossy(),"totalGB":gib(self.total),
+            "root":super::wz_index::display_path(root),"totalGB":gib(self.total),
             "topDirs":rows(&self.top_dirs),"topFiles":rows(&self.top_files),
             "extAgg":extensions.into_iter().take(top.min(40)).map(|(ext,(bytes,files))|json!({"ext":ext,"files":files,"sizeGB":gib(*bytes)})).collect::<Vec<_>>(),
             "staleFiles":self.stale.iter().take(top).map(|r|json!({"path":r.path,"sizeGB":gib(r.bytes),"modified":r.modified})).collect::<Vec<_>>(),

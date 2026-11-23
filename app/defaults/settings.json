@@ -1,0 +1,11 @@
+{
+  "_comment": "默认开放读取、检索和诊断工具。配置与会话保存在 data/，临时状态保存在 .state/。此配置不是系统沙箱；PowerShell 等原生组件可能留下宿主缓存。",
+  "defaultProvider": "deepseek",
+  "defaultModel": "deepseek-flash",
+  "defaultTools": [
+    "read",
+    "ls"
+  ],
+  "defaultProjectTrust": "never",
+  "enableInstallTelemetry": false
+}

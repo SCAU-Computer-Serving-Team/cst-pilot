@@ -266,7 +266,7 @@ impl Applier {
     ) -> Result<Journal, String> {
         let mut paths = inventory(&self.storage, cancel)?;
         paths.extend(release.sums.keys().cloned());
-        paths.insert("SHA256SUMS".into());
+        paths.insert(layout::SHA256SUMS_PATH.into());
         let mut journal = Journal {
             v: 1,
             id: uuid::Uuid::new_v4().to_string(),
@@ -284,11 +284,13 @@ impl Applier {
         let _base = self.storage.pin_directory(&journal.base(), true)?;
         for name in paths {
             io::cancelled(cancel)?;
-            let merged = layout::classify(&name)? == Area::Merge;
+            if layout::classify(&name)? != Area::Program {
+                continue;
+            }
             let path = self.storage.root.join(&name);
             let _pin = io::parent_pin(&self.storage, &path, true)?;
             let old = io::hash(&self.storage, &path, cancel)?;
-            let signed = if name == "SHA256SUMS" {
+            let next = if name == layout::SHA256SUMS_PATH {
                 Some(format!(
                     "{:x}",
                     Sha256::digest(release.info.sha256_sums.as_bytes())
@@ -296,30 +298,47 @@ impl Applier {
             } else {
                 release.sums.get(&name).cloned()
             };
-            let next = if merged {
-                let Some(_) = signed else { continue };
-                let current = self.storage.read_limited(&path, 8 * 1024 * 1024)?;
-                let defaults = self
-                    .storage
-                    .read_limited(
-                        &self.storage.root.join(stage).join("program").join(&name),
-                        8 * 1024 * 1024,
-                    )?
-                    .ok_or("预置配置已消失。")?;
-                let bytes = layout::merge_defaults(&name, current.as_deref(), &defaults)?;
-                let prepared = self.storage.root.join(journal.prepared(&name));
-                let _pin = io::parent_pin(&self.storage, &prepared, true)?;
-                io::atomic(&self.storage, &prepared, &bytes, false, cancel)?;
-                Some(format!("{:x}", Sha256::digest(&bytes)))
-            } else {
-                signed
-            };
             if old != next {
                 journal.entries.push(Entry {
                     path: name,
                     old,
                     next,
-                    merged,
+                    merged: false,
+                });
+            }
+        }
+        for (defaults_rel, target_rel) in layout::DEFAULT_MERGE_TARGETS {
+            io::cancelled(cancel)?;
+            if !release.sums.contains_key(*defaults_rel) {
+                continue;
+            }
+            let path = self.storage.root.join(target_rel);
+            let _pin = io::parent_pin(&self.storage, &path, true)?;
+            let old = io::hash(&self.storage, &path, cancel)?;
+            let current = self.storage.read_limited(&path, 8 * 1024 * 1024)?;
+            let defaults = self
+                .storage
+                .read_limited(
+                    &self
+                        .storage
+                        .root
+                        .join(stage)
+                        .join("program")
+                        .join(defaults_rel),
+                    8 * 1024 * 1024,
+                )?
+                .ok_or("预置配置已消失。")?;
+            let bytes = layout::merge_defaults(target_rel, current.as_deref(), &defaults)?;
+            let prepared = self.storage.root.join(journal.prepared(target_rel));
+            let _pin = io::parent_pin(&self.storage, &prepared, true)?;
+            io::atomic(&self.storage, &prepared, &bytes, false, cancel)?;
+            let next = Some(format!("{:x}", Sha256::digest(&bytes)));
+            if old != next {
+                journal.entries.push(Entry {
+                    path: (*target_rel).to_owned(),
+                    old,
+                    next,
+                    merged: true,
                 });
             }
         }
@@ -539,7 +558,7 @@ impl Applier {
                 return Err("升级事务条目无效。".into());
             }
             if !entry.merged {
-                let signed = if entry.path == "SHA256SUMS" {
+                let signed = if entry.path == layout::SHA256SUMS_PATH {
                     Some(format!(
                         "{:x}",
                         Sha256::digest(release.info.sha256_sums.as_bytes())
@@ -615,12 +634,14 @@ fn inventory(storage: &Storage, cancel: &CancellationToken) -> Result<BTreeSet<S
             let name = rel.to_str().ok_or("旧程序文件名无效。")?.replace('\\', "/");
             let meta = fs::symlink_metadata(item.path()).map_err(|_| "旧程序文件无法检查。")?;
             if meta.is_dir() {
-                let descend = matches!(name.as_str(), "agent" | "agent/home")
-                    || layout::classify(&format!("{name}/cst-upgrade-probe.bin")).is_ok();
+                let descend = name == "app"
+                    || (name.starts_with("app/")
+                        && layout::classify(&format!("{name}/cst-upgrade-probe.bin"))
+                            == Ok(Area::Program));
                 if descend {
                     pending.push(rel)
                 }
-            } else if layout::classify(&name).is_ok() {
+            } else if layout::classify(&name) == Ok(Area::Program) {
                 io::hash(storage, &item.path(), cancel)?.ok_or("旧程序文件已消失。")?;
                 result.insert(name);
             }

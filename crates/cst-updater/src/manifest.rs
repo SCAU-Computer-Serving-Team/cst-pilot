@@ -255,10 +255,12 @@ pub(crate) fn parse_sums(text: &str) -> Result<BTreeMap<String, String>, String>
     let mut names = BTreeSet::new();
     for line in text.lines() {
         let (hash, path) = line.split_once("  ").ok_or("文件校验清单格式无效。")?;
-        if !hash_text(hash) || path == "SHA256SUMS" {
+        if !hash_text(hash) || path == layout::SHA256SUMS_PATH {
             return Err("文件校验清单格式无效。".into());
         }
-        layout::classify(path)?;
+        if layout::classify(path)? != layout::Area::Program {
+            return Err("文件校验清单不能包含用户数据路径。".into());
+        }
         if !names.insert(path.to_lowercase()) || sums.insert(path.into(), hash.into()).is_some() {
             return Err("文件校验清单存在重复或大小写冲突。".into());
         }

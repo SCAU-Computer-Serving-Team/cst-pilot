@@ -30,6 +30,7 @@ pub struct RunbookCardProps<'a> {
     pub delivery: Option<&'a RunbookDeliveryView>,
     pub errors: &'a [String],
     pub details_expanded: bool,
+    pub running_light_allowed: bool,
 }
 
 pub type OpenRunbookFn = Rc<dyn Fn(String, String, &mut Window, &mut App)>;
@@ -160,11 +161,21 @@ pub fn render_runbook_card<V: 'static>(
                         .items_center()
                         .gap(space::XS)
                         .flex_shrink_0()
-                        .child(
+                        .child(if status_icon == IconName::LoaderCircle {
+                            motion::animated_spinner(
+                                format!("runbook-spin-{}", props.call_id),
+                                px(12.0),
+                                status_color,
+                                props.running_light_allowed,
+                                window,
+                                cx,
+                            )
+                        } else {
                             Icon::new(status_icon)
                                 .size(px(12.0))
-                                .text_color(status_color),
-                        )
+                                .text_color(status_color)
+                                .into_any_element()
+                        })
                         .child(
                             apply_scale(div(), scale::CAPTION)
                                 .text_color(palette.text_secondary)

@@ -15,16 +15,16 @@ use crate::session::{SessionPoolError, UnflushedSessionSnapshot};
 /// and project JSONL directories) independently from in-memory `SessionSlot` management.
 #[derive(Clone)]
 pub struct SessionIndexStore {
-    agent_dir: PathBuf,
+    sessions_root: PathBuf,
     inbox_root: PathBuf,
     created_lock: Arc<AsyncMutex<()>>,
     removed: Arc<Mutex<BTreeSet<String>>>,
 }
 
 impl SessionIndexStore {
-    pub fn new(agent_dir: PathBuf, inbox_root: PathBuf) -> Self {
+    pub fn new(sessions_root: PathBuf, inbox_root: PathBuf) -> Self {
         Self {
-            agent_dir,
+            sessions_root,
             inbox_root,
             created_lock: Arc::new(AsyncMutex::new(())),
             removed: Arc::new(Mutex::new(BTreeSet::new())),
@@ -207,14 +207,14 @@ impl SessionIndexStore {
         let _ = fs::remove_file(self.unflushed_file(id));
     }
 
-    /// Scans `agent/home/sessions/*.jsonl` and all `agent/home/sessions/--*--/*.jsonl` workspace subdirectories.
+    /// Scans `data/sessions/*.jsonl` and all `data/sessions/--*--/*.jsonl` workspace subdirectories.
     pub async fn list_all_project_sessions(&self) -> Vec<SessionInfo> {
-        let root = self.agent_dir.join("sessions");
+        let root = &self.sessions_root;
         if !root.exists() {
             return Vec::new();
         }
         let mut dirs = vec![root.clone()];
-        if let Ok(entries) = fs::read_dir(&root) {
+        if let Ok(entries) = fs::read_dir(root) {
             for entry in entries.filter_map(Result::ok) {
                 let path = entry.path();
                 if path.is_dir() && !dirs.contains(&path) {

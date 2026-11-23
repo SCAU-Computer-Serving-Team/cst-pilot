@@ -17,7 +17,9 @@ pub const BITLOCKER_VERIFICATION_CUSTOM_TYPE: &str = cst_kit::bitlocker::VERIFIC
 pub fn is_browser_visible_message(message: &AgentMessage) -> bool {
     match message {
         AgentMessage::User(_) | AgentMessage::Assistant(_) | AgentMessage::ToolResult(_) => true,
-        AgentMessage::Custom(c) => c.role == "branchSummary",
+        AgentMessage::Custom(c) => {
+            matches!(c.role.as_str(), "branchSummary" | "compactionSummary")
+        }
         AgentMessage::System(_) => false,
     }
 }

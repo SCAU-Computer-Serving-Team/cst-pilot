@@ -1,13 +1,16 @@
 use cst_client::tool_presenter::{FieldRow, SpecialStatus};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::motion::{Transition, TransitionId, transition};
 use gpui_kit::component::Icon;
 use gpui_kit::{
-    Context, FontWeight, InteractiveElement, IntoElement, ParentElement, SharedString, Styled,
+    App, Context, FontWeight, InteractiveElement, IntoElement, ParentElement, SharedString, Styled,
     TestSupportExt, Window, div, px, relative,
 };
 
 use crate::accessibility::A11yElementExt as _;
-use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
+use crate::theme::{
+    DesktopPalette, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
+};
 use crate::tools::render_special_details_section;
 
 pub struct SysOverviewProps<'a> {
@@ -25,6 +28,7 @@ pub struct SysOverviewProps<'a> {
     pub fields: &'a [FieldRow],
     pub errors: &'a [String],
     pub details_expanded: bool,
+    pub running_light_allowed: bool,
 }
 
 /// Renders the standalone System Overview persistent card (`sys` with `scope == "overview"`,
@@ -137,11 +141,21 @@ pub fn render_sys_overview_card<V: 'static>(
                         .items_center()
                         .gap(space::XS)
                         .flex_shrink_0()
-                        .child(
+                        .child(if status_icon == IconName::LoaderCircle {
+                            motion::animated_spinner(
+                                format!("sys-overview-spin-{}", props.call_id),
+                                px(12.0),
+                                status_icon_color,
+                                props.running_light_allowed,
+                                window,
+                                cx,
+                            )
+                        } else {
                             Icon::new(status_icon)
                                 .size(px(12.0))
-                                .text_color(status_icon_color),
-                        )
+                                .text_color(status_icon_color)
+                                .into_any_element()
+                        })
                         .child(
                             apply_scale(div(), scale::CAPTION)
                                 .text_color(palette.text_secondary)
@@ -172,20 +186,26 @@ pub fn render_sys_overview_card<V: 'static>(
             .items_start()
             .gap(space::GROUP)
             .child(render_metric_column(
+                format!("sys-cpu-bar-{}", props.call_id),
                 "CPU",
                 &cpu_pct_label,
                 &cpu_sub,
                 cpu_val,
                 mono_family.clone(),
                 palette,
+                window,
+                cx,
             ))
             .child(render_metric_column(
+                format!("sys-mem-bar-{}", props.call_id),
                 "内存",
                 &mem_pct_label,
                 &mem_sub,
                 mem_val,
                 mono_family.clone(),
                 palette,
+                window,
+                cx,
             )),
     );
 
@@ -249,15 +269,28 @@ fn format_pct(p: f64) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_metric_column(
+    bar_id: String,
     label: &'static str,
     pct_str: &str,
     sub_str: &str,
     pct: f64,
     mono_family: SharedString,
     palette: &DesktopPalette,
+    window: &mut Window,
+    cx: &mut App,
 ) -> impl IntoElement {
-    let fill_ratio = (pct / 100.0).clamp(0.0, 1.0) as f32;
+    let target_ratio = (pct / 100.0).clamp(0.0, 1.0) as f32;
+    let tid: TransitionId = SharedString::from(bar_id).into();
+    let fill_ratio = transition(
+        tid,
+        target_ratio,
+        Transition::new(motion::NORMAL).ease(motion::ease_out()),
+        window,
+        cx,
+    )
+    .clamp(0.0, 1.0);
 
     div()
         .flex_1()

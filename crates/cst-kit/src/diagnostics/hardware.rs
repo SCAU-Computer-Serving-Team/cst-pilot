@@ -97,14 +97,16 @@ impl HardwareSource for NativeHardware {
     }
     fn lhm(&self, mode: LhmMode, control: &Control) -> Result<Value, String> {
         let root = self.root.as_ref().ok_or("未配置 LHM 工具包目录。")?;
-        let exe = root.join("lhm/host/cst-lhm-host.exe");
-        let dll = root.join("lhm/LibreHardwareMonitorLib.dll");
+        let layout = cst_os::KitLayout::new(root)?;
+        let lhm_dir = layout.lhm_dir();
+        let exe = lhm_dir.join("host/cst-lhm-host.exe");
+        let dll = lhm_dir.join("LibreHardwareMonitorLib.dll");
         if !exe.is_file() || !dll.is_file() {
             return Err("随包 LHM 辅助程序或 DLL 缺失。".into());
         }
         // Neither the model nor a working-directory search can choose the executable/library.
-        ensure_component(root, &exe)?;
-        ensure_component(root, &dll)?;
+        ensure_component(layout.root(), &exe)?;
+        ensure_component(layout.root(), &dll)?;
         let bounded = Control::new(
             control.cancel.child_token(),
             control.remaining().min(Duration::from_secs(20)),

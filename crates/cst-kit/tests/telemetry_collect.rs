@@ -27,11 +27,21 @@ struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!("cst-telemetry-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(root.join("agent/home")).unwrap();
+        fs::create_dir_all(root.join("data/config")).unwrap();
         Self(root.canonicalize().unwrap())
     }
     fn file(&self, name: &str) -> PathBuf {
-        self.0.join("agent/home").join(name)
+        if let Some(rest) = name.strip_prefix("extensions/telemetry/") {
+            self.0.join("app/telemetry").join(rest)
+        } else if name == "telemetry"
+            || name.starts_with("telemetry/")
+            || name == "sessions"
+            || name.starts_with("sessions/")
+        {
+            self.0.join("data").join(name)
+        } else {
+            self.0.join("data/config").join(name)
+        }
     }
     fn write(&self, name: &str, value: Value) {
         let path = self.file(name);

@@ -18,6 +18,7 @@ use crate::workbench::model_picker::format_quota_balance;
 
 #[derive(Debug, Clone)]
 pub enum AccountViewEvent {
+    NavigateBack,
     OpenLoginTab(LoginMethodTab),
     LoggedOutCstoa,
     ErrorMessage(String),
@@ -189,7 +190,6 @@ impl Render for AccountView {
         let theme_global = DesktopThemeGlobal::current(cx);
         let palette = theme_global.palette;
         let transparency_enabled = theme_global.transparency_enabled;
-        let mono_family = theme_global.mono_font_family;
 
         let snap = self.client.snapshot();
         let account = snap.account.as_ref();
@@ -258,7 +258,6 @@ impl Render for AccountView {
                     )
                     .child(
                         apply_scale(div(), scale::BODY)
-                            .font_family(mono_family.clone())
                             .text_color(palette.text_primary)
                             .child(SharedString::from(student_id.to_owned())),
                     ),
@@ -310,7 +309,6 @@ impl Render for AccountView {
                             .gap(space::SM)
                             .child(
                                 apply_scale(div(), scale::BODY)
-                                    .font_family(mono_family)
                                     .text_color(if self.quota_error.is_some() {
                                         palette.status_danger
                                     } else {
@@ -351,11 +349,19 @@ impl Render for AccountView {
                 .child(err)
         }));
 
+        let logout_scrim_p = motion::surface_presence(
+            "account-logout-scrim-p",
+            self.logout_confirm_open,
+            motion::MODAL_OPEN,
+            window,
+            cx,
+        );
         let confirm_modal_opt = self.logout_confirm_open.then(|| {
             let scale_factor = window.scale_factor();
             let card = render_frosted_surface(
                 "account-logout-confirm-dialog",
-                FrostedGlassSpec::modal(&palette, f32::from(radius::ROW)),
+                FrostedGlassSpec::modal(&palette, f32::from(radius::ROW))
+                    .with_opacity(logout_scrim_p),
                 palette.bg_elevated,
                 transparency_enabled,
                 scale_factor,
@@ -463,11 +469,13 @@ impl Render for AccountView {
 
             render_frosted_surface(
                 "account-logout-confirm-scrim",
-                FrostedGlassSpec::scrim(&palette),
+                FrostedGlassSpec::workspace_scrim(&palette).with_opacity(logout_scrim_p),
                 palette.bg_scrim,
                 transparency_enabled,
                 scale_factor,
             )
+            .rounded(radius::ROW)
+            .opacity(0.01 + 0.99 * logout_scrim_p)
             .occlude()
             .absolute()
             .top_0()
@@ -503,13 +511,20 @@ impl Render for AccountView {
             .size_full()
             .flex()
             .flex_col()
-            .bg(palette.bg_workspace)
             .child(render_subpage_header_xwjof(
                 "account-subpage-header",
                 IconName::User,
                 "账号信息",
                 None,
+                Some(std::rc::Rc::new({
+                    let e_back = cx.entity();
+                    move |_, cx| {
+                        e_back.update(cx, |_, cx| cx.emit(AccountViewEvent::NavigateBack));
+                    }
+                })),
                 &palette,
+                window,
+                cx,
             ))
             .child(
                 div()
@@ -518,7 +533,7 @@ impl Render for AccountView {
                     .min_h_0()
                     .w_full()
                     .overflow_y_scroll()
-                    .px(space::GROUP)
+                    .px(layout::SUBPAGE_HORIZONTAL_INSET)
                     .py(space::GROUP)
                     .flex()
                     .flex_col()
@@ -527,6 +542,8 @@ impl Render for AccountView {
                         div()
                             .w_full()
                             .max_w(layout::CENTER_COLUMN_MAX_WIDTH)
+                            .id("account-content-column")
+                            .test_support()
                             .flex()
                             .flex_col()
                             .gap(space::GROUP)

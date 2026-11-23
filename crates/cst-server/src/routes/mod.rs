@@ -439,7 +439,7 @@ pub async fn handle_http_request(
             query.as_deref(),
             &headers,
             state.static_dir(),
-            &state.kit_root().join("assets").join("fonts"),
+            state.fonts_dir(),
             &state.mode,
         )
         .await);
@@ -586,6 +586,7 @@ async fn dispatch_api_route(
         caller,
         method,
         pathname,
+        query,
         headers,
         raw_body,
         conn_cancel,

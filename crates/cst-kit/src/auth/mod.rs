@@ -99,7 +99,6 @@ impl AuthRuntime {
         kind: AuthType,
         interaction: AuthInteraction,
     ) -> Result<Credential, String> {
-        self.invalidate_account();
         let credential = self.runtime.login("cstoa", kind, interaction, None).await?;
         self.invalidate_account();
         let _ = self.refresh(false).await;
@@ -159,21 +158,26 @@ impl AuthRuntime {
             }))
             .await
     }
-    /// Refreshes CSTOA and all registered provider catalogs together.
+    /// Refreshes CSTOA and all registered provider catalogs together in a single pass
+    /// so intermediate snapshots never drop dynamic providers mid-refresh.
     pub async fn refresh_all(&self, force: bool) -> ModelsRefreshResult {
-        let mut combined = self.refresh(force).await;
-        let all = self
-            .runtime
+        if let Err(error) = self.files.read("models.json") {
+            let mut result = ModelsRefreshResult::default();
+            result.errors.insert(
+                "cstoa".into(),
+                pi_ai::ModelsError::new(pi_ai::ModelsErrorCode::ModelSource, error),
+            );
+            return result;
+        }
+        if force {
+            self.invalidate_account();
+        }
+        self.runtime
             .refresh(Some(ModelsRefreshOptions {
                 allow_network: Some(true),
                 providers: None,
                 force: Some(force),
             }))
-            .await;
-        combined.aborted |= all.aborted;
-        for (provider, error) in all.errors {
-            combined.errors.entry(provider).or_insert(error);
-        }
-        combined
+            .await
     }
 }

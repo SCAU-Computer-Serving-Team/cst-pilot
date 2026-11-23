@@ -234,18 +234,21 @@ function Expand-IsolatedKit {
     if (Test-Path -LiteralPath $KitRoot) {
         throw "隔离目录已存在，请使用新的 -OutputDir：$KitRoot"
     }
-    $homeDir = Join-Path $KitRoot 'agent\home'
-    $sessionsDir = Join-Path $homeDir 'sessions'
-    $skillsDir = Join-Path $homeDir 'skills'
-    $fontsDir = Join-Path $KitRoot 'assets\fonts'
-    New-Item -ItemType Directory -Force -Path $sessionsDir, $skillsDir, $fontsDir, (Join-Path $KitRoot '.state') | Out-Null
+    $configDir = Join-Path $KitRoot 'data\config'
+    $sessionsDir = Join-Path $KitRoot 'data\sessions'
+    $promptsDir = Join-Path $KitRoot 'app\prompts'
+    $skillsDir = Join-Path $KitRoot 'app\skills'
+    $fontsDir = Join-Path $KitRoot 'app\fonts'
+    $appDir = Join-Path $KitRoot 'app'
+    New-Item -ItemType Directory -Force -Path $configDir, $sessionsDir, $promptsDir, $skillsDir, $fontsDir, (Join-Path $KitRoot '.state') | Out-Null
 
     foreach ($exe in @('cst-pilot.exe', 'cst-server.exe', 'cst-updater.exe')) {
         $src = Join-Path $SourceBinDir $exe
         if (-not (Test-Path -LiteralPath $src)) {
             throw "缺少 Release 可执行文件：$src"
         }
-        Copy-Item -LiteralPath $src -Destination (Join-Path $KitRoot $exe) -Force
+        $dst = if ($exe -eq 'cst-pilot.exe') { Join-Path $KitRoot $exe } else { Join-Path $appDir $exe }
+        Copy-Item -LiteralPath $src -Destination $dst -Force
     }
 
     $verSrc = Join-Path $repoRoot 'VERSION'
@@ -256,8 +259,8 @@ function Expand-IsolatedKit {
         Set-Content -LiteralPath $verDst -Value 'cst-pilot 0.1.0' -Encoding utf8NoBOM
     }
     Copy-Item -Path (Join-Path $repoRoot 'assets\fonts\*') -Destination $fontsDir -Force
-    Copy-Item -LiteralPath (Join-Path $repoRoot 'agent\home\APPEND_SYSTEM.md') -Destination (Join-Path $homeDir 'APPEND_SYSTEM.md') -Force
-    Copy-Item -Path (Join-Path $repoRoot 'agent\home\skills\*') -Destination $skillsDir -Recurse -Force
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'app\prompts\APPEND_SYSTEM.md') -Destination (Join-Path $promptsDir 'APPEND_SYSTEM.md') -Force
+    Copy-Item -Path (Join-Path $repoRoot 'app\skills\*') -Destination $skillsDir -Recurse -Force
 
     # 1. Generate F-AuthAndModels + F-IconWall + F-LargeModels (400 enabled models catalog)
     $modelItems = for ($i = 1; $i -le $fixtureModelCount; $i++) {
@@ -282,11 +285,11 @@ function Expand-IsolatedKit {
             }
         }
     } | ConvertTo-Json -Depth 6
-    Set-Content -LiteralPath (Join-Path $homeDir 'models.json') -Value $modelsJson -Encoding utf8NoBOM
+    Set-Content -LiteralPath (Join-Path $configDir 'models.json') -Value $modelsJson -Encoding utf8NoBOM
 
     @{
         enabledModels = @($modelItems | ForEach-Object { "ux-bench/$($_.id)" })
-    } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $homeDir 'settings.json') -Encoding utf8NoBOM
+    } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath (Join-Path $configDir 'settings.json') -Encoding utf8NoBOM
 
     $desktopSettings = @{
         theme = 'light'
@@ -294,7 +297,7 @@ function Expand-IsolatedKit {
         sidebarCollapsed = $false
         window = @{ width = 1280; height = 800 }
     } | ConvertTo-Json -Depth 4
-    Set-Content -LiteralPath (Join-Path $homeDir 'desktop.json') -Value $desktopSettings -Encoding utf8NoBOM
+    Set-Content -LiteralPath (Join-Path $configDir 'desktop.json') -Value $desktopSettings -Encoding utf8NoBOM
 
     # 2. Generate F-LongHistory + F-MarkdownStress + F-DiagUnbreakable + F-IconWall (130 turns + 45 tool calls)
     $longLines = [Collections.Generic.List[string]]::new()
@@ -467,8 +470,7 @@ function Get-ChatContrastRoi {
 
 function Open-IsolatedServer {
     param([string]$KitRoot)
-    $serverExe = Join-Path $KitRoot 'cst-server.exe'
-    $homeDir = Join-Path $KitRoot 'agent\home'
+    $serverExe = Join-Path $KitRoot 'app\cst-server.exe'
     $stateFile = Join-Path $KitRoot '.state\server.json'
     if (Test-Path -LiteralPath $stateFile) { Remove-Item -LiteralPath $stateFile -Force }
 
@@ -476,8 +478,8 @@ function Open-IsolatedServer {
     $psi.WorkingDirectory = $KitRoot
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
-    $psi.Environment['PI_CODING_AGENT_DIR'] = $homeDir
-    $psi.Environment['PI_OFFLINE'] = '1'
+    $psi.Environment['CST_PILOT_ROOT'] = $KitRoot
+    $psi.Environment['CST_OFFLINE'] = '1'
     $psi.Environment['CST_ALLOW_UNELEVATED'] = '1'
     $proc = [Diagnostics.Process]::Start($psi)
 
@@ -522,13 +524,12 @@ function Open-DesktopInstance {
     )
     if (Test-Path -LiteralPath $ProbeFile) { Remove-Item -LiteralPath $ProbeFile -Force }
     $desktopExe = Join-Path $KitRoot 'cst-pilot.exe'
-    $homeDir = Join-Path $KitRoot 'agent\home'
 
     $psi = [Diagnostics.ProcessStartInfo]::new($desktopExe, "--kit-root `"$KitRoot`"")
     $psi.WorkingDirectory = $KitRoot
     $psi.UseShellExecute = $false
-    $psi.Environment['PI_CODING_AGENT_DIR'] = $homeDir
-    $psi.Environment['PI_OFFLINE'] = '1'
+    $psi.Environment['CST_PILOT_ROOT'] = $KitRoot
+    $psi.Environment['CST_OFFLINE'] = '1'
     $psi.Environment['CST_ALLOW_UNELEVATED'] = '1'
     $psi.Environment['CST_DESKTOP_UX_PROBE'] = '1'
     $psi.Environment['CST_DESKTOP_UX_PROBE_FILE'] = $ProbeFile

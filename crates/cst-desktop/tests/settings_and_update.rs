@@ -165,6 +165,9 @@ struct Step6MockState {
     cstoa_signed_in: bool,
     cstoa_logout_calls: usize,
     tree_navigations: Vec<Value>,
+    compact_requests: usize,
+    finish_compact: Arc<tokio::sync::Notify>,
+    default_model_requests: usize,
     export_previews: Vec<Value>,
     export_creates: usize,
     export_opens: Vec<String>,
@@ -183,6 +186,9 @@ impl Default for Step6MockState {
             cstoa_signed_in: true,
             cstoa_logout_calls: 0,
             tree_navigations: Vec::new(),
+            compact_requests: 0,
+            finish_compact: Arc::new(tokio::sync::Notify::new()),
+            default_model_requests: 0,
             export_previews: Vec::new(),
             export_creates: 0,
             export_opens: Vec::new(),
@@ -292,6 +298,14 @@ impl Step6MockBackend {
                             return;
                         }
 
+                        if method == "POST" && path == "/api/sessions/sess-busy/compact" {
+                            let gate = {
+                                let mut guard = st.lock().unwrap();
+                                guard.compact_requests += 1;
+                                Arc::clone(&guard.finish_compact)
+                            };
+                            gate.notified().await;
+                        }
                         let (status_line, resp_json) = {
                             let mut guard = st.lock().unwrap();
                             let mut sessions = vec![json!({
@@ -350,6 +364,21 @@ impl Step6MockBackend {
                                         }
                                     }),
                                 ),
+                                ("GET", "/api/sessions/sess-idle") => (
+                                    "HTTP/1.1 200 OK",
+                                    json!({"id":"sess-idle", "running":false, "messages":[]}),
+                                ),
+                                ("POST", "/api/sessions/sess-busy/compact") => (
+                                    "HTTP/1.1 200 OK",
+                                    json!({"ok":true}),
+                                ),
+                                ("POST", "/api/models/default") => {
+                                    guard.default_model_requests += 1;
+                                    (
+                                        "HTTP/1.1 500 Internal Server Error",
+                                        json!({"error":{"code":"save_failed","message":"保存失败"}}),
+                                    )
+                                }
                                 ("GET", "/api/sessions/sess-busy") => (
                                     "HTTP/1.1 200 OK",
                                     json!({
@@ -361,8 +390,21 @@ impl Step6MockBackend {
                                             { "id": "e-assist-1", "role": "assistant", "timestamp": 1200, "content": "已定位驱动异常。" }
                                         ],
                                         "entries": [
-                                            { "id": "e-user-1", "parentId": null, "message": { "role": "user", "content": "分析蓝屏转储" } },
-                                            { "id": "e-assist-1", "parentId": "e-user-1", "message": { "role": "assistant", "content": "已定位驱动异常。" } }
+                                            { "id": "e-user-1", "parentId": "e-model-0", "message": { "role": "user", "timestamp": 1000, "content": "分析蓝屏转储" } },
+                                            { "id": "e-compact-1", "parentId": "e-user-1", "message": { "role": "compactionSummary", "summary": "已压缩蓝屏转储排查历史。", "tokensBefore": 148000, "timestamp": 1150 } },
+                                            { "id": "e-assist-1", "parentId": "e-compact-1", "message": { "role": "assistant", "timestamp": 1200, "content": "已定位驱动异常。" } }
+                                        ]
+                                    }),
+                                ),
+                                ("GET", "/api/sessions/sess-busy/tree?format=flat") => (
+                                    "HTTP/1.1 200 OK",
+                                    json!({
+                                        "leafId": "e-assist-1",
+                                        "entries": [
+                                            { "entry": { "id": "e-model-0", "type": "model_change", "modelId": "deepseek-chat" } },
+                                            { "entry": { "id": "e-user-1", "parentId": "e-model-0", "type": "message", "message": { "role": "user", "content": "分析蓝屏转储" } } },
+                                            { "entry": { "id": "e-compact-1", "parentId": "e-user-1", "type": "compaction", "summary": "已压缩蓝屏转储排查历史。", "tokensBefore": 148000 } },
+                                            { "entry": { "id": "e-assist-1", "parentId": "e-compact-1", "type": "message", "message": { "role": "assistant", "content": "已定位驱动异常。" } } }
                                         ]
                                     }),
                                 ),
@@ -704,6 +746,53 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
     })
     .unwrap();
 
+    // Switching to cold and cached sessions binds the composer on the same UI turn.
+    cx.update_window(win_handle, |_, window, cx| {
+        for id in ["sess-busy", "sess-idle", "sess-busy"] {
+            window.click(
+                gpui_kit::SharedString::from(format!("sidebar-session-row-{id}")),
+                cx,
+            );
+            window.render_frame(cx);
+            assert_eq!(
+                shell
+                    .read(cx)
+                    .workbench()
+                    .read(cx)
+                    .session_composer()
+                    .read(cx)
+                    .draft_key(),
+                &cst_client::DraftKey::Session(id.to_owned())
+            );
+        }
+        window.press("ctrl-k", cx);
+        window.input("/compact", cx);
+    })
+    .unwrap();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.press("enter", cx);
+    })
+    .unwrap();
+    cx.wait_for(win_handle, Duration::from_secs(2), |_, _| {
+        backend.state.lock().unwrap().compact_requests == 1
+    })
+    .await;
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("sidebar-session-row-sess-idle", cx);
+    })
+    .unwrap();
+    backend.state.lock().unwrap().finish_compact.notify_one();
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window.try_find("top-notice-banner").is_some()
+    })
+    .await;
+    assert_eq!(
+        handle
+            .with_workspace(|ws| ws.active_session_id().map(str::to_owned))
+            .as_deref(),
+        Some("sess-idle")
+    );
+
     // 3. `AllSessions` (`gpui_kit::v_virtual_list`): batch `"全选 / 删除"` -> `sess-idle` deleted, `sess-busy` `409` auto-restored!
     cx.update_window(win_handle, |_, window, cx| {
         window.click("sidebar-all-sessions-btn", cx);
@@ -739,15 +828,46 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
 
     cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
         window.try_find("session-header-more-btn").is_some()
+            && window.try_find("turn-compaction-e-compact-1").is_some()
     })
     .await;
 
+    // 4a. Compaction summary bubble renders collapsed by default and expands on header click
     cx.update_window(win_handle, |_, window, cx| {
-        window.click("session-header-more-btn", cx);
-        window.click("session-header-tree-btn", cx);
+        window.render_frame(cx);
+        assert!(window.find("turn-compaction-e-compact-1").visible());
+        assert!(window.try_find("compaction-copy-btn-e-compact-1").is_none());
+        window.click("compaction-hdr-e-compact-1", cx);
     })
     .unwrap();
 
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window
+            .try_find("compaction-copy-btn-e-compact-1")
+            .is_some_and(|n| n.visible())
+    })
+    .await;
+
+    // 4b. Collapsing sidebar exposes `topbar-session-more-btn` -> opens `topbar-session-more-menu` -> opens BranchTree
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("sidebar-collapse-btn", cx);
+        window.render_frame(cx);
+        assert!(window.find("topbar-session-more-btn").visible());
+        window.click("topbar-session-more-btn", cx);
+        window.render_frame(cx);
+        assert!(window.find("topbar-session-more-menu").visible());
+        window.click("topbar-session-more-tree-btn", cx);
+    })
+    .unwrap();
+
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window.try_find("branch-tree-view").is_some()
+            && window.try_find("tree-node-row-e-user-1").is_some()
+            && window.try_find("tree-node-row-e-compact-1").is_some()
+    })
+    .await;
+
+    // Verify branch tree controls while open
     cx.update_window(win_handle, |_, window, cx| {
         window.render_frame(cx);
         assert!(window.find("branch-tree-view").visible());
@@ -792,6 +912,13 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
     })
     .await;
 
+    // Re-expand sidebar before testing `ExportView` via `session-header-more-btn`
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("topbar-expand-sidebar-btn", cx);
+        window.render_frame(cx);
+    })
+    .unwrap();
+
     // 5. `ExportView` (`Ntay1`: `264px` `ER02w` + `eGkN1` independent theme preview + Explorer `open`)
     cx.update_window(win_handle, |_, window, cx| {
         window.click("session-header-more-btn", cx);
@@ -808,6 +935,34 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
 
     cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
         window.try_find("export-preview-turn-0").is_some()
+    })
+    .await;
+
+    let previews_before_back = backend.state.lock().unwrap().export_previews.len();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.press("ctrl-,", cx);
+        window.render_frame(cx);
+        assert!(window.find("settings-view-vpwaf").visible());
+        let header_track = window.find("settings-subpage-header-title-track").bounds();
+        let tabbar = window.find("settings-tabbar-vpwaf").bounds();
+        assert!(
+            (f32::from(header_track.origin.x) - f32::from(tabbar.origin.x)).abs() < 0.5,
+            "settings header title track x ({:?}) must align with tabbar x ({:?})",
+            header_track.origin.x,
+            tabbar.origin.x
+        );
+        assert!(
+            (f32::from(header_track.size.width) - f32::from(tabbar.size.width)).abs() < 0.5,
+            "settings header title track width ({:?}) must match tabbar width ({:?})",
+            header_track.size.width,
+            tabbar.size.width
+        );
+        window.click("settings-subpage-header-back-btn", cx);
+    })
+    .unwrap();
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window.try_find("export-preview-turn-0").is_some()
+            && backend.state.lock().unwrap().export_previews.len() > previews_before_back
     })
     .await;
 
@@ -958,6 +1113,94 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
     })
     .unwrap();
     assert_eq!(backend.state.lock().unwrap().cstoa_logout_calls, 1);
+
+    for collapsed in [false, true] {
+        cx.update_window(win_handle, |_, window, cx| {
+            shell.update(cx, |s, cx| s.set_route(ShellRoute::Settings, cx));
+            window.render_frame(cx);
+            if shell.read(cx).is_sidebar_collapsed() != collapsed {
+                shell.update(cx, |s, cx| s.toggle_sidebar(window, cx));
+            }
+            assert_eq!(shell.read(cx).is_sidebar_collapsed(), collapsed);
+        })
+        .unwrap();
+        for width in [1024.0, 1120.0, 1280.0, 1600.0] {
+            cx.update_window(win_handle, |_, window, _| {
+                window.resize(gpui::size(gpui::px(width), gpui::px(800.0)));
+            })
+            .unwrap();
+            for (route, header, content) in [
+                (
+                    ShellRoute::Settings,
+                    "settings-subpage-header-title-track",
+                    "settings-tabbar-vpwaf",
+                ),
+                (
+                    ShellRoute::AllSessions,
+                    "all-sessions-subpage-header-title-track",
+                    "all-sessions-content-column",
+                ),
+                (
+                    ShellRoute::Account,
+                    "account-subpage-header-title-track",
+                    "account-content-column",
+                ),
+            ] {
+                cx.update_window(win_handle, |_, window, cx| {
+                    shell.update(cx, |s, cx| s.set_route(route, cx));
+                    window.render_frame(cx);
+                    let head = window.find(header).bounds();
+                    let body = window.find(content).bounds();
+                    assert!(
+                        (f32::from(head.origin.x - body.origin.x)).abs() < 0.5,
+                        "{header} x at {width}, collapsed={collapsed}"
+                    );
+                    assert!(
+                        (f32::from(head.size.width - body.size.width)).abs() < 0.5,
+                        "{header} width at {width}, collapsed={collapsed}"
+                    );
+                })
+                .unwrap();
+            }
+        }
+    }
+    cx.update_window(win_handle, |_, window, cx| {
+        shell.update(cx, |s, cx| s.set_route(ShellRoute::Home, cx));
+        window.render_frame(cx);
+        window.resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
+    })
+    .unwrap();
+
+    // A failed default-model write does not modify the new-session draft's explicit choice.
+    backend.state.lock().unwrap().credential_ready = true;
+    backend.rt().block_on(handle.refresh_models(None)).unwrap();
+    handle.with_workspace_mut(|ws| {
+        let draft = ws.draft_mut(cst_client::DraftKey::NewSession);
+        draft.selected_provider = Some("deepseek".into());
+        draft.selected_model_id = Some("deepseek-chat".into());
+        draft.selected_thinking_level = Some("high".into());
+    });
+    cx.update_window(win_handle, |_, window, cx| {
+        shell.update(cx, |s, cx| s.set_route(ShellRoute::Settings, cx));
+        shell.read(cx).settings_view().clone().update(cx, |sv, cx| {
+            sv.set_category(cst_desktop::settings::SettingsCategory::Preferences, cx);
+        });
+        window.render_frame(cx);
+        window.click("pref-default-model-trigger", cx);
+        window.click("pref-default-model-deepseek-deepseek-chat", cx);
+    })
+    .unwrap();
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        backend.state.lock().unwrap().default_model_requests == 1
+            && window.try_find("workspace-top-error-bar").is_some()
+    })
+    .await;
+    handle.with_workspace(|ws| {
+        let draft = ws.draft(&cst_client::DraftKey::NewSession).unwrap();
+        assert_eq!(draft.selected_provider.as_deref(), Some("deepseek"));
+        assert_eq!(draft.selected_model_id.as_deref(), Some("deepseek-chat"));
+        assert_eq!(draft.selected_thinking_level.as_deref(), Some("high"));
+    });
 
     // 8. Software Update lifecycle (`kOm7J` -> `TqiZo` -> Settings `C9or7K` `keDNb` + `oHWRT` cancel -> `409` busy -> `200` launch!)
     {

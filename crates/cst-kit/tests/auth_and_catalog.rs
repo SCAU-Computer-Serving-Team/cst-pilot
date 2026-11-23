@@ -18,11 +18,11 @@ struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!("cst-auth-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(path.join("agent/home")).unwrap();
+        fs::create_dir_all(path.join("data/config")).unwrap();
         Self(path.canonicalize().unwrap())
     }
     fn file(&self, name: &str) -> PathBuf {
-        self.0.join("agent/home").join(name)
+        self.0.join("data/config").join(name)
     }
     fn json(&self, name: &str) -> Value {
         serde_json::from_slice(&fs::read(self.file(name)).unwrap()).unwrap()

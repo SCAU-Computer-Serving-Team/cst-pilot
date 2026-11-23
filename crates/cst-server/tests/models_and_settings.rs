@@ -60,7 +60,7 @@ impl TestKitDir {
         fs::create_dir_all(&dir).unwrap();
         let root = dir.canonicalize().unwrap();
         for name in SKILL_NAMES {
-            let p = root.join(format!("agent/home/skills/{name}/SKILL.md"));
+            let p = root.join(format!("app/skills/{name}/SKILL.md"));
             fs::create_dir_all(p.parent().unwrap()).unwrap();
             fs::write(
                 p,
@@ -68,8 +68,10 @@ impl TestKitDir {
             )
             .unwrap();
         }
+        fs::create_dir_all(root.join("app/prompts")).unwrap();
+        fs::create_dir_all(root.join("data/config")).unwrap();
         fs::write(
-            root.join("agent/home/APPEND_SYSTEM.md"),
+            root.join("app/prompts/APPEND_SYSTEM.md"),
             "CST Pilot 固定诊断规则。",
         )
         .unwrap();
@@ -88,7 +90,7 @@ async fn kit_host_shares_single_catalog_maintenance_task_when_individual_session
     let fixture = TestKitDir::new();
     // Write a CSTOA API key so catalog refresh will hit our mock OA transport
     fs::write(
-        fixture.0.join("agent/home/auth.json"),
+        fixture.0.join("data/config/auth.json"),
         serde_json::to_vec(&json!({
             "cstoa": {
                 "type": "api_key",
@@ -151,7 +153,7 @@ async fn kit_host_shares_single_catalog_maintenance_task_when_individual_session
 async fn saving_an_unrelated_model_keeps_the_original_scope_rule() {
     let fixture = TestKitDir::new();
     fs::write(
-        fixture.0.join("agent/home/auth.json"),
+        fixture.0.join("data/config/auth.json"),
         json!({ "deepseek": { "type": "api_key", "key": "test-offline-key" } }).to_string(),
     )
     .unwrap();
@@ -168,7 +170,7 @@ async fn saving_an_unrelated_model_keeps_the_original_scope_rule() {
     )
     .await
     .unwrap();
-    let settings_path = host.kit().agent_dir().join("settings.json");
+    let settings_path = host.kit().config_dir().join("settings.json");
     let wildcard = "DeepSeek/*:high";
     let unrelated = "anthropic/claude-fable-5";
     let unmatched = "missing-provider/*";
@@ -294,8 +296,9 @@ async fn three_end_theme_isolation_and_activity_gate_exemptions() {
     .unwrap();
 
     // Pre-set TUI theme in shared `settings.json` to "solarized-tui"
+    fs::create_dir_all(host.kit().config_dir()).unwrap();
     fs::write(
-        host.kit().agent_dir().join("settings.json"),
+        host.kit().config_dir().join("settings.json"),
         serde_json::to_vec_pretty(&json!({ "theme": "solarized-tui" })).unwrap(),
     )
     .unwrap();
@@ -349,18 +352,18 @@ async fn three_end_theme_isolation_and_activity_gate_exemptions() {
     assert_eq!(app_json["theme"], "system");
     assert_eq!(app_json["defaultView"], "tui");
     assert_eq!(app_json["windowWidth"], 1440);
-    assert!(host.kit().agent_dir().join("desktop.json").exists());
+    assert!(host.kit().config_dir().join("desktop.json").exists());
     assert!(
         !host
             .kit()
-            .agent_dir()
+            .config_dir()
             .join("desktop-settings.json")
             .exists()
     );
 
     // 3. Verify all three themes remain strictly isolated on disk
     let tui_settings_json: Value =
-        serde_json::from_slice(&fs::read(host.kit().agent_dir().join("settings.json")).unwrap())
+        serde_json::from_slice(&fs::read(host.kit().config_dir().join("settings.json")).unwrap())
             .unwrap();
     assert_eq!(tui_settings_json["theme"], "solarized-tui");
 
@@ -494,7 +497,7 @@ async fn desktop_json_forward_compatibility_corruption_protection_and_health_enr
     let client = reqwest::Client::new();
 
     // 1. Missing `desktop.json`: `GET /api/app/settings` returns defaults without creating file on disk
-    let desktop_path = host.kit().agent_dir().join("desktop.json");
+    let desktop_path = host.kit().config_dir().join("desktop.json");
     assert!(!desktop_path.exists());
     let initial_get: Value = client
         .get(format!("{}/api/app/settings", server.base_url()))
@@ -900,32 +903,41 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
     let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::from([
         ("VERSION".into(), b"cst-pilot v0.9.0\n".to_vec()),
         (
-            "BUILD-INFO.json".into(),
+            "app/BUILD-INFO.json".into(),
             br#"{"version":"v0.9.0"}"#.to_vec(),
         ),
         ("LICENSE".into(), b"MIT".to_vec()),
         ("THIRD-PARTY-NOTICES.md".into(), b"notices".to_vec()),
-        ("licenses/mock.txt".into(), b"mock notice".to_vec()),
+        ("app/licenses/mock.txt".into(), b"mock notice".to_vec()),
         ("cst-pilot.exe".into(), b"new-pilot-bin".to_vec()),
-        ("cst-server.exe".into(), b"new-server-bin".to_vec()),
-        ("cst-updater.exe".into(), b"new-updater-bin".to_vec()),
+        ("app/cst-server.exe".into(), b"new-server-bin".to_vec()),
+        ("app/cst-updater.exe".into(), b"new-updater-bin".to_vec()),
         (
-            "agent/home/APPEND_SYSTEM.md".into(),
+            "app/prompts/APPEND_SYSTEM.md".into(),
             b"CST Pilot Rules".to_vec(),
         ),
         (
-            "agent/home/extensions/telemetry/timserver_1.crt".into(),
+            "app/telemetry/timserver_1.crt".into(),
             b"synthetic public certificate".to_vec(),
         ),
+        ("app/telemetry/currency.json".into(), b"{}".to_vec()),
+        ("app/defaults/settings.json".into(), b"{}".to_vec()),
+        ("app/defaults/models-store.json".into(), b"{}".to_vec()),
+        ("app/defaults/telemetry.json".into(), b"{}".to_vec()),
+        ("app/defaults/web-search.json".into(), b"{}".to_vec()),
     ]);
     for name in SKILL_NAMES {
         files.insert(
-            format!("agent/home/skills/{name}/SKILL.md"),
+            format!("app/skills/{name}/SKILL.md"),
             format!("---\nname: {name}\ndescription: {name}\n---\nGuide").into_bytes(),
         );
     }
     for rel in REQUIRED_FONT_FILES {
-        files.insert((*rel).to_owned(), fs::read(repo_root.join(rel)).unwrap());
+        let font_name = rel.strip_prefix("app/fonts/").unwrap();
+        files.insert(
+            (*rel).to_owned(),
+            fs::read(repo_root.join("assets/fonts").join(font_name)).unwrap(),
+        );
     }
     let signing = SigningKey::from_bytes(&[9u8; 32]);
     let release_key = ReleaseKey::from_bytes(&signing.verifying_key().to_bytes()).unwrap();
@@ -944,7 +956,7 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
                 .unwrap();
             zip.write_all(content).unwrap();
         }
-        zip.start_file("cst-pilot/SHA256SUMS", SimpleFileOptions::default())
+        zip.start_file("cst-pilot/app/SHA256SUMS", SimpleFileOptions::default())
             .unwrap();
         zip.write_all(sums.as_bytes()).unwrap();
         zip.finish().unwrap();
@@ -1149,7 +1161,7 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
         .arg("--standalone-web")
         .arg("--port")
         .arg("0")
-        .env("PI_CODING_AGENT_DIR", dummy_agent_kit.0.join("agent/home"))
+        .env("CST_PILOT_ROOT", &dummy_agent_kit.0)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
@@ -1158,8 +1170,8 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
         .unwrap()
         .expect("child identity alive");
 
-    // Write an unloaded session's unresolved `web-inbox/<id>.json` on disk -> `409 session_busy_for_update`
-    let inbox_dir = host.kit().agent_dir().join("web-inbox");
+    // Write an unloaded session's unresolved `data/inbox/<id>.json` on disk -> `409 session_busy_for_update`
+    let inbox_dir = host.kit().inbox_dir();
     fs::create_dir_all(&inbox_dir).unwrap();
     let inbox_file = inbox_dir.join("unloaded-sess-1.json");
     fs::write(

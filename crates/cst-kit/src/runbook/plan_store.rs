@@ -1,7 +1,7 @@
 use chrono::{DateTime, Local, NaiveDateTime, SecondsFormat, Utc};
 use serde_json::{Value, json};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -28,35 +28,66 @@ impl RunbookStore {
         if let Some(day) = input.date.as_deref() {
             artifact_date(Some(day))?;
         }
-        self.locked(PathBuf::from("agent/home/command-plans"), cancel, move |storage, _, cancel| {
-            let previous = input.runbook_id.as_deref().map(|id| latest(storage, id, cancel)).transpose()?;
+        self.locked_plans(cancel, move |plan_storage, plans_rel, _, cancel| {
+            let previous = input
+                .runbook_id
+                .as_deref()
+                .map(|id| latest(plan_storage, plans_rel, id, cancel))
+                .transpose()?;
             if let Some(plan) = &previous
-                && Some(plan.version) != input.base_version {
-                return Err(format!("方案已有新版本 {}，请核对最新命令后再修订。", plan.version));
+                && Some(plan.version) != input.base_version
+            {
+                return Err(format!(
+                    "方案已有新版本 {}，请核对最新命令后再修订。",
+                    plan.version
+                ));
             }
-            let day = artifact_date(input.date.as_deref().or_else(|| previous.as_ref().map(|p| p.day.as_str())))?;
+            let day = artifact_date(
+                input
+                    .date
+                    .as_deref()
+                    .or_else(|| previous.as_ref().map(|p| p.day.as_str())),
+            )?;
             if previous.as_ref().is_some_and(|p| p.day != day) {
                 return Err("已有方案的归档日期不能修改。".into());
             }
             let now = Local::now();
             let plan = Plan {
-                runbook_id: previous.as_ref().map(|p| p.runbook_id.clone()).unwrap_or_else(|| Uuid::new_v4().to_string()),
+                runbook_id: previous
+                    .as_ref()
+                    .map(|p| p.runbook_id.clone())
+                    .unwrap_or_else(|| Uuid::new_v4().to_string()),
                 version: previous.as_ref().map_or(1, |p| p.version + 1),
-                day, created_at: now.with_timezone(&Utc).to_rfc3339_opts(SecondsFormat::Millis, true),
+                day,
+                created_at: now
+                    .with_timezone(&Utc)
+                    .to_rfc3339_opts(SecondsFormat::Millis, true),
                 time_text: now.format("%Y-%m-%d %H:%M").to_string(),
-                title, level: input.level, level_label: input.level.label().into(), commands,
+                title,
+                level: input.level,
+                level_label: input.level.label().into(),
+                commands,
             };
-            let relative = PathBuf::from("agent/home/command-plans").join(&plan.runbook_id);
-            let _lease = storage.pin_directory(&relative, true)?;
-            let dir = storage.directory(&relative, false)?;
+            let relative = plans_rel.join(&plan.runbook_id);
+            let _lease = plan_storage.pin_directory(&relative, true)?;
+            let dir = plan_storage.directory(&relative, false)?;
             let bytes = serde_json::to_vec(&plan).map_err(|_| "方案无法编码。")?;
-            storage.atomic(&dir.join(format!("v{}.json", plan.version)), &bytes, false, cancel)?;
+            plan_storage.atomic(
+                &dir.join(format!("v{}.json", plan.version)),
+                &bytes,
+                false,
+                cancel,
+            )?;
             let mut value = plan_value(&plan)?;
             value["action"] = json!("planned");
-            value["notice"] = json!("命令方案已保存，尚未导出文本。核对后用 runbook_deliver 交付此 ID 和版本；命令需手动执行。");
+            value["notice"] = json!(
+                "命令方案已保存，尚未导出文本。核对后用 runbook_deliver 交付此 ID 和版本；命令需手动执行。"
+            );
             Ok(json!({"runbook":value}))
-        }).await
+        })
+        .await
     }
+
     pub async fn deliver(
         &self,
         input: DeliverInput,
@@ -66,11 +97,10 @@ impl RunbookStore {
         if input.version == 0 || input.version > MAX_VERSION {
             return Err("version 必须是正整数。".into());
         }
-        self.locked(
-            PathBuf::from("agent/home/command-plans"),
+        self.locked_plans(
             cancel,
-            move |storage, _, cancel| {
-                let plan = latest(storage, &input.runbook_id, cancel)?;
+            move |plan_storage, plans_rel, root_storage, cancel| {
+                let plan = latest(plan_storage, plans_rel, &input.runbook_id, cancel)?;
                 if plan.version != input.version {
                     return Err(format!(
                         "方案已有新版本 {}，请核对后交付最新版本。",
@@ -81,17 +111,17 @@ impl RunbookStore {
                     .join(&plan.day)
                     .join("runbook")
                     .join(&plan.runbook_id);
-                let _lease = storage.pin_directory(&relative, true)?;
-                let dir = storage.directory(&relative, false)?;
+                let _lease = root_storage.pin_directory(&relative, true)?;
+                let dir = root_storage.directory(&relative, false)?;
                 let name = format!("v{}-{}-{}.txt", plan.version, plan.level_label, plan.title);
                 let file = dir.join(&name);
                 let body = build_body(&plan.title, plan.level, &plan.commands, &plan.time_text);
-                match storage.read(&file)? {
+                match root_storage.read(&file)? {
                     Some(existing) if existing != body => {
                         return Err("已交付文件被修改，请核对后修订方案，避免覆盖现场内容。".into());
                     }
                     Some(_) => (),
-                    None => storage.atomic(&file, &body, false, cancel)?,
+                    None => root_storage.atomic(&file, &body, false, cancel)?,
                 }
                 let mut value = plan_value(&plan)?;
                 for (key, field) in [
@@ -110,23 +140,25 @@ impl RunbookStore {
         .await
     }
 }
+
 fn valid_id(id: &str) -> Result<(), String> {
     if !Uuid::parse_str(id).is_ok_and(|uuid| uuid.to_string() == id) {
         return Err("清单 ID 无效。".into());
     }
     Ok(())
 }
-fn latest(storage: &Storage, id: &str, cancel: &CancellationToken) -> Result<Plan, String> {
+
+fn latest(
+    storage: &Storage,
+    plans_rel: &Path,
+    id: &str,
+    cancel: &CancellationToken,
+) -> Result<Plan, String> {
     valid_id(id)?;
-    let modern = PathBuf::from("agent/home/command-plans").join(id);
-    let relative = match fs::symlink_metadata(storage.root.join(&modern)) {
-        Ok(_) => modern,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            PathBuf::from("outbox/.plans").join(id)
-        }
-        Err(e) => return Err(io_error("读取方案目录", e)),
-    };
-    let _lease = storage.pin_directory(&relative, false)?;
+    let relative = plans_rel.join(id);
+    let _lease = storage
+        .pin_directory(&relative, false)
+        .map_err(|_| "命令方案不存在或目录包含链接，请检查后重试。")?;
     let dir = storage
         .directory(&relative, false)
         .map_err(|_| "命令方案不存在或目录包含链接，请检查后重试。")?;
@@ -174,6 +206,7 @@ fn latest(storage: &Storage, id: &str, cancel: &CancellationToken) -> Result<Pla
     plan.level_label = plan.level.label().into();
     Ok(plan)
 }
+
 fn plan_value(plan: &Plan) -> Result<Value, String> {
     let mut value = serde_json::to_value(plan).map_err(|_| "方案结果无法编码。")?;
     value["items"] = json!(plan.commands.len());

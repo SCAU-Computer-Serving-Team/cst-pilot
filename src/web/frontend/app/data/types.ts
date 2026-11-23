@@ -11,12 +11,13 @@ export type ContentPart =
 	  };
 
 export type Message = {
-	role: "user" | "assistant" | "toolResult" | "branchSummary";
+	role: "user" | "assistant" | "toolResult" | "branchSummary" | "compactionSummary";
 	content: string | ContentPart[];
 	timestamp: number;
 	clientMessageId?: string;
 	work?: { startedAt: number; endedAt: number };
 	summary?: string;
+	tokensBefore?: number;
 	fromId?: string;
 	toolCallId?: string;
 	toolName?: string;

@@ -71,6 +71,7 @@ pub struct LoginView {
     provider_index: usize,
     provider_scroll: gpui::ScrollHandle,
     saving_key: bool,
+    tab_slide: motion::PageSlide,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -122,6 +123,7 @@ impl LoginView {
             provider_index: 0,
             provider_scroll: gpui::ScrollHandle::new(),
             saving_key: false,
+            tab_slide: motion::PageSlide::default(),
             _subscriptions: subscriptions,
         }
     }
@@ -135,6 +137,19 @@ impl LoginView {
     }
 
     pub fn set_tab(&mut self, tab: LoginMethodTab, cx: &mut Context<Self>) {
+        if self.tab != tab {
+            let tab_order = |t: LoginMethodTab| match t {
+                LoginMethodTab::CstoaQr => 0,
+                LoginMethodTab::ApiKey => 1,
+                LoginMethodTab::OAuth => 2,
+            };
+            let dir = if tab_order(tab) >= tab_order(self.tab) {
+                1.0
+            } else {
+                -1.0
+            };
+            self.tab_slide.start(dir, cx);
+        }
         self.generation += 1;
         self.reset_qr(cx);
         self.tab = tab;
@@ -176,9 +191,18 @@ impl LoginView {
 
     fn reset_qr(&mut self, cx: &mut Context<Self>) {
         self.qr_generation += 1;
-        // The current worker owns cancellation (even while start is still in
-        // flight). Keep its running flag until cancellation finishes so a
-        // replacement start cannot reuse a flow about to be cancelled.
+        // Cancel any active server-side QR flow immediately when leaving or switching tabs
+        // so existing CSTOA credentials remain untouched and provider locks release at once.
+        if let Some(flow_id) = self.active_qr_flow_id.take() {
+            let client = self.client.clone();
+            cx.background_executor()
+                .spawn(async move {
+                    let _ = client
+                        .cancel_auth_flow("cstoa".into(), "oauth".into(), Some(flow_id))
+                        .await;
+                })
+                .detach();
+        }
         self.qr_image = None;
         self.qr_error = None;
         self.qr_expires_at_ms = 0;
@@ -318,12 +342,20 @@ impl LoginView {
                             cx.notify();
                         }
                     });
-                    cx.background_executor().timer(Duration::from_secs(1)).await;
+                    cx.background_executor()
+                        .timer(Duration::from_millis(250))
+                        .await;
                 }
             }
             if succeeded {
-                // Globals also reloads the account, model catalog and auth status.
-                let _ = client.refresh_globals().await;
+                // Refresh globals concurrently while transitioning immediately to Account view
+                // so the UI does not block on a serial remote account/catalog roundtrip.
+                let refresh_client = client.clone();
+                cx.background_executor()
+                    .spawn(async move {
+                        let _ = refresh_client.refresh_globals().await;
+                    })
+                    .detach();
             }
             if !succeeded
                 && !already_terminal
@@ -707,7 +739,7 @@ impl Render for LoginView {
                     col = col.child(
                         apply_scale(div(), scale::CAPTION)
                             .text_color(palette.text_muted)
-                            .child("当前暂无其他支持浏览器 OAuth 的模型服务。"),
+                            .child("当前暂无其他支持浏览器 OAuth 的提供商。"),
                     );
                 } else {
                     for p in oauth_providers {
@@ -1124,6 +1156,8 @@ impl Render for LoginView {
                 }),
             ));
 
+        let (tab_op, tab_dx) = self.tab_slide.sample(window, cx);
+
         // Right login main area overlapping smoothly from the fade blend zone rightward
         let right_viewport = div()
             .relative()
@@ -1138,6 +1172,9 @@ impl Render for LoginView {
                 div()
                     .id("login-viewport-300")
                     .test_support()
+                    .relative()
+                    .left(tab_dx)
+                    .opacity(tab_op)
                     .w(px(300.0))
                     .flex_shrink_0()
                     .flex()
@@ -1190,7 +1227,7 @@ impl Render for LoginView {
         div()
             .id("login-view-tm7yq")
             .test_support()
-            .a11y_region("login-view", "登录模型服务")
+            .a11y_region("login-view", "登录提供商")
             .relative()
             .size_full()
             .overflow_hidden()

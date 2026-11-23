@@ -12,6 +12,23 @@ use crate::discovery::strip_windows_verbatim_prefix;
 use crate::mode::ModeController;
 use crate::routes::{ApiError, SseOrBytesBody, bytes_response, error_response};
 
+mod embedded {
+    include!(concat!(env!("OUT_DIR"), "/embedded_web.rs"));
+}
+
+pub fn has_embedded_web_index() -> bool {
+    embedded::EMBEDDED_WEB_FILES
+        .binary_search_by_key(&"index.html", |(k, _)| *k)
+        .is_ok()
+}
+
+fn lookup_embedded(rel: &str) -> Option<&'static [u8]> {
+    embedded::EMBEDDED_WEB_FILES
+        .binary_search_by_key(&rel, |(k, _)| *k)
+        .ok()
+        .map(|idx| embedded::EMBEDDED_WEB_FILES[idx].1)
+}
+
 fn content_type_for_extension(ext: &str) -> &'static str {
     match ext.to_ascii_lowercase().as_str() {
         "css" => "text/css; charset=utf-8",
@@ -22,6 +39,7 @@ fn content_type_for_extension(ext: &str) -> &'static str {
         "otf" => "font/otf",
         "png" => "image/png",
         "svg" => "image/svg+xml",
+        "ttf" => "font/ttf",
         "txt" => "text/plain; charset=utf-8",
         "webp" => "image/webp",
         "woff2" => "font/woff2",
@@ -48,7 +66,7 @@ pub async fn serve_static_or_spa(
     pathname: &str,
     query: Option<&str>,
     headers: &HeaderMap,
-    static_dir: &Path,
+    static_dir: Option<&Path>,
     shared_fonts_dir: &Path,
     mode_controller: &ModeController,
 ) -> Response<SseOrBytesBody> {
@@ -114,23 +132,6 @@ pub async fn serve_static_or_spa(
         ));
     }
 
-    let Ok(canonical_root) =
-        fs::canonicalize(static_dir).map(|p| strip_windows_verbatim_prefix(&p))
-    else {
-        return error_response(&ApiError::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "static_missing",
-            "页面文件尚未构建。请先构建 Web 前端。",
-        ));
-    };
-
-    let rel_trimmed = pathname.trim_start_matches('/');
-    let candidate = if rel_trimmed.is_empty() {
-        canonical_root.join("index.html")
-    } else {
-        canonical_root.join(rel_trimmed)
-    };
-
     let reserved_asset = pathname == "/assets"
         || pathname.starts_with("/assets/")
         || pathname == "/fonts"
@@ -141,93 +142,121 @@ pub async fn serve_static_or_spa(
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.contains("text/html"));
 
-    let shared_font_file = pathname
-        .strip_prefix("/fonts/")
-        .filter(|rel| !rel.is_empty())
-        .and_then(|rel| {
-            let canonical_fonts_root = fs::canonicalize(shared_fonts_dir)
-                .map(|p| strip_windows_verbatim_prefix(&p))
-                .ok()?;
-            let real = fs::canonicalize(canonical_fonts_root.join(rel)).ok()?;
-            let clean = strip_windows_verbatim_prefix(&real);
-            (clean.starts_with(&canonical_fonts_root) && clean.is_file()).then_some(clean)
-        });
+    // 1. Shared fonts always come from external `app/fonts/` (or dev `assets/fonts/`).
+    if let Some(rel) = pathname.strip_prefix("/fonts/").filter(|r| !r.is_empty())
+        && let Ok(canonical_fonts_root) =
+            fs::canonicalize(shared_fonts_dir).map(|p| strip_windows_verbatim_prefix(&p))
+        && let Ok(real) = fs::canonicalize(canonical_fonts_root.join(rel))
+    {
+        let clean = strip_windows_verbatim_prefix(&real);
+        if clean.starts_with(&canonical_fonts_root) && clean.is_file() {
+            return serve_disk_file(method, pathname, headers, &clean, set_cookie_header);
+        }
+    }
 
-    let resolved_file = if let Some(shared) = shared_font_file {
-        Some(shared)
-    } else {
-        match fs::canonicalize(&candidate) {
+    // 2. Explicit disk static_dir override (dev mode or `--static-dir`).
+    if let Some(dir) = static_dir {
+        let Ok(canonical_root) = fs::canonicalize(dir).map(|p| strip_windows_verbatim_prefix(&p))
+        else {
+            return static_missing_response();
+        };
+        let rel_trimmed = pathname.trim_start_matches('/');
+        let candidate = if rel_trimmed.is_empty() {
+            canonical_root.join("index.html")
+        } else {
+            canonical_root.join(rel_trimmed)
+        };
+        let resolved_file = match fs::canonicalize(&candidate) {
             Ok(real) => {
                 let clean = strip_windows_verbatim_prefix(&real);
                 if !clean.starts_with(&canonical_root) {
-                    return error_response(&ApiError::new(
-                        StatusCode::NOT_FOUND,
-                        "not_found",
-                        "页面不存在。",
-                    ));
+                    return not_found_response();
                 }
                 if clean.is_file() { Some(clean) } else { None }
             }
             Err(_) => None,
-        }
-    };
-
-    let target_file = match resolved_file {
-        Some(f) => f,
-        None if pathname != "/" && !reserved_asset && !has_ext && accepts_html => {
-            let index = canonical_root.join("index.html");
-            match fs::canonicalize(&index) {
-                Ok(real) => {
-                    let clean = strip_windows_verbatim_prefix(&real);
-                    if clean.starts_with(&canonical_root) && clean.is_file() {
-                        clean
-                    } else {
-                        return error_response(&ApiError::new(
-                            StatusCode::SERVICE_UNAVAILABLE,
-                            "static_missing",
-                            "页面文件尚未构建。请先构建 Web 前端。",
-                        ));
+        };
+        let target_file = match resolved_file {
+            Some(f) => f,
+            None if pathname != "/" && !reserved_asset && !has_ext && accepts_html => {
+                let index = canonical_root.join("index.html");
+                match fs::canonicalize(&index) {
+                    Ok(real) => {
+                        let clean = strip_windows_verbatim_prefix(&real);
+                        if clean.starts_with(&canonical_root) && clean.is_file() {
+                            clean
+                        } else {
+                            return static_missing_response();
+                        }
                     }
-                }
-                Err(_) => {
-                    return error_response(&ApiError::new(
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        "static_missing",
-                        "页面文件尚未构建。请先构建 Web 前端。",
-                    ));
+                    Err(_) => return static_missing_response(),
                 }
             }
-        }
-        None if pathname == "/" => {
-            return error_response(&ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "static_missing",
-                "页面文件尚未构建。请先构建 Web 前端。",
-            ));
-        }
-        None => {
-            return error_response(&ApiError::new(
-                StatusCode::NOT_FOUND,
-                "not_found",
-                "页面不存在。",
-            ));
-        }
-    };
+            None if pathname == "/" => return static_missing_response(),
+            None => return not_found_response(),
+        };
+        return serve_disk_file(method, pathname, headers, &target_file, set_cookie_header);
+    }
 
+    // 3. Embedded web static assets (`embed-web` feature).
+    if !has_embedded_web_index() {
+        return static_missing_response();
+    }
+    let rel_trimmed = pathname.trim_start_matches('/');
+    let rel_key = if rel_trimmed.is_empty() {
+        "index.html"
+    } else {
+        rel_trimmed
+    };
+    let (ext, raw_bytes) = if let Some(bytes) = lookup_embedded(rel_key) {
+        let ext = Path::new(rel_key)
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        (ext, bytes)
+    } else if pathname != "/" && !reserved_asset && !has_ext && accepts_html {
+        let Some(bytes) = lookup_embedded("index.html") else {
+            return static_missing_response();
+        };
+        ("html", bytes)
+    } else if pathname == "/" {
+        return static_missing_response();
+    } else {
+        return not_found_response();
+    };
+    build_asset_response(method, pathname, headers, ext, raw_bytes, set_cookie_header)
+}
+
+fn static_missing_response() -> Response<SseOrBytesBody> {
+    error_response(&ApiError::new(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "static_missing",
+        "页面文件尚未构建。请先构建 Web 前端。",
+    ))
+}
+
+fn not_found_response() -> Response<SseOrBytesBody> {
+    error_response(&ApiError::new(
+        StatusCode::NOT_FOUND,
+        "not_found",
+        "页面不存在。",
+    ))
+}
+
+fn serve_disk_file(
+    method: &Method,
+    pathname: &str,
+    headers: &HeaderMap,
+    target_file: &Path,
+    set_cookie_header: Option<String>,
+) -> Response<SseOrBytesBody> {
     let ext = target_file
         .extension()
         .and_then(|s| s.to_str())
         .unwrap_or("");
-    let is_html = ext.eq_ignore_ascii_case("html");
-    let raw_bytes = match fs::read(&target_file) {
+    let raw_bytes = match fs::read(target_file) {
         Ok(b) => b,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            return error_response(&ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "static_missing",
-                "页面文件尚未构建。请先构建 Web 前端。",
-            ));
-        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return static_missing_response(),
         Err(_) => {
             return error_response(&ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -236,14 +265,32 @@ pub async fn serve_static_or_spa(
             ));
         }
     };
+    build_asset_response(
+        method,
+        pathname,
+        headers,
+        ext,
+        &raw_bytes,
+        set_cookie_header,
+    )
+}
 
+fn build_asset_response(
+    method: &Method,
+    pathname: &str,
+    headers: &HeaderMap,
+    ext: &str,
+    raw_bytes: &[u8],
+    set_cookie_header: Option<String>,
+) -> Response<SseOrBytesBody> {
+    let is_html = ext.eq_ignore_ascii_case("html");
     let final_bytes = if is_html {
         let theme = theme_from_headers(headers);
-        let text = String::from_utf8_lossy(&raw_bytes);
+        let text = String::from_utf8_lossy(raw_bytes);
         let replaced = text.replacen("<html", &format!("<html data-theme=\"{theme}\""), 1);
         Bytes::from(replaced.into_bytes())
     } else {
-        Bytes::from(raw_bytes)
+        Bytes::copy_from_slice(raw_bytes)
     };
 
     let cache_control = if is_html {

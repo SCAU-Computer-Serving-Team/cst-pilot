@@ -17,6 +17,19 @@ members = [
     "crates/cst-server",
     "crates/cst-client",
     "crates/cst-desktop",
+    "crates/xtask",
+]
+default-members = [
+    "crates/pi-ai",
+    "crates/pi-agent",
+    "crates/pi-session",
+    "crates/pi-runtime",
+    "crates/cst-os",
+    "crates/cst-updater",
+    "crates/cst-kit",
+    "crates/cst-server",
+    "crates/cst-client",
+    "crates/cst-desktop",
 ]
 
 [workspace.package]
@@ -63,3 +76,12 @@ opt-level = 2
 [profile.release]
 opt-level = 2
 strip = "symbols"
+
+[profile.dist]
+inherits = "release"
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[profile.dist.package.cst-updater]
+opt-level = "s"

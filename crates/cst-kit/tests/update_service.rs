@@ -42,21 +42,22 @@ impl Fixture {
     fn new() -> Self {
         let path =
             std::env::temp_dir().join(format!("cst-update-service-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(path.join("agent/home")).unwrap();
+        fs::create_dir_all(path.join("app/prompts")).unwrap();
+        fs::create_dir_all(path.join("data/config")).unwrap();
         fs::write(path.join("VERSION"), "cst-pilot v0.6.0\n").unwrap();
         fs::write(path.join("cst-pilot.exe"), "old main").unwrap();
         fs::write(
-            path.join("agent/home/telemetry.json"),
+            path.join("data/config/telemetry.json"),
             r#"{"enabled":false}"#,
         )
         .unwrap();
         fs::write(
-            path.join("agent/home/APPEND_SYSTEM.md"),
+            path.join("app/prompts/APPEND_SYSTEM.md"),
             "Synthetic instructions",
         )
         .unwrap();
         for name in SKILL_NAMES {
-            let dir = path.join(format!("agent/home/skills/{name}"));
+            let dir = path.join(format!("app/skills/{name}"));
             fs::create_dir_all(&dir).unwrap();
             fs::write(
                 dir.join("SKILL.md"),
@@ -186,45 +187,56 @@ impl Network {
     fn new() -> Arc<Self> {
         let mut files = BTreeMap::from([
             ("cst-pilot.exe".to_owned(), b"new synthetic main".to_vec()),
-            ("cst-server.exe".into(), b"new synthetic server".to_vec()),
-            ("cst-updater.exe".into(), b"not a real executable".to_vec()),
+            (
+                "app/cst-server.exe".into(),
+                b"new synthetic server".to_vec(),
+            ),
+            (
+                "app/cst-updater.exe".into(),
+                b"not a real executable".to_vec(),
+            ),
             ("VERSION".into(), b"cst-pilot v0.7.0\n".to_vec()),
             (
-                "BUILD-INFO.json".into(),
+                "app/BUILD-INFO.json".into(),
                 br#"{"version":"v0.7.0"}"#.to_vec(),
             ),
             ("LICENSE".into(), b"MIT".to_vec()),
             ("THIRD-PARTY-NOTICES.md".into(), b"notices".to_vec()),
-            ("licenses/mock.txt".into(), b"mock notice".to_vec()),
+            ("app/licenses/mock.txt".into(), b"mock notice".to_vec()),
             (
-                "assets/fonts/SourceHanSansCN-VF.otf".into(),
+                "app/fonts/SourceHanSansCN-VF.otf".into(),
                 mock_sfnt(b"OTTO"),
             ),
-            ("assets/fonts/LICENSE.txt".into(), b"SIL OFL 1.1".to_vec()),
+            ("app/fonts/LICENSE.txt".into(), b"SIL OFL 1.1".to_vec()),
             (
-                "assets/fonts/JetBrainsMono-Regular.ttf".into(),
+                "app/fonts/JetBrainsMono-Regular.ttf".into(),
                 mock_sfnt(&[0, 1, 0, 0]),
             ),
             (
-                "assets/fonts/JetBrainsMono-Medium.ttf".into(),
+                "app/fonts/JetBrainsMono-Medium.ttf".into(),
                 mock_sfnt(&[0, 1, 0, 0]),
             ),
             (
-                "assets/fonts/JetBrainsMono-OFL.txt".into(),
+                "app/fonts/JetBrainsMono-OFL.txt".into(),
                 b"SIL OFL 1.1".to_vec(),
             ),
             (
-                "agent/home/APPEND_SYSTEM.md".into(),
+                "app/prompts/APPEND_SYSTEM.md".into(),
                 b"Synthetic instructions".to_vec(),
             ),
             (
-                "agent/home/extensions/telemetry/timserver_1.crt".into(),
+                "app/telemetry/timserver_1.crt".into(),
                 b"synthetic public certificate".to_vec(),
             ),
+            ("app/telemetry/currency.json".into(), b"{}".to_vec()),
+            ("app/defaults/settings.json".into(), b"{}".to_vec()),
+            ("app/defaults/models-store.json".into(), b"{}".to_vec()),
+            ("app/defaults/telemetry.json".into(), b"{}".to_vec()),
+            ("app/defaults/web-search.json".into(), b"{}".to_vec()),
         ]);
         for name in SKILL_NAMES {
             files.insert(
-                format!("agent/home/skills/{name}/SKILL.md"),
+                format!("app/skills/{name}/SKILL.md"),
                 format!("---\nname: {name}\ndescription: test\n---\nTest").into_bytes(),
             );
         }
@@ -238,7 +250,7 @@ impl Network {
                 .unwrap();
             zip.write_all(bytes).unwrap();
         }
-        zip.start_file("cst-pilot/SHA256SUMS", SimpleFileOptions::default())
+        zip.start_file("cst-pilot/app/SHA256SUMS", SimpleFileOptions::default())
             .unwrap();
         zip.write_all(sums.as_bytes()).unwrap();
         let archive = zip.finish().unwrap().into_inner();
@@ -812,7 +824,7 @@ async fn update_finalizes_all_home_sessions_with_one_budget_and_does_not_wait_fo
     use cst_kit::telemetry::TelemetryService;
     let f = Fixture::new();
     fs::write(
-        f.0.join("agent/home/telemetry.json"),
+        f.0.join("data/config/telemetry.json"),
         r#"{"enabled":true,"endpoints":["http://127.0.0.1:9411/telemetry"]}"#,
     )
     .unwrap();

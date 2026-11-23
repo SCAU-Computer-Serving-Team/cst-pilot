@@ -64,6 +64,11 @@ pub struct FrostedGlassSpec {
 }
 
 impl FrostedGlassSpec {
+    pub fn with_opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity.clamp(0.0, 1.0);
+        self
+    }
+
     #[doc(hidden)]
     pub fn popover_h2p2z(palette: &DesktopPalette) -> Self {
         Self::popover(palette)
@@ -106,6 +111,13 @@ impl FrostedGlassSpec {
             specular: 0.12,
             corner_radius_px,
             opacity: 1.0,
+        }
+    }
+
+    pub fn workspace_scrim(palette: &DesktopPalette) -> Self {
+        Self {
+            corner_radius_px: f32::from(crate::theme::radius::ROW),
+            ..Self::scrim(palette)
         }
     }
 

@@ -107,11 +107,11 @@ pub fn group_sessions_by_natural_day(
 struct ContextMenuTarget {
     session_id: String,
     current_title: String,
-    anchor_top_px: f32,
 }
 
 #[derive(Debug, Clone)]
 pub enum AllSessionsEvent {
+    NavigateBack,
     OpenSession(String),
     SessionDeleted(String),
     Notice(String),
@@ -272,7 +272,7 @@ impl AllSessionsView {
 
         let client = self.client.clone();
         cx.spawn(async move |weak, cx| {
-            let mut failure = None;
+            let mut failures = BTreeSet::new();
             for sid in &targets {
                 match client.delete_session(sid.clone()).await {
                     Ok(_) => {
@@ -281,10 +281,10 @@ impl AllSessionsView {
                         });
                     }
                     Err(err) => {
-                        failure = Some(match err {
+                        failures.insert(match err {
                             ClientError::Conflict { message, .. } => message,
                             other => other.to_string(),
-                        })
+                        });
                     }
                 }
             }
@@ -295,8 +295,11 @@ impl AllSessionsView {
                 for id in &targets {
                     this.optimistically_hidden_ids.remove(id);
                 }
-                if let Some(msg) = failure {
-                    cx.emit(AllSessionsEvent::Notice(format!("部分会话未能删除：{msg}")));
+                if !failures.is_empty() {
+                    let msg = failures.into_iter().collect::<Vec<_>>().join("；");
+                    cx.emit(AllSessionsEvent::ErrorMessage(format!(
+                        "部分会话未能删除：{msg}"
+                    )));
                 } else if let Err(err) = refreshed {
                     cx.emit(AllSessionsEvent::ErrorMessage(err.to_string()));
                 }
@@ -395,12 +398,15 @@ impl AllSessionsView {
         true
     }
 
-    fn row_anchor_top_px(&self, row_idx: usize) -> f32 {
-        let mut y = 0.0_f32;
-        for sz in self.cached_sizes.iter().take(row_idx + 1) {
-            y += f32::from(sz.height);
-        }
-        (24.0 + y).clamp(52.0, 520.0)
+    fn menu_top(&self, session_id: &str) -> Option<Pixels> {
+        let idx = self.cached_rows.iter().position(
+            |row| matches!(row, VirtualSessionRow::Session(session) if session.id == session_id),
+        )?;
+        let scroll = self.scroll_handle.base_handle();
+        let row_top = self.cached_sizes[..idx]
+            .iter()
+            .fold(scroll.offset().y, |top, size| top + size.height);
+        menu_top_in_viewport(row_top, scroll.bounds().size.height).map(|y| space::GROUP + y)
     }
 
     fn render_virtual_range(
@@ -466,7 +472,6 @@ impl AllSessionsView {
                     let ent_more = entity.clone();
                     let sid_more = sid.clone();
                     let title_more = title_str.clone();
-                    let anchor_y = self.row_anchor_top_px(idx);
 
                     let mut left_row = div()
                         .flex()
@@ -556,7 +561,6 @@ impl AllSessionsView {
                                             this.context_menu = Some(ContextMenuTarget {
                                                 session_id: s_id,
                                                 current_title: t_cur,
-                                                anchor_top_px: anchor_y,
                                             });
                                         }
                                         cx.notify();
@@ -598,7 +602,6 @@ impl AllSessionsView {
                                     this.context_menu = Some(ContextMenuTarget {
                                         session_id: s_id,
                                         current_title: t_cur,
-                                        anchor_top_px: anchor_y,
                                     });
                                     cx.notify();
                                 }
@@ -634,6 +637,7 @@ impl AllSessionsView {
     fn render_context_menu_overlay(
         &self,
         menu: &ContextMenuTarget,
+        top: Pixels,
         palette: &DesktopPalette,
         transparency_enabled: bool,
         scale_factor: f32,
@@ -654,7 +658,7 @@ impl AllSessionsView {
             .bottom_0()
             .flex()
             .justify_center()
-            .px(space::GROUP)
+            .px(layout::SUBPAGE_HORIZONTAL_INSET)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
@@ -669,11 +673,8 @@ impl AllSessionsView {
                     .max_w(layout::CENTER_COLUMN_MAX_WIDTH)
                     .h_full()
                     .child(
-                        div()
-                            .absolute()
-                            .top(px(menu.anchor_top_px))
-                            .right(space::SM)
-                            .child(motion::animate_popover_enter(
+                        div().absolute().top(top).right(space::SM).child(
+                            motion::animate_popover_enter(
                                 "all-sessions-ctx-anim",
                                 render_frosted_surface(
                                     "all-sessions-context-menu-uwt8w",
@@ -791,7 +792,8 @@ impl AllSessionsView {
                                 ),
                                 palette.craft_stack_shadows(),
                                 -6.0,
-                            )),
+                            ),
+                        ),
                     ),
             )
             .into_any_element()
@@ -799,6 +801,7 @@ impl AllSessionsView {
 
     fn render_rename_modal(
         &self,
+        scrim_progress: f32,
         inp: &Entity<InputState>,
         palette: &DesktopPalette,
         transparency_enabled: bool,
@@ -807,7 +810,7 @@ impl AllSessionsView {
     ) -> gpui_kit::AnyElement {
         let modal_card = render_frosted_surface(
             "all-sessions-rename-modal",
-            FrostedGlassSpec::modal(palette, 8.0),
+            FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
             palette.bg_modal,
             transparency_enabled,
             scale_factor,
@@ -913,11 +916,13 @@ impl AllSessionsView {
 
         render_frosted_surface(
             "all-sessions-rename-scrim",
-            FrostedGlassSpec::scrim(palette),
+            FrostedGlassSpec::workspace_scrim(palette).with_opacity(scrim_progress),
             palette.bg_scrim,
             transparency_enabled,
             scale_factor,
         )
+        .rounded(radius::ROW)
+        .opacity(0.01 + 0.99 * scrim_progress)
         .test_support()
         .absolute()
         .top_0()
@@ -931,6 +936,21 @@ impl AllSessionsView {
         .child(wrapped_modal)
         .into_any_element()
     }
+}
+
+fn menu_top_in_viewport(row_top: Pixels, viewport_height: Pixels) -> Option<Pixels> {
+    let row_bottom = row_top + height::HEADER;
+    if row_top >= viewport_height || row_bottom <= px(0.0) {
+        return None;
+    }
+    // Three controls, one divider, four gaps, padding and border.
+    let menu_height = height::CONTROL * 3.0 + space::MICRO * 6.0 + space::XS * 2.0 + px(3.0);
+    let top = if row_bottom + menu_height <= viewport_height {
+        row_bottom
+    } else {
+        row_top - menu_height
+    };
+    Some(top.clamp(px(0.0), (viewport_height - menu_height).max(px(0.0))))
 }
 
 impl Render for AllSessionsView {
@@ -1106,13 +1126,35 @@ impl Render for AllSessionsView {
             .into_any_element()
         };
 
-        let menu_overlay = self.context_menu.clone().map(|m| {
-            self.render_context_menu_overlay(&m, &palette, transparency_enabled, scale_factor, cx)
+        let menu_overlay = self.context_menu.as_ref().and_then(|menu| {
+            let top = self.menu_top(&menu.session_id)?;
+            Some(self.render_context_menu_overlay(
+                menu,
+                top,
+                &palette,
+                transparency_enabled,
+                scale_factor,
+                cx,
+            ))
         });
 
+        let rename_scrim_p = motion::surface_presence(
+            "all-sessions-rename-scrim-p",
+            self.renaming_session_id.is_some(),
+            motion::MODAL_OPEN,
+            window,
+            cx,
+        );
         let rename_overlay = if self.renaming_session_id.is_some() {
             self.rename_input.clone().map(|inp| {
-                self.render_rename_modal(&inp, &palette, transparency_enabled, scale_factor, cx)
+                self.render_rename_modal(
+                    rename_scrim_p,
+                    &inp,
+                    &palette,
+                    transparency_enabled,
+                    scale_factor,
+                    cx,
+                )
             })
         } else {
             None
@@ -1127,13 +1169,20 @@ impl Render for AllSessionsView {
             .size_full()
             .flex()
             .flex_col()
-            .bg(palette.bg_workspace)
             .child(render_subpage_header_xwjof(
                 "all-sessions-subpage-header",
                 IconName::RotateCcwClock,
                 "全部会话",
                 Some(header_trailing),
+                Some(std::rc::Rc::new({
+                    let e_back = cx.entity();
+                    move |_, cx| {
+                        e_back.update(cx, |_, cx| cx.emit(AllSessionsEvent::NavigateBack));
+                    }
+                })),
                 &palette,
+                window,
+                cx,
             ))
             .child(
                 div()
@@ -1141,7 +1190,7 @@ impl Render for AllSessionsView {
                     .flex_1()
                     .min_h_0()
                     .w_full()
-                    .px(space::GROUP)
+                    .px(layout::SUBPAGE_HORIZONTAL_INSET)
                     .py(space::GROUP)
                     .flex()
                     .flex_col()
@@ -1150,6 +1199,8 @@ impl Render for AllSessionsView {
                         div()
                             .w_full()
                             .max_w(layout::CENTER_COLUMN_MAX_WIDTH)
+                            .id("all-sessions-content-column")
+                            .test_support()
                             .h_full()
                             .flex()
                             .flex_col()
@@ -1160,5 +1211,23 @@ impl Render for AllSessionsView {
                     .children(menu_overlay),
             )
             .children(rename_overlay)
+    }
+}
+
+#[cfg(test)]
+mod menu_tests {
+    use super::*;
+
+    #[test]
+    fn menu_follows_scrolled_row_and_flips_near_bottom() {
+        let unscrolled = px(600.0);
+        assert_eq!(menu_top_in_viewport(unscrolled, px(350.0)), None);
+        assert_eq!(
+            menu_top_in_viewport(unscrolled - px(520.0), px(350.0)),
+            Some(px(124.0))
+        );
+        let flipped = menu_top_in_viewport(unscrolled - px(290.0), px(350.0)).unwrap();
+        assert!(flipped < px(310.0));
+        assert_eq!(menu_top_in_viewport(px(20.0), px(80.0)), Some(px(0.0)));
     }
 }

@@ -36,6 +36,7 @@ pub fn gpui_image_from_handle(handle: &SharedImageHandle) -> Arc<Image> {
 /// preview of composer draft thumbnails, message attachments, and `read` tool images.
 #[allow(clippy::too_many_arguments)]
 pub fn render_image_lightbox_modal(
+    scrim_progress: f32,
     target: &LightboxImageTarget,
     palette: &DesktopPalette,
     transparency_enabled: bool,
@@ -57,11 +58,12 @@ pub fn render_image_lightbox_modal(
 
     let scrim = render_frosted_surface(
         "image-lightbox-scrim",
-        FrostedGlassSpec::scrim(palette),
+        FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
         palette.bg_scrim,
         transparency_enabled,
         scale_factor,
     )
+    .opacity(0.01 + 0.99 * scrim_progress)
     .test_support()
     .absolute()
     .top_0()

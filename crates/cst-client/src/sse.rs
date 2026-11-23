@@ -332,6 +332,22 @@ impl BoundedMultiplexSender {
 }
 
 impl BoundedMultiplexReceiver {
+    pub fn try_recv(&mut self) -> Option<MultiplexEnvelope> {
+        let mut guard = self.inner.lock().expect("multiplex queue lock");
+        if let Some(gen_id) = guard.overflow_generation.take() {
+            return Some(MultiplexEnvelope {
+                mux_generation: gen_id,
+                vector_cursors: BTreeMap::new(),
+                signal: MultiplexSignal::QueueOverflow,
+            });
+        }
+        if let Some((cost, env)) = guard.queue.pop_front() {
+            guard.queued_bytes = guard.queued_bytes.saturating_sub(cost);
+            return Some(env);
+        }
+        None
+    }
+
     pub async fn recv(&mut self) -> Option<MultiplexEnvelope> {
         loop {
             let notified = self.notify.notified();

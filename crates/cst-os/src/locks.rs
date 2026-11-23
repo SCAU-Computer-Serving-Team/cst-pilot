@@ -1,4 +1,3 @@
-#[cfg(any(not(windows), test))]
 use std::fs;
 use std::path::Path;
 
@@ -43,14 +42,14 @@ impl ServerInstanceLock {
         }
         #[cfg(not(windows))]
         {
-            let file = acquire_file_lock(&kit_root.join(".state").join("kernel-locks"), &address)
+            let file = acquire_file_lock(&kit_root.join(".state").join("locks"), &address)
                 .map_err(|error| match error {
-                fs::TryLockError::WouldBlock => {
-                    "server_already_running: 当前工具包目录已有 cst-server 实例正在运行。"
-                        .to_owned()
-                }
-                fs::TryLockError::Error(_) => "无法获取服务单实例文件锁。".to_owned(),
-            })?;
+                    fs::TryLockError::WouldBlock => {
+                        "server_already_running: 当前工具包目录已有 cst-server 实例正在运行。"
+                            .to_owned()
+                    }
+                    fs::TryLockError::Error(_) => "无法获取服务单实例文件锁。".to_owned(),
+                })?;
             Ok(Self {
                 address,
                 _file: file,
@@ -82,6 +81,7 @@ impl SessionOwnerLock {
     }
 
     pub fn acquire(agent_dir: &Path, session_id: &str) -> Result<Self, String> {
+        fs::create_dir_all(agent_dir).map_err(|_| "无法创建会话锁作用域目录。".to_owned())?;
         let address = Self::pipe_address(agent_dir, session_id)?;
         #[cfg(windows)]
         {
@@ -99,14 +99,13 @@ impl SessionOwnerLock {
         }
         #[cfg(not(windows))]
         {
-            let file =
-                acquire_file_lock(&agent_dir.join(".state").join("kernel-locks"), &address)
-                    .map_err(|error| match error {
-                        fs::TryLockError::WouldBlock => {
-                            "session_owned: 该会话正由另一端使用，请先关闭持有该会话的 TUI 或 Web 服务，再重新打开。".to_owned()
-                        }
-                        fs::TryLockError::Error(_) => "无法获取会话单写权文件锁。".to_owned(),
-                    })?;
+            let lock_dir = resolve_non_windows_lock_dir(agent_dir);
+            let file = acquire_file_lock(&lock_dir, &address).map_err(|error| match error {
+                fs::TryLockError::WouldBlock => {
+                    "session_owned: 该会话正由另一端使用，请先关闭持有该会话的 TUI 或 Web 服务，再重新打开。".to_owned()
+                }
+                fs::TryLockError::Error(_) => "无法获取会话单写权文件锁。".to_owned(),
+            })?;
             Ok(Self {
                 address,
                 _file: file,
@@ -201,7 +200,7 @@ impl UpdateLock {
         #[cfg(not(windows))]
         {
             let canonical_root = root.canonicalize().map_err(|_| "升级根目录无法读取。")?;
-            let lock_dir = canonical_root.join(".state").join("kernel-locks");
+            let lock_dir = canonical_root.join(".state").join("locks");
             let file = acquire_file_lock(&lock_dir, &name)
                 .map_err(|_| "工具包已有升级或恢复任务进行中。".to_owned())?;
             Ok(Self { _file: file })
@@ -212,20 +211,20 @@ impl UpdateLock {
 #[cfg(not(windows))]
 fn resolve_non_windows_lock_dir(canonical_target: &Path) -> std::path::PathBuf {
     for ancestor in canonical_target.ancestors() {
-        if ancestor.join("agent").join("home").is_dir() {
-            return ancestor.join(".state").join("kernel-locks");
+        if ancestor.join("app").is_dir() {
+            return ancestor.join(".state").join("locks");
         }
         if ancestor.file_name().and_then(|n| n.to_str()) == Some("artifacts")
             && let Some(kit_root) = ancestor.parent()
         {
-            return kit_root.join(".state").join("kernel-locks");
+            return kit_root.join(".state").join("locks");
         }
     }
     canonical_target
         .parent()
         .unwrap_or(canonical_target)
         .join(".state")
-        .join("kernel-locks")
+        .join("locks")
 }
 
 #[cfg(any(test, not(windows)))]

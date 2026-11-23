@@ -231,12 +231,14 @@ pub fn extract_archive(
             let _pin = storage.pin_directory(Path::new(&relative), true)?;
             continue;
         }
-        layout::classify(&relative)?;
+        if layout::classify(&relative)? != layout::Area::Program {
+            return Err("升级归档不能包含用户数据路径。".into());
+        }
         let expected = release.sums.get(&relative);
-        if expected.is_none() && relative != "SHA256SUMS" {
+        if expected.is_none() && relative != layout::SHA256SUMS_PATH {
             return Err("升级归档含未列入签名清单的文件。".into());
         }
-        let limit = if relative == "SHA256SUMS" {
+        let limit = if relative == layout::SHA256SUMS_PATH {
             sums_size
         } else {
             release.info.archive.unpacked_size
@@ -425,12 +427,14 @@ pub fn verify_tree(
                 }
                 pending.push(rel);
             } else {
-                layout::classify(&name)?;
+                if layout::classify(&name)? != layout::Area::Program {
+                    return Err("升级目录不能包含用户数据路径。".into());
+                }
                 if !seen.insert(name.clone()) {
                     return Err("升级目录文件重复。".into());
                 }
                 let mut file = storage.open_read(&item.path())?.ok_or("升级文件消失。")?;
-                if name == "SHA256SUMS" {
+                if name == layout::SHA256SUMS_PATH {
                     let mut bytes = Vec::new();
                     file.take(release.info.sha256_sums.len() as u64 + 1)
                         .read_to_end(&mut bytes)
@@ -472,12 +476,117 @@ pub fn verify_tree(
         }
     }
     if seen.len() != release.sums.len() + 1
-        || !seen.contains("SHA256SUMS")
+        || !seen.contains(layout::SHA256SUMS_PATH)
         || !release.sums.keys().all(|p| seen.contains(p))
     {
         return Err("升级包缺少签名清单中的文件。".into());
     }
     layout::validate_metadata(&release.sums, &storage.root, &release.info.version)
+}
+
+/// Scans an assembled release directory using the exact same whitelist, redline,
+/// credential, JSON, and SFNT checks enforced by the online updater, returning
+/// relative path -> lowercase SHA-256 hex (excluding `app/SHA256SUMS`).
+pub fn scan_clean_dist_tree(
+    root: &Path,
+    target_version: &str,
+) -> Result<BTreeMap<String, String>, String> {
+    let storage = Storage::new(root)?;
+    let mut sums = BTreeMap::new();
+    let mut seen_lower = BTreeSet::new();
+    let mut pending = vec![PathBuf::new()];
+    while let Some(relative) = pending.pop() {
+        let _pin = storage.pin_directory(&relative, false)?;
+        for item in fs::read_dir(storage.root.join(&relative)).map_err(|_| "无法扫描发行目录。")?
+        {
+            let item = item.map_err(|_| "无法扫描发行目录。")?;
+            let rel = relative.join(item.file_name());
+            let name = rel.to_str().ok_or("发行文件名无效。")?.replace('\\', "/");
+            let meta = fs::symlink_metadata(item.path()).map_err(|_| "无法检查发行文件。")?;
+            if is_reparse_or_symlink(&meta) {
+                return Err(format!("发行目录包含链接或重解析点：{name}"));
+            }
+            if meta.is_dir() {
+                layout::safe_path(&name)?;
+                pending.push(rel);
+                continue;
+            }
+            if name == layout::SHA256SUMS_PATH {
+                continue;
+            }
+            if layout::classify(&name)? != layout::Area::Program {
+                return Err(format!("发行目录包含非程序区文件：{name}"));
+            }
+            if !seen_lower.insert(name.to_lowercase()) {
+                return Err(format!("发行目录存在大小写冲突文件：{name}"));
+            }
+            let mut file = storage.open_read(&item.path())?.ok_or("发行文件消失。")?;
+            let mut hash = Sha256::new();
+            let mut buffer = [0; 64 * 1024];
+            let mut secret_scan = SecretScan::default();
+            loop {
+                let n = file.read(&mut buffer).map_err(|_| "无法读取发行文件。")?;
+                if n == 0 {
+                    break;
+                }
+                hash.update(&buffer[..n]);
+                secret_scan.check(&buffer[..n])?;
+            }
+            if name.ends_with(".json") {
+                let bytes = storage
+                    .read_limited(&item.path(), 8 * 1024 * 1024)?
+                    .ok_or("发行 JSON 文件消失。")?;
+                let value = crate::json::parse(&bytes)?;
+                check_json(&value)?;
+            }
+            sums.insert(name, format!("{:x}", hash.finalize()));
+        }
+    }
+    layout::validate_metadata(&sums, &storage.root, target_version)?;
+    Ok(sums)
+}
+
+/// Checks the assembled file set and contents against its on-disk checksum table.
+pub fn verify_clean_dist_tree(root: &Path, version: &str) -> Result<usize, String> {
+    let actual = scan_clean_dist_tree(root, version)?;
+    let storage = Storage::new(root)?;
+    let bytes = storage
+        .read_limited(&storage.root.join(layout::SHA256SUMS_PATH), 4 * 1024 * 1024)?
+        .ok_or("发行目录缺少 SHA256SUMS。")?;
+    let text = std::str::from_utf8(&bytes).map_err(|_| "SHA256SUMS 编码无效。")?;
+    check_dist_sums(&actual, text)?;
+    Ok(actual.len())
+}
+
+fn check_dist_sums(actual: &BTreeMap<String, String>, text: &str) -> Result<(), String> {
+    let expected = crate::manifest::parse_sums(text)?;
+    if let Some((path, _)) = actual
+        .iter()
+        .find(|(path, hash)| expected.get(*path) != Some(*hash))
+    {
+        return Err(format!("发行文件未登记或 SHA-256 不匹配：{path}"));
+    }
+    if let Some(path) = expected.keys().find(|path| !actual.contains_key(*path)) {
+        return Err(format!("SHA256SUMS 登记了不存在的发行文件：{path}"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod dist_sum_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_tampering_missing_and_extra_files() {
+        let a = "a".repeat(64);
+        let b = "b".repeat(64);
+        let actual = BTreeMap::from([("VERSION".to_owned(), a.clone())]);
+        let good = format!("{a}  VERSION\n");
+        assert!(check_dist_sums(&actual, &good).is_ok());
+        assert!(check_dist_sums(&actual, &format!("{b}  VERSION\n")).is_err());
+        assert!(check_dist_sums(&actual, &format!("{a}  cst-pilot.exe\n")).is_err());
+        assert!(check_dist_sums(&actual, &format!("{good}{b}  cst-pilot.exe\n")).is_err());
+    }
 }
 
 #[derive(Default)]

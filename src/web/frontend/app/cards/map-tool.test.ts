@@ -83,3 +83,23 @@ test("degraded results retain useful data and warnings", () => {
 	assert.match(JSON.stringify(view.blocks), /需要管理员权限/);
 	assert.match(JSON.stringify(view.blocks), /剩余/);
 });
+
+test("ls entries omit null pct and render a single unknown-size label without duplicating bytes", () => {
+	const view = mapTool(
+		call("ls"),
+		result({
+			path: "C:\\",
+			totalChildren: 2,
+			totalSize: "10.0 MB",
+			method: "walk",
+			entries: [
+				{ name: "pagefile.sys", type: "file", bytes: 10485760, size: "10.0 MB", pct: null },
+				{ name: "Documents and Settings", type: "unknown", bytes: null, size: null, pct: null },
+			],
+		}),
+	);
+	const listing = view.blocks.find((block) => block.kind === "listing");
+	assert.ok(listing && listing.kind === "listing");
+	assert.deepEqual(listing.items[0]?.metrics, [{ label: "大小", value: "10.0 MB" }]);
+	assert.deepEqual(listing.items[1]?.metrics, [{ label: "大小", value: "大小未知" }]);
+});

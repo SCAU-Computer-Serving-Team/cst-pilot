@@ -52,7 +52,7 @@ pub fn get_default_agent_dir() -> PathBuf {
     PathBuf::from(".pi").join("agent")
 }
 
-pub fn get_default_session_dir(cwd: &Path, agent_dir: &Path) -> PathBuf {
+pub fn get_default_session_dir_in(cwd: &Path, sessions_root: &Path) -> PathBuf {
     let resolved = resolve_path(cwd, None);
     let encoded: String = resolved
         .to_string_lossy()
@@ -66,7 +66,11 @@ pub fn get_default_session_dir(cwd: &Path, agent_dir: &Path) -> PathBuf {
             }
         })
         .collect();
-    agent_dir.join("sessions").join(format!("--{encoded}--"))
+    sessions_root.join(format!("--{encoded}--"))
+}
+
+pub fn get_default_session_dir(cwd: &Path, agent_dir: &Path) -> PathBuf {
+    get_default_session_dir_in(cwd, &agent_dir.join("sessions"))
 }
 
 pub fn resolve_path(raw: impl AsRef<Path>, base_cwd: Option<&Path>) -> PathBuf {
@@ -305,6 +309,7 @@ pub fn create_tool_name_matcher(patterns: &[String]) -> Arc<dyn Fn(&str) -> bool
 pub struct CreateAgentSessionOptions {
     pub cwd: Option<PathBuf>,
     pub agent_dir: Option<PathBuf>,
+    pub sessions_dir: Option<PathBuf>,
     pub project_trusted: Option<bool>,
     pub model_runtime: Option<ModelRuntime>,
     pub model: Option<Model>,
@@ -378,6 +383,7 @@ pub async fn create_agent_session_from_services(
     create_agent_session(CreateAgentSessionOptions {
         cwd: Some(options.services.cwd),
         agent_dir: Some(options.services.agent_dir),
+        sessions_dir: None,
         project_trusted: Some(options.services.settings_manager.is_project_trusted()),
         model_runtime: Some(options.services.model_runtime),
         model: options.model,
@@ -453,7 +459,10 @@ pub async fn create_agent_session(
     let session_manager = match options.session_manager {
         Some(sm) => sm,
         None => {
-            let session_dir = get_default_session_dir(&cwd, &agent_dir);
+            let session_dir = match options.sessions_dir {
+                Some(ref sessions_root) => get_default_session_dir_in(&cwd, sessions_root),
+                None => get_default_session_dir(&cwd, &agent_dir),
+            };
             SessionManager::create(&cwd_str, session_dir, None).map_err(|e| e.to_string())?
         }
     };

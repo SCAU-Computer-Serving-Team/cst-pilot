@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "endpoints": [
+    {
+      "url": "https://www.cstoa.top/api/telemetry"
+    },
+    {
+      "url": "https://8.163.28.9:8445/api/telemetry",
+      "caFile": "timserver_1.crt"
+    }
+  ],
+  "authProvider": "cstoa"
+}

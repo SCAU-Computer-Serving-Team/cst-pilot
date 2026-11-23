@@ -1,7 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
-use std::time::Duration;
 
 use gpui::{
     Animation, AnimationExt as _, App, AppContext as _, BorrowAppContext as _, Bounds, Context,
@@ -13,7 +12,7 @@ use gpui::{
 use gpui_kit::base::{TooltipOverlay, TooltipRequest, TooltipTransition};
 use gpui_kit::{TestSupportExt as _, component::ElementExt};
 
-use super::motion::{FAST, PointerFlag, ease_in_out, ease_out};
+use super::motion::{FAST, PointerFlag, ease_out};
 use super::{DesktopThemeGlobal, apply_scale, radius, scale, space};
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 
@@ -174,7 +173,7 @@ pub fn window_tooltip_overlay(window: &Window, cx: &App) -> Option<Entity<Deskto
         .and_then(WeakEntity::upgrade)
 }
 
-/// Builds the shared [`TooltipOverlay`] with `storybook.html` enter/switch motion (`150ms` enter / `200ms` slide).
+/// Builds the shared [`TooltipOverlay`] with `storybook.html` enter/switch motion (`150ms` enter / `0ms` adjacent switch).
 fn create_desktop_tooltip_overlay(cx: &mut App) -> Entity<TooltipOverlay> {
     cx.new(|_| {
         TooltipOverlay::new().render_with(|content_view, transition, _window, cx| {
@@ -193,29 +192,7 @@ fn create_desktop_tooltip_overlay(cx: &mut App) -> Entity<TooltipOverlay> {
                         },
                     )
                     .into_any_element(),
-                TooltipTransition::Switch {
-                    epoch,
-                    previous,
-                    current,
-                } => {
-                    let same_row = (current.origin.y - previous.origin.y).abs() < px(12.0);
-                    if !same_row {
-                        return div().child(content_view).into_any_element();
-                    }
-                    let dx =
-                        f32::from(current.center().x - previous.center().x).clamp(-240.0, 240.0);
-                    div()
-                        .child(content_view)
-                        .with_animation(
-                            ElementId::NamedInteger("desktop-tooltip-switch".into(), epoch as u64),
-                            Animation::new(Duration::from_millis(200)).with_easing(ease_in_out()),
-                            move |el, d| {
-                                let t = d.clamp(0.0, 1.0);
-                                el.ml(px(-dx * (1.0 - t)))
-                            },
-                        )
-                        .into_any_element()
-                }
+                TooltipTransition::Switch { .. } => div().child(content_view).into_any_element(),
             }
         })
     })

@@ -59,11 +59,12 @@ impl KitTempFixture {
     fn create() -> Self {
         let workspace_fonts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts");
         let dir = std::env::temp_dir().join(format!("cst-desktop-step3-{}", Uuid::new_v4()));
-        fs::create_dir_all(dir.join("agent/home")).unwrap();
-        fs::create_dir_all(dir.join("assets/fonts")).unwrap();
+        fs::create_dir_all(dir.join("app/prompts")).unwrap();
+        fs::create_dir_all(dir.join("app/fonts")).unwrap();
+        fs::create_dir_all(dir.join("data/config")).unwrap();
         fs::write(dir.join("VERSION"), "cst-pilot v0.1.0\n").unwrap();
         fs::write(
-            dir.join("agent/home/APPEND_SYSTEM.md"),
+            dir.join("app/prompts/APPEND_SYSTEM.md"),
             "桌面端测试规则。\n",
         )
         .unwrap();
@@ -77,7 +78,7 @@ impl KitTempFixture {
             "runbook",
             "bitlocker",
         ] {
-            let p = dir.join(format!("agent/home/skills/{skill}/SKILL.md"));
+            let p = dir.join(format!("app/skills/{skill}/SKILL.md"));
             fs::create_dir_all(p.parent().unwrap()).unwrap();
             fs::write(p, format!("---\nname: {skill}\n---\n技能说明。\n")).unwrap();
         }
@@ -90,7 +91,7 @@ impl KitTempFixture {
         ] {
             fs::copy(
                 workspace_fonts.join(font_file),
-                dir.join("assets/fonts").join(font_file),
+                dir.join("app/fonts").join(font_file),
             )
             .unwrap();
         }
@@ -520,6 +521,7 @@ fn shader_frame_scheduler_zero_fps_freeze_and_static_start_frame() {
             event_cursor: None,
             leaf_id: None,
             running: true,
+            compacting: false,
             active_turn_started_ms: None,
             messages: Arc::new(Vec::new()),
             entries: Arc::new(Vec::new()),
@@ -692,7 +694,7 @@ fn desktop_cli_health_check_lock_free_and_corrupt_asset_rejection() {
     drop(guard);
 
     // Corrupt SFNT font header -> must fail cleanly without modifying files
-    let mono_path = fixture.root.join("assets/fonts/JetBrainsMono-Regular.ttf");
+    let mono_path = fixture.root.join("app/fonts/JetBrainsMono-Regular.ttf");
     fs::write(&mono_path, b"BAD_FONT_HEADER_BYTES").unwrap();
     let bad_out = Command::new(exe)
         .arg("--health-check")
@@ -1437,9 +1439,13 @@ async fn headless_gpui_motion_primitives_interruptible_reversal_reduce_motion_on
     })
     .unwrap();
 
-    // Navigating away from Home and back marks welcomeStagger as done (no replay per session)
+    // Bottom-right gear button opens the desktop settings/account popover menu (matching Web),
+    // and clicking "设置" navigates away from Home (marking welcomeStagger as done).
     cx.update_window(win_handle, |_, window, cx| {
         window.click("sidebar-settings-btn", cx);
+        assert!(window.find("account-popover-menu").visible());
+        assert!(window.find("account-menu-feedback-btn").visible());
+        window.click("account-menu-settings-btn", cx);
         assert!(window.find("settings-view-vpwaf").visible());
         window.click("sidebar-new-session-btn", cx);
         assert!(window.find("workspace-home-view").visible());
@@ -1949,4 +1955,170 @@ async fn desktop_tooltips_share_delay_but_not_window_or_anchor_lifetime(
     assert!(!has(cx, *second, "tooltip-tip-a"));
     tick(cx, 1);
     assert!(has(cx, *second, "tooltip-tip-a"));
+}
+
+#[gpui::test]
+async fn motion_tuning_collapse_exit_easings_and_frosted_opacity(cx: &mut gpui::TestAppContext) {
+    use cst_desktop::background::FrostedGlassSpec;
+    use cst_desktop::theme::{DesktopPalette, motion};
+    use gpui_kit::{
+        InteractiveElement as _, IntoElement as _, ParentElement as _, Styled as _,
+        TestSupportExt as _, div,
+    };
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    // 1. FrostedGlassSpec::with_opacity scales & clamps cleanly for D3D11 fade sync.
+    let pal = DesktopPalette::light();
+    let scrim = FrostedGlassSpec::scrim(&pal);
+    let half = scrim.with_opacity(0.5);
+    assert!((half.opacity - scrim.opacity * 0.5).abs() < 1e-5);
+    assert_eq!(scrim.with_opacity(-1.0).opacity, 0.0);
+    assert!((scrim.with_opacity(2.0).opacity - scrim.opacity).abs() < 1e-5);
+
+    // 2. checkStroke spring overshoot & flip ease_in_out symmetry.
+    let spring = motion::ease_spring();
+    let max_spring = (1..=40)
+        .map(|i| spring(i as f32 / 40.0))
+        .fold(0.0_f32, f32::max);
+    assert!(
+        max_spring > 1.001 && max_spring < 1.05,
+        "checkStroke spring curve should have subtle overshoot in (1.001, 1.05), got {max_spring}"
+    );
+    let eio = motion::ease_in_out();
+    assert!((eio(0.5) - 0.5).abs() < 0.02);
+    assert!(eio(0.25) < 0.25 && eio(0.75) > 0.75);
+
+    // 3. animated_collapse_with_exit preserves visual-only exit snapshot while blurring focus
+    //    and unmounting interactive/test nodes on close frame 1, plus animated_press_progress.
+    struct CollapseExitProbe {
+        open: Rc<Cell<bool>>,
+        pressed: Rc<Cell<bool>>,
+        body_focus: gpui::FocusHandle,
+        saw_inert_exit: Rc<Cell<bool>>,
+        press_p: Rc<Cell<f32>>,
+    }
+
+    impl gpui::Render for CollapseExitProbe {
+        fn render(
+            &mut self,
+            window: &mut gpui_kit::Window,
+            cx: &mut gpui_kit::Context<Self>,
+        ) -> impl gpui_kit::IntoElement {
+            let saw_inert = Rc::clone(&self.saw_inert_exit);
+            let focus = self.body_focus.clone();
+            let col = motion::animated_collapse_with_exit(
+                "exit-probe",
+                self.open.get(),
+                window,
+                cx,
+                |interactive, _, _| {
+                    if interactive {
+                        div()
+                            .id("exit-probe-live-body")
+                            .test_support()
+                            .track_focus(&focus)
+                            .h(px(120.0))
+                            .flex_shrink_0()
+                            .child("live")
+                            .into_any_element()
+                    } else {
+                        saw_inert.set(true);
+                        div()
+                            .h(px(120.0))
+                            .flex_shrink_0()
+                            .child("inert-exit")
+                            .into_any_element()
+                    }
+                },
+            );
+            self.press_p.set(motion::animated_press_progress(
+                "press-probe-btn",
+                self.pressed.get(),
+                window,
+                cx,
+            ));
+            div().size_full().flex().flex_col().children(col)
+        }
+    }
+
+    let open = Rc::new(Cell::new(true));
+    let pressed = Rc::new(Cell::new(false));
+    let saw_inert_exit = Rc::new(Cell::new(false));
+    let press_p = Rc::new(Cell::new(0.0_f32));
+    let win = cx.add_window(|_, cx| CollapseExitProbe {
+        open: Rc::clone(&open),
+        pressed: Rc::clone(&pressed),
+        body_focus: cx.focus_handle(),
+        saw_inert_exit: Rc::clone(&saw_inert_exit),
+        press_p: Rc::clone(&press_p),
+    });
+
+    let frame = |cx: &mut gpui::TestAppContext| {
+        cx.update_window(*win, |_, window, cx| {
+            window.refresh();
+            window.render_frame(cx);
+        })
+        .unwrap();
+    };
+    frame(cx);
+    cx.executor().advance_clock(Duration::from_millis(260));
+    frame(cx);
+    cx.update_window(*win, |probe, window, cx| {
+        probe
+            .downcast::<CollapseExitProbe>()
+            .unwrap()
+            .read(cx)
+            .body_focus
+            .clone()
+            .focus(window, cx);
+    })
+    .unwrap();
+
+    // Trigger close: frame 1 must blur focus, unmount interactive node, and render inert exit.
+    open.set(false);
+    pressed.set(true);
+    frame(cx);
+    cx.executor().advance_clock(Duration::from_millis(60));
+    frame(cx);
+    assert!(
+        saw_inert_exit.get(),
+        "animated_collapse_with_exit should render inert exit content during 150ms close"
+    );
+    assert!(
+        press_p.get() > 0.2 && press_p.get() < 0.99,
+        "120ms press progress should be mid-flight at 60ms, got {}",
+        press_p.get()
+    );
+    cx.update_window(*win, |probe, window, cx| {
+        assert!(
+            !probe
+                .downcast::<CollapseExitProbe>()
+                .unwrap()
+                .read(cx)
+                .body_focus
+                .is_focused(window)
+        );
+        assert!(
+            !window
+                .elements()
+                .iter()
+                .any(|el| el.path().last() == Some(&"exit-probe-live-body".into()))
+        );
+    })
+    .unwrap();
+
+    // After 150ms close completes, inert exit stops rendering.
+    saw_inert_exit.set(false);
+    cx.executor().advance_clock(Duration::from_millis(120));
+    frame(cx);
+    assert!(
+        !saw_inert_exit.get(),
+        "inert exit should unmount once 150ms close finishes"
+    );
+    assert!(
+        (press_p.get() - 1.0).abs() < 0.01,
+        "120ms press progress should settle at 1.0, got {}",
+        press_p.get()
+    );
 }

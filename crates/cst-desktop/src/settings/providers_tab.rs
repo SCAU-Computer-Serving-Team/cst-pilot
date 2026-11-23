@@ -14,7 +14,8 @@ use zeroize::Zeroizing;
 
 use crate::accessibility::A11yElementExt as _;
 use crate::theme::{
-    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, radius, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
+    scale, space,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,6 +129,8 @@ pub struct ProvidersTabView {
     window: gpui::AnyWindowHandle,
     key_error: Option<SharedString>,
     form_error: Option<SharedString>,
+    providers_expanded: bool,
+    page_slide: motion::PageSlide,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -196,11 +199,14 @@ impl ProvidersTabView {
             window: window.window_handle(),
             key_error: None,
             form_error: None,
+            providers_expanded: false,
+            page_slide: motion::PageSlide::default(),
             _subscriptions: subs,
         }
     }
 
     pub fn open_new_custom_provider(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.page_slide.start(1.0, cx);
         self.reset_form();
         self.creating_new_custom = true;
         self.inline_edit_mode = true;
@@ -222,6 +228,7 @@ impl ProvidersTabView {
     }
 
     pub fn leave(&mut self, cx: &mut Context<Self>) {
+        self.providers_expanded = false;
         self.reset_form();
         let key = self.api_key_input.downgrade();
         let window = self.window;
@@ -238,6 +245,7 @@ impl ProvidersTabView {
     }
 
     fn return_to_provider_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.page_slide.start(-1.0, cx);
         self.reset_form();
         self.clear_key(window, cx);
         cx.notify();
@@ -277,6 +285,7 @@ impl ProvidersTabView {
             .and_then(|p| p.custom)
             .unwrap_or(false);
 
+        self.page_slide.start(1.0, cx);
         self.reset_form();
         self.clear_key(window, cx);
         self.search_input
@@ -459,7 +468,7 @@ impl ProvidersTabView {
                     Ok(_) => {
                         this.return_to_provider_list(window, cx);
                         cx.emit(ProvidersTabEvent::Notice(if custom {
-                            "已删除自定义模型服务。".into()
+                            "已删除自定义提供商。".into()
                         } else {
                             "已移除服务凭据。".into()
                         }));
@@ -626,13 +635,13 @@ impl ProvidersTabView {
                         this.creating_new_custom = false;
                         this.active_provider_id = Some(pid);
                         cx.emit(ProvidersTabEvent::CredentialsSaved);
-                        cx.emit(ProvidersTabEvent::Notice("模型服务配置已保存。".into()));
+                        cx.emit(ProvidersTabEvent::Notice("提供商配置已保存。".into()));
                     }
                     Err(ClientError::BadRequest { .. }) => {
-                        this.form_error = Some("无法保存模型服务，请检查配置和密钥。".into());
+                        this.form_error = Some("无法保存提供商，请检查配置和密钥。".into());
                     }
                     Err(_) => cx.emit(ProvidersTabEvent::ErrorMessage(
-                        "保存模型服务失败，请重试。".into(),
+                        "保存提供商失败，请重试。".into(),
                     )),
                 }
                 cx.notify();
@@ -650,7 +659,7 @@ impl ProvidersTabView {
             apply_scale(div(), scale::UI_MEDIUM)
                 .id("providers-back-to-list-btn")
                 .test_support()
-                .a11y_button("providers-back-to-list-btn", "返回模型服务列表")
+                .a11y_button("providers-back-to-list-btn", "返回提供商列表")
                 .h(height::CONTROL)
                 .px(space::SM)
                 .rounded(radius::CONTROL)
@@ -667,25 +676,29 @@ impl ProvidersTabView {
                         .size(px(14.0))
                         .text_color(palette.text_secondary),
                 )
-                .child(cjk_inline_label("模型服务")),
+                .child(cjk_inline_label("提供商")),
         )
     }
 }
 
 impl Render for ProvidersTabView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme_global = DesktopThemeGlobal::current(cx);
         let palette = theme_global.palette;
         let mono_family = theme_global.mono_font_family;
         let snap = self.client.snapshot();
+        let (slide_opacity, slide_dx) = self.page_slide.sample(window, cx);
 
         // 1. Custom / Inline Provider Editor Mode (`q8NLwK`)
         if self.creating_new_custom || self.inline_edit_mode {
             return div()
                 .id("settings-providers-tab")
                 .test_support()
-                .a11y_region("settings-providers-tab", "模型服务设置")
+                .a11y_region("settings-providers-tab", "提供商设置")
                 .w_full()
+                .relative()
+                .left(slide_dx)
+                .opacity(slide_opacity)
                 .flex()
                 .flex_col()
                 .gap(space::MD)
@@ -697,13 +710,13 @@ impl Render for ProvidersTabView {
                         .child(
                             apply_scale(div(), scale::TITLE)
                                 .text_color(palette.text_primary)
-                                .child(cjk_inline_label("自定义模型服务")),
+                                .child(cjk_inline_label("自定义提供商")),
                         )
                         .child(
                             apply_scale(div(), scale::UI)
                                 .text_color(palette.text_secondary)
                                 .child(cjk_inline_label(
-                                    "连接兼容 OpenAI、Anthropic 或 Google 接口的服务。",
+                                    "连接兼容 OpenAI、Anthropic 或 Google 接口的提供商。",
                                 )),
                         ),
                 )
@@ -840,15 +853,18 @@ impl Render for ProvidersTabView {
             return div()
                 .id("settings-providers-tab")
                 .test_support()
-                .a11y_region("settings-providers-tab", "模型服务设置")
+                .a11y_region("settings-providers-tab", "提供商设置")
                 .w_full()
+                .relative()
+                .left(slide_dx)
+                .opacity(slide_opacity)
                 .flex()
                 .flex_col()
                 .gap(space::MD)
                 .child(
                     apply_scale(div(), scale::TITLE)
                         .text_color(palette.text_primary)
-                        .child(cjk_inline_label("模型服务")),
+                        .child(cjk_inline_label("提供商")),
                 )
                 .child(self.render_back_bar(&palette, cx))
                 .child(
@@ -1022,7 +1038,7 @@ impl Render for ProvidersTabView {
                             .child(
                                 apply_scale(div(), scale::BODY)
                                     .text_color(palette.text_primary)
-                                    .child(cjk_inline_label("CSTOA 科协专属服务")),
+                                    .child(cjk_inline_label("计维CSTOA")),
                             )
                             .child(
                                 apply_scale(div(), scale::CAPTION)
@@ -1037,9 +1053,9 @@ impl Render for ProvidersTabView {
                             .a11y_button(
                                 "providers-cstoa-action-btn",
                                 if cstoa_signed_in {
-                                    "管理 CSTOA 账号"
+                                    "管理 计维CSTOA 账号"
                                 } else {
-                                    "扫码登录 CSTOA"
+                                    "扫码登录 计维CSTOA"
                                 },
                             )
                             .h(height::CONTROL)
@@ -1070,7 +1086,24 @@ impl Render for ProvidersTabView {
             .as_ref()
             .map(|p| p.as_slice())
             .unwrap_or(&[]);
-        for prov in providers.iter().filter(|p| p.id != "cstoa") {
+        // Configured providers first (keeping original order within each group) so active providers stay above the fold.
+        let mut ordered_others: Vec<_> = providers.iter().filter(|p| p.id != "cstoa").collect();
+        ordered_others.sort_by_key(|p| {
+            if p.configured == Some(true) || p.requires_login {
+                0u8
+            } else {
+                1u8
+            }
+        });
+        const PROVIDERS_COLLAPSED_LIMIT: usize = 5;
+        let total_providers_count = 1 + ordered_others.len();
+        let can_collapse_providers = total_providers_count > PROVIDERS_COLLAPSED_LIMIT;
+        let visible_other_limit = if can_collapse_providers && !self.providers_expanded {
+            PROVIDERS_COLLAPSED_LIMIT.saturating_sub(1)
+        } else {
+            ordered_others.len()
+        };
+        for prov in ordered_others.into_iter().take(visible_other_limit) {
             let pid = prov.id.clone();
             let pid_btn = pid.clone();
             let (status_label, status_color) = if prov.requires_login {
@@ -1145,6 +1178,45 @@ impl Render for ProvidersTabView {
             );
         }
 
+        if can_collapse_providers {
+            let expanded = self.providers_expanded;
+            let toggle_label = if expanded {
+                SharedString::from("收起列表")
+            } else {
+                SharedString::from(format!("查看全部提供商（{total_providers_count}）"))
+            };
+            merged_card = merged_card.child(
+                apply_scale(div(), scale::UI)
+                    .id("providers-toggle-expand-btn")
+                    .test_support()
+                    .a11y_button("providers-toggle-expand-btn", toggle_label.clone())
+                    .w_full()
+                    .h(height::HEADER)
+                    .px(space::LG)
+                    .border_t_1()
+                    .border_color(palette.border_subtle)
+                    .text_color(palette.text_secondary)
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.providers_expanded = !this.providers_expanded;
+                        cx.notify();
+                    }))
+                    .child(cjk_inline_label(toggle_label))
+                    .child(
+                        Icon::new(if expanded {
+                            IconName::ChevronUp
+                        } else {
+                            IconName::ChevronRight
+                        })
+                        .size(px(14.0))
+                        .text_color(palette.text_secondary),
+                    ),
+            );
+        }
+
         let configured_count = usize::from(cstoa_signed_in)
             + providers
                 .iter()
@@ -1154,8 +1226,11 @@ impl Render for ProvidersTabView {
         div()
             .id("settings-providers-tab")
             .test_support()
-            .a11y_region("settings-providers-tab", "模型服务设置")
+            .a11y_region("settings-providers-tab", "提供商设置")
             .w_full()
+            .relative()
+            .left(slide_dx)
+            .opacity(slide_opacity)
             .flex()
             .flex_col()
             .gap(space::GROUP)
@@ -1168,13 +1243,13 @@ impl Render for ProvidersTabView {
                     .child(
                         apply_scale(div(), scale::TITLE)
                             .text_color(palette.text_primary)
-                            .child(cjk_inline_label("模型服务")),
+                            .child(cjk_inline_label("提供商")),
                     )
                     .child(
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("providers-new-custom-btn")
                             .test_support()
-                            .a11y_button("providers-new-custom-btn", "添加服务")
+                            .a11y_button("providers-new-custom-btn", "添加提供商")
                             .h(height::CONTROL)
                             .px(space::MD)
                             .rounded(radius::CONTROL)
@@ -1194,7 +1269,7 @@ impl Render for ProvidersTabView {
                                     .size(px(14.0))
                                     .text_color(palette.text_secondary),
                             )
-                            .child(cjk_inline_label("添加服务")),
+                            .child(cjk_inline_label("添加提供商")),
                     ),
             )
             .child(
@@ -1212,7 +1287,7 @@ impl Render for ProvidersTabView {
                             .child(
                                 apply_scale(div(), scale::BODY_SEMIBOLD)
                                     .text_color(palette.text_primary)
-                                    .child(cjk_inline_label("服务列表")),
+                                    .child(cjk_inline_label("提供商列表")),
                             )
                             .child(
                                 apply_scale(div(), scale::UI)

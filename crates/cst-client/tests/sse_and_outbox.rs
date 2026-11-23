@@ -29,11 +29,18 @@ struct ServerFixture {
 impl ServerFixture {
     fn new() -> Self {
         let dir = std::env::temp_dir().join(format!("cst-client-sse-{}", Uuid::new_v4()));
-        fs::create_dir_all(dir.join("agent/home")).unwrap();
+        fs::create_dir_all(dir.join("app/prompts")).unwrap();
+        fs::create_dir_all(dir.join("data/config")).unwrap();
+        fs::create_dir_all(dir.join("static")).unwrap();
+        fs::write(
+            dir.join("static/index.html"),
+            "<!doctype html><title>test</title>",
+        )
+        .unwrap();
         fs::write(dir.join("VERSION"), "cst-pilot v0.9.5\n").unwrap();
-        fs::write(dir.join("agent/home/APPEND_SYSTEM.md"), "测试系统规则。").unwrap();
+        fs::write(dir.join("app/prompts/APPEND_SYSTEM.md"), "测试系统规则。").unwrap();
         for name in SKILL_NAMES {
-            let p = dir.join(format!("agent/home/skills/{name}/SKILL.md"));
+            let p = dir.join(format!("app/skills/{name}/SKILL.md"));
             fs::create_dir_all(p.parent().unwrap()).unwrap();
             fs::write(
                 p,
@@ -88,7 +95,7 @@ async fn stalled_ui_consumer_over_thirty_seconds_with_continuous_streaming_never
     let model_provider = faux.model.provider.clone();
     let model_id = faux.model.id.clone();
     fs::write(
-        fixture.root.join("agent/home/auth.json"),
+        fixture.root.join("data/config/auth.json"),
         serde_json::to_vec(&json!({
             model_provider.clone(): {
                 "type": "api_key",
@@ -117,6 +124,7 @@ async fn stalled_ui_consumer_over_thirty_seconds_with_continuous_streaming_never
 
     let mut cfg = ServerConfig::new(&fixture.root);
     cfg.port = Some(0);
+    cfg.static_dir = Some(fixture.root.join("static"));
     cfg.acquire_instance_lock = false;
     cfg.mode_config.first_connect_timeout = Duration::from_secs(5);
     cfg.mode_config.grace_period = Duration::from_secs(2);
@@ -221,6 +229,7 @@ async fn credentials_required_preserves_draft_and_web_mode_switch_suspends_and_r
 
     let mut cfg = ServerConfig::new(&fixture.root);
     cfg.port = Some(0);
+    cfg.static_dir = Some(fixture.root.join("static"));
     cfg.acquire_instance_lock = false;
     let server = RunningServer::start(host, cfg).await.unwrap();
 

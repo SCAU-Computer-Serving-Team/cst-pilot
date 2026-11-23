@@ -291,15 +291,20 @@ export function mapTool(call: Call, result: Message): CardView {
 				{ label: "序号", value: words(entry.rank) },
 				{ label: "取得正文", value: measure("fetched", entry.fetched ?? false) },
 			];
+		const hasSizeKey = "size" in entry;
 		return Object.entries(entry)
 			.filter(
-				([field]) =>
+				([field, value]) =>
 					!nameKeys.includes(field) &&
 					!metricSkips.has(field) &&
 					field !== "ext" &&
-					(field !== "bytes" || entry.size == null),
+					(field !== "bytes" || !hasSizeKey) &&
+					!(field === "pct" && value == null),
 			)
-			.map(([field, value]) => ({ label: label(field), value: measure(field, value) }));
+			.map(([field, value]) => ({
+				label: label(field),
+				value: field === "size" && value == null ? "大小未知" : measure(field, value),
+			}));
 	};
 	const nameOf = (key: string, entry: Record<string, unknown>, index: number) => {
 		if (key === "counts") return `${words(entry.provider ?? "未知来源")} / ${words(entry.id ?? "-")}`;

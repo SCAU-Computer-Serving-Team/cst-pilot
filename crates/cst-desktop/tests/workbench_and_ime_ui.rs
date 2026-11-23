@@ -8,12 +8,13 @@ use cst_client::{AppHttpClient, CstClient, DraftKey, VerifiedServerEndpoint, Wor
 use cst_desktop::open_desktop_shell_window_with_handle;
 use cst_desktop::shell::register_shell_keys;
 use cst_desktop::shell::sidebar::ShellRoute;
+use cst_desktop::theme::motion::{DigitDiffPlan, plan_label_digit_diff};
 use cst_desktop::workbench::markdown_view::MarkdownStreamStore;
 use cst_desktop::workbench::model_picker::{format_quota_balance, thinking_level_label};
 use cst_desktop::workbench::turn_segments::{
     TurnSegmentKind, build_turn_segments, build_turn_segments_with_results, format_assistant_error,
     format_duration_zh, glyph_light_strength, group_turns_and_results, light_glyphs,
-    process_segment_label, split_turn,
+    process_segment_label, segment_is_running, split_turn,
 };
 use cst_os::ProcessIdentity;
 use gpui::{AppContext as _, EntityInputHandler};
@@ -118,7 +119,7 @@ fn turn_segments_special_isolation_and_running_light_parity() {
     let auth_err = format_assistant_error(Some("DeepSeek"), "HTTP 401 invalid api key");
     assert_eq!(
         auth_err.headline,
-        "DeepSeek 凭据无效或已过期，请在「设置 · 模型服务」更新后重试。"
+        "DeepSeek 凭据无效或已过期，请在「设置 · 提供商」更新后重试。"
     );
 
     // `RunningLight` grapheme cluster segmentation (CJK + emoji ZWJ stays intact as 1 grapheme!)
@@ -188,6 +189,88 @@ fn turn_segments_special_isolation_and_running_light_parity() {
     assert_eq!(
         process_segment_label(&img_segs[2].parts, &img_results, false).as_deref(),
         Some("已完成 1 次工具调用")
+    );
+
+    // Intermediate assistant prose before tool calls stays inside the collapsible `Process`
+    // segment (web parity), so live working progress can be folded cleanly under `process-start`.
+    let prose_before_tool = vec![
+        json!({
+            "id": "u-c",
+            "role": "user",
+            "timestamp": 100,
+            "content": "看看C盘"
+        }),
+        json!({
+            "id": "a-c1",
+            "role": "assistant",
+            "timestamp": 200,
+            "durationMs": 1200,
+            "content": [
+                { "type": "text", "text": "我先读取一下 disk 工具说明和 C 盘的空间情况。" },
+                { "type": "toolCall", "id": "tc-read", "name": "read", "arguments": { "path": "disk.md" } }
+            ]
+        }),
+        json!({
+            "role": "toolResult",
+            "toolCallId": "tc-read",
+            "toolName": "read",
+            "content": [{ "type": "text", "text": "ok" }]
+        }),
+        json!({
+            "id": "a-c2",
+            "role": "assistant",
+            "timestamp": 1500,
+            "durationMs": 900,
+            "content": [
+                { "type": "text", "text": "C 盘目前剩余 74.2 GB。" }
+            ]
+        }),
+    ];
+    let (prose_turns, prose_results) = group_turns_and_results(&prose_before_tool);
+    let prose_split = split_turn(&prose_turns[0].assistants);
+    assert_eq!(prose_split.total_duration_ms, 2100);
+    assert_eq!(prose_split.final_text, "C 盘目前剩余 74.2 GB。");
+    let prose_segs = build_turn_segments_with_results(prose_split.process, &prose_results);
+    // [0] collapsible `process-start` containing intermediate prose + 1 tool call
+    assert_eq!(prose_segs.len(), 1);
+    assert_eq!(prose_segs[0].kind, TurnSegmentKind::Process);
+    assert_eq!(prose_segs[0].parts.len(), 2);
+    assert!(prose_segs[0].expansion_anchor().is_some());
+    assert_eq!(
+        process_segment_label(&prose_segs[0].parts, &prose_results, false).as_deref(),
+        Some("已完成 1 次工具调用")
+    );
+    assert!(!segment_is_running(
+        &prose_segs[0].parts,
+        &prose_results,
+        true,
+        true,
+        true
+    ));
+
+    // Digit-only status rolling diff algorithm specification checks:
+    assert_eq!(
+        plan_label_digit_diff("工作中 52s", "工作中 52s"),
+        DigitDiffPlan::Unchanged
+    );
+    assert_eq!(
+        plan_label_digit_diff("工作中 52s", "工作中 53s"),
+        DigitDiffPlan::DigitsOnly(vec![(0, 0, Some('2'), '3', true)])
+    );
+    assert_eq!(
+        plan_label_digit_diff("工作中 59s", "工作中 60s"),
+        DigitDiffPlan::DigitsOnly(vec![
+            (0, 1, Some('5'), '6', true),
+            (0, 0, Some('9'), '0', true),
+        ])
+    );
+    assert_eq!(
+        plan_label_digit_diff("工作中 9s", "工作中 10s"),
+        DigitDiffPlan::DigitsOnly(vec![(0, 1, None, '1', true), (0, 0, Some('9'), '0', true),])
+    );
+    assert_eq!(
+        plan_label_digit_diff("工作中 52s", "已工作 52.3s"),
+        DigitDiffPlan::FullSwap
     );
 }
 
@@ -870,9 +953,27 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
 
         // Open two-level Model Picker (`d8zzg`) -> Thinking page (`L7GWjV`) -> select `Max`!
         window.click("composer-model-picker-btn", cx);
+        let main_bounds = window.find("composer-model-picker-d8zzg").bounds();
         assert!(window.find("composer-model-picker-d8zzg").visible());
+        assert_eq!(f32::from(main_bounds.size.width), 224.0);
         window.press("down", cx);
         window.press("enter", cx);
+    })
+    .unwrap();
+
+    // Height smoothly transitions (`300ms ease_out`) from Main (76px) to Thinking (4 rows);
+    // wait for the resize animation to reveal `thinking-option-max`.
+    cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
+        window
+            .try_find("thinking-option-max")
+            .is_some_and(|el| el.visible())
+    })
+    .await;
+
+    cx.update_window(win_handle, |_, window, cx| {
+        let thinking_bounds = window.find("composer-model-picker-d8zzg").bounds();
+        assert_eq!(f32::from(thinking_bounds.size.width), 224.0);
+        assert!(f32::from(thinking_bounds.size.height) > 150.0);
         assert!(window.find("thinking-option-max").visible());
         window.press("end", cx);
         window.press("enter", cx);

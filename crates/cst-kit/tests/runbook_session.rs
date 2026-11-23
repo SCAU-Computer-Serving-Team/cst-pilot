@@ -27,7 +27,7 @@ async fn real_sdk_session_plans_and_exports_two_revisions_using_complete_tool_re
     fs::create_dir_all(&root).unwrap();
     let fixture = Fixture(root.canonicalize().unwrap());
     for name in SKILL_NAMES {
-        let skill = fixture.0.join(format!("agent/home/skills/{name}/SKILL.md"));
+        let skill = fixture.0.join(format!("app/skills/{name}/SKILL.md"));
         fs::create_dir_all(skill.parent().unwrap()).unwrap();
         fs::write(
             skill,
@@ -35,8 +35,9 @@ async fn real_sdk_session_plans_and_exports_two_revisions_using_complete_tool_re
         )
         .unwrap();
     }
+    fs::create_dir_all(fixture.0.join("app/prompts")).unwrap();
     fs::write(
-        fixture.0.join("agent/home/APPEND_SYSTEM.md"),
+        fixture.0.join("app/prompts/APPEND_SYSTEM.md"),
         "测试用维修交付规则。",
     )
     .unwrap();

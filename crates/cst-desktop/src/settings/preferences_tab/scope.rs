@@ -15,13 +15,13 @@ struct ScopeRow {
     origin: Option<RulePosition>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 struct OriginalRule {
     pattern: String,
     row_count: usize,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub(super) struct ModelScope {
     original: Vec<OriginalRule>,
     rows: Vec<ScopeRow>,

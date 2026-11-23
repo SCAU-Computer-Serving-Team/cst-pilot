@@ -16,7 +16,7 @@ use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
     scale, space,
 };
-use crate::tools::normal_card::render_normal_tool_card;
+use crate::tools::normal_card::render_normal_tool_card_with_args;
 use crate::tools::{SpecialToolDispatchProps, render_special_tool_component};
 use crate::workbench::turn_segments::{
     ConversationPart, extract_message_text, group_turns_and_results, split_turn,
@@ -89,6 +89,7 @@ pub struct ExportView {
     open_directory_task: Option<Task<()>>,
     last_completed_export_id: Option<String>,
     last_completed_dir: Option<String>,
+    preview_reveal: motion::SurfaceReveal,
 }
 
 impl EventEmitter<ExportViewEvent> for ExportView {}
@@ -114,9 +115,14 @@ impl ExportView {
             open_directory_task: None,
             last_completed_export_id: None,
             last_completed_dir: None,
+            preview_reveal: motion::SurfaceReveal::default(),
         };
         this.reload_preview(cx);
         this
+    }
+
+    pub(crate) fn session_id(&self) -> &str {
+        &self.session_id
     }
 
     pub fn set_session_id(&mut self, session_id: String, cx: &mut Context<Self>) {
@@ -135,6 +141,7 @@ impl ExportView {
         self.preview_failed = false;
         self.last_completed_export_id = None;
         self.last_completed_dir = None;
+        self.preview_reveal.clear();
     }
 
     /// Keep the previous preview mounted until the latest request settles.
@@ -160,11 +167,18 @@ impl ExportView {
                 this.preview_task = None;
                 this.preview_failed = false;
                 this.preview_snapshot = match res {
-                    Ok(snapshot) => snapshot
-                        .get("entries")
-                        .and_then(Value::as_array)
-                        .is_some_and(|entries| !entries.is_empty())
-                        .then_some(snapshot),
+                    Ok(snapshot) => {
+                        let ready = snapshot
+                            .get("entries")
+                            .and_then(Value::as_array)
+                            .is_some_and(|entries| !entries.is_empty())
+                            .then_some(snapshot);
+                        if ready.is_some() {
+                            this.preview_reveal
+                                .start(Duration::from_millis(180), 4.0, 0.25, cx);
+                        }
+                        ready
+                    }
                     Err(err) if err.code() == "empty_export" => None,
                     Err(err) => {
                         this.preview_failed = true;
@@ -264,7 +278,7 @@ impl ExportView {
     }
 
     fn render_readonly_preview(
-        &self,
+        &mut self,
         mono_family: SharedString,
         ui_palette: &DesktopPalette,
         scale_factor: f32,
@@ -272,6 +286,7 @@ impl ExportView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let doc_palette = self.doc_theme.palette();
+        let (preview_op, preview_dy) = self.preview_reveal.sample(window, cx);
 
         let viewport_el = if let Some(ref snap) = self.preview_snapshot {
             let title = snap
@@ -286,6 +301,9 @@ impl ExportView {
             let (turns, tool_results) = group_turns_and_results(&entries);
 
             let mut doc_col = div()
+                .relative()
+                .top(preview_dy)
+                .opacity(preview_op)
                 .w_full()
                 .max_w(px(760.0))
                 .mx_auto()
@@ -403,6 +421,9 @@ impl ExportView {
                                             warning_hovered: false,
                                             transparency_enabled: false,
                                             scale_factor,
+                                            running_light_allowed: false,
+                                            started_at: None,
+                                            animate_enter: false,
                                         },
                                         self.client.clone(),
                                         mono_family.clone(),
@@ -431,18 +452,20 @@ impl ExportView {
                                             .unwrap_or_default(),
                                         execution: None,
                                     };
-                                    let parsed = res_val
-                                        .map(ToolResultInput::from_message_json)
-                                        .unwrap_or_default();
-                                    let card_view = map_tool(&input, &parsed);
-                                    turn_box = turn_box.child(render_normal_tool_card(
+                                    let parsed = res_val.map(ToolResultInput::from_message_json);
+                                    let card_view = parsed.as_ref().map(|p| map_tool(&input, p));
+                                    // Arguments came from the server's sanitized export snapshot.
+                                    turn_box = turn_box.child(render_normal_tool_card_with_args(
                                         &tc.id,
                                         &tc.name,
+                                        Some(&tc.arguments),
                                         None,
                                         res_val.is_some(),
-                                        parsed.is_error,
+                                        parsed.as_ref().is_some_and(|p| p.is_error),
                                         false,
-                                        &card_view,
+                                        false,
+                                        None,
+                                        card_view.as_ref(),
                                         true,
                                         false,
                                         mono_family.clone(),
@@ -571,7 +594,6 @@ impl Render for ExportView {
             .flex_shrink_0()
             .pl(space::GROUP)
             .pr(space::LG)
-            .bg(palette.bg_workspace)
             .border_b_1()
             .border_color(palette.border_subtle)
             .flex()
@@ -818,7 +840,6 @@ impl Render for ExportView {
             .size_full()
             .flex()
             .flex_col()
-            .bg(palette.bg_workspace)
             .child(top_header)
             .child(
                 div()
@@ -827,7 +848,6 @@ impl Render for ExportView {
                     .w_full()
                     .p(space::GROUP)
                     .gap(space::GROUP)
-                    .bg(palette.bg_workspace)
                     .flex()
                     .flex_row()
                     .items_stretch()

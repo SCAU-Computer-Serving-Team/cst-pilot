@@ -651,6 +651,18 @@ impl AppHttpClient {
             })
     }
 
+    pub async fn get_session_tree(&self, session_id: &str) -> Result<Value, ClientError> {
+        let sid = encode_segment(session_id);
+        self.request_value(
+            Method::GET,
+            &format!("/api/sessions/{sid}/tree?format=flat"),
+            None,
+            None,
+            Some(Duration::from_secs(15)),
+        )
+        .await
+    }
+
     pub async fn navigate_session_tree(
         &self,
         session_id: &str,

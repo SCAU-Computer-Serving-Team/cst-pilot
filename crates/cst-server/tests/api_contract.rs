@@ -92,7 +92,7 @@ impl ContractFixture {
         fs::create_dir_all(&dir).unwrap();
         let root = dir.canonicalize().unwrap();
         for name in SKILL_NAMES {
-            let p = root.join(format!("agent/home/skills/{name}/SKILL.md"));
+            let p = root.join(format!("app/skills/{name}/SKILL.md"));
             fs::create_dir_all(p.parent().unwrap()).unwrap();
             fs::write(
                 p,
@@ -100,13 +100,14 @@ impl ContractFixture {
             )
             .unwrap();
         }
+        fs::create_dir_all(root.join("app/prompts")).unwrap();
         fs::write(
-            root.join("agent/home/APPEND_SYSTEM.md"),
+            root.join("app/prompts/APPEND_SYSTEM.md"),
             "CST Pilot 固定诊断规则。",
         )
         .unwrap();
         // Create a dummy `index.html` in static dir to test static serving + theme injection + ticket redemption
-        let static_dir = root.join("agent/home/extensions/web/static");
+        let static_dir = root.join("static");
         fs::create_dir_all(&static_dir).unwrap();
         fs::write(
             static_dir.join("index.html"),
@@ -150,6 +151,7 @@ impl ContractFixture {
         let opened = self.opened_runbooks.clone();
         let mut cfg = ServerConfig::new(&self.root);
         cfg.port = Some(0);
+        cfg.static_dir = Some(self.root.join("static"));
         cfg.acquire_instance_lock = false;
         cfg.mode_config.standalone_web = standalone_web;
         cfg.open_runbook = Some(Arc::new(move |path| {
@@ -1367,9 +1369,36 @@ async fn session_snapshots_exports_and_fork_omit_system_messages_while_preservin
         .json()
         .await
         .unwrap();
+    assert!(tree_res["tree"].is_array());
+    assert!(tree_res.get("entries").is_none());
     let tree_str = serde_json::to_string(&tree_res).unwrap();
     assert!(tree_str.contains(&sys_init_id));
     assert!(tree_str.contains(&sys_mid_id));
+
+    let flat_tree: Value = client
+        .get(format!(
+            "{}/api/sessions/{session_id}/tree?format=flat",
+            server.base_url()
+        ))
+        .header("Host", &host_header)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(flat_tree.get("tree").is_none());
+    assert_eq!(flat_tree["leafId"], tree_res["leafId"]);
+    let entries = flat_tree["entries"].as_array().unwrap();
+    assert!(
+        entries
+            .iter()
+            .any(|node| node["entry"]["id"] == sys_init_id)
+    );
+    assert!(entries.iter().any(|node| node["entry"]["id"] == sys_mid_id));
+    assert!(entries.iter().all(|node| node.get("children").is_none()));
 
     // Forking at u2's parentId (`sys_mid_id`) and u1's parentId (`sys_init_id`) must both succeed cleanly!
     for (idx, fork_target) in [(&sys_mid_id, 1usize), (&sys_init_id, 0usize)]
@@ -1450,10 +1479,10 @@ async fn browser_sse_single_and_multiplex_streams_filter_system_messages_across_
     });
 
     let fixture = ContractFixture::new();
-    let agent_dir = fixture.root.join("agent/home");
-    fs::create_dir_all(&agent_dir).unwrap();
+    let config_dir = fixture.root.join("data/config");
+    fs::create_dir_all(&config_dir).unwrap();
     fs::write(
-        agent_dir.join("models.json"),
+        config_dir.join("models.json"),
         serde_json::to_string_pretty(&json!({
             "providers": {
                 "mock-sse": {

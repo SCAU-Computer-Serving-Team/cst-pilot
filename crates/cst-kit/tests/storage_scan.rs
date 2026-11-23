@@ -275,6 +275,28 @@ fn native_walk_topdirs_shared_budget_and_incomplete_percentages() {
     );
 }
 #[test]
+fn ls_direct_files_respect_the_enumeration_deadline() {
+    let fixture = Fixture::new();
+    fs::write(fixture.0.join("file"), [0u8; 10]).unwrap();
+    let mut mock = MockScan::new(String::new());
+    mock.fail = true;
+    let index = WzIndex::new(Arc::new(mock));
+    let partial = ls::run(
+        &index,
+        &fixture.0,
+        20,
+        &control(),
+        walk::WalkLimits {
+            entries: 100,
+            timeout: Duration::ZERO,
+        },
+    )
+    .unwrap();
+    assert_eq!(partial["childrenTruncated"], true);
+    assert_eq!(partial["entries"], serde_json::json!([]));
+}
+
+#[test]
 fn ls_preserves_omitted_counts_and_never_publishes_walk() {
     let fixture = Fixture::new();
     fs::create_dir(fixture.0.join("dir")).unwrap();
@@ -384,10 +406,11 @@ fn junction_is_skipped_without_traversing_the_target() {
 #[test]
 fn native_temp_junction_is_rejected_before_any_export() {
     let fixture = Fixture::new();
-    fs::create_dir(fixture.0.join("wiztree")).unwrap();
-    fs::write(fixture.0.join("wiztree/WizTree64.exe"), []).unwrap();
+    fs::create_dir_all(fixture.0.join("app/tools/wiztree")).unwrap();
+    fs::write(fixture.0.join("app/tools/wiztree/WizTree64.exe"), []).unwrap();
+    fs::create_dir_all(fixture.0.join(".state/tmp")).unwrap();
     let external = Fixture::new();
-    let link = fixture.0.join("wiztree/tmp");
+    let link = fixture.0.join(".state/tmp/wiztree");
     let status = std::process::Command::new("cmd.exe")
         .args(["/D", "/C", "mklink", "/J"])
         .arg(&link)
@@ -556,4 +579,62 @@ fn walk_deadline_returns_lower_bound_and_cancellation_is_an_error() {
 #[test]
 fn canonical_path_keys_ignore_case_separators_and_extended_prefix() {
     assert_eq!(path_key(Path::new(r"\\?\C:\Data/")), "C:\\DATA");
+    assert_eq!(
+        path_key(Path::new(r"E:\root\\sub\child\")),
+        "E:\\ROOT\\SUB\\CHILD"
+    );
+    assert_eq!(
+        cst_kit::diagnostics::wz_index::display_path(Path::new(r"\\?\C:\")),
+        "C:\\"
+    );
+    assert_eq!(
+        cst_kit::diagnostics::wz_index::display_path(Path::new(r"\\?\UNC\server\share\dir")),
+        r"\\server\share\dir"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn ls_continues_measuring_sibling_dirs_after_junction() {
+    let fixture = Fixture::new();
+    let external = Fixture::new();
+    fs::write(external.0.join("secret"), [0u8; 500]).unwrap();
+    // Place junction alphabetically BEFORE normal directory `z_normal`.
+    let link = fixture.0.join("a_junction");
+    let status = std::process::Command::new("cmd.exe")
+        .args(["/D", "/C", "mklink", "/J"])
+        .arg(&link)
+        .arg(&external.0)
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+
+    fs::create_dir(fixture.0.join("z_normal")).unwrap();
+    fs::write(fixture.0.join("z_normal/data.bin"), [0u8; 1024]).unwrap();
+
+    let mut mock = MockScan::new(String::new());
+    mock.fail = true;
+    let index = WzIndex::new(Arc::new(mock));
+    let value = ls::run(
+        &index,
+        &fixture.0,
+        20,
+        &control(),
+        walk::WalkLimits::default(),
+    )
+    .unwrap();
+    assert!(!value["path"].as_str().unwrap().starts_with(r"\\?\"));
+    let entries = value["entries"].as_array().unwrap();
+    let normal = entries
+        .iter()
+        .find(|e| e["name"] == "z_normal")
+        .expect("z_normal entry present");
+    assert_eq!(normal["bytes"], 1024);
+    assert_eq!(normal["size"], "1.0 KB");
+    let junc = entries
+        .iter()
+        .find(|e| e["name"] == "a_junction")
+        .expect("a_junction entry present");
+    assert!(junc["bytes"].is_null());
+    fs::remove_dir(&link).unwrap();
 }

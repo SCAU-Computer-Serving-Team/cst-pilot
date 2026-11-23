@@ -122,10 +122,13 @@ pub fn has_valid_sfnt_magic(bytes: &[u8], expected_magic: &[u8; 4]) -> bool {
     num_tables > 0 && bytes.len() >= 12 + num_tables * 16
 }
 
-/// Loads bundled `SourceHanSansCN-VF.otf` and `JetBrainsMono-{Regular,Medium}.ttf` from `<kit_root>/assets/fonts/`.
+/// Loads bundled `SourceHanSansCN-VF.otf` and `JetBrainsMono-{Regular,Medium}.ttf` from `<kit_root>/app/fonts/`
+/// (or `<repo>/assets/fonts/` in a dev workspace).
 /// Falls back cleanly to system DirectWrite fonts with a non-blocking Chinese warning if missing or corrupted.
 pub fn load_bundled_fonts(kit_root: &Path, cx: &App) -> FontLoadReport {
-    let fonts_dir = kit_root.join("assets/fonts");
+    let fonts_dir = cst_os::KitLayout::new(kit_root)
+        .map(|l| l.fonts_dir())
+        .unwrap_or_else(|_| kit_root.join("app/fonts"));
     let mut warnings = Vec::new();
 
     let cjk_path = fonts_dir.join("SourceHanSansCN-VF.otf");

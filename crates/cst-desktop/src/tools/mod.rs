@@ -6,6 +6,7 @@ pub mod sys_overview;
 pub mod web_search_bar;
 
 use std::rc::Rc;
+use std::time::Instant;
 
 use cst_client::ClientHandle;
 use cst_client::tool_presenter::{FieldRow, SpecialToolView};
@@ -24,7 +25,9 @@ use crate::tools::bitlocker_card::{
 use crate::tools::runbook_card::{OpenRunbookFn, RunbookCardProps, render_runbook_card};
 use crate::tools::sys_overview::{SysOverviewProps, render_sys_overview_card};
 use crate::tools::web_search_bar::{WebSearchBarProps, render_web_search_bar};
-use crate::workbench::markdown_view::render_copyable_text_block;
+use crate::workbench::markdown_view::{
+    render_copyable_text_block, render_copyable_text_block_inert,
+};
 
 pub type ToggleKeyFn = Rc<dyn Fn(String, &mut Window, &mut App)>;
 pub type ToggleDetailsFn = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -41,6 +44,9 @@ pub struct SpecialToolDispatchProps<'a> {
     pub warning_hovered: bool,
     pub transparency_enabled: bool,
     pub scale_factor: f32,
+    pub running_light_allowed: bool,
+    pub started_at: Option<Instant>,
+    pub animate_enter: bool,
 }
 
 /// Unified dispatcher for the 4 standalone special persistent components
@@ -60,7 +66,9 @@ pub fn render_special_tool_component<V: 'static>(
     window: &mut Window,
     cx: &mut Context<V>,
 ) -> gpui_kit::AnyElement {
-    match props.view {
+    let enter_key = format!("{}:{}:{}", props.session_id, props.entry_id, props.call_id);
+    let animate_enter = props.animate_enter;
+    let card_el = match props.view {
         SpecialToolView::SysOverview {
             status,
             title,
@@ -91,6 +99,7 @@ pub fn render_special_tool_component<V: 'static>(
                 fields,
                 errors,
                 details_expanded: props.details_expanded,
+                running_light_allowed: props.running_light_allowed,
             },
             mono_family,
             palette,
@@ -129,6 +138,7 @@ pub fn render_special_tool_component<V: 'static>(
                 delivery: delivery.as_ref(),
                 errors,
                 details_expanded: props.details_expanded,
+                running_light_allowed: props.running_light_allowed,
             },
             mono_family,
             palette,
@@ -160,6 +170,8 @@ pub fn render_special_tool_component<V: 'static>(
                 errors,
                 expanded: props.details_expanded,
                 warning_hovered: props.warning_hovered,
+                running_light_allowed: props.running_light_allowed,
+                started_at: props.started_at,
             },
             palette,
             props.transparency_enabled,
@@ -194,6 +206,7 @@ pub fn render_special_tool_component<V: 'static>(
                 pending: props.pending_bitlocker,
                 secret_input: props.secret_input,
                 details_expanded: props.details_expanded,
+                running_light_allowed: props.running_light_allowed,
             },
             client,
             mono_family,
@@ -205,7 +218,8 @@ pub fn render_special_tool_component<V: 'static>(
             window,
             cx,
         ),
-    }
+    };
+    motion::animate_card_enter(enter_key, card_el, animate_enter, window, cx)
 }
 
 pub fn render_empty_tool_placeholder() -> impl IntoElement {
@@ -303,6 +317,7 @@ pub(crate) fn render_special_details_section<V: 'static>(
         bar = bar.justify_end();
     }
 
+    let collapse_id = SharedString::from(format!("special-details-{toggle_id}"));
     if has_details {
         let chev_id = toggle_id.clone();
         bar = bar.child(
@@ -333,79 +348,98 @@ pub(crate) fn render_special_details_section<V: 'static>(
 
     wrapper = wrapper.child(bar);
 
-    if has_details && expanded {
-        let mut detail_col = div().w_full().flex().flex_col().gap(space::MD);
-        if let Some(cap) = call_capsule {
-            detail_col = detail_col.child(
-                apply_scale(div(), scale::CAPTION)
-                    .font_family(mono_family.clone())
-                    .text_color(palette.text_secondary)
-                    .child(SharedString::from(cap.to_owned())),
-            );
-        }
+    if has_details
+        && let Some(animated_details) = motion::animated_collapse_with_exit(
+            collapse_id,
+            expanded,
+            window,
+            cx,
+            |interactive, window, cx| {
+                let mut detail_col = div().w_full().flex().flex_col().gap(space::MD);
+                if let Some(cap) = call_capsule {
+                    detail_col = detail_col.child(
+                        apply_scale(div(), scale::CAPTION)
+                            .font_family(mono_family.clone())
+                            .text_color(palette.text_secondary)
+                            .child(SharedString::from(cap.to_owned())),
+                    );
+                }
 
-        if fields.clone().next().is_some() {
-            let label_w = aligned_label_col_px(fields.clone());
-            let mut rows_col = div().w_full().flex().flex_col().gap(space::TIGHT);
-            for row in fields {
-                rows_col = rows_col.child(
-                    div()
-                        .w_full()
-                        .min_h(px(20.0))
-                        .flex()
-                        .items_start()
-                        .gap(space::MD)
-                        .child(
-                            apply_scale(div(), scale::CAPTION)
-                                .w(px(label_w))
-                                .flex_shrink_0()
-                                .text_color(palette.text_secondary)
-                                .child(cjk_inline_label(row.label.clone())),
-                        )
-                        .child(
-                            apply_scale(div(), scale::CAPTION)
-                                .flex_1()
-                                .min_w_0()
-                                .pb(space::MICRO)
-                                .font_family(mono_family.clone())
-                                .text_color(palette.text_primary)
-                                .child(SharedString::from(row.value.clone())),
-                        ),
-                );
-            }
-            detail_col = detail_col.child(rows_col);
-        }
+                if fields.clone().next().is_some() {
+                    let label_w = aligned_label_col_px(fields.clone());
+                    let mut rows_col = div().w_full().flex().flex_col().gap(space::TIGHT);
+                    for row in fields {
+                        rows_col = rows_col.child(
+                            div()
+                                .w_full()
+                                .min_h(px(20.0))
+                                .flex()
+                                .items_start()
+                                .gap(space::MD)
+                                .child(
+                                    apply_scale(div(), scale::CAPTION)
+                                        .w(px(label_w))
+                                        .flex_shrink_0()
+                                        .text_color(palette.text_secondary)
+                                        .child(cjk_inline_label(row.label.clone())),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::CAPTION)
+                                        .flex_1()
+                                        .min_w_0()
+                                        .pb(space::MICRO)
+                                        .font_family(mono_family.clone())
+                                        .text_color(palette.text_primary)
+                                        .child(SharedString::from(row.value.clone())),
+                                ),
+                        );
+                    }
+                    detail_col = detail_col.child(rows_col);
+                }
 
-        for err in errors {
-            let (err_icon, err_color) = if error_is_danger {
-                (IconName::CircleAlert, palette.status_danger)
-            } else {
-                (IconName::TriangleAlert, palette.status_warning)
-            };
-            detail_col = detail_col.child(render_tool_notice_line(
-                err_icon,
-                err_color,
-                err.clone(),
-                palette,
-            ));
-        }
+                for err in errors {
+                    let (err_icon, err_color) = if error_is_danger {
+                        (IconName::CircleAlert, palette.status_danger)
+                    } else {
+                        (IconName::TriangleAlert, palette.status_warning)
+                    };
+                    detail_col = detail_col.child(render_tool_notice_line(
+                        err_icon,
+                        err_color,
+                        err.clone(),
+                        palette,
+                    ));
+                }
 
-        if has_raw {
-            let copied = is_copied_fn(raw_block_id.as_ref());
-            detail_col = detail_col.child(render_copyable_text_block(
-                raw_block_id,
-                raw.to_owned(),
-                true,
-                mono_family,
-                copied,
-                palette,
-                on_mark_copied,
-                window,
-                cx,
-            ));
-        }
+                if has_raw {
+                    if interactive {
+                        let copied = is_copied_fn(raw_block_id.as_ref());
+                        detail_col = detail_col.child(render_copyable_text_block(
+                            raw_block_id,
+                            raw.to_owned(),
+                            true,
+                            mono_family,
+                            copied,
+                            palette,
+                            on_mark_copied,
+                            window,
+                            cx,
+                        ));
+                    } else {
+                        detail_col = detail_col.child(render_copyable_text_block_inert(
+                            raw.to_owned(),
+                            true,
+                            mono_family,
+                            palette,
+                        ));
+                    }
+                }
 
-        wrapper = wrapper.child(detail_col);
+                detail_col.into_any_element()
+            },
+        )
+    {
+        wrapper = wrapper.child(animated_details);
     }
 
     Some(wrapper)

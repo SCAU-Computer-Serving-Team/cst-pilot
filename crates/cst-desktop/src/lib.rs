@@ -36,12 +36,12 @@ const REQUIRED_SKILL_NAMES: &[&str] = &[
     "bitlocker",
 ];
 
-const REQUIRED_FONT_FILES: &[&str] = &[
-    "assets/fonts/SourceHanSansCN-VF.otf",
-    "assets/fonts/LICENSE.txt",
-    "assets/fonts/JetBrainsMono-Regular.ttf",
-    "assets/fonts/JetBrainsMono-Medium.ttf",
-    "assets/fonts/JetBrainsMono-OFL.txt",
+const REQUIRED_FONT_NAMES: &[&str] = &[
+    "SourceHanSansCN-VF.otf",
+    "LICENSE.txt",
+    "JetBrainsMono-Regular.ttf",
+    "JetBrainsMono-Medium.ttf",
+    "JetBrainsMono-OFL.txt",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,31 +120,33 @@ fn read_kit_version_file(
 }
 
 fn resolve_sibling_kit_binaries(kit_root: &Path) -> Result<(PathBuf, PathBuf, PathBuf), String> {
-    let canonical_root = cst_os::strip_windows_verbatim_prefix(
-        &kit_root
-            .canonicalize()
-            .map_err(|e| format!("无法解析工具包根目录：{e}"))?,
-    );
+    let layout = cst_os::KitLayout::new(kit_root)?;
+    let canonical_root = layout.display_root();
     let target_dir = canonical_root.join("target");
 
-    let bin_dir = std::env::current_exe()
+    let dev_target_bin_dir = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.canonicalize().ok())
         .map(|exe| cst_os::strip_windows_verbatim_prefix(&exe))
         .and_then(|exe| exe.parent().map(Path::to_path_buf))
         .filter(|dir| {
-            *dir == canonical_root
-                || dir
-                    .parent()
-                    .is_some_and(|parent| parent == target_dir.as_path())
-        })
-        .unwrap_or_else(|| canonical_root.clone());
+            dir.parent()
+                .is_some_and(|parent| parent == target_dir.as_path())
+        });
 
-    Ok((
-        bin_dir.join("cst-pilot.exe"),
-        bin_dir.join("cst-server.exe"),
-        bin_dir.join("cst-updater.exe"),
-    ))
+    if let Some(bin_dir) = dev_target_bin_dir {
+        Ok((
+            bin_dir.join("cst-pilot.exe"),
+            bin_dir.join("cst-server.exe"),
+            bin_dir.join("cst-updater.exe"),
+        ))
+    } else {
+        Ok((
+            canonical_root.join("cst-pilot.exe"),
+            canonical_root.join("app").join("cst-server.exe"),
+            canonical_root.join("app").join("cst-updater.exe"),
+        ))
+    }
 }
 
 /// Fast local read-only `--health-check` executed BEFORE initializing GUI, DirectWrite, single-instance locks, or network.
@@ -166,7 +168,8 @@ pub fn run_desktop_health_check(
     }
 
     // 2. Kit VERSION & optional binary build version match
-    let disk_version = read_kit_version_file(kit_root, compiled_build_version)?;
+    let layout = cst_os::KitLayout::new(kit_root)?;
+    let disk_version = read_kit_version_file(layout.root(), compiled_build_version)?;
     if let Some(build_ver) = compiled_build_version
         .map(str::trim)
         .filter(|v| !v.is_empty())
@@ -175,20 +178,20 @@ pub fn run_desktop_health_check(
         return Err("健康检查发现桌面程序内置版本与工具包 VERSION 不一致。".into());
     }
 
-    // 3. Kit prompt & skill assets
-    let storage = Storage::new(kit_root)?;
-    let _home = storage.pin_directory(Path::new("agent/home"), false)?;
+    // 3. Kit prompt & skill assets under `app/`
+    let storage = Storage::new(layout.root())?;
+    let _app = storage.pin_directory(Path::new("app"), false)?;
     if storage
         .read_limited(
-            &storage.root.join("agent/home/APPEND_SYSTEM.md"),
+            &storage.root.join("app/prompts/APPEND_SYSTEM.md"),
             4 * 1024 * 1024,
         )?
         .is_none()
     {
-        return Err("健康检查缺少 agent/home/APPEND_SYSTEM.md。".into());
+        return Err("健康检查缺少 app/prompts/APPEND_SYSTEM.md。".into());
     }
     for skill in REQUIRED_SKILL_NAMES {
-        let rel = format!("agent/home/skills/{skill}/SKILL.md");
+        let rel = format!("app/skills/{skill}/SKILL.md");
         if storage
             .read_limited(&storage.root.join(rel), 4 * 1024 * 1024)?
             .is_none()
@@ -198,48 +201,60 @@ pub fn run_desktop_health_check(
     }
 
     // 4. Required bundled desktop & web fonts + SFNT table directory validation
-    let _fonts = storage.pin_directory(Path::new("assets/fonts"), false)?;
-    for rel in REQUIRED_FONT_FILES {
+    let fonts_rel = layout.fonts_relative_dir();
+    let _fonts = storage.pin_directory(fonts_rel, false)?;
+    for name in REQUIRED_FONT_NAMES {
         if storage
-            .read_limited(&storage.root.join(rel), 32 * 1024 * 1024)?
+            .read_limited(&storage.root.join(fonts_rel).join(name), 32 * 1024 * 1024)?
             .is_none()
         {
             return Err("健康检查缺少必需随包字体或许可文件。".into());
         }
     }
-    for (rel, magic) in [
-        ("assets/fonts/SourceHanSansCN-VF.otf", b"OTTO"),
-        ("assets/fonts/JetBrainsMono-Regular.ttf", &[0, 1, 0, 0]),
-        ("assets/fonts/JetBrainsMono-Medium.ttf", &[0, 1, 0, 0]),
+    for (name, magic) in [
+        ("SourceHanSansCN-VF.otf", b"OTTO"),
+        ("JetBrainsMono-Regular.ttf", &[0, 1, 0, 0]),
+        ("JetBrainsMono-Medium.ttf", &[0, 1, 0, 0]),
     ] {
         let bytes = storage
-            .read_limited(&storage.root.join(rel), 32 * 1024 * 1024)?
+            .read_limited(&storage.root.join(fonts_rel).join(name), 32 * 1024 * 1024)?
             .ok_or_else(|| "健康检查缺少随包字体。".to_owned())?;
         if !theme::has_valid_sfnt_magic(&bytes, magic) {
-            return Err(format!("健康检查发现随包字体头损坏：{rel}"));
+            return Err(format!("健康检查发现随包字体头损坏：{name}"));
         }
     }
 
     // 5. Local user JSON configuration non-destructive parse check
-    for name in [
-        "auth.json",
-        "models.json",
-        "settings.json",
-        "device.json",
-        "desktop.json",
-    ] {
-        if let Some(bytes) =
-            storage.read_limited(&storage.root.join("agent/home").join(name), 8 * 1024 * 1024)?
-            && !parse_local_json(&format!("agent/home/{name}"), &bytes)?.is_object()
+    if layout.config_dir().exists() {
+        let (data_storage, cfg_rel) = if let Ok(rel) = layout.data_dir().strip_prefix(layout.root())
         {
-            return Err("健康检查发现配置格式无效，原文件已保留。".into());
+            (Storage::new(layout.root())?, rel.join("config"))
+        } else {
+            (Storage::new(layout.data_dir())?, PathBuf::from("config"))
+        };
+        let _cfg = data_storage.pin_directory(&cfg_rel, false)?;
+        for name in [
+            "auth.json",
+            "models.json",
+            "settings.json",
+            "device.json",
+            "desktop.json",
+            "web.json",
+        ] {
+            if let Some(bytes) = data_storage.read_limited(
+                &data_storage.root.join(&cfg_rel).join(name),
+                8 * 1024 * 1024,
+            )? && !parse_local_json(&format!("data/config/{name}"), &bytes)?.is_object()
+            {
+                return Err("健康检查发现配置格式无效，原文件已保留。".into());
+            }
         }
     }
 
     Ok(disk_version)
 }
 
-/// Forwards `--ui web` to `<bin_dir>/cst-server.exe --standalone-web --open-browser` under a sanitized environment.
+/// Forwards `--ui web` to `<app>/cst-server.exe --standalone-web --open-browser` under a sanitized environment.
 pub fn forward_standalone_web(kit_root: &Path) -> Result<(), String> {
     let canonical_root = cst_os::strip_windows_verbatim_prefix(
         &kit_root
@@ -248,7 +263,7 @@ pub fn forward_standalone_web(kit_root: &Path) -> Result<(), String> {
     );
     let (_desktop_exe, server_exe, _updater_exe) = resolve_sibling_kit_binaries(&canonical_root)?;
     if !server_exe.is_file() {
-        return Err("未找到同目录下的 cst-server.exe。".into());
+        return Err("未找到配套的 cst-server.exe。".into());
     }
     let meta = std::fs::symlink_metadata(&server_exe)
         .map_err(|e| format!("无法校验 cst-server.exe：{e}"))?;
@@ -269,7 +284,8 @@ pub fn forward_standalone_web(kit_root: &Path) -> Result<(), String> {
         .arg(&canonical_root)
         .current_dir(&canonical_root)
         .env_clear()
-        .env("PI_CODING_AGENT_DIR", canonical_root.join("agent/home"))
+        .env("CST_PILOT_ROOT", &canonical_root)
+        .env("CST_OFFLINE", "1")
         .env("TEMP", &tmp_dir)
         .env("TMP", &tmp_dir);
 

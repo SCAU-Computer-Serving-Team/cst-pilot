@@ -37,7 +37,7 @@ struct Fixture(PathBuf);
 impl Fixture {
     fn new(enabled: bool) -> Self {
         let path = std::env::temp_dir().join(format!("cst-telemetry-sdk-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(path.join("agent/home")).unwrap();
+        fs::create_dir_all(path.join("data/config")).unwrap();
         let f = Self(path.canonicalize().unwrap());
         fs::write(
             f.file("telemetry.json"),
@@ -47,10 +47,26 @@ impl Fixture {
         f
     }
     fn file(&self, name: &str) -> PathBuf {
-        self.0.join("agent/home").join(name)
+        if let Some(rest) = name.strip_prefix("extensions/telemetry/") {
+            self.0.join("app/telemetry").join(rest)
+        } else if name == "APPEND_SYSTEM.md" {
+            self.0.join("app/prompts/APPEND_SYSTEM.md")
+        } else if name.starts_with("skills/") {
+            self.0.join("app").join(name)
+        } else if name == "telemetry"
+            || name.starts_with("telemetry/")
+            || name == "sessions"
+            || name.starts_with("sessions/")
+        {
+            self.0.join("data").join(name)
+        } else {
+            self.0.join("data/config").join(name)
+        }
     }
     fn resources(&self) {
-        fs::write(self.file("APPEND_SYSTEM.md"), "仅测试。").unwrap();
+        let prompt = self.file("APPEND_SYSTEM.md");
+        fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        fs::write(prompt, "仅测试。").unwrap();
         for name in SKILL_NAMES {
             let p = self.file(&format!("skills/{name}/SKILL.md"));
             fs::create_dir_all(p.parent().unwrap()).unwrap();

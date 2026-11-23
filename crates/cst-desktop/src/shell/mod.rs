@@ -29,7 +29,8 @@ use crate::auth::account_view::{AccountView, AccountViewEvent};
 use crate::auth::login_view::{LoginView, LoginViewEvent};
 use crate::auth::missing_key::{MissingKeyModalState, render_missing_key_dialog};
 use crate::background::{
-    FrostedGlassSpec, ShaderFrameScheduler, has_active_hardware_diagnostic, render_frosted_surface,
+    FrostedGlassSpec, ShaderFrameScheduler, SkyPreset, has_active_hardware_diagnostic,
+    render_frosted_surface, render_sky_background_rounded,
 };
 use crate::palette::{CommandPaletteEvent, CommandPaletteModal, PaletteCommandTarget};
 use crate::sessions::all_sessions::{AllSessionsEvent, AllSessionsView};
@@ -44,6 +45,7 @@ use crate::shell::overlays::{
 };
 use crate::shell::sidebar::{
     ShellRoute, SidebarCallbacks, filter_recent_sidebar_sessions, render_sidebar,
+    render_sidebar_exiting,
 };
 use crate::shell::topbar::{TopbarCallbacks, render_topbar, render_window_caption_controls};
 use crate::shell::window_bounds::{
@@ -54,7 +56,7 @@ use crate::theme::{
     cjk_inline_label, height, layout, motion, radius, scale, space,
 };
 use crate::workbench::composer::SlashNavigationTarget;
-use crate::workbench::{WorkbenchEvent, WorkbenchView};
+use crate::workbench::{WorkbenchEvent, WorkbenchView, render_home_brand_arcs};
 
 fn viewport_is_narrow(window: &Window) -> Option<bool> {
     let viewport = window.viewport_size();
@@ -116,6 +118,7 @@ pub struct AppShell {
     theme_preference: ThemeModeDto,
     route: ShellRoute,
     session_subview: SessionSubView,
+    route_history: Vec<(ShellRoute, SessionSubView, Option<String>)>,
     workbench: Entity<WorkbenchView>,
     all_sessions_view: Entity<AllSessionsView>,
     branch_tree_view: Entity<BranchTreeView>,
@@ -147,6 +150,10 @@ pub struct AppShell {
     rename_trap_focus: FocusHandle,
     recent_drawer_open: bool,
     recent_drawer_prior_focus: Option<FocusHandle>,
+    recent_btn_anchor_x: Rc<std::cell::Cell<f32>>,
+    topbar_session_more_open: bool,
+    topbar_session_more_prior_focus: Option<FocusHandle>,
+    topbar_session_more_anchor_x: Rc<std::cell::Cell<f32>>,
     account_menu_open: bool,
     account_menu_prior_focus: Option<FocusHandle>,
     web_switch_confirm: Option<WebSwitchConfirmState>,
@@ -159,13 +166,14 @@ pub struct AppShell {
     missing_key_cancel_focus: FocusHandle,
     update_trap_focus: FocusHandle,
     update_dismiss_focus: FocusHandle,
-    last_web_url: Option<String>,
     workspace_error: Option<SharedString>,
     top_notice: Option<SharedString>,
     error_banner_timer: BannerCountdownState,
     notice_banner_timer: BannerCountdownState,
     shader_scheduler: ShaderFrameScheduler,
     bounds_tracker: NormalBoundsTracker,
+    cached_display_hint: Option<(gpui::DisplayId, String)>,
+    bounds_dirty_generation: u64,
     bounds_debounce_task: Option<Task<()>>,
     error_dismiss_task: Option<Task<()>>,
     notice_dismiss_task: Option<Task<()>>,
@@ -174,16 +182,26 @@ pub struct AppShell {
     sidebar_collapse_focus: FocusHandle,
     topbar_expand_focus: FocusHandle,
     topbar_recent_focus: FocusHandle,
+    topbar_session_more_focus: FocusHandle,
     sidebar_account_focus: FocusHandle,
+    sidebar_settings_focus: FocusHandle,
     topbar_account_focus: FocusHandle,
+    topbar_settings_focus: FocusHandle,
     web_lock_trap_focus: FocusHandle,
     web_lock_switch_focus: FocusHandle,
     exit_trap_focus: FocusHandle,
     exit_cancel_focus: FocusHandle,
     exit_confirm_focus: FocusHandle,
     tooltip_overlay: Entity<motion::DesktopTooltips>,
+    route_transition: motion::RouteTransition,
+    last_sky_time: f32,
+    login_return_route: ShellRoute,
     sidebar_presence: TransitionState<f32>,
     account_presence: TransitionState<f32>,
+    sidebar_menu_presence: TransitionState<f32>,
+    last_sidebar_menu: Option<(String, Point<Pixels>)>,
+    banner_presence: TransitionState<f32>,
+    last_banner: Option<(bool, SharedString)>,
     tooltip_session: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
@@ -225,8 +243,11 @@ impl AppShell {
         let sidebar_collapse_focus = cx.focus_handle().tab_stop(true);
         let topbar_expand_focus = cx.focus_handle().tab_stop(true);
         let topbar_recent_focus = cx.focus_handle().tab_stop(true);
+        let topbar_session_more_focus = cx.focus_handle().tab_stop(true);
         let sidebar_account_focus = cx.focus_handle();
+        let sidebar_settings_focus = cx.focus_handle().tab_stop(true);
         let topbar_account_focus = cx.focus_handle().tab_stop(true);
+        let topbar_settings_focus = cx.focus_handle().tab_stop(true);
         let web_lock_trap_focus = cx.focus_handle();
         let web_lock_switch_focus = cx.focus_handle().tab_stop(true);
         let exit_trap_focus = cx.focus_handle();
@@ -319,6 +340,7 @@ impl AppShell {
             theme_preference,
             route: ShellRoute::Home,
             session_subview: SessionSubView::Chat,
+            route_history: Vec::new(),
             workbench,
             all_sessions_view,
             branch_tree_view,
@@ -350,6 +372,10 @@ impl AppShell {
             rename_trap_focus: cx.focus_handle(),
             recent_drawer_open: false,
             recent_drawer_prior_focus: None,
+            recent_btn_anchor_x: Rc::new(std::cell::Cell::new(134.0)),
+            topbar_session_more_open: false,
+            topbar_session_more_prior_focus: None,
+            topbar_session_more_anchor_x: Rc::new(std::cell::Cell::new(220.0)),
             account_menu_open: false,
             account_menu_prior_focus: None,
             web_switch_confirm: None,
@@ -362,13 +388,16 @@ impl AppShell {
             missing_key_cancel_focus: cx.focus_handle().tab_stop(true),
             update_trap_focus: cx.focus_handle(),
             update_dismiss_focus: cx.focus_handle().tab_stop(true),
-            last_web_url: None,
             workspace_error: None,
             top_notice: None,
             error_banner_timer: BannerCountdownState::new(),
             notice_banner_timer: BannerCountdownState::new(),
             shader_scheduler: ShaderFrameScheduler::new(),
             bounds_tracker: NormalBoundsTracker::from_resolved(resolved_geometry),
+            cached_display_hint: resolved_geometry
+                .display_id
+                .zip(resolved_geometry.display_hint.clone()),
+            bounds_dirty_generation: 0,
             bounds_debounce_task: None,
             error_dismiss_task: None,
             notice_dismiss_task: None,
@@ -377,16 +406,26 @@ impl AppShell {
             sidebar_collapse_focus,
             topbar_expand_focus,
             topbar_recent_focus,
+            topbar_session_more_focus,
             sidebar_account_focus,
+            sidebar_settings_focus,
             topbar_account_focus,
+            topbar_settings_focus,
             web_lock_trap_focus,
             web_lock_switch_focus,
             exit_trap_focus,
             exit_cancel_focus,
             exit_confirm_focus,
             tooltip_overlay,
+            route_transition: motion::RouteTransition::default(),
+            last_sky_time: 0.0,
+            login_return_route: ShellRoute::Home,
             sidebar_presence: TransitionState::default(),
             account_presence: TransitionState::default(),
+            sidebar_menu_presence: TransitionState::default(),
+            last_sidebar_menu: None,
+            banner_presence: TransitionState::default(),
+            last_banner: None,
             tooltip_session: None,
             _subscriptions: subscriptions,
         };
@@ -465,15 +504,80 @@ impl AppShell {
         subview: SessionSubView,
         cx: &mut Context<Self>,
     ) {
+        self.set_workspace_route_inner(route, subview, true, None, cx);
+    }
+
+    fn set_workspace_route_inner(
+        &mut self,
+        route: ShellRoute,
+        subview: SessionSubView,
+        record_history: bool,
+        forced_transition: Option<motion::RouteTransitionKind>,
+        cx: &mut Context<Self>,
+    ) {
         if self.route != route || self.session_subview != subview {
             #[cfg(feature = "test-support")]
             crate::ux_probe::mark_input("route_switch");
+            if record_history && self.route != ShellRoute::Login && route != ShellRoute::Login {
+                let session_id = match (self.route, self.session_subview) {
+                    (ShellRoute::Session, SessionSubView::Tree) => {
+                        Some(self.branch_tree_view.read(cx).session_id().to_owned())
+                    }
+                    (ShellRoute::Session, SessionSubView::Export) => {
+                        Some(self.export_view.read(cx).session_id().to_owned())
+                    }
+                    _ => None,
+                };
+                let prev = (self.route, self.session_subview, session_id);
+                if self.route_history.last() != Some(&prev) {
+                    self.route_history.push(prev);
+                    if self.route_history.len() > 24 {
+                        self.route_history.remove(0);
+                    }
+                }
+            }
+            let kind = forced_transition.unwrap_or_else(|| {
+                match (self.route, self.session_subview, route, subview) {
+                    (ShellRoute::Home, _, dst, _) if dst != ShellRoute::Login => {
+                        motion::RouteTransitionKind::HomeToWorkspace
+                    }
+                    (src, _, ShellRoute::Home, _) if src != ShellRoute::Login => {
+                        motion::RouteTransitionKind::WorkspaceToHome
+                    }
+                    (
+                        ShellRoute::Session,
+                        SessionSubView::Chat,
+                        ShellRoute::Session,
+                        SessionSubView::Tree | SessionSubView::Export,
+                    )
+                    | (
+                        ShellRoute::Session,
+                        SessionSubView::Chat,
+                        ShellRoute::Settings | ShellRoute::AllSessions | ShellRoute::Account,
+                        _,
+                    )
+                    | (ShellRoute::Settings, _, ShellRoute::Account, _) => {
+                        motion::RouteTransitionKind::SlideForward
+                    }
+                    (
+                        ShellRoute::Session,
+                        SessionSubView::Tree | SessionSubView::Export,
+                        ShellRoute::Session,
+                        SessionSubView::Chat,
+                    ) => motion::RouteTransitionKind::SlideBackward,
+                    _ => motion::RouteTransitionKind::CrossFade,
+                }
+            });
+            self.route_transition.start(kind, self.last_sky_time, cx);
             self.reset_account_menu();
             self.tooltip_overlay
                 .update(cx, motion::DesktopTooltips::dismiss);
         }
         if self.route != route {
             if self.route == ShellRoute::Login || route == ShellRoute::Login {
+                if route == ShellRoute::Login && self.route != ShellRoute::Login {
+                    self.login_return_route = self.route;
+                }
                 self.sidebar_presence = TransitionState::default();
                 self.set_banner_hovered(true, self.error_banner_timer.generation(), false, cx);
                 self.set_banner_hovered(false, self.notice_banner_timer.generation(), false, cx);
@@ -512,6 +616,8 @@ impl AppShell {
             self.rename_modal = None;
             self.recent_drawer_open = false;
             self.recent_drawer_prior_focus = None;
+            self.topbar_session_more_open = false;
+            self.topbar_session_more_prior_focus = None;
             self.sidebar_context_menu = None;
             self.sidebar_menu_prior_focus = None;
             self.sidebar_batch_mode = false;
@@ -525,8 +631,56 @@ impl AppShell {
 
     fn return_to_chat(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let prior = self.session_subview_prior_focus.take();
-        self.set_route(ShellRoute::Session, cx);
+        self.set_workspace_route_inner(
+            ShellRoute::Session,
+            SessionSubView::Chat,
+            false,
+            Some(motion::RouteTransitionKind::SlideBackward),
+            cx,
+        );
         self.restore_surface_focus(prior, window, cx);
+    }
+
+    fn navigate_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let has_active_session = self
+            .client
+            .with_workspace(|ws| ws.active_session_id().is_some());
+        let mut target = None;
+        while let Some((prev_route, prev_subview, session_id)) = self.route_history.pop() {
+            if prev_route == self.route && prev_subview == self.session_subview {
+                continue;
+            }
+            if let Some(id) = &session_id {
+                if !self
+                    .snapshot
+                    .sessions
+                    .iter()
+                    .any(|session| session.id == *id)
+                {
+                    continue;
+                }
+            } else if prev_route == ShellRoute::Session && !has_active_session {
+                continue;
+            }
+            target = Some((prev_route, prev_subview, session_id));
+            break;
+        }
+        let fallback = if has_active_session {
+            (ShellRoute::Session, SessionSubView::Chat, None)
+        } else {
+            (ShellRoute::Home, SessionSubView::Chat, None)
+        };
+        let (dest_route, dest_subview, session_id) = target.unwrap_or(fallback);
+        let transition_kind = if dest_route == ShellRoute::Home {
+            motion::RouteTransitionKind::WorkspaceToHome
+        } else {
+            motion::RouteTransitionKind::SlideBackward
+        };
+        self.set_workspace_route_inner(dest_route, dest_subview, false, Some(transition_kind), cx);
+        self.root_focus.focus(window, cx);
+        if let Some(id) = session_id {
+            self.initialize_session_subview(dest_subview, id, window, cx);
+        }
     }
 
     pub fn is_sidebar_collapsed(&self) -> bool {
@@ -575,20 +729,33 @@ impl AppShell {
         cx.notify();
     }
 
+    fn close_topbar_session_more(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.topbar_session_more_open = false;
+        let prior = self.topbar_session_more_prior_focus.take();
+        self.restore_surface_focus(prior, window, cx);
+        cx.notify();
+    }
+
     fn reset_account_menu(&mut self) {
         self.account_menu_open = false;
         self.account_menu_prior_focus = None;
         self.account_presence = TransitionState::default();
     }
 
-    fn toggle_account_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn toggle_account_menu(
+        &mut self,
+        from_settings: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.account_menu_open {
             self.close_account_menu(window, cx);
         } else if !self.blocks_transient_surfaces(cx) {
-            let trigger = if self.sidebar_collapsed {
-                &self.topbar_account_focus
-            } else {
-                &self.sidebar_account_focus
+            let trigger = match (self.sidebar_collapsed, from_settings) {
+                (true, true) => &self.topbar_settings_focus,
+                (true, false) => &self.topbar_account_focus,
+                (false, true) => &self.sidebar_settings_focus,
+                (false, false) => &self.sidebar_account_focus,
             };
             self.account_menu_prior_focus = Some(trigger.clone());
             trigger.focus(window, cx);
@@ -851,19 +1018,85 @@ impl AppShell {
     }
 
     fn spawn_client_revision_listener(&self, window: &mut Window, cx: &mut Context<Self>) {
+        fn opt_arc_ptr_eq<T>(a: &Option<std::sync::Arc<T>>, b: &Option<std::sync::Arc<T>>) -> bool {
+            match (a, b) {
+                (None, None) => true,
+                (Some(lhs), Some(rhs)) => std::sync::Arc::ptr_eq(lhs, rhs),
+                _ => false,
+            }
+        }
+
         let mut rev_rx = self.client.subscribe_revisions();
         let client = self.client.clone();
         cx.spawn_in(window, async move |weak, cx| {
             while rev_rx.changed().await.is_ok() {
                 let latest_snap = client.snapshot();
                 let keep_going = weak.update_in(cx, |this, window, cx| {
-                    let prev_mode = this.snapshot.channel_mode;
+                    let prev_snap = std::sync::Arc::clone(&this.snapshot);
+                    let shell_globals_changed = prev_snap.connected != latest_snap.connected
+                        || prev_snap.reconnecting != latest_snap.reconnecting
+                        || prev_snap.channel_mode != latest_snap.channel_mode
+                        || prev_snap.version != latest_snap.version
+                        || prev_snap.desktop_settings != latest_snap.desktop_settings
+                        || prev_snap.desktop_settings_corrupt
+                            != latest_snap.desktop_settings_corrupt
+                        || !std::sync::Arc::ptr_eq(&prev_snap.commands, &latest_snap.commands)
+                        || !std::sync::Arc::ptr_eq(&prev_snap.sessions, &latest_snap.sessions)
+                        || !opt_arc_ptr_eq(&prev_snap.models, &latest_snap.models)
+                        || !opt_arc_ptr_eq(&prev_snap.auth_providers, &latest_snap.auth_providers)
+                        || !opt_arc_ptr_eq(&prev_snap.account, &latest_snap.account)
+                        || !opt_arc_ptr_eq(&prev_snap.update_state, &latest_snap.update_state)
+                        || !opt_arc_ptr_eq(
+                            &prev_snap.last_oauth_event,
+                            &latest_snap.last_oauth_event,
+                        );
+
+                    let prev_mode = prev_snap.channel_mode;
                     let prev_theme = this.theme_preference;
-                    let prev_update_phase =
-                        this.snapshot.update_state.as_ref().map(|u| u.status.phase);
-                    let prev_pref_collapsed = this.snapshot.desktop_settings.sidebar_collapsed;
-                    let was_corrupt = this.snapshot.desktop_settings_corrupt;
+                    let prev_update_phase = prev_snap.update_state.as_ref().map(|u| u.status.phase);
+                    let prev_pref_collapsed = prev_snap.desktop_settings.sidebar_collapsed;
+                    let was_corrupt = prev_snap.desktop_settings_corrupt;
                     this.snapshot = latest_snap;
+
+                    // Fast path for live session streaming: when only `loaded_sessions` updated
+                    // while viewing an active chat, notify only `MessageListView` (and
+                    // `ComposerView` if queue/running/context changed) instead of repainting the
+                    // entire `AppShell` sidebar, topbar, and overlays on every frame.
+                    if !shell_globals_changed
+                        && this.route == ShellRoute::Session
+                        && this.session_subview == SessionSubView::Chat
+                    {
+                        let active_sid = this
+                            .client
+                            .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
+                        if this.workbench.read(cx).bound_session_id() != active_sid.as_deref() {
+                            cx.notify();
+                            return;
+                        }
+                        let composer_changed = active_sid.as_deref().is_some_and(|sid| {
+                            let prev_s = prev_snap.loaded_sessions.get(sid);
+                            let next_s = this.snapshot.loaded_sessions.get(sid);
+                            match (prev_s, next_s) {
+                                (Some(a), Some(b)) => {
+                                    a.running != b.running
+                                        || a.queue != b.queue
+                                        || a.ui != b.ui
+                                        || a.context_usage != b.context_usage
+                                }
+                                (None, None) => false,
+                                _ => true,
+                            }
+                        });
+                        let wb = this.workbench.read(cx);
+                        let msg_list = wb.message_list().clone();
+                        let sess_comp = composer_changed.then(|| wb.session_composer().clone());
+                        msg_list.update(cx, |_, cx| cx.notify());
+                        if let Some(comp) = sess_comp {
+                            comp.update(cx, |_, cx| cx.notify());
+                        }
+                        return;
+                    }
+
                     let pref_collapsed = this.snapshot.desktop_settings.sidebar_collapsed;
                     // A revision can arrive while SSE is offline, e.g. from an HTTP request.
                     // Ignore older echoes while a local manual preference is being saved.
@@ -976,41 +1209,82 @@ impl AppShell {
             }
         }
         let bounds = window.bounds();
-        let center_x = f32::from(bounds.origin.x) + f32::from(bounds.size.width) * 0.5;
-        let center_y = f32::from(bounds.origin.y) + f32::from(bounds.size.height) * 0.5;
-        let matched_hint = collect_app_displays(cx)
-            .into_iter()
-            .find(|d| {
-                center_x >= d.work_x
-                    && center_x <= d.work_x + d.work_width
-                    && center_y >= d.work_y
-                    && center_y <= d.work_y + d.work_height
-            })
-            .map(|d| d.hint);
+        let current_display_id = window.display(cx).map(|d| d.id());
+        let matched_hint = match (current_display_id, &self.cached_display_hint) {
+            (Some(id), Some((cached_id, hint))) if id == *cached_id => Some(hint.clone()),
+            _ => {
+                let center_x = f32::from(bounds.origin.x) + f32::from(bounds.size.width) * 0.5;
+                let center_y = f32::from(bounds.origin.y) + f32::from(bounds.size.height) * 0.5;
+                let resolved = collect_app_displays(cx)
+                    .into_iter()
+                    .find(|d| {
+                        center_x >= d.work_x
+                            && center_x <= d.work_x + d.work_width
+                            && center_y >= d.work_y
+                            && center_y <= d.work_y + d.work_height
+                    })
+                    .map(|d| d.hint);
+                if let (Some(id), Some(hint)) = (current_display_id, resolved.as_ref()) {
+                    self.cached_display_hint = Some((id, hint.clone()));
+                }
+                resolved
+            }
+        };
 
         if self
             .bounds_tracker
             .observe(bounds, window.is_maximized(), false, matched_hint)
         {
-            let client = self.client.clone();
-            self.bounds_debounce_task = Some(cx.spawn(async move |weak, cx| {
-                cx.background_executor()
-                    .timer(Duration::from_millis(GEOMETRY_DEBOUNCE_MS))
-                    .await;
-                let maybe_patch = weak
-                    .update(cx, |this, _| this.bounds_tracker.take_pending_patch())
-                    .ok()
-                    .flatten();
-                if let Some(patch) = maybe_patch {
-                    let client_bg = client.clone();
-                    let _ = cx
-                        .background_executor()
-                        .spawn(async move {
-                            let _ = client_bg.patch_desktop_settings(patch).await;
-                        })
-                        .await;
-                }
-            }));
+            self.bounds_dirty_generation = self.bounds_dirty_generation.wrapping_add(1);
+            if self.bounds_debounce_task.is_none() {
+                let client = self.client.clone();
+                self.bounds_debounce_task = Some(cx.spawn(async move |weak, cx| {
+                    loop {
+                        let Ok(seen_generation) =
+                            weak.update(cx, |this, _| this.bounds_dirty_generation)
+                        else {
+                            return;
+                        };
+                        cx.background_executor()
+                            .timer(Duration::from_millis(GEOMETRY_DEBOUNCE_MS))
+                            .await;
+                        let Ok(outcome) = weak.update(cx, |this, _| {
+                            if this.bounds_dirty_generation != seen_generation {
+                                None
+                            } else {
+                                Some(this.bounds_tracker.take_pending_patch())
+                            }
+                        }) else {
+                            return;
+                        };
+                        let Some(maybe_patch) = outcome else {
+                            continue;
+                        };
+                        if let Some(patch) = maybe_patch {
+                            let client_bg = client.clone();
+                            let _ = cx
+                                .background_executor()
+                                .spawn(async move {
+                                    let _ = client_bg.patch_desktop_settings(patch).await;
+                                })
+                                .await;
+                        }
+                        let Ok(should_continue) = weak.update(cx, |this, _| {
+                            if this.bounds_dirty_generation != seen_generation {
+                                true
+                            } else {
+                                this.bounds_debounce_task = None;
+                                false
+                            }
+                        }) else {
+                            return;
+                        };
+                        if !should_continue {
+                            return;
+                        }
+                    }
+                }));
+            }
         }
     }
 
@@ -1095,8 +1369,7 @@ impl AppShell {
                 if let Some(sid) = active_sid {
                     let client = self.client.clone();
                     cx.spawn(async move |weak, cx| {
-                        let res = client.compact_session(sid.clone(), None).await;
-                        let _ = client.activate_session(Some(sid)).await;
+                        let res = client.compact_session(sid, None).await;
                         let _ = weak.update(cx, |this, cx| match res {
                             Ok(_) => this.show_top_notice("会话上下文已完成压缩。", cx),
                             Err(e) => this.show_workspace_error(e.to_string(), cx),
@@ -1170,19 +1443,35 @@ impl AppShell {
         let prior = window.focused(cx);
         self.set_workspace_route(ShellRoute::Session, SessionSubView::Tree, cx);
         self.session_subview_prior_focus = prior;
-        self.branch_tree_view.update(cx, |tv, cx| {
-            tv.set_session_id(sid, window, cx);
-            tv.focus_handle(cx).focus(window, cx);
-        });
+        self.initialize_session_subview(SessionSubView::Tree, sid, window, cx);
     }
 
     fn open_session_export(&mut self, sid: String, window: &mut Window, cx: &mut Context<Self>) {
         let prior = window.focused(cx);
         self.set_workspace_route(ShellRoute::Session, SessionSubView::Export, cx);
         self.session_subview_prior_focus = prior;
-        self.export_view
-            .update(cx, |view, cx| view.set_session_id(sid, cx));
-        self.root_focus.focus(window, cx);
+        self.initialize_session_subview(SessionSubView::Export, sid, window, cx);
+    }
+
+    fn initialize_session_subview(
+        &mut self,
+        subview: SessionSubView,
+        sid: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match subview {
+            SessionSubView::Tree => self.branch_tree_view.update(cx, |view, cx| {
+                view.set_session_id(sid, window, cx);
+                view.focus_handle(cx).focus(window, cx);
+            }),
+            SessionSubView::Export => {
+                self.export_view
+                    .update(cx, |view, cx| view.set_session_id(sid, cx));
+                self.root_focus.focus(window, cx);
+            }
+            SessionSubView::Chat => {}
+        }
     }
 
     fn dismiss_sidebar_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -1241,15 +1530,20 @@ impl AppShell {
             let search_focus = self.sidebar_search_input.read(cx).focus_handle(cx);
             self.sidebar_collapse_focus.is_focused(window)
                 || self.sidebar_account_focus.is_focused(window)
+                || self.sidebar_settings_focus.is_focused(window)
                 || search_focus.contains_focused(window, cx)
                 || self.sidebar_menu_focus.contains_focused(window, cx)
         } else {
             self.topbar_expand_focus.is_focused(window)
                 || self.topbar_recent_focus.is_focused(window)
+                || self.topbar_session_more_focus.is_focused(window)
                 || self.topbar_account_focus.is_focused(window)
+                || self.topbar_settings_focus.is_focused(window)
         };
         self.recent_drawer_open = false;
         self.recent_drawer_prior_focus = None;
+        self.topbar_session_more_open = false;
+        self.topbar_session_more_prior_focus = None;
         self.sidebar_context_menu = None;
         self.sidebar_menu_prior_focus = None;
         self.sidebar_batch_mode = false;
@@ -1360,6 +1654,10 @@ impl AppShell {
         }
         if self.account_menu_open {
             self.close_account_menu(window, cx);
+            return true;
+        }
+        if self.topbar_session_more_open {
+            self.close_topbar_session_more(window, cx);
             return true;
         }
         if self.recent_drawer_open {
@@ -1658,7 +1956,6 @@ impl AppShell {
                 this.web_transition_pending = false;
                 match res {
                     Ok(opened) => {
-                        this.last_web_url = Some(opened.url.clone());
                         open_url_in_trusted_browser(&opened.url);
                         cx.notify();
                     }
@@ -1701,15 +1998,16 @@ impl AppShell {
         self.recent_drawer_open = false;
         self.recent_drawer_prior_focus = None;
         self.sidebar_context_menu = None;
-        let client = self.client.clone();
+        let activation = self.client.begin_activate_session(Some(session_id.clone()));
         cx.spawn(async move |weak, cx| {
-            let res = cx
-                .background_executor()
-                .spawn(async move { client.activate_session(Some(session_id)).await })
-                .await;
-            if let Err(err) = res {
+            if let Err(err) = activation.await {
                 let _ = weak.update(cx, |this, cx| {
-                    this.show_workspace_error(err.to_string(), cx);
+                    if this
+                        .client
+                        .with_workspace(|ws| ws.active_session_id() == Some(session_id.as_str()))
+                    {
+                        this.show_workspace_error(err.to_string(), cx);
+                    }
                 });
             }
         })
@@ -1796,6 +2094,9 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         match event {
+            AllSessionsEvent::NavigateBack => {
+                self.navigate_back(window, cx);
+            }
             AllSessionsEvent::OpenSession(sid) => {
                 self.activate_session_by_id(sid.clone(), cx);
                 self.root_focus.focus(window, cx);
@@ -1901,6 +2202,9 @@ impl AppShell {
             return;
         }
         match event {
+            SettingsViewEvent::NavigateBack => {
+                self.navigate_back(window, cx);
+            }
             SettingsViewEvent::OpenUpdateDialog => {
                 self.open_update_dialog(window, cx);
             }
@@ -1969,13 +2273,16 @@ impl AppShell {
         &mut self,
         _av: &Entity<AccountView>,
         event: &AccountViewEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.route != ShellRoute::Account {
             return;
         }
         match event {
+            AccountViewEvent::NavigateBack => {
+                self.navigate_back(window, cx);
+            }
             AccountViewEvent::OpenLoginTab(tab) => {
                 let target_tab = *tab;
                 self.set_route(ShellRoute::Login, cx);
@@ -1984,7 +2291,7 @@ impl AppShell {
                 cx.notify();
             }
             AccountViewEvent::LoggedOutCstoa => {
-                self.show_top_notice("已退出 CSTOA 登录，其余模型服务凭据保持不变。", cx);
+                self.show_top_notice("已退出 计维CSTOA 登录，其余提供商凭据保持不变。", cx);
                 self.set_route(ShellRoute::Login, cx);
                 cx.notify();
             }
@@ -2028,6 +2335,7 @@ impl AppShell {
                                     .w_full()
                                     .h(height::CONTROL)
                                     .px(space::GROUP)
+                                    .rounded_t(radius::ROW)
                                     .bg(palette.bg_surface)
                                     .border_b_1()
                                     .border_color(palette.border_subtle)
@@ -2081,6 +2389,90 @@ impl AppShell {
             ShellRoute::Account => self.account_view.clone().into_any_element(),
         }
     }
+
+    fn render_active_or_exiting_banner(
+        &mut self,
+        palette: &DesktopPalette,
+        transparency_enabled: bool,
+        scale_factor: f32,
+        entity: &Entity<Self>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
+        let active = if let Some(ref err_msg) = self.workspace_error {
+            Some((true, err_msg.clone(), self.error_banner_timer.generation()))
+        } else if let Some(ref notice) = self.top_notice {
+            Some((false, notice.clone(), self.notice_banner_timer.generation()))
+        } else {
+            None
+        };
+        let is_open = active.is_some();
+        if let Some((is_error, ref msg, _)) = active {
+            self.last_banner = Some((is_error, msg.clone()));
+        }
+        let progress = self
+            .banner_presence
+            .sample(
+                if is_open { 1.0_f32 } else { 0.0 },
+                Transition::new(if is_open {
+                    motion::NORMAL
+                } else {
+                    motion::SURFACE_CLOSE
+                })
+                .ease(motion::ease_out()),
+                window,
+                cx,
+            )
+            .value
+            .clamp(0.0, 1.0);
+        if !is_open && progress <= 0.001 {
+            self.last_banner = None;
+            return None;
+        }
+        let (is_error, msg, generation) = match active {
+            Some((is_err, msg, banner_gen)) => (is_err, msg, banner_gen),
+            None => {
+                let (is_err, msg) = self.last_banner.clone()?;
+                (is_err, msg, 0)
+            }
+        };
+        let ent_hover = entity.clone();
+        if is_error {
+            Some(
+                render_workspace_error_bar(
+                    is_open,
+                    progress,
+                    msg,
+                    palette,
+                    transparency_enabled,
+                    scale_factor,
+                    move |hovered, _, cx| {
+                        ent_hover.update(cx, |this, cx| {
+                            this.set_banner_hovered(true, generation, *hovered, cx)
+                        });
+                    },
+                )
+                .into_any_element(),
+            )
+        } else {
+            Some(
+                render_top_notice_banner(
+                    is_open,
+                    progress,
+                    msg,
+                    palette,
+                    transparency_enabled,
+                    scale_factor,
+                    move |hovered, _, cx| {
+                        ent_hover.update(cx, |this, cx| {
+                            this.set_banner_hovered(false, generation, *hovered, cx)
+                        });
+                    },
+                )
+                .into_any_element(),
+            )
+        }
+    }
 }
 
 impl Render for AppShell {
@@ -2126,6 +2518,9 @@ impl Render for AppShell {
             cx.reduce_motion(),
             window,
         );
+        self.last_sky_time = sky_time;
+
+        let route_sample = self.route_transition.sample(active_chat, window, cx);
 
         let (active_session_id, active_view) = self
             .client
@@ -2141,6 +2536,8 @@ impl Render for AppShell {
             _ => None,
         };
         self.workbench.update(cx, |wb, cx| {
+            wb.set_sidebar_collapsed(self.sidebar_collapsed);
+            wb.set_route_transition_samples(route_sample.home_enter, route_sample.chat_enter);
             wb.sync_route_and_sky(wb_session_id, sky_time, window, cx);
         });
         if self.route == ShellRoute::Login {
@@ -2185,8 +2582,17 @@ impl Render for AppShell {
             let mut login_shell = div()
                 .relative()
                 .size_full()
+                .overflow_hidden()
                 .bg(palette.bg_workspace)
-                .child(self.login_view.clone())
+                .child(
+                    div()
+                        .relative()
+                        .size_full()
+                        .opacity(route_sample.container_opacity)
+                        .left(route_sample.container_dx)
+                        .top(route_sample.container_dy)
+                        .child(self.login_view.clone()),
+                )
                 .child(
                     div()
                         .absolute()
@@ -2194,8 +2600,37 @@ impl Render for AppShell {
                         .left_0()
                         .right_0()
                         .h(layout::TOPBAR_HEIGHT)
+                        .pl(space::SM)
                         .flex()
                         .items_center()
+                        .child(
+                            apply_scale(div(), scale::UI_MEDIUM)
+                                .id("login-window-back-btn")
+                                .test_support()
+                                .a11y_button("login-window-back-btn", "返回工作台")
+                                .tab_index(0)
+                                .h(height::COMPACT)
+                                .px(space::SM)
+                                .flex_shrink_0()
+                                .rounded(radius::CONTROL)
+                                .flex()
+                                .items_center()
+                                .gap(space::XS)
+                                .text_color(palette.text_primary)
+                                .hover(|s| s.bg(palette.bg_item_hover))
+                                .on_click(move |_, _, cx| {
+                                    e_back.update(cx, |this, cx| {
+                                        let dest = match this.login_return_route {
+                                            ShellRoute::Login => ShellRoute::Home,
+                                            other => other,
+                                        };
+                                        this.set_route(dest, cx);
+                                        cx.notify();
+                                    });
+                                })
+                                .child(Icon::new(IconName::ArrowLeft).size(px(14.0)))
+                                .child(cjk_inline_label("返回")),
+                        )
                         .child(
                             div()
                                 .id("login-topbar-drag-region")
@@ -2211,71 +2646,45 @@ impl Render for AppShell {
                             Rc::new(move |w, cx| {
                                 e_close.update(cx, |this, cx| this.request_close_flow(w, cx));
                             }),
+                            window,
+                            cx,
                         )),
-                )
-                .child(
-                    apply_scale(div(), scale::UI_MEDIUM)
-                        .id("login-window-back-btn")
-                        .test_support()
-                        .a11y_button("login-window-back-btn", "返回工作台")
-                        .tab_index(0)
-                        .absolute()
-                        .left(space::SM)
-                        .top(space::TIGHT)
-                        .h(height::COMPACT)
-                        .px(space::SM)
-                        .rounded(radius::CONTROL)
-                        .flex()
-                        .items_center()
-                        .gap(space::XS)
-                        .text_color(palette.text_primary)
-                        .hover(|s| s.bg(palette.bg_item_hover))
-                        .on_click(move |_, _, cx| {
-                            e_back.update(cx, |this, cx| {
-                                this.set_route(ShellRoute::Home, cx);
-                                cx.notify();
-                            });
-                        })
-                        .child(Icon::new(IconName::ArrowLeft).size(px(14.0)))
-                        .child(cjk_inline_label("返回")),
                 );
 
-            if let Some(ref err_msg) = self.workspace_error {
-                let ent_hover = entity.clone();
-                let generation = self.error_banner_timer.generation();
-                login_shell = login_shell.child(render_workspace_error_bar(
-                    err_msg.clone(),
-                    generation,
-                    &palette,
-                    transparency_enabled,
-                    scale_factor,
-                    move |hovered, _, cx| {
-                        ent_hover.update(cx, |this, cx| {
-                            this.set_banner_hovered(true, generation, *hovered, cx)
-                        });
-                    },
-                ));
-            } else if let Some(ref notice) = self.top_notice {
-                let ent_hover = entity.clone();
-                let generation = self.notice_banner_timer.generation();
-                login_shell = login_shell.child(render_top_notice_banner(
-                    notice.clone(),
-                    generation,
-                    &palette,
-                    transparency_enabled,
-                    scale_factor,
-                    move |hovered, _, cx| {
-                        ent_hover.update(cx, |this, cx| {
-                            this.set_banner_hovered(false, generation, *hovered, cx)
-                        });
-                    },
-                ));
+            if let Some(banner_el) = self.render_active_or_exiting_banner(
+                &palette,
+                transparency_enabled,
+                scale_factor,
+                &entity,
+                window,
+                cx,
+            ) {
+                login_shell = login_shell.child(banner_el);
             }
             login_shell
         } else {
+            let sidebar_open = !self.sidebar_collapsed;
+            let sidebar_progress = self
+                .sidebar_presence
+                .sample(
+                    if sidebar_open { 1.0_f32 } else { 0.0 },
+                    Transition::new(if sidebar_open {
+                        motion::NORMAL
+                    } else {
+                        motion::SURFACE_CLOSE
+                    })
+                    .ease(motion::ease_out()),
+                    window,
+                    cx,
+                )
+                .value
+                .clamp(0.0, 1.0);
+            let collapsed_progress = (1.0 - sidebar_progress).clamp(0.0, 1.0);
+
             let topbar_el = {
                 let e1 = entity.clone();
                 let e2 = entity.clone();
+                let e2_more = entity.clone();
                 let e3 = entity.clone();
                 let e4 = entity.clone();
                 let e5 = entity.clone();
@@ -2283,15 +2692,42 @@ impl Render for AppShell {
                 let e7 = entity.clone();
                 let e8 = entity.clone();
                 let e9 = entity.clone();
+                let show_topbar_session_more = active_chat && active_session_id.is_some();
+                let collapsed_session_title: Option<String> = if active_chat {
+                    active_session_id.as_ref().map(|sid| {
+                        self.snapshot
+                            .sessions
+                            .iter()
+                            .find(|s| &s.id == sid)
+                            .map(|s| {
+                                if s.title.trim().is_empty() {
+                                    "新对话".to_owned()
+                                } else {
+                                    s.title.clone()
+                                }
+                            })
+                            .unwrap_or_else(|| "当前对话".to_owned())
+                    })
+                } else {
+                    None
+                };
                 render_topbar(
                     self.sidebar_collapsed,
+                    collapsed_progress,
                     self.recent_drawer_open,
+                    show_topbar_session_more,
+                    self.topbar_session_more_open,
+                    collapsed_session_title.as_deref(),
+                    Rc::clone(&self.recent_btn_anchor_x),
+                    Rc::clone(&self.topbar_session_more_anchor_x),
                     active_view,
                     window.is_maximized(),
                     account_initial.clone(),
                     &self.topbar_expand_focus,
                     &self.topbar_recent_focus,
+                    &self.topbar_session_more_focus,
                     &self.topbar_account_focus,
+                    &self.topbar_settings_focus,
                     &palette,
                     TopbarCallbacks {
                         on_expand_sidebar: Rc::new(move |w, cx| {
@@ -2307,10 +2743,34 @@ impl Render for AppShell {
                                     if this.account_menu_open {
                                         this.close_account_menu(w, cx);
                                     }
+                                    if this.topbar_session_more_open {
+                                        this.topbar_session_more_open = false;
+                                        this.topbar_session_more_prior_focus = None;
+                                    }
                                     this.recent_drawer_open = true;
                                     this.recent_drawer_prior_focus =
                                         Some(this.topbar_recent_focus.clone());
                                     this.topbar_recent_focus.focus(w, cx);
+                                    cx.notify();
+                                }
+                            });
+                        }),
+                        on_toggle_session_more: Rc::new(move |w, cx| {
+                            e2_more.update(cx, |this, cx| {
+                                if this.topbar_session_more_open {
+                                    this.close_topbar_session_more(w, cx);
+                                } else {
+                                    if this.account_menu_open {
+                                        this.close_account_menu(w, cx);
+                                    }
+                                    if this.recent_drawer_open {
+                                        this.recent_drawer_open = false;
+                                        this.recent_drawer_prior_focus = None;
+                                    }
+                                    this.topbar_session_more_open = true;
+                                    this.topbar_session_more_prior_focus =
+                                        Some(this.topbar_session_more_focus.clone());
+                                    this.topbar_session_more_focus.focus(w, cx);
                                     cx.notify();
                                 }
                             });
@@ -2351,13 +2811,10 @@ impl Render for AppShell {
                             e6.update(cx, |this, cx| this.trigger_open_web(false, w, cx));
                         }),
                         on_toggle_account_menu: Rc::new(move |w, cx| {
-                            e7.update(cx, |this, cx| this.toggle_account_menu(w, cx));
+                            e7.update(cx, |this, cx| this.toggle_account_menu(false, w, cx));
                         }),
-                        on_open_settings: Rc::new(move |_, cx| {
-                            e8.update(cx, |this, cx| {
-                                this.set_route(ShellRoute::Settings, cx);
-                                cx.notify();
-                            });
+                        on_open_settings: Rc::new(move |w, cx| {
+                            e8.update(cx, |this, cx| this.toggle_account_menu(true, w, cx));
                         }),
                         on_minimize_window: Rc::new(|w, _| w.minimize_window()),
                         on_zoom_window: Rc::new(|w, _| w.zoom_window()),
@@ -2380,38 +2837,116 @@ impl Render for AppShell {
                 .bg(palette.bg_workspace)
                 .shadow(palette.workspace_shadows())
                 .overflow_hidden()
-                .child(self.render_workspace_body(&palette, &entity));
+                .child(
+                    div()
+                        .relative()
+                        .size_full()
+                        .opacity(route_sample.container_opacity)
+                        .left(route_sample.container_dx)
+                        .top(route_sample.container_dy)
+                        .child(self.render_workspace_body(&palette, &entity)),
+                );
 
-            if let Some(ref err_msg) = self.workspace_error {
-                let ent_hover = entity.clone();
-                let generation = self.error_banner_timer.generation();
-                workspace_card = workspace_card.child(render_workspace_error_bar(
-                    err_msg.clone(),
-                    generation,
-                    &palette,
-                    transparency_enabled,
-                    scale_factor,
-                    move |hovered, _, cx| {
-                        ent_hover.update(cx, |this, cx| {
-                            this.set_banner_hovered(true, generation, *hovered, cx)
-                        });
-                    },
-                ));
-            } else if let Some(ref notice) = self.top_notice {
-                let ent_hover = entity.clone();
-                let generation = self.notice_banner_timer.generation();
-                workspace_card = workspace_card.child(render_top_notice_banner(
-                    notice.clone(),
-                    generation,
-                    &palette,
-                    transparency_enabled,
-                    scale_factor,
-                    move |hovered, _, cx| {
-                        ent_hover.update(cx, |this, cx| {
-                            this.set_banner_hovered(false, generation, *hovered, cx)
-                        });
-                    },
-                ));
+            if let Some(curtain) = route_sample.home_exit_curtain {
+                let curtain_layer = div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .h_full()
+                            .opacity(1.0 - curtain.sky_progress)
+                            .child(render_sky_background_rounded(
+                                SkyPreset::home_for_theme(palette.mode),
+                                curtain.frozen_sky_time,
+                                1.0,
+                                [f32::from(radius::ROW); 4],
+                                scale_factor,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .relative()
+                            .size_full()
+                            .px(space::GROUP)
+                            .pb(space::SM)
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                div()
+                                    .w_full()
+                                    .max_w(px(600.0))
+                                    .flex()
+                                    .flex_col()
+                                    .items_center()
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .h(px(200.0))
+                                            .relative()
+                                            .flex()
+                                            .justify_center()
+                                            .child(
+                                                div()
+                                                    .relative()
+                                                    .w_full()
+                                                    .h_full()
+                                                    .top(curtain.mark_dy)
+                                                    .opacity(curtain.mark_opacity)
+                                                    .child(render_home_brand_arcs()),
+                                            )
+                                            .child(
+                                                apply_scale(div(), scale::HERO)
+                                                    .absolute()
+                                                    .top(px(125.0) + curtain.greeting_dy)
+                                                    .left_0()
+                                                    .right_0()
+                                                    .opacity(curtain.greeting_opacity)
+                                                    .flex()
+                                                    .justify_center()
+                                                    .text_color(palette.text_welcome)
+                                                    .child("我该如何协助您？"),
+                                            ),
+                                    )
+                                    .child(div().w_full().h(px(88.0))),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .right_0()
+                            .bottom(px(17.0) - curtain.footer_dy)
+                            .opacity(curtain.footer_opacity)
+                            .flex()
+                            .justify_center()
+                            .child(
+                                apply_scale(div(), scale::CAPTION)
+                                    .text_color(palette.text_secondary)
+                                    .child("@cst-pilot"),
+                            ),
+                    );
+                workspace_card = workspace_card.child(curtain_layer);
+            }
+
+            if let Some(banner_el) = self.render_active_or_exiting_banner(
+                &palette,
+                transparency_enabled,
+                scale_factor,
+                &entity,
+                window,
+                cx,
+            ) {
+                workspace_card = workspace_card.child(banner_el);
             }
 
             // Non-interactive 1px inner border ring painted above rounded sky shader surfaces
@@ -2431,26 +2966,15 @@ impl Render for AppShell {
                 workspace_card = workspace_card.child(layer);
             }
 
-            let framed_workspace = if self.sidebar_collapsed {
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .min_w_0()
-                    .pl(layout::SHELL_FRAME_INSET)
-                    .pr(layout::SHELL_FRAME_INSET)
-                    .pb(layout::SHELL_FRAME_INSET)
-                    .bg(palette.bg_shell)
-                    .child(workspace_card)
-            } else {
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .min_w_0()
-                    .pr(layout::SHELL_FRAME_INSET)
-                    .pb(layout::SHELL_FRAME_INSET)
-                    .bg(palette.bg_shell)
-                    .child(workspace_card)
-            };
+            let framed_workspace = div()
+                .flex_1()
+                .min_h_0()
+                .min_w_0()
+                .pl(layout::SHELL_FRAME_INSET * collapsed_progress)
+                .pr(layout::SHELL_FRAME_INSET)
+                .pb(layout::SHELL_FRAME_INSET)
+                .bg(palette.bg_shell)
+                .child(workspace_card);
 
             let right_column = div()
                 .flex_1()
@@ -2468,23 +2992,6 @@ impl Render for AppShell {
                 .items_stretch()
                 .size_full()
                 .bg(palette.bg_shell);
-
-            let sidebar_open = !self.sidebar_collapsed;
-            let sidebar_progress = self
-                .sidebar_presence
-                .sample(
-                    if sidebar_open { 1.0_f32 } else { 0.0 },
-                    Transition::new(if sidebar_open {
-                        motion::NORMAL
-                    } else {
-                        motion::SURFACE_CLOSE
-                    })
-                    .ease(motion::ease_out()),
-                    window,
-                    cx,
-                )
-                .value
-                .clamp(0.0, 1.0);
 
             if sidebar_open {
                 let search_query = self.sidebar_search_input.read(cx).value().to_string();
@@ -2514,8 +3021,10 @@ impl Render for AppShell {
                     &self.sidebar_selected_ids,
                     account_label,
                     account_initial,
+                    self.account_menu_open,
                     &self.sidebar_collapse_focus,
                     &self.sidebar_account_focus,
+                    &self.sidebar_settings_focus,
                     &palette,
                     SidebarCallbacks {
                         on_collapse: Rc::new(move |w, cx| {
@@ -2627,13 +3136,10 @@ impl Render for AppShell {
                             });
                         }),
                         on_toggle_account_menu: Rc::new(move |w, cx| {
-                            s10.update(cx, |this, cx| this.toggle_account_menu(w, cx));
+                            s10.update(cx, |this, cx| this.toggle_account_menu(false, w, cx));
                         }),
-                        on_open_settings: Rc::new(move |_, cx| {
-                            s11.update(cx, |this, cx| {
-                                this.set_route(ShellRoute::Settings, cx);
-                                cx.notify();
-                            });
+                        on_open_settings: Rc::new(move |w, cx| {
+                            s11.update(cx, |this, cx| this.toggle_account_menu(true, w, cx));
                         }),
                     },
                 );
@@ -2656,14 +3162,34 @@ impl Render for AppShell {
                         ),
                 );
             } else if sidebar_progress > 0.001 {
-                // Visual-only 150ms exit strip: drops interactive & a11y nodes immediately on collapse.
+                // Visual-only 150ms exit: preserves real sidebar layout while interactive & a11y nodes unmount on frame 1.
+                let search_query = self.sidebar_search_input.read(cx).value().to_string();
+                let sidebar_exit_el = render_sidebar_exiting(
+                    self.route,
+                    active_session_id.as_deref(),
+                    &sidebar_sessions,
+                    &search_query,
+                    self.sidebar_batch_mode,
+                    &self.sidebar_selected_ids,
+                    account_label,
+                    account_initial,
+                    &palette,
+                );
                 row_layout = row_layout.child(
                     div()
                         .h_full()
                         .w(layout::SIDEBAR_WIDTH * sidebar_progress)
+                        .overflow_hidden()
+                        .flex()
                         .flex_shrink_0()
-                        .bg(palette.bg_shell)
-                        .opacity(0.01 + 0.99 * sidebar_progress),
+                        .opacity(0.01 + 0.99 * sidebar_progress)
+                        .child(
+                            div()
+                                .h_full()
+                                .flex_shrink_0()
+                                .ml(px(-24.0 * (1.0 - sidebar_progress)))
+                                .child(sidebar_exit_el),
+                        ),
                 );
             }
 
@@ -2725,16 +3251,45 @@ impl Render for AppShell {
             .child(main_layout);
 
         if self.route != ShellRoute::Login {
-            if let Some((ref menu_sid, menu_pos)) = self.sidebar_context_menu {
-                root = root.child(self.render_sidebar_context_menu(
-                    menu_sid,
-                    menu_pos,
-                    viewport_size,
-                    &palette,
-                    transparency_enabled,
-                    scale_factor,
-                    &entity,
-                ));
+            let ctx_open = self.sidebar_context_menu.is_some();
+            if let Some(ref active_ctx) = self.sidebar_context_menu {
+                self.last_sidebar_menu = Some(active_ctx.clone());
+            }
+            let ctx_progress = self
+                .sidebar_menu_presence
+                .sample(
+                    if ctx_open { 1.0_f32 } else { 0.0 },
+                    Transition::new(if ctx_open {
+                        motion::POPOVER_OPEN
+                    } else {
+                        motion::SURFACE_CLOSE
+                    })
+                    .ease(motion::ease_out()),
+                    window,
+                    cx,
+                )
+                .value
+                .clamp(0.0, 1.0);
+            if ctx_open || ctx_progress > 0.001 {
+                if let Some((menu_sid, menu_pos)) = self
+                    .sidebar_context_menu
+                    .as_ref()
+                    .or(self.last_sidebar_menu.as_ref())
+                {
+                    root = root.child(self.render_sidebar_context_menu(
+                        ctx_open,
+                        ctx_progress,
+                        menu_sid,
+                        *menu_pos,
+                        viewport_size,
+                        &palette,
+                        transparency_enabled,
+                        scale_factor,
+                        &entity,
+                    ));
+                }
+            } else {
+                self.last_sidebar_menu = None;
             }
 
             if self.sidebar_collapsed && !web_locked {
@@ -2743,7 +3298,7 @@ impl Render for AppShell {
                     "shell-recent-drawer-presence",
                     if open { 1.0_f32 } else { 0.0 },
                     Transition::new(if open {
-                        motion::NORMAL
+                        motion::POPOVER_OPEN
                     } else {
                         motion::SURFACE_CLOSE
                     })
@@ -2760,6 +3315,35 @@ impl Render for AppShell {
                         scale_factor,
                         &entity,
                     ));
+                }
+
+                if let Some(ref sid) = active_session_id
+                    && active_chat
+                {
+                    let more_open = self.topbar_session_more_open;
+                    let more_progress = transition(
+                        "shell-topbar-session-more-presence",
+                        if more_open { 1.0_f32 } else { 0.0 },
+                        Transition::new(if more_open {
+                            motion::POPOVER_OPEN
+                        } else {
+                            motion::SURFACE_CLOSE
+                        })
+                        .ease(motion::ease_out()),
+                        window,
+                        cx,
+                    );
+                    if more_open || more_progress > 0.001 {
+                        root = root.child(self.render_topbar_session_more_popover(
+                            more_open,
+                            more_progress,
+                            sid,
+                            &palette,
+                            transparency_enabled,
+                            scale_factor,
+                            &entity,
+                        ));
+                    }
                 }
             }
 
@@ -2779,38 +3363,15 @@ impl Render for AppShell {
                 )
                 .value
                 .clamp(0.0, 1.0);
-            if account_open {
+            if account_open || account_progress > 0.001 {
                 root = root.child(self.render_account_popover(
+                    account_open,
                     account_progress,
                     &palette,
                     transparency_enabled,
                     scale_factor,
                     &entity,
                 ));
-            } else if account_progress > 0.001 {
-                let exit_pos = if self.sidebar_collapsed {
-                    div().absolute().top(px(44.0)).right(px(136.0))
-                } else {
-                    div().absolute().bottom(px(50.0)).left(space::LG)
-                };
-                root = root.child(
-                    exit_pos.child(
-                        div()
-                            .w(px(224.0))
-                            .h(px(140.0))
-                            .rounded(radius::ROW)
-                            .bg(palette.bg_elevated)
-                            .border_1()
-                            .border_color(palette.border_hairline)
-                            .opacity(0.01 + 0.99 * account_progress)
-                            .mt(px(if self.sidebar_collapsed { -6.0 } else { 6.0 }
-                                * (1.0 - account_progress)))
-                            .shadow(motion::scale_shadows(
-                                palette.craft_stack_shadows(),
-                                account_progress * account_progress * account_progress,
-                            )),
-                    ),
-                );
             }
         }
 
@@ -2820,16 +3381,24 @@ impl Render for AppShell {
         }
 
         // Rename Session Modal (`384px`, `r: 8px`, `p: 20px`, `gap: 12px`)
+        let rename_scrim_p = motion::surface_presence(
+            "rename-session-scrim-p",
+            self.rename_modal.is_some(),
+            motion::MODAL_OPEN,
+            window,
+            cx,
+        );
         if let Some(ref rm) = self.rename_modal {
             let ent_cancel = entity.clone();
             root = root.child(
                 render_frosted_surface(
                     "rename-session-scrim",
-                    FrostedGlassSpec::scrim(&palette),
+                    FrostedGlassSpec::scrim(&palette).with_opacity(rename_scrim_p),
                     palette.bg_scrim,
                     transparency_enabled,
                     scale_factor,
                 )
+                .opacity(0.01 + 0.99 * rename_scrim_p)
                 .absolute()
                 .top_0()
                 .left_0()
@@ -2843,7 +3412,7 @@ impl Render for AppShell {
                     "rename-session-modal-anim",
                     render_frosted_surface(
                         "rename-session-modal",
-                        FrostedGlassSpec::modal(&palette, 8.0),
+                        FrostedGlassSpec::modal(&palette, 8.0).with_opacity(rename_scrim_p),
                         palette.bg_modal,
                         transparency_enabled,
                         scale_factor,
@@ -2943,11 +3512,19 @@ impl Render for AppShell {
         }
 
         // `384px` Missing Key Dialog (`e7fEty`)
+        let missing_key_p = motion::surface_presence(
+            "missing-key-scrim-p",
+            self.missing_key_modal.is_some(),
+            motion::MODAL_OPEN,
+            window,
+            cx,
+        );
         if let Some(ref mk_state) = self.missing_key_modal {
             let ent_cancel = entity.clone();
             let ent_cfg = entity.clone();
             root = root.child(render_missing_key_dialog(
                 mk_state,
+                missing_key_p,
                 &palette,
                 transparency_enabled,
                 scale_factor,
@@ -2976,12 +3553,21 @@ impl Render for AppShell {
         }
 
         // `384px` Software Update Dialog (`kOm7J` / `TqiZo`)
-        if self.update_dialog.open || self.update_dialog.handoff_locked {
+        let update_dialog_open = self.update_dialog.open || self.update_dialog.handoff_locked;
+        let update_dialog_p = motion::surface_presence(
+            "update-dialog-scrim-p",
+            update_dialog_open,
+            motion::MODAL_OPEN,
+            window,
+            cx,
+        );
+        if update_dialog_open {
             let ent_later = entity.clone();
             let ent_prep = entity.clone();
             let ent_canc = entity.clone();
             let ent_lnch = entity.clone();
             root = root.child(render_update_dialog(
+                update_dialog_p,
                 &self.update_dialog,
                 self.snapshot.update_state.as_deref(),
                 mono_family,
@@ -3008,17 +3594,25 @@ impl Render for AppShell {
         }
 
         // Unsent draft confirmation before switching to Web mode (`384px`, `r: 8px`, `p: 20px`, `gap: 12px`)
+        let web_confirm_p = motion::surface_presence(
+            "web-switch-confirm-scrim-p",
+            self.web_switch_confirm.is_some(),
+            motion::MODAL_OPEN,
+            window,
+            cx,
+        );
         if self.web_switch_confirm.is_some() {
             let ent_cancel = entity.clone();
             let ent_proceed = entity.clone();
             root = root.child(
                 render_frosted_surface(
                     "web-switch-confirm-scrim",
-                    FrostedGlassSpec::scrim(&palette),
+                    FrostedGlassSpec::scrim(&palette).with_opacity(web_confirm_p),
                     palette.bg_scrim,
                     transparency_enabled,
                     scale_factor,
                 )
+                .opacity(0.01 + 0.99 * web_confirm_p)
                 .absolute()
                 .top_0()
                 .left_0()
@@ -3032,7 +3626,7 @@ impl Render for AppShell {
                     "web-switch-confirm-anim",
                     render_frosted_surface(
                         "web-switch-confirm-card",
-                        FrostedGlassSpec::modal(&palette, 8.0),
+                        FrostedGlassSpec::modal(&palette, 8.0).with_opacity(web_confirm_p),
                         palette.bg_modal,
                         transparency_enabled,
                         scale_factor,
@@ -3118,10 +3712,18 @@ impl Render for AppShell {
         }
 
         // `WebActive` takeover lock (`WO6NQ`)
+        let web_lock_p = motion::surface_presence(
+            "web-active-scrim-p",
+            web_locked,
+            motion::MODAL_OPEN,
+            window,
+            cx,
+        );
         if web_locked {
             let ent_open = entity.clone();
             let ent_back = entity.clone();
             root = root.child(render_web_active_lock_overlay(
+                web_lock_p,
                 &palette,
                 transparency_enabled,
                 scale_factor,
@@ -3129,11 +3731,8 @@ impl Render for AppShell {
                 &self.web_lock_switch_focus,
                 move |w, cx| {
                     ent_open.update(cx, |this, cx| {
-                        if let Some(ref url) = this.last_web_url {
-                            open_url_in_trusted_browser(url);
-                        } else {
-                            this.trigger_open_web(true, w, cx);
-                        }
+                        // Always mint a fresh single-use ticket when re-opening browser in WebActive.
+                        this.trigger_open_web(true, w, cx);
                     });
                 },
                 move |w, cx| {
@@ -3143,12 +3742,20 @@ impl Render for AppShell {
         }
 
         // Exit confirmation dialog (`pFooK`) — sits topmost so user can always safely exit even during `WebActive`
+        let exit_dialog_p = motion::surface_presence(
+            "exit-dialog-scrim-p",
+            self.exit_dialog.is_some(),
+            motion::MODAL_OPEN,
+            window,
+            cx,
+        );
         if let Some(ref dialog) = self.exit_dialog {
             let ent_cancel = entity.clone();
             let ent_confirm = entity.clone();
             root = root.child(render_exit_confirm_dialog(
                 &dialog.report,
                 dialog.exiting,
+                exit_dialog_p,
                 &palette,
                 transparency_enabled,
                 scale_factor,
@@ -3210,12 +3817,30 @@ impl Render for AppShell {
 pub fn open_url_in_trusted_browser(url: &str) {
     #[cfg(windows)]
     {
-        if (url.starts_with("http://127.0.0.1:") || url.starts_with("https://"))
-            && let Ok(win_dir) = cst_os::windows_directory()
-        {
-            let _ = std::process::Command::new(win_dir.join("explorer.exe"))
-                .arg(url)
-                .spawn();
+        if url.starts_with("http://127.0.0.1:") || url.starts_with("https://") {
+            use std::ffi::OsStr;
+            use std::os::windows::ffi::OsStrExt;
+            use windows::Win32::UI::Shell::ShellExecuteW;
+            use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+            use windows::core::PCWSTR;
+            let verb: Vec<u16> = OsStr::new("open").encode_wide().chain([0]).collect();
+            let target: Vec<u16> = OsStr::new(url).encode_wide().chain([0]).collect();
+            let launched = unsafe {
+                let res = ShellExecuteW(
+                    None,
+                    PCWSTR(verb.as_ptr()),
+                    PCWSTR(target.as_ptr()),
+                    PCWSTR::null(),
+                    PCWSTR::null(),
+                    SW_SHOWNORMAL,
+                );
+                (res.0 as isize) > 32
+            };
+            if !launched && let Ok(win_dir) = cst_os::windows_directory() {
+                let _ = std::process::Command::new(win_dir.join("explorer.exe"))
+                    .arg(url)
+                    .spawn();
+            }
         }
     }
     #[cfg(not(windows))]

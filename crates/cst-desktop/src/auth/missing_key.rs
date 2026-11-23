@@ -25,6 +25,7 @@ pub struct MissingKeyModalState {
 #[allow(clippy::too_many_arguments)]
 pub fn render_missing_key_dialog(
     state: &MissingKeyModalState,
+    scrim_progress: f32,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
@@ -35,25 +36,26 @@ pub fn render_missing_key_dialog(
 ) -> impl IntoElement {
     let clean_prov = state.provider_label.as_deref().filter(|s| !s.is_empty());
     let title_text = match clean_prov {
-        Some(prov) => SharedString::from(format!("缺少 {prov} 服务凭据")),
-        None => SharedString::from("缺少模型服务凭据"),
+        Some(prov) => SharedString::from(format!("缺少 {prov} 凭据")),
+        None => SharedString::from("缺少提供商凭据"),
     };
     let body_text = match clean_prov {
         Some(prov) => SharedString::from(format!(
             "当前所选模型所属的 {prov} 尚未配置有效凭据。已保留输入框内的草稿与附图，配置完成后可返回原会话继续发送。"
         )),
         None => SharedString::from(
-            "当前尚未配置任何可用的模型服务凭据。前往「设置 · 模型服务」或登录页完成配置即可开始诊断。",
+            "当前尚未配置任何可用的提供商凭据。前往「设置 · 提供商」或登录页完成配置即可开始诊断。",
         ),
     };
 
     render_frosted_surface(
         "missing-key-scrim-ywnbk",
-        FrostedGlassSpec::scrim(palette),
+        FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
         palette.bg_scrim,
         transparency_enabled,
         scale_factor,
     )
+    .opacity(0.01 + 0.99 * scrim_progress)
     .test_support()
     .absolute()
     .top_0()
@@ -72,7 +74,7 @@ pub fn render_missing_key_dialog(
                 "missing-key-dialog-anim",
                 render_frosted_surface(
                     "missing-key-dialog-e7fety",
-                    FrostedGlassSpec::modal(palette, 8.0),
+                    FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
                     palette.bg_modal,
                     transparency_enabled,
                     scale_factor,

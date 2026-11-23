@@ -83,7 +83,7 @@ pub fn filter_recent_sidebar_sessions(
     sorted
 }
 
-/// Full-height `232px` sidebar (`cst-pilot-desktop.pen` 「01 · 工作台」 master `L081M1` / `h5AY3`).
+/// Full-height `248px` sidebar (`cst-pilot-desktop.pen` 「01 · 工作台」 master `L081M1` / `h5AY3`).
 #[allow(clippy::too_many_arguments)]
 pub fn render_sidebar(
     route: ShellRoute,
@@ -97,13 +97,16 @@ pub fn render_sidebar(
     selected_ids: &BTreeSet<String>,
     account_label: SharedString,
     account_initial: SharedString,
+    account_menu_open: bool,
     collapse_btn_focus: &FocusHandle,
     account_btn_focus: &FocusHandle,
+    settings_btn_focus: &FocusHandle,
     palette: &DesktopPalette,
     cb: SidebarCallbacks,
 ) -> impl IntoElement {
     let recent = filter_recent_sidebar_sessions(sessions, search_query);
     let has_search_query = !search_query.trim().is_empty();
+    let row_height = px(36.0);
 
     let mut recent_list = div()
         .id("sidebar-recent-scroll")
@@ -113,12 +116,12 @@ pub fn render_sidebar(
         .overflow_y_scroll()
         .flex()
         .flex_col()
-        .gap(space::XS);
+        .gap(space::TIGHT);
 
     if recent.is_empty() {
         recent_list = recent_list.child(
-            apply_scale(div(), scale::CAPTION)
-                .px(space::SM)
+            apply_scale(div(), scale::BODY)
+                .px(space::MD)
                 .py(space::MD)
                 .text_color(palette.text_muted)
                 .child(if has_search_query {
@@ -156,9 +159,9 @@ pub fn render_sidebar(
                 palette.bg_item_hover
             };
             let row_scale = if is_selected {
-                scale::UI_MEDIUM
+                scale::BODY_MEDIUM
             } else {
-                scale::UI
+                scale::BODY
             };
             let row_text_color = if is_selected {
                 palette.text_primary
@@ -180,7 +183,7 @@ pub fn render_sidebar(
                 "sidebar-recent",
                 &sid,
                 &flip_scope,
-                (height::CONTROL + space::XS) * index as f32,
+                (row_height + space::TIGHT) * index as f32,
                 window,
                 cx,
             );
@@ -190,14 +193,14 @@ pub fn render_sidebar(
                 .relative()
                 .top(flip_y)
                 .group(row_group.clone())
-                .h(height::CONTROL)
-                .px(space::SM)
+                .h(row_height)
+                .px(space::MD)
                 .rounded(radius::CONTROL)
                 .bg(row_bg)
                 .text_color(row_text_color)
                 .flex()
                 .items_center()
-                .gap(space::SM)
+                .gap(space::MD)
                 .hover(move |s| s.bg(row_hover_bg).text_color(palette.text_primary))
                 .on_mouse_down(gpui::MouseButton::Right, move |ev, window, cx| {
                     (on_menu_rclick)(sid_rclick.clone(), ev.position, window, cx);
@@ -214,7 +217,12 @@ pub fn render_sidebar(
             let slot_w = transition(
                 SharedString::from(format!("sb-shift-{sid}")),
                 if batch_mode { 24.0 } else { 0.0 },
-                Transition::new(motion::NORMAL).ease(motion::ease_out()),
+                Transition::new(if batch_mode {
+                    motion::NORMAL
+                } else {
+                    motion::SURFACE_CLOSE
+                })
+                .ease(motion::ease_out()),
                 window,
                 cx,
             );
@@ -375,8 +383,8 @@ pub fn render_sidebar(
     let search_box = div()
         .id("sidebar-search-box")
         .test_support()
-        .h(height::CONTROL)
-        .px(space::SM)
+        .h(row_height)
+        .px(space::MD)
         .rounded(radius::CONTROL)
         .border_1()
         .border_color(palette.border_hairline)
@@ -389,11 +397,11 @@ pub fn render_sidebar(
         })
         .child(
             Icon::new(IconName::Search)
-                .size(px(16.0))
+                .size(px(18.0))
                 .text_color(palette.text_secondary),
         )
         .child(
-            div().flex_1().min_w_0().child(
+            apply_scale(div(), scale::BODY).flex_1().min_w_0().child(
                 Input::new(search_input)
                     .accessibility_id("sidebar-search-box")
                     .aria_label("搜索会话")
@@ -457,35 +465,70 @@ pub fn render_sidebar(
                             div()
                                 .flex()
                                 .items_center()
-                                .gap(space::XS)
+                                .gap(space::TIGHT)
                                 .child({
                                     let (pressed, press_state) = motion::icon_press_state(
                                         "sidebar-collapse-btn",
                                         window,
                                         cx,
                                     );
+                                    let (hovered, hs) = motion::PointerFlag::keyed(
+                                        "hover-sidebar-collapse-btn",
+                                        window,
+                                        cx,
+                                    );
+                                    let hover_t = motion::animated_state_progress(
+                                        "sidebar-collapse-btn",
+                                        hovered,
+                                        window,
+                                        cx,
+                                    );
+                                    let press_t = motion::animated_press_progress(
+                                        "sidebar-collapse-btn",
+                                        pressed,
+                                        window,
+                                        cx,
+                                    );
+                                    let bg = motion::lerp_hsla(
+                                        motion::lerp_hsla(
+                                            gpui_kit::transparent_black(),
+                                            palette.bg_item_hover,
+                                            hover_t,
+                                        ),
+                                        palette.bg_active_press,
+                                        press_t,
+                                    );
                                     div()
                                         .id("sidebar-collapse-btn")
                                         .test_support()
                                         .a11y_button("sidebar-collapse-btn", "收起侧栏")
-                                        .desktop_tooltip("sidebar-collapse-btn", "收起侧栏")
+                                        .desktop_tooltip_with_hover(
+                                            "tooltip-sidebar-collapse-btn".into(),
+                                            "收起侧栏".into(),
+                                            false,
+                                            Some(hs),
+                                        )
                                         .track_focus(collapse_btn_focus)
                                         .tab_index(0)
-                                        .w(height::COMPACT)
-                                        .h(height::COMPACT)
+                                        .w(height::CONTROL)
+                                        .h(height::CONTROL)
                                         .rounded(radius::CONTROL)
+                                        .bg(bg)
                                         .flex()
                                         .items_center()
                                         .justify_center()
-                                        .hover(|s| s.bg(palette.bg_item_hover))
                                         .on_icon_press(press_state)
                                         .on_click(move |_, window, cx| (on_collapse)(window, cx))
                                         .child(motion::animated_icon_press(
                                             "sidebar-collapse-btn",
                                             pressed,
                                             Icon::new(IconName::PanelLeft)
-                                                .size(px(16.0))
-                                                .text_color(palette.text_secondary),
+                                                .size(px(18.0))
+                                                .text_color(motion::lerp_hsla(
+                                                    palette.text_secondary,
+                                                    palette.text_primary,
+                                                    hover_t,
+                                                )),
                                             window,
                                             cx,
                                         ))
@@ -496,27 +539,62 @@ pub fn render_sidebar(
                                         window,
                                         cx,
                                     );
+                                    let (hovered, hs) = motion::PointerFlag::keyed(
+                                        "hover-sidebar-new-session-btn",
+                                        window,
+                                        cx,
+                                    );
+                                    let hover_t = motion::animated_state_progress(
+                                        "sidebar-new-session-btn",
+                                        hovered,
+                                        window,
+                                        cx,
+                                    );
+                                    let press_t = motion::animated_press_progress(
+                                        "sidebar-new-session-btn",
+                                        pressed,
+                                        window,
+                                        cx,
+                                    );
+                                    let bg = motion::lerp_hsla(
+                                        motion::lerp_hsla(
+                                            gpui_kit::transparent_black(),
+                                            palette.bg_item_hover,
+                                            hover_t,
+                                        ),
+                                        palette.bg_active_press,
+                                        press_t,
+                                    );
                                     div()
                                         .id("sidebar-new-session-btn")
                                         .test_support()
                                         .a11y_button("sidebar-new-session-btn", "新建对话")
-                                        .desktop_tooltip("sidebar-new-session-btn", "新建对话")
+                                        .desktop_tooltip_with_hover(
+                                            "tooltip-sidebar-new-session-btn".into(),
+                                            "新建对话".into(),
+                                            false,
+                                            Some(hs),
+                                        )
                                         .tab_index(0)
-                                        .w(height::COMPACT)
-                                        .h(height::COMPACT)
+                                        .w(height::CONTROL)
+                                        .h(height::CONTROL)
                                         .rounded(radius::CONTROL)
+                                        .bg(bg)
                                         .flex()
                                         .items_center()
                                         .justify_center()
-                                        .hover(|s| s.bg(palette.bg_item_hover))
                                         .on_icon_press(press_state)
                                         .on_click(move |_, window, cx| (on_new)(window, cx))
                                         .child(motion::animated_icon_press(
                                             "sidebar-new-session-btn",
                                             pressed,
                                             Icon::new(IconName::SquarePen)
-                                                .size(px(16.0))
-                                                .text_color(palette.text_primary),
+                                                .size(px(18.0))
+                                                .text_color(motion::lerp_hsla(
+                                                    palette.text_secondary,
+                                                    palette.text_primary,
+                                                    hover_t,
+                                                )),
                                             window,
                                             cx,
                                         ))
@@ -532,15 +610,15 @@ pub fn render_sidebar(
                         .flex()
                         .flex_col()
                         .gap(space::LG)
-                        // 2a. Search box `oq4G4` (`32px`)
+                        // 2a. Search box `oq4G4` (`36px`)
                         .child(search_box)
-                        // 2b. Primary navigation `WKJAy` (`gap: 4px`, Dashboard -> All Sessions)
+                        // 2b. Primary navigation `WKJAy` (`gap: 6px`, Dashboard -> All Sessions)
                         .child(
                             div()
                                 .flex_shrink_0()
                                 .flex()
                                 .flex_col()
-                                .gap(space::XS)
+                                .gap(space::TIGHT)
                                 .child(sidebar_nav_item(
                                     "sidebar-dashboard-btn",
                                     IconName::LayoutDashboard,
@@ -558,7 +636,7 @@ pub fn render_sidebar(
                                     move |w, cx| (on_all)(w, cx),
                                 )),
                         )
-                        // 2c. Recent sessions group `CzUNm` (`24px` header + `12px` gap + scrollable list)
+                        // 2c. Recent sessions group `CzUNm` (`28px` header + `8px` gap + scrollable list)
                         .child(
                             div()
                                 .flex_1()
@@ -566,17 +644,17 @@ pub fn render_sidebar(
                                 .min_w_0()
                                 .flex()
                                 .flex_col()
-                                .gap(space::MD)
+                                .gap(space::SM)
                                 .child(
                                     div()
-                                        .h(height::INLINE)
-                                        .px(space::SM)
+                                        .h(height::COMPACT)
+                                        .px(space::MD)
                                         .flex_shrink_0()
                                         .flex()
                                         .items_center()
                                         .justify_between()
                                         .child(
-                                            apply_scale(div(), scale::CAPTION_MEDIUM)
+                                            apply_scale(div(), scale::BODY_MEDIUM)
                                                 .text_color(palette.text_muted)
                                                 .child(cjk_inline_label("最近")),
                                         )
@@ -587,7 +665,7 @@ pub fn render_sidebar(
                                                     .items_center()
                                                     .gap(space::SM)
                                                     .child(
-                                                        apply_scale(div(), scale::CAPTION)
+                                                        apply_scale(div(), scale::BODY)
                                                             .id("sidebar-batch-select-all-btn")
                                                             .test_support()
                                                             .a11y_button(
@@ -607,7 +685,7 @@ pub fn render_sidebar(
                                                         has_checked_items.then_some(()),
                                                         |d, ()| {
                                                             d.child(
-                                                                apply_scale(div(), scale::CAPTION)
+                                                                apply_scale(div(), scale::BODY)
                                                                     .id("sidebar-batch-delete-btn")
                                                                     .test_support()
                                                                     .a11y_button(
@@ -633,11 +711,11 @@ pub fn render_sidebar(
                         ),
                 ),
         )
-        // 3. Bottom account + settings bar `fMdf9` (aligned to `24px` vertical spine, no top divider line)
+        // 3. Bottom account + settings menu trigger bar `fMdf9`
         .child(
             div().pt(space::SM).flex_shrink_0().child(
                 div()
-                    .h(height::CONTROL)
+                    .h(row_height)
                     .pr(space::MICRO)
                     .rounded(radius::CONTROL)
                     .flex()
@@ -645,7 +723,7 @@ pub fn render_sidebar(
                     .justify_between()
                     .gap(space::XS)
                     .child(
-                        apply_scale(div(), scale::UI_MEDIUM)
+                        apply_scale(div(), scale::BODY_MEDIUM)
                             .id("sidebar-account-btn")
                             .test_support()
                             .a11y_button("sidebar-account-btn", account_btn_label)
@@ -653,19 +731,19 @@ pub fn render_sidebar(
                             .tab_index(0)
                             .flex_1()
                             .min_w_0()
-                            .h(height::CONTROL)
-                            .px(space::SM)
+                            .h(row_height)
+                            .px(space::MD)
                             .rounded(radius::CONTROL)
                             .flex()
                             .items_center()
-                            .gap(space::SM)
+                            .gap(space::MD)
                             .hover(|s| s.bg(palette.bg_item_hover))
                             .on_click(move |_, w, cx| (on_acc)(w, cx))
                             .child(
                                 apply_scale(div(), scale::CAPTION_MEDIUM)
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .w(px(20.0))
-                                    .h(px(20.0))
+                                    .w(height::INLINE)
+                                    .h(height::INLINE)
                                     .rounded(radius::FULL)
                                     .bg(palette.bg_item_active)
                                     .text_color(palette.text_primary)
@@ -687,14 +765,397 @@ pub fn render_sidebar(
                     .child({
                         let (pressed, press_state) =
                             motion::icon_press_state("sidebar-settings-btn", window, cx);
+                        let (hovered, hs) =
+                            motion::PointerFlag::keyed("hover-sidebar-settings-btn", window, cx);
+                        let hover_t = motion::animated_state_progress(
+                            "sidebar-settings-btn",
+                            hovered,
+                            window,
+                            cx,
+                        );
+                        let press_t = motion::animated_press_progress(
+                            "sidebar-settings-btn",
+                            pressed,
+                            window,
+                            cx,
+                        );
+                        let base_bg = if account_menu_open || matches!(route, ShellRoute::Settings)
+                        {
+                            palette.bg_item_active
+                        } else {
+                            gpui_kit::transparent_black()
+                        };
+                        let bg = motion::lerp_hsla(
+                            motion::lerp_hsla(base_bg, palette.bg_item_hover, hover_t),
+                            palette.bg_active_press,
+                            press_t,
+                        );
                         div()
                             .id("sidebar-settings-btn")
                             .test_support()
-                            .a11y_button("sidebar-settings-btn", "打开设置")
-                            .desktop_tooltip("sidebar-settings-btn", "打开设置")
+                            .a11y_button("sidebar-settings-btn", "账号与设置菜单")
+                            .desktop_tooltip_with_hover(
+                                "tooltip-sidebar-settings-btn".into(),
+                                "账号与设置菜单".into(),
+                                false,
+                                Some(hs),
+                            )
+                            .track_focus(settings_btn_focus)
                             .tab_index(0)
-                            .w(height::COMPACT)
-                            .h(height::COMPACT)
+                            .w(height::CONTROL)
+                            .h(height::CONTROL)
+                            .rounded(radius::CONTROL)
+                            .bg(bg)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .on_icon_press(press_state)
+                            .on_click(move |_, w, cx| (on_settings)(w, cx))
+                            .child(motion::animated_icon_press(
+                                "sidebar-settings-btn",
+                                pressed,
+                                Icon::new(IconName::Settings)
+                                    .size(px(18.0))
+                                    .text_color(palette.text_secondary),
+                                window,
+                                cx,
+                            ))
+                    }),
+            ),
+        )
+}
+
+/// Visual-only non-interactive sidebar snapshot used exclusively during the `150ms` collapse exit
+/// so content slides and fades smoothly while all interactive, focus, and a11y nodes unmount on frame 1.
+#[allow(clippy::too_many_arguments)]
+pub fn render_sidebar_exiting(
+    route: ShellRoute,
+    active_session_id: Option<&str>,
+    sessions: &[SessionSummary],
+    search_query: &str,
+    batch_mode: bool,
+    selected_ids: &BTreeSet<String>,
+    account_label: SharedString,
+    account_initial: SharedString,
+    palette: &DesktopPalette,
+) -> impl IntoElement {
+    let recent = filter_recent_sidebar_sessions(sessions, search_query);
+    let has_search_query = !search_query.trim().is_empty();
+    let row_height = px(36.0);
+
+    let mut recent_list = div()
+        .flex_1()
+        .min_h_0()
+        .min_w_0()
+        .overflow_hidden()
+        .flex()
+        .flex_col()
+        .gap(space::TIGHT);
+
+    if recent.is_empty() {
+        recent_list = recent_list.child(
+            apply_scale(div(), scale::BODY)
+                .px(space::MD)
+                .py(space::MD)
+                .text_color(palette.text_muted)
+                .child(if has_search_query {
+                    "无匹配会话"
+                } else {
+                    "暂无历史对话"
+                }),
+        );
+    } else {
+        for sess in &recent {
+            let is_active =
+                matches!(route, ShellRoute::Session) && active_session_id == Some(sess.id.as_str());
+            let is_checked = selected_ids.contains(&sess.id);
+            let is_selected = if batch_mode { is_checked } else { is_active };
+            let title_text = if sess.title.trim().is_empty() {
+                SharedString::from("新对话")
+            } else {
+                SharedString::from(sess.title.clone())
+            };
+            let row_bg = if is_selected {
+                palette.bg_item_active
+            } else {
+                gpui_kit::transparent_black()
+            };
+            let row_scale = if is_selected {
+                scale::BODY_MEDIUM
+            } else {
+                scale::BODY
+            };
+            let row_text_color = if is_selected {
+                palette.text_primary
+            } else {
+                palette.text_secondary
+            };
+
+            let mut row = apply_scale(div(), row_scale)
+                .h(row_height)
+                .px(space::MD)
+                .rounded(radius::CONTROL)
+                .bg(row_bg)
+                .text_color(row_text_color)
+                .flex()
+                .items_center()
+                .gap(space::MD);
+            if batch_mode {
+                row = row.child(
+                    div()
+                        .w(px(16.0))
+                        .h(px(16.0))
+                        .rounded(radius::CONTROL)
+                        .border_1()
+                        .border_color(if is_checked {
+                            palette.accent_solid
+                        } else {
+                            palette.border_strong
+                        })
+                        .bg(if is_checked {
+                            palette.accent_solid
+                        } else {
+                            palette.bg_elevated
+                        })
+                        .flex_shrink_0(),
+                );
+            }
+            recent_list = recent_list.child(
+                row.child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(cjk_inline_label(title_text)),
+                ),
+            );
+        }
+    }
+
+    let nav_row = |icon: IconName, label: &'static str, active: bool| {
+        apply_scale(
+            div(),
+            if active {
+                scale::BODY_MEDIUM
+            } else {
+                scale::BODY
+            },
+        )
+        .h(row_height)
+        .px(space::MD)
+        .rounded(radius::CONTROL)
+        .bg(if active {
+            palette.bg_item_active
+        } else {
+            gpui_kit::transparent_black()
+        })
+        .text_color(palette.text_primary)
+        .flex()
+        .items_center()
+        .gap(space::MD)
+        .child(
+            Icon::new(icon)
+                .size(px(18.0))
+                .text_color(palette.text_secondary),
+        )
+        .child(cjk_inline_label(label))
+    };
+
+    div()
+        .w(layout::SIDEBAR_WIDTH)
+        .h_full()
+        .flex_shrink_0()
+        .px(space::LG)
+        .pb(space::MD)
+        .bg(palette.bg_shell)
+        .flex()
+        .flex_col()
+        .justify_between()
+        .child(
+            div()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(space::SM)
+                .child(
+                    div()
+                        .h(layout::TOPBAR_HEIGHT)
+                        .pl(space::SM)
+                        .flex_shrink_0()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            apply_scale(div(), scale::BODY_SEMIBOLD)
+                                .text_color(palette.text_primary)
+                                .child(cjk_inline_label("CST Pilot")),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(space::TIGHT)
+                                .child(
+                                    div()
+                                        .w(height::CONTROL)
+                                        .h(height::CONTROL)
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(
+                                            Icon::new(IconName::PanelLeft)
+                                                .size(px(18.0))
+                                                .text_color(palette.text_secondary),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .w(height::CONTROL)
+                                        .h(height::CONTROL)
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(
+                                            Icon::new(IconName::SquarePen)
+                                                .size(px(18.0))
+                                                .text_color(palette.text_secondary),
+                                        ),
+                                ),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(space::LG)
+                        .child(
+                            div()
+                                .h(row_height)
+                                .px(space::MD)
+                                .rounded(radius::CONTROL)
+                                .border_1()
+                                .border_color(palette.border_hairline)
+                                .flex_shrink_0()
+                                .flex()
+                                .items_center()
+                                .gap(space::SM)
+                                .child(
+                                    Icon::new(IconName::Search)
+                                        .size(px(18.0))
+                                        .text_color(palette.text_secondary),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::BODY)
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_color(if has_search_query {
+                                            palette.text_primary
+                                        } else {
+                                            palette.text_muted
+                                        })
+                                        .child(if has_search_query {
+                                            SharedString::from(search_query.to_owned())
+                                        } else {
+                                            SharedString::from("搜索")
+                                        }),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::CAPTION)
+                                        .text_color(palette.text_muted)
+                                        .flex_shrink_0()
+                                        .child(cjk_inline_label("Ctrl+K")),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex_shrink_0()
+                                .flex()
+                                .flex_col()
+                                .gap(space::TIGHT)
+                                .child(nav_row(IconName::LayoutDashboard, "仪表盘", false))
+                                .child(nav_row(
+                                    IconName::RotateCcwClock,
+                                    "全部会话",
+                                    !batch_mode && matches!(route, ShellRoute::AllSessions),
+                                )),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_h_0()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap(space::SM)
+                                .child(
+                                    div()
+                                        .h(height::COMPACT)
+                                        .px(space::MD)
+                                        .flex_shrink_0()
+                                        .flex()
+                                        .items_center()
+                                        .child(
+                                            apply_scale(div(), scale::BODY_MEDIUM)
+                                                .text_color(palette.text_muted)
+                                                .child(cjk_inline_label("最近")),
+                                        ),
+                                )
+                                .child(recent_list),
+                        ),
+                ),
+        )
+        .child(
+            div().pt(space::SM).flex_shrink_0().child(
+                div()
+                    .h(row_height)
+                    .pr(space::MICRO)
+                    .rounded(radius::CONTROL)
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(space::XS)
+                    .child(
+                        apply_scale(div(), scale::BODY_MEDIUM)
+                            .flex_1()
+                            .min_w_0()
+                            .h(row_height)
+                            .px(space::MD)
+                            .flex()
+                            .items_center()
+                            .gap(space::MD)
+                            .child(
+                                apply_scale(div(), scale::CAPTION_MEDIUM)
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .w(height::INLINE)
+                                    .h(height::INLINE)
+                                    .rounded(radius::FULL)
+                                    .bg(palette.bg_item_active)
+                                    .text_color(palette.text_primary)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .flex_shrink_0()
+                                    .child(account_initial),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_color(palette.text_primary)
+                                    .child(cjk_inline_label(account_label)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(height::CONTROL)
+                            .h(height::CONTROL)
                             .rounded(radius::CONTROL)
                             .bg(if matches!(route, ShellRoute::Settings) {
                                 palette.bg_item_active
@@ -704,19 +1165,12 @@ pub fn render_sidebar(
                             .flex()
                             .items_center()
                             .justify_center()
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_icon_press(press_state)
-                            .on_click(move |_, w, cx| (on_settings)(w, cx))
-                            .child(motion::animated_icon_press(
-                                "sidebar-settings-btn",
-                                pressed,
+                            .child(
                                 Icon::new(IconName::Settings)
-                                    .size(px(16.0))
+                                    .size(px(18.0))
                                     .text_color(palette.text_secondary),
-                                window,
-                                cx,
-                            ))
-                    }),
+                            ),
+                    ),
             ),
         )
 }
@@ -729,37 +1183,44 @@ fn sidebar_nav_item(
     palette: &DesktopPalette,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    apply_scale(div(), if active { scale::UI_MEDIUM } else { scale::UI })
-        .id(id)
-        .test_support()
-        .a11y_button(id, label)
-        .tab_index(0)
-        .h(height::CONTROL)
-        .px(space::SM)
-        .rounded(radius::CONTROL)
-        .bg(if active {
+    apply_scale(
+        div(),
+        if active {
+            scale::BODY_MEDIUM
+        } else {
+            scale::BODY
+        },
+    )
+    .id(id)
+    .test_support()
+    .a11y_button(id, label)
+    .tab_index(0)
+    .h(px(36.0))
+    .px(space::MD)
+    .rounded(radius::CONTROL)
+    .bg(if active {
+        palette.bg_item_active
+    } else {
+        gpui_kit::transparent_black()
+    })
+    .text_color(palette.text_primary)
+    .flex()
+    .items_center()
+    .gap(space::MD)
+    .hover(|s| {
+        s.bg(if active {
             palette.bg_item_active
         } else {
-            gpui_kit::transparent_black()
+            palette.bg_item_hover
         })
-        .text_color(palette.text_primary)
-        .flex()
-        .items_center()
-        .gap(space::SM)
-        .hover(|s| {
-            s.bg(if active {
-                palette.bg_item_active
-            } else {
-                palette.bg_item_hover
-            })
-        })
-        .on_click(move |_, w, cx| on_click(w, cx))
-        .child(
-            Icon::new(icon)
-                .size(px(16.0))
-                .text_color(palette.text_secondary),
-        )
-        .child(cjk_inline_label(label))
+    })
+    .on_click(move |_, w, cx| on_click(w, cx))
+    .child(
+        Icon::new(icon)
+            .size(px(18.0))
+            .text_color(palette.text_secondary),
+    )
+    .child(cjk_inline_label(label))
 }
 
 trait DivCondExt: Sized {

@@ -291,7 +291,7 @@ pub fn render_frosted_surface(
     transparency_enabled: bool,
     scale_factor: f32,
 ) -> Stateful<Div> {
-    let is_elevated_card = spec.corner_radius_px > 0.0;
+    let is_elevated_card = spec.specular > 0.0;
     let shadow_sm: Hsla = gpui_kit::rgba(if spec.tint_rgb[0] > 0.5 {
         0x1111_110F
     } else {
@@ -304,12 +304,13 @@ pub fn render_frosted_surface(
         0x0000_0080
     })
     .into();
-    let highlight_top: Hsla = gpui_kit::rgba(if spec.tint_rgb[0] > 0.5 {
+    let mut highlight_top: Hsla = gpui_kit::rgba(if spec.tint_rgb[0] > 0.5 {
         0xFFFF_FFF2
     } else {
         0xFFFF_FF1F
     })
     .into();
+    highlight_top.a *= spec.opacity.clamp(0.0, 1.0);
 
     let mut container = div().id(id).relative();
     if is_elevated_card {

@@ -154,6 +154,19 @@ pub fn render_assistant_markdown(
     reduce_motion: bool,
     palette: &DesktopPalette,
 ) -> impl IntoElement {
+    let style = build_markdown_style(palette);
+    render_assistant_markdown_with_style(state, is_streaming, reduce_motion, palette, style)
+}
+
+/// Renders an assistant Markdown block reusing a pre-built `TextViewStyle` so multi-turn frames
+/// avoid rebuilding identical `StyleRefinement` allocations on every block.
+pub fn render_assistant_markdown_with_style(
+    state: &Entity<TextViewState>,
+    is_streaming: bool,
+    reduce_motion: bool,
+    palette: &DesktopPalette,
+    style: TextViewStyle,
+) -> impl IntoElement {
     let palette_copy = *palette;
     let copied_code_spans: Arc<Mutex<BTreeMap<usize, Instant>>> =
         Arc::new(Mutex::new(BTreeMap::new()));
@@ -174,7 +187,7 @@ pub fn render_assistant_markdown(
         .text_color(palette.text_primary)
         .child(
             TextView::new(state)
-                .style(build_markdown_style(palette))
+                .style(style)
                 .selectable(true)
                 .scrollable(false)
                 .motion(text_motion)
@@ -321,6 +334,33 @@ pub fn render_copyable_text_block<V: 'static>(
                     cx,
                 )),
         )
+}
+
+/// Visual-only non-interactive copyable text block used during `150ms` collapse exits.
+pub fn render_copyable_text_block_inert(
+    text: impl Into<SharedString>,
+    monospace: bool,
+    mono_family: SharedString,
+    palette: &DesktopPalette,
+) -> impl IntoElement {
+    let mut content_div = apply_scale(div(), scale::CAPTION)
+        .w_full()
+        .min_w_0()
+        .text_color(palette.text_secondary);
+    if monospace {
+        content_div = content_div.font_family(mono_family);
+    }
+    div()
+        .relative()
+        .w_full()
+        .min_w_0()
+        .min_h(px(36.0))
+        .pl(space::MD)
+        .pr(px(40.0))
+        .py(px(10.0))
+        .rounded(radius::CONTROL)
+        .bg(palette.bg_surface)
+        .child(content_div.child(text.into()))
 }
 
 /// Helper tracker that remembers recently-copied IDs for 1.6s (`iconSwap` contract).

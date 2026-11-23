@@ -82,7 +82,7 @@ impl SettingsCategory {
     pub fn label(self) -> &'static str {
         match self {
             Self::General => "常规",
-            Self::Providers => "模型服务",
+            Self::Providers => "提供商",
             Self::Preferences => "模型偏好",
             Self::Shortcuts => "快捷键",
         }
@@ -100,6 +100,7 @@ impl SettingsCategory {
 
 #[derive(Debug, Clone)]
 pub enum SettingsViewEvent {
+    NavigateBack,
     OpenUpdateDialog,
     CancelUpdate,
     OpenLoginOrAccount { signed_in: bool },
@@ -415,8 +416,14 @@ impl Render for SettingsView {
         };
 
         let (opacity, offset) = self.page_slide.sample(window, cx);
-        let content_wrap = div().w_full().opacity(opacity).ml(offset).child(content_el);
+        let content_wrap = div()
+            .relative()
+            .left(offset)
+            .w_full()
+            .opacity(opacity)
+            .child(content_el);
 
+        let e_back = entity.clone();
         div()
             .id("settings-view-vpwaf")
             .test_support()
@@ -424,13 +431,17 @@ impl Render for SettingsView {
             .size_full()
             .flex()
             .flex_col()
-            .bg(palette.bg_workspace)
             .child(render_subpage_header_xwjof(
                 "settings-subpage-header",
                 IconName::Settings,
                 "设置",
                 None,
+                Some(Rc::new(move |_, cx| {
+                    e_back.update(cx, |_, cx| cx.emit(SettingsViewEvent::NavigateBack));
+                })),
                 &palette,
+                window,
+                cx,
             ))
             .child(
                 div()
@@ -439,7 +450,7 @@ impl Render for SettingsView {
                     .min_h_0()
                     .w_full()
                     .overflow_y_scroll()
-                    .px(space::GROUP)
+                    .px(layout::SUBPAGE_HORIZONTAL_INSET)
                     .py(space::GROUP)
                     .flex()
                     .flex_col()

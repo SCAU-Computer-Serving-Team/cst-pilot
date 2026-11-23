@@ -1,5 +1,5 @@
 use super::win_native::Control;
-use super::wz_index::{ScanSource, VolumeIdentity};
+use super::wz_index::{ScanSource, VolumeIdentity, display_path, drive_key, path_key};
 use std::fs::{self, File};
 use std::io::{Read, Result as IoResult};
 use std::path::{Path, PathBuf};
@@ -36,26 +36,36 @@ impl ScanSource for NativeScanSource {
     }
     fn export(&self, root: &Path, control: &Control) -> Result<Box<dyn Read + Send>, String> {
         control.check()?;
-        let executable = self.root.join("wiztree/WizTree64.exe");
+        let layout = cst_os::KitLayout::new(&self.root)?;
+        let executable = layout.wiztree_dir().join("WizTree64.exe");
         if !executable.is_file() {
             return Err("随包 WizTree 不可用。".into());
         }
-        let directories = pin_temporary(&self.root)?;
-        let path = self
-            .root
-            .join("wiztree/tmp")
+        #[cfg(windows)]
+        if let Some(drive) = drive_key(root)
+            && path_key(root) == drive
+            && volume_identity(&drive).is_ok_and(|id| id.filesystem.eq_ignore_ascii_case("NTFS"))
+            && !cst_os::is_elevated().unwrap_or(false)
+        {
+            return Err("当前非管理员权限，无法通过 WizTree 读取 NTFS 主文件表（MFT）。".into());
+        }
+        let directories = pin_temporary(layout.root())?;
+        let path = layout
+            .wiztree_tmp_dir()
             .join(format!("wz-{}.csv", uuid::Uuid::new_v4()));
         let mut exported = ExportFile {
             file: None,
             path: path.clone(),
             _directories: directories,
         };
+        let cli_root = wiztree_target_arg(root);
+        let cli_export = display_path(&path);
         super::native_job::run(
             &executable,
             &[
-                root.as_os_str().to_owned(),
+                cli_root.into(),
                 "/admin=0".into(),
-                format!("/export={}", path.display()).into(),
+                format!("/export={cli_export}").into(),
                 "/exportfolders=1".into(),
                 "/exportfiles=1".into(),
             ],
@@ -88,10 +98,23 @@ impl ScanSource for NativeScanSource {
         Ok(Box::new(exported))
     }
 }
+fn wiztree_target_arg(root: &Path) -> String {
+    let clean = display_path(root);
+    let trimmed = clean.trim_end_matches(['\\', '/']);
+    let bytes = trimmed.as_bytes();
+    if bytes.len() == 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        format!("{trimmed}\\")
+    } else if trimmed.is_empty() {
+        clean
+    } else {
+        trimmed.to_owned()
+    }
+}
+
 fn pin_temporary(root: &Path) -> Result<Vec<File>, String> {
     let mut files = Vec::new();
     let mut path = root.to_path_buf();
-    for part in ["", "wiztree", "tmp"] {
+    for part in ["", ".state", "tmp", "wiztree"] {
         if !part.is_empty() {
             path.push(part);
         }

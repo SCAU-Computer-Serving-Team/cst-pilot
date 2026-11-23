@@ -243,10 +243,37 @@ impl WzIndex {
     }
 }
 
+pub fn display_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else if let Some(stripped) = text.strip_prefix(r"\\?\") {
+        stripped.to_owned()
+    } else {
+        text.into_owned()
+    }
+}
 pub fn path_key(path: &Path) -> String {
-    let text = path.to_string_lossy().replace('/', "\\");
-    let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
-    text.trim_end_matches('\\').to_uppercase()
+    let text = display_path(path).replace('/', "\\");
+    let (prefix, rest) = match text.strip_prefix(r"\\") {
+        Some(tail) => (r"\\", tail),
+        None => ("", text.as_str()),
+    };
+    let mut normalized = String::with_capacity(text.len());
+    normalized.push_str(prefix);
+    let mut prev_slash = false;
+    for ch in rest.chars() {
+        if ch == '\\' {
+            if !prev_slash {
+                normalized.push('\\');
+                prev_slash = true;
+            }
+        } else {
+            prev_slash = false;
+            normalized.push(ch);
+        }
+    }
+    normalized.trim_end_matches('\\').to_uppercase()
 }
 pub fn drive_key(path: &Path) -> Option<String> {
     let key = path_key(path);

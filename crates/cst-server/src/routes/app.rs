@@ -140,6 +140,13 @@ pub async fn handle_app_route(
             .activity_gate()
             .enter()
             .map_err(|msg| ApiError::from(ModeRejection::Updating(msg)))?;
+        if !state.has_web_static() {
+            return Err(ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "static_missing",
+                "网页端前端尚未构建，请先执行 npm run build --prefix src/web/frontend。",
+            ));
+        }
         let port = state.port();
         let (open_res, _ticket) = state.mode.open_web(port).await.map_err(ApiError::from)?;
         state.pool.global_events.publish(

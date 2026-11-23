@@ -12,6 +12,7 @@ use cst_client::{
 };
 use gpui::{Image, ImageSource, ObjectFit, ScrollEvent, ScrollHandle, StyledImage as _};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::text::TextViewStyle;
 use gpui_kit::component::Icon;
 use gpui_kit::{
     App, AppContext as _, ClipboardItem, Context, Entity, EventEmitter, InteractiveElement,
@@ -22,7 +23,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::accessibility::A11yElementExt as _;
-use crate::theme::motion::DesktopTooltipExt as _;
+use crate::theme::motion::{DesktopTooltipExt as _, IconPressExt as _};
 use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion,
     radius, scale, space,
@@ -30,19 +31,22 @@ use crate::theme::{
 use crate::tools::bitlocker_card::{
     PendingBitLockerPrompt, SecretInput, SecretInputEvent, find_pending_bitlocker_request,
 };
-use crate::tools::normal_card::render_normal_tool_card_with_args;
+use crate::tools::normal_card::{render_normal_tool_card_with_args, render_normal_tool_row_inert};
 use crate::tools::{SpecialToolDispatchProps, render_special_tool_component};
 use crate::workbench::image_viewer::{
     LightboxImageTarget, gpui_image_from_bytes, gpui_image_from_handle,
 };
 use crate::workbench::markdown_view::{
-    CopyFeedbackTracker, MarkdownStreamStore, render_assistant_markdown, render_copyable_text_block,
+    CopyFeedbackTracker, MarkdownStreamStore, build_markdown_style,
+    render_assistant_markdown_with_style, render_copyable_text_block,
+    render_copyable_text_block_inert,
 };
 use crate::workbench::turn_segments::{
-    ConversationPart, ImageContentPart, SpecialToolKind, ToolCallPart, Turn, TurnEntry, TurnPart,
-    TurnSegmentKind, active_turn_index, build_turn_segments_with_results, extract_message_text,
-    extract_user_images, format_duration_zh, group_turns_and_results, is_standalone_tool,
-    process_segment_label, render_running_light_label, split_turn,
+    ConversationPart, ImageContentPart, SpecialToolKind, SplitTurnOutput, ToolCallPart, Turn,
+    TurnEntry, TurnPart, TurnSegment, TurnSegmentKind, build_turn_segments_with_results,
+    extract_message_text, extract_user_images, format_duration_zh, format_live_duration_zh,
+    group_turns_and_results, is_standalone_tool, process_segment_label,
+    render_running_light_label_with_scale, segment_is_running, split_turn,
 };
 
 pub const DEFAULT_VISIBLE_TURN_WINDOW: usize = 30;
@@ -80,22 +84,187 @@ struct GroupedTurnCache {
     // even if the store has the only strong reference. It doesn't pin the JSON.
     source: Weak<Vec<Value>>,
     grouped: Arc<GroupedTurns>,
+    prepared_base: Arc<Vec<Arc<PreparedTurn>>>,
+    generation: u64,
+}
+
+struct PreparedTurn {
+    turn: Turn,
+    split: Option<SplitTurnOutput>,
+    segments: Vec<TurnSegment>,
+}
+
+impl PreparedTurn {
+    fn from_turn(turn: Turn, tool_results: &BTreeMap<String, Value>) -> Self {
+        if turn.summary.is_some() || turn.compaction.is_some() || turn.assistants.is_empty() {
+            return Self {
+                turn,
+                split: None,
+                segments: Vec::new(),
+            };
+        }
+        let split = split_turn(&turn.assistants);
+        let segments = build_turn_segments_with_results(split.process.clone(), tool_results);
+        Self {
+            turn,
+            split: Some(split),
+            segments,
+        }
+    }
+}
+
+struct PreparedSessionData {
+    turns: Vec<Arc<PreparedTurn>>,
+    tool_results: Arc<BTreeMap<String, Value>>,
+    messages_generation: u64,
+}
+
+struct PreparedSessionCache {
+    session_id: String,
+    revision: u64,
+    running: bool,
+    messages_generation: u64,
+    data: Arc<PreparedSessionData>,
 }
 
 impl GroupedTurnCache {
+    #[cfg_attr(not(test), allow(dead_code))]
     fn for_messages(cache: &mut Option<Self>, messages: &Arc<Vec<Value>>) -> Arc<GroupedTurns> {
+        let mut dummy_gen = cache.as_ref().map_or(0, |c| c.generation);
+        let (grouped, _, _) = Self::sync_messages(cache, &mut dummy_gen, messages);
+        grouped
+    }
+
+    fn sync_messages(
+        cache: &mut Option<Self>,
+        next_gen: &mut u64,
+        messages: &Arc<Vec<Value>>,
+    ) -> (Arc<GroupedTurns>, Arc<Vec<Arc<PreparedTurn>>>, u64) {
         if let Some(cached) = cache
             && std::ptr::eq(cached.source.as_ptr(), Arc::as_ptr(messages))
         {
-            return Arc::clone(&cached.grouped);
+            return (
+                Arc::clone(&cached.grouped),
+                Arc::clone(&cached.prepared_base),
+                cached.generation,
+            );
         }
         let grouped = Arc::new(group_turns_and_results(messages));
+        let (turns, tool_results) = grouped.as_ref();
+        let prepared_base = Arc::new(
+            turns
+                .iter()
+                .cloned()
+                .map(|turn| Arc::new(PreparedTurn::from_turn(turn, tool_results)))
+                .collect(),
+        );
+        *next_gen = next_gen.wrapping_add(1).max(1);
+        let generation = *next_gen;
         *cache = Some(Self {
             source: Arc::downgrade(messages),
             grouped: Arc::clone(&grouped),
+            prepared_base: Arc::clone(&prepared_base),
+            generation,
         });
-        grouped
+        (grouped, prepared_base, generation)
     }
+}
+
+fn prepare_session_turns(
+    grouped_cache: &mut Option<GroupedTurnCache>,
+    next_messages_gen: &mut u64,
+    prepared_cache: &mut Option<PreparedSessionCache>,
+    session: &SessionViewSnapshot,
+) -> Arc<PreparedSessionData> {
+    let source_entries = if !session.entries.is_empty() {
+        &session.entries
+    } else {
+        &session.messages
+    };
+    let (grouped, prepared_base, messages_gen) =
+        GroupedTurnCache::sync_messages(grouped_cache, next_messages_gen, source_entries);
+
+    if let Some(cached) = prepared_cache
+        && cached.session_id == session.id
+        && cached.revision == session.revision
+        && cached.running == session.running
+        && cached.messages_generation == messages_gen
+    {
+        return Arc::clone(&cached.data);
+    }
+
+    let (_, base_tool_results) = grouped.as_ref();
+    let mut prepared_turns: Vec<Arc<PreparedTurn>> = prepared_base.as_ref().clone();
+
+    if session.running
+        && let Some(ref streaming) = session.streaming_assistant
+    {
+        let stream_entry = TurnEntry::from_json(streaming, source_entries.len());
+        if stream_entry.role == "assistant" {
+            let stream_id = streaming
+                .get("id")
+                .or_else(|| streaming.get("message").and_then(|m| m.get("id")))
+                .and_then(Value::as_str);
+            let mut updated_last = false;
+            if let Some(last_arc) = prepared_turns.last()
+                && last_arc.turn.summary.is_none()
+                && last_arc.turn.compaction.is_none()
+            {
+                let mut tail_turn = last_arc.turn.clone();
+                if let Some(sid_str) = stream_id
+                    && let Some(last_asst) = tail_turn.assistants.last_mut()
+                    && last_asst.id.as_deref() == Some(sid_str)
+                {
+                    *last_asst = stream_entry.clone();
+                } else {
+                    tail_turn.assistants.push(stream_entry.clone());
+                }
+                *prepared_turns.last_mut().expect("non-empty turns") =
+                    Arc::new(PreparedTurn::from_turn(tail_turn, base_tool_results));
+                updated_last = true;
+            }
+            if !updated_last {
+                let tail_turn = Turn {
+                    user: None,
+                    assistants: vec![stream_entry],
+                    summary: None,
+                    compaction: None,
+                };
+                prepared_turns.push(Arc::new(PreparedTurn::from_turn(
+                    tail_turn,
+                    base_tool_results,
+                )));
+            }
+        }
+    }
+
+    let data = Arc::new(PreparedSessionData {
+        turns: prepared_turns,
+        tool_results: Arc::new(base_tool_results.clone()),
+        messages_generation: messages_gen,
+    });
+    *prepared_cache = Some(PreparedSessionCache {
+        session_id: session.id.clone(),
+        revision: session.revision,
+        running: session.running,
+        messages_generation: messages_gen,
+        data: Arc::clone(&data),
+    });
+    data
+}
+
+fn active_prepared_turn_index(turns: &[Arc<PreparedTurn>], running: bool) -> Option<usize> {
+    if !running || turns.is_empty() {
+        return None;
+    }
+    let mut idx = turns.len();
+    while idx > 0 {
+        idx -= 1;
+        if turns[idx].turn.summary.is_none() && turns[idx].turn.compaction.is_none() {
+            return Some(idx);
+        }
+    }
+    None
 }
 
 pub struct MessageListView {
@@ -105,8 +274,9 @@ pub struct MessageListView {
     scroll_handle: ScrollHandle,
     auto_follow_bottom: bool,
     visible_turn_limit: usize,
-    expanded_segments: BTreeSet<ProcessExpansionKey>,
+    segment_expansion_overrides: BTreeMap<ProcessExpansionKey, bool>,
     expanded_thinking: BTreeSet<String>,
+    expanded_compactions: BTreeSet<String>,
     expanded_error_details: BTreeSet<String>,
     tool_card_expansion: BTreeMap<String, bool>,
     expanded_tool_raw: BTreeSet<String>,
@@ -120,6 +290,11 @@ pub struct MessageListView {
     attachment_loading: BTreeSet<String>,
     attachment_generation: u64,
     grouped_turn_cache: Option<GroupedTurnCache>,
+    next_messages_generation: u64,
+    prepared_session_cache: Option<PreparedSessionCache>,
+    revealed_session_id: Option<String>,
+    suppress_immediate_reveal: bool,
+    content_reveal: motion::SurfaceReveal,
 }
 
 impl EventEmitter<MessageListEvent> for MessageListView {}
@@ -133,8 +308,9 @@ impl MessageListView {
             scroll_handle: ScrollHandle::new(),
             auto_follow_bottom: true,
             visible_turn_limit: DEFAULT_VISIBLE_TURN_WINDOW,
-            expanded_segments: BTreeSet::new(),
+            segment_expansion_overrides: BTreeMap::new(),
             expanded_thinking: BTreeSet::new(),
+            expanded_compactions: BTreeSet::new(),
             expanded_error_details: BTreeSet::new(),
             tool_card_expansion: BTreeMap::new(),
             expanded_tool_raw: BTreeSet::new(),
@@ -148,6 +324,11 @@ impl MessageListView {
             attachment_loading: BTreeSet::new(),
             attachment_generation: 0,
             grouped_turn_cache: None,
+            next_messages_generation: 0,
+            prepared_session_cache: None,
+            revealed_session_id: None,
+            suppress_immediate_reveal: false,
+            content_reveal: motion::SurfaceReveal::default(),
         }
     }
 
@@ -157,12 +338,10 @@ impl MessageListView {
         expanded: bool,
         cx: &mut Context<Self>,
     ) {
-        let changed = if expanded {
-            self.expanded_segments.insert(key.clone())
-        } else {
-            self.expanded_segments.remove(key)
-        };
-        if changed {
+        let prev = self
+            .segment_expansion_overrides
+            .insert(key.clone(), expanded);
+        if prev != Some(expanded) {
             cx.notify();
         }
     }
@@ -171,12 +350,20 @@ impl MessageListView {
         if self.session_id == next_id {
             return;
         }
+        let was_in_session = self.session_id.is_some();
         self.session_id = next_id;
+        self.revealed_session_id = None;
+        // Switching Session A -> Session B always plays the local message-surface reveal;
+        // entering from Home/other routes lets the route transition lead if data is already cached,
+        // while async loads still glide in once settled.
+        self.suppress_immediate_reveal = !was_in_session;
+        self.content_reveal.clear();
         self.last_observed_revision = 0;
         self.auto_follow_bottom = true;
         self.visible_turn_limit = DEFAULT_VISIBLE_TURN_WINDOW;
-        self.expanded_segments.clear();
+        self.segment_expansion_overrides.clear();
         self.expanded_thinking.clear();
+        self.expanded_compactions.clear();
         self.expanded_error_details.clear();
         self.tool_card_expansion.clear();
         self.expanded_tool_raw.clear();
@@ -187,6 +374,7 @@ impl MessageListView {
         self.markdown_store.clear();
         self.turn_started_instants.clear();
         self.grouped_turn_cache = None;
+        self.prepared_session_cache = None;
         self.attachment_cache.clear();
         self.attachment_loading.clear();
         self.attachment_generation = self.attachment_generation.wrapping_add(1);
@@ -670,6 +858,8 @@ impl MessageListView {
                 ),
                 false,
                 palette,
+                window,
+                cx,
                 move |_, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(text_copy.clone()));
                     ent_copy.update(cx, |this, cx| {
@@ -688,6 +878,8 @@ impl MessageListView {
                 palette.text_secondary,
                 false,
                 palette,
+                window,
+                cx,
                 move |_, cx| {
                     let s = sid_edit.clone();
                     let p = parent_edit.clone();
@@ -704,6 +896,8 @@ impl MessageListView {
                 palette.text_secondary,
                 false,
                 palette,
+                window,
+                cx,
                 move |_, cx| {
                     let s = sid_retry.clone();
                     let p = parent_retry.clone();
@@ -727,12 +921,15 @@ impl MessageListView {
             .into_any_element()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_outbox_bubble(
         &self,
         session_id: &str,
         item: &OutboxItem,
         palette: &DesktopPalette,
         entity: &Entity<Self>,
+        window: &mut Window,
+        cx: &mut App,
     ) -> gpui_kit::AnyElement {
         let mid = item.client_message_id.clone();
         let in_flight = item.state.is_in_flight();
@@ -860,6 +1057,8 @@ impl MessageListView {
                         palette.text_secondary,
                         false,
                         palette,
+                        window,
+                        cx,
                         move |_, cx| {
                             let s = sid_retry.clone();
                             let m = mid_retry.clone();
@@ -885,6 +1084,8 @@ impl MessageListView {
                         palette.text_secondary,
                         false,
                         palette,
+                        window,
+                        cx,
                         move |_, cx| {
                             ent_edit.update(cx, |this, cx| {
                                 match this.client.edit_outbox_item(
@@ -908,6 +1109,8 @@ impl MessageListView {
                         palette.status_danger,
                         false,
                         palette,
+                        window,
+                        cx,
                         move |_, cx| {
                             ent_rm.update(cx, |this, cx| {
                                 if let Err(err) =
@@ -932,21 +1135,28 @@ impl MessageListView {
         tool_result_val: Option<&Value>,
         result_revision: u64,
         live: bool,
+        running_light_allowed: bool,
+        started_at: Instant,
         mono_family: SharedString,
         palette: &DesktopPalette,
         entity: &Entity<Self>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
-        let input = to_tool_call_input(call);
-        let parsed_res = tool_result_val.map(ToolResultInput::from_message_json);
-        let empty_res = ToolResultInput::default();
-        let card_view = self.client.with_presenter_cache(|cache| {
-            cache.get_or_map_normal(
-                &input,
-                parsed_res.as_ref().unwrap_or(&empty_res),
-                result_revision,
-            )
+        let has_result = tool_result_val.is_some();
+        let is_error = tool_result_val
+            .and_then(|v| v.get("isError"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let card_view = tool_result_val.map(|res_val| {
+            self.client.with_presenter_cache(|cache| {
+                if let Some(hit) = cache.get_cached_normal(&call.id, result_revision) {
+                    return hit;
+                }
+                let input = to_tool_call_input(call);
+                let parsed_res = ToolResultInput::from_message_json(res_val);
+                cache.get_or_map_normal(&input, &parsed_res, result_revision)
+            })
         });
 
         let duration_ms = tool_result_val
@@ -976,10 +1186,12 @@ impl MessageListView {
             &call.name,
             Some(&call.arguments),
             duration_ms,
-            parsed_res.is_some(),
-            parsed_res.as_ref().is_some_and(|r| r.is_error),
+            has_result,
+            is_error,
             live,
-            &card_view,
+            running_light_allowed,
+            Some(started_at),
+            card_view.as_deref(),
             is_open,
             is_raw_open,
             mono_family,
@@ -1026,6 +1238,8 @@ impl MessageListView {
         tool_result_val: Option<&Value>,
         result_revision: u64,
         live: bool,
+        running_light_allowed: bool,
+        started_at: Instant,
         mono_family: SharedString,
         transparency_enabled: bool,
         scale_factor: f32,
@@ -1034,10 +1248,18 @@ impl MessageListView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
-        let input = to_tool_call_input(call);
-        let parsed_res = tool_result_val.map(ToolResultInput::from_message_json);
+        let cache_rev = if tool_result_val.is_some() {
+            result_revision
+        } else {
+            0
+        };
         let Some(special) = self.client.with_presenter_cache(|cache| {
-            cache.get_or_map_special(&input, parsed_res.as_ref(), result_revision, live)
+            if let Some(hit) = cache.get_cached_special(&call.id, cache_rev, live) {
+                return Some(hit);
+            }
+            let input = to_tool_call_input(call);
+            let parsed_res = tool_result_val.map(ToolResultInput::from_message_json);
+            cache.get_or_map_special(&input, parsed_res.as_ref(), cache_rev, live)
         }) else {
             return div().into_any_element();
         };
@@ -1080,6 +1302,9 @@ impl MessageListView {
                 warning_hovered,
                 transparency_enabled,
                 scale_factor,
+                running_light_allowed,
+                started_at: Some(started_at),
+                animate_enter: live,
             },
             self.client.clone(),
             mono_family,
@@ -1136,11 +1361,13 @@ impl MessageListView {
         &mut self,
         session: &SessionViewSnapshot,
         turn_idx: usize,
-        turn: &Turn,
+        prepared_turn: &PreparedTurn,
         parent_entry_id: Option<String>,
         tool_results: &BTreeMap<String, Value>,
+        messages_generation: u64,
         is_live_turn: bool,
         mono_family: SharedString,
+        markdown_style: &TextViewStyle,
         reduce_motion: bool,
         running_light_allowed: bool,
         transparency_enabled: bool,
@@ -1150,13 +1377,222 @@ impl MessageListView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
+        let turn = &prepared_turn.turn;
         let turn_key = turn
             .user
             .as_ref()
             .map(TurnEntry::stable_key)
             .or_else(|| turn.summary.as_ref().map(TurnEntry::stable_key))
+            .or_else(|| turn.compaction.as_ref().map(TurnEntry::stable_key))
             .or_else(|| turn.assistants.first().map(TurnEntry::stable_key))
             .unwrap_or_else(|| format!("idx-{turn_idx}"));
+
+        // Standalone `compactionSummary` Assistant reply bubble (`ln9GA` / `z9Bj5e`, collapsed by default)
+        if let Some(ref comp_entry) = turn.compaction {
+            let summary_raw = extract_message_text(&comp_entry.raw);
+            let summary_text = if summary_raw.trim().is_empty() {
+                "已完成上下文压缩，较早对话已整理为摘要。".to_owned()
+            } else {
+                summary_raw
+            };
+            let tokens_before = comp_entry
+                .raw
+                .get("tokensBefore")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let tokens_label = (tokens_before > 0).then(|| {
+                let k = (tokens_before as f64 / 1000.0).round() as u64;
+                if k > 0 {
+                    format!("压缩前 {k}k tokens")
+                } else {
+                    format!("压缩前 {tokens_before} tokens")
+                }
+            });
+            let ts_label = (comp_entry.timestamp_ms > 0)
+                .then(|| format_timestamp_hhmm(comp_entry.timestamp_ms))
+                .flatten();
+
+            let comp_key = format!("compaction:{turn_key}");
+            let is_open = self.expanded_compactions.contains(&comp_key);
+            let ent_toggle = entity.clone();
+            let toggle_key = comp_key.clone();
+            let hdr_id = SharedString::from(format!("compaction-hdr-{turn_key}"));
+            let (hdr_hovered, hdr_hs) =
+                motion::PointerFlag::keyed(format!("hover-compaction-hdr-{turn_key}"), window, cx);
+            let hdr_hover_t = motion::animated_state_progress(
+                format!("compaction-hdr-{turn_key}"),
+                hdr_hovered,
+                window,
+                cx,
+            );
+            let hdr_icon_fg =
+                motion::lerp_hsla(palette.text_secondary, palette.text_primary, hdr_hover_t);
+
+            let header = div()
+                .id(hdr_id.clone())
+                .test_support()
+                .a11y_toggle_button(hdr_id, "上下文已压缩", is_open)
+                .aria_expanded(is_open)
+                .w_full()
+                .h(height::CONTROL)
+                .border_b_1()
+                .border_color(palette.bg_surface)
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(space::MD)
+                .on_hover(move |active, w, cx| {
+                    if *active {
+                        motion::PointerFlag::enter(&hdr_hs, w, cx);
+                    } else {
+                        motion::PointerFlag::set(&hdr_hs, false, cx);
+                    }
+                })
+                .on_click(move |_, _, cx| {
+                    let k = toggle_key.clone();
+                    ent_toggle.update(cx, |this, cx| {
+                        if !this.expanded_compactions.remove(&k) {
+                            this.expanded_compactions.insert(k);
+                        }
+                        cx.notify();
+                    });
+                })
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::SM)
+                        .min_w_0()
+                        .child(
+                            Icon::new(IconName::Minimize2)
+                                .size(px(16.0))
+                                .text_color(hdr_icon_fg),
+                        )
+                        .child(
+                            apply_scale(div(), scale::BODY_MEDIUM)
+                                .text_color(palette.text_primary)
+                                .child(cjk_inline_label("上下文已压缩")),
+                        )
+                        .children(tokens_label.map(|meta| {
+                            apply_scale(div(), scale::UI)
+                                .text_color(palette.text_muted)
+                                .child(cjk_inline_label(meta))
+                        }))
+                        .child(motion::animated_chevron(
+                            format!("compaction-chev-{turn_key}"),
+                            is_open,
+                            false,
+                            px(16.0),
+                            hdr_icon_fg,
+                            window,
+                            cx,
+                        )),
+                )
+                .children(ts_label.map(|hhmm| {
+                    apply_scale(div(), scale::UI)
+                        .font_family(mono_family.clone())
+                        .text_color(palette.text_secondary)
+                        .flex_shrink_0()
+                        .child(cjk_inline_label(hhmm))
+                }));
+
+            let mut container = div()
+                .id(SharedString::from(format!("turn-compaction-{turn_key}")))
+                .test_support()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(space::MD)
+                .child(header);
+
+            let stream_key = format!("compaction-md:{turn_key}");
+            let md_entity = self
+                .markdown_store
+                .sync_entry(&stream_key, &summary_text, cx);
+            let copy_id = SharedString::from(format!("compaction-copy-{turn_key}"));
+            let is_copied = self.copy_tracker.is_copied(copy_id.as_ref());
+            let copy_text = summary_text.clone();
+            let copy_id_click = copy_id.clone();
+            let ent_copy = entity.clone();
+
+            if let Some(animated_body) = motion::animated_collapse_with_exit(
+                format!("compaction-body-{turn_key}"),
+                is_open,
+                window,
+                cx,
+                |interactive, window, cx| {
+                    let body_card = div()
+                        .w_full()
+                        .px(space::LG)
+                        .py(space::MD)
+                        .rounded(radius::CONTROL)
+                        .bg(palette.bg_surface)
+                        .child(render_assistant_markdown_with_style(
+                            &md_entity,
+                            false,
+                            reduce_motion,
+                            palette,
+                            markdown_style.clone(),
+                        ));
+
+                    if !interactive {
+                        return body_card.into_any_element();
+                    }
+
+                    let copy_btn_id = SharedString::from(format!("compaction-copy-btn-{turn_key}"));
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(space::SM)
+                        .child(body_card)
+                        .child(
+                            div()
+                                .w_full()
+                                .h(height::INLINE)
+                                .flex()
+                                .items_center()
+                                .child(icon_action_24_element(
+                                    copy_btn_id.clone(),
+                                    "复制压缩摘要",
+                                    motion::animated_copy_icon(
+                                        copy_btn_id,
+                                        is_copied,
+                                        px(14.0),
+                                        if is_copied {
+                                            palette.status_success
+                                        } else {
+                                            palette.text_secondary
+                                        },
+                                        window,
+                                        cx,
+                                    ),
+                                    false,
+                                    palette,
+                                    window,
+                                    cx,
+                                    move |_, cx| {
+                                        cx.write_to_clipboard(ClipboardItem::new_string(
+                                            copy_text.clone(),
+                                        ));
+                                        ent_copy.update(cx, |this, cx| {
+                                            this.copy_tracker.mark_copied(
+                                                copy_id_click.clone(),
+                                                |v| &mut v.copy_tracker,
+                                                cx,
+                                            );
+                                        });
+                                    },
+                                )),
+                        )
+                        .into_any_element()
+                },
+            ) {
+                container = container.child(animated_body);
+            }
+
+            return container.into_any_element();
+        }
 
         // Standalone `branchSummary` turn
         if let Some(ref sum_entry) = turn.summary {
@@ -1219,8 +1655,21 @@ impl MessageListView {
             return column.into_any_element();
         }
 
-        let split = split_turn(&turn.assistants);
-        let segments = build_turn_segments_with_results(split.process, tool_results);
+        let empty_split;
+        let split = match prepared_turn.split.as_ref() {
+            Some(s) => s,
+            None => {
+                empty_split = split_turn(&turn.assistants);
+                &empty_split
+            }
+        };
+        let empty_segments;
+        let segments: &[TurnSegment] = if prepared_turn.split.is_some() {
+            &prepared_turn.segments
+        } else {
+            empty_segments = build_turn_segments_with_results(split.process.clone(), tool_results);
+            &empty_segments
+        };
 
         // Track live elapsed instant for `RunningLight` sweep
         let started_instant = *self
@@ -1237,6 +1686,8 @@ impl MessageListView {
             split.total_duration_ms
         };
 
+        let total_segments = segments.len();
+        let has_final_text = !split.final_text.trim().is_empty();
         let mut assistant_stack = div().w_full().flex().flex_col().gap(space::MD);
 
         for (seg_idx, segment) in segments.iter().enumerate() {
@@ -1259,26 +1710,48 @@ impl MessageListView {
                     let expansion_key = segment
                         .expansion_anchor()
                         .map(|anchor| (turn_key.clone(), anchor));
-                    let seg_expanded = expansion_key
-                        .as_ref()
-                        .is_some_and(|key| self.expanded_segments.contains(key));
                     let has_expandable_parts = expansion_key.is_some();
+                    // Parity with web `ProcessSegment`: live process segments expand by default
+                    // so progress streams visibly and can be collapsed manually at any time;
+                    // once settled, untouched segments auto-collapse cleanly.
+                    let seg_expanded = expansion_key.as_ref().is_some_and(|key| {
+                        self.segment_expansion_overrides
+                            .get(key)
+                            .copied()
+                            .unwrap_or(is_live_turn)
+                    });
 
-                    let header_text = if seg_idx == 0 {
-                        let base = if is_live_turn {
-                            format!("工作中 {}", format_duration_zh(live_elapsed_ms))
+                    let base_header = (seg_idx == 0).then(|| {
+                        if is_live_turn {
+                            format!("工作中 {}", format_live_duration_zh(live_elapsed_ms))
                         } else {
                             format!("已工作 {}", format_duration_zh(split.total_duration_ms))
-                        };
-                        match sub_label {
-                            Some(sub) => format!("{base} · {sub}"),
-                            None => base,
                         }
-                    } else {
-                        sub_label.unwrap_or_else(|| "处理过程".to_owned())
+                    });
+                    let header_text = match (&base_header, &sub_label) {
+                        (Some(base), Some(sub)) => format!("{base} · {sub}"),
+                        (Some(base), None) => base.clone(),
+                        (None, Some(sub)) => sub.clone(),
+                        (None, None) => "处理过程".to_owned(),
                     };
 
                     let header_id = SharedString::from(format!("process-hdr-{segment_id}"));
+                    let (hdr_hovered, hdr_hs) = motion::PointerFlag::keyed(
+                        format!("hover-process-hdr-{segment_id}"),
+                        window,
+                        cx,
+                    );
+                    let hdr_hover_t = motion::animated_state_progress(
+                        format!("process-hdr-{segment_id}"),
+                        hdr_hovered && has_expandable_parts,
+                        window,
+                        cx,
+                    );
+                    let hdr_fg = motion::lerp_hsla(
+                        palette.text_secondary,
+                        palette.text_primary,
+                        hdr_hover_t,
+                    );
                     let mut header = div()
                         .id(header_id.clone())
                         .test_support()
@@ -1289,17 +1762,24 @@ impl MessageListView {
                         .flex()
                         .items_center()
                         .gap(space::SM)
-                        .text_color(palette.text_secondary)
-                        .hover(|s| s.text_color(palette.text_primary));
+                        .text_color(hdr_fg);
 
                     if let Some(click_key) = expansion_key {
                         let expand_key = click_key.clone();
                         let collapse_key = click_key.clone();
                         let expand_view = entity.clone();
                         let collapse_view = entity.clone();
+                        let current_expanded = seg_expanded;
                         header = header
                             .a11y_toggle_button(header_id, header_text.clone(), seg_expanded)
                             .aria_expanded(seg_expanded)
+                            .on_hover(move |active, w, cx| {
+                                if *active {
+                                    motion::PointerFlag::enter(&hdr_hs, w, cx);
+                                } else {
+                                    motion::PointerFlag::set(&hdr_hs, false, cx);
+                                }
+                            })
                             .on_a11y_action(gpui::AccessibleAction::Expand, move |_, _, cx| {
                                 expand_view.update(cx, |this, cx| {
                                     this.set_process_segment_expanded(&expand_key, true, cx);
@@ -1311,18 +1791,67 @@ impl MessageListView {
                                 });
                             })
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                let expanded = this.expanded_segments.contains(&click_key);
-                                this.set_process_segment_expanded(&click_key, !expanded, cx);
+                                this.set_process_segment_expanded(
+                                    &click_key,
+                                    !current_expanded,
+                                    cx,
+                                );
                             }));
                     }
 
-                    header = header.child(render_running_light_label(
-                        &header_text,
-                        is_live_turn && seg_idx == 0 && running_light_allowed,
-                        started_instant,
-                        palette,
-                        window,
-                    ));
+                    let segment_active = is_live_turn
+                        && (seg_idx == 0
+                            || segment_is_running(
+                                &segment.parts,
+                                tool_results,
+                                is_live_turn,
+                                seg_idx + 1 == total_segments,
+                                has_final_text,
+                            ));
+                    let sweep_live = segment_active && running_light_allowed;
+                    if let Some(base) = base_header {
+                        let mut label_row =
+                            div()
+                                .flex()
+                                .items_center()
+                                .child(motion::animated_status_label(
+                                    format!("process-hdr-base-{segment_id}"),
+                                    SharedString::from(base),
+                                    sweep_live,
+                                    started_instant,
+                                    hdr_fg,
+                                    palette.text_primary,
+                                    scale::BODY,
+                                    window,
+                                    cx,
+                                ));
+                        if let Some(sub) = sub_label {
+                            label_row = label_row.child(motion::animated_status_label(
+                                format!("process-hdr-sub-{segment_id}"),
+                                SharedString::from(format!(" · {sub}")),
+                                sweep_live,
+                                started_instant,
+                                hdr_fg,
+                                palette.text_primary,
+                                scale::BODY,
+                                window,
+                                cx,
+                            ));
+                        }
+                        header = header.child(label_row);
+                    } else {
+                        header = header.child(motion::animated_status_label(
+                            format!("process-hdr-label-{segment_id}"),
+                            SharedString::from(header_text),
+                            sweep_live,
+                            started_instant,
+                            hdr_fg,
+                            palette.text_primary,
+                            scale::BODY,
+                            window,
+                            cx,
+                        ));
+                    }
 
                     if has_expandable_parts {
                         header = header.child(motion::animated_chevron(
@@ -1330,7 +1859,7 @@ impl MessageListView {
                             seg_expanded,
                             false,
                             px(16.0),
-                            palette.text_secondary,
+                            hdr_fg,
                             window,
                             cx,
                         ));
@@ -1344,28 +1873,49 @@ impl MessageListView {
                         .child(header);
 
                     if has_expandable_parts
-                        && let Some(animated_body) = motion::animated_collapse(
+                        && let Some(animated_body) = motion::animated_collapse_with_exit(
                             format!("process-body-{segment_id}"),
                             seg_expanded,
                             window,
                             cx,
-                            |window, cx| {
+                            |interactive, window, cx| {
                                 let mut expanded_col =
                                     div().w_full().flex().flex_col().gap(space::SM);
-                                for (part_idx, tp) in segment.parts.iter().enumerate() {
-                                    expanded_col = expanded_col.child(self.render_process_part(
-                                        session,
-                                        &segment_id,
-                                        part_idx,
-                                        tp,
-                                        tool_results,
-                                        is_live_turn,
-                                        mono_family.clone(),
-                                        palette,
-                                        entity,
-                                        window,
-                                        cx,
-                                    ));
+                                if interactive {
+                                    let part_count = segment.parts.len();
+                                    for (part_idx, tp) in segment.parts.iter().enumerate() {
+                                        expanded_col =
+                                            expanded_col.child(self.render_process_part(
+                                                &turn_key,
+                                                &segment_id,
+                                                part_idx,
+                                                part_idx + 1 == part_count && !has_final_text,
+                                                tp,
+                                                tool_results,
+                                                messages_generation,
+                                                is_live_turn,
+                                                reduce_motion,
+                                                running_light_allowed,
+                                                started_instant,
+                                                mono_family.clone(),
+                                                markdown_style,
+                                                palette,
+                                                entity,
+                                                window,
+                                                cx,
+                                            ));
+                                    }
+                                } else {
+                                    for tp in &segment.parts {
+                                        expanded_col =
+                                            expanded_col.child(render_process_part_inert(
+                                                tp,
+                                                tool_results,
+                                                is_live_turn,
+                                                mono_family.clone(),
+                                                palette,
+                                            ));
+                                    }
                                 }
                                 expanded_col.into_any_element()
                             },
@@ -1379,6 +1929,20 @@ impl MessageListView {
                 TurnSegmentKind::Visible => {
                     for (v_idx, tp) in segment.parts.iter().enumerate() {
                         match &tp.part {
+                            ConversationPart::Text(txt) if !txt.trim().is_empty() => {
+                                let stream_key =
+                                    format!("mid:{turn_key}:{}:{seg_idx}:{v_idx}", tp.entry_key);
+                                let md_entity =
+                                    self.markdown_store.sync_entry(&stream_key, txt, cx);
+                                assistant_stack =
+                                    assistant_stack.child(render_assistant_markdown_with_style(
+                                        &md_entity,
+                                        is_live_turn && tp.is_final_entry,
+                                        reduce_motion,
+                                        palette,
+                                        markdown_style.clone(),
+                                    ));
+                            }
                             ConversationPart::Special { kind, call } => {
                                 assistant_stack =
                                     assistant_stack.child(self.render_special_tool_surface(
@@ -1387,8 +1951,10 @@ impl MessageListView {
                                         *kind,
                                         call,
                                         tool_results.get(&call.id),
-                                        session.revision,
+                                        messages_generation,
                                         is_live_turn,
+                                        running_light_allowed,
+                                        started_instant,
                                         mono_family.clone(),
                                         transparency_enabled,
                                         scale_factor,
@@ -1448,8 +2014,10 @@ impl MessageListView {
                                         visible_tools.child(self.render_normal_tool_row(
                                             call,
                                             tool_results.get(&call.id),
-                                            session.revision,
+                                            messages_generation,
                                             is_live_turn,
+                                            running_light_allowed,
+                                            started_instant,
                                             mono_family.clone(),
                                             palette,
                                             entity,
@@ -1475,11 +2043,12 @@ impl MessageListView {
             let md_entity = self
                 .markdown_store
                 .sync_entry(&stream_key, &split.final_text, cx);
-            assistant_stack = assistant_stack.child(render_assistant_markdown(
+            assistant_stack = assistant_stack.child(render_assistant_markdown_with_style(
                 &md_entity,
                 is_live_turn,
                 reduce_motion,
                 palette,
+                markdown_style.clone(),
             ));
         }
 
@@ -1535,25 +2104,43 @@ impl MessageListView {
                             cx,
                         )),
                 );
-                if det_open {
-                    let blk_id = SharedString::from(format!("assistant-err-raw-{turn_key}"));
-                    let copied = self.copy_tracker.is_copied(blk_id.as_ref());
-                    err_col = err_col.child(render_copyable_text_block(
-                        blk_id,
-                        raw_detail.clone(),
-                        true,
-                        mono_family.clone(),
-                        copied,
-                        palette,
-                        |cid, _, cx| {
-                            cx.entity().update(cx, |this: &mut Self, cx| {
-                                this.copy_tracker
-                                    .mark_copied(cid, |v| &mut v.copy_tracker, cx);
-                            });
-                        },
-                        window,
-                        cx,
-                    ));
+                if let Some(animated_err) = motion::animated_collapse_with_exit(
+                    format!("assistant-err-det-body-{turn_key}"),
+                    det_open,
+                    window,
+                    cx,
+                    |interactive, window, cx| {
+                        if !interactive {
+                            return render_copyable_text_block_inert(
+                                raw_detail.clone(),
+                                true,
+                                mono_family.clone(),
+                                palette,
+                            )
+                            .into_any_element();
+                        }
+                        let blk_id = SharedString::from(format!("assistant-err-raw-{turn_key}"));
+                        let copied = self.copy_tracker.is_copied(blk_id.as_ref());
+                        render_copyable_text_block(
+                            blk_id,
+                            raw_detail.clone(),
+                            true,
+                            mono_family.clone(),
+                            copied,
+                            palette,
+                            |cid, _, cx| {
+                                cx.entity().update(cx, |this: &mut Self, cx| {
+                                    this.copy_tracker
+                                        .mark_copied(cid, |v| &mut v.copy_tracker, cx);
+                                });
+                            },
+                            window,
+                            cx,
+                        )
+                        .into_any_element()
+                    },
+                ) {
+                    err_col = err_col.child(animated_err);
                 }
             }
             assistant_stack = assistant_stack.child(err_col);
@@ -1641,6 +2228,8 @@ impl MessageListView {
                     ),
                     is_live_turn,
                     palette,
+                    window,
+                    cx,
                     move |_, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
                         ent_copy.update(cx, |this, cx| {
@@ -1659,6 +2248,8 @@ impl MessageListView {
                     palette.text_secondary,
                     is_live_turn,
                     palette,
+                    window,
+                    cx,
                     move |_, cx| {
                         let s = sid_edit.clone();
                         let p = parent_edit.clone();
@@ -1675,6 +2266,8 @@ impl MessageListView {
                     palette.text_secondary,
                     is_live_turn,
                     palette,
+                    window,
+                    cx,
                     move |_, cx| {
                         if fork_eid.is_empty() {
                             return;
@@ -1693,6 +2286,8 @@ impl MessageListView {
                     palette.text_secondary,
                     is_live_turn,
                     palette,
+                    window,
+                    cx,
                     move |_, cx| {
                         let s = sid_retry.clone();
                         let p = parent_retry.clone();
@@ -1729,13 +2324,19 @@ impl MessageListView {
     #[allow(clippy::too_many_arguments)]
     fn render_process_part(
         &mut self,
-        session: &SessionViewSnapshot,
+        turn_key: &str,
         seg_key: &str,
         part_idx: usize,
+        is_trailing_live_part: bool,
         tp: &TurnPart,
         tool_results: &BTreeMap<String, Value>,
+        messages_generation: u64,
         live: bool,
+        reduce_motion: bool,
+        running_light_allowed: bool,
+        started_at: Instant,
         mono_family: SharedString,
+        markdown_style: &TextViewStyle,
         palette: &DesktopPalette,
         entity: &Entity<Self>,
         window: &mut Window,
@@ -1747,13 +2348,19 @@ impl MessageListView {
                 let open = self.expanded_thinking.contains(&think_key);
                 let ent_th = entity.clone();
                 let k_th = think_key.clone();
+                let thinking_live = live && tp.is_final_entry && is_trailing_live_part;
+                let think_label = if thinking_live {
+                    "正在思考"
+                } else {
+                    "已思考"
+                };
 
                 let think_hdr_id = SharedString::from(format!("thinking-hdr-{think_key}"));
-                // Collapsed: `"已思考"` + `gap(8px)` + `14px` arrow; hover brightens text without bg block
+                // Collapsed: `"已思考"` / `"正在思考"` + `gap(8px)` + `14px` arrow; hover brightens text without bg block
                 let hdr = apply_scale(div(), scale::UI)
                     .id(think_hdr_id.clone())
                     .test_support()
-                    .a11y_toggle_button(think_hdr_id, "已思考", open)
+                    .a11y_toggle_button(think_hdr_id, think_label, open)
                     .h(height::INLINE)
                     .flex()
                     .items_center()
@@ -1769,7 +2376,15 @@ impl MessageListView {
                             cx.notify();
                         });
                     })
-                    .child(cjk_inline_label("已思考"))
+                    .child(render_running_light_label_with_scale(
+                        think_label,
+                        thinking_live && running_light_allowed,
+                        started_at,
+                        palette.text_secondary,
+                        palette.text_primary,
+                        scale::UI,
+                        window,
+                    ))
                     .child(motion::animated_chevron(
                         format!("thinking-hdr-{think_key}"),
                         open,
@@ -1781,45 +2396,73 @@ impl MessageListView {
                     ));
 
                 let mut col = div().w_full().flex().flex_col().gap(space::XS).child(hdr);
-                if open {
-                    let content = if t.redacted && t.thinking.trim().is_empty() {
-                        "思考内容已按模型策略省略。".to_owned()
-                    } else {
-                        t.thinking.clone()
-                    };
-                    let blk_id = SharedString::from(format!("thinking-body-{think_key}"));
-                    let copied = self.copy_tracker.is_copied(blk_id.as_ref());
-                    col = col.child(render_copyable_text_block(
-                        blk_id,
-                        content,
-                        false,
-                        mono_family,
-                        copied,
-                        palette,
-                        |cid, _, cx| {
-                            cx.entity().update(cx, |this: &mut Self, cx| {
-                                this.copy_tracker
-                                    .mark_copied(cid, |v| &mut v.copy_tracker, cx);
-                            });
-                        },
-                        window,
-                        cx,
-                    ));
+                if let Some(animated_think) = motion::animated_collapse_with_exit(
+                    format!("thinking-body-collapse-{think_key}"),
+                    open,
+                    window,
+                    cx,
+                    |interactive, window, cx| {
+                        let content = if t.redacted && t.thinking.trim().is_empty() {
+                            "思考内容已按模型策略省略。".to_owned()
+                        } else {
+                            t.thinking.clone()
+                        };
+                        if !interactive {
+                            return render_copyable_text_block_inert(
+                                content,
+                                false,
+                                mono_family,
+                                palette,
+                            )
+                            .into_any_element();
+                        }
+                        let blk_id = SharedString::from(format!("thinking-body-{think_key}"));
+                        let copied = self.copy_tracker.is_copied(blk_id.as_ref());
+                        render_copyable_text_block(
+                            blk_id,
+                            content,
+                            false,
+                            mono_family,
+                            copied,
+                            palette,
+                            |cid, _, cx| {
+                                cx.entity().update(cx, |this: &mut Self, cx| {
+                                    this.copy_tracker
+                                        .mark_copied(cid, |v| &mut v.copy_tracker, cx);
+                                });
+                            },
+                            window,
+                            cx,
+                        )
+                        .into_any_element()
+                    },
+                ) {
+                    col = col.child(animated_think);
                 }
                 col.into_any_element()
             }
-            ConversationPart::Text(txt) => apply_scale(div(), scale::UI)
-                .text_color(palette.text_secondary)
-                .child(SharedString::from(txt.clone()))
-                .into_any_element(),
+            ConversationPart::Text(txt) => {
+                let stream_key = format!("proc:{turn_key}:{seg_key}:{}:{part_idx}", tp.entry_key);
+                let md_entity = self.markdown_store.sync_entry(&stream_key, txt, cx);
+                render_assistant_markdown_with_style(
+                    &md_entity,
+                    live && tp.is_final_entry,
+                    reduce_motion,
+                    palette,
+                    markdown_style.clone(),
+                )
+                .into_any_element()
+            }
             ConversationPart::Tools(calls) => {
                 let mut group_col = div().w_full().flex().flex_col().gap(space::XS);
                 for call in calls {
                     group_col = group_col.child(self.render_normal_tool_row(
                         call,
                         tool_results.get(&call.id),
-                        session.revision,
+                        messages_generation,
                         live,
+                        running_light_allowed,
+                        started_at,
                         mono_family.clone(),
                         palette,
                         entity,
@@ -1850,6 +2493,9 @@ impl Render for MessageListView {
 
         let Some(session) = snap.loaded_sessions.get(sid).cloned() else {
             self.grouped_turn_cache = None;
+            self.prepared_session_cache = None;
+            // Session data was not ready immediately; animate once it finishes loading.
+            self.suppress_immediate_reveal = false;
             self.retain_seen_secret_inputs(false, cx);
             return div()
                 .id("message-list-loading")
@@ -1865,56 +2511,43 @@ impl Render for MessageListView {
                 .into_any_element();
         };
 
-        if session.revision != self.last_observed_revision {
-            self.last_observed_revision = session.revision;
-            if self.auto_follow_bottom {
-                self.scroll_handle.scroll_to_bottom();
+        if self.revealed_session_id.as_deref() != Some(sid.as_str()) {
+            self.revealed_session_id = Some(sid.clone());
+            if self.suppress_immediate_reveal {
+                self.suppress_immediate_reveal = false;
+                self.content_reveal.clear();
+            } else {
+                self.content_reveal
+                    .start(std::time::Duration::from_millis(180), 6.0, 0.01, cx);
             }
         }
+        let (reveal_op, reveal_dy) = self.content_reveal.sample(window, cx);
 
-        // Reuse grouped turns for settled sessions so scrolling & hover frames skip cloning
-        // hundreds of JSON entries and re-grouping the entire history.
-        let grouped = if !session.running && session.streaming_assistant.is_none() {
-            GroupedTurnCache::for_messages(&mut self.grouped_turn_cache, &session.messages)
-        } else {
-            self.grouped_turn_cache = None;
-            let mut combined_entries: Vec<Value> = session.messages.as_ref().clone();
-            if session.running
-                && let Some(ref streaming) = session.streaming_assistant
-            {
-                let stream_id = streaming
-                    .get("id")
-                    .or_else(|| streaming.get("message").and_then(|m| m.get("id")))
-                    .and_then(Value::as_str);
-                let replaced = if let Some(sid_str) = stream_id {
-                    if let Some(last) = combined_entries.last_mut() {
-                        let last_id = last
-                            .get("id")
-                            .or_else(|| last.get("message").and_then(|m| m.get("id")))
-                            .and_then(Value::as_str);
-                        if last_id == Some(sid_str) {
-                            *last = streaming.clone();
-                            true
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-                if !replaced {
-                    combined_entries.push(streaming.clone());
-                }
-            }
-            Arc::new(group_turns_and_results(&combined_entries))
-        };
-        let (turns, tool_results) = grouped.as_ref();
-        let live_turn_idx = active_turn_index(turns, session.running);
+        let revision_changed = session.revision != self.last_observed_revision;
+        if revision_changed {
+            self.last_observed_revision = session.revision;
+        }
+
+        // Cache prepared turns (grouping + split_turn + segments) across animation frames AND
+        // incremental streaming deltas so 60-120fps frames skip cloning and reparsing history.
+        let prepared = prepare_session_turns(
+            &mut self.grouped_turn_cache,
+            &mut self.next_messages_generation,
+            &mut self.prepared_session_cache,
+            &session,
+        );
+        let turns = &prepared.turns;
+        let tool_results = prepared.tool_results.as_ref();
+        let messages_generation = prepared.messages_generation;
+        let live_turn_idx = active_prepared_turn_index(turns, session.running);
+        if self.auto_follow_bottom && (revision_changed || live_turn_idx.is_some()) {
+            self.scroll_handle.scroll_to_bottom();
+        }
         let running_light_allowed = !reduce_motion
             && snap.channel_mode != cst_client::ChannelModeDto::WebActive
             && !crate::background::has_active_hardware_diagnostic(&snap);
+
+        let markdown_style = build_markdown_style(&palette);
 
         // Tail sliding window (`DEFAULT_VISIBLE_TURN_WINDOW = 30`)
         let total_turns = turns.len();
@@ -1926,6 +2559,9 @@ impl Render for MessageListView {
         let entity = cx.entity();
 
         let mut list_col = div()
+            .relative()
+            .top(reveal_dy)
+            .opacity(reveal_op)
             .w_full()
             .max_w(layout::CENTER_COLUMN_MAX_WIDTH)
             .mx_auto()
@@ -1969,13 +2605,14 @@ impl Render for MessageListView {
             );
         }
 
-        for (idx, turn) in turns.iter().enumerate().skip(window_start) {
+        for (idx, prepared_turn) in turns.iter().enumerate().skip(window_start) {
             let parent_entry_id = if idx > 0 {
                 turns[idx - 1]
+                    .turn
                     .assistants
                     .last()
                     .and_then(|a| a.id.clone())
-                    .or_else(|| turns[idx - 1].user.as_ref().and_then(|u| u.id.clone()))
+                    .or_else(|| turns[idx - 1].turn.user.as_ref().and_then(|u| u.id.clone()))
             } else {
                 None
             };
@@ -1983,11 +2620,13 @@ impl Render for MessageListView {
             list_col = list_col.child(self.render_turn_view(
                 &session,
                 idx,
-                turn,
+                prepared_turn,
                 parent_entry_id,
                 tool_results,
+                messages_generation,
                 is_live,
                 mono_family.clone(),
+                &markdown_style,
                 reduce_motion,
                 running_light_allowed,
                 transparency_enabled,
@@ -2002,7 +2641,41 @@ impl Render for MessageListView {
         self.retain_seen_secret_inputs(true, cx);
 
         for ob_item in &outbox_items {
-            list_col = list_col.child(self.render_outbox_bubble(sid, ob_item, &palette, &entity));
+            list_col = list_col
+                .child(self.render_outbox_bubble(sid, ob_item, &palette, &entity, window, cx));
+        }
+
+        if session.compacting {
+            let started_instant = *self
+                .turn_started_instants
+                .entry(format!("compacting:{sid}"))
+                .or_insert_with(Instant::now);
+            list_col = list_col.child(
+                div()
+                    .id("session-compacting-status")
+                    .test_support()
+                    .w_full()
+                    .h(height::CONTROL)
+                    .border_b_1()
+                    .border_color(palette.bg_surface)
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .child(
+                        Icon::new(IconName::Minimize2)
+                            .size(px(16.0))
+                            .text_color(palette.text_secondary),
+                    )
+                    .child(render_running_light_label_with_scale(
+                        "正在压缩上下文…",
+                        running_light_allowed,
+                        started_instant,
+                        palette.text_secondary,
+                        palette.text_primary,
+                        scale::BODY_MEDIUM,
+                        window,
+                    )),
+            );
         }
 
         let show_scroll_bottom_btn =
@@ -2042,8 +2715,60 @@ impl Render for MessageListView {
             outer = outer.child(layer);
         }
 
-        if show_scroll_bottom_btn {
+        let scroll_btn_progress = motion::surface_presence(
+            "scroll-to-bottom-presence",
+            show_scroll_bottom_btn,
+            motion::POPOVER_OPEN,
+            window,
+            cx,
+        );
+        if show_scroll_bottom_btn || scroll_btn_progress > 0.001 {
             let ent_btm = entity.clone();
+            let (btn_pressed, press_state) =
+                motion::icon_press_state("scroll-to-bottom-btn", window, cx);
+            let pill = div()
+                .h(height::FIELD)
+                .px(space::LG)
+                .rounded(radius::ROW)
+                .bg(palette.text_primary)
+                .shadow(motion::scale_shadows(
+                    palette.craft_lift_shadows(),
+                    scroll_btn_progress.powi(3),
+                ))
+                .opacity(0.01 + 0.99 * scroll_btn_progress)
+                .mb(px(-8.0 * (1.0 - scroll_btn_progress)))
+                .flex()
+                .items_center()
+                .gap(space::SM)
+                .child(motion::animated_icon_press(
+                    "scroll-to-bottom-btn",
+                    show_scroll_bottom_btn && btn_pressed,
+                    Icon::new(IconName::ArrowDown)
+                        .size(px(16.0))
+                        .text_color(palette.bg_workspace),
+                    window,
+                    cx,
+                ))
+                .child(
+                    apply_scale(div(), scale::UI_MEDIUM)
+                        .text_color(palette.bg_workspace)
+                        .child(cjk_inline_label("回到底部")),
+                );
+            let pill = if show_scroll_bottom_btn {
+                pill.id("scroll-to-bottom-btn")
+                    .test_support()
+                    .a11y_button("scroll-to-bottom-btn", "回到底部")
+                    .hover(|s| s.opacity(0.92))
+                    .on_icon_press(press_state)
+                    .on_click(move |_, _, cx| {
+                        ent_btm.update(cx, |this, cx| {
+                            this.scroll_to_bottom_and_follow(cx);
+                        });
+                    })
+                    .into_any_element()
+            } else {
+                pill.into_any_element()
+            };
             outer = outer.child(
                 div()
                     .absolute()
@@ -2052,40 +2777,67 @@ impl Render for MessageListView {
                     .bottom(space::LG)
                     .flex()
                     .justify_center()
-                    .child(
-                        div()
-                            .id("scroll-to-bottom-btn")
-                            .test_support()
-                            .a11y_button("scroll-to-bottom-btn", "回到底部")
-                            .h(height::FIELD)
-                            .px(space::LG)
-                            .rounded(radius::ROW)
-                            .bg(palette.text_primary)
-                            .shadow(palette.craft_lift_shadows())
-                            .flex()
-                            .items_center()
-                            .gap(space::SM)
-                            .hover(|s| s.opacity(0.92))
-                            .on_click(move |_, _, cx| {
-                                ent_btm.update(cx, |this, cx| {
-                                    this.scroll_to_bottom_and_follow(cx);
-                                });
-                            })
-                            .child(
-                                Icon::new(IconName::ArrowDown)
-                                    .size(px(16.0))
-                                    .text_color(palette.bg_workspace),
-                            )
-                            .child(
-                                apply_scale(div(), scale::UI_MEDIUM)
-                                    .text_color(palette.bg_workspace)
-                                    .child(cjk_inline_label("回到底部")),
-                            ),
-                    ),
+                    .child(pill),
             );
         }
 
         outer.into_any_element()
+    }
+}
+
+fn render_process_part_inert(
+    tp: &TurnPart,
+    tool_results: &BTreeMap<String, Value>,
+    live: bool,
+    mono_family: SharedString,
+    palette: &DesktopPalette,
+) -> gpui::AnyElement {
+    match &tp.part {
+        ConversationPart::Thinking(_) => apply_scale(div(), scale::UI)
+            .h(height::INLINE)
+            .flex()
+            .items_center()
+            .gap(space::SM)
+            .text_color(palette.text_secondary)
+            .child(cjk_inline_label("已思考"))
+            .child(
+                Icon::new(IconName::ChevronRight)
+                    .size(px(14.0))
+                    .text_color(palette.text_secondary),
+            )
+            .into_any_element(),
+        ConversationPart::Text(txt) => apply_scale(div(), scale::UI)
+            .text_color(palette.text_secondary)
+            .child(SharedString::from(txt.clone()))
+            .into_any_element(),
+        ConversationPart::Tools(calls) => {
+            let mut group_col = div().w_full().flex().flex_col().gap(space::XS);
+            for call in calls {
+                let tool_result_val = tool_results.get(&call.id);
+                let duration_ms = tool_result_val
+                    .and_then(|v| {
+                        v.get("durationMs")
+                            .or_else(|| v.get("details").and_then(|d| d.get("durationMs")))
+                    })
+                    .and_then(Value::as_u64);
+                let is_err = tool_result_val
+                    .and_then(|v| v.get("isError"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                group_col = group_col.child(render_normal_tool_row_inert(
+                    &call.name,
+                    Some(&call.arguments),
+                    duration_ms,
+                    tool_result_val.is_some(),
+                    is_err,
+                    live,
+                    mono_family.clone(),
+                    palette,
+                ));
+            }
+            group_col.into_any_element()
+        }
+        _ => div().into_any_element(),
     }
 }
 
@@ -2098,34 +2850,76 @@ fn format_timestamp_hhmm(ts_ms: u64) -> Option<String> {
     Some(dt.with_timezone(&Local).format("%H:%M").to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn icon_action_24_element(
     id: impl Into<SharedString>,
     label: &'static str,
     icon: Icon,
     disabled: bool,
     palette: &DesktopPalette,
+    window: &mut Window,
+    cx: &mut App,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let id_shared = id.into();
-    let mut btn = div()
+    if disabled {
+        return div()
+            .id(id_shared.clone())
+            .test_support()
+            .a11y_button(id_shared.clone(), label)
+            .desktop_tooltip(id_shared, label)
+            .w(height::INLINE)
+            .h(height::INLINE)
+            .rounded(radius::CONTROL)
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(icon);
+    }
+
+    let (pressed, press_state) = motion::icon_press_state(id_shared.as_ref(), window, cx);
+    let (hovered, hs) = motion::PointerFlag::keyed(
+        gpui_kit::ElementId::Name(SharedString::from(format!("hover-{id_shared}"))),
+        window,
+        cx,
+    );
+    let hover_t = motion::animated_state_progress(id_shared.clone(), hovered, window, cx);
+    let press_t = motion::animated_press_progress(id_shared.clone(), pressed, window, cx);
+    let bg = motion::lerp_hsla(
+        motion::lerp_hsla(
+            gpui_kit::transparent_black(),
+            palette.bg_item_hover,
+            hover_t,
+        ),
+        palette.bg_active_press,
+        press_t,
+    );
+
+    div()
         .id(id_shared.clone())
         .test_support()
         .a11y_button(id_shared.clone(), label)
-        .desktop_tooltip(id_shared, label)
+        .desktop_tooltip_with_hover(
+            SharedString::from(format!("tooltip-{id_shared}")),
+            label.into(),
+            false,
+            Some(hs),
+        )
         .w(height::INLINE)
         .h(height::INLINE)
         .rounded(radius::CONTROL)
+        .bg(bg)
         .flex()
         .items_center()
-        .justify_center();
-    if !disabled {
-        btn = btn
-            .hover(|s| s.bg(palette.bg_item_hover))
-            .on_click(move |_, w, cx| on_click(w, cx));
-    }
-    btn.child(icon)
+        .justify_center()
+        .on_icon_press(press_state)
+        .on_click(move |_, w, cx| on_click(w, cx))
+        .child(motion::animated_icon_press(
+            id_shared, pressed, icon, window, cx,
+        ))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn icon_action_24(
     id: impl Into<SharedString>,
     label: &'static str,
@@ -2133,6 +2927,8 @@ fn icon_action_24(
     icon_color: gpui_kit::Hsla,
     disabled: bool,
     palette: &DesktopPalette,
+    window: &mut Window,
+    cx: &mut App,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     icon_action_24_element(
@@ -2141,6 +2937,8 @@ fn icon_action_24(
         Icon::new(icon).size(px(14.0)).text_color(icon_color),
         disabled,
         palette,
+        window,
+        cx,
         on_click,
     )
 }
@@ -2204,5 +3002,126 @@ mod tests {
         let new_session = Arc::new(vec![user("next")]);
         let next = GroupedTurnCache::for_messages(&mut cache, &new_session);
         assert_eq!(next.0[0].user.as_ref().unwrap().id.as_deref(), Some("next"));
+    }
+
+    #[test]
+    fn prepare_session_turns_caches_animation_frames_and_reuses_history_during_streaming() {
+        let messages = Arc::new(vec![
+            serde_json::json!({"id": "u1", "message": {"role": "user", "content": "第一轮"}}),
+            serde_json::json!({"id": "a1", "message": {"role": "assistant", "content": [{"type": "text", "text": "已完成"}]}}),
+            serde_json::json!({"id": "u2", "message": {"role": "user", "content": "第二轮"}}),
+        ]);
+        let mut snap = SessionViewSnapshot {
+            id: "sess-1".into(),
+            revision: 10,
+            event_cursor: None,
+            leaf_id: None,
+            running: true,
+            compacting: false,
+            messages: Arc::clone(&messages),
+            entries: Arc::new(Vec::new()),
+            context_usage: None,
+            queue: None,
+            ui: None,
+            bitlocker: None,
+            streaming_assistant: Some(serde_json::json!({
+                "id": "a2",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "正在"}]
+            })),
+            active_tools: Arc::new(BTreeMap::new()),
+            active_turn_started_ms: Some(1000),
+            estimated_bytes: 256,
+        };
+
+        let mut grouped_cache = None;
+        let mut next_gen = 0u64;
+        let mut prepared_cache = None;
+
+        // 1. Same revision (animation frame): returns the exact same PreparedSessionData allocation.
+        let p1 = prepare_session_turns(
+            &mut grouped_cache,
+            &mut next_gen,
+            &mut prepared_cache,
+            &snap,
+        );
+        let p2 = prepare_session_turns(
+            &mut grouped_cache,
+            &mut next_gen,
+            &mut prepared_cache,
+            &snap,
+        );
+        assert!(Arc::ptr_eq(&p1, &p2));
+        assert_eq!(p1.turns.len(), 2);
+
+        // 2. Streaming delta (revision bumps, `messages` Arc unchanged):
+        //    - `messages_generation` stays stable (tool caches stay warm)
+        //    - Historical turn 0 reuses the exact same `Arc<PreparedTurn>`
+        //    - Only active tail turn 1 updates its text.
+        snap.revision = 11;
+        snap.streaming_assistant = Some(serde_json::json!({
+            "id": "a2",
+            "role": "assistant",
+            "content": [{"type": "text", "text": "正在采集整机概览"}]
+        }));
+        let p3 = prepare_session_turns(
+            &mut grouped_cache,
+            &mut next_gen,
+            &mut prepared_cache,
+            &snap,
+        );
+        assert!(!Arc::ptr_eq(&p1, &p3));
+        assert_eq!(p1.messages_generation, p3.messages_generation);
+        assert!(Arc::ptr_eq(&p1.turns[0], &p3.turns[0]));
+        assert!(!Arc::ptr_eq(&p1.turns[1], &p3.turns[1]));
+        assert_eq!(
+            p3.turns[1].split.as_ref().unwrap().final_text,
+            "正在采集整机概览"
+        );
+    }
+
+    #[test]
+    fn prepare_session_turns_prefers_entries_and_preserves_compaction_summary() {
+        let entries = Arc::new(vec![
+            serde_json::json!({"id": "u1", "message": {"role": "user", "content": "压缩前提问", "timestamp": 1000}}),
+            serde_json::json!({"id": "a1", "message": {"role": "assistant", "content": [{"type": "text", "text": "压缩前回复"}], "timestamp": 1100}}),
+            serde_json::json!({"id": "c1", "message": {"role": "compactionSummary", "summary": "已完成历史总结", "tokensBefore": 148000, "timestamp": 1200}}),
+            serde_json::json!({"id": "u2", "message": {"role": "user", "content": "压缩后继续", "timestamp": 1300}}),
+        ]);
+        let snap = SessionViewSnapshot {
+            id: "sess-compact".into(),
+            revision: 1,
+            event_cursor: None,
+            leaf_id: Some("u2".into()),
+            running: false,
+            compacting: false,
+            messages: Arc::new(vec![
+                serde_json::json!({"role": "compactionSummary", "summary": "已完成历史总结", "tokensBefore": 148000, "timestamp": 1200}),
+                serde_json::json!({"role": "user", "content": "压缩后继续", "timestamp": 1300}),
+            ]),
+            entries,
+            context_usage: None,
+            queue: None,
+            ui: None,
+            bitlocker: None,
+            streaming_assistant: None,
+            active_tools: Arc::new(BTreeMap::new()),
+            active_turn_started_ms: None,
+            estimated_bytes: 512,
+        };
+        let mut grouped_cache = None;
+        let mut next_gen = 0u64;
+        let mut prepared_cache = None;
+        let prepared = prepare_session_turns(
+            &mut grouped_cache,
+            &mut next_gen,
+            &mut prepared_cache,
+            &snap,
+        );
+        // Should retain pre-compaction turn + standalone compaction turn + post-compaction turn.
+        assert_eq!(prepared.turns.len(), 3);
+        assert!(prepared.turns[0].turn.user.is_some());
+        assert!(prepared.turns[1].turn.compaction.is_some());
+        assert!(prepared.turns[2].turn.user.is_some());
     }
 }

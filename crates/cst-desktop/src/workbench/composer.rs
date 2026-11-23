@@ -9,6 +9,7 @@ use gpui::{
     ObjectFit, PathPromptOptions, StyledImage as _,
 };
 use gpui_kit::assets::IconName;
+use gpui_kit::base::motion::{Transition, TransitionState};
 use gpui_kit::component::input::{
     Enter, IndentInline, InlineToken as UiInlineToken, InputContent, InputEvent, InputState,
     MoveDown, MoveUp, OutdentInline, Textarea, TextareaState,
@@ -203,12 +204,15 @@ pub struct ComposerView {
     submitting: Option<DraftKey>,
     model_change_pending: bool,
     picker_open: bool,
+    picker_open_epoch: u64,
+    picker_presence: TransitionState<f32>,
     picker_page: ModelPickerPage,
     picker_slide: motion::PageSlide,
     picker_hi_idx: usize,
     picker_scroll: ScrollHandle,
     picker_prior_focus: Option<FocusHandle>,
     context_popover_open: bool,
+    context_presence: TransitionState<f32>,
     context_prior_focus: Option<FocusHandle>,
     cached_quota_provider: Option<String>,
     cached_quota: Option<Value>,
@@ -301,12 +305,15 @@ impl ComposerView {
             submitting: None,
             model_change_pending: false,
             picker_open: false,
+            picker_open_epoch: 0,
+            picker_presence: TransitionState::default(),
             picker_page: ModelPickerPage::Main,
             picker_slide: motion::PageSlide::default(),
             picker_hi_idx: 0,
             picker_scroll: ScrollHandle::new(),
             picker_prior_focus: None,
             context_popover_open: false,
+            context_presence: TransitionState::default(),
             context_prior_focus: None,
             cached_quota_provider: None,
             cached_quota: None,
@@ -1044,34 +1051,45 @@ impl ComposerView {
         if self.submitting.is_some()
             || self.model_change_pending
             || self.is_ime_composing(window, cx)
+            || matches!(&self.draft_key, DraftKey::Session(id)
+                if self.client.with_workspace(|ws| ws.active_session_id() != Some(id.as_str())))
         {
             return;
         }
         self.clear_completion();
         self.push_to_workspace(cx);
 
-        // Handle `/compact` command token inside an active session directly
-        let is_compact_only = self.client.with_workspace(|ws| {
-            ws.draft(&self.draft_key).is_some_and(|d| {
-                d.text.trim().is_empty()
-                    && d.images.is_empty()
-                    && matches!(d.tokens.as_slice(), [DraftToken::Command { name, .. }] if name == "/compact")
+        // Handle `/compact` command token (with optional custom instructions) inside an active session directly
+        let compact_instructions = self.client.with_workspace(|ws| {
+            ws.draft(&self.draft_key).and_then(|d| {
+                let has_compact_token = matches!(
+                    d.tokens.as_slice(),
+                    [DraftToken::Command { name, .. }] if name == "/compact"
+                );
+                (d.images.is_empty() && has_compact_token).then(|| {
+                    let trimmed = d.text.trim();
+                    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+                })
             })
         });
-        if is_compact_only && let DraftKey::Session(sid) = self.draft_key.clone() {
+        if let Some(instructions) = compact_instructions
+            && let DraftKey::Session(sid) = self.draft_key.clone()
+        {
             let key = self.draft_key.clone();
             self.submitting = Some(key.clone());
             let draft = self.client.with_workspace_mut(|ws| ws.take_draft(&key));
             self.pull_from_workspace(window, cx);
             let client = self.client.clone();
             cx.spawn_in(window, async move |weak, cx| {
-                let res = client.compact_session(sid, None).await;
+                let res = client.compact_session(sid, instructions).await;
                 let _ = weak.update_in(cx, |this, window, cx| {
                     this.submitting = None;
                     match res {
-                        Ok(_) => cx.emit(ComposerHostEvent::TopNotice(
-                            "已完成会话上下文压缩。".into(),
-                        )),
+                        Ok(_) => {
+                            cx.emit(ComposerHostEvent::TopNotice(
+                                "已完成会话上下文压缩。".into(),
+                            ));
+                        }
                         Err(e) => {
                             this.client.with_workspace_mut(|ws| {
                                 ws.restore_draft_if_empty(key, draft);
@@ -2011,6 +2029,7 @@ impl Render for ComposerView {
                         this.close_picker();
                     } else {
                         this.picker_open = true;
+                        this.picker_open_epoch = this.picker_open_epoch.wrapping_add(1);
                         this.picker_page = ModelPickerPage::Main;
                         this.set_picker_page(ModelPickerPage::Main, cx);
                         this.picker_prior_focus = w.focused(cx);
@@ -2261,7 +2280,23 @@ impl Render for ComposerView {
             wrapper = wrapper.child(comp_pop);
         }
 
-        if self.context_popover_open {
+        let ctx_open = self.context_popover_open;
+        let ctx_progress = self
+            .context_presence
+            .sample(
+                if ctx_open { 1.0_f32 } else { 0.0 },
+                Transition::new(if ctx_open {
+                    motion::POPOVER_OPEN
+                } else {
+                    motion::SURFACE_CLOSE
+                })
+                .ease(motion::ease_out()),
+                window,
+                cx,
+            )
+            .value
+            .clamp(0.0, 1.0);
+        if ctx_open || ctx_progress > 0.001 {
             let ent_retry = entity.clone();
             let ent_acc = entity.clone();
             let prov_retry = cur_provider.clone();
@@ -2272,6 +2307,8 @@ impl Render for ComposerView {
                     .bottom_full()
                     .pb(px(2.0))
                     .child(render_context_quota_popover(
+                        ctx_open,
+                        ctx_progress,
                         &cur_provider,
                         context_usage,
                         models_ref.usage.as_ref(),
@@ -2302,7 +2339,23 @@ impl Render for ComposerView {
             );
         }
 
-        if self.picker_open {
+        let picker_open = self.picker_open;
+        let picker_progress = self
+            .picker_presence
+            .sample(
+                if picker_open { 1.0_f32 } else { 0.0 },
+                Transition::new(if picker_open {
+                    motion::POPOVER_OPEN
+                } else {
+                    motion::SURFACE_CLOSE
+                })
+                .ease(motion::ease_out()),
+                window,
+                cx,
+            )
+            .value
+            .clamp(0.0, 1.0);
+        if picker_open || picker_progress > 0.001 {
             let ent_page = entity.clone();
             let ent_sel_m = entity.clone();
             let ent_sel_t = entity.clone();
@@ -2312,8 +2365,11 @@ impl Render for ComposerView {
                     .absolute()
                     .right(px(48.0))
                     .bottom_full()
-                    .pb(px(2.0))
+                    .pb(px(8.0))
                     .child(render_model_picker_popover(
+                        picker_open,
+                        picker_progress,
+                        self.picker_open_epoch,
                         self.picker_page,
                         self.picker_slide.sample(window, cx),
                         self.picker_hi_idx,

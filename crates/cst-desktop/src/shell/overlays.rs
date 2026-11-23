@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement;
 use gpui_kit::component::Icon;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, FocusHandle, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
@@ -114,7 +115,9 @@ impl BannerDeadline {
 }
 
 /// `WebActive` takeover lock overlay (`cst-pilot-desktop.pen` 「01 · 工作台」 frame `sYHwZ`, card `WO6NQ`, `384px` wide).
+#[allow(clippy::too_many_arguments)]
 pub fn render_web_active_lock_overlay(
+    scrim_progress: f32,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
@@ -128,11 +131,12 @@ pub fn render_web_active_lock_overlay(
 
     let scrim = render_frosted_surface(
         "web-active-scrim",
-        FrostedGlassSpec::scrim(palette),
+        FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
         palette.bg_scrim,
         transparency_enabled,
         scale_factor,
     )
+    .opacity(0.01 + 0.99 * scrim_progress)
     .test_support()
     .absolute()
     .top_0()
@@ -146,7 +150,7 @@ pub fn render_web_active_lock_overlay(
 
     let card = render_frosted_surface(
         "web-active-card-wo6nq",
-        FrostedGlassSpec::modal(palette, 8.0),
+        FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
         palette.bg_modal,
         transparency_enabled,
         scale_factor,
@@ -253,9 +257,11 @@ pub fn render_web_active_lock_overlay(
 
 /// Workspace top-center `40px` rectangular error bar (`X2gAh`:
 /// `top(20px)`, `h(40px)`, `px(16px)`, `rounded(8px)`, `CircleAlert` `16px` `$status-danger` + single-line reason, `H2p2z` frosted glass).
+#[allow(clippy::too_many_arguments)]
 pub fn render_workspace_error_bar(
+    interactive: bool,
+    progress: f32,
     message: SharedString,
-    generation: u64,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
@@ -263,14 +269,22 @@ pub fn render_workspace_error_bar(
 ) -> impl IntoElement {
     let label = single_line_banner_label(&message);
     let card = render_frosted_surface(
-        "workspace-top-error-bar",
-        FrostedGlassSpec::popover(palette),
+        if interactive {
+            "workspace-top-error-bar"
+        } else {
+            "workspace-top-error-bar-exit"
+        },
+        FrostedGlassSpec::popover(palette).with_opacity(progress),
         palette.bg_elevated,
         transparency_enabled,
         scale_factor,
     )
-    .test_support()
-    .a11y_status("workspace-top-error-bar", format!("错误：{message}"))
+    .opacity(0.01 + 0.99 * progress)
+    .mt(px(-8.0 * (1.0 - progress)))
+    .shadow(motion::scale_shadows(
+        palette.craft_stack_shadows(),
+        progress.powi(3),
+    ))
     .h(height::FIELD)
     .max_w(px(640.0))
     .px(space::LG)
@@ -279,7 +293,6 @@ pub fn render_workspace_error_bar(
     .border_color(palette.border_hairline)
     .flex()
     .items_center()
-    .on_hover(on_hover)
     .child(
         div()
             .relative()
@@ -299,7 +312,17 @@ pub fn render_workspace_error_bar(
                     .truncate()
                     .child(cjk_inline_label(label)),
             ),
-    );
+    )
+    .map(|el| {
+        if interactive {
+            el.test_support()
+                .a11y_status("workspace-top-error-bar", format!("错误：{message}"))
+                .on_hover(on_hover)
+                .into_any_element()
+        } else {
+            el.into_any_element()
+        }
+    });
     div()
         .absolute()
         .top(space::LG)
@@ -307,18 +330,16 @@ pub fn render_workspace_error_bar(
         .right_0()
         .flex()
         .justify_center()
-        .child(motion::animate_toast_enter(
-            ("workspace-top-error-anim", generation),
-            card,
-            palette.craft_stack_shadows(),
-        ))
+        .child(card)
 }
 
 /// Non-blocking top notice banner (`h1BufF`:
 /// `top(20px)`, `h(40px)`, `px(16px)`, `rounded(8px)`, `CircleCheck` `16px` `$status-success` + message, `H2p2z` frosted glass).
+#[allow(clippy::too_many_arguments)]
 pub fn render_top_notice_banner(
+    interactive: bool,
+    progress: f32,
     message: SharedString,
-    generation: u64,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
@@ -326,14 +347,22 @@ pub fn render_top_notice_banner(
 ) -> impl IntoElement {
     let label = single_line_banner_label(&message);
     let card = render_frosted_surface(
-        "top-notice-banner",
-        FrostedGlassSpec::popover(palette),
+        if interactive {
+            "top-notice-banner"
+        } else {
+            "top-notice-banner-exit"
+        },
+        FrostedGlassSpec::popover(palette).with_opacity(progress),
         palette.bg_elevated,
         transparency_enabled,
         scale_factor,
     )
-    .test_support()
-    .a11y_status("top-notice-banner", format!("提示：{message}"))
+    .opacity(0.01 + 0.99 * progress)
+    .mt(px(-8.0 * (1.0 - progress)))
+    .shadow(motion::scale_shadows(
+        palette.craft_stack_shadows(),
+        progress.powi(3),
+    ))
     .h(height::FIELD)
     .max_w(px(480.0))
     .px(space::LG)
@@ -342,7 +371,6 @@ pub fn render_top_notice_banner(
     .border_color(palette.border_hairline)
     .flex()
     .items_center()
-    .on_hover(on_hover)
     .child(
         div()
             .relative()
@@ -362,7 +390,17 @@ pub fn render_top_notice_banner(
                     .truncate()
                     .child(cjk_inline_label(label)),
             ),
-    );
+    )
+    .map(|el| {
+        if interactive {
+            el.test_support()
+                .a11y_status("top-notice-banner", format!("提示：{message}"))
+                .on_hover(on_hover)
+                .into_any_element()
+        } else {
+            el.into_any_element()
+        }
+    });
     div()
         .absolute()
         .top(space::LG)
@@ -370,11 +408,7 @@ pub fn render_top_notice_banner(
         .right_0()
         .flex()
         .justify_center()
-        .child(motion::animate_toast_enter(
-            ("top-notice-anim", generation),
-            card,
-            palette.craft_stack_shadows(),
-        ))
+        .child(card)
 }
 
 fn single_line_banner_label(message: &SharedString) -> SharedString {

@@ -188,7 +188,7 @@ pub fn render_queue_bar(
     let header_text = if let Some(f) = failed_item {
         match f.error.as_deref().filter(|s| !s.is_empty()) {
             Some(reason) => format!("投递失败 · {reason}"),
-            None => "投递失败 · 请检查模型服务".to_owned(),
+            None => "投递失败 · 请检查提供商".to_owned(),
         }
     } else if has_uncertain {
         "上次投递结果待核对 · 请核对对话后再补充消息，不会自动重发".to_owned()

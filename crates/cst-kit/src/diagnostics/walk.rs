@@ -21,6 +21,7 @@ impl Default for WalkLimits {
 pub struct WalkBudget {
     pub scanned: usize,
     pub incomplete: bool,
+    pub exhausted: bool,
     pub denied: Vec<String>,
     start: Instant,
     limits: WalkLimits,
@@ -30,6 +31,7 @@ impl WalkBudget {
         Self {
             scanned: 0,
             incomplete: false,
+            exhausted: false,
             denied: Vec::new(),
             start: Instant::now(),
             limits,
@@ -39,10 +41,12 @@ impl WalkBudget {
         if control.cancel.is_cancelled() {
             control.check()?;
         }
-        if self.scanned >= self.limits.entries
+        if self.exhausted
+            || self.scanned >= self.limits.entries
             || self.start.elapsed() >= self.limits.timeout
             || control.remaining().is_zero()
         {
+            self.exhausted = true;
             self.incomplete = true;
             return Ok(false);
         }
@@ -52,7 +56,7 @@ impl WalkBudget {
     pub fn failed(&mut self, path: &Path) {
         self.incomplete = true;
         if self.denied.len() < 50 {
-            self.denied.push(path.to_string_lossy().into_owned());
+            self.denied.push(super::wz_index::display_path(path));
         }
     }
 }
@@ -102,7 +106,7 @@ pub fn size(
                     Ok(m) => m,
                     Err(_) => {
                         budget.failed(&path);
-                        break;
+                        continue;
                     }
                 };
                 if linked(&meta) {
@@ -112,7 +116,7 @@ pub fn size(
                 if meta.is_dir() {
                     if stack.len() >= 1024 {
                         budget.failed(&path);
-                        break;
+                        continue;
                     }
                     match fs::read_dir(&path) {
                         Ok(entries) => stack.push(Frame {
@@ -122,7 +126,7 @@ pub fn size(
                         }),
                         Err(_) => {
                             budget.failed(&path);
-                            break;
+                            continue;
                         }
                     }
                 } else if meta.is_file() {
@@ -130,9 +134,18 @@ pub fn size(
                 }
             }
             Some(Err(_)) => {
-                let path = frame.path.clone();
-                budget.failed(&path);
-                break;
+                let frame = stack.pop().expect("nonempty traversal stack");
+                budget.failed(&frame.path);
+                top.add(Ranked {
+                    bytes: frame.bytes,
+                    path: super::wz_index::display_path(&frame.path),
+                    modified: None,
+                });
+                if let Some(parent) = stack.last_mut() {
+                    parent.bytes = parent.bytes.saturating_add(frame.bytes);
+                } else {
+                    return Ok(frame.bytes);
+                }
             }
             None => {
                 // Exhaustion checks are not directory entries.
@@ -140,7 +153,7 @@ pub fn size(
                 let frame = stack.pop().expect("nonempty traversal stack");
                 top.add(Ranked {
                     bytes: frame.bytes,
-                    path: frame.path.to_string_lossy().into_owned(),
+                    path: super::wz_index::display_path(&frame.path),
                     modified: None,
                 });
                 if let Some(parent) = stack.last_mut() {
@@ -157,7 +170,7 @@ pub fn size(
         bytes = bytes.saturating_add(frame.bytes);
         top.add(Ranked {
             bytes,
-            path: frame.path.to_string_lossy().into_owned(),
+            path: super::wz_index::display_path(&frame.path),
             modified: None,
         });
     }
@@ -176,6 +189,6 @@ pub fn usage(
     let root_key = super::wz_index::path_key(root);
     let rows=largest.sorted().into_iter().filter(|r|super::wz_index::path_key(Path::new(&r.path))!=root_key).take(top).map(|r|json!({"path":r.path,"sizeGB":gib(r.bytes),"pct":if budget.incomplete {None}else{pct(r.bytes,total)}})).collect::<Vec<_>>();
     Ok(
-        json!({"method":"node-walk","root":root.to_string_lossy(),"totalGB":gib(total),"topDirs":rows,"stats":{"filesScanned":budget.scanned,"elapsedSec":super::win_native::rounded(start.elapsed().as_secs_f64(),1),"budget":limits.entries},"truncated":budget.incomplete,"denied":budget.denied,"notice":if budget.incomplete {"扫描因预算、链接或访问限制未完成，大小为下界，占比未计算。"}else{"原生目录遍历完成，仅提供目录排行；不同深度的父子目录不可相加。"}}),
+        json!({"method":"node-walk","root":super::wz_index::display_path(root),"totalGB":gib(total),"topDirs":rows,"stats":{"filesScanned":budget.scanned,"elapsedSec":super::win_native::rounded(start.elapsed().as_secs_f64(),1),"budget":limits.entries},"truncated":budget.incomplete,"denied":budget.denied,"notice":if budget.incomplete {"扫描因预算、链接或访问限制未完成，大小为下界，占比未计算。"}else{"原生目录遍历完成，仅提供目录排行；不同深度的父子目录不可相加。"}}),
     )
 }

@@ -46,6 +46,7 @@ enum PrefRowItem {
 
 const PREF_LIST_ROW_HEIGHT_PX: f32 = 56.0;
 const PREF_LIST_MAX_VISIBLE_ROWS: usize = 8;
+const PREF_COLLAPSED_MODEL_LIMIT: usize = 5;
 
 pub struct PreferencesTabView {
     client: ClientHandle,
@@ -53,7 +54,10 @@ pub struct PreferencesTabView {
     provider_filter: Option<String>,
     default_dropdown_open: bool,
     filter_dropdown_open: bool,
+    models_expanded: bool,
     enabled_scope: ModelScope,
+    last_ready_models: Vec<ModelChoiceDto>,
+    optimistic_default: Option<(String, String)>,
     selected_row_id: Option<String>,
     visible_enabled_indices: Vec<usize>,
     visible_filter_key: Option<(Option<String>, String)>,
@@ -82,7 +86,7 @@ impl Focusable for PreferencesTabView {
 
 impl PreferencesTabView {
     pub fn new(client: ClientHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索模型或服务…"));
+        let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索模型…"));
         let search_subscription = cx.subscribe(&search_input, |_, _, event: &InputEvent, cx| {
             if matches!(event, InputEvent::Change) {
                 cx.notify();
@@ -94,7 +98,10 @@ impl PreferencesTabView {
             provider_filter: None,
             default_dropdown_open: false,
             filter_dropdown_open: false,
+            models_expanded: false,
             enabled_scope: ModelScope::default(),
+            last_ready_models: Vec::new(),
+            optimistic_default: None,
             selected_row_id: None,
             visible_enabled_indices: Vec::new(),
             visible_filter_key: None,
@@ -121,6 +128,7 @@ impl PreferencesTabView {
     pub fn leave(&mut self, cx: &mut Context<Self>) {
         self.default_dropdown_open = false;
         self.filter_dropdown_open = false;
+        self.models_expanded = false;
         cx.notify();
     }
 
@@ -168,6 +176,37 @@ impl PreferencesTabView {
         cx.notify();
     }
 
+    fn enabled_ready_pairs_from_snapshot(
+        &self,
+        models: Option<&ModelsSnapshot>,
+    ) -> Vec<(String, String)> {
+        let ready_source: Vec<&ModelChoiceDto> = models
+            .into_iter()
+            .flat_map(|m| &m.models)
+            .filter(|m| m.credential_ready && m.catalog_present)
+            .collect();
+        let ready_keys: HashSet<(&str, &str)> = if !ready_source.is_empty() {
+            ready_source
+                .iter()
+                .map(|m| (m.provider.as_str(), m.id.as_str()))
+                .collect()
+        } else {
+            self.last_ready_models
+                .iter()
+                .map(|m| (m.provider.as_str(), m.id.as_str()))
+                .collect()
+        };
+        self.enabled_scope
+            .model_rows()
+            .filter_map(|(_, full_id)| {
+                let (prov, mid) = full_id.split_once('/')?;
+                ready_keys
+                    .contains(&(prov, mid))
+                    .then(|| (prov.to_owned(), mid.to_owned()))
+            })
+            .collect()
+    }
+
     fn sync_from_snapshot(&mut self) {
         if self.saving_scope {
             return;
@@ -183,24 +222,89 @@ impl PreferencesTabView {
         {
             return;
         }
+        let has_ready = models
+            .models
+            .iter()
+            .any(|m| m.credential_ready && m.catalog_present);
+        if self.refreshing_catalog && !has_ready && !self.last_ready_models.is_empty() {
+            // Ignore transient empty snapshots emitted mid-refresh to prevent list flicker.
+            return;
+        }
         self.observed_models = Some(models.clone());
-        self.enabled_scope = ModelScope::from_snapshot(models);
+        let next_scope = ModelScope::from_snapshot(models);
+        if next_scope != self.enabled_scope {
+            self.enabled_scope = next_scope;
+        }
+        if has_ready {
+            self.last_ready_models = models
+                .models
+                .iter()
+                .filter(|m| m.credential_ready && m.catalog_present)
+                .cloned()
+                .collect();
+        } else if !self.refreshing_catalog {
+            self.last_ready_models.clear();
+        }
+        if !self.saving_default {
+            if let Some((ref opt_p, ref opt_m)) = self.optimistic_default
+                && models
+                    .default_model
+                    .as_ref()
+                    .is_some_and(|d| &d.provider == opt_p && &d.id == opt_m)
+            {
+                self.optimistic_default = None;
+            } else if !self.refreshing_catalog {
+                self.optimistic_default = None;
+            }
+        }
     }
 
     fn save_scoped_with_rollback(&mut self, previous: ModelScope, cx: &mut Context<Self>) {
         self.saving_scope = true;
         let next = self.enabled_scope.patterns();
+        let snap = self.client.snapshot();
+        let enabled_pairs = self.enabled_ready_pairs_from_snapshot(snap.models.as_deref());
+        let current_default = self.optimistic_default.clone().or_else(|| {
+            snap.models
+                .as_ref()
+                .and_then(|m| m.default_model.as_ref())
+                .map(|d| (d.provider.clone(), d.id.clone()))
+        });
+        let auto_next_default = match (current_default, enabled_pairs.first()) {
+            (Some(cur), Some(first)) if !enabled_pairs.contains(&cur) => Some(first.clone()),
+            (None, Some(first)) => Some(first.clone()),
+            _ => None,
+        };
+        let previous_optimistic = self.optimistic_default.clone();
+        if let Some(ref next_def) = auto_next_default {
+            self.optimistic_default = Some(next_def.clone());
+        }
         let client = self.client.clone();
 
         cx.spawn(async move |weak, cx| {
             let res = client.set_explicit_model_scope(next).await;
+            let default_res = if res.is_ok() {
+                if let Some((prov, mid)) = auto_next_default {
+                    Some(client.set_default_model(prov, mid).await)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
             let refreshed = client.refresh_models(None).await.is_ok();
             let _ = weak.update(cx, |this, cx| {
                 this.saving_scope = false;
                 if let Err(err) = res {
                     this.enabled_scope = previous;
+                    this.optimistic_default = previous_optimistic;
                     cx.emit(PreferencesTabEvent::ErrorMessage(format!(
                         "保存启用模型范围失败，已自动回滚：{err}"
+                    )));
+                } else if let Some(Err(err)) = default_res {
+                    this.optimistic_default = previous_optimistic;
+                    cx.emit(PreferencesTabEvent::ErrorMessage(format!(
+                        "同步默认模型失败：{err}"
                     )));
                 }
                 if refreshed {
@@ -252,12 +356,14 @@ impl PreferencesTabView {
             return;
         }
         self.refreshing_catalog = true;
+        cx.notify();
         let client = self.client.clone();
         cx.spawn(async move |weak, cx| {
             let res = client.refresh_models_catalog().await;
             let _ = client.refresh_models(None).await;
             let _ = weak.update(cx, |this, cx| {
                 this.refreshing_catalog = false;
+                this.sync_from_snapshot();
                 match res {
                     Ok(_) => cx.emit(PreferencesTabEvent::Notice("模型列表已刷新。".into())),
                     Err(err) => cx.emit(PreferencesTabEvent::ErrorMessage(err.to_string())),
@@ -304,15 +410,20 @@ impl PreferencesTabView {
             return;
         }
         self.saving_default = true;
+        let previous_optimistic = self.optimistic_default.clone();
+        self.optimistic_default = Some((provider.clone(), model_id.clone()));
         cx.notify();
         let client = self.client.clone();
         cx.spawn(async move |weak, cx| {
             let res = client.set_default_model(provider, model_id).await;
-            let _ = client.refresh_models(None).await;
+            let refreshed = client.refresh_models(None).await.is_ok();
             let _ = weak.update(cx, |this, cx| {
                 this.saving_default = false;
                 if let Err(err) = res {
+                    this.optimistic_default = previous_optimistic;
                     cx.emit(PreferencesTabEvent::ErrorMessage(err.to_string()));
+                } else if refreshed {
+                    this.sync_from_snapshot();
                 }
                 cx.notify();
             });
@@ -360,53 +471,69 @@ impl Render for PreferencesTabView {
         let snap = self.client.snapshot();
         let models_snap = snap.models.as_ref();
 
-        let catalog: &[ModelChoiceDto] = models_snap.map(|m| m.catalog.as_slice()).unwrap_or(&[]);
-        // Only expose logged-in / credential-ready providers and models on the Preferences tab.
-        let ready_models: Vec<&ModelChoiceDto> = models_snap
+        let snap_ready: Vec<&ModelChoiceDto> = models_snap
             .into_iter()
             .flat_map(|m| &m.models)
             .filter(|m| m.credential_ready && m.catalog_present)
             .collect();
+        let ready_models: Vec<&ModelChoiceDto> = if snap_ready.is_empty()
+            && self.refreshing_catalog
+            && !self.last_ready_models.is_empty()
+        {
+            self.last_ready_models.iter().collect()
+        } else {
+            snap_ready
+        };
         let mut ready_by_key: HashMap<(&str, &str), &ModelChoiceDto> =
             HashMap::with_capacity(ready_models.len());
         for m in &ready_models {
             ready_by_key.insert((m.provider.as_str(), m.id.as_str()), *m);
         }
-        let current_default = models_snap.and_then(|m| m.default_model.as_ref());
 
-        let default_label = current_default
-            .map(|d| {
-                ready_by_key
-                    .get(&(d.provider.as_str(), d.id.as_str()))
-                    .copied()
-                    .or_else(|| {
-                        catalog
-                            .iter()
-                            .find(|m| m.provider == d.provider && m.id == d.id)
-                    })
-                    .map(|m| {
-                        if m.name.trim().is_empty() {
-                            m.id.clone()
-                        } else {
-                            m.name.clone()
-                        }
-                    })
-                    .unwrap_or_else(|| {
-                        if d.name.trim().is_empty() {
-                            d.id.clone()
-                        } else {
-                            d.name.clone()
-                        }
-                    })
+        // Default model choices strictly match the enabled models below in the same order.
+        let enabled_ready_models: Vec<&ModelChoiceDto> = self
+            .enabled_scope
+            .model_rows()
+            .filter_map(|(_, full_id)| {
+                let (prov, mid) = full_id.split_once('/')?;
+                ready_by_key.get(&(prov, mid)).copied()
             })
-            .unwrap_or_else(|| "选择默认模型".to_owned());
+            .collect();
+
+        let requested_default: Option<(&str, &str)> = self
+            .optimistic_default
+            .as_ref()
+            .map(|(p, m)| (p.as_str(), m.as_str()))
+            .or_else(|| {
+                models_snap
+                    .and_then(|m| m.default_model.as_ref())
+                    .map(|d| (d.provider.as_str(), d.id.as_str()))
+            });
+        let effective_default: Option<&ModelChoiceDto> = requested_default
+            .and_then(|(prov, mid)| {
+                enabled_ready_models
+                    .iter()
+                    .copied()
+                    .find(|m| m.provider == prov && m.id == mid)
+            })
+            .or_else(|| enabled_ready_models.first().copied());
+
+        let default_label = effective_default
+            .map(|m| {
+                if m.name.trim().is_empty() {
+                    m.id.clone()
+                } else {
+                    m.name.clone()
+                }
+            })
+            .unwrap_or_else(|| "未选择默认模型".to_owned());
 
         // 1. Default model `72px` card with `208×32px` custom dropdown trigger + frosted popover (`H2p2z`)
-        let choices: Vec<_> = ready_models
+        let choices: Vec<_> = enabled_ready_models
             .iter()
             .map(|m| (m.provider.clone(), m.id.clone()))
             .collect();
-        let default_index = current_default
+        let default_index = effective_default
             .and_then(|d| {
                 choices
                     .iter()
@@ -415,7 +542,7 @@ impl Render for PreferencesTabView {
             .unwrap_or(0);
         let mut dropdown_menu_opt = None;
         if self.default_dropdown_open {
-            let items = if ready_models.is_empty() {
+            let items = if enabled_ready_models.is_empty() {
                 div()
                     .id("pref-default-model-scroll")
                     .w_full()
@@ -423,12 +550,16 @@ impl Render for PreferencesTabView {
                         apply_scale(div(), scale::CAPTION)
                             .p(space::SM)
                             .text_color(palette.text_muted)
-                            .child("暂无已登录服务的可用模型"),
+                            .child(if ready_models.is_empty() {
+                                "暂无已登录服务的可用模型"
+                            } else {
+                                "请先在下方启用模型"
+                            }),
                     )
                     .into_any_element()
             } else {
                 let default_rows: Arc<Vec<(String, String, String)>> = Arc::new(
-                    ready_models
+                    enabled_ready_models
                         .iter()
                         .map(|m| {
                             let label = if m.name.trim().is_empty() {
@@ -681,7 +812,7 @@ impl Render for PreferencesTabView {
             .provider_filter
             .as_deref()
             .filter(|pf| providers_seen_set.contains(*pf));
-        let filter_label = active_provider_filter.unwrap_or("全部服务").to_owned();
+        let filter_label = active_provider_filter.unwrap_or("全部").to_owned();
 
         let filter_index = providers_seen
             .iter()
@@ -702,7 +833,7 @@ impl Render for PreferencesTabView {
                     apply_scale(div(), scale::UI)
                         .id("pref-filter-all")
                         .test_support()
-                        .a11y_listitem("pref-filter-all", "全部服务", self.picker_index == 0)
+                        .a11y_listitem("pref-filter-all", "全部提供商", self.picker_index == 0)
                         .flex_shrink_0()
                         .h(height::CONTROL)
                         .px(space::SM)
@@ -722,7 +853,7 @@ impl Render for PreferencesTabView {
                             this.provider_filter = None;
                             this.dismiss_dropdowns(window, cx);
                         }))
-                        .child(cjk_inline_label("全部服务"))
+                        .child(cjk_inline_label("全部"))
                         .children((self.picker_index == 0).then(|| {
                             Icon::new(IconName::Check)
                                 .size(px(13.0))
@@ -782,7 +913,7 @@ impl Render for PreferencesTabView {
                         scale_factor,
                     )
                     .test_support()
-                    .a11y_dialog("pref-filter-popover", "按模型服务筛选")
+                    .a11y_dialog("pref-filter-popover", "按提供商筛选")
                     .w(px(220.0))
                     .p(space::XS)
                     .rounded(radius::ROW)
@@ -910,7 +1041,7 @@ impl Render for PreferencesTabView {
                 div().w(px(340.0)).child(
                     Input::new(&self.search_input)
                         .accessibility_id("preferences-search-input")
-                        .aria_label("搜索模型或服务")
+                        .aria_label("搜索模型")
                         .h(height::CONTROL)
                         .prefix(
                             Icon::new(IconName::Search)
@@ -926,7 +1057,7 @@ impl Render for PreferencesTabView {
                     .test_support()
                     .a11y_toggle_button(
                         "pref-filter-dropdown-btn",
-                        format!("筛选服务：{filter_label}"),
+                        format!("筛选提供商：{filter_label}"),
                         self.filter_dropdown_open,
                     )
                     .track_focus(&self.filter_trigger_focus)
@@ -937,7 +1068,7 @@ impl Render for PreferencesTabView {
                             cx.stop_propagation();
                         }
                     }))
-                    .min_w(px(108.0))
+                    .min_w(px(84.0))
                     .max_w(px(180.0))
                     .h(height::CONTROL)
                     .px(space::MD)
@@ -1025,21 +1156,28 @@ impl Render for PreferencesTabView {
                     .text_color(palette.text_secondary)
                     .flex()
                     .items_center()
-                    .gap(space::XS)
                     .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                    .opacity(if self.refreshing_catalog { 0.6 } else { 1.0 })
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.refresh_catalog(cx);
                     }))
-                    .child(
-                        Icon::new(IconName::RefreshCw)
-                            .size(px(13.0))
-                            .text_color(palette.text_secondary),
-                    )
-                    .child(cjk_inline_label("刷新")),
+                    .child(cjk_inline_label(if self.refreshing_catalog {
+                        "刷新中…"
+                    } else {
+                        "刷新"
+                    })),
             );
 
-        // 3. Enabled & unchecked logged-in models virtualized in `uniform_list` (`56px` uniform rows)
-        let row_count = visible_rows.len();
+        // 3. Enabled & unchecked logged-in models (`56px` uniform rows, collapsed to 5 rows by default per `lTWwV`)
+        let total_matching_rows = visible_rows.len();
+        let filtering_active = active_provider_filter.is_some() || !search_q.is_empty();
+        let can_collapse_models =
+            !filtering_active && total_matching_rows > PREF_COLLAPSED_MODEL_LIMIT;
+        let display_row_count = if can_collapse_models && !self.models_expanded {
+            PREF_COLLAPSED_MODEL_LIMIT
+        } else {
+            total_matching_rows
+        };
         let mut list_card = div()
             .w_full()
             .rounded(radius::ROW)
@@ -1050,13 +1188,13 @@ impl Render for PreferencesTabView {
             .flex()
             .flex_col();
 
-        if row_count == 0 {
+        if display_row_count == 0 {
             list_card = list_card.child(
                 apply_scale(div(), scale::UI)
                     .p(space::LG)
                     .text_color(palette.text_muted)
                     .child(if ready_models.is_empty() {
-                        "暂无已登录服务的可用模型，请先在「模型服务」中登录"
+                        "暂无已登录提供商的可用模型，请先在「提供商」中登录"
                     } else {
                         "暂无匹配的模型项"
                     }),
@@ -1064,12 +1202,12 @@ impl Render for PreferencesTabView {
         } else {
             let flip_scope = SharedString::from(format!("{:?}:{search_q}", active_provider_filter));
             let rows_arc = Arc::new(visible_rows);
-            let viewport_h =
-                px((row_count.min(PREF_LIST_MAX_VISIBLE_ROWS) as f32) * PREF_LIST_ROW_HEIGHT_PX);
+            let viewport_h = px((display_row_count.min(PREF_LIST_MAX_VISIBLE_ROWS) as f32)
+                * PREF_LIST_ROW_HEIGHT_PX);
             list_card = list_card.child(
                 uniform_list(
                     "pref-models-virtual-list",
-                    row_count,
+                    display_row_count,
                     cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
                         range
                             .map(|vis_idx| match &rows_arc[vis_idx] {
@@ -1173,6 +1311,8 @@ impl Render for PreferencesTabView {
                                             apply_scale(div(), scale::UI)
                                                 .w(px(140.0))
                                                 .flex_shrink_0()
+                                                .flex()
+                                                .justify_end()
                                                 .truncate()
                                                 .text_color(palette.text_secondary)
                                                 .child(SharedString::from(provider.clone())),
@@ -1319,6 +1459,8 @@ impl Render for PreferencesTabView {
                                             apply_scale(div(), scale::UI)
                                                 .w(px(140.0))
                                                 .flex_shrink_0()
+                                                .flex()
+                                                .justify_end()
                                                 .truncate()
                                                 .text_color(palette.text_secondary)
                                                 .child(SharedString::from(provider.clone())),
@@ -1338,6 +1480,45 @@ impl Render for PreferencesTabView {
                 .flex_shrink_0()
                 .h(viewport_h),
             );
+            if can_collapse_models {
+                let expanded = self.models_expanded;
+                let toggle_label = if expanded {
+                    SharedString::from("收起模型列表")
+                } else {
+                    SharedString::from(format!("查看全部模型（{total_matching_rows}）"))
+                };
+                list_card = list_card.child(
+                    apply_scale(div(), scale::UI)
+                        .id("pref-toggle-expand-models-btn")
+                        .test_support()
+                        .a11y_button("pref-toggle-expand-models-btn", toggle_label.clone())
+                        .w_full()
+                        .h(height::HEADER)
+                        .px(space::LG)
+                        .border_t_1()
+                        .border_color(palette.border_subtle)
+                        .text_color(palette.text_secondary)
+                        .flex()
+                        .items_center()
+                        .gap(space::SM)
+                        .hover(|s| s.bg(palette.bg_item_hover).text_color(palette.text_primary))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.models_expanded = !this.models_expanded;
+                            this.list_scroll = UniformListScrollHandle::new();
+                            cx.notify();
+                        }))
+                        .child(cjk_inline_label(toggle_label))
+                        .child(
+                            Icon::new(if expanded {
+                                IconName::ChevronUp
+                            } else {
+                                IconName::ChevronRight
+                            })
+                            .size(px(14.0))
+                            .text_color(palette.text_secondary),
+                        ),
+                );
+            }
         }
 
         let enabled_count = enabled_ready_count;

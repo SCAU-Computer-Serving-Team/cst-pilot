@@ -150,7 +150,7 @@ impl std::fmt::Display for SettingsError {
 
 impl std::error::Error for SettingsError {}
 
-/// Manages `agent/home/web-settings.json` (`theme` and `emptyModelScope`), isolated from TUI and Desktop themes.
+/// Manages `data/config/web.json` (`theme` and `emptyModelScope`), isolated from TUI and Desktop themes.
 #[derive(Clone)]
 pub struct WebSettingsStore {
     file: PathBuf,
@@ -158,9 +158,9 @@ pub struct WebSettingsStore {
 }
 
 impl WebSettingsStore {
-    pub fn new(agent_dir: impl AsRef<Path>) -> Self {
+    pub fn new(config_dir: impl AsRef<Path>) -> Self {
         Self {
-            file: agent_dir.as_ref().join("web-settings.json"),
+            file: config_dir.as_ref().join("web.json"),
             serial: Arc::new(AsyncMutex::new(())),
         }
     }
@@ -178,12 +178,12 @@ impl WebSettingsStore {
             Ok(bytes) => {
                 let value: Value = serde_json::from_slice(&bytes).map_err(|_| {
                     SettingsError::ConfigurationUnavailable(
-                        "Web外观配置无法读取，请检查 web-settings.json 后重试。".to_owned(),
+                        "Web外观配置无法读取，请检查 web.json 后重试。".to_owned(),
                     )
                 })?;
                 let Some(obj) = value.as_object() else {
                     return Err(SettingsError::ConfigurationUnavailable(
-                        "Web外观配置无法读取，请检查 web-settings.json 后重试。".to_owned(),
+                        "Web外观配置无法读取，请检查 web.json 后重试。".to_owned(),
                     ));
                 };
                 let parsed_theme = obj
@@ -195,7 +195,7 @@ impl WebSettingsStore {
                     (None, Some(rep)) => rep,
                     (None, None) => {
                         return Err(SettingsError::ConfigurationUnavailable(
-                            "Web外观配置无法读取，请检查 web-settings.json 后重试。".to_owned(),
+                            "Web外观配置无法读取，请检查 web.json 后重试。".to_owned(),
                         ));
                     }
                 };

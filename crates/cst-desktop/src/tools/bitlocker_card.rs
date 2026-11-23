@@ -149,6 +149,7 @@ pub struct BitLockerCardProps<'a> {
     pub pending: Option<PendingBitLockerPrompt>,
     pub secret_input: Option<Entity<SecretInput>>,
     pub details_expanded: bool,
+    pub running_light_allowed: bool,
 }
 
 /// Renders the standalone BitLocker Controlled Interaction & Result Card (`bitlocker` `unlock / decrypt`,
@@ -265,11 +266,21 @@ pub fn render_bitlocker_card<V: 'static>(
         .items_center()
         .gap(space::XS)
         .flex_shrink_0()
-        .child(
+        .child(if status_icon == IconName::LoaderCircle {
+            motion::animated_spinner(
+                format!("bitlocker-spin-{}", props.call_id),
+                px(12.0),
+                status_color,
+                props.running_light_allowed,
+                window,
+                cx,
+            )
+        } else {
             Icon::new(status_icon)
                 .size(px(12.0))
-                .text_color(status_color),
-        )
+                .text_color(status_color)
+                .into_any_element()
+        })
         .child(
             apply_scale(div(), scale::CAPTION)
                 .id(SharedString::from(format!(

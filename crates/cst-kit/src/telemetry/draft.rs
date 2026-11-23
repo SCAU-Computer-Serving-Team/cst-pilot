@@ -294,7 +294,7 @@ impl Drafts {
         let _lease = self
             .files
             .base
-            .pin_directory(Path::new("agent/home/telemetry/drafts"), false)?;
+            .pin_directory(&self.files.tel_rel.join("drafts"), false)?;
         let mut files = Vec::new();
         for entry in std::fs::read_dir(path).map_err(|_| "遥测草稿目录无法读取。")? {
             let entry = entry.map_err(|_| "遥测草稿条目无法读取。")?;

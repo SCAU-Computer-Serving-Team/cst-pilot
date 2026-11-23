@@ -15,45 +15,28 @@ use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
 
-/// Formats the human-readable Chinese summary lines for non-zero unfinished items in [`ExitCheckReport`].
-pub fn summarize_exit_report(report: &ExitCheckReport) -> Vec<String> {
-    let mut items = Vec::new();
-    if report.running_sessions > 0 {
-        items.push(format!(
-            "{} 个会话正在执行诊断或生成回复",
-            report.running_sessions
-        ));
+/// Formats a single concise Chinese warning line for [`ExitCheckReport`] matching `pFooK`.
+pub fn summarize_exit_message(report: &ExitCheckReport) -> &'static str {
+    let has_tasks = report.running_sessions > 0
+        || report.pending_server_inbox > 0
+        || report.active_exports > 0
+        || report.unresolved_local_outbox > 0;
+    let has_drafts = report.unsent_drafts > 0;
+    match (has_tasks, has_drafts) {
+        (true, true) => "有未完成任务和草稿，退出将中断并清空。",
+        (true, false) => "有运行中的任务，退出将立即中断。",
+        (false, true) => "有未发送的草稿，退出后将清空。",
+        (false, false) => "退出后当前会话进度仍会保留。",
     }
-    if report.pending_server_inbox > 0 {
-        items.push(format!(
-            "{} 条排队消息尚未投递完成",
-            report.pending_server_inbox
-        ));
-    }
-    if report.active_exports > 0 {
-        items.push(format!(
-            "{} 项会话导出任务正在后台生成",
-            report.active_exports
-        ));
-    }
-    if report.unresolved_local_outbox > 0 {
-        items.push(format!(
-            "{} 条本机待发消息尚未确认结果",
-            report.unresolved_local_outbox
-        ));
-    }
-    if report.unsent_drafts > 0 {
-        items.push(format!("{} 个输入框存有未发送草稿", report.unsent_drafts));
-    }
-    items
 }
 
 /// `384px` exit confirmation dialog (`cst-pilot-desktop.pen` 「01 · 工作台」 frame `xXtdv`, card `pFooK`).
-/// Default initial focus sits on the safe `"继续使用"` button.
+/// Default initial focus sits on the safe `"取消"` button.
 #[allow(clippy::too_many_arguments)]
 pub fn render_exit_confirm_dialog(
     report: &ExitCheckReport,
     exiting_in_progress: bool,
+    scrim_progress: f32,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
@@ -65,15 +48,16 @@ pub fn render_exit_confirm_dialog(
 ) -> impl IntoElement {
     let on_cancel = Rc::new(on_cancel);
     let on_confirm_exit = Rc::new(on_confirm_exit);
-    let bullets = summarize_exit_report(report);
+    let summary_text = summarize_exit_message(report);
 
     let scrim = render_frosted_surface(
         "exit-dialog-scrim",
-        FrostedGlassSpec::scrim(palette),
+        FrostedGlassSpec::scrim(palette).with_opacity(scrim_progress),
         palette.bg_scrim,
         transparency_enabled,
         scale_factor,
     )
+    .opacity(0.01 + 0.99 * scrim_progress)
     .test_support()
     .absolute()
     .top_0()
@@ -85,18 +69,9 @@ pub fn render_exit_confirm_dialog(
     .justify_center()
     .occlude();
 
-    let mut bullet_list = div().flex().flex_col().gap(space::XS);
-    for line in bullets {
-        bullet_list = bullet_list.child(
-            apply_scale(div(), scale::UI)
-                .text_color(palette.text_secondary)
-                .child(format!("· {line}")),
-        );
-    }
-
     let card = render_frosted_surface(
         "exit-dialog-card-pfook",
-        FrostedGlassSpec::modal(palette, 8.0),
+        FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
         palette.bg_modal,
         transparency_enabled,
         scale_factor,
@@ -136,9 +111,8 @@ pub fn render_exit_confirm_dialog(
             .child(
                 apply_scale(div(), scale::UI)
                     .text_color(palette.text_secondary)
-                    .child("退出将停止当前正在运行的后台任务并清空内存中的未发草稿："),
-            )
-            .child(bullet_list),
+                    .child(summary_text),
+            ),
     )
     .child(
         div()
@@ -152,7 +126,7 @@ pub fn render_exit_confirm_dialog(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .id("exit-dialog-cancel-btn")
                     .test_support()
-                    .a11y_button("exit-dialog-cancel-btn", "取消退出")
+                    .a11y_button("exit-dialog-cancel-btn", "取消")
                     .track_focus(cancel_focus)
                     .tab_index(0)
                     .h(height::CONTROL)
@@ -171,7 +145,7 @@ pub fn render_exit_confirm_dialog(
                             cb(window, cx);
                         }
                     })
-                    .child(cjk_inline_label("继续使用"))
+                    .child(cjk_inline_label("取消"))
             })
             .child({
                 let cb = Rc::clone(&on_confirm_exit);
@@ -183,7 +157,7 @@ pub fn render_exit_confirm_dialog(
                         if exiting_in_progress {
                             "正在退出"
                         } else {
-                            "停止任务并退出"
+                            "退出"
                         },
                     )
                     .track_focus(confirm_focus)
@@ -206,7 +180,7 @@ pub fn render_exit_confirm_dialog(
                     .child(cjk_inline_label(if exiting_in_progress {
                         "正在退出…"
                     } else {
-                        "停止任务并退出"
+                        "退出"
                     }))
             }),
     );

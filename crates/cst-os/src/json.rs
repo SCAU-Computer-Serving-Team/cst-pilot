@@ -131,7 +131,13 @@ pub fn strip_json_comments(input: &str) -> String {
 /// Release metadata and all other configuration remain strict JSON.
 pub fn parse_local_json(path: &str, bytes: &[u8]) -> Result<Value, String> {
     let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
-    if matches!(path, "agent/home/settings.json" | "agent/home/models.json") {
+    if matches!(
+        path,
+        "data/config/settings.json"
+            | "data/config/models.json"
+            | "config/settings.json"
+            | "config/models.json"
+    ) {
         let text = std::str::from_utf8(bytes).map_err(|_| "本机配置编码无效。")?;
         return parse_strict_json(strip_json_comments(text).as_bytes());
     }

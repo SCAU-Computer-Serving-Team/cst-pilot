@@ -15,16 +15,17 @@ struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
         let path = std::env::temp_dir().join(format!("cst-auth-routing-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(path.join("agent/home")).unwrap();
+        fs::create_dir_all(path.join("data/config")).unwrap();
         Self(path.canonicalize().unwrap())
     }
     fn file(&self, name: &str) -> PathBuf {
-        self.0.join("agent/home").join(name)
+        self.0.join("data/config").join(name)
     }
     fn resources(&self) {
-        fs::write(self.file("APPEND_SYSTEM.md"), "固定规则。").unwrap();
+        fs::create_dir_all(self.0.join("app/prompts")).unwrap();
+        fs::write(self.0.join("app/prompts/APPEND_SYSTEM.md"), "固定规则。").unwrap();
         for name in SKILL_NAMES {
-            let dir = self.file(&format!("skills/{name}"));
+            let dir = self.0.join(format!("app/skills/{name}"));
             fs::create_dir_all(&dir).unwrap();
             fs::write(
                 dir.join("SKILL.md"),

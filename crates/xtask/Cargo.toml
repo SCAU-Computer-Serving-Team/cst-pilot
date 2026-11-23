@@ -1,0 +1,19 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[dependencies]
+cst-os = { path = "../cst-os" }
+cst-updater = { path = "../cst-updater" }
+chrono = { version = "=0.4.45", default-features = false, features = ["clock", "serde"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+zip = { version = "=6.0.0", default-features = false, features = ["deflate"] }

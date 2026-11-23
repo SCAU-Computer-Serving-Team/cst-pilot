@@ -82,14 +82,16 @@ impl Handoff {
         let expected = package
             .release
             .sums
-            .get("cst-updater.exe")
+            .get(layout::UPDATER_EXE_PATH)
             .ok_or("升级包缺少更新器。")?;
         let _update = storage.pin_directory(Path::new(".state/update"), true)?;
-        let _stage =
-            storage.pin_directory(Path::new(&request.stage).join("program").as_path(), false)?;
+        let _stage = storage.pin_directory(
+            Path::new(&request.stage).join("program/app").as_path(),
+            false,
+        )?;
         copy_updater(
             &storage,
-            &package.directory().join("cst-updater.exe"),
+            &package.directory().join(layout::UPDATER_EXE_PATH),
             &updater,
             expected,
             cancel,
@@ -131,7 +133,7 @@ impl Handoff {
             .package
             .release
             .sums
-            .get("cst-updater.exe")
+            .get(layout::UPDATER_EXE_PATH)
             .ok_or("更新器哈希缺失。")?;
         io::same(&self.storage, &self.updater, Some(expected), &cancel)?;
         let pid = process::launch(
@@ -246,7 +248,10 @@ pub fn run_request(root: &Path, id: &str, key: ReleaseKey) -> Result<ApplyOutcom
     io::same(
         &storage,
         &own,
-        release.sums.get("cst-updater.exe").map(String::as_str),
+        release
+            .sums
+            .get(layout::UPDATER_EXE_PATH)
+            .map(String::as_str),
         &cancel,
     )?;
     process::wait_for_parents(&request.parents, Duration::from_secs(60), &cancel)?;
