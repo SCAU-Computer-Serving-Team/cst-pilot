@@ -151,13 +151,25 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         }
     }
 
-    // 2. Optional Cargo build (with embed-web on cst-server)
+    // 2. Optional Cargo build (with embed-web on cst-server; static CRT on Windows dist)
     if !args.skip_cargo_build {
         println!(
             "[xtask] Building Rust binaries (profile={})...",
             args.profile
         );
         let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+        let dist_rustflags = if cfg!(windows) && args.profile == "dist" {
+            let mut flags = env::var("RUSTFLAGS").unwrap_or_default();
+            if !flags.contains("crt-static") {
+                if !flags.is_empty() {
+                    flags.push(' ');
+                }
+                flags.push_str("-C target-feature=+crt-static");
+            }
+            Some(flags)
+        } else {
+            None
+        };
         let mut cmd1 = Command::new(&cargo);
         cmd1.args([
             "build",
@@ -171,6 +183,9 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         ])
         .env("CST_BUILD_VERSION", &args.version)
         .current_dir(&root);
+        if let Some(flags) = &dist_rustflags {
+            cmd1.env("RUSTFLAGS", flags);
+        }
         let st1 = cmd1
             .status()
             .map_err(|e| format!("无法执行 cargo build：{e}"))?;
@@ -191,6 +206,9 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         ])
         .env("CST_BUILD_VERSION", &args.version)
         .current_dir(&root);
+        if let Some(flags) = &dist_rustflags {
+            cmd2.env("RUSTFLAGS", flags);
+        }
         let st2 = cmd2
             .status()
             .map_err(|e| format!("无法执行 cargo build (cst-server)：{e}"))?;
