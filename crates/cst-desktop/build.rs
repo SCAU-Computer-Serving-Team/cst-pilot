@@ -216,13 +216,11 @@ layout(std140, set = 0, binding = 0) uniform CstUniforms {
     vec4 _u_slot1; // [viewport_w, viewport_h, opacity, 0]
     vec4 _u_slot2; // [u_blur, u_refract, u_vibrancy, u_grain]
     vec4 _u_slot3; // [u_tint.r, u_tint.g, u_tint.b, u_tintOpacity]
-    vec4 _u_slot4; // [u_specular, cap_offset_x, cap_offset_y, 0]
+    vec4 _u_slot4; // [u_specular, cap_offset_x, cap_offset_y, corner_radius_px]
     vec4 _u_slot5; // [cap_w, cap_h, alloc_w, alloc_h]
 };
-layout(set = 0, binding = 1) uniform texture2D _u_sdf_tex;
-layout(set = 0, binding = 2) uniform sampler _u_sdf_smp;
-layout(set = 0, binding = 3) uniform texture2D _u_bg_tex;
-layout(set = 0, binding = 4) uniform sampler _u_bg_smp;
+layout(set = 0, binding = 1) uniform texture2D _u_bg_tex;
+layout(set = 0, binding = 2) uniform sampler _u_bg_smp;
 layout(location = 0) out vec4 _cst_outColor;
 #define u_resolution (_u_slot0.zw)
 #define u_blur (_u_slot2.x)
@@ -233,7 +231,24 @@ layout(location = 0) out vec4 _cst_outColor;
 #define u_tintOpacity (_u_slot3.w)
 #define u_specular (_u_slot4.x)
 vec4 _cst_sample_sdf(vec2 uv) {
-    return texture(sampler2D(_u_sdf_tex, _u_sdf_smp), vec2(uv.x, 1.0 - uv.y));
+    vec2 res = max(u_resolution, vec2(1.0));
+    vec2 halfSize = res * 0.5;
+    float r = clamp(_u_slot4.w, 0.0, min(halfSize.x, halfSize.y));
+    vec2 b = max(halfSize - vec2(r), vec2(0.0));
+    vec2 w = (uv - vec2(0.5)) * res;
+    vec2 q = abs(w) - b;
+    vec2 o = max(q, vec2(0.0));
+    float outLen = length(o);
+    float signedOutside = outLen + min(max(q.x, q.y), 0.0) - r;
+    float innerDist = -signedOutside;
+    float sx = (w.x >= 0.0) ? 1.0 : -1.0;
+    float sy = (w.y >= 0.0) ? 1.0 : -1.0;
+    vec2 outN = (outLen > 1e-4)
+        ? ((o / outLen) * vec2(sx, sy))
+        : ((q.x > q.y) ? vec2(sx, 0.0) : vec2(0.0, sy));
+    vec2 inN = -outN;
+    float coverage = clamp(0.5 + innerDist, 0.0, 1.0);
+    return vec4(max(innerDist, 0.0), inN.x, inN.y, coverage);
 }
 vec4 _cst_sample_bg(vec2 uv) {
     vec2 topDown = vec2(uv.x, 1.0 - uv.y);

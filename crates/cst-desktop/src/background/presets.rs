@@ -212,7 +212,7 @@ pub struct FrostedGlassUniforms {
     pub slot1: [f32; 4], // [viewport_w, viewport_h, opacity, 0]
     pub slot2: [f32; 4], // [u_blur, u_refract, u_vibrancy, u_grain]
     pub slot3: [f32; 4], // [u_tint.r, u_tint.g, u_tint.b, u_tintOpacity]
-    pub slot4: [f32; 4], // [u_specular, cap_offset_x, cap_offset_y, 0]
+    pub slot4: [f32; 4], // [u_specular, cap_offset_x, cap_offset_y, corner_radius_px]
     pub slot5: [f32; 4], // [cap_w, cap_h, alloc_w, alloc_h]
 }
 
@@ -238,86 +238,6 @@ fn decode_png_row(png_bytes: &[u8]) -> [[u8; 4]; 256] {
         }
     }
     out
-}
-
-/// Converts a finite `f32` into IEEE 754 binary16 (`f16` bits stored as `u16`) for `DXGI_FORMAT_R16G16B16A16_FLOAT`.
-pub fn f32_to_f16_bits(val: f32) -> u16 {
-    let bits = val.to_bits();
-    let sign = ((bits >> 16) & 0x8000) as u16;
-    let exp = ((bits >> 23) & 0xFF) as i32;
-    let mant = bits & 0x007F_FFFF;
-
-    if exp == 255 {
-        return sign | 0x7C00 | u16::from(mant != 0);
-    }
-    let new_exp = exp - 127 + 15;
-    if new_exp >= 31 {
-        return sign | 0x7C00;
-    }
-    if new_exp <= 0 {
-        if new_exp < -10 {
-            return sign;
-        }
-        let sub_mant = (mant | 0x0080_0000) >> (1 - new_exp + 13);
-        return sign | (sub_mant as u16);
-    }
-    sign | ((new_exp as u16) << 10) | ((mant >> 13) as u16)
-}
-
-/// Generates a top-down D3D11 `Rgba16Float` analytical rounded-rect SDF texture:
-/// - `r`: inward pixel distance (`>= 0` inside rounded rect)
-/// - `g, b`: inward unit normal in WebGL bottom-up UV space (so top edge has `normal.y = -1.0` for top-lit Fresnel bevel)
-/// - `a`: subpixel anti-aliased shape coverage `[0.0 .. 1.0]`
-pub fn generate_rounded_rect_sdf_rgba16f(
-    width: u32,
-    height: u32,
-    corner_radius_px: f32,
-) -> Vec<[u16; 4]> {
-    let w = width.max(1);
-    let h = height.max(1);
-    let wf = w as f32;
-    let hf = h as f32;
-    let half_w = wf * 0.5;
-    let half_h = hf * 0.5;
-    let r = corner_radius_px.clamp(0.0, half_w.min(half_h));
-    let bx = (half_w - r).max(0.0);
-    let by = (half_h - r).max(0.0);
-
-    let mut texels = Vec::with_capacity((w as usize) * (h as usize));
-    for py in 0..h {
-        // Convert top-down D3D11 row `py` to WebGL bottom-up `wy` relative to center
-        let wy = (hf - (py as f32 + 0.5)) - half_h;
-        for px in 0..w {
-            let wx = (px as f32 + 0.5) - half_w;
-            let qx = wx.abs() - bx;
-            let qy = wy.abs() - by;
-            let ox = qx.max(0.0);
-            let oy = qy.max(0.0);
-            let out_len = (ox * ox + oy * oy).sqrt();
-            let signed_outside = out_len + qx.max(qy).min(0.0) - r;
-            let inner_dist = -signed_outside;
-
-            // Analytical gradient of `signed_outside` points OUTWARD; negate for INWARD normal!
-            let (out_nx, out_ny) = if out_len > 1e-4 {
-                ((ox / out_len) * wx.signum(), (oy / out_len) * wy.signum())
-            } else if qx > qy {
-                (wx.signum(), 0.0)
-            } else {
-                (0.0, wy.signum())
-            };
-            let in_nx = -out_nx;
-            let in_ny = -out_ny;
-            let coverage = (0.5 + inner_dist).clamp(0.0, 1.0);
-
-            texels.push([
-                f32_to_f16_bits(inner_dist.max(0.0)),
-                f32_to_f16_bits(in_nx),
-                f32_to_f16_bits(in_ny),
-                f32_to_f16_bits(coverage),
-            ]);
-        }
-    }
-    texels
 }
 
 #[cfg(test)]

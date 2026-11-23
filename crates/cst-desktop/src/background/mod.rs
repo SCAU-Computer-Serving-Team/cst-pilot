@@ -17,7 +17,7 @@ pub use d3d11_surface::{
     SurfaceRuntimeDiagnostics, d3d_is_software_adapter, d3d_sm50_supported,
     reset_d3d11_pipeline_cache, surface_diagnostics,
 };
-pub use presets::{FrostedGlassSpec, SkyPreset, generate_rounded_rect_sdf_rgba16f};
+pub use presets::{FrostedGlassSpec, SkyPreset};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnimationGateInputs {
