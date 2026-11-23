@@ -98,8 +98,10 @@ impl WindowsWindowInner {
             WM_MOVE => self.handle_move_msg(handle, lparam),
             WM_SIZE => self.handle_size_msg(wparam, lparam),
             WM_GETMINMAXINFO => self.handle_get_min_max_info_msg(lparam),
-            WM_ENTERSIZEMOVE | WM_ENTERMENULOOP => self.handle_size_move_loop(handle),
-            WM_EXITSIZEMOVE | WM_EXITMENULOOP => self.handle_size_move_loop_exit(handle),
+            WM_ENTERSIZEMOVE => self.handle_size_move_loop(handle, true),
+            WM_ENTERMENULOOP => self.handle_size_move_loop(handle, false),
+            WM_EXITSIZEMOVE => self.handle_size_move_loop_exit(handle, true),
+            WM_EXITMENULOOP => self.handle_size_move_loop_exit(handle, false),
             WM_TIMER => self.handle_timer_msg(handle, wparam),
             WM_NCCALCSIZE => self.handle_calc_client_size(handle, wparam, lparam),
             WM_DPICHANGED => self.handle_dpi_changed_msg(handle, wparam, lparam),
@@ -196,7 +198,9 @@ impl WindowsWindowInner {
                 )?);
             }
         }
-        if let Some(mut callback) = self.state.callbacks.moved.take() {
+        if self.state.in_size_move_loop.get() {
+            self.state.pending_move_notify.set(true);
+        } else if let Some(mut callback) = self.state.callbacks.moved.take() {
             callback();
             self.state.callbacks.moved.set(Some(callback));
         }
@@ -219,6 +223,9 @@ impl WindowsWindowInner {
     }
 
     fn handle_size_msg(self: &Rc<Self>, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
+        if self.state.in_size_move_loop.get() {
+            self.state.resizing_in_loop.set(true);
+        }
         // Minimizing and restoring both arrive as `WM_SIZE`; the deferred report
         // reads `IsIconic` at delivery, so one call covers both directions.
         self.report_visibility();
@@ -274,7 +281,12 @@ impl WindowsWindowInner {
         }
     }
 
-    fn handle_size_move_loop(&self, handle: HWND) -> Option<isize> {
+    fn handle_size_move_loop(&self, handle: HWND, is_size_move: bool) -> Option<isize> {
+        if is_size_move {
+            self.state.in_size_move_loop.set(true);
+            self.state.resizing_in_loop.set(false);
+            self.state.pending_move_notify.set(false);
+        }
         unsafe {
             let ret = SetTimer(
                 Some(handle),
@@ -292,9 +304,22 @@ impl WindowsWindowInner {
         None
     }
 
-    fn handle_size_move_loop_exit(&self, handle: HWND) -> Option<isize> {
+    fn handle_size_move_loop_exit(&self, handle: HWND, is_size_move: bool) -> Option<isize> {
         unsafe {
             KillTimer(Some(handle), SIZE_MOVE_LOOP_TIMER_ID).log_err();
+        }
+        if is_size_move {
+            let was_pure_move =
+                self.state.pending_move_notify.take() && !self.state.resizing_in_loop.get();
+            self.state.in_size_move_loop.set(false);
+            self.state.resizing_in_loop.set(false);
+            if was_pure_move {
+                if let Some(mut callback) = self.state.callbacks.moved.take() {
+                    callback();
+                    self.state.callbacks.moved.set(Some(callback));
+                }
+                let _ = self.handle_paint_msg(handle);
+            }
         }
         None
     }
@@ -305,6 +330,15 @@ impl WindowsWindowInner {
             while let Some(Ok(runnable)) = runnables.next() {
                 WindowsDispatcher::execute_runnable(runnable);
             }
+            // During a pure window drag (moving without resizing), DWM translates the existing
+            // swapchain smoothly on the GPU. Skipping synchronous D3D11 redraws inside the modal
+            // drag loop avoids stalling mouse message delivery.
+            if self.state.in_size_move_loop.get()
+                && !self.state.resizing_in_loop.get()
+                && self.state.pending_move_notify.get()
+            {
+                return Some(0);
+            }
             self.handle_paint_msg(handle)
         } else {
             None
@@ -312,6 +346,17 @@ impl WindowsWindowInner {
     }
 
     fn handle_paint_msg(&self, handle: HWND) -> Option<isize> {
+        // During a pure window drag (moving without resizing or DPI change), DWM translates
+        // the existing swapchain smoothly on the GPU. Validate the region instead of running
+        // synchronous GPUI layout + D3D11 Present on every VSync invalidation so the modal
+        // drag loop stays responsive.
+        if self.state.in_size_move_loop.get()
+            && !self.state.resizing_in_loop.get()
+            && self.state.pending_move_notify.get()
+        {
+            unsafe { ValidateRect(Some(handle), None).ok().log_err() };
+            return Some(0);
+        }
         self.draw_window(handle, false)
     }
 
@@ -876,6 +921,9 @@ impl WindowsWindowInner {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> Option<isize> {
+        if self.state.in_size_move_loop.get() {
+            self.state.resizing_in_loop.set(true);
+        }
         let new_dpi = wparam.loword() as f32;
 
         let is_maximized = self.state.is_maximized();

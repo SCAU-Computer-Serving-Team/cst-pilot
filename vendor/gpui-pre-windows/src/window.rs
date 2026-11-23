@@ -91,6 +91,9 @@ pub struct WindowsWindowState {
     hwnd: HWND,
     pub(crate) a11y: RefCell<Option<A11yState>>,
     pub mouse_position: Cell<Point<Pixels>>,
+    pub(crate) in_size_move_loop: Cell<bool>,
+    pub(crate) resizing_in_loop: Cell<bool>,
+    pub(crate) pending_move_notify: Cell<bool>,
 }
 
 pub(crate) struct WindowsWindowInner {
@@ -193,6 +196,9 @@ impl WindowsWindowState {
             direct_manipulation,
             a11y: RefCell::new(None),
             mouse_position: Cell::new(Point::default()),
+            in_size_move_loop: Cell::new(false),
+            resizing_in_loop: Cell::new(false),
+            pending_move_notify: Cell::new(false),
         })
     }
 

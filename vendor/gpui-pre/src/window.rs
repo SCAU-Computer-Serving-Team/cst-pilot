@@ -3001,11 +3001,16 @@ impl Window {
     /// the platform window, then notifies observers. Normally called automatically
     /// by the platform's resize callback, but exposed publicly for test infrastructure.
     pub fn bounds_changed(&mut self, cx: &mut App) {
-        self.scale_factor = self.platform_window.scale_factor();
-        self.viewport_size = self.platform_window.content_size();
+        let next_scale = self.platform_window.scale_factor();
+        let next_size = self.platform_window.content_size();
+        let layout_changed = next_scale != self.scale_factor || next_size != self.viewport_size;
+        self.scale_factor = next_scale;
+        self.viewport_size = next_size;
         self.mouse_position = self.platform_window.mouse_position();
 
-        self.refresh();
+        if layout_changed {
+            self.refresh();
+        }
 
         self.bounds_observers
             .clone()
@@ -3204,7 +3209,9 @@ impl Window {
     pub(crate) fn set_test_pointer_state(&mut self, active: bool, hovered: bool, cx: &mut App) {
         self.hovered.set(hovered);
         if self.active.replace(active) != active {
-            self.activation_observers.clone().retain(|callback| callback(self, cx));
+            self.activation_observers
+                .clone()
+                .retain(|callback| callback(self, cx));
         }
         self.refresh();
     }
