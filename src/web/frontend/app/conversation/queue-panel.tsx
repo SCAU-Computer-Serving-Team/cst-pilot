@@ -1,14 +1,23 @@
-import { Button, Input, Label, TextField, Tooltip } from "@heroui/react";
+import { Button, Tooltip } from "@heroui/react";
 import { ArrowUp, CircleHelp, GripVertical, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { apiJson, sessionPath } from "../data/api";
 import type { InboxSnapshot } from "../data/web-state";
 import { visibleQueueItems } from "./conversation-parts";
 
+export const EDIT_QUEUE_ITEM_EVENT = "cst-pilot:edit-queue-item";
+
+export type EditQueueItemDetail = {
+	sessionId: string;
+	itemId: string;
+	version: number;
+	text: string;
+	skill?: string;
+	refresh: () => Promise<void>;
+};
+
 export function QueuePanel({ id, queue, refresh }: { id: string; queue: InboxSnapshot; refresh: () => Promise<void> }) {
 	const [error, setError] = useState("");
-	const [editing, setEditing] = useState("");
-	const [text, setText] = useState("");
 	const pending = visibleQueueItems(queue.items);
 	const failed = pending.find((item) => item.status === "failed");
 	const uncertain = pending.some((item) => item.uncertain);
@@ -20,7 +29,6 @@ export function QueuePanel({ id, queue, refresh }: { id: string; queue: InboxSna
 		try {
 			await apiJson(sessionPath(id, `/${path}`), { method, body: { version: queue.version, ...body } });
 			setError("");
-			setEditing("");
 			await refresh();
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : "队列更新失败");
@@ -71,60 +79,70 @@ export function QueuePanel({ id, queue, refresh }: { id: string; queue: InboxSna
 							void change("queue/order", "PUT", { ids });
 						}}
 					>
-						{editing === item.id ? (
+						{!item.uncertain && <GripVertical size={16} aria-hidden="true" className="queue-grip" />}
+						<span>{item.text || "图片消息"}</span>
+						{(item.status === "pending" || item.status === "failed") && (
 							<>
-								<TextField aria-label="编辑排队消息" className="queue-edit" value={text} onChange={setText}>
-									<Label className="visually-hidden">编辑排队消息</Label>
-									<Input className="queue-edit-input" />
-								</TextField>
-								<Button onPress={() => void change(`queue/${item.id}`, "PATCH", { text })}>保存</Button>
-								<Button onPress={() => setEditing("")}>取消</Button>
-							</>
-						) : (
-							<>
-								{!item.uncertain && <GripVertical size={16} aria-hidden="true" className="queue-grip" />}
-								<span>{item.text || "图片消息"}</span>
-								{(item.status === "pending" || item.status === "failed") && (
-									<>
-										<Button
-											variant="ghost"
-											className="queue-steer"
-											onPress={() =>
-												void change(
-													`queue/${item.id}/${item.status === "failed" ? "retry" : "steer"}`,
-													"POST",
-													{},
-												)
-											}
-										>
-											{item.status === "failed" ? (
-												<RotateCcw size={14} aria-hidden="true" />
-											) : (
-												<ArrowUp size={14} aria-hidden="true" />
-											)}
-											{item.status === "failed" ? "重试" : "立即"}
-										</Button>
+								{item.status === "failed" ? (
+									<Tooltip delay={80} closeDelay={0}>
 										<Button
 											variant="ghost"
 											isIconOnly
-											aria-label="编辑排队消息"
-											onPress={() => {
-												setEditing(item.id);
-												setText(item.text);
-											}}
+											aria-label="重试排队消息"
+											onPress={() => void change(`queue/${item.id}/retry`, "POST", {})}
 										>
-											<Pencil size={16} />
+											<RotateCcw size={16} />
 										</Button>
+										<Tooltip.Content placement="top">重试发送</Tooltip.Content>
+									</Tooltip>
+								) : (
+									<Tooltip delay={80} closeDelay={0}>
 										<Button
 											variant="ghost"
 											isIconOnly
-											aria-label="删除排队消息"
-											onPress={() => void change(`queue/${item.id}`, "DELETE", {})}
+											aria-label="立即发送"
+											onPress={() => void change(`queue/${item.id}/steer`, "POST", {})}
 										>
-											<Trash2 size={16} />
+											<ArrowUp size={16} />
 										</Button>
-									</>
+										<Tooltip.Content placement="top">立即发送</Tooltip.Content>
+									</Tooltip>
 								)}
+								<Tooltip delay={80} closeDelay={0}>
+									<Button
+										variant="ghost"
+										isIconOnly
+										aria-label="编辑排队消息"
+										onPress={() => {
+											window.dispatchEvent(
+												new CustomEvent<EditQueueItemDetail>(EDIT_QUEUE_ITEM_EVENT, {
+													detail: {
+														sessionId: id,
+														itemId: item.id,
+														version: queue.version,
+														text: item.text,
+														skill: item.skill,
+														refresh,
+													},
+												}),
+											);
+										}}
+									>
+										<Pencil size={16} />
+									</Button>
+									<Tooltip.Content placement="top">编辑</Tooltip.Content>
+								</Tooltip>
+								<Tooltip delay={80} closeDelay={0}>
+									<Button
+										variant="ghost"
+										isIconOnly
+										aria-label="删除排队消息"
+										onPress={() => void change(`queue/${item.id}`, "DELETE", {})}
+									>
+										<Trash2 size={16} />
+									</Button>
+									<Tooltip.Content placement="top">删除</Tooltip.Content>
+								</Tooltip>
 							</>
 						)}
 					</li>

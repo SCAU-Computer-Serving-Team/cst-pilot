@@ -5380,7 +5380,7 @@
         "mode": "dark"
       },
       "width": 4128,
-      "height": 11182,
+      "height": 12182,
       "cornerRadius": "$radius-row",
       "stroke": "$border-subtle",
       "strokeWidth": 2,
@@ -6268,7 +6268,7 @@
           "y": 1266,
           "name": "对话",
           "width": 4000,
-          "height": 2342,
+          "height": 3342,
           "layout": "none",
           "children": [
             {
@@ -11736,6 +11736,1103 @@
                   ]
                 }
               ]
+            },
+            {
+              "type": "frame",
+              "id": "Dgzwn",
+              "x": 0,
+              "y": 2424,
+              "name": "对话 · 修改消息与草稿保护",
+              "theme": {
+                "mode": "light"
+              },
+              "clip": true,
+              "width": 1280,
+              "height": 800,
+              "fill": "$bg-shell",
+              "cornerRadius": "$radius-row",
+              "stroke": "$border-strong",
+              "strokeWidth": 1,
+              "strokeAlignment": "inner",
+              "children": [
+                {
+                  "id": "H9q3c4",
+                  "type": "ref",
+                  "ref": "L081M1",
+                  "name": "通顶侧边栏 · 实例",
+                  "height": "fill_container",
+                  "descendants": {
+                    "rWDPV": {
+                      "fill": "$bg-item-active"
+                    },
+                    "jReIx": {
+                      "fontWeight": "500",
+                      "fill": "$text-primary"
+                    }
+                  }
+                },
+                {
+                  "type": "frame",
+                  "id": "ZEERo",
+                  "name": "右侧工作区列",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "id": "N1pPg",
+                      "type": "ref",
+                      "ref": "GElS8",
+                      "name": "展开态工作区顶栏 · 实例",
+                      "width": "fill_container"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "sJ7wQ",
+                      "name": "工作区主体包装",
+                      "width": "fill_container",
+                      "height": "fill_container",
+                      "padding": [
+                        0,
+                        "$space-inline",
+                        "$space-inline",
+                        0
+                      ],
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "dIpto",
+                          "name": "工作区主容器",
+                          "clip": true,
+                          "width": "fill_container",
+                          "height": "fill_container",
+                          "fill": "$bg-workspace",
+                          "cornerRadius": "$radius-row",
+                          "stroke": "$border-subtle",
+                          "strokeWidth": 1,
+                          "strokeAlignment": "inner",
+                          "effect": [
+                            {
+                              "type": "shadow",
+                              "shadowType": "outer",
+                              "color": "$shadow-panel-sm",
+                              "offset": {
+                                "x": 0,
+                                "y": 2
+                              },
+                              "blur": 6
+                            },
+                            {
+                              "type": "shadow",
+                              "shadowType": "outer",
+                              "color": "$shadow-panel-lg",
+                              "offset": {
+                                "x": 0,
+                                "y": 8
+                              },
+                              "blur": 24
+                            }
+                          ],
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "id": "a3hmN",
+                              "type": "ref",
+                              "ref": "HUkqs",
+                              "name": "会话标题栏 · 实例",
+                              "width": "fill_container"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "wQuq5",
+                              "name": "消息滚动视口",
+                              "width": "fill_container",
+                              "height": "fill_container",
+                              "layout": "vertical",
+                              "padding": [
+                                24,
+                                24,
+                                16,
+                                24
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "y6aZs",
+                                  "name": "对话内容列 · 816px",
+                                  "width": 816,
+                                  "layout": "vertical",
+                                  "gap": "$space-group",
+                                  "children": [
+                                    {
+                                      "id": "vhkpX",
+                                      "type": "ref",
+                                      "ref": "CpxAu",
+                                      "name": "目标用户消息",
+                                      "descendants": {
+                                        "LlaoY": {
+                                          "fill": "$bg-item-active"
+                                        },
+                                        "LlaoY/DfvN3": {
+                                          "fill": "$text-primary"
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": "frame",
+                                      "id": "C7vdA",
+                                      "name": "助手回复轮次",
+                                      "width": "fill_container",
+                                      "layout": "vertical",
+                                      "gap": "$space-component",
+                                      "children": [
+                                        {
+                                          "type": "frame",
+                                          "id": "kWqrG",
+                                          "name": "过程折叠头",
+                                          "height": 28,
+                                          "gap": "$space-inline",
+                                          "alignItems": "center",
+                                          "children": [
+                                            {
+                                              "type": "frame",
+                                              "id": "ayD4n",
+                                              "name": "过程标题对齐槽",
+                                              "padding": [
+                                                0,
+                                                0,
+                                                "$space-micro",
+                                                0
+                                              ],
+                                              "alignItems": "center",
+                                              "children": [
+                                                {
+                                                  "type": "text",
+                                                  "id": "gby3p",
+                                                  "name": "过程标题",
+                                                  "fill": "$text-secondary",
+                                                  "content": "已工作 3.2s",
+                                                  "lineHeight": 1.4286,
+                                                  "fontFamily": "Source Han Sans CN",
+                                                  "fontSize": "$font-ui",
+                                                  "fontWeight": "normal"
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "type": "icon",
+                                              "id": "rCjJB",
+                                              "name": "展开箭头",
+                                              "width": 14,
+                                              "height": 14,
+                                              "icon": "chevron-right",
+                                              "library": "lucide",
+                                              "fill": "$text-secondary"
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "type": "text",
+                                          "id": "x0OOlv",
+                                          "name": "助手正文",
+                                          "fill": "$text-primary",
+                                          "textGrowth": "fixed-width",
+                                          "width": "fill_container",
+                                          "content": "当前系统盘剩余 18.4 GB（已用 92.2%），主要占用为休眠文件 hiberfil.sys（12.8 GB）与用户软件缓存（30.8 GB）。",
+                                          "lineHeight": 1.5,
+                                          "fontFamily": "Source Han Sans CN",
+                                          "fontSize": "$font-body",
+                                          "fontWeight": "normal"
+                                        },
+                                        {
+                                          "type": "frame",
+                                          "id": "FX3Tc",
+                                          "name": "助手回复底栏行",
+                                          "width": "fill_container",
+                                          "height": 24,
+                                          "justifyContent": "space_between",
+                                          "alignItems": "center",
+                                          "children": [
+                                            {
+                                              "id": "OHFqk",
+                                              "type": "ref",
+                                              "ref": "VS7mw",
+                                              "name": "助手操作栏 · 实例"
+                                            },
+                                            {
+                                              "type": "text",
+                                              "id": "oP9RP",
+                                              "name": "回复时间",
+                                              "fill": "$text-muted",
+                                              "content": "16:26",
+                                              "lineHeight": 1.3333,
+                                              "fontFamily": "JetBrains Mono",
+                                              "fontSize": "$font-caption",
+                                              "fontWeight": "normal"
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "ungU3",
+                              "name": "底部输入栏包装",
+                              "width": "fill_container",
+                              "padding": [
+                                0,
+                                24,
+                                12,
+                                24
+                              ],
+                              "justifyContent": "center",
+                              "children": [
+                                {
+                                  "id": "hPWLl",
+                                  "type": "ref",
+                                  "ref": "ZWAs1",
+                                  "name": "聊天消息输入框",
+                                  "width": 816,
+                                  "descendants": {
+                                    "cjJe9": {
+                                      "content": "顺便看下事件日志里的 Kernel-Power 41",
+                                      "fill": "$text-primary"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "rI84C",
+                  "type": "ref",
+                  "ref": "DZ0Fp",
+                  "name": "模糊遮罩层 · 实例",
+                  "layoutPosition": "absolute",
+                  "x": 0,
+                  "y": 0,
+                  "width": 1280,
+                  "height": 800,
+                  "cornerRadius": 0,
+                  "strokeWidth": 0
+                },
+                {
+                  "type": "frame",
+                  "id": "BHYkA",
+                  "layoutPosition": "absolute",
+                  "x": 0,
+                  "y": 0,
+                  "name": "草稿覆盖确认定位层",
+                  "width": 1280,
+                  "height": 800,
+                  "layout": "vertical",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "id": "Q0ic9z",
+                      "type": "ref",
+                      "ref": "sVucQ",
+                      "name": "覆盖草稿确认弹窗 · 384px",
+                      "descendants": {
+                        "hXxWo": {
+                          "icon": "triangle-alert",
+                          "fill": "$status-warning"
+                        },
+                        "CeueD": {
+                          "content": "覆盖当前输入框草稿？"
+                        },
+                        "I7FtT2": {
+                          "width": "fill_container"
+                        },
+                        "S3tk7": {
+                          "content": "回填待编辑消息将替换输入框内尚未发送的内容。",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container"
+                        },
+                        "xF9JD/xEZi3": {
+                          "content": "保留原草稿"
+                        },
+                        "dYHsC": {
+                          "fill": "$accent-solid"
+                        },
+                        "dYHsC/x5G1Qw": {
+                          "content": "覆盖草稿"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "KBFnu",
+              "x": 0,
+              "y": 3244,
+              "name": "画板图注 · 修改消息与草稿保护",
+              "width": 1280,
+              "fill": "$bg-surface",
+              "cornerRadius": "$radius-row",
+              "stroke": "$border-subtle",
+              "strokeWidth": 1,
+              "strokeAlignment": "inner",
+              "layout": "vertical",
+              "gap": "$space-inline",
+              "padding": [
+                "$space-component",
+                "$space-section"
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "jQcGz",
+                  "name": "图注条目",
+                  "width": "fill_container",
+                  "height": 24,
+                  "gap": "$space-component",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "QdwzE",
+                      "name": "状态徽标",
+                      "height": 20,
+                      "fill": "$bg-elevated",
+                      "cornerRadius": "$radius-control",
+                      "stroke": "$border-subtle",
+                      "strokeWidth": 1,
+                      "strokeAlignment": "inner",
+                      "padding": [
+                        0,
+                        "$space-inline"
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "lBlGj",
+                          "name": "徽标文字",
+                          "fill": "$text-secondary",
+                          "content": "修改回填保护",
+                          "lineHeight": 1.3333,
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": "$font-caption",
+                          "fontWeight": "600"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "M46CL",
+                      "name": "状态说明",
+                      "fill": "$text-secondary",
+                      "content": "点击消息或排队行「修改」时若输入框为空直接回填聚焦；存在未发送内容时弹出 384px 确认框并默认聚焦「保留原草稿」",
+                      "lineHeight": 1.3333,
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": "$font-caption",
+                      "fontWeight": "500"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "PaRHN",
+              "x": 1360,
+              "y": 2424,
+              "name": "对话 · 重新生成回复",
+              "theme": {
+                "mode": "light"
+              },
+              "clip": true,
+              "width": 1280,
+              "height": 800,
+              "fill": "$bg-shell",
+              "cornerRadius": "$radius-row",
+              "stroke": "$border-strong",
+              "strokeWidth": 1,
+              "strokeAlignment": "inner",
+              "children": [
+                {
+                  "id": "l3Yvm",
+                  "type": "ref",
+                  "ref": "L081M1",
+                  "name": "通顶侧边栏 · 实例",
+                  "height": "fill_container",
+                  "descendants": {
+                    "rWDPV": {
+                      "fill": "$bg-item-active"
+                    },
+                    "jReIx": {
+                      "fontWeight": "500",
+                      "fill": "$text-primary"
+                    }
+                  }
+                },
+                {
+                  "type": "frame",
+                  "id": "Y7WF9q",
+                  "name": "右侧工作区列",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "id": "hlwtx",
+                      "type": "ref",
+                      "ref": "GElS8",
+                      "name": "展开态工作区顶栏 · 实例",
+                      "width": "fill_container"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Q6TAt",
+                      "name": "工作区主体包装",
+                      "width": "fill_container",
+                      "height": "fill_container",
+                      "padding": [
+                        0,
+                        "$space-inline",
+                        "$space-inline",
+                        0
+                      ],
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "H1q2j5",
+                          "name": "工作区主容器",
+                          "clip": true,
+                          "width": "fill_container",
+                          "height": "fill_container",
+                          "fill": "$bg-workspace",
+                          "cornerRadius": "$radius-row",
+                          "stroke": "$border-subtle",
+                          "strokeWidth": 1,
+                          "strokeAlignment": "inner",
+                          "effect": [
+                            {
+                              "type": "shadow",
+                              "shadowType": "outer",
+                              "color": "$shadow-panel-sm",
+                              "offset": {
+                                "x": 0,
+                                "y": 2
+                              },
+                              "blur": 6
+                            },
+                            {
+                              "type": "shadow",
+                              "shadowType": "outer",
+                              "color": "$shadow-panel-lg",
+                              "offset": {
+                                "x": 0,
+                                "y": 8
+                              },
+                              "blur": 24
+                            }
+                          ],
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "id": "yxJn7",
+                              "type": "ref",
+                              "ref": "HUkqs",
+                              "name": "会话标题栏 · 实例",
+                              "width": "fill_container"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "G6kmi",
+                              "name": "消息滚动视口",
+                              "width": "fill_container",
+                              "height": "fill_container",
+                              "layout": "vertical",
+                              "padding": [
+                                24,
+                                24,
+                                16,
+                                24
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "QpFkD",
+                                  "name": "对话内容列 · 816px",
+                                  "width": 816,
+                                  "layout": "vertical",
+                                  "gap": "$space-group",
+                                  "children": [
+                                    {
+                                      "id": "l8Tncf",
+                                      "type": "ref",
+                                      "ref": "CpxAu",
+                                      "name": "原轮用户消息",
+                                      "descendants": {
+                                        "LlaoY": {
+                                          "opacity": 0.4
+                                        },
+                                        "WwAkq": {
+                                          "opacity": 0.4
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": "frame",
+                                      "id": "F6iCt",
+                                      "name": "助手回复轮次",
+                                      "width": "fill_container",
+                                      "layout": "vertical",
+                                      "gap": "$space-component",
+                                      "children": [
+                                        {
+                                          "type": "frame",
+                                          "id": "U2z9o8",
+                                          "name": "过程折叠头",
+                                          "height": 28,
+                                          "gap": "$space-inline",
+                                          "alignItems": "center",
+                                          "children": [
+                                            {
+                                              "type": "frame",
+                                              "id": "jRIK7",
+                                              "name": "过程标题对齐槽",
+                                              "padding": [
+                                                0,
+                                                0,
+                                                "$space-micro",
+                                                0
+                                              ],
+                                              "alignItems": "center",
+                                              "children": [
+                                                {
+                                                  "type": "text",
+                                                  "id": "ohzJ9",
+                                                  "name": "过程标题",
+                                                  "fill": "$text-primary",
+                                                  "content": "工作中 1.8s",
+                                                  "lineHeight": 1.4286,
+                                                  "fontFamily": "Source Han Sans CN",
+                                                  "fontSize": "$font-ui",
+                                                  "fontWeight": "normal"
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "type": "icon",
+                                              "id": "xICtP",
+                                              "name": "展开箭头",
+                                              "width": 14,
+                                              "height": 14,
+                                              "icon": "chevron-down",
+                                              "library": "lucide",
+                                              "fill": "$text-secondary"
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "id": "J2gLCd",
+                                          "type": "ref",
+                                          "ref": "BuK2W",
+                                          "name": "运行中工具行"
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "vNcJn",
+                              "name": "底部输入栏包装",
+                              "width": "fill_container",
+                              "padding": [
+                                0,
+                                24,
+                                12,
+                                24
+                              ],
+                              "justifyContent": "center",
+                              "children": [
+                                {
+                                  "id": "Q4pgwy",
+                                  "type": "ref",
+                                  "ref": "ZWAs1",
+                                  "name": "聊天消息输入框",
+                                  "width": 816,
+                                  "descendants": {
+                                    "cjJe9": {
+                                      "content": "顺便看下事件日志里的 Kernel-Power 41",
+                                      "fill": "$text-primary"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "cnbXM",
+              "x": 1360,
+              "y": 3244,
+              "name": "画板图注 · 重新生成回复",
+              "width": 1280,
+              "fill": "$bg-surface",
+              "cornerRadius": "$radius-row",
+              "stroke": "$border-subtle",
+              "strokeWidth": 1,
+              "strokeAlignment": "inner",
+              "layout": "vertical",
+              "gap": "$space-inline",
+              "padding": [
+                "$space-component",
+                "$space-section"
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "I2PQio",
+                  "name": "图注条目",
+                  "width": "fill_container",
+                  "height": 24,
+                  "gap": "$space-component",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "v5Xmrg",
+                      "name": "状态徽标",
+                      "height": 20,
+                      "fill": "$bg-elevated",
+                      "cornerRadius": "$radius-control",
+                      "stroke": "$border-subtle",
+                      "strokeWidth": 1,
+                      "strokeAlignment": "inner",
+                      "padding": [
+                        0,
+                        "$space-inline"
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "Jbdq1",
+                          "name": "徽标文字",
+                          "fill": "$text-secondary",
+                          "content": "原位重新生成",
+                          "lineHeight": 1.3333,
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": "$font-caption",
+                          "fontWeight": "600"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "bXkJ2",
+                      "name": "状态说明",
+                      "fill": "$text-secondary",
+                      "content": "点击「重新生成」回退当前轮并原参重新发起流式回答，走独立重发通道，底部输入框内的未发送草稿与附图原样保留",
+                      "lineHeight": 1.3333,
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": "$font-caption",
+                      "fontWeight": "500"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "H3YwBW",
+              "x": 2720,
+              "y": 2424,
+              "name": "对话 · 分支会话直接跳转",
+              "theme": {
+                "mode": "light"
+              },
+              "clip": true,
+              "width": 1280,
+              "height": 800,
+              "fill": "$bg-shell",
+              "cornerRadius": "$radius-row",
+              "stroke": "$border-strong",
+              "strokeWidth": 1,
+              "strokeAlignment": "inner",
+              "children": [
+                {
+                  "id": "Y74Hyd",
+                  "type": "ref",
+                  "ref": "L081M1",
+                  "name": "通顶侧边栏 · 实例",
+                  "height": "fill_container",
+                  "descendants": {
+                    "rWDPV": {
+                      "fill": "$bg-item-active"
+                    },
+                    "jReIx": {
+                      "fontWeight": "500",
+                      "fill": "$text-primary",
+                      "content": "C 盘空间与硬盘信息 · 分支"
+                    },
+                    "y5IX1": {
+                      "content": "C 盘空间与硬盘信息"
+                    }
+                  }
+                },
+                {
+                  "type": "frame",
+                  "id": "F6ULs",
+                  "name": "右侧工作区列",
+                  "width": "fill_container",
+                  "height": "fill_container",
+                  "layout": "vertical",
+                  "children": [
+                    {
+                      "id": "kGZqn",
+                      "type": "ref",
+                      "ref": "GElS8",
+                      "name": "展开态工作区顶栏 · 实例",
+                      "width": "fill_container"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "tBhAW",
+                      "name": "工作区主体包装",
+                      "width": "fill_container",
+                      "height": "fill_container",
+                      "padding": [
+                        0,
+                        "$space-inline",
+                        "$space-inline",
+                        0
+                      ],
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "IpCOr",
+                          "name": "工作区主容器",
+                          "clip": true,
+                          "width": "fill_container",
+                          "height": "fill_container",
+                          "fill": "$bg-workspace",
+                          "cornerRadius": "$radius-row",
+                          "stroke": "$border-subtle",
+                          "strokeWidth": 1,
+                          "strokeAlignment": "inner",
+                          "effect": [
+                            {
+                              "type": "shadow",
+                              "shadowType": "outer",
+                              "color": "$shadow-panel-sm",
+                              "offset": {
+                                "x": 0,
+                                "y": 2
+                              },
+                              "blur": 6
+                            },
+                            {
+                              "type": "shadow",
+                              "shadowType": "outer",
+                              "color": "$shadow-panel-lg",
+                              "offset": {
+                                "x": 0,
+                                "y": 8
+                              },
+                              "blur": 24
+                            }
+                          ],
+                          "layout": "vertical",
+                          "children": [
+                            {
+                              "id": "K5kjKr",
+                              "type": "ref",
+                              "ref": "HUkqs",
+                              "name": "会话标题栏 · 实例",
+                              "width": "fill_container"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "kJmII",
+                              "name": "消息滚动视口",
+                              "width": "fill_container",
+                              "height": "fill_container",
+                              "layout": "vertical",
+                              "padding": [
+                                24,
+                                24,
+                                16,
+                                24
+                              ],
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "frame",
+                                  "id": "zWGX4",
+                                  "name": "对话内容列 · 816px",
+                                  "width": 816,
+                                  "layout": "vertical",
+                                  "gap": "$space-group",
+                                  "children": [
+                                    {
+                                      "id": "o48xqn",
+                                      "type": "ref",
+                                      "ref": "CpxAu",
+                                      "name": "继承的用户消息"
+                                    },
+                                    {
+                                      "type": "frame",
+                                      "id": "Is4Ap",
+                                      "name": "助手回复轮次",
+                                      "width": "fill_container",
+                                      "layout": "vertical",
+                                      "gap": "$space-component",
+                                      "children": [
+                                        {
+                                          "type": "frame",
+                                          "id": "wSAYl",
+                                          "name": "过程折叠头",
+                                          "height": 28,
+                                          "gap": "$space-inline",
+                                          "alignItems": "center",
+                                          "children": [
+                                            {
+                                              "type": "frame",
+                                              "id": "y5YCBz",
+                                              "name": "过程标题对齐槽",
+                                              "padding": [
+                                                0,
+                                                0,
+                                                "$space-micro",
+                                                0
+                                              ],
+                                              "alignItems": "center",
+                                              "children": [
+                                                {
+                                                  "type": "text",
+                                                  "id": "Hi1dF",
+                                                  "name": "过程标题",
+                                                  "fill": "$text-secondary",
+                                                  "content": "已工作 3.2s",
+                                                  "lineHeight": 1.4286,
+                                                  "fontFamily": "Source Han Sans CN",
+                                                  "fontSize": "$font-ui",
+                                                  "fontWeight": "normal"
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "type": "icon",
+                                              "id": "h4bRu",
+                                              "name": "展开箭头",
+                                              "width": 14,
+                                              "height": 14,
+                                              "icon": "chevron-right",
+                                              "library": "lucide",
+                                              "fill": "$text-secondary"
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "type": "text",
+                                          "id": "Fb505",
+                                          "name": "助手正文",
+                                          "fill": "$text-primary",
+                                          "textGrowth": "fixed-width",
+                                          "width": "fill_container",
+                                          "content": "当前系统盘剩余 18.4 GB（已用 92.2%），主要占用为休眠文件 hiberfil.sys（12.8 GB）与用户软件缓存（30.8 GB）。",
+                                          "lineHeight": 1.5,
+                                          "fontFamily": "Source Han Sans CN",
+                                          "fontSize": "$font-body",
+                                          "fontWeight": "normal"
+                                        },
+                                        {
+                                          "type": "frame",
+                                          "id": "DM93U",
+                                          "name": "助手回复底栏行",
+                                          "width": "fill_container",
+                                          "height": 24,
+                                          "justifyContent": "space_between",
+                                          "alignItems": "center",
+                                          "children": [
+                                            {
+                                              "id": "CfoK6",
+                                              "type": "ref",
+                                              "ref": "VS7mw",
+                                              "name": "助手操作栏 · 实例"
+                                            },
+                                            {
+                                              "type": "text",
+                                              "id": "hNBtN",
+                                              "name": "回复时间",
+                                              "fill": "$text-muted",
+                                              "content": "16:26",
+                                              "lineHeight": 1.3333,
+                                              "fontFamily": "JetBrains Mono",
+                                              "fontSize": "$font-caption",
+                                              "fontWeight": "normal"
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "pHIgq",
+                              "name": "底部输入栏包装",
+                              "width": "fill_container",
+                              "padding": [
+                                0,
+                                24,
+                                12,
+                                24
+                              ],
+                              "justifyContent": "center",
+                              "children": [
+                                {
+                                  "id": "s47H6k",
+                                  "type": "ref",
+                                  "ref": "ZWAs1",
+                                  "name": "聊天消息输入框",
+                                  "width": 816,
+                                  "descendants": {
+                                    "cjJe9": {
+                                      "content": "继续提问，或补充这台电脑的情况…"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "cGj4L",
+                  "layoutPosition": "absolute",
+                  "x": 248,
+                  "y": 56,
+                  "name": "分支跳转顶部通知层",
+                  "width": 1032,
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "id": "ZVIJj",
+                      "type": "ref",
+                      "ref": "h1BufF",
+                      "name": "顶部通知 · 已分支新会话",
+                      "descendants": {
+                        "L0YAA": {
+                          "content": "已从当前节点分支新会话"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "gc07i",
+              "x": 2720,
+              "y": 3244,
+              "name": "画板图注 · 分支会话直接跳转",
+              "width": 1280,
+              "fill": "$bg-surface",
+              "cornerRadius": "$radius-row",
+              "stroke": "$border-subtle",
+              "strokeWidth": 1,
+              "strokeAlignment": "inner",
+              "layout": "vertical",
+              "gap": "$space-inline",
+              "padding": [
+                "$space-component",
+                "$space-section"
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "zCel9",
+                  "name": "图注条目",
+                  "width": "fill_container",
+                  "height": 24,
+                  "gap": "$space-component",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "f2klg",
+                      "name": "状态徽标",
+                      "height": 20,
+                      "fill": "$bg-elevated",
+                      "cornerRadius": "$radius-control",
+                      "stroke": "$border-subtle",
+                      "strokeWidth": 1,
+                      "strokeAlignment": "inner",
+                      "padding": [
+                        0,
+                        "$space-inline"
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "oqy11",
+                          "name": "徽标文字",
+                          "fill": "$text-secondary",
+                          "content": "直接分支新会话",
+                          "lineHeight": 1.3333,
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": "$font-caption",
+                          "fontWeight": "600"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "kTGfz",
+                      "name": "状态说明",
+                      "fill": "$text-secondary",
+                      "content": "点击助手底栏「分支会话」以当前轮回复为终点创建新会话并立即跳转进入，保留完整前序上下文，无中间选择弹窗",
+                      "lineHeight": 1.3333,
+                      "fontFamily": "Source Han Sans CN",
+                      "fontSize": "$font-caption",
+                      "fontWeight": "500"
+                    }
+                  ]
+                }
+              ]
             }
           ]
         },
@@ -11743,7 +12840,7 @@
           "type": "frame",
           "id": "zdtJ6",
           "x": 64,
-          "y": 5642,
+          "y": 6642,
           "name": "对话中的工具",
           "width": 4000,
           "height": 1154,
@@ -12774,7 +13871,7 @@
           "type": "frame",
           "id": "Ed7xS",
           "x": 64,
-          "y": 6916,
+          "y": 7916,
           "name": "终端",
           "width": 2640,
           "height": 974,
@@ -14714,7 +15811,7 @@
           "type": "frame",
           "id": "juqeU",
           "x": 64,
-          "y": 9324,
+          "y": 10324,
           "name": "状态提示与软件更新",
           "width": 4000,
           "height": 1794,
@@ -17747,7 +18844,7 @@
           "type": "frame",
           "id": "OmK5U",
           "x": 64,
-          "y": 3728,
+          "y": 4728,
           "name": "输入与快捷面板",
           "width": 4000,
           "height": 1900,
@@ -20610,60 +21707,25 @@
                                                 {
                                                   "type": "frame",
                                                   "id": "CIKpr",
-                                                  "name": "按钮 · 立即",
+                                                  "name": "立即发送",
+                                                  "width": 24,
                                                   "height": 24,
-                                                  "fill": "$bg-workspace",
+                                                  "fill": "#00000000",
                                                   "cornerRadius": "$radius-control",
                                                   "stroke": "$border-subtle",
-                                                  "strokeWidth": 1,
                                                   "strokeAlignment": "inner",
-                                                  "gap": 3,
-                                                  "padding": [
-                                                    0,
-                                                    "$space-inline",
-                                                    0,
-                                                    "$space-detail"
-                                                  ],
                                                   "justifyContent": "center",
                                                   "alignItems": "center",
                                                   "children": [
                                                     {
-                                                      "type": "frame",
-                                                      "id": "D2iKeU",
-                                                      "name": "上箭头光学对齐槽",
-                                                      "width": 12,
-                                                      "height": 14,
-                                                      "padding": [
-                                                        1,
-                                                        0,
-                                                        0,
-                                                        0
-                                                      ],
-                                                      "justifyContent": "center",
-                                                      "alignItems": "center",
-                                                      "children": [
-                                                        {
-                                                          "type": "icon",
-                                                          "id": "BEshk",
-                                                          "name": "立即插话上箭头",
-                                                          "width": 12,
-                                                          "height": 12,
-                                                          "icon": "arrow-up",
-                                                          "library": "lucide",
-                                                          "fill": "$text-secondary"
-                                                        }
-                                                      ]
-                                                    },
-                                                    {
-                                                      "type": "text",
-                                                      "id": "SddHq",
-                                                      "name": "立即文字",
-                                                      "fill": "$text-primary",
-                                                      "content": "立即",
-                                                      "lineHeight": 1.3333,
-                                                      "fontFamily": "Source Han Sans CN",
-                                                      "fontSize": "$font-caption",
-                                                      "fontWeight": "normal"
+                                                      "type": "icon",
+                                                      "id": "HMlr5",
+                                                      "name": "立即发送图标",
+                                                      "width": 18,
+                                                      "height": 18,
+                                                      "icon": "arrow-up",
+                                                      "library": "lucide",
+                                                      "fill": "$text-secondary"
                                                     }
                                                   ]
                                                 },
@@ -20772,6 +21834,28 @@
                                               "gap": "$space-tight",
                                               "alignItems": "center",
                                               "children": [
+                                                {
+                                                  "type": "frame",
+                                                  "id": "kZ1AR",
+                                                  "name": "立即发送",
+                                                  "width": 24,
+                                                  "height": 24,
+                                                  "cornerRadius": "$radius-control",
+                                                  "justifyContent": "center",
+                                                  "alignItems": "center",
+                                                  "children": [
+                                                    {
+                                                      "type": "icon",
+                                                      "id": "DD1xo",
+                                                      "name": "立即发送图标",
+                                                      "width": 18,
+                                                      "height": 18,
+                                                      "icon": "arrow-up",
+                                                      "library": "lucide",
+                                                      "fill": "$text-secondary"
+                                                    }
+                                                  ]
+                                                },
                                                 {
                                                   "type": "frame",
                                                   "id": "l6k9u",
@@ -23521,7 +24605,7 @@
           "type": "frame",
           "id": "KsR0v",
           "x": 64,
-          "y": 8010,
+          "y": 9010,
           "name": "仪表盘",
           "width": 4000,
           "height": 1194,
@@ -35304,1659 +36388,8 @@
             },
             {
               "type": "frame",
-              "id": "b6H6K",
-              "x": 0,
-              "y": 944,
-              "name": "分支树 · 派生会话 (/fork)",
-              "theme": {
-                "mode": "light"
-              },
-              "clip": true,
-              "width": 1280,
-              "height": 800,
-              "fill": "$bg-shell",
-              "cornerRadius": "$radius-row",
-              "stroke": "$border-strong",
-              "strokeWidth": 1,
-              "strokeAlignment": "inner",
-              "children": [
-                {
-                  "id": "fUegP",
-                  "type": "ref",
-                  "ref": "L081M1",
-                  "name": "通顶侧边栏 · 实例",
-                  "height": "fill_container",
-                  "descendants": {
-                    "rWDPV": {
-                      "fill": "$bg-item-active"
-                    }
-                  }
-                },
-                {
-                  "type": "frame",
-                  "id": "l0Oj6g",
-                  "name": "右侧工作区列",
-                  "width": "fill_container",
-                  "height": "fill_container",
-                  "layout": "vertical",
-                  "children": [
-                    {
-                      "id": "Hoks6",
-                      "type": "ref",
-                      "ref": "GElS8",
-                      "name": "展开态工作区顶栏 · 实例",
-                      "width": "fill_container"
-                    },
-                    {
-                      "type": "frame",
-                      "id": "PexrP",
-                      "name": "工作区主体包装",
-                      "width": "fill_container",
-                      "height": "fill_container",
-                      "padding": [
-                        0,
-                        "$space-inline",
-                        "$space-inline",
-                        0
-                      ],
-                      "children": [
-                        {
-                          "type": "frame",
-                          "id": "nU8SK",
-                          "name": "工作区主容器",
-                          "clip": true,
-                          "width": "fill_container",
-                          "height": "fill_container",
-                          "fill": "$bg-workspace",
-                          "cornerRadius": "$radius-row",
-                          "stroke": "$border-subtle",
-                          "strokeWidth": 1,
-                          "strokeAlignment": "inner",
-                          "effect": [
-                            {
-                              "type": "shadow",
-                              "shadowType": "outer",
-                              "color": "$shadow-panel-sm",
-                              "offset": {
-                                "x": 0,
-                                "y": 2
-                              },
-                              "blur": 6
-                            },
-                            {
-                              "type": "shadow",
-                              "shadowType": "outer",
-                              "color": "$shadow-panel-lg",
-                              "offset": {
-                                "x": 0,
-                                "y": 8
-                              },
-                              "blur": 24
-                            }
-                          ],
-                          "layout": "none",
-                          "children": [
-                            {
-                              "type": "frame",
-                              "id": "TF1aE",
-                              "x": 0,
-                              "y": 0,
-                              "name": "工作区内容层",
-                              "width": 1040,
-                              "height": 752,
-                              "layout": "vertical",
-                              "children": [
-                                {
-                                  "type": "frame",
-                                  "id": "j4ZRIn",
-                                  "name": "分支树标题栏",
-                                  "width": "fill_container",
-                                  "height": 44,
-                                  "fill": "$bg-workspace",
-                                  "stroke": "$border-subtle",
-                                  "strokeWidth": {
-                                    "bottom": 1
-                                  },
-                                  "padding": [
-                                    0,
-                                    "$space-section",
-                                    0,
-                                    "$space-group"
-                                  ],
-                                  "justifyContent": "space_between",
-                                  "alignItems": "center",
-                                  "children": [
-                                    {
-                                      "type": "frame",
-                                      "id": "yxe9z",
-                                      "name": "标题左侧组",
-                                      "gap": "$space-inline",
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "type": "icon",
-                                          "id": "e2KOt",
-                                          "name": "设备图标",
-                                          "width": 16,
-                                          "height": 16,
-                                          "icon": "hard-drive",
-                                          "library": "lucide",
-                                          "fill": "$text-secondary"
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "bYASa",
-                                          "name": "会话标题对齐槽",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "HpDk5",
-                                              "name": "会话标题",
-                                              "fill": "$text-primary",
-                                              "content": "C 盘空间与硬盘信息",
-                                              "lineHeight": 1.5,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-body",
-                                              "fontWeight": "600"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "t4oBk",
-                                          "name": "分支树后缀对齐槽",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "EPU02",
-                                              "name": "分支树后缀",
-                                              "fill": "$text-secondary",
-                                              "content": "· 分支树",
-                                              "lineHeight": 1.4286,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-ui",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "id": "r0Pxt0",
-                                      "type": "ref",
-                                      "ref": "AxUEZ",
-                                      "name": "关闭分支树钮",
-                                      "descendants": {
-                                        "DfvN3": {
-                                          "icon": "x"
-                                        }
-                                      }
-                                    }
-                                  ]
-                                },
-                                {
-                                  "type": "frame",
-                                  "id": "BNxOi",
-                                  "name": "分支树工具栏",
-                                  "width": "fill_container",
-                                  "height": 56,
-                                  "stroke": "$border-subtle",
-                                  "strokeWidth": {
-                                    "bottom": 1
-                                  },
-                                  "padding": [
-                                    0,
-                                    "$space-group"
-                                  ],
-                                  "justifyContent": "space_between",
-                                  "alignItems": "center",
-                                  "children": [
-                                    {
-                                      "type": "frame",
-                                      "id": "lCAkQ",
-                                      "name": "左侧筛选组",
-                                      "gap": "$space-component",
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "id": "QCTd5",
-                                          "type": "ref",
-                                          "ref": "gVNCA",
-                                          "name": "搜索条目输入框",
-                                          "descendants": {
-                                            "zdXiu": {
-                                              "content": "搜索条目"
-                                            }
-                                          }
-                                        },
-                                        {
-                                          "id": "pAX5a",
-                                          "type": "ref",
-                                          "ref": "PHFud",
-                                          "name": "视图过滤选择器",
-                                          "width": 150,
-                                          "descendants": {
-                                            "i8VJQh": {
-                                              "content": "默认视图"
-                                            }
-                                          }
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "frame",
-                                      "id": "yWxXa",
-                                      "name": "右侧折叠与计数",
-                                      "gap": "$space-component",
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "id": "Lgd0r",
-                                          "type": "ref",
-                                          "ref": "PP59g",
-                                          "name": "按钮 · 全部展开",
-                                          "descendants": {
-                                            "QB2pH": {
-                                              "icon": "chevrons-up-down",
-                                              "fill": "$accent-ink"
-                                            },
-                                            "wkufn": {
-                                              "content": "全部展开"
-                                            }
-                                          }
-                                        },
-                                        {
-                                          "id": "USlVr",
-                                          "type": "ref",
-                                          "ref": "PP59g",
-                                          "name": "按钮 · 全部折叠",
-                                          "descendants": {
-                                            "QB2pH": {
-                                              "icon": "chevrons-down-up",
-                                              "fill": "$accent-ink"
-                                            },
-                                            "wkufn": {
-                                              "content": "全部折叠"
-                                            }
-                                          }
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "Ny44U",
-                                          "name": "条目计数对齐槽",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "o9mie",
-                                              "name": "条目计数",
-                                              "fill": "$text-secondary",
-                                              "content": "8 / 10 条",
-                                              "lineHeight": 1.3333,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-caption",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        }
-                                      ]
-                                    }
-                                  ]
-                                },
-                                {
-                                  "type": "frame",
-                                  "id": "iRKpU",
-                                  "name": "分支树条目列表",
-                                  "width": "fill_container",
-                                  "height": "fill_container",
-                                  "layout": "vertical",
-                                  "padding": [
-                                    "$space-inline",
-                                    0
-                                  ],
-                                  "children": [
-                                    {
-                                      "type": "frame",
-                                      "id": "nK3su",
-                                      "name": "树行 · C 盘红了只剩十几 G，帮我",
-                                      "width": "fill_container",
-                                      "height": 40,
-                                      "padding": [
-                                        0,
-                                        "$space-group"
-                                      ],
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "type": "frame",
-                                          "id": "X8KeE6",
-                                          "name": "角色图标槽",
-                                          "width": 28,
-                                          "height": 40,
-                                          "justifyContent": "center",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "icon",
-                                              "id": "WS6ZV",
-                                              "name": "条目图标",
-                                              "width": 16,
-                                              "height": 16,
-                                              "icon": "user",
-                                              "library": "lucide",
-                                              "fill": "$accent-ink"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "mMPgF",
-                                          "name": "角色前缀槽",
-                                          "padding": [
-                                            0,
-                                            "$space-detail",
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "kdNOR",
-                                              "name": "角色前缀",
-                                              "fill": "$accent-ink",
-                                              "content": "user:",
-                                              "lineHeight": 1.5,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-body",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "cHtOc",
-                                          "name": "摘要文本槽",
-                                          "width": "fill_container",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "bNufT",
-                                              "name": "摘要文本",
-                                              "fill": "$text-primary",
-                                              "content": "C 盘红了只剩十几 G，帮我看看是什么占满了，能不能直接清？",
-                                              "lineHeight": 1.5,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-body",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "J6bsUR",
-                                          "name": "折叠钮对齐槽",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "upXdW",
-                                              "name": "折叠钮",
-                                              "fill": "$text-secondary",
-                                              "content": "▾",
-                                              "lineHeight": 1.4286,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-ui",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "frame",
-                                      "id": "IsRMo",
-                                      "name": "树行 · [sys] Windows ",
-                                      "width": "fill_container",
-                                      "height": 40,
-                                      "padding": [
-                                        0,
-                                        "$space-group"
-                                      ],
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "type": "frame",
-                                          "id": "hSMr8",
-                                          "name": "角色图标槽",
-                                          "width": 28,
-                                          "height": 40,
-                                          "justifyContent": "center",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "icon",
-                                              "id": "pv7Mq",
-                                              "name": "条目图标",
-                                              "width": 16,
-                                              "height": 16,
-                                              "icon": "wrench",
-                                              "library": "lucide",
-                                              "fill": "$text-secondary"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "caXK3",
-                                          "name": "摘要文本槽",
-                                          "width": "fill_container",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "X58Rl6",
-                                              "name": "摘要文本",
-                                              "fill": "$text-secondary",
-                                              "content": "[sys] Windows 11 · Intel Core i7-13700H · 32 GB 内存",
-                                              "lineHeight": 1.4286,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-ui",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "frame",
-                                      "id": "qh61b",
-                                      "name": "树行 · [disk] C: 已用 9",
-                                      "width": "fill_container",
-                                      "height": 40,
-                                      "padding": [
-                                        0,
-                                        "$space-group"
-                                      ],
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "type": "frame",
-                                          "id": "q7C842",
-                                          "name": "角色图标槽",
-                                          "width": 28,
-                                          "height": 40,
-                                          "justifyContent": "center",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "icon",
-                                              "id": "trgBh",
-                                              "name": "条目图标",
-                                              "width": 16,
-                                              "height": 16,
-                                              "icon": "wrench",
-                                              "library": "lucide",
-                                              "fill": "$text-secondary"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "vHISq",
-                                          "name": "摘要文本槽",
-                                          "width": "fill_container",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "EcK31",
-                                              "name": "摘要文本",
-                                              "fill": "$text-secondary",
-                                              "content": "[disk] C: 已用 92.2% · 已扫描 142,810 个文件",
-                                              "lineHeight": 1.4286,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-ui",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "frame",
-                                      "id": "d6PDI",
-                                      "name": "树行 · C 盘剩余 18.4 GB（",
-                                      "width": "fill_container",
-                                      "height": 40,
-                                      "padding": [
-                                        0,
-                                        "$space-group"
-                                      ],
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "type": "frame",
-                                          "id": "R3pY9",
-                                          "name": "角色图标槽",
-                                          "width": 28,
-                                          "height": 40,
-                                          "justifyContent": "center",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "icon",
-                                              "id": "AKEZy",
-                                              "name": "条目图标",
-                                              "width": 16,
-                                              "height": 16,
-                                              "icon": "bot",
-                                              "library": "lucide",
-                                              "fill": "$status-success"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "C0wIEI",
-                                          "name": "角色前缀槽",
-                                          "padding": [
-                                            0,
-                                            "$space-detail",
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "bw80T",
-                                              "name": "角色前缀",
-                                              "fill": "$status-success",
-                                              "content": "assistant:",
-                                              "lineHeight": 1.5,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-body",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "WlENb",
-                                          "name": "摘要文本槽",
-                                          "width": "fill_container",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "YzM5g",
-                                              "name": "摘要文本",
-                                              "fill": "$text-primary",
-                                              "content": "C 盘剩余 18.4 GB（已用 92.2%），空间主要由休眠文件与本地缓存占用",
-                                              "lineHeight": 1.5,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-body",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "frame",
-                                      "id": "ritcb",
-                                      "name": "树行 · 帮我生成关闭休眠和清理临时目",
-                                      "width": "fill_container",
-                                      "height": 40,
-                                      "padding": [
-                                        0,
-                                        "$space-group"
-                                      ],
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "type": "frame",
-                                          "id": "J3rqi",
-                                          "name": "树槽 · 0",
-                                          "width": 32,
-                                          "height": 40,
-                                          "layout": "vertical",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "frame",
-                                              "id": "mguE6",
-                                              "name": "上留白",
-                                              "width": 2,
-                                              "height": 15
-                                            },
-                                            {
-                                              "type": "frame",
-                                              "id": "B9ioc6",
-                                              "name": "分支连接方块",
-                                              "width": 10,
-                                              "height": 10,
-                                              "fill": "$accent-ink"
-                                            },
-                                            {
-                                              "type": "frame",
-                                              "id": "ILFef",
-                                              "name": "分支竖线 · 下接",
-                                              "width": 2,
-                                              "height": "fill_container",
-                                              "fill": "$border-strong"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "caoaR",
-                                          "name": "角色图标槽",
-                                          "width": 28,
-                                          "height": 40,
-                                          "justifyContent": "center",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "icon",
-                                              "id": "Wkg4A",
-                                              "name": "条目图标",
-                                              "width": 16,
-                                              "height": 16,
-                                              "icon": "user",
-                                              "library": "lucide",
-                                              "fill": "$accent-ink"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "g0gDqX",
-                                          "name": "角色前缀槽",
-                                          "padding": [
-                                            0,
-                                            "$space-detail",
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "lptSo",
-                                              "name": "角色前缀",
-                                              "fill": "$accent-ink",
-                                              "content": "user:",
-                                              "lineHeight": 1.5,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-body",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "JWVmZ",
-                                          "name": "摘要文本槽",
-                                          "width": "fill_container",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "Vpacl",
-                                              "name": "摘要文本",
-                                              "fill": "$text-primary",
-                                              "content": "帮我生成关闭休眠和清理临时目录的命令清单",
-                                              "lineHeight": 1.5,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-body",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "L2kNNN",
-                                          "name": "折叠钮对齐槽",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "Y5vxH",
-                                              "name": "折叠钮",
-                                              "fill": "$text-secondary",
-                                              "content": "▾",
-                                              "lineHeight": 1.4286,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-ui",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "frame",
-                                      "id": "NkExv",
-                                      "name": "树行 · 压缩 · 148k toke",
-                                      "width": "fill_container",
-                                      "height": 40,
-                                      "padding": [
-                                        0,
-                                        "$space-group"
-                                      ],
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "type": "frame",
-                                          "id": "yBWJl",
-                                          "name": "树槽 · 0",
-                                          "width": 32,
-                                          "height": 40,
-                                          "justifyContent": "center",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "frame",
-                                              "id": "SoMRr",
-                                              "name": "分支竖线",
-                                              "width": 2,
-                                              "height": 40,
-                                              "fill": "$border-strong"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "i7d3qM",
-                                          "name": "角色图标槽",
-                                          "width": 28,
-                                          "height": 40,
-                                          "justifyContent": "center",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "icon",
-                                              "id": "USXYk",
-                                              "name": "条目图标",
-                                              "width": 16,
-                                              "height": 16,
-                                              "icon": "minimize-2",
-                                              "library": "lucide",
-                                              "fill": "$text-secondary"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "QFMxx",
-                                          "name": "摘要文本槽",
-                                          "width": "fill_container",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "nd6sg",
-                                              "name": "摘要文本",
-                                              "fill": "$text-primary",
-                                              "content": "压缩 · 148k tokens",
-                                              "lineHeight": 1.5,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-body",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "frame",
-                                      "id": "hrHWe",
-                                      "name": "树行 · [command_plan]",
-                                      "width": "fill_container",
-                                      "height": 40,
-                                      "padding": [
-                                        0,
-                                        "$space-group"
-                                      ],
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "type": "frame",
-                                          "id": "yk6yi",
-                                          "name": "树槽 · 0",
-                                          "width": 32,
-                                          "height": 40,
-                                          "justifyContent": "center",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "frame",
-                                              "id": "r0Gvg",
-                                              "name": "分支竖线",
-                                              "width": 2,
-                                              "height": 40,
-                                              "fill": "$border-strong"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "Pvobf",
-                                          "name": "角色图标槽",
-                                          "width": 28,
-                                          "height": 40,
-                                          "justifyContent": "center",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "icon",
-                                              "id": "sZj1p",
-                                              "name": "条目图标",
-                                              "width": 16,
-                                              "height": 16,
-                                              "icon": "wrench",
-                                              "library": "lucide",
-                                              "fill": "$text-secondary"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "I5zPb",
-                                          "name": "摘要文本槽",
-                                          "width": "fill_container",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "vSA4X",
-                                              "name": "摘要文本",
-                                              "fill": "$text-secondary",
-                                              "content": "[command_plan] 释放 C 盘休眠文件与系统缓存 · 2 条命令",
-                                              "lineHeight": 1.4286,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-ui",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "frame",
-                                      "id": "J53xG",
-                                      "name": "树行 · 已生成可核对清理清单，执行后",
-                                      "width": "fill_container",
-                                      "height": 40,
-                                      "fill": "$bg-item-active",
-                                      "padding": [
-                                        0,
-                                        "$space-group"
-                                      ],
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "type": "frame",
-                                          "id": "Z5aS3J",
-                                          "name": "树槽 · 0",
-                                          "width": 32,
-                                          "height": 40,
-                                          "justifyContent": "center",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "frame",
-                                              "id": "vjMEZ",
-                                              "name": "分支竖线",
-                                              "width": 2,
-                                              "height": 40,
-                                              "fill": "$border-strong"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "T2iqQR",
-                                          "name": "角色图标槽",
-                                          "width": 28,
-                                          "height": 40,
-                                          "justifyContent": "center",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "icon",
-                                              "id": "FVWQ9",
-                                              "name": "条目图标",
-                                              "width": 16,
-                                              "height": 16,
-                                              "icon": "bot",
-                                              "library": "lucide",
-                                              "fill": "$status-success"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "jsg50",
-                                          "name": "角色前缀槽",
-                                          "padding": [
-                                            0,
-                                            "$space-detail",
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "U8Yoyn",
-                                              "name": "角色前缀",
-                                              "fill": "$status-success",
-                                              "content": "assistant:",
-                                              "lineHeight": 1.5,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-body",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "Z8mWB",
-                                          "name": "摘要文本槽",
-                                          "width": "fill_container",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "xSEpY",
-                                              "name": "摘要文本",
-                                              "fill": "$text-primary",
-                                              "content": "已生成可核对清理清单，执行后预计释放约 43.6 GB 空间。",
-                                              "lineHeight": 1.5,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-body",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "MFXus",
-                                          "name": "当前位置标记槽",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            "$space-component"
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "pGQKl",
-                                              "name": "当前位置",
-                                              "fill": "$accent-ink",
-                                              "content": "当前位置",
-                                              "lineHeight": 1.3333,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-caption",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "frame",
-                                      "id": "PhThk",
-                                      "name": "树行 · 分支总结 · 已完成 C 盘",
-                                      "width": "fill_container",
-                                      "height": 40,
-                                      "padding": [
-                                        0,
-                                        "$space-group"
-                                      ],
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "type": "frame",
-                                          "id": "y1sng",
-                                          "name": "树槽 · 0",
-                                          "width": 32,
-                                          "height": 40,
-                                          "justifyContent": "center",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "frame",
-                                              "id": "dakdi",
-                                              "name": "分支竖线",
-                                              "width": 2,
-                                              "height": 40,
-                                              "fill": "$border-strong"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "d7phF",
-                                          "name": "角色图标槽",
-                                          "width": 28,
-                                          "height": 40,
-                                          "justifyContent": "center",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "icon",
-                                              "id": "YZPER",
-                                              "name": "条目图标",
-                                              "width": 16,
-                                              "height": 16,
-                                              "icon": "git-branch",
-                                              "library": "lucide",
-                                              "fill": "$accent-ink"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "VvpnG",
-                                          "name": "摘要文本槽",
-                                          "width": "fill_container",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "a00B3v",
-                                              "name": "摘要文本",
-                                              "fill": "$text-primary",
-                                              "content": "分支总结 · 已完成 C 盘休眠文件与缓存清理方案核对",
-                                              "lineHeight": 1.5,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-body",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "frame",
-                                      "id": "LZyFK",
-                                      "name": "树行 · 不动休眠文件，只看用户目录下",
-                                      "width": "fill_container",
-                                      "height": 40,
-                                      "padding": [
-                                        0,
-                                        "$space-group"
-                                      ],
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "type": "frame",
-                                          "id": "AR5yf",
-                                          "name": "树槽 · 0",
-                                          "width": 32,
-                                          "height": 40,
-                                          "layout": "vertical",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "frame",
-                                              "id": "QcGuq",
-                                              "name": "分支竖线 · 上接",
-                                              "width": 2,
-                                              "height": 15,
-                                              "fill": "$border-strong"
-                                            },
-                                            {
-                                              "type": "frame",
-                                              "id": "Es8KD",
-                                              "name": "分支连接方块",
-                                              "width": 10,
-                                              "height": 10,
-                                              "fill": "$accent-ink"
-                                            },
-                                            {
-                                              "type": "frame",
-                                              "id": "slp7T",
-                                              "name": "下留白",
-                                              "width": 2,
-                                              "height": 15
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "WB62D",
-                                          "name": "角色图标槽",
-                                          "width": 28,
-                                          "height": 40,
-                                          "justifyContent": "center",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "icon",
-                                              "id": "JfNmo",
-                                              "name": "条目图标",
-                                              "width": 16,
-                                              "height": 16,
-                                              "icon": "user",
-                                              "library": "lucide",
-                                              "fill": "$accent-ink"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "xM7ij",
-                                          "name": "角色前缀槽",
-                                          "padding": [
-                                            0,
-                                            "$space-detail",
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "oHgIO",
-                                              "name": "角色前缀",
-                                              "fill": "$accent-ink",
-                                              "content": "user:",
-                                              "lineHeight": 1.5,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-body",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "egdU6",
-                                          "name": "摘要文本槽",
-                                          "width": "fill_container",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "wSxOq",
-                                              "name": "摘要文本",
-                                              "fill": "$text-primary",
-                                              "content": "不动休眠文件，只看用户目录下的软件缓存占用",
-                                              "lineHeight": 1.5,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-body",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "cO3H0",
-                                          "name": "已折叠指示",
-                                          "gap": "$space-tight",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "frame",
-                                              "id": "azCuY",
-                                              "name": "右三角对齐槽",
-                                              "padding": [
-                                                0,
-                                                0,
-                                                "$space-micro",
-                                                0
-                                              ],
-                                              "alignItems": "center",
-                                              "children": [
-                                                {
-                                                  "type": "text",
-                                                  "id": "KedQu",
-                                                  "name": "右三角",
-                                                  "fill": "$text-secondary",
-                                                  "content": "▸",
-                                                  "lineHeight": 1.4286,
-                                                  "fontFamily": "Source Han Sans CN",
-                                                  "fontSize": "$font-ui",
-                                                  "fontWeight": "normal"
-                                                }
-                                              ]
-                                            },
-                                            {
-                                              "type": "frame",
-                                              "id": "d772o",
-                                              "name": "隐藏条数对齐槽",
-                                              "padding": [
-                                                0,
-                                                0,
-                                                "$space-micro",
-                                                0
-                                              ],
-                                              "alignItems": "center",
-                                              "children": [
-                                                {
-                                                  "type": "text",
-                                                  "id": "uqpiu",
-                                                  "name": "隐藏条数",
-                                                  "fill": "$text-secondary",
-                                                  "content": "已隐藏 2 条",
-                                                  "lineHeight": 1.3333,
-                                                  "fontFamily": "Source Han Sans CN",
-                                                  "fontSize": "$font-caption",
-                                                  "fontWeight": "normal"
-                                                }
-                                              ]
-                                            }
-                                          ]
-                                        }
-                                      ]
-                                    }
-                                  ]
-                                }
-                              ]
-                            }
-                          ]
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "id": "uUKiE",
-                  "type": "ref",
-                  "ref": "DZ0Fp",
-                  "name": "模糊遮罩层 · 实例",
-                  "layoutPosition": "absolute",
-                  "x": 0,
-                  "y": 0,
-                  "width": 1280,
-                  "height": 800
-                },
-                {
-                  "type": "frame",
-                  "id": "HM2JE",
-                  "layoutPosition": "absolute",
-                  "x": 0,
-                  "y": 0,
-                  "name": "派生弹窗定位层",
-                  "width": 1280,
-                  "height": 800,
-                  "layout": "vertical",
-                  "justifyContent": "center",
-                  "alignItems": "center",
-                  "children": [
-                    {
-                      "id": "gTahh",
-                      "type": "ref",
-                      "ref": "K3x72",
-                      "name": "派生会话弹窗 · 520px",
-                      "width": 520,
-                      "padding": 20,
-                      "stroke": "$border-subtle",
-                      "children": [
-                        {
-                          "type": "frame",
-                          "id": "a7zhTh",
-                          "name": "内容容器",
-                          "width": "fill_container",
-                          "layout": "vertical",
-                          "gap": "$space-component",
-                          "children": [
-                            {
-                              "type": "frame",
-                              "id": "xz7jE",
-                              "name": "派生标题栏",
-                              "width": "fill_container",
-                              "justifyContent": "space_between",
-                              "alignItems": "center",
-                              "children": [
-                                {
-                                  "type": "frame",
-                                  "id": "w6eSmG",
-                                  "name": "标题对齐槽",
-                                  "padding": [
-                                    0,
-                                    0,
-                                    "$space-micro",
-                                    0
-                                  ],
-                                  "alignItems": "center",
-                                  "children": [
-                                    {
-                                      "type": "text",
-                                      "id": "cE4X3",
-                                      "name": "标题",
-                                      "fill": "$text-primary",
-                                      "content": "派生会话",
-                                      "lineHeight": 1.5,
-                                      "fontFamily": "Source Han Sans CN",
-                                      "fontSize": "$font-body",
-                                      "fontWeight": "600"
-                                    }
-                                  ]
-                                },
-                                {
-                                  "id": "cAC7c",
-                                  "type": "ref",
-                                  "ref": "AxUEZ",
-                                  "name": "关闭按钮",
-                                  "width": 28,
-                                  "height": 28,
-                                  "descendants": {
-                                    "DfvN3": {
-                                      "icon": "x",
-                                      "width": 16,
-                                      "height": 16,
-                                      "fill": "$text-secondary"
-                                    }
-                                  }
-                                }
-                              ]
-                            },
-                            {
-                              "type": "text",
-                              "id": "jOEha",
-                              "name": "说明",
-                              "fill": "$text-secondary",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "选择一条用户消息，在其之前派生新分支并回填至输入框。",
-                              "lineHeight": 1.4286,
-                              "fontFamily": "Source Han Sans CN",
-                              "fontSize": "$font-ui",
-                              "fontWeight": "normal"
-                            },
-                            {
-                              "type": "frame",
-                              "id": "ah0gS",
-                              "name": "可选消息列表",
-                              "width": "fill_container",
-                              "layout": "vertical",
-                              "gap": "$space-tight",
-                              "children": [
-                                {
-                                  "type": "frame",
-                                  "id": "EzNgR",
-                                  "name": "派生目标 · 1",
-                                  "width": "fill_container",
-                                  "height": 40,
-                                  "fill": "$bg-surface",
-                                  "cornerRadius": "$radius-control",
-                                  "stroke": "$border-subtle",
-                                  "padding": [
-                                    0,
-                                    "$space-component"
-                                  ],
-                                  "alignItems": "center",
-                                  "children": [
-                                    {
-                                      "type": "frame",
-                                      "id": "gTdCh",
-                                      "name": "文案对齐槽",
-                                      "clip": true,
-                                      "width": "fill_container",
-                                      "padding": [
-                                        0,
-                                        0,
-                                        "$space-micro",
-                                        0
-                                      ],
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "type": "text",
-                                          "id": "CPu4Z",
-                                          "name": "消息正文",
-                                          "fill": "$text-primary",
-                                          "content": "1. C 盘红了只剩十几 G，帮我看看是什么占满了，能不能直接清？",
-                                          "lineHeight": 1.4286,
-                                          "fontFamily": "Source Han Sans CN",
-                                          "fontSize": "$font-ui",
-                                          "fontWeight": "normal"
-                                        }
-                                      ]
-                                    }
-                                  ]
-                                },
-                                {
-                                  "type": "frame",
-                                  "id": "fHpju",
-                                  "name": "派生目标 · 2",
-                                  "width": "fill_container",
-                                  "height": 40,
-                                  "fill": "$bg-track-recess",
-                                  "cornerRadius": "$radius-control",
-                                  "stroke": "$accent-ink",
-                                  "padding": [
-                                    0,
-                                    "$space-component"
-                                  ],
-                                  "alignItems": "center",
-                                  "children": [
-                                    {
-                                      "type": "frame",
-                                      "id": "cUwuj",
-                                      "name": "文案对齐槽",
-                                      "clip": true,
-                                      "width": "fill_container",
-                                      "padding": [
-                                        0,
-                                        0,
-                                        "$space-micro",
-                                        0
-                                      ],
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "type": "text",
-                                          "id": "bHv8O",
-                                          "name": "消息正文",
-                                          "fill": "$text-primary",
-                                          "content": "2. 帮我生成关闭休眠和清理临时目录的命令清单",
-                                          "lineHeight": 1.4286,
-                                          "fontFamily": "Source Han Sans CN",
-                                          "fontSize": "$font-ui",
-                                          "fontWeight": "500"
-                                        }
-                                      ]
-                                    }
-                                  ]
-                                },
-                                {
-                                  "type": "frame",
-                                  "id": "qEGXr",
-                                  "name": "派生目标 · 3",
-                                  "width": "fill_container",
-                                  "height": 40,
-                                  "fill": "$bg-surface",
-                                  "cornerRadius": "$radius-control",
-                                  "stroke": "$border-subtle",
-                                  "padding": [
-                                    0,
-                                    "$space-component"
-                                  ],
-                                  "alignItems": "center",
-                                  "children": [
-                                    {
-                                      "type": "frame",
-                                      "id": "UU8bX",
-                                      "name": "文案对齐槽",
-                                      "clip": true,
-                                      "width": "fill_container",
-                                      "padding": [
-                                        0,
-                                        0,
-                                        "$space-micro",
-                                        0
-                                      ],
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "type": "text",
-                                          "id": "YAt9A",
-                                          "name": "消息正文",
-                                          "fill": "$text-primary",
-                                          "content": "3. 不动休眠文件，只看用户目录下的软件缓存占用",
-                                          "lineHeight": 1.4286,
-                                          "fontFamily": "Source Han Sans CN",
-                                          "fontSize": "$font-ui",
-                                          "fontWeight": "normal"
-                                        }
-                                      ]
-                                    }
-                                  ]
-                                }
-                              ]
-                            },
-                            {
-                              "type": "frame",
-                              "id": "dj2Mm",
-                              "name": "底部按钮栏",
-                              "width": "fill_container",
-                              "gap": "$space-inline",
-                              "justifyContent": "end",
-                              "alignItems": "center",
-                              "children": [
-                                {
-                                  "id": "MHZrG",
-                                  "type": "ref",
-                                  "ref": "s2CZVU",
-                                  "name": "按钮 · 取消",
-                                  "descendants": {
-                                    "g94CyR": {
-                                      "enabled": false
-                                    },
-                                    "xEZi3": {
-                                      "content": "取消"
-                                    }
-                                  }
-                                },
-                                {
-                                  "id": "bHJ1J",
-                                  "type": "ref",
-                                  "ref": "xRNmP",
-                                  "name": "按钮 · 派生",
-                                  "descendants": {
-                                    "r0Zmst": {
-                                      "icon": "git-fork"
-                                    },
-                                    "DTJ47": {
-                                      "content": "派生"
-                                    }
-                                  }
-                                }
-                              ]
-                            }
-                          ]
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "type": "frame",
               "id": "kNc96",
-              "x": 1360,
+              "x": 0,
               "y": 944,
               "name": "分支树 · 节点标记编辑",
               "theme": {
@@ -74268,7 +73701,7 @@
                       "id": "WwAkq",
                       "type": "ref",
                       "ref": "AxUEZ",
-                      "name": "重试消息",
+                      "name": "重新生成",
                       "width": 24,
                       "height": 24,
                       "descendants": {
@@ -74329,7 +73762,7 @@
                   "id": "C27aZN",
                   "type": "ref",
                   "ref": "AxUEZ",
-                  "name": "重试消息",
+                  "name": "重新生成",
                   "width": 24,
                   "height": 24,
                   "descendants": {

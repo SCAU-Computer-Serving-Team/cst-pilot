@@ -153,6 +153,7 @@ impl WindowsWindowInner {
             WM_CHAR => self.handle_char_msg(wparam),
             WM_IME_STARTCOMPOSITION => self.handle_ime_position(handle),
             WM_IME_COMPOSITION => self.handle_ime_composition(handle, lparam),
+            WM_IME_ENDCOMPOSITION => self.handle_ime_end_composition(),
             WM_SETCURSOR => self.handle_set_cursor(handle, lparam),
             WM_SETTINGCHANGE => self.handle_system_settings_changed(handle, wparam, lparam),
             WM_INPUTLANGCHANGE => self.handle_input_language_changed(),
@@ -766,6 +767,40 @@ impl WindowsWindowInner {
         }
     }
 
+    pub(crate) fn finish_ime_composition(&self, handle: HWND) {
+        unsafe {
+            if GetFocus() == handle
+                && let Some(ctx) = ImeContext::get(handle)
+            {
+                ImmNotifyIME(*ctx, NI_COMPOSITIONSTR, CPS_COMPLETE, 0)
+                    .ok()
+                    .log_err();
+            }
+        }
+    }
+
+    pub(crate) fn cancel_ime_composition(&self, handle: HWND) {
+        unsafe {
+            if GetFocus() == handle
+                && let Some(ctx) = ImeContext::get(handle)
+            {
+                ImmNotifyIME(*ctx, NI_COMPOSITIONSTR, CPS_CANCEL, 0)
+                    .ok()
+                    .log_err();
+            }
+        }
+        self.with_input_handler(|input_handler| {
+            input_handler.unmark_text();
+        });
+    }
+
+    fn handle_ime_end_composition(&self) -> Option<isize> {
+        self.with_input_handler(|input_handler| {
+            input_handler.unmark_text();
+        });
+        None
+    }
+
     fn handle_ime_composition(&self, handle: HWND, lparam: LPARAM) -> Option<isize> {
         let ctx = ImeContext::get(handle)?;
         self.handle_ime_composition_inner(*ctx, lparam)
@@ -790,8 +825,18 @@ impl WindowsWindowInner {
             }
             if lparam & GCS_COMPSTR.0 > 0 {
                 let comp_string = parse_ime_composition_string(ctx, GCS_COMPSTR)?;
-                let caret_pos =
-                    (!comp_string.is_empty() && lparam & GCS_CURSORPOS.0 > 0).then(|| {
+                if comp_string.is_empty() {
+                    if lparam & GCS_RESULTSTR.0 == 0 {
+                        self.with_input_handler(|input_handler| {
+                            input_handler.replace_text_in_range(None, "");
+                        })?;
+                    } else {
+                        self.with_input_handler(|input_handler| {
+                            input_handler.unmark_text();
+                        })?;
+                    }
+                } else {
+                    let caret_pos = (lparam & GCS_CURSORPOS.0 > 0).then(|| {
                         let cursor_pos = retrieve_composition_cursor_position(ctx);
                         let pos = if should_use_ime_cursor_position(ctx, cursor_pos) {
                             cursor_pos
@@ -800,13 +845,14 @@ impl WindowsWindowInner {
                         };
                         pos..pos
                     });
-                self.with_input_handler(|input_handler| {
-                    input_handler.replace_and_mark_text_in_range(
-                        None,
-                        &String::from_utf16_lossy(&comp_string),
-                        caret_pos,
-                    );
-                })?;
+                    self.with_input_handler(|input_handler| {
+                        input_handler.replace_and_mark_text_in_range(
+                            None,
+                            &String::from_utf16_lossy(&comp_string),
+                            caret_pos,
+                        );
+                    })?;
+                }
             }
             if lparam & (GCS_RESULTSTR.0 | GCS_COMPSTR.0) > 0 {
                 return Some(0);

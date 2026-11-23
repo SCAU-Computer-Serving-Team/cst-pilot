@@ -5,7 +5,8 @@ import { useNavigate } from "react-router";
 import { ModelKeyDialog, type ModelKeyDialogReason } from "../auth/model-key-dialog";
 import { anyModelConfigured, claimMissingKeyPrompt } from "../auth/model-key-prompt";
 import { EDIT_OUTGOING_EVENT } from "../conversation/outgoing-message";
-import { ApiFailure, apiJson } from "../data/api";
+import { EDIT_QUEUE_ITEM_EVENT, type EditQueueItemDetail } from "../conversation/queue-panel";
+import { ApiFailure, apiJson, sessionPath } from "../data/api";
 import { type ModelChoice, type ModelSelectionPayload, refreshManualSelection } from "../data/model-selection";
 import { messageOutbox } from "../data/use-message-outbox";
 import { type Model, useGlobalEvents } from "../data/web-state";
@@ -88,6 +89,7 @@ export function Composer({
 	const [dragging, setDragging] = useState(false);
 	const dragDepth = useRef(0);
 	const [pendingEditId, setPendingEditId] = useState<string | null>(null);
+	const [pendingQueueEdit, setPendingQueueEdit] = useState<EditQueueItemDetail | null>(null);
 	const attachmentBusy = useRef(false);
 	const imageGeneration = useRef(0);
 	const imagesRef = useRef(images);
@@ -695,6 +697,21 @@ export function Composer({
 			.catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "无法恢复消息"))
 			.finally(() => outbox.endEdit(item.id));
 	}
+	async function performQueueItemEdit(detail: EditQueueItemDetail) {
+		if (!sessionId || detail.sessionId !== sessionId) return;
+		try {
+			await apiJson(sessionPath(detail.sessionId, `/queue/${encodeURIComponent(detail.itemId)}`), {
+				method: "DELETE",
+				body: { version: detail.version },
+			});
+			await detail.refresh();
+			const serialized = detail.skill ? `/skill:${detail.skill} ${detail.text}` : detail.text;
+			await replaceDraft({ text: serialized, images: [] }, true);
+		} catch (cause) {
+			await detail.refresh().catch(() => {});
+			setError(cause instanceof Error ? cause.message : "无法编辑排队消息");
+		}
+	}
 	// biome-ignore lint/correctness/useExhaustiveDependencies: 事件读写当前会话 DOM 和 refs，不随输入内容重新订阅。
 	useEffect(() => {
 		const edit = (event: Event) => {
@@ -709,8 +726,22 @@ export function Composer({
 			}
 			performOutgoingEdit(item.id);
 		};
+		const editQueue = (event: Event) => {
+			if (!(event instanceof CustomEvent) || !event.detail || typeof event.detail !== "object") return;
+			const detail = event.detail as EditQueueItemDetail;
+			if (!sessionId || detail.sessionId !== sessionId) return;
+			if (readEditor(true) || imagesRef.current.length) {
+				setPendingQueueEdit(detail);
+				return;
+			}
+			void performQueueItemEdit(detail);
+		};
 		window.addEventListener(EDIT_OUTGOING_EVENT, edit);
-		return () => window.removeEventListener(EDIT_OUTGOING_EVENT, edit);
+		window.addEventListener(EDIT_QUEUE_ITEM_EVENT, editQueue);
+		return () => {
+			window.removeEventListener(EDIT_OUTGOING_EVENT, edit);
+			window.removeEventListener(EDIT_QUEUE_ITEM_EVENT, editQueue);
+		};
 	}, [draftKey, sessionId, imagesLoading, attaching]);
 	function keyDown(event: KeyboardEvent<HTMLDivElement>) {
 		if (event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -764,6 +795,19 @@ export function Composer({
 						const id = pendingEditId;
 						setPendingEditId(null);
 						performOutgoingEdit(id);
+					}}
+				/>
+			)}
+			{pendingQueueEdit && (
+				<ConfirmDialog
+					title="继续编辑这条排队消息？"
+					description="当前草稿将保留，可通过「恢复保留草稿」取回。"
+					confirmLabel="继续编辑"
+					onCancel={() => setPendingQueueEdit(null)}
+					onConfirm={() => {
+						const detail = pendingQueueEdit;
+						setPendingQueueEdit(null);
+						void performQueueItemEdit(detail);
 					}}
 				/>
 			)}

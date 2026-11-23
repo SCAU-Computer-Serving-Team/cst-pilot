@@ -33,6 +33,7 @@ pub(super) async fn execute_send_draft(
     target: DraftKey,
     draft: &ComposerDraft,
     previous: Option<watch::Receiver<()>>,
+    preserve_workspace_draft: bool,
 ) -> Result<SendSubmissionOutcome, ClientError> {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -161,7 +162,7 @@ pub(super) async fn execute_send_draft(
             })
         }
         Err(err) => {
-            if err.is_credentials_required() {
+            if err.is_credentials_required() && !preserve_workspace_draft {
                 let target_for_restore = match &target {
                     DraftKey::NewSession => DraftKey::Session(session_id.clone()),
                     other => other.clone(),

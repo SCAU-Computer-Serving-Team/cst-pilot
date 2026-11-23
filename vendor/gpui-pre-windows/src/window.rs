@@ -1080,6 +1080,14 @@ impl PlatformWindow for WindowsWindow {
         self.0.update_ime_position(self.0.hwnd, caret_position);
     }
 
+    fn finish_ime_composition(&self) {
+        self.0.finish_ime_composition(self.0.hwnd);
+    }
+
+    fn cancel_ime_composition(&self) {
+        self.0.cancel_ime_composition(self.0.hwnd);
+    }
+
     fn play_system_bell(&self) {
         // MB_OK: The sound specified as the Windows Default Beep sound.
         let _ = unsafe { MessageBeep(MB_OK) };

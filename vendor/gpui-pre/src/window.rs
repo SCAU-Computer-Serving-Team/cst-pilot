@@ -6992,6 +6992,16 @@ impl Window {
         });
     }
 
+    /// Commits any active platform IME composition string on the focused window.
+    pub fn finish_ime_composition(&self) {
+        self.platform_window.finish_ime_composition();
+    }
+
+    /// Cancels and discards any active platform IME composition string on the focused window.
+    pub fn cancel_ime_composition(&self) {
+        self.platform_window.cancel_ime_composition();
+    }
+
     /// Present a platform dialog.
     /// The provided message will be presented, along with buttons for each answer.
     /// When a button is clicked, the returned Receiver will receive the index of the clicked button.

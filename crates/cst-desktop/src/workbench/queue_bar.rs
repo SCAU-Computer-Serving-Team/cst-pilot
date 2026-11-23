@@ -3,14 +3,14 @@ use std::rc::Rc;
 use cst_client::{ClientError, ClientHandle};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
-use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::{
-    App, Entity, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px,
+    App, InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement,
+    Styled, TestSupportExt, Window, div, px,
 };
 use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
+use crate::theme::motion::DesktopTooltipExt as _;
 use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
 };
@@ -19,6 +19,7 @@ use crate::theme::{
 pub struct VisibleQueueItem {
     pub id: String,
     pub text: String,
+    pub skill: Option<String>,
     pub status: String,
     pub delivery: String,
     pub uncertain: bool,
@@ -77,6 +78,11 @@ impl ParsedQueueSnapshot {
                         .and_then(Value::as_str)
                         .unwrap_or("")
                         .to_owned(),
+                    skill: item
+                        .get("skill")
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_owned),
                     status,
                     delivery,
                     uncertain,
@@ -105,7 +111,6 @@ pub(super) enum QueueMutation {
     Retry(String),
     Delete(String),
     Reorder(Vec<String>),
-    Edit(String, String),
 }
 
 impl QueueMutation {
@@ -120,7 +125,6 @@ impl QueueMutation {
             Self::Retry(id) => client.retry_queue_item(sid, id, version).await,
             Self::Delete(id) => client.delete_queue_item(sid, id, version).await,
             Self::Reorder(ids) => client.reorder_queue(sid, version, ids).await,
-            Self::Edit(id, text) => client.edit_queue_item(sid, id, version, text).await,
         }
     }
 
@@ -149,28 +153,22 @@ impl QueueMutation {
 
 pub type QueueItemActionFn = Rc<dyn Fn(String, u64, &mut Window, &mut App)>;
 pub type QueueReorderFn = Rc<dyn Fn(u64, Vec<String>, &mut Window, &mut App)>;
-pub type QueueBeginEditFn = Rc<dyn Fn(String, String, &mut Window, &mut App)>;
-pub type QueueCommitEditFn = Rc<dyn Fn(String, u64, &mut Window, &mut App)>;
-pub type QueueCancelEditFn = Rc<dyn Fn(&mut Window, &mut App)>;
+pub type QueueEditFn = Rc<dyn Fn(VisibleQueueItem, u64, &mut Window, &mut App)>;
 
 pub struct QueueBarCallbacks {
     pub on_steer: QueueItemActionFn,
     pub on_retry: QueueItemActionFn,
     pub on_delete: QueueItemActionFn,
     pub on_reorder: QueueReorderFn,
-    pub on_begin_edit: QueueBeginEditFn,
-    pub on_commit_edit: QueueCommitEditFn,
-    pub on_cancel_edit: QueueCancelEditFn,
+    pub on_edit: QueueEditFn,
 }
 
 /// Renders the temporary pending-message `QueueBar` (`cst-pilot-desktop.pen` 「01 · 工作台」 `rnehA`)
-/// inside the top of the composer container, supporting reorder (`version`), `↑ 立即` steer, inline edit, and delete.
-#[allow(clippy::too_many_arguments)]
+/// inside the top of the composer container, supporting reorder (`version`), borderless `arrow-up` steer,
+/// delete-then-backfill edit, and delete.
 pub fn render_queue_bar(
     queue: &ParsedQueueSnapshot,
     session_id: &str,
-    editing_item_id: Option<&str>,
-    edit_input_state: Option<&Entity<InputState>>,
     palette: &DesktopPalette,
     window: &mut Window,
     cx: &mut App,
@@ -188,7 +186,7 @@ pub fn render_queue_bar(
     let header_text = if let Some(f) = failed_item {
         match f.error.as_deref().filter(|s| !s.is_empty()) {
             Some(reason) => format!("投递失败 · {reason}"),
-            None => "投递失败 · 请检查提供商".to_owned(),
+            None => "投递失败 · 请检查模型服务".to_owned(),
         }
     } else if has_uncertain {
         "上次投递结果待核对 · 请核对对话后再补充消息，不会自动重发".to_owned()
@@ -228,73 +226,6 @@ pub fn render_queue_bar(
     let flip_scope = SharedString::from(session_id.to_owned());
     for (index, item) in queue.items.iter().enumerate() {
         let iid = item.id.clone();
-        let is_editing = editing_item_id == Some(iid.as_str());
-
-        if is_editing
-            && matches!(item.status.as_str(), "pending" | "failed")
-            && let Some(input_entity) = edit_input_state
-        {
-            let commit_cb = Rc::clone(&cb.on_commit_edit);
-            let cancel_cb = Rc::clone(&cb.on_cancel_edit);
-            let iid_save = iid.clone();
-            let edit_input_id = SharedString::from(format!("queue-edit-input-{iid}"));
-            let save_btn_id = SharedString::from(format!("queue-save-btn-{iid}"));
-            let cancel_btn_id = SharedString::from(format!("queue-cancel-edit-btn-{iid}"));
-
-            list = list.child(
-                div()
-                    .id(SharedString::from(format!("queue-row-edit-{iid}")))
-                    .h(height::CONTROL)
-                    .border_t_1()
-                    .border_color(palette.border_subtle)
-                    .flex()
-                    .items_center()
-                    .gap(space::XS)
-                    .child(
-                        div().flex_1().min_w_0().child(
-                            Input::new(input_entity)
-                                .accessibility_id(edit_input_id)
-                                .aria_label("编辑排队消息"),
-                        ),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .id(save_btn_id.clone())
-                            .test_support()
-                            .a11y_button(save_btn_id, "保存排队消息")
-                            .tab_index(0)
-                            .h(height::INLINE)
-                            .px(space::SM)
-                            .rounded(radius::CONTROL)
-                            .bg(palette.accent_solid)
-                            .text_color(palette.text_on_accent)
-                            .flex()
-                            .items_center()
-                            .on_click(move |_, w, cx| {
-                                (commit_cb)(iid_save.clone(), version, w, cx);
-                            })
-                            .child(cjk_inline_label("保存")),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .id(cancel_btn_id.clone())
-                            .test_support()
-                            .a11y_button(cancel_btn_id, "取消编辑排队消息")
-                            .tab_index(0)
-                            .h(height::INLINE)
-                            .px(space::SM)
-                            .rounded(radius::CONTROL)
-                            .border_1()
-                            .border_color(palette.border_strong)
-                            .text_color(palette.text_secondary)
-                            .flex()
-                            .items_center()
-                            .on_click(move |_, w, cx| (cancel_cb)(w, cx))
-                            .child(cjk_inline_label("取消")),
-                    ),
-            );
-            continue;
-        }
 
         let display_label = if item.text.trim().is_empty() {
             SharedString::from("图片消息")
@@ -320,7 +251,8 @@ pub fn render_queue_bar(
                     div()
                         .id(up_id.clone())
                         .test_support()
-                        .a11y_button(up_id, "上移排队消息")
+                        .a11y_button(up_id.clone(), "上移排队消息")
+                        .desktop_tooltip(up_id, "上移")
                         .tab_index(0)
                         .w(height::INLINE)
                         .h(height::INLINE)
@@ -348,7 +280,8 @@ pub fn render_queue_bar(
                     div()
                         .id(down_id.clone())
                         .test_support()
-                        .a11y_button(down_id, "下移排队消息")
+                        .a11y_button(down_id.clone(), "下移排队消息")
+                        .desktop_tooltip(down_id, "下移")
                         .tab_index(0)
                         .w(height::INLINE)
                         .h(height::INLINE)
@@ -377,9 +310,8 @@ pub fn render_queue_bar(
                 Rc::clone(&cb.on_steer)
             };
             let iid_act = iid.clone();
-            let iid_edit = iid.clone();
-            let raw_text_edit = item.text.clone();
-            let edit_fn = Rc::clone(&cb.on_begin_edit);
+            let item_for_edit = item.clone();
+            let edit_fn = Rc::clone(&cb.on_edit);
             let iid_del = iid.clone();
             let del_fn = Rc::clone(&cb.on_delete);
             let pri_id = SharedString::from(if is_failed {
@@ -387,33 +319,28 @@ pub fn render_queue_bar(
             } else {
                 format!("queue-steer-btn-{iid}")
             });
+            let pri_tip = if is_failed {
+                "重试发送"
+            } else {
+                "立即发送"
+            };
             let edit_id = SharedString::from(format!("queue-edit-btn-{iid}"));
             let del_id = SharedString::from(format!("queue-delete-btn-{iid}"));
 
             actions = actions
                 .child(
-                    apply_scale(div(), scale::CAPTION_MEDIUM)
+                    div()
                         .id(pri_id.clone())
                         .test_support()
+                        .a11y_button(pri_id.clone(), pri_tip)
+                        .desktop_tooltip(pri_id, pri_tip)
                         .tab_index(0)
-                        .a11y_button(
-                            pri_id,
-                            if is_failed {
-                                "重试排队消息"
-                            } else {
-                                "立即插队发送"
-                            },
-                        )
+                        .w(height::INLINE)
                         .h(height::INLINE)
-                        .px(space::SM)
                         .rounded(radius::CONTROL)
-                        .border_1()
-                        .border_color(palette.border_subtle)
-                        .bg(palette.bg_workspace)
-                        .text_color(palette.text_primary)
                         .flex()
                         .items_center()
-                        .gap(space::MICRO)
+                        .justify_center()
                         .hover(|s| s.bg(palette.bg_item_hover))
                         .on_click(move |_, w, cx| {
                             (action_fn)(iid_act.clone(), version, w, cx);
@@ -424,20 +351,16 @@ pub fn render_queue_bar(
                             } else {
                                 IconName::ArrowUp
                             })
-                            .size(px(12.0))
+                            .size(if is_failed { px(14.0) } else { px(18.0) })
                             .text_color(palette.text_secondary),
-                        )
-                        .child(cjk_inline_label(if is_failed {
-                            "重试"
-                        } else {
-                            "立即"
-                        })),
+                        ),
                 )
                 .child(
                     div()
                         .id(edit_id.clone())
                         .test_support()
-                        .a11y_button(edit_id, "编辑排队消息")
+                        .a11y_button(edit_id.clone(), "编辑排队消息")
+                        .desktop_tooltip(edit_id, "编辑")
                         .tab_index(0)
                         .w(height::INLINE)
                         .h(height::INLINE)
@@ -447,7 +370,7 @@ pub fn render_queue_bar(
                         .justify_center()
                         .hover(|s| s.bg(palette.bg_item_hover))
                         .on_click(move |_, w, cx| {
-                            (edit_fn)(iid_edit.clone(), raw_text_edit.clone(), w, cx);
+                            (edit_fn)(item_for_edit.clone(), version, w, cx);
                         })
                         .child(
                             Icon::new(IconName::Pencil)
@@ -459,7 +382,8 @@ pub fn render_queue_bar(
                     div()
                         .id(del_id.clone())
                         .test_support()
-                        .a11y_button(del_id, "删除排队消息")
+                        .a11y_button(del_id.clone(), "删除排队消息")
+                        .desktop_tooltip(del_id, "删除")
                         .tab_index(0)
                         .w(height::INLINE)
                         .h(height::INLINE)

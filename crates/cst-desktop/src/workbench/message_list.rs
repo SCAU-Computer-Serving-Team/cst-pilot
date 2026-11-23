@@ -58,14 +58,48 @@ pub enum MessageListEvent {
     FocusComposer,
     RequestEditUserTurn {
         session_id: String,
-        parent_entry_id: Option<String>,
+        user_entry_id: String,
         user_text: String,
+        user_images: Vec<ImageContentPart>,
+    },
+    RequestEditOutboxItem {
+        session_id: String,
+        client_message_id: String,
     },
     MissingCredentials {
         provider: String,
     },
     ErrorMessage(String),
     TopNotice(String),
+}
+
+pub(crate) fn is_real_entry_id(id: &str) -> bool {
+    !id.is_empty() && !id.starts_with("entry-") && !id.starts_with("stream-")
+}
+
+pub(crate) fn latest_forkable_entry_id(session: &SessionViewSnapshot) -> Option<String> {
+    for raw in session.entries.iter().rev() {
+        let Some(eid) = raw.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if !is_real_entry_id(eid) {
+            continue;
+        }
+        let role = raw
+            .get("message")
+            .unwrap_or(raw)
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if role != "user" && role != "system" {
+            return Some(eid.to_owned());
+        }
+    }
+    session
+        .leaf_id
+        .as_deref()
+        .filter(|id| is_real_entry_id(id))
+        .map(str::to_owned)
 }
 
 struct PendingSecretInput {
@@ -273,6 +307,7 @@ pub struct MessageListView {
     last_observed_revision: u64,
     scroll_handle: ScrollHandle,
     auto_follow_bottom: bool,
+    action_in_flight: bool,
     visible_turn_limit: usize,
     segment_expansion_overrides: BTreeMap<ProcessExpansionKey, bool>,
     expanded_thinking: BTreeSet<String>,
@@ -307,6 +342,7 @@ impl MessageListView {
             last_observed_revision: 0,
             scroll_handle: ScrollHandle::new(),
             auto_follow_bottom: true,
+            action_in_flight: false,
             visible_turn_limit: DEFAULT_VISIBLE_TURN_WINDOW,
             segment_expansion_overrides: BTreeMap::new(),
             expanded_thinking: BTreeSet::new(),
@@ -338,6 +374,7 @@ impl MessageListView {
         expanded: bool,
         cx: &mut Context<Self>,
     ) {
+        self.auto_follow_bottom = false;
         let prev = self
             .segment_expansion_overrides
             .insert(key.clone(), expanded);
@@ -360,6 +397,7 @@ impl MessageListView {
         self.content_reveal.clear();
         self.last_observed_revision = 0;
         self.auto_follow_bottom = true;
+        self.action_in_flight = false;
         self.visible_turn_limit = DEFAULT_VISIBLE_TURN_WINDOW;
         self.segment_expansion_overrides.clear();
         self.expanded_thinking.clear();
@@ -621,120 +659,175 @@ impl MessageListView {
     pub fn apply_edit_and_rewrite_user_turn(
         &mut self,
         session_id: String,
-        parent_entry_id: Option<String>,
+        user_entry_id: String,
         user_text: String,
+        user_images: Vec<ImageContentPart>,
         cx: &mut Context<Self>,
     ) {
-        let key = DraftKey::Session(session_id.clone());
-        self.client.with_workspace_mut(|ws| {
-            let draft = ComposerDraft {
-                cursor_char_offset: user_text.chars().count(),
-                text: user_text,
-                ..ComposerDraft::default()
-            };
-            ws.restore_draft(key, draft);
-        });
-        cx.emit(MessageListEvent::FocusComposer);
-
-        if let Some(target_parent_id) = parent_entry_id {
-            let client = self.client.clone();
-            cx.spawn(async move |weak, cx| {
-                let res = client
-                    .navigate_session_tree(session_id.clone(), target_parent_id, false, None)
-                    .await;
-                let _ = client.activate_session(Some(session_id)).await;
-                if let Err(err) = res {
-                    let _ = weak.update(cx, |_, cx| {
-                        cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
-                    });
-                }
-            })
-            .detach();
+        if self.action_in_flight || !is_real_entry_id(&user_entry_id) {
+            return;
         }
+        self.action_in_flight = true;
+        cx.notify();
+
+        let client = self.client.clone();
+        cx.spawn(async move |weak, cx| {
+            let images = load_turn_images_into_pool(&client, &session_id, &user_images).await;
+            let nav_res = client
+                .navigate_session_tree(session_id.clone(), user_entry_id, false, None)
+                .await;
+            match nav_res {
+                Err(err) => {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.action_in_flight = false;
+                        cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
+                        cx.notify();
+                    });
+                    return;
+                }
+                Ok(ref val) if val.get("cancelled").and_then(Value::as_bool) == Some(true) => {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.action_in_flight = false;
+                        cx.notify();
+                    });
+                    return;
+                }
+                Ok(_) => {}
+            }
+
+            let _ = client.reload_session(session_id.clone()).await;
+            let key = DraftKey::Session(session_id);
+            client.with_workspace_mut(|ws| {
+                let d = ws.draft_mut(key);
+                d.cursor_char_offset = user_text.chars().count();
+                d.text = user_text;
+                d.tokens.clear();
+                d.images = images;
+            });
+            let _ = weak.update(cx, |this, cx| {
+                this.action_in_flight = false;
+                cx.emit(MessageListEvent::FocusComposer);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn request_edit_user_turn(
         &mut self,
         session_id: String,
-        parent_entry_id: Option<String>,
+        user_entry_id: String,
         user_text: String,
+        user_images: Vec<ImageContentPart>,
         cx: &mut Context<Self>,
     ) {
+        if self.action_in_flight || !is_real_entry_id(&user_entry_id) {
+            return;
+        }
         cx.emit(MessageListEvent::RequestEditUserTurn {
             session_id,
-            parent_entry_id,
+            user_entry_id,
             user_text,
+            user_images,
         });
     }
 
     fn retry_user_turn(
         &mut self,
         session_id: String,
-        parent_entry_id: Option<String>,
+        user_entry_id: String,
         user_text: String,
+        user_images: Vec<ImageContentPart>,
         cx: &mut Context<Self>,
     ) {
-        if user_text.trim().is_empty() {
+        if self.action_in_flight
+            || !is_real_entry_id(&user_entry_id)
+            || (user_text.trim().is_empty() && user_images.is_empty())
+        {
             return;
         }
+        self.action_in_flight = true;
+        cx.notify();
+
+        let active_provider = resolve_session_active_provider(&self.client, &session_id);
         let client = self.client.clone();
         cx.spawn(async move |weak, cx| {
-            if let Some(pid) = parent_entry_id
-                && let Err(err) = client
-                    .navigate_session_tree(session_id.clone(), pid, false, None)
-                    .await
-            {
-                let _ = weak.update(cx, |_, cx| {
-                    cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
-                });
-                return;
-            }
-            let key = DraftKey::Session(session_id.clone());
-            client.with_workspace_mut(|ws| {
-                let draft = ComposerDraft {
-                    cursor_char_offset: user_text.chars().count(),
-                    text: user_text,
-                    ..ComposerDraft::default()
-                };
-                ws.restore_draft(key.clone(), draft);
-            });
-            match client.submit_draft(key).await {
-                Ok(_) => {}
-                Err(ClientError::CredentialsRequired { .. }) => {
-                    let _ = weak.update(cx, |_, cx| {
-                        cx.emit(MessageListEvent::MissingCredentials {
-                            provider: "cstoa".into(),
-                        });
-                    });
-                }
+            let images = load_turn_images_into_pool(&client, &session_id, &user_images).await;
+            let nav_res = client
+                .navigate_session_tree(session_id.clone(), user_entry_id, false, None)
+                .await;
+            match nav_res {
                 Err(err) => {
-                    let _ = weak.update(cx, |_, cx| {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.action_in_flight = false;
                         cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
+                        cx.notify();
                     });
+                    return;
                 }
+                Ok(ref val) if val.get("cancelled").and_then(Value::as_bool) == Some(true) => {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.action_in_flight = false;
+                        cx.notify();
+                    });
+                    return;
+                }
+                Ok(_) => {}
             }
+
+            let _ = client.reload_session(session_id.clone()).await;
+            let payload = ComposerDraft {
+                cursor_char_offset: user_text.chars().count(),
+                text: user_text,
+                images,
+                ..ComposerDraft::default()
+            };
+            let submit_res = client.submit_direct_payload(session_id, payload).await;
+            let _ = weak.update(cx, |this, cx| {
+                this.action_in_flight = false;
+                this.scroll_to_bottom_and_follow(cx);
+                match submit_res {
+                    Ok(_) => {}
+                    Err(ClientError::CredentialsRequired { .. }) => {
+                        cx.emit(MessageListEvent::MissingCredentials {
+                            provider: active_provider,
+                        });
+                    }
+                    Err(err) => {
+                        cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
+                    }
+                }
+                cx.notify();
+            });
         })
         .detach();
     }
 
     fn fork_from_entry(&mut self, session_id: String, entry_id: String, cx: &mut Context<Self>) {
+        if self.action_in_flight || !is_real_entry_id(&entry_id) {
+            return;
+        }
+        self.action_in_flight = true;
+        cx.notify();
+
         let client = self.client.clone();
         cx.spawn(async move |weak, cx| {
             let res = client.fork_session(session_id, entry_id).await;
             let _ = client.refresh_globals().await;
-            let _ = weak.update(cx, |_, cx| match res {
-                Ok(new_sid) => {
-                    if !new_sid.is_empty() {
-                        cx.emit(MessageListEvent::SwitchToSession(new_sid));
-                    } else {
-                        cx.emit(MessageListEvent::TopNotice(
-                            "已从当前位置派生新对话。".into(),
-                        ));
+            let _ = weak.update(cx, |this, cx| {
+                this.action_in_flight = false;
+                match res {
+                    Ok(new_sid) => {
+                        if !new_sid.is_empty() {
+                            cx.emit(MessageListEvent::SwitchToSession(new_sid));
+                            cx.emit(MessageListEvent::TopNotice("已从当前节点分支新会话".into()));
+                        }
+                    }
+                    Err(err) => {
+                        cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
                     }
                 }
-                Err(err) => {
-                    cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
-                }
+                cx.notify();
             });
         })
         .detach();
@@ -744,9 +837,9 @@ impl MessageListView {
     fn render_user_bubble(
         &mut self,
         session_id: &str,
+        session_running: bool,
         turn_key: &str,
         user_entry: &TurnEntry,
-        parent_entry_id: Option<String>,
         palette: &DesktopPalette,
         entity: &Entity<Self>,
         window: &mut Window,
@@ -821,14 +914,24 @@ impl MessageListView {
         let copy_id_click = copy_id.clone();
         let ent_copy = entity.clone();
 
+        let real_user_eid = user_entry
+            .id
+            .as_deref()
+            .filter(|id| is_real_entry_id(id))
+            .map(str::to_owned);
+        let mutating_disabled = session_running || self.action_in_flight || real_user_eid.is_none();
+        let retry_disabled = mutating_disabled || (text.trim().is_empty() && images.is_empty());
+
         let sid_edit = session_id.to_owned();
-        let parent_edit = parent_entry_id.clone();
+        let eid_edit = real_user_eid.clone().unwrap_or_default();
         let text_edit = text.clone();
+        let imgs_edit = images.clone();
         let ent_edit = entity.clone();
 
         let sid_retry = session_id.to_owned();
-        let parent_retry = parent_entry_id;
+        let eid_retry = real_user_eid.unwrap_or_default();
         let text_retry = text;
+        let imgs_retry = images;
         let ent_retry = entity.clone();
 
         // Bottom-right `24×24px` icon-only action bar (`SHcR1` / `b0aK5`)
@@ -843,7 +946,7 @@ impl MessageListView {
             .gap(space::XS)
             .child(icon_action_24_element(
                 copy_icon_id.clone(),
-                "复制用户消息",
+                "复制消息",
                 motion::animated_copy_icon(
                     copy_icon_id,
                     is_copied,
@@ -873,37 +976,39 @@ impl MessageListView {
             ))
             .child(icon_action_24(
                 format!("user-edit-btn-{turn_key}"),
-                "编辑并重新提问",
+                "修改消息",
                 IconName::Pencil,
                 palette.text_secondary,
-                false,
+                mutating_disabled,
                 palette,
                 window,
                 cx,
                 move |_, cx| {
                     let s = sid_edit.clone();
-                    let p = parent_edit.clone();
+                    let e = eid_edit.clone();
                     let t = text_edit.clone();
+                    let im = imgs_edit.clone();
                     ent_edit.update(cx, |this, cx| {
-                        this.request_edit_user_turn(s, p, t, cx);
+                        this.request_edit_user_turn(s, e, t, im, cx);
                     });
                 },
             ))
             .child(icon_action_24(
                 format!("user-retry-btn-{turn_key}"),
-                "重试此轮提问",
+                "重新生成",
                 IconName::RotateCcw,
                 palette.text_secondary,
-                false,
+                retry_disabled,
                 palette,
                 window,
                 cx,
                 move |_, cx| {
                     let s = sid_retry.clone();
-                    let p = parent_retry.clone();
+                    let e = eid_retry.clone();
                     let t = text_retry.clone();
+                    let im = imgs_retry.clone();
                     ent_retry.update(cx, |this, cx| {
-                        this.retry_user_turn(s, p, t, cx);
+                        this.retry_user_turn(s, e, t, im, cx);
                     });
                 },
             ));
@@ -1079,7 +1184,7 @@ impl MessageListView {
                     ))
                     .child(icon_action_24(
                         format!("outbox-edit-{mid}"),
-                        "回填编辑",
+                        "修改消息",
                         IconName::Pencil,
                         palette.text_secondary,
                         false,
@@ -1087,24 +1192,19 @@ impl MessageListView {
                         window,
                         cx,
                         move |_, cx| {
-                            ent_edit.update(cx, |this, cx| {
-                                match this.client.edit_outbox_item(
-                                    Some(&sid_edit),
-                                    &mid_edit,
-                                    false,
-                                ) {
-                                    Ok(_) => cx.emit(MessageListEvent::FocusComposer),
-                                    Err(err) => {
-                                        cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
-                                    }
-                                }
-                                cx.notify();
+                            let s = sid_edit.clone();
+                            let m = mid_edit.clone();
+                            ent_edit.update(cx, |_, cx| {
+                                cx.emit(MessageListEvent::RequestEditOutboxItem {
+                                    session_id: s,
+                                    client_message_id: m,
+                                });
                             });
                         },
                     ))
                     .child(icon_action_24(
                         format!("outbox-remove-{mid}"),
-                        "移除待发消息",
+                        "移除",
                         IconName::Trash,
                         palette.status_danger,
                         false,
@@ -1199,6 +1299,7 @@ impl MessageListView {
             &|cid| copy_ref.is_copied(cid),
             Rc::new(move |key, _, cx| {
                 ent_card.update(cx, |this, cx| {
+                    this.auto_follow_bottom = false;
                     let expanded = this.tool_card_expansion.entry(key).or_insert(standalone);
                     *expanded = !*expanded;
                     cx.notify();
@@ -1206,6 +1307,7 @@ impl MessageListView {
             }),
             Rc::new(move |key, _, cx| {
                 ent_raw.update(cx, |this, cx| {
+                    this.auto_follow_bottom = false;
                     if !this.expanded_tool_raw.remove(&key) {
                         this.expanded_tool_raw.insert(key);
                     }
@@ -1312,6 +1414,7 @@ impl MessageListView {
             &|cid| copy_ref.is_copied(cid),
             Rc::new(move |_, cx| {
                 ent_toggle.update(cx, |this, cx| {
+                    this.auto_follow_bottom = false;
                     if !this.expanded_special_details.remove(&details_key) {
                         this.expanded_special_details.insert(details_key.clone());
                     }
@@ -1362,7 +1465,6 @@ impl MessageListView {
         session: &SessionViewSnapshot,
         turn_idx: usize,
         prepared_turn: &PreparedTurn,
-        parent_entry_id: Option<String>,
         tool_results: &BTreeMap<String, Value>,
         messages_generation: u64,
         is_live_turn: bool,
@@ -1451,6 +1553,7 @@ impl MessageListView {
                 .on_click(move |_, _, cx| {
                     let k = toggle_key.clone();
                     ent_toggle.update(cx, |this, cx| {
+                        this.auto_follow_bottom = false;
                         if !this.expanded_compactions.remove(&k) {
                             this.expanded_compactions.insert(k);
                         }
@@ -1641,9 +1744,9 @@ impl MessageListView {
         if let Some(ref user_entry) = turn.user {
             column = column.child(self.render_user_bubble(
                 &session.id,
+                session.running,
                 &turn_key,
                 user_entry,
-                parent_entry_id.clone(),
                 palette,
                 entity,
                 window,
@@ -2087,6 +2190,7 @@ impl MessageListView {
                         .on_click(move |_, _, cx| {
                             let k = k_det.clone();
                             ent_det.update(cx, |this, cx| {
+                                this.auto_follow_bottom = false;
                                 if !this.expanded_error_details.remove(&k) {
                                     this.expanded_error_details.insert(k);
                                 }
@@ -2177,22 +2281,50 @@ impl MessageListView {
                 .as_ref()
                 .map(|u| extract_message_text(&u.raw))
                 .unwrap_or_default();
-            let user_entry_id = turn.user.as_ref().and_then(|u| u.id.clone());
+            let user_images_for_turn = turn
+                .user
+                .as_ref()
+                .map(|u| extract_user_images(&u.raw))
+                .unwrap_or_default();
+            let real_user_eid = turn
+                .user
+                .as_ref()
+                .and_then(|u| u.id.as_deref())
+                .filter(|id| is_real_entry_id(id))
+                .map(str::to_owned);
+            let real_fork_eid = split
+                .final_entry_id
+                .as_deref()
+                .filter(|id| is_real_entry_id(id))
+                .map(str::to_owned)
+                .or_else(|| {
+                    turn.assistants
+                        .last()
+                        .and_then(|a| a.id.as_deref())
+                        .filter(|id| is_real_entry_id(id))
+                        .map(str::to_owned)
+                });
+
+            let mutating_busy = session.running || self.action_in_flight;
+            let edit_disabled = mutating_busy || real_user_eid.is_none();
+            let fork_disabled = mutating_busy || real_fork_eid.is_none();
+            let retry_disabled = edit_disabled
+                || (user_text_for_turn.trim().is_empty() && user_images_for_turn.is_empty());
 
             let sid_edit = session.id.clone();
-            let parent_edit = parent_entry_id.clone();
+            let eid_edit = real_user_eid.clone().unwrap_or_default();
             let ut_edit = user_text_for_turn.clone();
+            let uimg_edit = user_images_for_turn.clone();
             let ent_edit = entity.clone();
 
             let sid_fork = session.id.clone();
-            let fork_eid = user_entry_id
-                .or_else(|| split.final_entry_id.clone())
-                .unwrap_or_default();
+            let fork_eid = real_fork_eid.unwrap_or_default();
             let ent_fork = entity.clone();
 
             let sid_retry = session.id.clone();
-            let parent_retry = parent_entry_id;
+            let eid_retry = real_user_eid.unwrap_or_default();
             let ut_retry = user_text_for_turn;
+            let uimg_retry = user_images_for_turn;
             let ent_retry = entity.clone();
 
             let ts_label_opt = (!is_live_turn)
@@ -2210,10 +2342,9 @@ impl MessageListView {
                 .flex()
                 .items_center()
                 .gap(space::XS)
-                .opacity(if is_live_turn { 0.35 } else { 1.0 })
                 .child(icon_action_24_element(
                     copy_icon_id.clone(),
-                    "复制回复内容",
+                    "复制回答",
                     motion::animated_copy_icon(
                         copy_icon_id,
                         is_copied,
@@ -2243,35 +2374,33 @@ impl MessageListView {
                 ))
                 .child(icon_action_24(
                     format!("assistant-edit-btn-{turn_key}"),
-                    "编辑提问",
+                    "修改消息",
                     IconName::Pencil,
                     palette.text_secondary,
-                    is_live_turn,
+                    edit_disabled,
                     palette,
                     window,
                     cx,
                     move |_, cx| {
                         let s = sid_edit.clone();
-                        let p = parent_edit.clone();
+                        let e = eid_edit.clone();
                         let t = ut_edit.clone();
+                        let im = uimg_edit.clone();
                         ent_edit.update(cx, |this, cx| {
-                            this.request_edit_user_turn(s, p, t, cx);
+                            this.request_edit_user_turn(s, e, t, im, cx);
                         });
                     },
                 ))
                 .child(icon_action_24(
                     format!("assistant-fork-btn-{turn_key}"),
-                    "从此节点派生新会话",
+                    "分支会话",
                     IconName::GitFork,
                     palette.text_secondary,
-                    is_live_turn,
+                    fork_disabled,
                     palette,
                     window,
                     cx,
                     move |_, cx| {
-                        if fork_eid.is_empty() {
-                            return;
-                        }
                         let s = sid_fork.clone();
                         let e = fork_eid.clone();
                         ent_fork.update(cx, |this, cx| {
@@ -2281,19 +2410,20 @@ impl MessageListView {
                 ))
                 .child(icon_action_24(
                     format!("assistant-retry-btn-{turn_key}"),
-                    "重新生成回复",
+                    "重新生成",
                     IconName::RotateCcw,
                     palette.text_secondary,
-                    is_live_turn,
+                    retry_disabled,
                     palette,
                     window,
                     cx,
                     move |_, cx| {
                         let s = sid_retry.clone();
-                        let p = parent_retry.clone();
+                        let e = eid_retry.clone();
                         let t = ut_retry.clone();
+                        let im = uimg_retry.clone();
                         ent_retry.update(cx, |this, cx| {
-                            this.retry_user_turn(s, p, t, cx);
+                            this.retry_user_turn(s, e, t, im, cx);
                         });
                     },
                 ));
@@ -2370,6 +2500,7 @@ impl MessageListView {
                     .on_click(move |_, _, cx| {
                         let k = k_th.clone();
                         ent_th.update(cx, |this, cx| {
+                            this.auto_follow_bottom = false;
                             if !this.expanded_thinking.remove(&k) {
                                 this.expanded_thinking.insert(k);
                             }
@@ -2542,6 +2673,8 @@ impl Render for MessageListView {
         let live_turn_idx = active_prepared_turn_index(turns, session.running);
         if self.auto_follow_bottom && (revision_changed || live_turn_idx.is_some()) {
             self.scroll_handle.scroll_to_bottom();
+        } else if !self.auto_follow_bottom {
+            self.scroll_handle.cancel_scroll_to_bottom();
         }
         let running_light_allowed = !reduce_motion
             && snap.channel_mode != cst_client::ChannelModeDto::WebActive
@@ -2606,22 +2739,11 @@ impl Render for MessageListView {
         }
 
         for (idx, prepared_turn) in turns.iter().enumerate().skip(window_start) {
-            let parent_entry_id = if idx > 0 {
-                turns[idx - 1]
-                    .turn
-                    .assistants
-                    .last()
-                    .and_then(|a| a.id.clone())
-                    .or_else(|| turns[idx - 1].turn.user.as_ref().and_then(|u| u.id.clone()))
-            } else {
-                None
-            };
             let is_live = live_turn_idx == Some(idx);
             list_col = list_col.child(self.render_turn_view(
                 &session,
                 idx,
                 prepared_turn,
-                parent_entry_id,
                 tool_results,
                 messages_generation,
                 is_live,
@@ -2871,6 +2993,7 @@ fn icon_action_24_element(
             .w(height::INLINE)
             .h(height::INLINE)
             .rounded(radius::CONTROL)
+            .opacity(0.35)
             .flex()
             .items_center()
             .justify_center()
@@ -2950,6 +3073,66 @@ fn to_tool_call_input(call: &ToolCallPart) -> ToolCallInput {
         arguments: call.arguments.as_object().cloned().unwrap_or_default(),
         execution: Some(ToolExecutionMeta::default()),
     }
+}
+
+fn resolve_session_active_provider(client: &ClientHandle, session_id: &str) -> String {
+    let draft_prov = client.with_workspace(|ws| {
+        ws.draft(&DraftKey::Session(session_id.to_owned()))
+            .and_then(|d| d.selected_provider.clone())
+    });
+    if let Some(p) = draft_prov.filter(|s| !s.is_empty()) {
+        return p;
+    }
+    let snap = client.snapshot();
+    if let Some(ref models) = snap.models {
+        if let Some(ref sel) = models.selected
+            && !sel.provider.is_empty()
+        {
+            return sel.provider.clone();
+        }
+        if let Some(ref def) = models.default_model
+            && !def.provider.is_empty()
+        {
+            return def.provider.clone();
+        }
+    }
+    "cstoa".to_owned()
+}
+
+async fn load_turn_images_into_pool(
+    client: &ClientHandle,
+    session_id: &str,
+    parts: &[ImageContentPart],
+) -> Vec<cst_client::SharedImageHandle> {
+    if parts.is_empty() {
+        return Vec::new();
+    }
+    let pool = client.with_workspace(|ws| ws.image_pool().clone());
+    let mut out = Vec::with_capacity(parts.len());
+    for part in parts {
+        let bytes_opt = if let Some(ref b64) = part.data_base64
+            && !b64.is_empty()
+        {
+            base64::engine::general_purpose::STANDARD
+                .decode(b64.trim())
+                .ok()
+        } else if let Some(ref aid) = part.attachment_id
+            && !aid.is_empty()
+        {
+            client
+                .get_session_attachment_bytes(session_id.to_owned(), aid.clone())
+                .await
+                .ok()
+        } else {
+            None
+        };
+        if let Some(bytes) = bytes_opt
+            && let Ok(handle) = pool.admit_image(bytes, None)
+        {
+            out.push(handle);
+        }
+    }
+    out
 }
 
 fn now_epoch_ms() -> u64 {

@@ -26,6 +26,7 @@ export type Model = { id: string; provider: string; name: string; reasoning: boo
 export type QueueItem = {
 	id: string;
 	text: string;
+	skill?: string;
 	status: "pending" | "delivering" | "delivered" | "failed" | "cancelled";
 	delivery: "direct" | "queue" | "steer";
 	images: { id: string; mimeType: string }[];

@@ -1,5 +1,5 @@
 import { Button, Popover } from "@heroui/react";
-import { Download, EllipsisVertical, HardDrive, ListTree, Share2, X } from "lucide-react";
+import { Download, EllipsisVertical, HardDrive, ListTree, Share2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams, useViewTransitionState } from "react-router";
 import { Composer, type ComposerConfig } from "../composer/composer";
@@ -16,7 +16,6 @@ import { ErrorNotice } from "../shell/error-notice";
 import { usePanelDismiss } from "../shell/panel-dismiss";
 import { sampleSessions } from "../shell/sample-sessions";
 import { branchSummaryChoice, type NavigateResult, summaryBody, summaryTagText } from "../tree/branch-summary";
-import { ForkPicker, forkTargets } from "../tree/fork-picker";
 
 const EMPTY_REQUESTS: PendingBitLocker[] = [];
 
@@ -60,7 +59,7 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 			/* 本地清理失败时保留备份，下一次同步重试。 */
 		}
 	}, [detail, example, outbox]);
-	const [forkOpen, setForkOpen] = useState(false);
+	const [forkBusy, setForkBusy] = useState(false);
 	const [messageMenuOpen, setMessageMenuOpen] = useState(false);
 	const messageMenuTrigger = useRef<HTMLButtonElement>(null);
 	usePanelDismiss(messageMenuOpen, () => setMessageMenuOpen(false), undefined, messageMenuTrigger);
@@ -87,15 +86,6 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 		const timer = window.setTimeout(() => setLinearEntering(false), Number.isFinite(duration) ? duration : 150);
 		return () => window.clearTimeout(timer);
 	}, [entranceId]);
-	const [forkSource, setForkSource] = useState("");
-	// 派生跳转带入的来源提示：换路由即读取，读后立刻清掉历史状态避免刷新后复现
-	useEffect(() => {
-		const state = location.state as { forkSource?: string } | null;
-		if (state?.forkSource) {
-			setForkSource(state.forkSource);
-			window.history.replaceState({}, "");
-		}
-	}, [location.state]);
 	const title = useSessionTitle(sessionId, example?.title ?? "会话", !example);
 	const [summarizing, setSummarizing] = useState(false);
 	const [summaryNote, setSummaryNote] = useState("");
@@ -152,7 +142,6 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 		if (!sessionId) throw new Error("会话尚未就绪");
 		const { messageId, ...payload } = config;
 		outbox.enqueue({ ...payload, id: messageId, sessionId, text });
-		setForkSource("");
 	}
 	async function stop() {
 		if (!sessionId) return;
@@ -164,6 +153,32 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 		if (name === "compact")
 			await apiJson(sessionPath(sessionId, "/compact"), { method: "POST", body: { instructions: text } });
 		await refresh();
+	}
+	async function forkDirectly(explicitEntryId?: string) {
+		if (!sessionId || forkBusy) return;
+		if (detail?.running || streaming) {
+			setSummaryNote("请等待当前回复完成后再分支新会话。");
+			return;
+		}
+		const targetEntryId =
+			explicitEntryId ?? [...entries].reverse().find((entry) => entry.id && entry.message.role !== "user")?.id;
+		if (!targetEntryId) {
+			setSummaryNote("当前会话尚无可用于分支的已完成回复。");
+			return;
+		}
+		setForkBusy(true);
+		setSummaryNote("");
+		try {
+			const created = await apiJson<{ id: string }>(sessionPath(sessionId, "/fork"), {
+				method: "POST",
+				body: { entryId: targetEntryId },
+			});
+			navigate(`/s/${created.id}`);
+		} catch (cause) {
+			setSummaryNote(cause instanceof Error ? cause.message : "分支会话失败，请重试");
+		} finally {
+			setForkBusy(false);
+		}
 	}
 	return (
 		<main className="chat-main">
@@ -214,14 +229,6 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 			{error && detail && presentError(error).kind !== "connection" && (
 				<ErrorNotice message={error} onRetry={() => void refresh()} />
 			)}
-			{forkSource && (
-				<output className="fork-source-banner">
-					<span>{`派生自：${forkSource}`}</span>
-					<Button variant="ghost" isIconOnly aria-label="关闭提示" onPress={() => setForkSource("")}>
-						<X size={14} />
-					</Button>
-				</output>
-			)}
 			<div className="chat-message-surface">
 				{detail ? (
 					<div
@@ -243,7 +250,7 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 							summarizing={summarizing}
 							refresh={refresh}
 							onCancelSummary={cancelSummary}
-							onFork={example ? () => undefined : () => setForkOpen(true)}
+							onFork={example ? () => undefined : (entryId) => void forkDirectly(entryId)}
 						/>
 					</div>
 				) : (
@@ -281,17 +288,9 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 					onSend={example ? undefined : send}
 					onStop={example ? undefined : stop}
 					onCommand={example ? undefined : command}
-					onFork={example ? undefined : () => setForkOpen(true)}
+					onFork={example ? undefined : () => void forkDirectly()}
 				/>
 			</div>
-			{forkOpen && (
-				<ForkPicker
-					sessionId={sessionId ?? ""}
-					targets={forkTargets(detail?.entries ?? [])}
-					running={!!detail?.running || !!streaming}
-					onClose={() => setForkOpen(false)}
-				/>
-			)}
 		</main>
 	);
 }

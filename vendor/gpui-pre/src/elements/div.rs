@@ -4455,11 +4455,19 @@ impl ScrollHandle {
         state.scroll_to_bottom = true;
     }
 
+    /// Cancels a pending `scroll_to_bottom` request before layout runs.
+    pub fn cancel_scroll_to_bottom(&self) {
+        let mut state = self.0.borrow_mut();
+        state.scroll_to_bottom = false;
+    }
+
     /// Set the offset explicitly. The offset is the distance from the top left of the
     /// parent container to the top left of the first child.
     /// As you scroll further down the offset becomes more negative.
     pub fn set_offset(&self, position: Point<Pixels>) {
-        let state = self.0.borrow();
+        let mut state = self.0.borrow_mut();
+        state.scroll_to_bottom = false;
+        state.active_item = None;
         *state.offset.borrow_mut() = position;
     }
 

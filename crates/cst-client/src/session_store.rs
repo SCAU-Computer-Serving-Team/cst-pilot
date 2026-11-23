@@ -621,8 +621,33 @@ fn apply_frame_to_snapshot(snap: &mut SessionViewSnapshot, frame: BufferedSessio
                         if msg.get("role").and_then(Value::as_str) != Some("system") {
                             let added_bytes = serde_json::to_vec(msg).map(|b| b.len()).unwrap_or(0);
                             let previous_bytes = upsert_message(&mut snap.messages, msg.clone());
-                            if !snap.entries.is_empty() {
-                                upsert_entry_message(&mut snap.entries, msg.clone());
+                            upsert_entry_message(&mut snap.entries, msg.clone());
+                            snap.estimated_bytes = snap
+                                .estimated_bytes
+                                .saturating_sub(previous_bytes)
+                                .saturating_add(added_bytes);
+                        }
+                    }
+                }
+                "entry_appended" => {
+                    if let Some(entry) = ev.get("entry") {
+                        if let Some(eid) = entry
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .filter(|s| !s.is_empty())
+                        {
+                            snap.leaf_id = Some(eid.to_owned());
+                        }
+                        if let Some(normalized) = normalize_appended_entry(entry) {
+                            let added_bytes = serde_json::to_vec(&normalized)
+                                .map(|b| b.len())
+                                .unwrap_or(0);
+                            let previous_bytes =
+                                upsert_persisted_entry(&mut snap.entries, normalized.clone());
+                            if let Some(msg) = normalized.get("message")
+                                && msg.get("role").and_then(Value::as_str) != Some("system")
+                            {
+                                let _ = upsert_message(&mut snap.messages, msg.clone());
                             }
                             snap.estimated_bytes = snap
                                 .estimated_bytes
@@ -706,6 +731,68 @@ fn upsert_message(messages: &mut Arc<Vec<Value>>, msg: Value) -> usize {
         return previous;
     }
     vec.push(msg);
+    0
+}
+
+fn normalize_appended_entry(entry: &Value) -> Option<Value> {
+    let obj = entry.as_object()?;
+    let id = obj
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())?;
+    let parent_id = obj.get("parentId").cloned().unwrap_or(Value::Null);
+    let entry_type = obj.get("type").and_then(Value::as_str).unwrap_or("message");
+    let msg = match entry_type {
+        "message" => {
+            let m = obj.get("message")?;
+            if m.get("role").and_then(Value::as_str) == Some("system") {
+                return None;
+            }
+            m.clone()
+        }
+        "compaction" => json!({
+            "role": "compactionSummary",
+            "summary": obj.get("summary").and_then(Value::as_str).unwrap_or(""),
+            "tokensBefore": obj.get("tokensBefore").and_then(Value::as_u64).unwrap_or(0),
+            "timestamp": obj.get("timestamp").cloned().unwrap_or(Value::Null),
+        }),
+        "branch_summary" => json!({
+            "role": "branchSummary",
+            "summary": obj.get("summary").and_then(Value::as_str).unwrap_or(""),
+            "fromId": obj.get("fromId").cloned().unwrap_or(Value::Null),
+            "timestamp": obj.get("timestamp").cloned().unwrap_or(Value::Null),
+        }),
+        _ => return None,
+    };
+    Some(json!({
+        "id": id,
+        "parentId": parent_id,
+        "message": msg,
+    }))
+}
+
+fn upsert_persisted_entry(entries: &mut Arc<Vec<Value>>, entry: Value) -> usize {
+    let vec = Arc::make_mut(entries);
+    let target_id = entry.get("id").and_then(Value::as_str);
+    let msg_key = entry.get("message").and_then(message_dedup_key);
+    if let Some(existing) = vec.iter_mut().find(|existing| {
+        let existing_id = existing.get("id").and_then(Value::as_str);
+        if target_id.is_some() && existing_id == target_id {
+            return true;
+        }
+        let is_synthetic =
+            existing_id.is_none_or(|id| id.starts_with("stream-") || id.starts_with("entry-"));
+        if is_synthetic && msg_key.is_some() {
+            let em = existing.get("message").unwrap_or(existing);
+            return message_dedup_key(em) == msg_key;
+        }
+        false
+    }) {
+        let previous = serde_json::to_vec(existing).map_or(0, |bytes| bytes.len());
+        *existing = entry;
+        return previous;
+    }
+    vec.push(entry);
     0
 }
 
@@ -876,5 +963,128 @@ mod tests {
             store.finish_loading_snapshot("s1", g2, json!({"id": "s1", "messages": []})),
             FinishLoadingOutcome::BufferOverflowNeedsReload
         ));
+    }
+
+    #[test]
+    fn turn_zero_entry_appended_and_message_end_populate_real_entry_ids_in_either_order() {
+        let user_msg = json!({
+            "role": "user",
+            "timestamp": 1000,
+            "clientMessageId": "cm-1",
+            "content": [{"type": "text", "text": "你好"}]
+        });
+        let asst_msg = json!({
+            "role": "assistant",
+            "timestamp": 1200,
+            "stopReason": "stop",
+            "content": [{"type": "text", "text": "你好，有什么可以帮你的？"}]
+        });
+        let user_entry = json!({
+            "id": "u-real-1",
+            "parentId": null,
+            "type": "message",
+            "message": user_msg
+        });
+        let asst_entry = json!({
+            "id": "a-real-1",
+            "parentId": "u-real-1",
+            "type": "message",
+            "message": asst_msg
+        });
+
+        // Order A: `message_end` arrives before `entry_appended` on a brand-new Turn 0 session (`entries: []`).
+        let mut store_a = SessionStore::default();
+        let g_a = store_a.begin_loading_if_absent("s0").unwrap();
+        assert!(matches!(
+            store_a.finish_loading_snapshot(
+                "s0",
+                g_a,
+                json!({"id": "s0", "eventCursor": "ep:1", "messages": [], "entries": []}),
+            ),
+            FinishLoadingOutcome::Installed(_)
+        ));
+        store_a.apply_session_event(
+            "s0",
+            Some(("ep".into(), 2)),
+            json!({"type": "message_end", "message": user_msg}),
+            128,
+        );
+        store_a.apply_session_event(
+            "s0",
+            Some(("ep".into(), 3)),
+            json!({"type": "message_end", "message": asst_msg}),
+            128,
+        );
+        let mid_a = store_a.export_ready_map()["s0"].clone();
+        assert_eq!(mid_a.entries.len(), 2);
+        assert!(
+            mid_a.entries[0]["id"]
+                .as_str()
+                .unwrap()
+                .starts_with("stream-user-")
+        );
+
+        store_a.apply_session_event(
+            "s0",
+            Some(("ep".into(), 4)),
+            json!({"type": "entry_appended", "entry": user_entry}),
+            128,
+        );
+        store_a.apply_session_event(
+            "s0",
+            Some(("ep".into(), 5)),
+            json!({"type": "entry_appended", "entry": asst_entry}),
+            128,
+        );
+        let final_a = store_a.export_ready_map()["s0"].clone();
+        assert_eq!(final_a.leaf_id.as_deref(), Some("a-real-1"));
+        assert_eq!(final_a.messages.len(), 2);
+        assert_eq!(final_a.entries.len(), 2);
+        assert_eq!(final_a.entries[0]["id"], "u-real-1");
+        assert_eq!(final_a.entries[1]["id"], "a-real-1");
+        assert_eq!(final_a.entries[1]["parentId"], "u-real-1");
+
+        // Order B: `entry_appended` arrives before `message_end` on a brand-new Turn 0 session (`entries: []`).
+        let mut store_b = SessionStore::default();
+        let g_b = store_b.begin_loading_if_absent("s0").unwrap();
+        assert!(matches!(
+            store_b.finish_loading_snapshot(
+                "s0",
+                g_b,
+                json!({"id": "s0", "eventCursor": "ep:1", "messages": [], "entries": []}),
+            ),
+            FinishLoadingOutcome::Installed(_)
+        ));
+        store_b.apply_session_event(
+            "s0",
+            Some(("ep".into(), 2)),
+            json!({"type": "entry_appended", "entry": user_entry}),
+            128,
+        );
+        store_b.apply_session_event(
+            "s0",
+            Some(("ep".into(), 3)),
+            json!({"type": "message_end", "message": user_msg}),
+            128,
+        );
+        store_b.apply_session_event(
+            "s0",
+            Some(("ep".into(), 4)),
+            json!({"type": "entry_appended", "entry": asst_entry}),
+            128,
+        );
+        store_b.apply_session_event(
+            "s0",
+            Some(("ep".into(), 5)),
+            json!({"type": "message_end", "message": asst_msg}),
+            128,
+        );
+        let final_b = store_b.export_ready_map()["s0"].clone();
+        assert_eq!(final_b.leaf_id.as_deref(), Some("a-real-1"));
+        assert_eq!(final_b.messages.len(), 2);
+        assert_eq!(final_b.entries.len(), 2);
+        assert_eq!(final_b.entries[0]["id"], "u-real-1");
+        assert_eq!(final_b.entries[1]["id"], "a-real-1");
+        assert_eq!(final_b.entries[1]["parentId"], "u-real-1");
     }
 }

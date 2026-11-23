@@ -4169,9 +4169,9 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     "alert-dialog":         ["modal"],
     "context-menu":         ["popover", "hover"],
     "menu-item":            ["hover"],
-    "composer":             ["focus", "flip", "popover", "pageSlide"],
-    "user-message":         ["hover", "modal"],
-    "message-actions":      ["runningLight", "iconSwap", "streamAppend", "hover"],
+    "composer":             ["focus", "flip", "popover", "pageSlide", "tooltipGroup"],
+    "user-message":         ["hover", "modal", "tooltipGroup"],
+    "message-actions":      ["runningLight", "iconSwap", "streamAppend", "hover", "tooltipGroup"],
     "compaction-summary":   ["collapse", "chevron", "iconSwap", "runningLight"],
     "session-row":          ["hover"],
     "info-row":             [],
@@ -4283,11 +4283,12 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     ],
     "composer": [
       ["外观与圆角", "工作区实底 $bg-workspace、清晰边框 $border-strong、圆角 8px、内边距 12px"],
+      ["排队栏 (rnehA)", "右侧三个 24px 无框图标钮（立即发送 / 编辑 / 删除）；arrow-up 采用 18px 视觉补偿对齐 14px pencil 与 trash-2"],
       ["聚焦与动效", "输入聚焦切换 $border-focus 与柔和阴影；增删附件胶囊 250ms 补位，右下双级选择器 300ms 伸缩"]
     ],
     "user-message": [
       ["气泡样式", "内边距上下 12px / 左右 16px，圆角 8px，右对齐排版"],
-      ["底部操作栏", "气泡下方紧跟复制、修改、重试三个 24px 图标钮；草稿非空时点击修改先弹保护确认"]
+      ["底部操作栏", "气泡下方紧跟复制、修改、重新生成三个 24px 图标钮；草稿非空时点击修改先弹保护确认"]
     ],
     "message-actions": [
       ["操作栏排布", "24px 图标钮水平排列（间距 4px），悬停铺浅灰底 $bg-hover"],
@@ -4736,6 +4737,62 @@ function toggleCollapse(boxEl, open) {
     boxEl.style.height = "0px";
     boxEl.style.opacity = "0";
   }
+}
+
+function bindStoryTooltips(rootEl) {
+  if (!rootEl) return { refresh() {}, closeAll() {} };
+  let openDelayTimer = null;
+  let coolTimer = null;
+  let groupWarm = false;
+  const getBubbles = () => [...rootEl.querySelectorAll(".sb-tip-bubble")];
+  const closeAll = (instant = true) => {
+    clearTimeout(openDelayTimer);
+    getBubbles().forEach(b => {
+      if (instant) b.dataset.instant = "true";
+      b.dataset.open = "false";
+    });
+  };
+  function attach(scopeEl) {
+    scopeEl.querySelectorAll(".sb-tip-wrap").forEach(wrap => {
+      if (wrap.dataset.tipBound === "true") return;
+      wrap.dataset.tipBound = "true";
+      const btn = wrap.querySelector("button");
+      const bubble = wrap.querySelector(".sb-tip-bubble");
+      if (!btn || !bubble) return;
+      btn.addEventListener("mouseenter", () => {
+        clearTimeout(coolTimer);
+        clearTimeout(openDelayTimer);
+        getBubbles().forEach(b => {
+          if (b !== bubble) {
+            b.dataset.instant = "true";
+            b.dataset.open = "false";
+          }
+        });
+        if (groupWarm || AppState.reducedMotion) {
+          bubble.dataset.instant = "true";
+          bubble.dataset.open = "true";
+        } else {
+          bubble.dataset.instant = "false";
+          openDelayTimer = setTimeout(() => {
+            groupWarm = true;
+            bubble.dataset.instant = "false";
+            bubble.dataset.open = "true";
+          }, ms(400) || 400);
+        }
+      });
+      const hide = () => {
+        clearTimeout(openDelayTimer);
+        bubble.dataset.instant = groupWarm ? "true" : "false";
+        bubble.dataset.open = "false";
+        coolTimer = setTimeout(() => { groupWarm = false; }, 300);
+      };
+      btn.addEventListener("mouseleave", hide);
+      btn.addEventListener("click", hide);
+    });
+  }
+  attach(rootEl);
+  AppState.cleanups.push(() => { clearTimeout(openDelayTimer); clearTimeout(coolTimer); closeAll(); });
+  return { refresh: () => attach(rootEl), closeAll };
 }
 
 /* ============================================================================
@@ -5921,13 +5978,13 @@ const STORIES = [
 
             <!-- QG05v 输入框操作栏 · 28px -->
             <div style="height:28px;display:flex;align-items:center;justify-content:space-between;position:relative;">
-              <button type="button" class="btn-icon sm-28" id="cmp-attach-btn" title="添加附件">${icon("plus", 16)}</button>
+              <span class="sb-tip-wrap"><button type="button" class="btn-icon sm-28" id="cmp-attach-btn" aria-label="添加图片附件">${icon("plus", 16)}</button><span class="sb-tip-bubble" data-open="false" data-instant="false">添加图片附件</span></span>
 
               <!-- Cl0vI 右侧控件组 · gap 8px -->
               <div style="display:flex;align-items:center;gap:8px;position:relative;">
                 <!-- V3qVq 上下文与模型组 · gap 4px -->
                 <div style="display:flex;align-items:center;gap:4px;">
-                  <button type="button" class="btn-icon sm-28" id="cmp-quota-btn" title="上下文容量与剩余额度">${ringSvg}</button>
+                  <span class="sb-tip-wrap"><button type="button" class="btn-icon sm-28" id="cmp-quota-btn" aria-label="上下文容量与剩余额度">${ringSvg}</button><span class="sb-tip-bubble" data-open="false" data-instant="false">上下文容量与剩余额度</span></span>
                   <button type="button" class="btn-ghost" id="cmp-model-btn" style="height:28px;padding:0 6px;gap:4px;">
                     <span id="cmp-m-txt" style="font-size:12px;color:var(--text-primary);">deepseek-flash</span>
                     <span id="cmp-t-txt" style="font-size:12px;color:var(--text-secondary);">High</span>
@@ -5935,7 +5992,7 @@ const STORIES = [
                   </button>
                 </div>
                 <!-- b0mRIk 发送按钮 · 28×28 $accent-solid -->
-                <button type="button" class="tier-1-btn-primary" id="cmp-send-btn" style="width:28px;height:28px;padding:0;" aria-label="发送">${icon("arrow-up", 14)}</button>
+                <span class="sb-tip-wrap"><button type="button" class="tier-1-btn-primary" id="cmp-send-btn" style="width:28px;height:28px;padding:0;" aria-label="发送消息">${icon("arrow-up", 14)}</button><span class="sb-tip-bubble" data-open="false" data-instant="false">发送消息</span></span>
 
                 <!-- d8zzg 模型与思考强度双级面板 -->
                 <div class="tier-2-glass pop-surface" id="cmp-picker-pop" data-dir="up" data-open="false" style="position:absolute;right:36px;bottom:36px;width:216px;overflow:hidden;z-index:35;">
@@ -5982,11 +6039,12 @@ const STORIES = [
       const pickerPages = stageEl.querySelector("#cmp-picker-pages");
       const modelBtn = stageEl.querySelector("#cmp-model-btn");
       const modelChev = stageEl.querySelector("#cmp-model-chev");
+      const tips = bindStoryTooltips(stageEl);
 
       function renderInner() {
         queueSlot.style.display = queue.length ? "block" : "none";
         queueSlot.innerHTML = queue.length ? `
-          <div style="border-bottom:1px solid var(--border-subtle);padding-bottom:4px;">
+          <div data-pen-id="rnehA" style="border-bottom:1px solid var(--border-subtle);padding-bottom:4px;">
             <div style="height:24px;display:flex;align-items:center;font-size:12px;font-weight:500;color:var(--text-secondary);">排队 · ${queue.length}</div>
             ${queue.map(q => `
               <div data-flip-id="q:${q.id}" style="height:30px;display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid var(--border-subtle);">
@@ -5995,8 +6053,9 @@ const STORIES = [
                   <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(q.text)}</span>
                 </span>
                 <span style="display:inline-flex;align-items:center;gap:4px;flex-shrink:0;">
-                  <button type="button" class="tier-1-btn-outline" data-steer-q="${q.id}" style="height:22px;padding:0 6px;font-size:11px;">↑ 立即</button>
-                  <button type="button" class="btn-icon xs-24" data-rm-q="${q.id}" aria-label="删除">${icon("trash-2", 13)}</button>
+                  <span class="sb-tip-wrap"><button type="button" class="btn-icon xs-24" data-steer-q="${q.id}" aria-label="立即发送">${icon("arrow-up", 18)}</button><span class="sb-tip-bubble" data-open="false" data-instant="false">立即发送</span></span>
+                  <span class="sb-tip-wrap"><button type="button" class="btn-icon xs-24" data-edit-q="${q.id}" aria-label="编辑">${icon("pencil", 14)}</button><span class="sb-tip-bubble" data-open="false" data-instant="false">编辑</span></span>
+                  <span class="sb-tip-wrap"><button type="button" class="btn-icon xs-24" data-rm-q="${q.id}" aria-label="删除">${icon("trash-2", 14)}</button><span class="sb-tip-bubble" data-open="false" data-instant="false">删除</span></span>
                 </span>
               </div>
             `).join("")}
@@ -6023,9 +6082,60 @@ const STORIES = [
           </span>
         `).join("");
 
-        queueSlot.querySelectorAll("[data-rm-q],[data-steer-q]").forEach(btn => {
+        queueSlot.querySelectorAll("[data-steer-q]").forEach(btn => {
           btn.addEventListener("click", () => {
-            const id = btn.dataset.rmQ || btn.dataset.steerQ;
+            const id = btn.dataset.steerQ;
+            const row = btn.closest("[data-flip-id]");
+            runFlipTransition(box, {
+              exitingEl: row,
+              rowId: "composer-row",
+              mutate: () => { queue = queue.filter(x => x.id !== id); renderInner(); }
+            });
+            showToast({ text: "已转为立即发送" });
+          });
+        });
+
+        queueSlot.querySelectorAll("[data-edit-q]").forEach(btn => {
+          btn.addEventListener("click", () => {
+            const id = btn.dataset.editQ;
+            const target = queue.find(x => x.id === id);
+            if (!target) return;
+            const applyBackfill = () => {
+              const row = btn.closest("[data-flip-id]");
+              runFlipTransition(box, {
+                exitingEl: row,
+                rowId: "composer-row",
+                mutate: () => {
+                  queue = queue.filter(x => x.id !== id);
+                  chips = [];
+                  thumbs = [];
+                  inputEl.value = target.text;
+                  renderInner();
+                }
+              });
+              inputEl.focus();
+              showToast({ text: "已移出队列并回填至输入框" });
+            };
+            if (inputEl.value.trim() || chips.length || thumbs.length) {
+              openAlertDialog({
+                title: "覆盖当前输入框草稿？",
+                desc: "回填待编辑消息将替换输入框内尚未发送的内容。",
+                confirmText: "覆盖草稿",
+                cancelText: "保留原草稿",
+                danger: false,
+                defaultSafeFocus: true,
+                triggerEl: btn,
+                onConfirm: applyBackfill
+              });
+            } else {
+              applyBackfill();
+            }
+          });
+        });
+
+        queueSlot.querySelectorAll("[data-rm-q]").forEach(btn => {
+          btn.addEventListener("click", () => {
+            const id = btn.dataset.rmQ;
             const row = btn.closest("[data-flip-id]");
             runFlipTransition(box, {
               exitingEl: row,
@@ -6034,6 +6144,7 @@ const STORIES = [
             });
           });
         });
+        tips.refresh();
 
         thumbSlot.querySelectorAll("[data-rm-th]").forEach(btn => {
           btn.addEventListener("click", (e) => {
@@ -7390,6 +7501,7 @@ const STORIES = [
       stageEl.classList.add("stretch");
       stageEl.innerHTML = `<div id="um-wrap" style="width:100%;max-width:816px;margin:0 auto;"></div>`;
       const wrap = stageEl.querySelector("#um-wrap");
+      const tips = bindStoryTooltips(wrap);
 
       function render() {
         wrap.innerHTML = `
@@ -7400,11 +7512,11 @@ const STORIES = [
                 C 盘红了只剩十几 G，帮我看看是什么占满了，能不能直接清？
               </div>
             </div>
-            <div style="height:24px;display:inline-flex;align-items:center;gap:4px;">
-              <button type="button" class="btn-icon xs-24" id="um-copy" title="复制消息">${icon("copy", 14)}</button>
-              <button type="button" class="btn-icon xs-24" id="um-edit" title="修改消息">${icon("pencil", 14)}</button>
-              <button type="button" class="btn-icon xs-24" id="um-retry" title="重试消息">${icon("rotate-ccw", 14)}</button>
-              ${disk507 ? `<button type="button" class="btn-icon xs-24" id="um-rm" style="color:var(--status-danger);" title="移除">${icon("trash-2", 14)}</button>` : ""}
+            <div data-pen-id="SHcR1" style="height:24px;display:inline-flex;align-items:center;gap:4px;">
+              <span class="sb-tip-wrap"><button type="button" class="btn-icon xs-24" id="um-copy" aria-label="复制消息">${icon("copy", 14)}</button><span class="sb-tip-bubble" data-open="false" data-instant="false">复制消息</span></span>
+              <span class="sb-tip-wrap"><button type="button" class="btn-icon xs-24" id="um-edit" aria-label="修改消息">${icon("pencil", 14)}</button><span class="sb-tip-bubble" data-open="false" data-instant="false">修改消息</span></span>
+              <span class="sb-tip-wrap"><button type="button" class="btn-icon xs-24" id="um-retry" aria-label="重新生成">${icon("rotate-ccw", 14)}</button><span class="sb-tip-bubble" data-open="false" data-instant="false">重新生成</span></span>
+              ${disk507 ? `<span class="sb-tip-wrap"><button type="button" class="btn-icon xs-24" id="um-rm" style="color:var(--status-danger);" aria-label="移除">${icon("trash-2", 14)}</button><span class="sb-tip-bubble" data-open="false" data-instant="false">移除</span></span>` : ""}
             </div>
           </div>
         `;
@@ -7417,7 +7529,7 @@ const STORIES = [
           if (hasDraft) {
             openAlertDialog({
               title: "覆盖当前输入框草稿？",
-              desc: "回填历史消息将替换输入框内尚未发送的内容。",
+              desc: "回填待编辑消息将替换输入框内尚未发送的内容。",
               confirmText: "覆盖草稿",
               cancelText: "保留原草稿",
               danger: false,
@@ -7429,8 +7541,9 @@ const STORIES = [
             showToast({ text: "已回填至输入框" });
           }
         });
-        wrap.querySelector("#um-retry").addEventListener("click", () => showToast({ text: "已重新发送" }));
+        wrap.querySelector("#um-retry").addEventListener("click", () => showToast({ text: "已回退本轮并重新生成" }));
         wrap.querySelector("#um-rm")?.addEventListener("click", () => showToast({ text: "已移除未受理气泡" }));
+        tips.refresh();
       }
       controlsEl.querySelector("#um-507-chk").addEventListener("click", (e) => { disk507 = !disk507; e.currentTarget.dataset.checked = String(disk507); render(); });
       controlsEl.querySelector("#um-draft-chk").addEventListener("click", (e) => { hasDraft = !hasDraft; e.currentTarget.dataset.checked = String(hasDraft); });
@@ -7457,7 +7570,7 @@ const STORIES = [
     en: "Message Action Bars",
     penIds: ["b0aK5", "VS7mw"],
     meta: [
-      ["b0aK5 (3 键)", "24px 高 · 修改 (pencil) / 分支 (git-fork) / 重试 (rotate-ccw)"],
+      ["b0aK5 (3 键)", "24px 高 · 修改消息 (pencil) / 分支会话 (git-fork) / 重新生成 (rotate-ccw)"],
       ["VS7mw (4 键)", "复制回答 (copy) + 嵌套引用 b0aK5"]
     ],
     mount(stageEl, controlsEl) {
@@ -7476,11 +7589,11 @@ const STORIES = [
           </button>
 
           <div id="ma-bar" data-pen-id="VS7mw" style="height:24px;display:inline-flex;align-items:center;gap:4px;transition:opacity 150ms ease-out;">
-            <button type="button" class="btn-icon xs-24" data-act="复制回答" title="复制回答">${icon("copy", 14)}</button>
+            <span class="sb-tip-wrap"><button type="button" class="btn-icon xs-24" data-act="复制回答" aria-label="复制回答">${icon("copy", 14)}</button><span class="sb-tip-bubble" data-open="false" data-instant="false">复制回答</span></span>
             <span data-pen-id="b0aK5" style="display:inline-flex;align-items:center;gap:4px;">
-              <button type="button" class="btn-icon xs-24" data-act="修改消息" title="修改消息">${icon("pencil", 14)}</button>
-              <button type="button" class="btn-icon xs-24" data-act="分支会话" title="分支会话">${icon("git-fork", 14)}</button>
-              <button type="button" class="btn-icon xs-24" data-act="重试消息" title="重试消息">${icon("rotate-ccw", 14)}</button>
+              <span class="sb-tip-wrap"><button type="button" class="btn-icon xs-24" data-act="修改消息" aria-label="修改消息">${icon("pencil", 14)}</button><span class="sb-tip-bubble" data-open="false" data-instant="false">修改消息</span></span>
+              <span class="sb-tip-wrap"><button type="button" class="btn-icon xs-24" data-act="分支会话" aria-label="分支会话">${icon("git-fork", 14)}</button><span class="sb-tip-bubble" data-open="false" data-instant="false">分支会话</span></span>
+              <span class="sb-tip-wrap"><button type="button" class="btn-icon xs-24" data-act="重新生成" aria-label="重新生成">${icon("rotate-ccw", 14)}</button><span class="sb-tip-bubble" data-open="false" data-instant="false">重新生成</span></span>
             </span>
           </div>
         </div>
@@ -7489,6 +7602,7 @@ const STORIES = [
       const sweepHost = stageEl.querySelector("#ma-sweep-host");
       const rl = createRunningLightController(sweepHost);
       const bar = stageEl.querySelector("#ma-bar");
+      bindStoryTooltips(bar);
 
       function syncState() {
         rl.update(running ? `工作中 ${sec} 秒` : `已工作 ${sec} 秒`, running);
@@ -7503,7 +7617,10 @@ const STORIES = [
 
       controlsEl.querySelector("#ma-run-btn").addEventListener("click", () => { running = !running; syncState(); });
       bar.querySelectorAll("[data-act]").forEach(b => {
-        b.addEventListener("click", () => showToast({ text: b.dataset.act }));
+        b.addEventListener("click", () => {
+          const act = b.dataset.act;
+          showToast({ text: act === "分支会话" ? "已从当前节点分支新会话" : act });
+        });
       });
       syncState();
     },

@@ -11,8 +11,8 @@ use gpui::{
 use gpui_kit::assets::IconName;
 use gpui_kit::base::motion::{Transition, TransitionState};
 use gpui_kit::component::input::{
-    Enter, IndentInline, InlineToken as UiInlineToken, InputContent, InputEvent, InputState,
-    MoveDown, MoveUp, OutdentInline, Textarea, TextareaState,
+    Enter, IndentInline, InlineToken as UiInlineToken, InputContent, InputEvent, MoveDown, MoveUp,
+    OutdentInline, Textarea, TextareaState,
 };
 use gpui_kit::component::{Icon, Sizable as _};
 use gpui_kit::{
@@ -36,13 +36,22 @@ use crate::workbench::model_picker::{
     render_model_picker_popover, resolve_scoped_models, thinking_level_label,
 };
 use crate::workbench::queue_bar::{
-    ParsedQueueSnapshot, QueueBarCallbacks, QueueMutation, render_queue_bar,
+    ParsedQueueSnapshot, QueueBarCallbacks, QueueMutation, VisibleQueueItem, render_queue_bar,
 };
 
 #[derive(Debug, Clone)]
 pub enum ComposerHostEvent {
-    SubmittedToSession { session_id: String },
-    MissingCredentials { provider: String },
+    SubmittedToSession {
+        session_id: String,
+    },
+    RequestEditQueueItem {
+        session_id: String,
+        item: VisibleQueueItem,
+        version: u64,
+    },
+    MissingCredentials {
+        provider: String,
+    },
     NavigateSlashRoute(SlashNavigationTarget),
     OpenAccountPage,
     OpenLightbox(LightboxImageTarget),
@@ -220,8 +229,6 @@ pub struct ComposerView {
     quota_loading: bool,
     queue_pending: Option<(String, ParsedQueueSnapshot)>,
     queue_receipt: Option<(String, ParsedQueueSnapshot)>,
-    editing_queue_item_id: Option<String>,
-    queue_edit_input: Option<Entity<InputState>>,
     model_btn_focus: FocusHandle,
     context_btn_focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
@@ -321,8 +328,6 @@ impl ComposerView {
             quota_loading: false,
             queue_pending: None,
             queue_receipt: None,
-            editing_queue_item_id: None,
-            queue_edit_input: None,
             model_btn_focus,
             context_btn_focus,
             _subscriptions: vec![sub, obs],
@@ -374,8 +379,6 @@ impl ComposerView {
         self.context_popover_open = false;
         self.context_prior_focus = None;
         self.had_active_ime_mark = false;
-        self.editing_queue_item_id = None;
-        self.queue_edit_input = None;
         let ph = Self::placeholder_for(&next_key);
         self.textarea.update(cx, |st, cx| {
             st.set_placeholder(ph, window, cx);
@@ -449,9 +452,13 @@ impl ComposerView {
         });
         self.last_synced_edit_rev = rev;
         let content = build_input_content_from_draft(&draft);
-        if self.textarea.read(cx).content() != content {
+        let had_ime_mark = self.is_ime_composing(window, cx);
+        if self.textarea.read(cx).content() != content || had_ime_mark {
             self.clear_completion();
+            self.had_active_ime_mark = false;
+            window.cancel_ime_composition();
             self.textarea.update(cx, |st, cx| {
+                EntityInputHandler::unmark_text(st, window, cx);
                 st.set_value(content, window, cx);
             });
         }
@@ -1047,6 +1054,17 @@ impl ComposerView {
         cx.notify();
     }
 
+    pub fn trigger_submit_from_button(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.is_ime_composing(window, cx) {
+            window.finish_ime_composition();
+            self.textarea.update(cx, |st, cx| {
+                EntityInputHandler::unmark_text(st, window, cx);
+            });
+            self.had_active_ime_mark = false;
+        }
+        self.trigger_submit(window, cx);
+    }
+
     pub fn trigger_submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.submitting.is_some()
             || self.model_change_pending
@@ -1186,10 +1204,56 @@ impl ComposerView {
             cx.notify();
             return;
         }
-        let edit_id = match &mutation {
-            QueueMutation::Edit(id, _) => Some(id.clone()),
-            _ => None,
-        };
+        self.queue_pending = Some((sid.clone(), mutation.project(queue)));
+        let client = self.client.clone();
+        cx.spawn_in(window, async move |weak, cx| {
+            let result = mutation.send(client, sid.clone(), version).await;
+            let _ = weak.update_in(cx, |this, _window, cx| {
+                this.queue_pending = None;
+                match result {
+                    Ok(response) => {
+                        if let Some(raw) = response.get("queue") {
+                            this.queue_receipt =
+                                Some((sid.clone(), ParsedQueueSnapshot::from_json(Some(raw))));
+                        }
+                    }
+                    Err(err) => cx.emit(ComposerHostEvent::ErrorMessage(err.to_string())),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Atomically deletes the queued item using optimistic-lock `version` and backfills its content
+    /// into the bottom main composer ONLY after `200 OK`.
+    pub(crate) fn execute_queue_item_backfill(
+        &mut self,
+        sid: String,
+        item: VisibleQueueItem,
+        version: u64,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.queue_pending.is_some() || self.draft_key != DraftKey::Session(sid.clone()) {
+            return;
+        }
+        let snap = self.client.snapshot();
+        let queue = self.queue_snapshot(
+            &sid,
+            snap.loaded_sessions
+                .get(&sid)
+                .and_then(|s| s.queue.as_ref()),
+        );
+        if queue.version != version {
+            cx.emit(ComposerHostEvent::ErrorMessage(
+                "排队消息状态已更新，请重新点击编辑。".into(),
+            ));
+            cx.notify();
+            return;
+        }
+        let mutation = QueueMutation::Delete(item.id.clone());
         self.queue_pending = Some((sid.clone(), mutation.project(queue)));
         let client = self.client.clone();
         cx.spawn_in(window, async move |weak, cx| {
@@ -1202,11 +1266,29 @@ impl ComposerView {
                             this.queue_receipt =
                                 Some((sid.clone(), ParsedQueueSnapshot::from_json(Some(raw))));
                         }
-                        if this.draft_key == DraftKey::Session(sid)
-                            && edit_id.is_some()
-                            && this.editing_queue_item_id == edit_id
-                        {
-                            this.close_queue_editor(window, cx);
+                        let key = DraftKey::Session(sid.clone());
+                        let tokens = item
+                            .skill
+                            .as_deref()
+                            .filter(|s| !s.is_empty())
+                            .map(|s| {
+                                let cmd = format!("/skill:{s}");
+                                vec![DraftToken::Command {
+                                    raw: cmd.clone(),
+                                    name: cmd,
+                                }]
+                            })
+                            .unwrap_or_default();
+                        this.client.with_workspace_mut(|ws| {
+                            let d = ws.draft_mut(key);
+                            d.cursor_char_offset = item.text.chars().count();
+                            d.text = item.text;
+                            d.tokens = tokens;
+                            d.images.clear();
+                        });
+                        if this.draft_key == DraftKey::Session(sid) {
+                            this.pull_from_workspace(window, cx);
+                            this.focus_handle(cx).focus(window, cx);
                         }
                     }
                     Err(err) => cx.emit(ComposerHostEvent::ErrorMessage(err.to_string())),
@@ -1215,20 +1297,6 @@ impl ComposerView {
             });
         })
         .detach();
-        cx.notify();
-    }
-
-    fn close_queue_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(input) = self.queue_edit_input.take()
-            && input
-                .read(cx)
-                .presentation()
-                .focus_handle()
-                .is_focused(window)
-        {
-            self.focus_handle(cx).focus(window, cx);
-        }
-        self.editing_queue_item_id = None;
         cx.notify();
     }
 
@@ -1613,13 +1681,9 @@ impl Render for ComposerView {
             let q3 = (entity.clone(), sid.clone());
             let q4 = (entity.clone(), sid.clone());
             let q_edit = (entity.clone(), sid.clone());
-            let q_save = (entity.clone(), sid.clone());
-            let q_cancel = entity.clone();
             render_queue_bar(
                 parsed_queue,
                 sid,
-                self.editing_queue_item_id.as_deref(),
-                self.queue_edit_input.as_ref(),
                 &palette,
                 window,
                 cx,
@@ -1668,49 +1732,20 @@ impl Render for ComposerView {
                             );
                         });
                     }),
-                    on_begin_edit: Rc::new(move |id, text, w, cx| {
+                    on_edit: Rc::new(move |item, version, _w, cx| {
+                        let sid_for_edit = q_edit.1.clone();
                         q_edit.0.update(cx, |this, cx| {
                             if this.queue_pending.is_some()
-                                || this.draft_key != DraftKey::Session(q_edit.1.clone())
+                                || this.draft_key != DraftKey::Session(sid_for_edit.clone())
                             {
                                 return;
                             }
-                            let input = cx.new(|cx| {
-                                let mut state = InputState::new(w, cx);
-                                state.set_value(text, w, cx);
-                                state.focus(w, cx);
-                                state
+                            cx.emit(ComposerHostEvent::RequestEditQueueItem {
+                                session_id: sid_for_edit,
+                                item,
+                                version,
                             });
-                            this.editing_queue_item_id = Some(id);
-                            this.queue_edit_input = Some(input);
-                            cx.notify();
                         });
-                    }),
-                    on_commit_edit: Rc::new(move |id, version, w, cx| {
-                        q_save.0.update(cx, |this, cx| {
-                            if this.editing_queue_item_id.as_deref() != Some(id.as_str()) {
-                                return;
-                            }
-                            let Some(input) = &this.queue_edit_input else {
-                                return;
-                            };
-                            let composing = input.update(cx, |st, cx| {
-                                EntityInputHandler::marked_text_range(st, w, cx).is_some()
-                            });
-                            if !composing {
-                                let text = input.read(cx).value().to_string();
-                                this.mutate_queue(
-                                    q_save.1.clone(),
-                                    version,
-                                    QueueMutation::Edit(id, text),
-                                    w,
-                                    cx,
-                                );
-                            }
-                        });
-                    }),
-                    on_cancel_edit: Rc::new(move |w, cx| {
-                        q_cancel.update(cx, |this, cx| this.close_queue_editor(w, cx));
                     }),
                 },
             )
@@ -2116,7 +2151,7 @@ impl Render for ComposerView {
                         .detach();
                     });
                 } else {
-                    ent_send.update(cx, |this, cx| this.trigger_submit(w, cx));
+                    ent_send.update(cx, |this, cx| this.trigger_submit_from_button(w, cx));
                 }
             })
             .child(motion::animated_icon_press(

@@ -1,5 +1,5 @@
 {
-  "version": "2.22",
+  "version": "2.25",
   "children": [
     {
       "type": "frame",
@@ -19186,49 +19186,14 @@
                               "alignItems": "center",
                               "children": [
                                 {
-                                  "type": "frame",
-                                  "id": "gOjfu",
-                                  "name": "插队按钮 · 立即",
-                                  "height": 28,
-                                  "fill": "#465A9F",
-                                  "cornerRadius": "$radius-control",
-                                  "gap": 4,
-                                  "padding": [
-                                    0,
-                                    8
-                                  ],
-                                  "justifyContent": "center",
-                                  "alignItems": "center",
-                                  "children": [
-                                    {
-                                      "type": "frame",
-                                      "id": "uwRcP",
-                                      "name": "图标位",
-                                      "children": [
-                                        {
-                                          "type": "icon",
-                                          "id": "qsP92",
-                                          "name": "插队图标",
-                                          "width": 14,
-                                          "height": 14,
-                                          "icon": "arrow-up",
-                                          "library": "lucide",
-                                          "fill": "#FFFFFF"
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "text",
-                                      "id": "t6iTu",
-                                      "name": "插队标签",
-                                      "fill": "#FFFFFF",
-                                      "content": "立即",
-                                      "lineHeight": 1.3333,
-                                      "fontFamily": "Source Han Sans CN",
-                                      "fontSize": 12,
-                                      "fontWeight": "normal"
-                                    }
-                                  ]
+                                  "type": "icon",
+                                  "id": "suRFY",
+                                  "name": "立即发送",
+                                  "width": 16,
+                                  "height": 16,
+                                  "icon": "arrow-up",
+                                  "library": "lucide",
+                                  "fill": "#646464"
                                 },
                                 {
                                   "type": "icon",
@@ -19545,49 +19510,14 @@
                               "alignItems": "center",
                               "children": [
                                 {
-                                  "type": "frame",
-                                  "id": "O9Cqz",
-                                  "name": "插队按钮 · 立即",
-                                  "height": 28,
-                                  "fill": "#7785DE",
-                                  "cornerRadius": "$radius-control",
-                                  "gap": 4,
-                                  "padding": [
-                                    0,
-                                    8
-                                  ],
-                                  "justifyContent": "center",
-                                  "alignItems": "center",
-                                  "children": [
-                                    {
-                                      "type": "frame",
-                                      "id": "o1omJM",
-                                      "name": "图标位",
-                                      "children": [
-                                        {
-                                          "type": "icon",
-                                          "id": "qhg86",
-                                          "name": "插队图标",
-                                          "width": 14,
-                                          "height": 14,
-                                          "icon": "arrow-up",
-                                          "library": "lucide",
-                                          "fill": "#001F42"
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "text",
-                                      "id": "QnTm1",
-                                      "name": "插队标签",
-                                      "fill": "#001F42",
-                                      "content": "立即",
-                                      "lineHeight": 1.3333,
-                                      "fontFamily": "Source Han Sans CN",
-                                      "fontSize": 12,
-                                      "fontWeight": "normal"
-                                    }
-                                  ]
+                                  "type": "icon",
+                                  "id": "VzDDp",
+                                  "name": "立即发送",
+                                  "width": 16,
+                                  "height": 16,
+                                  "icon": "arrow-up",
+                                  "library": "lucide",
+                                  "fill": "#AAB3B7"
                                 },
                                 {
                                   "type": "icon",
@@ -19914,49 +19844,14 @@
                               "alignItems": "center",
                               "children": [
                                 {
-                                  "type": "frame",
-                                  "id": "IcWoT",
-                                  "name": "插队按钮 · 立即",
-                                  "height": 28,
-                                  "fill": "#465A9F",
-                                  "cornerRadius": "$radius-control",
-                                  "gap": 4,
-                                  "padding": [
-                                    0,
-                                    8
-                                  ],
-                                  "justifyContent": "center",
-                                  "alignItems": "center",
-                                  "children": [
-                                    {
-                                      "type": "frame",
-                                      "id": "kQFYa",
-                                      "name": "图标位",
-                                      "children": [
-                                        {
-                                          "type": "icon",
-                                          "id": "kCJCj",
-                                          "name": "插队图标",
-                                          "width": 14,
-                                          "height": 14,
-                                          "icon": "arrow-up",
-                                          "library": "lucide",
-                                          "fill": "#FFFFFF"
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "text",
-                                      "id": "hWJZg",
-                                      "name": "插队标签",
-                                      "fill": "#FFFFFF",
-                                      "content": "立即",
-                                      "lineHeight": 1.3333,
-                                      "fontFamily": "Source Han Sans CN",
-                                      "fontSize": 12,
-                                      "fontWeight": "normal"
-                                    }
-                                  ]
+                                  "type": "icon",
+                                  "id": "I3K8nI",
+                                  "name": "立即发送",
+                                  "width": 16,
+                                  "height": 16,
+                                  "icon": "arrow-up",
+                                  "library": "lucide",
+                                  "fill": "#646464"
                                 },
                                 {
                                   "type": "icon",
@@ -20049,49 +19944,14 @@
                               "alignItems": "center",
                               "children": [
                                 {
-                                  "type": "frame",
-                                  "id": "qW0yg",
-                                  "name": "插队按钮 · 立即",
-                                  "height": 28,
-                                  "fill": "#465A9F",
-                                  "cornerRadius": "$radius-control",
-                                  "gap": 4,
-                                  "padding": [
-                                    0,
-                                    8
-                                  ],
-                                  "justifyContent": "center",
-                                  "alignItems": "center",
-                                  "children": [
-                                    {
-                                      "type": "frame",
-                                      "id": "RngCQ",
-                                      "name": "图标位",
-                                      "children": [
-                                        {
-                                          "type": "icon",
-                                          "id": "fDE03",
-                                          "name": "插队图标",
-                                          "width": 14,
-                                          "height": 14,
-                                          "icon": "arrow-up",
-                                          "library": "lucide",
-                                          "fill": "#FFFFFF"
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "text",
-                                      "id": "ThSY1",
-                                      "name": "插队标签",
-                                      "fill": "#FFFFFF",
-                                      "content": "立即",
-                                      "lineHeight": 1.3333,
-                                      "fontFamily": "Source Han Sans CN",
-                                      "fontSize": 12,
-                                      "fontWeight": "normal"
-                                    }
-                                  ]
+                                  "type": "icon",
+                                  "id": "l9aUad",
+                                  "name": "立即发送",
+                                  "width": 16,
+                                  "height": 16,
+                                  "icon": "arrow-up",
+                                  "library": "lucide",
+                                  "fill": "#646464"
                                 },
                                 {
                                   "type": "icon",
@@ -20419,49 +20279,14 @@
                               "alignItems": "center",
                               "children": [
                                 {
-                                  "type": "frame",
-                                  "id": "wsuNM",
-                                  "name": "插队按钮 · 立即",
-                                  "height": 28,
-                                  "fill": "#7785DE",
-                                  "cornerRadius": "$radius-control",
-                                  "gap": 4,
-                                  "padding": [
-                                    0,
-                                    8
-                                  ],
-                                  "justifyContent": "center",
-                                  "alignItems": "center",
-                                  "children": [
-                                    {
-                                      "type": "frame",
-                                      "id": "pfzFa",
-                                      "name": "图标位",
-                                      "children": [
-                                        {
-                                          "type": "icon",
-                                          "id": "r6Vlz",
-                                          "name": "插队图标",
-                                          "width": 14,
-                                          "height": 14,
-                                          "icon": "arrow-up",
-                                          "library": "lucide",
-                                          "fill": "#001F42"
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "text",
-                                      "id": "O4OB6n",
-                                      "name": "插队标签",
-                                      "fill": "#001F42",
-                                      "content": "立即",
-                                      "lineHeight": 1.3333,
-                                      "fontFamily": "Source Han Sans CN",
-                                      "fontSize": 12,
-                                      "fontWeight": "normal"
-                                    }
-                                  ]
+                                  "type": "icon",
+                                  "id": "q0I0H",
+                                  "name": "立即发送",
+                                  "width": 16,
+                                  "height": 16,
+                                  "icon": "arrow-up",
+                                  "library": "lucide",
+                                  "fill": "#AAB3B7"
                                 },
                                 {
                                   "type": "icon",
@@ -20554,49 +20379,14 @@
                               "alignItems": "center",
                               "children": [
                                 {
-                                  "type": "frame",
-                                  "id": "DBzgp",
-                                  "name": "插队按钮 · 立即",
-                                  "height": 28,
-                                  "fill": "#7785DE",
-                                  "cornerRadius": "$radius-control",
-                                  "gap": 4,
-                                  "padding": [
-                                    0,
-                                    8
-                                  ],
-                                  "justifyContent": "center",
-                                  "alignItems": "center",
-                                  "children": [
-                                    {
-                                      "type": "frame",
-                                      "id": "eqceX",
-                                      "name": "图标位",
-                                      "children": [
-                                        {
-                                          "type": "icon",
-                                          "id": "fhN2S",
-                                          "name": "插队图标",
-                                          "width": 14,
-                                          "height": 14,
-                                          "icon": "arrow-up",
-                                          "library": "lucide",
-                                          "fill": "#001F42"
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "text",
-                                      "id": "RMNk7",
-                                      "name": "插队标签",
-                                      "fill": "#001F42",
-                                      "content": "立即",
-                                      "lineHeight": 1.3333,
-                                      "fontFamily": "Source Han Sans CN",
-                                      "fontSize": 12,
-                                      "fontWeight": "normal"
-                                    }
-                                  ]
+                                  "type": "icon",
+                                  "id": "HctSN",
+                                  "name": "立即发送",
+                                  "width": 16,
+                                  "height": 16,
+                                  "icon": "arrow-up",
+                                  "library": "lucide",
+                                  "fill": "#AAB3B7"
                                 },
                                 {
                                   "type": "icon",
@@ -21105,49 +20895,14 @@
                               "alignItems": "center",
                               "children": [
                                 {
-                                  "type": "frame",
-                                  "id": "LuNeh",
-                                  "name": "插队按钮 · 立即",
-                                  "height": 28,
-                                  "fill": "#465A9F",
-                                  "cornerRadius": "$radius-control",
-                                  "gap": 4,
-                                  "padding": [
-                                    0,
-                                    8
-                                  ],
-                                  "justifyContent": "center",
-                                  "alignItems": "center",
-                                  "children": [
-                                    {
-                                      "type": "frame",
-                                      "id": "admOa",
-                                      "name": "图标位",
-                                      "children": [
-                                        {
-                                          "type": "icon",
-                                          "id": "SA56f",
-                                          "name": "插队图标",
-                                          "width": 14,
-                                          "height": 14,
-                                          "icon": "arrow-up",
-                                          "library": "lucide",
-                                          "fill": "#FFFFFF"
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "text",
-                                      "id": "uf7wk",
-                                      "name": "插队标签",
-                                      "fill": "#FFFFFF",
-                                      "content": "立即",
-                                      "lineHeight": 1.3333,
-                                      "fontFamily": "Source Han Sans CN",
-                                      "fontSize": 12,
-                                      "fontWeight": "normal"
-                                    }
-                                  ]
+                                  "type": "icon",
+                                  "id": "Y2AbE",
+                                  "name": "立即发送",
+                                  "width": 16,
+                                  "height": 16,
+                                  "icon": "arrow-up",
+                                  "library": "lucide",
+                                  "fill": "#646464"
                                 },
                                 {
                                   "type": "icon",
@@ -21656,49 +21411,14 @@
                               "alignItems": "center",
                               "children": [
                                 {
-                                  "type": "frame",
-                                  "id": "tAMeK",
-                                  "name": "插队按钮 · 立即",
-                                  "height": 28,
-                                  "fill": "#7785DE",
-                                  "cornerRadius": "$radius-control",
-                                  "gap": 4,
-                                  "padding": [
-                                    0,
-                                    8
-                                  ],
-                                  "justifyContent": "center",
-                                  "alignItems": "center",
-                                  "children": [
-                                    {
-                                      "type": "frame",
-                                      "id": "W9RGB",
-                                      "name": "图标位",
-                                      "children": [
-                                        {
-                                          "type": "icon",
-                                          "id": "urIkN",
-                                          "name": "插队图标",
-                                          "width": 14,
-                                          "height": 14,
-                                          "icon": "arrow-up",
-                                          "library": "lucide",
-                                          "fill": "#001F42"
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "text",
-                                      "id": "rVWhk",
-                                      "name": "插队标签",
-                                      "fill": "#001F42",
-                                      "content": "立即",
-                                      "lineHeight": 1.3333,
-                                      "fontFamily": "Source Han Sans CN",
-                                      "fontSize": 12,
-                                      "fontWeight": "normal"
-                                    }
-                                  ]
+                                  "type": "icon",
+                                  "id": "Syr8M",
+                                  "name": "立即发送",
+                                  "width": 16,
+                                  "height": 16,
+                                  "icon": "arrow-up",
+                                  "library": "lucide",
+                                  "fill": "#AAB3B7"
                                 },
                                 {
                                   "type": "icon",
@@ -22207,49 +21927,14 @@
                               "alignItems": "center",
                               "children": [
                                 {
-                                  "type": "frame",
-                                  "id": "J7yoBK",
-                                  "name": "插队按钮 · 立即",
-                                  "height": 28,
-                                  "fill": "#465A9F",
-                                  "cornerRadius": "$radius-control",
-                                  "gap": 4,
-                                  "padding": [
-                                    0,
-                                    8
-                                  ],
-                                  "justifyContent": "center",
-                                  "alignItems": "center",
-                                  "children": [
-                                    {
-                                      "type": "frame",
-                                      "id": "o59SVg",
-                                      "name": "图标位",
-                                      "children": [
-                                        {
-                                          "type": "icon",
-                                          "id": "w8bOsh",
-                                          "name": "插队图标",
-                                          "width": 14,
-                                          "height": 14,
-                                          "icon": "arrow-up",
-                                          "library": "lucide",
-                                          "fill": "#FFFFFF"
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "text",
-                                      "id": "hV1dz",
-                                      "name": "插队标签",
-                                      "fill": "#FFFFFF",
-                                      "content": "立即",
-                                      "lineHeight": 1.3333,
-                                      "fontFamily": "Source Han Sans CN",
-                                      "fontSize": 12,
-                                      "fontWeight": "normal"
-                                    }
-                                  ]
+                                  "type": "icon",
+                                  "id": "mmBOK",
+                                  "name": "立即发送",
+                                  "width": 16,
+                                  "height": 16,
+                                  "icon": "arrow-up",
+                                  "library": "lucide",
+                                  "fill": "#646464"
                                 },
                                 {
                                   "type": "icon",
@@ -22810,49 +22495,14 @@
                               "alignItems": "center",
                               "children": [
                                 {
-                                  "type": "frame",
-                                  "id": "C6F1a",
-                                  "name": "插队按钮 · 立即",
-                                  "height": 28,
-                                  "fill": "#7785DE",
-                                  "cornerRadius": "$radius-control",
-                                  "gap": 4,
-                                  "padding": [
-                                    0,
-                                    8
-                                  ],
-                                  "justifyContent": "center",
-                                  "alignItems": "center",
-                                  "children": [
-                                    {
-                                      "type": "frame",
-                                      "id": "PZfh8",
-                                      "name": "图标位",
-                                      "children": [
-                                        {
-                                          "type": "icon",
-                                          "id": "tgKE7",
-                                          "name": "插队图标",
-                                          "width": 14,
-                                          "height": 14,
-                                          "icon": "arrow-up",
-                                          "library": "lucide",
-                                          "fill": "#001F42"
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "text",
-                                      "id": "i2kwPQ",
-                                      "name": "插队标签",
-                                      "fill": "#001F42",
-                                      "content": "立即",
-                                      "lineHeight": 1.3333,
-                                      "fontFamily": "Source Han Sans CN",
-                                      "fontSize": 12,
-                                      "fontWeight": "normal"
-                                    }
-                                  ]
+                                  "type": "icon",
+                                  "id": "m8uLdl",
+                                  "name": "立即发送",
+                                  "width": 16,
+                                  "height": 16,
+                                  "icon": "arrow-up",
+                                  "library": "lucide",
+                                  "fill": "#AAB3B7"
                                 },
                                 {
                                   "type": "icon",

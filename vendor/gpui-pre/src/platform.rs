@@ -1402,6 +1402,8 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn gpu_specs(&self) -> Option<GpuSpecs>;
 
     fn update_ime_position(&self, _bounds: Bounds<Pixels>);
+    fn finish_ime_composition(&self) {}
+    fn cancel_ime_composition(&self) {}
 
     // Mobile platform methods.
 

@@ -999,3 +999,674 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
         );
     }
 }
+
+#[derive(Default)]
+struct ChatActionsMockState {
+    navigated_entries: Vec<Value>,
+    cleared_count: usize,
+    forked_entries: Vec<Value>,
+    deleted_queue_items: Vec<(String, Value)>,
+    sent_messages: Vec<(String, Value)>,
+}
+
+struct ChatActionsMockBackend {
+    rt: Option<tokio::runtime::Runtime>,
+    port: u16,
+    token: String,
+    state: Arc<Mutex<ChatActionsMockState>>,
+    stop: Arc<AtomicBool>,
+}
+
+impl ChatActionsMockBackend {
+    fn rt(&self) -> &tokio::runtime::Runtime {
+        self.rt.as_ref().unwrap()
+    }
+
+    fn start() -> Self {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let state = Arc::new(Mutex::new(ChatActionsMockState::default()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let token = "chat-actions-token".to_owned();
+
+        let state_srv = Arc::clone(&state);
+        let stop_srv = Arc::clone(&stop);
+        let port = rt.block_on(async move {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            tokio::spawn(async move {
+                while !stop_srv.load(Ordering::Relaxed) {
+                    let Ok((mut stream, _)) = listener.accept().await else {
+                        break;
+                    };
+                    let st = Arc::clone(&state_srv);
+                    let st_stop = Arc::clone(&stop_srv);
+                    tokio::spawn(async move {
+                        let Some((method_owned, path_owned, body_owned)) =
+                            read_full_http_request(&mut stream).await
+                        else {
+                            return;
+                        };
+                        let method = method_owned.as_str();
+                        let path = path_owned.as_str();
+                        let body_str = body_owned.as_str();
+
+                        if method == "GET"
+                            && (path.starts_with("/api/app/events")
+                                || path.starts_with("/api/events/stream"))
+                        {
+                            let hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n: connected\n\n";
+                            let _ = stream.write_all(hdr.as_bytes()).await;
+                            while !st_stop.load(Ordering::Relaxed) {
+                                tokio::time::sleep(Duration::from_millis(200)).await;
+                                if stream.write_all(b": ping\n\n").await.is_err() {
+                                    break;
+                                }
+                            }
+                            return;
+                        }
+
+                        let (status_line, resp_json) = {
+                            let mut guard = st.lock().unwrap();
+                            match (method, path) {
+                                ("GET", "/api/health") => (
+                                    "HTTP/1.1 200 OK",
+                                    json!({ "connected": true, "stopping": false, "version": "v0.1.0" }),
+                                ),
+                                ("GET", "/api/state") => {
+                                    let mut sessions = vec![json!({
+                                        "id": "sess-chat",
+                                        "title": "磁盘与分区排查",
+                                        "createdAt": "2026-11-23T08:00:00Z",
+                                        "updatedAt": "2026-11-23T08:05:00Z",
+                                        "running": false
+                                    })];
+                                    if !guard.forked_entries.is_empty() {
+                                        sessions.insert(
+                                            0,
+                                            json!({
+                                                "id": "sess-forked",
+                                                "title": "磁盘与分区排查 (分支)",
+                                                "createdAt": "2026-11-23T08:06:00Z",
+                                                "updatedAt": "2026-11-23T08:06:00Z",
+                                                "running": true
+                                            }),
+                                        );
+                                    }
+                                    (
+                                        "HTTP/1.1 200 OK",
+                                        json!({
+                                            "version": "v0.1.0",
+                                            "channelMode": "app_active",
+                                            "multiplexStream": true,
+                                            "sessions": sessions
+                                        }),
+                                    )
+                                }
+                                ("GET", "/api/sessions") => {
+                                    let mut sessions = vec![json!({
+                                        "id": "sess-chat",
+                                        "title": "磁盘与分区排查",
+                                        "createdAt": "2026-11-23T08:00:00Z",
+                                        "updatedAt": "2026-11-23T08:05:00Z",
+                                        "running": false
+                                    })];
+                                    if !guard.forked_entries.is_empty() {
+                                        sessions.insert(
+                                            0,
+                                            json!({
+                                                "id": "sess-forked",
+                                                "title": "磁盘与分区排查 (分支)",
+                                                "createdAt": "2026-11-23T08:06:00Z",
+                                                "updatedAt": "2026-11-23T08:06:00Z",
+                                                "running": true
+                                            }),
+                                        );
+                                    }
+                                    ("HTTP/1.1 200 OK", json!({ "sessions": sessions }))
+                                }
+                                ("GET", "/api/sessions/sess-chat") => (
+                                    "HTTP/1.1 200 OK",
+                                    json!({
+                                        "id": "sess-chat",
+                                        "running": false,
+                                        "leafId": "a-1",
+                                        "entries": [
+                                            {
+                                                "id": "u-0",
+                                                "parentId": null,
+                                                "message": { "role": "user", "timestamp": 1000, "content": "你好" }
+                                            },
+                                            {
+                                                "id": "a-0",
+                                                "parentId": "u-0",
+                                                "message": {
+                                                    "role": "assistant",
+                                                    "timestamp": 1200,
+                                                    "durationMs": 1200,
+                                                    "stopReason": "stop",
+                                                    "content": [
+                                                        { "type": "toolCall", "id": "tc-disk", "name": "disk", "arguments": { "scope": "space" } },
+                                                        { "type": "text", "text": "你好，刚才查过 C 盘空间充足。" }
+                                                    ]
+                                                }
+                                            },
+                                            {
+                                                "id": "r-0",
+                                                "parentId": "a-0",
+                                                "message": {
+                                                    "role": "toolResult",
+                                                    "toolCallId": "tc-disk",
+                                                    "toolName": "disk",
+                                                    "isError": false,
+                                                    "content": [{ "type": "text", "text": "{\"volumes\":[]}" }]
+                                                }
+                                            },
+                                            {
+                                                "id": "u-1",
+                                                "parentId": "a-0",
+                                                "message": { "role": "user", "timestamp": 2000, "content": "排查 D 盘" }
+                                            },
+                                            {
+                                                "id": "a-1",
+                                                "parentId": "u-1",
+                                                "message": {
+                                                    "role": "assistant",
+                                                    "timestamp": 2400,
+                                                    "durationMs": 800,
+                                                    "stopReason": "stop",
+                                                    "content": [{ "type": "text", "text": "D 盘未加密，剩余 512 GB。" }]
+                                                }
+                                            }
+                                        ],
+                                        "messages": []
+                                    }),
+                                ),
+                                ("GET", "/api/sessions/sess-chat/tree") => (
+                                    "HTTP/1.1 200 OK",
+                                    json!({
+                                        "leafId": "a-1",
+                                        "tree": [
+                                            {
+                                                "entry": { "id": "u-0", "parentId": null, "type": "message", "message": { "role": "user", "content": "你好" } },
+                                                "children": [
+                                                    {
+                                                        "entry": { "id": "a-0", "parentId": "u-0", "type": "message", "message": { "role": "assistant", "content": "你好" } },
+                                                        "children": [
+                                                            {
+                                                                "entry": { "id": "u-1", "parentId": "a-0", "type": "message", "message": { "role": "user", "content": "排查 D 盘" } },
+                                                                "children": [
+                                                                    {
+                                                                        "entry": { "id": "a-1", "parentId": "u-1", "type": "message", "message": { "role": "assistant", "content": "D 盘未加密" } },
+                                                                        "children": []
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }),
+                                ),
+                                ("POST", "/api/sessions/sess-chat/tree/navigate") => {
+                                    if let Ok(v) = serde_json::from_str::<Value>(body_str) {
+                                        guard.navigated_entries.push(v);
+                                    }
+                                    ("HTTP/1.1 200 OK", json!({ "cancelled": false }))
+                                }
+                                ("POST", "/api/sessions/sess-chat/clear") => {
+                                    guard.cleared_count += 1;
+                                    ("HTTP/1.1 200 OK", json!({ "ok": true }))
+                                }
+                                ("POST", "/api/sessions/sess-chat/fork") => {
+                                    if let Ok(v) = serde_json::from_str::<Value>(body_str) {
+                                        guard.forked_entries.push(v);
+                                    }
+                                    ("HTTP/1.1 200 OK", json!({ "id": "sess-forked" }))
+                                }
+                                ("GET", "/api/sessions/sess-forked") => {
+                                    let q_items = if guard.deleted_queue_items.is_empty() {
+                                        vec![json!({
+                                            "id": "q1",
+                                            "text": "然后是D盘",
+                                            "skill": "disk",
+                                            "status": "pending",
+                                            "delivery": "queue"
+                                        })]
+                                    } else {
+                                        Vec::new()
+                                    };
+                                    (
+                                        "HTTP/1.1 200 OK",
+                                        json!({
+                                            "id": "sess-forked",
+                                            "running": true,
+                                            "leafId": "a-0",
+                                            "queue": {
+                                                "version": if guard.deleted_queue_items.is_empty() { 3 } else { 4 },
+                                                "paused": false,
+                                                "items": q_items
+                                            },
+                                            "entries": [
+                                                {
+                                                    "id": "u-0",
+                                                    "parentId": null,
+                                                    "message": { "role": "user", "timestamp": 1000, "content": "你好" }
+                                                },
+                                                {
+                                                    "id": "a-0",
+                                                    "parentId": "u-0",
+                                                    "message": {
+                                                        "role": "assistant",
+                                                        "timestamp": 1200,
+                                                        "durationMs": 1200,
+                                                        "stopReason": "stop",
+                                                        "content": [{ "type": "text", "text": "你好，刚才查过 C 盘空间充足。" }]
+                                                    }
+                                                }
+                                            ],
+                                            "messages": []
+                                        }),
+                                    )
+                                }
+                                ("DELETE", "/api/sessions/sess-forked/queue/q1") => {
+                                    let parsed = serde_json::from_str::<Value>(body_str)
+                                        .unwrap_or_else(|_| json!({}));
+                                    guard.deleted_queue_items.push(("q1".to_owned(), parsed));
+                                    (
+                                        "HTTP/1.1 200 OK",
+                                        json!({
+                                            "queue": {
+                                                "version": 4,
+                                                "paused": false,
+                                                "items": []
+                                            }
+                                        }),
+                                    )
+                                }
+                                ("POST", p) if p.ends_with("/messages") => {
+                                    if let Ok(v) = serde_json::from_str::<Value>(body_str) {
+                                        guard.sent_messages.push((p.to_owned(), v));
+                                    }
+                                    (
+                                        "HTTP/1.1 202 Accepted",
+                                        json!({ "accepted": true }),
+                                    )
+                                }
+                                ("PUT", p) if p.starts_with("/api/events/stream/") => {
+                                    ("HTTP/1.1 200 OK", json!({ "ok": true }))
+                                }
+                                ("GET", p) if p.starts_with("/api/models") => (
+                                    "HTTP/1.1 200 OK",
+                                    json!({
+                                        "models": [{
+                                            "provider": "cstoa",
+                                            "id": "gpt-5.4",
+                                            "name": "GPT-5.4",
+                                            "reasoning": true,
+                                            "credentialReady": true,
+                                            "thinkingLevels": ["low", "medium", "high"],
+                                            "thinkingLevel": "medium"
+                                        }],
+                                        "catalog": [{
+                                            "provider": "cstoa",
+                                            "id": "gpt-5.4",
+                                            "name": "GPT-5.4",
+                                            "reasoning": true,
+                                            "credentialReady": true,
+                                            "thinkingLevels": ["low", "medium", "high"],
+                                            "thinkingLevel": "medium"
+                                        }],
+                                        "selected": {
+                                            "provider": "cstoa",
+                                            "id": "gpt-5.4",
+                                            "name": "GPT-5.4",
+                                            "reasoning": true,
+                                            "credentialReady": true,
+                                            "thinkingLevels": ["low", "medium", "high"],
+                                            "thinkingLevel": "medium"
+                                        },
+                                        "thinkingLevels": ["low", "medium", "high"],
+                                        "unavailableEnabled": []
+                                    }),
+                                ),
+                                ("GET", "/api/auth") => {
+                                    ("HTTP/1.1 200 OK", json!({ "providers": [] }))
+                                }
+                                ("GET", p) if p.starts_with("/api/account") => (
+                                    "HTTP/1.1 200 OK",
+                                    json!({ "providerId": "cstoa", "signedIn": true }),
+                                ),
+                                ("GET", "/api/app/settings") => (
+                                    "HTTP/1.1 200 OK",
+                                    json!({
+                                        "theme": "light",
+                                        "defaultView": "gui",
+                                        "sidebarCollapsed": false,
+                                        "windowMaximized": false
+                                    }),
+                                ),
+                                ("GET", "/api/ui-hints") => ("HTTP/1.1 200 OK", json!({})),
+                                ("GET", "/api/app/update/status") => (
+                                    "HTTP/1.1 200 OK",
+                                    json!({ "status": { "phase": "idle" } }),
+                                ),
+                                _ => ("HTTP/1.1 200 OK", json!({})),
+                            }
+                        };
+
+                        let body_bytes = serde_json::to_vec(&resp_json).unwrap();
+                        let header = format!(
+                            "{status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body_bytes.len()
+                        );
+                        let _ = stream.write_all(header.as_bytes()).await;
+                        let _ = stream.write_all(&body_bytes).await;
+                    });
+                }
+            });
+            port
+        });
+
+        Self {
+            rt: Some(rt),
+            port,
+            token,
+            state,
+            stop,
+        }
+    }
+}
+
+impl Drop for ChatActionsMockBackend {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(rt) = self.rt.take() {
+            rt.shutdown_background();
+        }
+    }
+}
+
+#[gpui_kit::test]
+async fn message_actions_direct_fork_queue_edit_backfill_scroll_anchor_and_ime_clear(
+    cx: &mut gpui_kit::TestAppContext,
+) {
+    cx.executor().allow_parking();
+    let fixture = KitTempFixture::create();
+    let backend = ChatActionsMockBackend::start();
+    let self_id = ProcessIdentity::current().unwrap();
+    let endpoint = VerifiedServerEndpoint {
+        kit_root: fixture.root.clone(),
+        pid: self_id.pid,
+        process_created: self_id.created,
+        port: backend.port,
+        version: "v0.1.0".into(),
+        http: AppHttpClient::new(backend.port, &backend.token).unwrap(),
+        spawned_by_client: false,
+    };
+    let handle = CstClient::from_verified_endpoint(backend.rt().handle(), endpoint, None).unwrap();
+    backend.rt().block_on(handle.refresh_globals()).unwrap();
+    backend.rt().block_on(handle.refresh_models(None)).unwrap();
+
+    let (win_handle, shell) = cx.update(|cx| {
+        gpui_kit::init(cx);
+        register_shell_keys(cx);
+        open_desktop_shell_window_with_handle(handle.clone(), None, cx).unwrap()
+    });
+
+    cx.wait_for(win_handle, Duration::from_secs(3), |window, _| {
+        window.try_find("sidebar-session-row-sess-chat").is_some()
+    })
+    .await;
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("sidebar-session-row-sess-chat", cx);
+    })
+    .unwrap();
+
+    cx.wait_for(win_handle, Duration::from_secs(3), |window, _| {
+        window.try_find("assistant-actions-u-0").is_some()
+            && window.try_find("assistant-actions-u-1").is_some()
+    })
+    .await;
+
+    // 1. Expanding a collapsible process header must disable `auto_follow_bottom` so the row stays stationary.
+    cx.update_window(win_handle, |_, window, cx| {
+        let ml = shell.read(cx).workbench().read(cx).message_list().clone();
+        assert!(ml.read(cx).is_auto_following());
+        window.click("process-hdr-u-0:process-start", cx);
+        assert!(
+            !ml.read(cx).is_auto_following(),
+            "manual expand/collapse must stop auto-follow so the header row stays stationary"
+        );
+    })
+    .unwrap();
+
+    // 2. Put an unsent draft in `session_composer`; verify `重新生成` (`assistant-retry-btn-u-1`)
+    // navigates to `a-0` and resubmits `"排查 D 盘"` directly WITHOUT wiping the unsent draft!
+    cx.update_window(win_handle, |_, window, cx| {
+        let sess_comp = shell
+            .read(cx)
+            .workbench()
+            .read(cx)
+            .session_composer()
+            .clone();
+        let textarea = sess_comp.read(cx).textarea_state().clone();
+        textarea.update(cx, |st, cx| {
+            st.focus(window, cx);
+            st.set_value("保留中的草稿", window, cx);
+        });
+        window.render_frame(cx);
+        window.click("assistant-retry-btn-u-1", cx);
+    })
+    .unwrap();
+
+    let st_retry = Arc::clone(&backend.state);
+    let shell_retry = shell.clone();
+    cx.wait_for(win_handle, Duration::from_secs(3), move |_, cx| {
+        let g = st_retry.lock().unwrap();
+        let settled = shell_retry
+            .read(cx)
+            .workbench()
+            .read(cx)
+            .message_list()
+            .read(cx)
+            .is_auto_following();
+        g.navigated_entries.len() == 1 && g.sent_messages.len() == 1 && settled
+    })
+    .await;
+    {
+        let g = backend.state.lock().unwrap();
+        assert_eq!(g.navigated_entries[0]["entryId"], "u-1");
+        assert_eq!(g.sent_messages[0].0, "/api/sessions/sess-chat/messages");
+        assert_eq!(g.sent_messages[0].1["text"], "排查 D 盘");
+    }
+    cx.update(|cx| {
+        let val = shell
+            .read(cx)
+            .workbench()
+            .read(cx)
+            .session_composer()
+            .read(cx)
+            .textarea_state()
+            .read(cx)
+            .value()
+            .to_string();
+        assert_eq!(
+            val, "保留中的草稿",
+            "regenerating a history turn must preserve unsent composer draft"
+        );
+    });
+
+    // 3. Edit Turn 0 (`user-edit-btn-u-0` / `assistant-edit-btn-u-0`): non-empty draft opens `overwrite-draft-confirm-card`;
+    // keeping preserves draft, confirming navigates to `u-0` (rewinding leaf to root) and backfills `"你好"`.
+    cx.update_window(win_handle, |_, window, cx| {
+        let ml = shell.read(cx).workbench().read(cx).message_list().clone();
+        ml.update(cx, |m, cx| m.scroll_to_top(cx));
+        window.render_frame(cx);
+        window.click("user-edit-btn-u-0", cx);
+    })
+    .unwrap();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("overwrite-draft-confirm-card").visible());
+        window.click("overwrite-draft-keep-btn", cx);
+        assert!(window.try_find("overwrite-draft-confirm-card").is_none());
+    })
+    .unwrap();
+    assert_eq!(backend.state.lock().unwrap().navigated_entries.len(), 1);
+
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("assistant-edit-btn-u-0", cx);
+    })
+    .unwrap();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("overwrite-draft-confirm-card").visible());
+        window.click("overwrite-draft-confirm-btn", cx);
+    })
+    .unwrap();
+
+    let st_clear = Arc::clone(&backend.state);
+    let shell_clear = shell.clone();
+    cx.wait_for(win_handle, Duration::from_secs(3), move |_, cx| {
+        let rewound = st_clear.lock().unwrap().navigated_entries.len() == 2;
+        let val = shell_clear
+            .read(cx)
+            .workbench()
+            .read(cx)
+            .session_composer()
+            .read(cx)
+            .textarea_state()
+            .read(cx)
+            .value()
+            .to_string();
+        rewound && val == "你好"
+    })
+    .await;
+    assert_eq!(
+        backend.state.lock().unwrap().navigated_entries[1]["entryId"],
+        "u-0"
+    );
+
+    // 4. Direct Fork (`assistant-fork-btn-u-0`): posts `entryId: "a-0"` and switches straight to `"sess-forked"`!
+    cx.update_window(win_handle, |_, window, cx| {
+        window.click("assistant-fork-btn-u-0", cx);
+    })
+    .unwrap();
+
+    cx.wait_for(win_handle, Duration::from_secs(3), |window, _| {
+        window.try_find("queue-steer-btn-q1").is_some()
+            && window.try_find("queue-edit-btn-q1").is_some()
+    })
+    .await;
+    {
+        let g = backend.state.lock().unwrap();
+        assert_eq!(g.forked_entries.len(), 1);
+        assert_eq!(
+            g.forked_entries[0]["entryId"], "a-0",
+            "fork must pass the target assistant entry ID directly"
+        );
+    }
+
+    // 5. Queue chinese message submission with active IME preedit via mouse click on `composer-send-btn-b0mrik`:
+    // composer must clear both Chinese text and IME marked range immediately!
+    cx.update_window(win_handle, |_, window, cx| {
+        let sess_comp = shell
+            .read(cx)
+            .workbench()
+            .read(cx)
+            .session_composer()
+            .clone();
+        let textarea = sess_comp.read(cx).textarea_state().clone();
+        textarea.update(cx, |st, cx| {
+            st.focus(window, cx);
+            st.set_value("检查内存", window, cx);
+            let end_utf16 = st.value().encode_utf16().count();
+            EntityInputHandler::replace_and_mark_text_in_range(
+                st,
+                Some(end_utf16..end_utf16),
+                "占用",
+                None,
+                window,
+                cx,
+            );
+        });
+        assert!(sess_comp.update(cx, |c, cx| c.is_ime_composing(window, cx)));
+        window.render_frame(cx);
+        window.click("composer-send-btn-b0mrik", cx);
+
+        assert_eq!(
+            textarea.read(cx).value().as_ref(),
+            "",
+            "Chinese text must be cleared from composer immediately upon queuing/sending"
+        );
+        assert!(
+            !sess_comp.update(cx, |c, cx| c.is_ime_composing(window, cx)),
+            "IME marked range must be cleared immediately after queuing/sending"
+        );
+    })
+    .unwrap();
+
+    let st_queued = Arc::clone(&backend.state);
+    cx.wait_for(win_handle, Duration::from_secs(3), move |_, _| {
+        st_queued.lock().unwrap().sent_messages.len() == 2
+    })
+    .await;
+    assert_eq!(
+        backend.state.lock().unwrap().sent_messages[1].1["text"],
+        "检查内存占用"
+    );
+
+    // 6. Queue Edit (`queue-edit-btn-q1`): non-empty draft prompts confirmation, then `DELETE /queue/q1` (`version: 3`)
+    // removes the queued item and backfills `/skill:disk` + `"然后是D盘"` into the main composer!
+    cx.update_window(win_handle, |_, window, cx| {
+        let textarea = shell
+            .read(cx)
+            .workbench()
+            .read(cx)
+            .session_composer()
+            .read(cx)
+            .textarea_state()
+            .clone();
+        textarea.update(cx, |st, cx| {
+            st.focus(window, cx);
+            st.set_value("未发草稿", window, cx);
+        });
+        window.render_frame(cx);
+        window.click("queue-edit-btn-q1", cx);
+    })
+    .unwrap();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("overwrite-draft-confirm-card").visible());
+        window.click("overwrite-draft-confirm-btn", cx);
+    })
+    .unwrap();
+
+    let st_qedit = Arc::clone(&backend.state);
+    let shell_qedit = shell.clone();
+    cx.wait_for(win_handle, Duration::from_secs(3), move |_, cx| {
+        let deleted = st_qedit.lock().unwrap().deleted_queue_items.len() == 1;
+        let val = shell_qedit
+            .read(cx)
+            .workbench()
+            .read(cx)
+            .session_composer()
+            .read(cx)
+            .textarea_state()
+            .read(cx)
+            .value()
+            .to_string();
+        deleted && val == "/skill:disk 然后是D盘"
+    })
+    .await;
+    {
+        let g = backend.state.lock().unwrap();
+        assert_eq!(g.deleted_queue_items[0].0, "q1");
+        assert_eq!(g.deleted_queue_items[0].1["version"], 3);
+    }
+}

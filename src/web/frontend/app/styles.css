@@ -727,15 +727,14 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .queue-item span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-body); line-height: var(--line-body); }
 .queue-item button, .question-panel button { flex: 0 0 auto; height: var(--control); min-height: var(--control); padding: 0 var(--space-inline); font-size: var(--font-caption); line-height: var(--line-caption); }
 .queue-item button[aria-label] { width: var(--control); min-width: var(--control); height: var(--control); padding: 0; color: var(--chat-muted); }
-.queue-item .queue-steer { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-tight); height: var(--control); min-height: var(--control); padding: 0 var(--space-inline); border: 0; border-radius: var(--radius-control); background: var(--app-send); color: var(--app-send-icon); font-size: var(--font-caption); line-height: var(--line-caption); }
-.queue-edit, .question-field { flex: 1; min-width: 0; display: flex; }
-.queue-edit-input, .question-panel .question-input, .question-panel .question-textarea { flex: 1; min-width: 0; width: 100%; padding: var(--space-inline); border: 1px solid var(--chat-border); border-radius: var(--radius-control); background: var(--chat-bg); color: var(--chat-ink); font-size: var(--font-ui); line-height: var(--line-ui); }
+.question-field { flex: 1; min-width: 0; display: flex; }
+.question-panel .question-input, .question-panel .question-textarea { flex: 1; min-width: 0; width: 100%; padding: var(--space-inline); border: 1px solid var(--chat-border); border-radius: var(--radius-control); background: var(--chat-bg); color: var(--chat-ink); font-size: var(--font-ui); line-height: var(--line-ui); }
 .question-panel .question-textarea { display: block; min-height: 60px; }
-:is(.queue-edit-input, .question-panel .question-input, .question-panel .question-textarea):is(:focus-visible, [data-focus-visible="true"]) { border-color: var(--app-muted); outline: none; box-shadow: var(--focus-shadow); }
+:is(.question-panel .question-input, .question-panel .question-textarea):is(:focus-visible, [data-focus-visible="true"]) { border-color: var(--app-muted); outline: none; box-shadow: var(--focus-shadow); }
 .question-panel .question-select { flex: 1; min-width: 0; display: flex; }
 .question-panel .question-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: var(--space-inline); width: 100%; padding: var(--space-inline) var(--space-inline); border: 1px solid var(--chat-border); border-radius: var(--radius-control); background: var(--chat-bg); color: var(--chat-ink); font-size: var(--font-ui); line-height: var(--line-ui); }
 .question-panel .question-select-trigger:is(:focus-visible, [data-focus-visible="true"]) { border-color: var(--app-muted); outline: none; box-shadow: var(--focus-shadow); }
-/* 提交/跳过照排队行「立即」的控件语言：实心品牌色 + ghost，盒高 26、圆角 4、按钮文字 12 */
+/* 提交/跳过控件：实心品牌色 + ghost，盒高 26、圆角 4、按钮文字 12 */
 .question-panel .question-apply { display: inline-flex; align-items: center; justify-content: center; height: var(--control); min-height: var(--control); padding: 0 var(--space-inline); border: 0; border-radius: var(--radius-control); --button-bg: var(--app-send); --button-bg-hover: var(--app-send-hover); --button-bg-pressed: var(--app-send-hover); --button-fg: var(--app-send-icon); background: var(--app-send); color: var(--app-send-icon); font-size: var(--font-caption); line-height: var(--line-caption); }
 .question-panel .question-apply:is(:hover, [data-hovered="true"]):not(:disabled, [aria-disabled="true"]) { background: var(--app-send-hover); }
 .question-panel .question-skip { display: inline-flex; align-items: center; justify-content: center; height: var(--control); min-height: var(--control); padding: 0 var(--space-inline); border: 0; border-radius: var(--radius-control); --button-bg: transparent; --button-bg-hover: transparent; --button-bg-pressed: transparent; --button-fg: var(--chat-muted); background: transparent; color: var(--chat-muted); font-size: var(--font-caption); line-height: var(--line-caption); }
@@ -760,21 +759,6 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .summary-option-active { background: var(--app-selected); }
 .summary-option-active:is(:hover, [data-hovered="true"]) { background: var(--app-selected); }
 .summary-option:is(:focus-visible, [data-focus-visible="true"]) { outline: none; box-shadow: var(--focus-shadow); }
-/* 派生选择对话框（画布 n3Qkm/utKHY）：宽 560，消息列表带微小长方形滚动条。 */
-.fork-dialog { display: flex; flex-direction: column; gap: var(--space-component); width: 560px; max-width: calc(100vw - 48px); padding: var(--space-group); border: 1px solid var(--chat-input-border); border-radius: var(--radius-composer); background: var(--chat-row); box-shadow: 0 24px 64px #1a202433; }
-.fork-list-wrap { position: relative; }
-.fork-list { display: flex; flex-direction: column; gap: var(--space-tight); max-height: 242px; margin: 0; padding: 0 var(--space-component) 0 0; overflow-y: auto; list-style: none; scrollbar-width: none; outline: none; }
-.fork-list::-webkit-scrollbar { width: 0; height: 0; }
-.fork-row { display: flex; align-items: center; width: 100%; height: var(--control-lg); padding: 0 var(--space-component); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--chat-ink); font-size: var(--font-body); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; line-height: var(--line-body); }
-.fork-row:disabled { color: var(--chat-muted); cursor: not-allowed; }
-.fork-row-active { background: var(--app-hover); }
-.fork-thumb { position: absolute; right: 2px; width: 4px; border-radius: var(--radius-control); background: var(--chat-muted); opacity: 0.5; pointer-events: none; }
-.fork-dialog-foot { display: flex; align-items: center; gap: var(--space-component); padding-top: var(--space-component); border-top: 1px solid var(--chat-border); }
-.fork-foot-note { flex: 1; min-width: 0; color: var(--chat-muted); font-size: var(--font-caption); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: var(--line-caption); }
-.composer-actions .fork-confirm { height: var(--control-lg); min-height: var(--control-lg); padding: 0 var(--space-component); border-radius: var(--radius-control); background: var(--app-send); color: var(--app-send-icon); }
-.composer-actions .fork-confirm:is(:hover, [data-hovered="true"]):not(:disabled, [aria-disabled="true"]) { background-color: var(--app-send-hover); }
-.fork-source-banner { display: flex; align-items: center; gap: var(--space-inline); margin: 0 20px var(--space-inline); padding: var(--space-inline) var(--space-component); border: 1px solid var(--chat-input-border); border-radius: var(--radius-row); background: var(--app-hover); color: var(--chat-ink); font-size: var(--font-ui); line-height: var(--line-ui); }
-.fork-source-banner span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 分支总结的状态行高 32，与助手消息同宽、同左缘。 */
 .summary-pending { display: flex; align-items: center; gap: var(--space-inline); min-height: var(--control-lg); color: var(--chat-ink); font-size: var(--font-body); line-height: var(--line-body); }
 .summary-pending > svg { flex: 0 0 var(--icon-menu); color: var(--tree-summary); }

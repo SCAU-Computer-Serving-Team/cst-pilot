@@ -23,6 +23,7 @@ function AssistantTurnImpl({
 	id,
 	turn,
 	live,
+	sessionRunning,
 	resultsByTurn,
 	requests,
 	onFork,
@@ -31,9 +32,10 @@ function AssistantTurnImpl({
 	id: string;
 	turn: Turn;
 	live: boolean;
+	sessionRunning: boolean;
 	resultsByTurn: Map<string, Map<string, Message>>;
 	requests: PendingBitLocker[];
-	onFork: () => void;
+	onFork: (entryId: string) => void;
 	onError: (text: string) => void;
 }) {
 	const last = turn.assistants.at(-1);
@@ -76,7 +78,15 @@ function AssistantTurnImpl({
 						<Tooltip.Content placement="top">复制</Tooltip.Content>
 					</Tooltip>
 					<Tooltip delay={80} closeDelay={0}>
-						<Button variant="ghost" isIconOnly aria-label="从此处分支新会话" onPress={() => onFork()}>
+						<Button
+							variant="ghost"
+							isIconOnly
+							isDisabled={sessionRunning}
+							aria-label="从此处分支新会话"
+							onPress={() => {
+								if (last.id) onFork(last.id);
+							}}
+						>
 							<GitFork size={16} />
 						</Button>
 						<Tooltip.Content placement="top">从此处分支新会话</Tooltip.Content>
@@ -94,6 +104,7 @@ const AssistantTurn = memo(
 	AssistantTurnImpl,
 	(prev, next) =>
 		prev.live === next.live &&
+		prev.sessionRunning === next.sessionRunning &&
 		prev.id === next.id &&
 		prev.resultsByTurn === next.resultsByTurn &&
 		prev.requests === next.requests &&
@@ -125,7 +136,7 @@ export function Conversation({
 	summarizing: boolean;
 	refresh: () => Promise<void>;
 	onCancelSummary: () => Promise<void>;
-	onFork: () => void;
+	onFork: (entryId: string) => void;
 }) {
 	const scroll = useRef<HTMLDivElement>(null);
 	const scrollAnimation = useRef<number | null>(null);
@@ -355,6 +366,7 @@ export function Conversation({
 									id={id}
 									turn={turn}
 									live={live}
+									sessionRunning={running}
 									resultsByTurn={resultsByTurn}
 									requests={requests}
 									onFork={onFork}

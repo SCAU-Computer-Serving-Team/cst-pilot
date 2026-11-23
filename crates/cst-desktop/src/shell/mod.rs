@@ -1382,20 +1382,16 @@ impl AppShell {
             }
             PaletteCommandTarget::SlashFork => {
                 if let Some(sid) = active_sid {
-                    let latest_user_eid = self.snapshot.loaded_sessions.get(&sid).and_then(|s| {
-                        s.messages.iter().rev().find_map(|m| {
-                            let msg = m.get("message").unwrap_or(m);
-                            (msg.get("role").and_then(serde_json::Value::as_str) == Some("user"))
-                                .then(|| {
-                                    m.get("id")
-                                        .or_else(|| msg.get("id"))
-                                        .and_then(serde_json::Value::as_str)
-                                        .map(str::to_owned)
-                                })
-                                .flatten()
-                        })
-                    });
-                    if let Some(eid) = latest_user_eid {
+                    let Some(sess) = self.snapshot.loaded_sessions.get(&sid) else {
+                        return;
+                    };
+                    if sess.running {
+                        self.show_top_notice("请等待当前回复完成后再分支会话。", cx);
+                        return;
+                    }
+                    if let Some(eid) =
+                        crate::workbench::message_list::latest_forkable_entry_id(sess)
+                    {
                         let client = self.client.clone();
                         cx.spawn(async move |weak, cx| {
                             let res = client.fork_session(sid, eid).await;
@@ -1403,15 +1399,18 @@ impl AppShell {
                             let _ = weak.update(cx, |this, cx| match res {
                                 Ok(new_sid) if !new_sid.is_empty() => {
                                     this.activate_session_by_id(new_sid, cx);
+                                    this.show_top_notice("已从当前节点分支新会话", cx);
                                 }
                                 Ok(_) => {}
                                 Err(e) => this.show_workspace_error(e.to_string(), cx),
                             });
                         })
                         .detach();
+                    } else {
+                        self.show_top_notice("当前会话尚无可用于分支的已完成回复。", cx);
                     }
                 } else {
-                    self.show_top_notice("请先进入一个会话后再派生新分支。", cx);
+                    self.show_top_notice("请先进入一个会话后再分支新会话。", cx);
                 }
             }
             PaletteCommandTarget::OpenSession(sid) => {

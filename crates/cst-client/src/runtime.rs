@@ -98,6 +98,10 @@ enum WorkerCommand {
         session_id: Option<String>,
         reply: oneshot::Sender<Result<Option<Arc<SessionViewSnapshot>>, ClientError>>,
     },
+    ReloadSession {
+        session_id: String,
+        reply: oneshot::Sender<Result<Option<Arc<SessionViewSnapshot>>, ClientError>>,
+    },
     RefreshGlobals {
         op_revision: u64,
         reply: oneshot::Sender<Result<OpReceipt<()>, ClientError>>,
@@ -113,6 +117,11 @@ enum WorkerCommand {
     },
     SendDraft {
         target: DraftKey,
+        draft: ComposerDraft,
+        reply: oneshot::Sender<Result<SendSubmissionOutcome, ClientError>>,
+    },
+    SendDirect {
+        session_id: String,
         draft: ComposerDraft,
         reply: oneshot::Sender<Result<SendSubmissionOutcome, ClientError>>,
     },
@@ -399,6 +408,24 @@ impl ClientHandle {
         self.begin_activate_session(session_id).await
     }
 
+    /// Forces an unconditional snapshot reload (`GET /api/sessions/<id>`) while keeping the previous
+    /// snapshot visible in `SessionStore` until the fresh snapshot installs.
+    pub async fn reload_session(
+        &self,
+        session_id: String,
+    ) -> Result<Option<Arc<SessionViewSnapshot>>, ClientError> {
+        let (tx, rx) = oneshot::channel();
+        self.core
+            .cmd_tx
+            .send(WorkerCommand::ReloadSession {
+                session_id,
+                reply: tx,
+            })
+            .map_err(|_| ClientError::Disconnected("客户端后台线程已退出。".into()))?;
+        rx.await
+            .map_err(|_| ClientError::Disconnected("客户端后台响应中断。".into()))?
+    }
+
     /// Changes the selected session immediately and returns its asynchronous load.
     pub fn begin_activate_session(
         &self,
@@ -496,6 +523,32 @@ impl ClientHandle {
                 .await
                 .map_err(|_| ClientError::Disconnected("客户端后台响应中断。".into()))?
         }
+    }
+
+    /// Submits an explicit payload directly into `SessionOutbox` for `session_id` without reading or
+    /// mutating `WorkspaceState` composer drafts (used by in-place turn regeneration).
+    pub async fn submit_direct_payload(
+        &self,
+        session_id: String,
+        draft: ComposerDraft,
+    ) -> Result<SendSubmissionOutcome, ClientError> {
+        if draft.is_empty() {
+            return Err(ClientError::BadRequest {
+                code: "empty_message".into(),
+                message: "请输入消息内容或添加图片。".into(),
+            });
+        }
+        let (tx, rx) = oneshot::channel();
+        self.core
+            .cmd_tx
+            .send(WorkerCommand::SendDirect {
+                session_id,
+                draft,
+                reply: tx,
+            })
+            .map_err(|_| ClientError::Disconnected("客户端后台线程已退出。".into()))?;
+        rx.await
+            .map_err(|_| ClientError::Disconnected("客户端后台响应中断。".into()))?
     }
 
     fn enqueue_draft(
@@ -1577,6 +1630,7 @@ async fn run_state_reducer_loop(
                             }
                             if let Some(cmid) = event
                                 .get("message")
+                                .or_else(|| event.get("entry").and_then(|e| e.get("message")))
                                 .and_then(|m| m.get("clientMessageId"))
                                 .and_then(Value::as_str)
                             {
@@ -2091,6 +2145,16 @@ async fn run_state_reducer_loop(
                             vec![reply],
                         );
                     }
+                    WorkerCommand::ReloadSession { session_id, reply } => {
+                        let generation = session_store.reset_to_loading(&session_id);
+                        spawn_session_snapshot_fetch(
+                            core.http.clone(),
+                            done_tx.clone(),
+                            session_id,
+                            generation,
+                            vec![reply],
+                        );
+                    }
                     WorkerCommand::RefreshGlobals { op_revision, reply } => {
                         let http = core.http.clone();
                         let done_tx_clone = done_tx.clone();
@@ -2233,7 +2297,32 @@ async fn run_state_reducer_loop(
                         let core_clone = Arc::clone(&core);
                         let rev_tx = revision_tx.clone();
                         tokio::spawn(async move {
-                            let res = execute_send_draft(&core_clone, &rev_tx, target, &draft, previous).await;
+                            let res = execute_send_draft(&core_clone, &rev_tx, target, &draft, previous, false).await;
+                            let _ = reply.send(res);
+                            drop(tail);
+                        });
+                    }
+                    WorkerCommand::SendDirect {
+                        session_id,
+                        draft,
+                        reply,
+                    } => {
+                        send_tails.retain(|_, tail| tail.has_changed().is_ok());
+                        let (tx, rx) = watch::channel(());
+                        let previous = send_tails.insert(session_id.clone(), rx);
+                        let tail = Some(tx);
+                        let core_clone = Arc::clone(&core);
+                        let rev_tx = revision_tx.clone();
+                        tokio::spawn(async move {
+                            let res = execute_send_draft(
+                                &core_clone,
+                                &rev_tx,
+                                DraftKey::Session(session_id),
+                                &draft,
+                                previous,
+                                true,
+                            )
+                            .await;
                             let _ = reply.send(res);
                             drop(tail);
                         });

@@ -28,7 +28,9 @@ use crate::theme::{
 };
 use crate::workbench::composer::{ComposerHostEvent, ComposerView, SlashNavigationTarget};
 use crate::workbench::image_viewer::{LightboxImageTarget, render_image_lightbox_modal};
-use crate::workbench::message_list::{MessageListEvent, MessageListView};
+use crate::workbench::message_list::{MessageListEvent, MessageListView, latest_forkable_entry_id};
+use crate::workbench::queue_bar::VisibleQueueItem;
+use crate::workbench::turn_segments::ImageContentPart;
 
 #[derive(Debug, Clone)]
 pub enum WorkbenchEvent {
@@ -41,10 +43,27 @@ pub enum WorkbenchEvent {
 }
 
 #[derive(Debug, Clone)]
+enum PendingDraftOverwriteAction {
+    HistoryUserTurn {
+        session_id: String,
+        user_entry_id: String,
+        user_text: String,
+        user_images: Vec<ImageContentPart>,
+    },
+    QueueItem {
+        session_id: String,
+        item: VisibleQueueItem,
+        version: u64,
+    },
+    OutboxItem {
+        session_id: String,
+        client_message_id: String,
+    },
+}
+
+#[derive(Debug, Clone)]
 struct PendingEditDraftConfirm {
-    session_id: String,
-    parent_entry_id: Option<String>,
-    user_text: String,
+    action: PendingDraftOverwriteAction,
     prior_focus: Option<FocusHandle>,
 }
 
@@ -221,10 +240,16 @@ impl WorkbenchView {
     ) {
         let owned = text.to_owned();
         self.session_composer.update(cx, |comp, cx| {
-            comp.textarea_state().update(cx, |st, cx| {
-                st.set_value(owned, window, cx);
-                st.focus_handle(cx).focus(window, cx);
+            let key = comp.draft_key().clone();
+            self.client.with_workspace_mut(|ws| {
+                let d = ws.draft_mut(key);
+                d.cursor_char_offset = owned.chars().count();
+                d.text = owned;
+                d.tokens.clear();
+                d.images.clear();
             });
+            comp.reconcile_external_draft_changes(window, cx);
+            comp.focus_handle(cx).focus(window, cx);
             cx.notify();
         });
     }
@@ -277,23 +302,76 @@ impl WorkbenchView {
         cx.notify();
     }
 
-    fn execute_edit_backfill(
+    fn execute_overwrite_action(
         &mut self,
-        session_id: String,
-        parent_entry_id: Option<String>,
-        user_text: String,
+        action: PendingDraftOverwriteAction,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.message_list.update(cx, |ml, cx| {
-            ml.apply_edit_and_rewrite_user_turn(session_id, parent_entry_id, user_text, cx);
-        });
-        self.session_composer.update(cx, |comp, cx| {
-            comp.reconcile_external_draft_changes(window, cx);
-            comp.focus_handle(cx).focus(window, cx);
-            cx.notify();
-        });
+        match action {
+            PendingDraftOverwriteAction::HistoryUserTurn {
+                session_id,
+                user_entry_id,
+                user_text,
+                user_images,
+            } => {
+                self.message_list.update(cx, |ml, cx| {
+                    ml.apply_edit_and_rewrite_user_turn(
+                        session_id,
+                        user_entry_id,
+                        user_text,
+                        user_images,
+                        cx,
+                    );
+                });
+            }
+            PendingDraftOverwriteAction::QueueItem {
+                session_id,
+                item,
+                version,
+            } => {
+                self.session_composer.update(cx, |comp, cx| {
+                    comp.execute_queue_item_backfill(session_id, item, version, window, cx);
+                });
+            }
+            PendingDraftOverwriteAction::OutboxItem {
+                session_id,
+                client_message_id,
+            } => match self
+                .client
+                .edit_outbox_item(Some(&session_id), &client_message_id, true)
+            {
+                Ok(_) => {
+                    self.session_composer.update(cx, |comp, cx| {
+                        comp.reconcile_external_draft_changes(window, cx);
+                        comp.focus_handle(cx).focus(window, cx);
+                        cx.notify();
+                    });
+                }
+                Err(err) => cx.emit(WorkbenchEvent::WorkspaceError(err.to_string())),
+            },
+        }
         cx.notify();
+    }
+
+    fn request_draft_overwrite_or_run(
+        &mut self,
+        action: PendingDraftOverwriteAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let has_draft = self.session_composer.read(cx).has_unsent_draft_content(cx);
+        if has_draft {
+            self.header_menu_open = false;
+            self.pending_edit_confirm = Some(PendingEditDraftConfirm {
+                action,
+                prior_focus: window.focused(cx),
+            });
+            self.edit_confirm_keep_focus.focus(window, cx);
+            cx.notify();
+        } else {
+            self.execute_overwrite_action(action, window, cx);
+        }
     }
 
     fn on_composer_event(
@@ -314,6 +392,21 @@ impl WorkbenchView {
                 }
                 cx.notify();
             }
+            ComposerHostEvent::RequestEditQueueItem {
+                session_id,
+                item,
+                version,
+            } => {
+                self.request_draft_overwrite_or_run(
+                    PendingDraftOverwriteAction::QueueItem {
+                        session_id: session_id.clone(),
+                        item: item.clone(),
+                        version: *version,
+                    },
+                    window,
+                    cx,
+                );
+            }
             ComposerHostEvent::MissingCredentials { provider } => {
                 cx.emit(WorkbenchEvent::MissingCredentials {
                     provider: provider.clone(),
@@ -323,21 +416,16 @@ impl WorkbenchView {
                 if *target == SlashNavigationTarget::ForkLatest {
                     if let Some(ref sid) = self.active_session_id {
                         let snap = self.client.snapshot();
-                        let latest_user_eid = snap.loaded_sessions.get(sid).and_then(|s| {
-                            s.messages.iter().rev().find_map(|m| {
-                                let msg = m.get("message").unwrap_or(m);
-                                (msg.get("role").and_then(serde_json::Value::as_str)
-                                    == Some("user"))
-                                .then(|| {
-                                    m.get("id")
-                                        .or_else(|| msg.get("id"))
-                                        .and_then(serde_json::Value::as_str)
-                                        .map(str::to_owned)
-                                })
-                                .flatten()
-                            })
-                        });
-                        if let Some(eid) = latest_user_eid {
+                        let Some(sess) = snap.loaded_sessions.get(sid) else {
+                            return;
+                        };
+                        if sess.running {
+                            cx.emit(WorkbenchEvent::TopNotice(
+                                "请等待当前回复完成后再分支会话".into(),
+                            ));
+                            return;
+                        }
+                        if let Some(eid) = latest_forkable_entry_id(sess) {
                             let sid_owned = sid.clone();
                             let client = self.client.clone();
                             cx.spawn(async move |weak, cx| {
@@ -347,6 +435,9 @@ impl WorkbenchView {
                                     Ok(new_sid) => {
                                         if !new_sid.is_empty() {
                                             cx.emit(WorkbenchEvent::ActivatedSession(new_sid));
+                                            cx.emit(WorkbenchEvent::TopNotice(
+                                                "已从当前节点分支新会话".into(),
+                                            ));
                                         }
                                     }
                                     Err(e) => {
@@ -355,6 +446,10 @@ impl WorkbenchView {
                                 });
                             })
                             .detach();
+                        } else {
+                            cx.emit(WorkbenchEvent::TopNotice(
+                                "当前会话尚无可用于分支的已完成回复".into(),
+                            ));
                         }
                     }
                     return;
@@ -400,29 +495,33 @@ impl WorkbenchView {
             }
             MessageListEvent::RequestEditUserTurn {
                 session_id,
-                parent_entry_id,
+                user_entry_id,
                 user_text,
+                user_images,
             } => {
-                let has_draft = self.session_composer.read(cx).has_unsent_draft_content(cx);
-                if has_draft {
-                    self.header_menu_open = false;
-                    self.pending_edit_confirm = Some(PendingEditDraftConfirm {
+                self.request_draft_overwrite_or_run(
+                    PendingDraftOverwriteAction::HistoryUserTurn {
                         session_id: session_id.clone(),
-                        parent_entry_id: parent_entry_id.clone(),
+                        user_entry_id: user_entry_id.clone(),
                         user_text: user_text.clone(),
-                        prior_focus: window.focused(cx),
-                    });
-                    self.edit_confirm_keep_focus.focus(window, cx);
-                    cx.notify();
-                } else {
-                    self.execute_edit_backfill(
-                        session_id.clone(),
-                        parent_entry_id.clone(),
-                        user_text.clone(),
-                        window,
-                        cx,
-                    );
-                }
+                        user_images: user_images.clone(),
+                    },
+                    window,
+                    cx,
+                );
+            }
+            MessageListEvent::RequestEditOutboxItem {
+                session_id,
+                client_message_id,
+            } => {
+                self.request_draft_overwrite_or_run(
+                    PendingDraftOverwriteAction::OutboxItem {
+                        session_id: session_id.clone(),
+                        client_message_id: client_message_id.clone(),
+                    },
+                    window,
+                    cx,
+                );
             }
             MessageListEvent::MissingCredentials { provider } => {
                 cx.emit(WorkbenchEvent::MissingCredentials {
@@ -954,7 +1053,7 @@ impl Render for WorkbenchView {
                     .child(
                         apply_scale(div(), scale::UI)
                             .text_color(palette.text_secondary)
-                            .child("回填历史消息将替换输入框内尚未发送的内容。"),
+                            .child("回填待编辑消息将替换输入框内尚未发送的内容。"),
                     ),
             )
             .child(
@@ -1008,13 +1107,7 @@ impl Render for WorkbenchView {
                             .on_click(move |_, w, cx| {
                                 ent_overwrite.update(cx, |this, cx| {
                                     if let Some(pending) = this.pending_edit_confirm.take() {
-                                        this.execute_edit_backfill(
-                                            pending.session_id,
-                                            pending.parent_entry_id,
-                                            pending.user_text,
-                                            w,
-                                            cx,
-                                        );
+                                        this.execute_overwrite_action(pending.action, w, cx);
                                     }
                                 });
                             })
