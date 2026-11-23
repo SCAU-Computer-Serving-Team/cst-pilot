@@ -8319,16 +8319,10 @@ Next: 核对开机自启项与后台高负载进程。</div>
           });
         });
         stageEl.querySelectorAll(".md-copy-btn").forEach(btn => {
-          btn.addEventListener("click", async () => {
+          btn.addEventListener("click", () => {
             const code = btn.closest(".md-code-block")?.querySelector("pre")?.textContent;
-            if (code == null) return;
-            try {
-              await navigator.clipboard.writeText(code);
-            } catch {
-              if (!disposed && btn.isConnected) showToast({ text: "无法复制代码内容", variant: "danger" });
-              return;
-            }
-            if (disposed || !btn.isConnected) return;
+            if (code == null || disposed || !btn.isConnected) return;
+            navigator.clipboard?.writeText(code).catch(() => {});
             clearTimeout(copyTimers.get(btn));
             btn.innerHTML = icon("check", 14);
             btn.style.color = "var(--status-success)";
