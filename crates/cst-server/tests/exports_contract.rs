@@ -194,6 +194,27 @@ fn snapshot_options_date_filtering_and_pagination_contract() {
                 "timestamp": 4
             }
         }),
+        json!({
+            "id": "a3-err",
+            "message": {
+                "role": "assistant",
+                "provider": "deepseek",
+                "content": [],
+                "stopReason": "error",
+                "errorMessage": "Request error: timeout",
+                "timestamp": 5
+            }
+        }),
+        json!({
+            "id": "a4-err-only-stop",
+            "message": {
+                "role": "assistant",
+                "provider": "cstoa",
+                "content": [],
+                "stopReason": "error",
+                "timestamp": 6
+            }
+        }),
     ];
 
     let before = Local
@@ -216,7 +237,16 @@ fn snapshot_options_date_filtering_and_pagination_contract() {
         .iter()
         .filter_map(|e| e.get("id").and_then(Value::as_str))
         .collect();
-    assert_eq!(chosen_ids, vec!["u1", "a2"]);
+    assert_eq!(chosen_ids, vec!["u1", "a2", "a3-err", "a4-err-only-stop"]);
+    assert_eq!(
+        first["entries"][2]["message"]["provider"],
+        json!("deepseek")
+    );
+    assert_eq!(
+        first["entries"][2]["message"]["errorMessage"],
+        json!("Request error: timeout")
+    );
+    assert_eq!(first["entries"][3]["message"]["stopReason"], json!("error"));
     let first_str = serde_json::to_string(&first).unwrap();
     assert!(!first_str.contains("隐藏思考"));
     assert!(!first_str.contains("toolCall"));
@@ -235,7 +265,7 @@ fn snapshot_options_date_filtering_and_pagination_contract() {
     .unwrap();
     let full = build_export_snapshot_from_entries("fixture", "全量", &entries, &full_opts, before)
         .unwrap();
-    assert_eq!(full["entries"].as_array().unwrap().len(), 4);
+    assert_eq!(full["entries"].as_array().unwrap().len(), 6);
 
     let secret = ["123456"; 8].join("-");
     let redacted = build_export_snapshot_from_entries(
@@ -824,7 +854,49 @@ async fn bitlocker_verification_projection_and_export_http_routes() {
         .await
         .unwrap();
     assert_eq!(ok_open.status(), http::StatusCode::OK);
-    assert_eq!(opened_dirs.lock().unwrap().len(), 1);
+    let opened = opened_dirs.lock().unwrap().clone();
+    assert_eq!(opened.len(), 1);
+    assert!(
+        opened[0].is_file(),
+        "POST /api/exports/:id/open should target the first exported file for explorer /select, got {:?}",
+        opened[0]
+    );
+
+    // Recent exports endpoint returns completed exports across sessions
+    let recent_resp = client
+        .get(format!("{}/api/exports/recent?limit=5", server.base_url()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(recent_resp.status(), http::StatusCode::OK);
+    let recent_body: Value = recent_resp.json().await.unwrap();
+    let recent_list = recent_body["exports"].as_array().unwrap();
+    assert_eq!(recent_list.len(), 1);
+    assert_eq!(recent_list[0]["id"], exp_id);
+    assert_eq!(recent_list[0]["status"], "completed");
+
+    // Invalid limit rejected with 400
+    let bad_recent = client
+        .get(format!("{}/api/exports/recent?limit=0", server.base_url()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad_recent.status(), http::StatusCode::BAD_REQUEST);
+
+    // Removing the exported file causes POST /open to return 404 export_file_missing
+    std::fs::remove_file(&opened[0]).unwrap();
+    let missing_open = client
+        .post(format!("{}/api/exports/{exp_id}/open", server.base_url()))
+        .header("Origin", server.base_url())
+        .header("X-CST-Web-Request", "1")
+        .header("Idempotency-Key", "missing-open")
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing_open.status(), http::StatusCode::NOT_FOUND);
+    let missing_err: Value = missing_open.json().await.unwrap();
+    assert_eq!(missing_err["error"]["code"], "export_file_missing");
 
     server.shutdown().await;
 }

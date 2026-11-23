@@ -574,7 +574,7 @@ async fn dispatch_api_route(
     }
 
     if let Some(resp) = Box::pin(exports::handle_exports_route(
-        state, caller, method, pathname, headers, raw_body,
+        state, caller, method, pathname, query, headers, raw_body,
     ))
     .await?
     {

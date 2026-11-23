@@ -30,7 +30,7 @@
 
 | 文档 / 资产 | 待办项 | 依据 |
 |---|---|---|
-| [cst-pilot-web.pen](../design/cst-pilot-web.pen) / [cst-pilot-tools.pen](../design/cst-pilot-tools.pen) | Web 设计规范对齐：按设计核心文件体系对齐静态画布、Shader 绑定、令牌与交互行为，导入 `mode: [light, dark]` 变量轴与 `00A–00F` 可复用母版，重排主区为 `y = 0` 单行线性流并同步迁移 Web 前端样式与契约测试 | [DESIGN.md](../DESIGN.md) · [storybook.html](../design/storybook.html) · [cst-pilot-desktop.pen](../design/cst-pilot-desktop.pen) |
+| [cst-pilot-web.pen](../design/cst-pilot-web.pen) | Web 设计规范对齐：单文件画布合并（原 `cst-pilot-tools.pen` 已归档至 `design/achieved/`）、50 项静态变量、`mode: [light, dark]` 轴、`LKIQI` 规范板、`00A–00F`/`00H` 母版与 `01–07` 单行主区已完成；待同步迁移 Web 前端样式、缺口功能与 UX 契约测试 | [DESIGN.md](../DESIGN.md) · [storybook.html](../design/storybook.html) · [cst-pilot-desktop.pen](../design/cst-pilot-desktop.pen) |
 
 ## 待决议题
 

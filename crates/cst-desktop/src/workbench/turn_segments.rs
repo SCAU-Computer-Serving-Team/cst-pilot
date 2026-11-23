@@ -478,6 +478,8 @@ pub fn split_turn(assistants: &[TurnEntry]) -> SplitTurnOutput {
                 && !err_msg.trim().is_empty()
             {
                 assistant_error = Some(format_assistant_error(entry.provider.as_deref(), err_msg));
+            } else if entry.stop_reason.as_deref() == Some("error") {
+                assistant_error = Some(format_assistant_error(entry.provider.as_deref(), ""));
             }
         }
 

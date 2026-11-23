@@ -16,7 +16,6 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
     DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
 };
@@ -69,6 +68,7 @@ pub struct PreferencesTabView {
     filter_trigger_focus: FocusHandle,
     picker_focus: FocusHandle,
     picker_index: usize,
+    picker_keyboard_nav: bool,
     picker_scroll: gpui::ScrollHandle,
     default_picker_scroll: UniformListScrollHandle,
     list_scroll: UniformListScrollHandle,
@@ -87,11 +87,19 @@ impl Focusable for PreferencesTabView {
 impl PreferencesTabView {
     pub fn new(client: ClientHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索模型…"));
-        let search_subscription = cx.subscribe(&search_input, |_, _, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                cx.notify();
-            }
-        });
+        let search_subscription =
+            cx.subscribe(
+                &search_input,
+                |this, _, event: &InputEvent, cx| match event {
+                    InputEvent::Change => {
+                        cx.notify();
+                    }
+                    InputEvent::Focus => {
+                        this.dismiss_dropdowns_on_outside_click(cx);
+                    }
+                    _ => {}
+                },
+            );
         Self {
             client,
             search_input,
@@ -113,6 +121,7 @@ impl PreferencesTabView {
             filter_trigger_focus: cx.focus_handle().tab_stop(true),
             picker_focus: cx.focus_handle(),
             picker_index: 0,
+            picker_keyboard_nav: false,
             picker_scroll: gpui::ScrollHandle::new(),
             default_picker_scroll: UniformListScrollHandle::new(),
             list_scroll: UniformListScrollHandle::new(),
@@ -128,6 +137,7 @@ impl PreferencesTabView {
     pub fn leave(&mut self, cx: &mut Context<Self>) {
         self.default_dropdown_open = false;
         self.filter_dropdown_open = false;
+        self.picker_keyboard_nav = false;
         self.models_expanded = false;
         cx.notify();
     }
@@ -142,6 +152,17 @@ impl PreferencesTabView {
             self.filter_trigger_focus.focus(window, cx);
         }
         self.leave(cx);
+        true
+    }
+
+    pub fn dismiss_dropdowns_on_outside_click(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.has_dropdown() {
+            return false;
+        }
+        self.default_dropdown_open = false;
+        self.filter_dropdown_open = false;
+        self.picker_keyboard_nav = false;
+        cx.notify();
         true
     }
 
@@ -164,6 +185,7 @@ impl PreferencesTabView {
         self.default_dropdown_open = default_model;
         self.filter_dropdown_open = !default_model;
         self.picker_index = index;
+        self.picker_keyboard_nav = false;
         if default_model {
             self.default_picker_scroll = UniformListScrollHandle::new();
             self.default_picker_scroll
@@ -466,8 +488,6 @@ impl Render for PreferencesTabView {
         self.sync_from_snapshot();
         let theme_global = DesktopThemeGlobal::current(cx);
         let palette = theme_global.palette;
-        let transparency_enabled = theme_global.transparency_enabled;
-        let scale_factor = window.scale_factor();
         let snap = self.client.snapshot();
         let models_snap = snap.models.as_ref();
 
@@ -573,6 +593,8 @@ impl Render for PreferencesTabView {
                 );
                 let row_count = default_rows.len();
                 let list_h = px((row_count as f32 * 32.0).min(280.0));
+                let current_def_pair =
+                    effective_default.map(|d| (d.provider.clone(), d.id.clone()));
                 uniform_list(
                     "pref-default-model-scroll",
                     row_count,
@@ -580,7 +602,11 @@ impl Render for PreferencesTabView {
                         range
                             .map(|idx| {
                                 let (prov, mid, mname) = &default_rows[idx];
-                                let is_def = idx == this.picker_index;
+                                let is_selected = current_def_pair
+                                    .as_ref()
+                                    .is_some_and(|(p, m)| p == prov && m == mid);
+                                let is_kbd_hi =
+                                    this.picker_keyboard_nav && idx == this.picker_index;
                                 let prov_c = prov.clone();
                                 let mid_c = mid.clone();
                                 let opt_id =
@@ -591,14 +617,14 @@ impl Render for PreferencesTabView {
                                 apply_scale(div(), scale::UI)
                                     .id(opt_id.clone())
                                     .test_support()
-                                    .a11y_listitem(opt_id, opt_aria, is_def)
+                                    .a11y_listitem(opt_id, opt_aria, is_selected)
                                     .flex_shrink_0()
                                     .w_full()
                                     .h(height::CONTROL)
                                     .px(space::SM)
                                     .rounded(radius::CONTROL)
-                                    .bg(if is_def {
-                                        palette.bg_item_active
+                                    .bg(if is_kbd_hi {
+                                        palette.bg_item_hover
                                     } else {
                                         gpui_kit::transparent_black()
                                     })
@@ -629,7 +655,7 @@ impl Render for PreferencesTabView {
                                                     .text_color(palette.text_muted)
                                                     .child(prov_label),
                                             )
-                                            .children(is_def.then(|| {
+                                            .children(is_selected.then(|| {
                                                 Icon::new(IconName::Check)
                                                     .size(px(13.0))
                                                     .text_color(palette.accent_ink)
@@ -646,72 +672,77 @@ impl Render for PreferencesTabView {
             };
             let menu = motion::animate_popover_enter(
                 "pref-default-model-pop-anim",
-                render_frosted_surface(
-                    "pref-default-model-popover",
-                    FrostedGlassSpec::popover(&palette),
-                    palette.bg_elevated,
-                    transparency_enabled,
-                    scale_factor,
-                )
-                .test_support()
-                .a11y_dialog("pref-default-model-popover", "选择默认模型")
-                .w(px(300.0))
-                .p(space::XS)
-                .rounded(radius::ROW)
-                .border_1()
-                .border_color(palette.border_hairline)
-                .occlude()
-                .child(
-                    div()
-                        .w_full()
-                        .focus_trap("pref-default-model-focus", &self.picker_focus)
-                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                            if !choices.is_empty() {
-                                let moved = match event.keystroke.key.as_str() {
-                                    "down" => {
-                                        this.picker_index = (this.picker_index + 1) % choices.len();
-                                        true
+                div()
+                    .id("pref-default-model-popover")
+                    .test_support()
+                    .a11y_dialog("pref-default-model-popover", "选择默认模型")
+                    .w(px(300.0))
+                    .p(space::XS)
+                    .rounded(radius::ROW)
+                    .bg(palette.bg_elevated)
+                    .border_1()
+                    .border_color(palette.border_subtle)
+                    .occlude()
+                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(
+                        div()
+                            .w_full()
+                            .focus_trap("pref-default-model-focus", &self.picker_focus)
+                            .on_key_down(cx.listener(
+                                move |this, event: &KeyDownEvent, window, cx| {
+                                    if !choices.is_empty() {
+                                        let moved = match event.keystroke.key.as_str() {
+                                            "down" => {
+                                                this.picker_index =
+                                                    (this.picker_index + 1) % choices.len();
+                                                true
+                                            }
+                                            "up" => {
+                                                this.picker_index = this
+                                                    .picker_index
+                                                    .checked_sub(1)
+                                                    .unwrap_or(choices.len() - 1);
+                                                true
+                                            }
+                                            "home" => {
+                                                this.picker_index = 0;
+                                                true
+                                            }
+                                            "end" => {
+                                                this.picker_index = choices.len() - 1;
+                                                true
+                                            }
+                                            _ => false,
+                                        };
+                                        if moved {
+                                            this.picker_keyboard_nav = true;
+                                            this.default_picker_scroll.scroll_to_item(
+                                                this.picker_index,
+                                                ScrollStrategy::Nearest,
+                                            );
+                                            cx.notify();
+                                            cx.stop_propagation();
+                                            return;
+                                        }
                                     }
-                                    "up" => {
-                                        this.picker_index = this
-                                            .picker_index
-                                            .checked_sub(1)
-                                            .unwrap_or(choices.len() - 1);
-                                        true
+                                    if super::activates_button(event) {
+                                        if let Some((provider, model)) =
+                                            choices.get(this.picker_index)
+                                        {
+                                            this.set_default_model(
+                                                provider.clone(),
+                                                model.clone(),
+                                                window,
+                                                cx,
+                                            );
+                                        }
+                                        cx.stop_propagation();
                                     }
-                                    "home" => {
-                                        this.picker_index = 0;
-                                        true
-                                    }
-                                    "end" => {
-                                        this.picker_index = choices.len() - 1;
-                                        true
-                                    }
-                                    _ => false,
-                                };
-                                if moved {
-                                    this.default_picker_scroll
-                                        .scroll_to_item(this.picker_index, ScrollStrategy::Nearest);
-                                    cx.notify();
-                                    cx.stop_propagation();
-                                    return;
-                                }
-                            }
-                            if super::activates_button(event) {
-                                if let Some((provider, model)) = choices.get(this.picker_index) {
-                                    this.set_default_model(
-                                        provider.clone(),
-                                        model.clone(),
-                                        window,
-                                        cx,
-                                    );
-                                }
-                                cx.stop_propagation();
-                            }
-                        }))
-                        .child(items),
-                ),
-                palette.craft_stack_shadows(),
+                                },
+                            ))
+                            .child(items),
+                    ),
+                palette.flat_popover_shadows(),
                 -6.0,
             );
             dropdown_menu_opt = Some(div().absolute().top(px(60.0)).right(space::LG).child(menu));
@@ -780,6 +811,7 @@ impl Render for PreferencesTabView {
                     .justify_between()
                     .gap(space::XS)
                     .hover(|s| s.bg(palette.bg_surface))
+                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.toggle_dropdown(true, default_index, window, cx);
                     }))
@@ -833,13 +865,17 @@ impl Render for PreferencesTabView {
                     apply_scale(div(), scale::UI)
                         .id("pref-filter-all")
                         .test_support()
-                        .a11y_listitem("pref-filter-all", "全部提供商", self.picker_index == 0)
+                        .a11y_listitem(
+                            "pref-filter-all",
+                            "全部提供商",
+                            active_provider_filter.is_none(),
+                        )
                         .flex_shrink_0()
                         .h(height::CONTROL)
                         .px(space::SM)
                         .rounded(radius::CONTROL)
-                        .bg(if self.picker_index == 0 {
-                            palette.bg_item_active
+                        .bg(if self.picker_keyboard_nav && self.picker_index == 0 {
+                            palette.bg_item_hover
                         } else {
                             gpui_kit::transparent_black()
                         })
@@ -854,7 +890,7 @@ impl Render for PreferencesTabView {
                             this.dismiss_dropdowns(window, cx);
                         }))
                         .child(cjk_inline_label("全部"))
-                        .children((self.picker_index == 0).then(|| {
+                        .children(active_provider_filter.is_none().then(|| {
                             Icon::new(IconName::Check)
                                 .size(px(13.0))
                                 .text_color(palette.accent_ink)
@@ -862,7 +898,8 @@ impl Render for PreferencesTabView {
                 );
 
             for (index, prov) in providers_seen.iter().enumerate() {
-                let active = self.picker_index == index + 1;
+                let is_selected = active_provider_filter == Some(prov.as_str());
+                let is_kbd_hi = self.picker_keyboard_nav && self.picker_index == index + 1;
                 let p_click = prov.clone();
                 let filter_id = SharedString::from(format!("pref-filter-{prov}"));
                 let prov_label = SharedString::from(prov.clone());
@@ -870,13 +907,13 @@ impl Render for PreferencesTabView {
                     apply_scale(div(), scale::UI)
                         .id(filter_id.clone())
                         .test_support()
-                        .a11y_listitem(filter_id, prov_label.clone(), active)
+                        .a11y_listitem(filter_id, prov_label.clone(), is_selected)
                         .flex_shrink_0()
                         .h(height::CONTROL)
                         .px(space::SM)
                         .rounded(radius::CONTROL)
-                        .bg(if active {
-                            palette.bg_item_active
+                        .bg(if is_kbd_hi {
+                            palette.bg_item_hover
                         } else {
                             gpui_kit::transparent_black()
                         })
@@ -891,7 +928,7 @@ impl Render for PreferencesTabView {
                             this.dismiss_dropdowns(window, cx);
                         }))
                         .child(div().flex_1().min_w_0().truncate().child(prov_label))
-                        .children(active.then(|| {
+                        .children(is_selected.then(|| {
                             Icon::new(IconName::Check)
                                 .size(px(13.0))
                                 .text_color(palette.accent_ink)
@@ -905,49 +942,47 @@ impl Render for PreferencesTabView {
                 .right_0()
                 .child(motion::animate_popover_enter(
                     "pref-filter-pop-anim",
-                    render_frosted_surface(
-                        "pref-filter-popover",
-                        FrostedGlassSpec::popover(&palette),
-                        palette.bg_elevated,
-                        transparency_enabled,
-                        scale_factor,
-                    )
-                    .test_support()
-                    .a11y_dialog("pref-filter-popover", "按提供商筛选")
-                    .w(px(220.0))
-                    .p(space::XS)
-                    .rounded(radius::ROW)
-                    .border_1()
-                    .border_color(palette.border_hairline)
-                    .occlude()
-                    .child(
-                        div()
-                            .w_full()
-                            .focus_trap("pref-filter-focus", &self.picker_focus)
-                            .on_key_down(cx.listener(
-                                move |this, event: &KeyDownEvent, window, cx| {
-                                    if super::move_picker_cursor(
-                                        event,
-                                        &mut this.picker_index,
-                                        choices.len() + 1,
-                                        &this.picker_scroll,
-                                    ) {
-                                        cx.notify();
-                                        cx.stop_propagation();
-                                    } else if super::activates_button(event) {
-                                        this.provider_filter = this
-                                            .picker_index
-                                            .checked_sub(1)
-                                            .and_then(|ix| choices.get(ix))
-                                            .cloned();
-                                        this.dismiss_dropdowns(window, cx);
-                                        cx.stop_propagation();
-                                    }
-                                },
-                            ))
-                            .child(items),
-                    ),
-                    palette.craft_stack_shadows(),
+                    div()
+                        .id("pref-filter-popover")
+                        .test_support()
+                        .a11y_dialog("pref-filter-popover", "按提供商筛选")
+                        .w(px(220.0))
+                        .p(space::XS)
+                        .rounded(radius::ROW)
+                        .bg(palette.bg_elevated)
+                        .border_1()
+                        .border_color(palette.border_subtle)
+                        .occlude()
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .child(
+                            div()
+                                .w_full()
+                                .focus_trap("pref-filter-focus", &self.picker_focus)
+                                .on_key_down(cx.listener(
+                                    move |this, event: &KeyDownEvent, window, cx| {
+                                        if super::move_picker_cursor(
+                                            event,
+                                            &mut this.picker_index,
+                                            choices.len() + 1,
+                                            &this.picker_scroll,
+                                        ) {
+                                            this.picker_keyboard_nav = true;
+                                            cx.notify();
+                                            cx.stop_propagation();
+                                        } else if super::activates_button(event) {
+                                            this.provider_filter = this
+                                                .picker_index
+                                                .checked_sub(1)
+                                                .and_then(|ix| choices.get(ix))
+                                                .cloned();
+                                            this.dismiss_dropdowns(window, cx);
+                                            cx.stop_propagation();
+                                        }
+                                    },
+                                ))
+                                .child(items),
+                        ),
+                    palette.flat_popover_shadows(),
                     -6.0,
                 ))
         });
@@ -1031,6 +1066,14 @@ impl Render for PreferencesTabView {
         let vis_for_all = visible_full_ids.clone();
         let vis_for_clear = visible_full_ids;
 
+        let search_focused = self
+            .search_input
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window);
+        let search_has_text = !search_q.is_empty();
+        let search_focus_ent = self.search_input.clone();
+
         let filter_row = div()
             .w_full()
             .flex()
@@ -1038,18 +1081,66 @@ impl Render for PreferencesTabView {
             .justify_between()
             .gap(space::MD)
             .child(
-                div().w(px(340.0)).child(
-                    Input::new(&self.search_input)
-                        .accessibility_id("preferences-search-input")
-                        .aria_label("搜索模型")
-                        .h(height::CONTROL)
-                        .prefix(
-                            Icon::new(IconName::Search)
-                                .size(px(14.0))
-                                .text_color(palette.text_muted),
-                        )
-                        .cleanable(true),
-                ),
+                div()
+                    .id("preferences-search-box")
+                    .w(px(340.0))
+                    .h(height::CONTROL)
+                    .px(space::MD)
+                    .rounded(radius::CONTROL)
+                    .border_1()
+                    .border_color(if search_focused {
+                        palette.border_focus
+                    } else {
+                        palette.border_strong
+                    })
+                    .bg(palette.bg_workspace)
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .on_click(move |_, w, cx| {
+                        search_focus_ent.focus_handle(cx).focus(w, cx);
+                    })
+                    .child(
+                        Icon::new(IconName::Search)
+                            .size(px(14.0))
+                            .text_color(palette.text_muted),
+                    )
+                    .child(
+                        div().flex_1().min_w_0().child(
+                            Input::new(&self.search_input)
+                                .accessibility_id("preferences-search-input")
+                                .aria_label("搜索模型")
+                                .appearance(false)
+                                .bordered(false)
+                                .focus_bordered(false)
+                                .p_0(),
+                        ),
+                    )
+                    .children(search_has_text.then(|| {
+                        div()
+                            .id("preferences-search-clear-btn")
+                            .w(px(20.0))
+                            .h(px(20.0))
+                            .rounded(radius::CONTROL)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .flex_shrink_0()
+                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_click(cx.listener(|this, _, w, cx| {
+                                this.search_input.update(cx, |i, cx| {
+                                    i.set_value("", w, cx);
+                                    i.focus(w, cx);
+                                });
+                                cx.notify();
+                                cx.stop_propagation();
+                            }))
+                            .child(
+                                Icon::new(IconName::X)
+                                    .size(px(13.0))
+                                    .text_color(palette.text_muted),
+                            )
+                    })),
             )
             .child(
                 apply_scale(div(), scale::UI)
@@ -1086,6 +1177,7 @@ impl Render for PreferencesTabView {
                     .justify_between()
                     .gap(space::SM)
                     .hover(|s| s.bg(palette.bg_surface))
+                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.toggle_dropdown(false, filter_index, window, cx);
                     }))
@@ -1231,11 +1323,12 @@ impl Render for PreferencesTabView {
                                     let up_id = SharedString::from(format!("pref-move-up-{idx}"));
                                     let down_id =
                                         SharedString::from(format!("pref-move-down-{idx}"));
-                                    let flip_y = motion::flip_row_offset_y(
+                                    let flip_y = motion::flip_row_offset_y_with_duration(
                                         "pref-enabled-models",
                                         full_id,
                                         &flip_scope,
                                         px(PREF_LIST_ROW_HEIGHT_PX) * vis_idx as f32,
+                                        motion::FAST,
                                         window,
                                         cx,
                                     );

@@ -47,7 +47,6 @@ pub struct SidebarCallbacks {
     pub on_collapse: SidebarActionFn,
     pub on_new_session: SidebarActionFn,
     pub on_clear_search: SidebarActionFn,
-    pub on_open_palette: SidebarActionFn,
     pub on_open_all_sessions: SidebarActionFn,
     pub on_open_dashboard: SidebarActionFn,
     pub on_select_session: SidebarSessionFn,
@@ -332,7 +331,6 @@ pub fn render_sidebar(
     let on_collapse = Rc::clone(&cb.on_collapse);
     let on_new = Rc::clone(&cb.on_new_session);
     let on_clear = Rc::clone(&cb.on_clear_search);
-    let on_palette = Rc::clone(&cb.on_open_palette);
     let on_all = Rc::clone(&cb.on_open_all_sessions);
     let on_dash = Rc::clone(&cb.on_open_dashboard);
     let on_sel_all = Rc::clone(&cb.on_toggle_select_all);
@@ -341,7 +339,7 @@ pub fn render_sidebar(
     let on_settings = Rc::clone(&cb.on_open_settings);
     let search_focus_ent = search_input.clone();
 
-    let search_trailing = if has_search_query {
+    let search_trailing = has_search_query.then(|| {
         div()
             .id("sidebar-search-clear-btn")
             .test_support()
@@ -363,22 +361,7 @@ pub fn render_sidebar(
                     .size(px(13.0))
                     .text_color(palette.text_muted),
             )
-            .into_any_element()
-    } else {
-        apply_scale(div(), scale::CAPTION)
-            .id("sidebar-search-kbd-btn")
-            .test_support()
-            .a11y_button("sidebar-search-kbd-btn", "打开命令面板")
-            .text_color(palette.text_muted)
-            .flex_shrink_0()
-            .hover(|s| s.text_color(palette.text_primary))
-            .on_click(move |_, w, cx| {
-                (on_palette)(w, cx);
-                cx.stop_propagation();
-            })
-            .child(cjk_inline_label("Ctrl+K"))
-            .into_any_element()
-    };
+    });
 
     let search_box = div()
         .id("sidebar-search-box")
@@ -411,7 +394,7 @@ pub fn render_sidebar(
                     .p_0(),
             ),
         )
-        .child(search_trailing);
+        .children(search_trailing);
 
     let has_checked_items = !selected_ids.is_empty();
     let account_btn_label = SharedString::from(format!("账号菜单：{account_label}"));
@@ -1064,12 +1047,6 @@ pub fn render_sidebar_exiting(
                                         } else {
                                             SharedString::from("搜索")
                                         }),
-                                )
-                                .child(
-                                    apply_scale(div(), scale::CAPTION)
-                                        .text_color(palette.text_muted)
-                                        .flex_shrink_0()
-                                        .child(cjk_inline_label("Ctrl+K")),
                                 ),
                         )
                         .child(

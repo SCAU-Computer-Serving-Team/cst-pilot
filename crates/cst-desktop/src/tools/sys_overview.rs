@@ -276,7 +276,7 @@ fn render_metric_column(
     pct_str: &str,
     sub_str: &str,
     pct: f64,
-    mono_family: SharedString,
+    _mono_family: SharedString,
     palette: &DesktopPalette,
     window: &mut Window,
     cx: &mut App,
@@ -313,7 +313,6 @@ fn render_metric_column(
                 .child(
                     apply_scale(div(), scale::UI_MEDIUM)
                         .font_weight(FontWeight::SEMIBOLD)
-                        .font_family(mono_family)
                         .text_color(palette.text_primary)
                         .child(SharedString::from(pct_str.to_owned())),
                 ),

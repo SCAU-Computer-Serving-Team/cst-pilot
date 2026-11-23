@@ -73,7 +73,11 @@ export function AssistantContent({
 			})}
 			{finalText && <Markdown text={finalText} live={live} />}
 			{(last?.message.stopReason === "error" || last?.message.errorMessage) && (
-				<ErrorNotice model message={last.message.errorMessage || "模型调用失败，请检查登录状态和模型设置。"} />
+				<ErrorNotice
+					model
+					format={format}
+					message={last.message.errorMessage || "模型调用失败，请检查登录状态和模型设置。"}
+				/>
 			)}
 			{last?.message.stopReason === "aborted" && <p className="message-warning">已停止生成</p>}
 			{children}

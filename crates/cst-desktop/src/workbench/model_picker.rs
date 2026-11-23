@@ -2,6 +2,7 @@ use std::f32::consts::{FRAC_PI_2, TAU};
 use std::rc::Rc;
 
 use cst_client::{ModelChoiceDto, ModelsSnapshot};
+use gpui::{Font, FontWeight, Hsla, Pixels, TextRun};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::component::Icon;
@@ -13,10 +14,10 @@ use gpui_kit::{
 use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::shell::open_url_in_trusted_browser;
 use crate::theme::{
-    DesktopPalette, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
+    DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
+    scale, space,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -139,6 +140,7 @@ pub fn render_context_ring_button(
         .items_center()
         .justify_center()
         .hover(|s| s.bg(palette.bg_item_hover))
+        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_click(move |_, w, cx| on_toggle(w, cx))
         .child(
             canvas(
@@ -208,10 +210,10 @@ pub fn render_context_quota_popover(
     usage_stats: Option<&Value>,
     quota: Option<&Value>,
     quota_loading: bool,
-    mono_family: SharedString,
+    _mono_family: SharedString,
     palette: &DesktopPalette,
-    transparency_enabled: bool,
-    scale_factor: f32,
+    _transparency_enabled: bool,
+    _scale_factor: f32,
     on_retry_quota: SimpleUiFn,
     on_open_account: SimpleUiFn,
 ) -> impl IntoElement {
@@ -251,88 +253,83 @@ pub fn render_context_quota_popover(
 
     let bar_ratio = (percent_opt.unwrap_or(0.0).clamp(0.0, 100.0) / 100.0) as f32;
 
-    let mut card = render_frosted_surface(
-        if interactive {
+    let mut card = div()
+        .id(if interactive {
             "composer-context-popover-h5jg6d"
         } else {
             "composer-context-popover-h5jg6d-exit"
-        },
-        FrostedGlassSpec::popover(palette).with_opacity(progress),
-        palette.bg_elevated,
-        transparency_enabled,
-        scale_factor,
-    )
-    .opacity(0.01 + 0.99 * progress)
-    .mt(px(6.0 * (1.0 - progress)))
-    .shadow(motion::scale_shadows(
-        palette.craft_stack_shadows(),
-        progress.powi(3),
-    ))
-    .w(px(336.0))
-    .p(space::LG)
-    .rounded(radius::ROW)
-    .border_1()
-    .border_color(palette.border_hairline)
-    .flex()
-    .flex_col()
-    .gap(space::SM)
-    .child(
-        div()
-            .relative()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(space::SM)
-            .child(
-                apply_scale(div(), scale::CAPTION_MEDIUM)
-                    .text_color(palette.text_secondary)
-                    .child("上下文容量"),
-            )
-            .child(
-                apply_scale(div(), scale::CAPTION)
-                    .font_family(mono_family.clone())
-                    .text_color(palette.text_primary)
-                    .child(SharedString::from(capacity_str)),
-            ),
-    )
-    .child(
-        div()
-            .relative()
-            .w_full()
-            .h(px(6.0))
-            .rounded(radius::FULL)
-            .bg(palette.bg_surface)
-            .overflow_hidden()
-            .child(
-                div()
-                    .w(relative(bar_ratio))
-                    .h_full()
-                    .rounded(radius::FULL)
-                    .bg(if bar_ratio >= 0.85 {
-                        palette.status_warning
-                    } else {
-                        palette.accent_solid
-                    }),
-            ),
-    )
-    .child(
-        div()
-            .relative()
-            .flex()
-            .items_center()
-            .justify_between()
-            .child(
-                apply_scale(div(), scale::CAPTION)
-                    .text_color(palette.text_secondary)
-                    .child("平均缓存命中率"),
-            )
-            .child(
-                apply_scale(div(), scale::CAPTION)
-                    .font_family(mono_family.clone())
-                    .text_color(palette.text_primary)
-                    .child(SharedString::from(cache_str)),
-            ),
-    );
+        })
+        .relative()
+        .top(px(6.0 * (1.0 - progress)))
+        .opacity(0.01 + 0.99 * progress)
+        .shadow(motion::scale_shadows(
+            palette.flat_popover_shadows(),
+            progress.powi(3),
+        ))
+        .w(px(336.0))
+        .p(space::LG)
+        .rounded(radius::ROW)
+        .bg(palette.bg_elevated)
+        .border_1()
+        .border_color(palette.border_subtle)
+        .flex()
+        .flex_col()
+        .gap(space::SM)
+        .child(
+            div()
+                .relative()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(space::SM)
+                .child(
+                    apply_scale(div(), scale::CAPTION_MEDIUM)
+                        .text_color(palette.text_secondary)
+                        .child("上下文容量"),
+                )
+                .child(
+                    apply_scale(div(), scale::CAPTION)
+                        .text_color(palette.text_primary)
+                        .child(SharedString::from(capacity_str)),
+                ),
+        )
+        .child(
+            div()
+                .relative()
+                .w_full()
+                .h(px(6.0))
+                .rounded(radius::FULL)
+                .bg(palette.bg_surface)
+                .overflow_hidden()
+                .child(
+                    div()
+                        .w(relative(bar_ratio))
+                        .h_full()
+                        .rounded(radius::FULL)
+                        .bg(if bar_ratio >= 0.85 {
+                            palette.status_warning
+                        } else {
+                            palette.accent_solid
+                        }),
+                ),
+        )
+        .child(
+            div()
+                .relative()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    apply_scale(div(), scale::CAPTION)
+                        .text_color(palette.text_secondary)
+                        .child("平均缓存命中率"),
+                )
+                .child(
+                    apply_scale(div(), scale::CAPTION)
+                        .text_color(palette.text_primary)
+                        .child(SharedString::from(cache_str)),
+                ),
+        );
 
     if is_quota_provider(provider) {
         let is_external_more = provider != "cstoa";
@@ -428,7 +425,6 @@ pub fn render_context_quota_popover(
                 card = card.child(
                     apply_scale(div(), scale::BODY_SEMIBOLD)
                         .relative()
-                        .font_family(mono_family.clone())
                         .text_color(palette.text_primary)
                         .child(SharedString::from(bal)),
                 );
@@ -463,7 +459,6 @@ pub fn render_context_quota_popover(
                                 )
                                 .child(
                                     apply_scale(div(), scale::CAPTION)
-                                        .font_family(mono_family.clone())
                                         .text_color(palette.text_primary)
                                         .child(SharedString::from(format!("剩余 {rem}%"))),
                                 ),
@@ -535,6 +530,7 @@ pub fn render_context_quota_popover(
         card.test_support()
             .occlude()
             .a11y_dialog("composer-context-popover-h5jg6d", "上下文容量与剩余额度")
+            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(|_, _, cx| cx.stop_propagation())
             .into_any_element()
     } else {
@@ -546,9 +542,234 @@ pub type SelectModelFn = Rc<dyn Fn(String, String, &mut Window, &mut App)>;
 pub type SelectThinkingFn = Rc<dyn Fn(String, &mut Window, &mut App)>;
 pub type ChangePickerPageFn = Rc<dyn Fn(ModelPickerPage, &mut Window, &mut App)>;
 
-/// Computes the target `(width, height)` for the two-level model picker popover following the web
-/// frontend's deterministic layout formula (`min(rows * row_h + chrome, 440px, 60vh)` with stable
-/// `224px` baseline width on Main / Thinking and adaptive `[224px, 268px]` width on Models).
+const PICKER_MIN_WIDTH: f32 = 224.0;
+const PICKER_MAX_WIDTH: f32 = 320.0;
+const PICKER_ROW_HEIGHT: f32 = 32.0;
+const PICKER_BACK_HEIGHT: f32 = 28.0;
+const PICKER_ROW_GAP: f32 = 2.0;
+const PICKER_CARD_CHROME_H: f32 = 10.0; // space::XS (4px) * 2 + 1px border * 2
+const PICKER_CARD_CHROME_V: f32 = 10.0; // space::XS (4px) * 2 + 1px border * 2
+const PICKER_ROW_PADDING_H: f32 = 16.0; // space::SM (8px) * 2
+
+fn shape_text_width(
+    text: &str,
+    font_size: Pixels,
+    weight: FontWeight,
+    family: &SharedString,
+    window: &Window,
+) -> f32 {
+    if text.is_empty() {
+        return 0.0;
+    }
+    let run = TextRun {
+        len: text.len(),
+        font: Font {
+            family: family.clone(),
+            weight,
+            ..Default::default()
+        },
+        color: Hsla::default(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let line = window.text_system().shape_line(
+        SharedString::from(text.to_owned()),
+        font_size,
+        &[run],
+        None,
+    );
+    f32::from(line.width).ceil()
+}
+
+fn compute_picker_height(
+    page: ModelPickerPage,
+    model_count: usize,
+    thinking_count: usize,
+    viewport_height: f32,
+) -> f32 {
+    let max_height = 440.0_f32.min((viewport_height * 0.6).max(120.0));
+    let raw_height = match page {
+        ModelPickerPage::Main => 2.0 * PICKER_ROW_HEIGHT + PICKER_ROW_GAP + PICKER_CARD_CHROME_V,
+        ModelPickerPage::Models => {
+            let rows = model_count.max(1) as f32;
+            PICKER_BACK_HEIGHT
+                + PICKER_ROW_GAP
+                + rows * PICKER_ROW_HEIGHT
+                + (rows - 1.0).max(0.0) * PICKER_ROW_GAP
+                + PICKER_CARD_CHROME_V
+        }
+        ModelPickerPage::Thinking => {
+            let rows = thinking_count.max(1) as f32;
+            PICKER_BACK_HEIGHT
+                + PICKER_ROW_GAP
+                + rows * PICKER_ROW_HEIGHT
+                + (rows - 1.0).max(0.0) * PICKER_ROW_GAP
+                + PICKER_CARD_CHROME_V
+        }
+    };
+    raw_height.min(max_height).ceil()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn measure_model_picker_dimensions(
+    page: ModelPickerPage,
+    scoped_models: &[ModelChoiceDto],
+    current_model_label: &str,
+    thinking_levels: &[String],
+    current_thinking: &str,
+    viewport_width: f32,
+    viewport_height: f32,
+    window: &Window,
+    cx: &App,
+) -> (f32, f32) {
+    let ui_family = DesktopThemeGlobal::current(cx).ui_font_family;
+    let max_width = (viewport_width - 32.0).max(180.0);
+    let effective_thinking_count = if thinking_levels.is_empty() {
+        4
+    } else {
+        thinking_levels.len()
+    };
+
+    let raw_width = match page {
+        ModelPickerPage::Main => {
+            let model_key_w = shape_text_width(
+                "模型",
+                scale::CAPTION_MEDIUM.font_size,
+                scale::CAPTION_MEDIUM.weight,
+                &ui_family,
+                window,
+            );
+            let model_val_w = shape_text_width(
+                current_model_label,
+                scale::CAPTION_MEDIUM.font_size,
+                scale::CAPTION_MEDIUM.weight,
+                &ui_family,
+                window,
+            )
+            .min(180.0);
+            let think_key_w = shape_text_width(
+                "思考强度",
+                scale::CAPTION_MEDIUM.font_size,
+                scale::CAPTION_MEDIUM.weight,
+                &ui_family,
+                window,
+            );
+            let think_val_w = shape_text_width(
+                thinking_level_label(current_thinking),
+                scale::CAPTION_MEDIUM.font_size,
+                scale::CAPTION_MEDIUM.weight,
+                &ui_family,
+                window,
+            );
+            // Row chrome: left/right padding (16) + min gap (12) + xs gap (4) + 13px chevron + card chrome (10)
+            let row_chrome = PICKER_ROW_PADDING_H + 12.0 + 4.0 + 13.0 + PICKER_CARD_CHROME_H + 4.0;
+            let needed = (model_key_w + model_val_w).max(think_key_w + think_val_w) + row_chrome;
+            needed.clamp(PICKER_MIN_WIDTH, PICKER_MAX_WIDTH)
+        }
+        ModelPickerPage::Models => {
+            let back_w = PICKER_ROW_PADDING_H
+                + 13.0
+                + 4.0
+                + shape_text_width(
+                    "返回",
+                    scale::CAPTION_MEDIUM.font_size,
+                    scale::CAPTION_MEDIUM.weight,
+                    &ui_family,
+                    window,
+                )
+                + PICKER_CARD_CHROME_H;
+            let rows_w = if scoped_models.is_empty() {
+                shape_text_width(
+                    "暂无已就绪模型",
+                    scale::CAPTION.font_size,
+                    scale::CAPTION.weight,
+                    &ui_family,
+                    window,
+                ) + PICKER_ROW_PADDING_H
+                    + PICKER_CARD_CHROME_H
+            } else {
+                scoped_models
+                    .iter()
+                    .map(|m| {
+                        let label = if m.name.trim().is_empty() {
+                            m.id.as_str()
+                        } else {
+                            m.name.as_str()
+                        };
+                        let label_w = shape_text_width(
+                            label,
+                            scale::CAPTION_MEDIUM.font_size,
+                            scale::CAPTION_MEDIUM.weight,
+                            &ui_family,
+                            window,
+                        );
+                        let provider_w = shape_text_width(
+                            &m.provider,
+                            px(11.0),
+                            FontWeight::NORMAL,
+                            &ui_family,
+                            window,
+                        );
+                        // Row chrome: row px (16) + between gap (12) + xs gap (4) + 13px check slot + card chrome (10) + safety (4)
+                        label_w
+                            + provider_w
+                            + PICKER_ROW_PADDING_H
+                            + 12.0
+                            + 4.0
+                            + 13.0
+                            + PICKER_CARD_CHROME_H
+                            + 4.0
+                    })
+                    .fold(0.0_f32, f32::max)
+            };
+            rows_w.max(back_w).clamp(PICKER_MIN_WIDTH, PICKER_MAX_WIDTH)
+        }
+        ModelPickerPage::Thinking => {
+            let fallback = ["low", "medium", "high", "max"];
+            let rows_w = if thinking_levels.is_empty() {
+                fallback
+                    .iter()
+                    .map(|lv| {
+                        shape_text_width(
+                            thinking_level_label(lv),
+                            scale::CAPTION_MEDIUM.font_size,
+                            scale::CAPTION_MEDIUM.weight,
+                            &ui_family,
+                            window,
+                        )
+                    })
+                    .fold(0.0_f32, f32::max)
+            } else {
+                thinking_levels
+                    .iter()
+                    .map(|lv| {
+                        shape_text_width(
+                            thinking_level_label(lv),
+                            scale::CAPTION_MEDIUM.font_size,
+                            scale::CAPTION_MEDIUM.weight,
+                            &ui_family,
+                            window,
+                        )
+                    })
+                    .fold(0.0_f32, f32::max)
+            };
+            (rows_w + PICKER_ROW_PADDING_H + 12.0 + 13.0 + PICKER_CARD_CHROME_H + 4.0)
+                .clamp(PICKER_MIN_WIDTH, PICKER_MAX_WIDTH)
+        }
+    };
+
+    let height = compute_picker_height(
+        page,
+        scoped_models.len(),
+        effective_thinking_count,
+        viewport_height,
+    );
+    (raw_width.min(max_width).ceil(), height)
+}
+
+/// Deterministic fallback formula used in pure unit tests without a GPUI text system.
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn compute_model_picker_dimensions(
     page: ModelPickerPage,
     scoped_models: &[ModelChoiceDto],
@@ -556,18 +777,9 @@ pub(crate) fn compute_model_picker_dimensions(
     viewport_width: f32,
     viewport_height: f32,
 ) -> (f32, f32) {
-    const BASE_WIDTH: f32 = 224.0;
-    const MAX_MODEL_WIDTH: f32 = 268.0;
-    const ROW_H: f32 = 32.0;
-    const ROW_GAP: f32 = 2.0;
-    const BACK_HEADER_CHROME: f32 = 28.0 + 1.0 + ROW_GAP * 2.0; // back row + divider + 2 gaps
-    const CARD_CHROME_V: f32 = 4.0 * 2.0 + 1.0 * 2.0; // space::XS padding + 1px border
-
     let max_width = (viewport_width - 32.0).max(180.0);
-    let max_height = 440.0_f32.min((viewport_height * 0.6).max(120.0));
-
     let raw_width = match page {
-        ModelPickerPage::Main | ModelPickerPage::Thinking => BASE_WIDTH,
+        ModelPickerPage::Main | ModelPickerPage::Thinking => PICKER_MIN_WIDTH,
         ModelPickerPage::Models => {
             let longest_px = scoped_models
                 .iter()
@@ -577,29 +789,28 @@ pub(crate) fn compute_model_picker_dimensions(
                     } else {
                         m.name.as_str()
                     };
-                    label.chars().fold(0.0_f32, |acc, ch| {
-                        acc + if ch.is_ascii() { 7.6 } else { 13.0 }
-                    })
+                    let label_w = label.chars().fold(0.0_f32, |acc, ch| {
+                        acc + if ch.is_ascii() { 7.2 } else { 12.5 }
+                    });
+                    let provider_w = m.provider.chars().fold(0.0_f32, |acc, ch| {
+                        acc + if ch.is_ascii() { 6.2 } else { 11.0 }
+                    });
+                    label_w
+                        + provider_w
+                        + PICKER_ROW_PADDING_H
+                        + 12.0
+                        + 4.0
+                        + 13.0
+                        + PICKER_CARD_CHROME_H
+                        + 4.0
                 })
                 .fold(0.0_f32, f32::max);
-            // 16px row padding + 8px gap + 13px check icon + 10px card border/padding
-            (longest_px + 54.0).clamp(BASE_WIDTH, MAX_MODEL_WIDTH)
+            longest_px.clamp(PICKER_MIN_WIDTH, PICKER_MAX_WIDTH)
         }
     };
 
-    let raw_height = match page {
-        ModelPickerPage::Main => 2.0 * ROW_H + ROW_GAP + CARD_CHROME_V,
-        ModelPickerPage::Models => {
-            let rows = scoped_models.len().max(1) as f32;
-            BACK_HEADER_CHROME + rows * ROW_H + (rows - 1.0).max(0.0) * ROW_GAP + CARD_CHROME_V
-        }
-        ModelPickerPage::Thinking => {
-            let rows = thinking_count.max(1) as f32;
-            BACK_HEADER_CHROME + rows * ROW_H + (rows - 1.0).max(0.0) * ROW_GAP + CARD_CHROME_V
-        }
-    };
-
-    (raw_width.min(max_width), raw_height.min(max_height))
+    let height = compute_picker_height(page, scoped_models.len(), thinking_count, viewport_height);
+    (raw_width.min(max_width).ceil(), height)
 }
 
 /// Renders the compact two-level model & thinking strength popover (`cst-pilot-desktop.pen` 「01 · 工作台」
@@ -620,26 +831,25 @@ pub fn render_model_picker_popover(
     thinking_levels: &[String],
     current_thinking: &str,
     palette: &DesktopPalette,
-    transparency_enabled: bool,
-    scale_factor: f32,
+    _transparency_enabled: bool,
+    _scale_factor: f32,
     on_goto_page: ChangePickerPageFn,
     on_select_model: SelectModelFn,
     on_select_thinking: SelectThinkingFn,
     window: &mut Window,
     cx: &mut App,
 ) -> impl IntoElement {
-    let effective_thinking_count = if thinking_levels.is_empty() {
-        4
-    } else {
-        thinking_levels.len()
-    };
     let viewport = window.viewport_size();
-    let (target_width, target_height) = compute_model_picker_dimensions(
+    let (target_width, target_height) = measure_model_picker_dimensions(
         page,
         scoped_models,
-        effective_thinking_count,
+        current_model_label,
+        thinking_levels,
+        current_thinking,
         f32::from(viewport.width).max(360.0),
         f32::from(viewport.height).max(360.0),
+        window,
+        cx,
     );
     let anim_width = transition(
         SharedString::from(format!("model-picker-resize-w-{open_epoch}")),
@@ -656,30 +866,27 @@ pub fn render_model_picker_popover(
         cx,
     );
 
-    let card = render_frosted_surface(
-        if interactive {
+    let card = div()
+        .id(if interactive {
             "composer-model-picker-d8zzg"
         } else {
             "composer-model-picker-d8zzg-exit"
-        },
-        FrostedGlassSpec::popover(palette).with_opacity(progress),
-        palette.bg_elevated,
-        transparency_enabled,
-        scale_factor,
-    )
-    .opacity(0.01 + 0.99 * progress)
-    .mt(px(6.0 * (1.0 - progress)))
-    .shadow(motion::scale_shadows(
-        palette.craft_stack_shadows(),
-        progress.powi(3),
-    ))
-    .w(px(anim_width))
-    .h(px(anim_height))
-    .p(space::XS)
-    .rounded(radius::ROW)
-    .border_1()
-    .border_color(palette.border_hairline)
-    .overflow_hidden();
+        })
+        .relative()
+        .top(px(6.0 * (1.0 - progress)))
+        .opacity(0.01 + 0.99 * progress)
+        .shadow(motion::scale_shadows(
+            palette.flat_popover_shadows(),
+            progress.powi(3),
+        ))
+        .w(px(anim_width))
+        .h(px(anim_height))
+        .p(space::XS)
+        .rounded(radius::ROW)
+        .bg(palette.bg_elevated)
+        .border_1()
+        .border_color(palette.border_subtle)
+        .overflow_hidden();
 
     let mut page_body = div()
         .size_full()
@@ -724,7 +931,7 @@ pub fn render_model_picker_popover(
                         .min_w_0()
                         .child(
                             div()
-                                .max_w(px(124.0))
+                                .max_w(px(180.0))
                                 .truncate()
                                 .text_color(palette.text_secondary)
                                 .child(SharedString::from(current_model_label.to_owned())),
@@ -814,35 +1021,22 @@ pub fn render_model_picker_popover(
                 .relative()
                 .h(height::COMPACT)
                 .px(space::SM)
-                .rounded(radius::CONTROL)
                 .text_color(palette.text_secondary)
                 .flex()
                 .items_center()
                 .gap(space::XS)
-                .child(
-                    Icon::new(IconName::ChevronLeft)
-                        .size(px(13.0))
-                        .text_color(palette.text_secondary),
-                )
+                .child(Icon::new(IconName::ChevronLeft).size(px(13.0)))
                 .child(cjk_inline_label("返回"));
-            page_body = page_body
-                .child(if interactive {
-                    back_btn
-                        .test_support()
-                        .a11y_button("model-picker-back-btn", "返回上级菜单")
-                        .hover(|s| s.bg(palette.bg_item_active))
-                        .on_click(move |_, w, cx| (back)(ModelPickerPage::Main, w, cx))
-                        .into_any_element()
-                } else {
-                    back_btn.into_any_element()
-                })
-                .child(
-                    div()
-                        .relative()
-                        .w_full()
-                        .h(px(1.0))
-                        .bg(palette.border_subtle),
-                );
+            page_body = page_body.child(if interactive {
+                back_btn
+                    .test_support()
+                    .a11y_button("model-picker-back-btn", "返回上级菜单")
+                    .hover(|s| s.text_color(palette.text_primary))
+                    .on_click(move |_, w, cx| (back)(ModelPickerPage::Main, w, cx))
+                    .into_any_element()
+            } else {
+                back_btn.into_any_element()
+            });
 
             let mut scroll = div()
                 .id(if interactive {
@@ -875,6 +1069,7 @@ pub fn render_model_picker_popover(
                     let is_cur = m.provider == current_provider && m.id == current_model_id;
                     let is_hi = idx == highlighted_idx;
                     let prov = m.provider.clone();
+                    let prov_display = SharedString::from(m.provider.clone());
                     let mid = m.id.clone();
                     let sel_fn = Rc::clone(&on_select_model);
                     let label = if m.name.trim().is_empty() {
@@ -883,7 +1078,7 @@ pub fn render_model_picker_popover(
                         m.name.clone()
                     };
                     let opt_id = SharedString::from(format!("model-option-{prov}-{mid}"));
-                    let mut row = apply_scale(div(), scale::CAPTION_MEDIUM)
+                    let row = apply_scale(div(), scale::CAPTION_MEDIUM)
                         .id(if interactive {
                             opt_id.clone()
                         } else {
@@ -902,17 +1097,29 @@ pub fn render_model_picker_popover(
                         .items_center()
                         .justify_between()
                         .gap(space::SM)
-                        .child(div().flex_1().min_w_0().truncate().child(label.clone()));
-                    if is_cur {
-                        row = row.child(
-                            Icon::new(IconName::Check)
-                                .size(px(13.0))
-                                .text_color(palette.accent_ink),
+                        .child(div().flex_1().min_w_0().truncate().child(label.clone()))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(space::XS)
+                                .flex_shrink_0()
+                                .child(
+                                    div()
+                                        .text_size(px(11.0))
+                                        .line_height(px(16.0))
+                                        .text_color(palette.text_muted)
+                                        .child(prov_display),
+                                )
+                                .children(is_cur.then(|| {
+                                    Icon::new(IconName::Check)
+                                        .size(px(13.0))
+                                        .text_color(palette.accent_ink)
+                                })),
                         );
-                    }
                     scroll = scroll.child(if interactive {
                         row.test_support()
-                            .a11y_listitem(opt_id, label, is_cur)
+                            .a11y_listitem(opt_id, format!("{prov} · {label}"), is_cur)
                             .hover(|s| s.bg(palette.bg_item_active))
                             .on_click(move |_, w, cx| {
                                 (sel_fn)(prov.clone(), mid.clone(), w, cx);
@@ -936,35 +1143,22 @@ pub fn render_model_picker_popover(
                 .relative()
                 .h(height::COMPACT)
                 .px(space::SM)
-                .rounded(radius::CONTROL)
                 .text_color(palette.text_secondary)
                 .flex()
                 .items_center()
                 .gap(space::XS)
-                .child(
-                    Icon::new(IconName::ChevronLeft)
-                        .size(px(13.0))
-                        .text_color(palette.text_secondary),
-                )
+                .child(Icon::new(IconName::ChevronLeft).size(px(13.0)))
                 .child(cjk_inline_label("返回"));
-            page_body = page_body
-                .child(if interactive {
-                    back_btn
-                        .test_support()
-                        .a11y_button("thinking-picker-back-btn", "返回上级菜单")
-                        .hover(|s| s.bg(palette.bg_item_active))
-                        .on_click(move |_, w, cx| (back)(ModelPickerPage::Main, w, cx))
-                        .into_any_element()
-                } else {
-                    back_btn.into_any_element()
-                })
-                .child(
-                    div()
-                        .relative()
-                        .w_full()
-                        .h(px(1.0))
-                        .bg(palette.border_subtle),
-                );
+            page_body = page_body.child(if interactive {
+                back_btn
+                    .test_support()
+                    .a11y_button("thinking-picker-back-btn", "返回上级菜单")
+                    .hover(|s| s.text_color(palette.text_primary))
+                    .on_click(move |_, w, cx| (back)(ModelPickerPage::Main, w, cx))
+                    .into_any_element()
+            } else {
+                back_btn.into_any_element()
+            });
 
             let levels: Vec<String> = if thinking_levels.is_empty() {
                 vec![
@@ -1051,11 +1245,12 @@ pub fn render_model_picker_popover(
         }
     }
 
-    let card = card.child(page_body.opacity(page_opacity).ml(page_offset));
+    let card = card.child(page_body.relative().left(page_offset).opacity(page_opacity));
     if interactive {
         card.test_support()
             .occlude()
             .a11y_dialog("composer-model-picker-d8zzg", "模型与思考强度选择")
+            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(|_, _, cx| cx.stop_propagation())
             .into_any_element()
     } else {
@@ -1108,7 +1303,7 @@ mod tests {
             1280.0,
             600.0,
         );
-        assert!((224.0..=268.0).contains(&lw));
+        assert!((224.0..=320.0).contains(&lw));
         // Capped at min(440, 60vh) = 360px when viewport height is 600px
         assert_eq!(lh, 360.0);
     }

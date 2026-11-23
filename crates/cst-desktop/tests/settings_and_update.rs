@@ -468,6 +468,20 @@ impl Step6MockBackend {
                                         "directory": "artifacts/2026-11-20/sessions"
                                     }))
                                 }
+                                ("GET", "/api/exports/recent") => (
+                                    "HTTP/1.1 200 OK",
+                                    json!({
+                                        "exports": [{
+                                            "id": "exp-job-1",
+                                            "sessionId": "sess-busy",
+                                            "title": "蓝屏排查会话",
+                                            "capturedAt": "2026-11-20T14:30:00Z",
+                                            "status": "completed",
+                                            "options": { "format": "png", "date": "2026-11-20" },
+                                            "files": [{ "name": "report.png", "bytes": 4096, "url": "/api/exports/exp-job-1/files/0" }]
+                                        }]
+                                    }),
+                                ),
                                 ("GET", "/api/exports/exp-stale") => (
                                     "HTTP/1.1 200 OK",
                                     json!({
@@ -696,18 +710,29 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         open_desktop_shell_window_with_handle(handle.clone(), None, cx).unwrap()
     });
 
-    // 1. `Ctrl+K` `520px` Command Palette (`I70mz`): instant open + `Esc` 1-frame focus restore
+    // 1. `Ctrl+P` / `Ctrl+O` `540px` Dual Quick Palette (`I70mz` / `Xyg0l`): instant open, in-place switch, `Ctrl+K` removed, & `Esc` 1-frame focus restore
     cx.update_window(win_handle, |_, window, cx| {
         window.render_frame(cx);
         window.click("sidebar-collapse-btn", cx);
         window.click("topbar-expand-sidebar-btn", cx);
         assert_eq!(window.find("sidebar-collapse-btn").focused(), Some(true));
+        assert!(window.try_find("sidebar-search-kbd-btn").is_none());
 
+        // Legacy Ctrl+K must not open the palette
         window.press("ctrl-k", cx);
+        assert!(window.try_find("command-palette-modal-i70mz").is_none());
+
+        window.press("ctrl-p", cx);
         let modal = window.find("command-palette-modal-i70mz");
         assert!(modal.visible());
-        assert_eq!(f32::from(modal.bounds().size.width), 520.0);
-        assert!(window.find("command-palette-footer-hints").visible());
+        assert_eq!(f32::from(modal.bounds().size.width), 540.0);
+        assert!(window.try_find("command-palette-footer-hints").is_none());
+
+        // In-place switch Ctrl+P -> Ctrl+O -> Ctrl+P
+        window.press("ctrl-o", cx);
+        assert!(window.find("command-palette-modal-i70mz").visible());
+        window.press("ctrl-p", cx);
+        assert!(window.find("command-palette-modal-i70mz").visible());
 
         window.press("escape", cx);
         assert!(window.try_find("command-palette-modal-i70mz").is_none());
@@ -765,8 +790,8 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
                 &cst_client::DraftKey::Session(id.to_owned())
             );
         }
-        window.press("ctrl-k", cx);
-        window.input("/compact", cx);
+        window.press("ctrl-p", cx);
+        window.input("compact", cx);
     })
     .unwrap();
     cx.update_window(win_handle, |_, window, cx| {
@@ -867,33 +892,37 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
     })
     .await;
 
-    // Verify branch tree controls while open
+    // Verify branch tree controls while open (branch-tree shortcuts removed; Ctrl+O opens Quick Open palette)
     cx.update_window(win_handle, |_, window, cx| {
         window.render_frame(cx);
         assert!(window.find("branch-tree-view").visible());
+        assert!(window.try_find("branch-tree-kbd-hint-na2qi").is_none());
         window.press("ctrl-o", cx);
+        assert!(window.find("command-palette-modal-i70mz").visible());
         assert_eq!(
             shell.read(cx).branch_tree_view().read(cx).filter_mode(),
-            TreeFilterMode::NoTools
-        );
-
-        // Select non-leaf user node `e-user-1` -> opens 3-mode summary card -> click `"不总结"`
-        window.click("tree-node-row-e-user-1", cx);
-        assert!(window.find("branch-summary-mode-card").visible());
-        assert!(window.find("branch-mode-no-summary-btn").visible());
-        assert!(window.find("branch-mode-summary-btn").visible());
-        assert!(window.find("branch-mode-custom-summary-btn").visible());
-        window.press("tab tab tab tab tab", cx);
-        window.press("ctrl-o", cx);
-        assert_eq!(
-            shell.read(cx).branch_tree_view().read(cx).filter_mode(),
-            TreeFilterMode::NoTools
+            TreeFilterMode::Default
         );
         window.press("escape", cx);
-        assert!(window.try_find("branch-summary-mode-card").is_none());
+        assert!(window.try_find("command-palette-modal-i70mz").is_none());
+
+        // Select non-leaf user node `e-user-1` -> opens 3-mode summary card (`直接回退 / 总结 / 自定义提示词总结`, no cancel button)
+        window.click("tree-node-row-e-user-1", cx);
+        assert!(window.find("branch-summary-mode-card").visible());
+        assert!(window.find("branch-mode-direct-btn").visible());
+        assert!(window.find("branch-mode-summary-btn").visible());
+        assert!(window.find("branch-mode-custom-summary-btn").visible());
+        assert!(window.try_find("branch-mode-cancel-btn").is_none());
+        // Verify arrow-key navigation opens the independent custom prompt dialog (`AtYcx` -> `l6fle`)
+        window.press("down", cx);
+        window.press("down", cx);
+        window.press("enter", cx);
+        assert!(window.find("branch-custom-prompt-card").visible());
+        window.press("escape", cx);
+        assert!(window.try_find("branch-custom-prompt-card").is_none());
         assert!(window.find("branch-tree-view").visible());
         window.click("tree-node-row-e-user-1", cx);
-        window.click("branch-mode-no-summary-btn", cx);
+        window.click("branch-mode-direct-btn", cx);
     })
     .unwrap();
 
@@ -912,8 +941,11 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
     })
     .await;
 
-    // Re-expand sidebar before testing `ExportView` via `session-header-more-btn`
+    // Return from branch tree & re-expand sidebar before testing `ExportView` via `session-header-more-btn`
     cx.update_window(win_handle, |_, window, cx| {
+        if window.try_find("branch-tree-close-btn").is_some() {
+            window.click("branch-tree-close-btn", cx);
+        }
         window.click("topbar-expand-sidebar-btn", cx);
         window.render_frame(cx);
     })
@@ -985,8 +1017,8 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
     })
     .unwrap();
     cx.update_window(win_handle, |_, window, cx| {
-        window.press("ctrl-k", cx);
-        window.input("/export", cx);
+        window.press("ctrl-p", cx);
+        window.input("export", cx);
         window.press("enter", cx);
     })
     .unwrap();
@@ -1181,6 +1213,43 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         draft.selected_thinking_level = Some("high".into());
     });
     cx.update_window(win_handle, |_, window, cx| {
+        shell.update(cx, |s, cx| s.set_route(ShellRoute::Settings, cx));
+        shell.read(cx).settings_view().clone().update(cx, |sv, cx| {
+            sv.set_category(cst_desktop::settings::SettingsCategory::Preferences, cx);
+        });
+        window.render_frame(cx);
+        // Verify click-outside dismissal on both model preference dropdowns.
+        window.click("pref-default-model-trigger", cx);
+        assert!(window.find("pref-default-model-popover").visible());
+        window.click("settings-subpage-header-title-track", cx);
+        assert!(window.try_find("pref-default-model-popover").is_none());
+
+        window.click("pref-filter-dropdown-btn", cx);
+        assert!(window.find("pref-filter-popover").visible());
+        window.click("settings-subpage-header-title-track", cx);
+        assert!(window.try_find("pref-filter-popover").is_none());
+
+        // Verify Ctrl+P -> 打开全部会话 keeps keyboard arrow navigation continuous.
+        window.press("ctrl-p", cx);
+        window.input("sessions", cx);
+    })
+    .unwrap();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.press("enter", cx);
+    })
+    .unwrap();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("command-palette-modal-i70mz").is_none());
+        assert!(window.find("all-sessions-view").visible());
+        window.press("down", cx);
+        window.press("enter", cx);
+    })
+    .unwrap();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).route(), ShellRoute::Session);
+
         shell.update(cx, |s, cx| s.set_route(ShellRoute::Settings, cx));
         shell.read(cx).settings_view().clone().update(cx, |sv, cx| {
             sv.set_category(cst_desktop::settings::SettingsCategory::Preferences, cx);

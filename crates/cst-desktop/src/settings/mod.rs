@@ -198,17 +198,34 @@ impl SettingsView {
     }
 
     pub fn has_dropdown(&self, cx: &gpui::App) -> bool {
-        self.category == SettingsCategory::Preferences
-            && self.preferences_tab.read(cx).has_dropdown()
+        match self.category {
+            SettingsCategory::Preferences => self.preferences_tab.read(cx).has_dropdown(),
+            SettingsCategory::Providers => self.providers_tab.read(cx).has_dropdown(),
+            _ => false,
+        }
     }
 
     pub fn dismiss_topmost_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        if self.category == SettingsCategory::Preferences {
-            return self
+        match self.category {
+            SettingsCategory::Preferences => self
                 .preferences_tab
-                .update(cx, |pt, cx| pt.dismiss_dropdowns(window, cx));
+                .update(cx, |pt, cx| pt.dismiss_dropdowns(window, cx)),
+            SettingsCategory::Providers => self
+                .providers_tab
+                .update(cx, |pt, cx| pt.dismiss_dropdowns(cx)),
+            _ => false,
         }
-        false
+    }
+
+    pub fn dismiss_click_outside_dropdowns(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut closed = false;
+        closed |= self
+            .preferences_tab
+            .update(cx, |pt, cx| pt.dismiss_dropdowns_on_outside_click(cx));
+        closed |= self
+            .providers_tab
+            .update(cx, |pt, cx| pt.dismiss_click_outside_dropdowns(cx));
+        closed
     }
 }
 

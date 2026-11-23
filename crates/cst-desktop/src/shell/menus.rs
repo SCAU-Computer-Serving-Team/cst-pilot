@@ -9,7 +9,6 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
@@ -28,8 +27,8 @@ impl AppShell {
         anchor_pos: Point<Pixels>,
         viewport_size: gpui_kit::Size<Pixels>,
         palette: &DesktopPalette,
-        transparency_enabled: bool,
-        scale_factor: f32,
+        _transparency_enabled: bool,
+        _scale_factor: f32,
         entity: &Entity<Self>,
     ) -> impl IntoElement {
         let sid_rename = sid.to_owned();
@@ -55,31 +54,27 @@ impl AppShell {
             raw_y.clamp(8.0, max_y)
         };
 
-        let mut menu_box = render_frosted_surface(
-            if interactive {
+        let mut menu_box = div()
+            .id(if interactive {
                 "sidebar-session-context-menu"
             } else {
                 "sidebar-session-context-menu-exit"
-            },
-            FrostedGlassSpec::popover(palette).with_opacity(progress),
-            palette.bg_elevated,
-            transparency_enabled,
-            scale_factor,
-        )
-        .opacity(0.01 + 0.99 * progress)
-        .mt(px(-4.0 * (1.0 - progress)))
-        .shadow(motion::scale_shadows(
-            palette.craft_stack_shadows(),
-            progress.powi(3),
-        ))
-        .w(px(200.0))
-        .p(space::XS)
-        .rounded(radius::ROW)
-        .border_1()
-        .border_color(palette.border_hairline)
-        .flex()
-        .flex_col()
-        .gap(space::MICRO);
+            })
+            .opacity(0.01 + 0.99 * progress)
+            .mt(px(-4.0 * (1.0 - progress)))
+            .shadow(motion::scale_shadows(
+                palette.flat_popover_shadows(),
+                progress.powi(3),
+            ))
+            .w(px(200.0))
+            .p(space::XS)
+            .rounded(radius::ROW)
+            .bg(palette.bg_elevated)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .flex()
+            .flex_col()
+            .gap(space::MICRO);
 
         // In batch mode, right-click menu converges to single `"删除"`!
         if !self.sidebar_batch_mode {
@@ -280,8 +275,8 @@ impl AppShell {
         progress: f32,
         active_session_id: Option<&str>,
         palette: &DesktopPalette,
-        transparency_enabled: bool,
-        scale_factor: f32,
+        _transparency_enabled: bool,
+        _scale_factor: f32,
         entity: &Entity<Self>,
     ) -> impl IntoElement {
         let mut sorted: Vec<_> = self.snapshot.sessions.as_ref().clone();
@@ -392,85 +387,84 @@ impl AppShell {
             })
             .child(
                 div().absolute().top(px(38.0)).left(px(anchor_x)).child(
-                    render_frosted_surface(
-                        if interactive {
+                    div()
+                        .id(if interactive {
                             "recent-sessions-drawer"
                         } else {
                             "recent-sessions-drawer-exit"
-                        },
-                        FrostedGlassSpec::popover(palette).with_opacity(progress),
-                        palette.bg_elevated,
-                        transparency_enabled,
-                        scale_factor,
-                    )
-                    .opacity(0.01 + 0.99 * progress)
-                    .mt(px(-8.0 * (1.0 - progress)))
-                    .shadow(motion::scale_shadows(
-                        palette.craft_stack_shadows(),
-                        progress.powi(3),
-                    ))
-                    .w(width)
-                    .p(space::XS)
-                    .rounded(radius::ROW)
-                    .border_1()
-                    .border_color(palette.border_hairline)
-                    .flex()
-                    .flex_col()
-                    .gap(space::MICRO)
-                    .child(rows)
-                    .child(
-                        div()
-                            .relative()
-                            .px(space::XS)
-                            .py(space::MICRO)
-                            .child(div().w_full().h(px(1.0)).bg(palette.border_subtle)),
-                    )
-                    .child(
-                        apply_scale(div(), scale::UI)
-                            .id("drawer-open-all-sessions-btn")
-                            .relative()
-                            .h(height::CONTROL)
-                            .px(space::SM)
-                            .rounded(radius::CONTROL)
-                            .text_color(palette.text_primary)
-                            .flex()
-                            .items_center()
-                            .gap(space::SM)
-                            .child(
-                                Icon::new(IconName::RotateCcwClock)
-                                    .size(px(16.0))
-                                    .text_color(palette.text_secondary),
-                            )
-                            .child(cjk_inline_label("查看全部会话"))
-                            .map(|el| {
-                                if interactive {
-                                    el.test_support()
-                                        .a11y_button("drawer-open-all-sessions-btn", "查看全部会话")
-                                        .hover(|s| s.bg(palette.bg_item_active))
-                                        .on_click(move |_, window, cx| {
-                                            ent_all.update(cx, |this, cx| {
-                                                this.close_recent_drawer(window, cx);
-                                                this.set_route(ShellRoute::AllSessions, cx);
-                                            });
-                                        })
-                                        .into_any_element()
-                                } else {
-                                    el.into_any_element()
-                                }
-                            }),
-                    )
-                    .map(|el| {
-                        if interactive {
-                            el.test_support()
-                                .a11y_dialog("recent-sessions-drawer", "最近会话抽屉")
-                                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
-                                    cx.stop_propagation()
-                                })
-                                .into_any_element()
-                        } else {
-                            el.into_any_element()
-                        }
-                    }),
+                        })
+                        .opacity(0.01 + 0.99 * progress)
+                        .mt(px(-8.0 * (1.0 - progress)))
+                        .shadow(motion::scale_shadows(
+                            palette.flat_popover_shadows(),
+                            progress.powi(3),
+                        ))
+                        .w(width)
+                        .p(space::XS)
+                        .rounded(radius::ROW)
+                        .bg(palette.bg_elevated)
+                        .border_1()
+                        .border_color(palette.border_subtle)
+                        .flex()
+                        .flex_col()
+                        .gap(space::MICRO)
+                        .child(rows)
+                        .child(
+                            div()
+                                .relative()
+                                .px(space::XS)
+                                .py(space::MICRO)
+                                .child(div().w_full().h(px(1.0)).bg(palette.border_subtle)),
+                        )
+                        .child(
+                            apply_scale(div(), scale::UI)
+                                .id("drawer-open-all-sessions-btn")
+                                .relative()
+                                .h(height::CONTROL)
+                                .px(space::SM)
+                                .rounded(radius::CONTROL)
+                                .text_color(palette.text_primary)
+                                .flex()
+                                .items_center()
+                                .gap(space::SM)
+                                .child(
+                                    Icon::new(IconName::RotateCcwClock)
+                                        .size(px(16.0))
+                                        .text_color(palette.text_secondary),
+                                )
+                                .child(cjk_inline_label("查看全部会话"))
+                                .map(|el| {
+                                    if interactive {
+                                        el.test_support()
+                                            .a11y_button(
+                                                "drawer-open-all-sessions-btn",
+                                                "查看全部会话",
+                                            )
+                                            .hover(|s| s.bg(palette.bg_item_active))
+                                            .on_click(move |_, window, cx| {
+                                                ent_all.update(cx, |this, cx| {
+                                                    this.close_recent_drawer(window, cx);
+                                                    this.set_route(ShellRoute::AllSessions, cx);
+                                                });
+                                            })
+                                            .into_any_element()
+                                    } else {
+                                        el.into_any_element()
+                                    }
+                                }),
+                        )
+                        .map(|el| {
+                            if interactive {
+                                el.test_support()
+                                    .a11y_dialog("recent-sessions-drawer", "最近会话抽屉")
+                                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation()
+                                    })
+                                    .into_any_element()
+                            } else {
+                                el.into_any_element()
+                            }
+                        }),
                 ),
             )
     }
@@ -481,8 +475,8 @@ impl AppShell {
         interactive: bool,
         progress: f32,
         palette: &DesktopPalette,
-        transparency_enabled: bool,
-        scale_factor: f32,
+        _transparency_enabled: bool,
+        _scale_factor: f32,
         entity: &Entity<Self>,
     ) -> impl IntoElement {
         let logged_in = self.snapshot.account.as_ref().is_some_and(|a| a.signed_in);
@@ -537,33 +531,29 @@ impl AppShell {
             })
             .child(
                 pos_div.child(
-                    render_frosted_surface(
-                        if interactive {
+                    div()
+                        .id(if interactive {
                             "account-popover-menu"
                         } else {
                             "account-popover-menu-exit"
-                        },
-                        FrostedGlassSpec::popover(palette).with_opacity(progress),
-                        palette.bg_elevated,
-                        transparency_enabled,
-                        scale_factor,
-                    )
-                    .opacity(0.01 + 0.99 * progress)
-                    .mt(px(
-                        if self.sidebar_collapsed { -6.0 } else { 6.0 } * (1.0 - progress)
-                    ))
-                    .shadow(motion::scale_shadows(
-                        palette.craft_stack_shadows(),
-                        progress * progress * progress,
-                    ))
-                    .w(px(224.0))
-                    .p(space::XS)
-                    .rounded(radius::ROW)
-                    .border_1()
-                    .border_color(palette.border_hairline)
-                    .flex()
-                    .flex_col()
-                    .gap(space::MICRO)
+                        })
+                        .opacity(0.01 + 0.99 * progress)
+                        .mt(px(
+                            if self.sidebar_collapsed { -6.0 } else { 6.0 } * (1.0 - progress),
+                        ))
+                        .shadow(motion::scale_shadows(
+                            palette.flat_popover_shadows(),
+                            progress * progress * progress,
+                        ))
+                        .w(px(224.0))
+                        .p(space::XS)
+                        .rounded(radius::ROW)
+                        .bg(palette.bg_elevated)
+                        .border_1()
+                        .border_color(palette.border_subtle)
+                        .flex()
+                        .flex_col()
+                        .gap(space::MICRO)
                     .children(account_identity.map(|identity_label| {
                         div()
                             .w_full()
@@ -858,8 +848,8 @@ impl AppShell {
         progress: f32,
         session_id: &str,
         palette: &DesktopPalette,
-        transparency_enabled: bool,
-        scale_factor: f32,
+        _transparency_enabled: bool,
+        _scale_factor: f32,
         entity: &Entity<Self>,
     ) -> impl IntoElement {
         let sid_tree = session_id.to_owned();
@@ -869,154 +859,150 @@ impl AppShell {
         let ent_backdrop = entity.clone();
         let anchor_x = self.topbar_session_more_anchor_x.get().max(16.0);
 
-        let menu_card = render_frosted_surface(
-            if interactive {
+        let menu_card = div()
+            .id(if interactive {
                 "topbar-session-more-menu"
             } else {
                 "topbar-session-more-menu-exit"
-            },
-            FrostedGlassSpec::popover(palette).with_opacity(progress),
-            palette.bg_elevated,
-            transparency_enabled,
-            scale_factor,
-        )
-        .opacity(0.01 + 0.99 * progress)
-        .mt(px(-6.0 * (1.0 - progress)))
-        .shadow(motion::scale_shadows(
-            palette.craft_stack_shadows(),
-            progress.powi(3),
-        ))
-        .w(px(200.0))
-        .p(space::XS)
-        .rounded(radius::ROW)
-        .border_1()
-        .border_color(palette.border_hairline)
-        .flex()
-        .flex_col()
-        .gap(space::MICRO)
-        .child(
-            apply_scale(div(), scale::UI)
-                .id(if interactive {
-                    "topbar-session-more-tree-btn"
-                } else {
-                    "topbar-session-more-tree-btn-exit"
-                })
-                .relative()
-                .h(height::CONTROL)
-                .px(space::SM)
-                .rounded(radius::CONTROL)
-                .flex()
-                .items_center()
-                .gap(space::SM)
-                .text_color(palette.text_primary)
-                .child(
-                    Icon::new(IconName::GitBranch)
-                        .size(px(15.0))
-                        .text_color(palette.text_secondary),
-                )
-                .child(cjk_inline_label("分支树"))
-                .map(|el| {
-                    if interactive {
-                        el.test_support()
-                            .a11y_menuitem("topbar-session-more-tree-btn", "分支树")
-                            .hover(|s| s.bg(palette.bg_item_active))
-                            .on_click(move |_, window, cx| {
-                                let target = sid_tree.clone();
-                                ent_tree.update(cx, |this, cx| {
-                                    this.topbar_session_more_open = false;
-                                    this.topbar_session_more_prior_focus = None;
-                                    this.open_session_tree(target, window, cx);
-                                });
-                            })
-                            .into_any_element()
+            })
+            .opacity(0.01 + 0.99 * progress)
+            .mt(px(-6.0 * (1.0 - progress)))
+            .shadow(motion::scale_shadows(
+                palette.flat_popover_shadows(),
+                progress.powi(3),
+            ))
+            .w(px(200.0))
+            .p(space::XS)
+            .rounded(radius::ROW)
+            .bg(palette.bg_elevated)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .flex()
+            .flex_col()
+            .gap(space::MICRO)
+            .child(
+                apply_scale(div(), scale::UI)
+                    .id(if interactive {
+                        "topbar-session-more-tree-btn"
                     } else {
-                        el.into_any_element()
-                    }
-                }),
-        )
-        .child(
-            apply_scale(div(), scale::UI)
-                .id(if interactive {
-                    "topbar-session-more-export-btn"
-                } else {
-                    "topbar-session-more-export-btn-exit"
-                })
-                .relative()
-                .h(height::CONTROL)
-                .px(space::SM)
-                .rounded(radius::CONTROL)
-                .flex()
-                .items_center()
-                .gap(space::SM)
-                .text_color(palette.text_primary)
-                .child(
-                    Icon::new(IconName::FileText)
-                        .size(px(15.0))
-                        .text_color(palette.text_secondary),
-                )
-                .child(cjk_inline_label("导出会话"))
-                .map(|el| {
-                    if interactive {
-                        el.test_support()
-                            .a11y_menuitem("topbar-session-more-export-btn", "导出会话")
-                            .hover(|s| s.bg(palette.bg_item_active))
-                            .on_click(move |_, window, cx| {
-                                let target = sid_export.clone();
-                                ent_export.update(cx, |this, cx| {
-                                    this.topbar_session_more_open = false;
-                                    this.topbar_session_more_prior_focus = None;
-                                    this.open_session_export(target, window, cx);
-                                });
-                            })
-                            .into_any_element()
+                        "topbar-session-more-tree-btn-exit"
+                    })
+                    .relative()
+                    .h(height::CONTROL)
+                    .px(space::SM)
+                    .rounded(radius::CONTROL)
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .text_color(palette.text_primary)
+                    .child(
+                        Icon::new(IconName::GitBranch)
+                            .size(px(15.0))
+                            .text_color(palette.text_secondary),
+                    )
+                    .child(cjk_inline_label("分支树"))
+                    .map(|el| {
+                        if interactive {
+                            el.test_support()
+                                .a11y_menuitem("topbar-session-more-tree-btn", "分支树")
+                                .hover(|s| s.bg(palette.bg_item_active))
+                                .on_click(move |_, window, cx| {
+                                    let target = sid_tree.clone();
+                                    ent_tree.update(cx, |this, cx| {
+                                        this.topbar_session_more_open = false;
+                                        this.topbar_session_more_prior_focus = None;
+                                        this.open_session_tree(target, window, cx);
+                                    });
+                                })
+                                .into_any_element()
+                        } else {
+                            el.into_any_element()
+                        }
+                    }),
+            )
+            .child(
+                apply_scale(div(), scale::UI)
+                    .id(if interactive {
+                        "topbar-session-more-export-btn"
                     } else {
-                        el.into_any_element()
-                    }
-                }),
-        )
-        .child(
-            div()
-                .relative()
-                .w_full()
-                .my(space::MICRO)
-                .h(px(1.0))
-                .bg(palette.border_subtle),
-        )
-        .child(
-            apply_scale(div(), scale::UI)
-                .id(if interactive {
-                    "topbar-session-more-share-disabled"
+                        "topbar-session-more-export-btn-exit"
+                    })
+                    .relative()
+                    .h(height::CONTROL)
+                    .px(space::SM)
+                    .rounded(radius::CONTROL)
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .text_color(palette.text_primary)
+                    .child(
+                        Icon::new(IconName::FileText)
+                            .size(px(15.0))
+                            .text_color(palette.text_secondary),
+                    )
+                    .child(cjk_inline_label("导出会话"))
+                    .map(|el| {
+                        if interactive {
+                            el.test_support()
+                                .a11y_menuitem("topbar-session-more-export-btn", "导出会话")
+                                .hover(|s| s.bg(palette.bg_item_active))
+                                .on_click(move |_, window, cx| {
+                                    let target = sid_export.clone();
+                                    ent_export.update(cx, |this, cx| {
+                                        this.topbar_session_more_open = false;
+                                        this.topbar_session_more_prior_focus = None;
+                                        this.open_session_export(target, window, cx);
+                                    });
+                                })
+                                .into_any_element()
+                        } else {
+                            el.into_any_element()
+                        }
+                    }),
+            )
+            .child(
+                div()
+                    .relative()
+                    .w_full()
+                    .my(space::MICRO)
+                    .h(px(1.0))
+                    .bg(palette.border_subtle),
+            )
+            .child(
+                apply_scale(div(), scale::UI)
+                    .id(if interactive {
+                        "topbar-session-more-share-disabled"
+                    } else {
+                        "topbar-session-more-share-disabled-exit"
+                    })
+                    .relative()
+                    .h(height::CONTROL)
+                    .px(space::SM)
+                    .rounded(radius::CONTROL)
+                    .opacity(0.45)
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .text_color(palette.text_secondary)
+                    .child(
+                        Icon::new(IconName::ExternalLink)
+                            .size(px(15.0))
+                            .text_color(palette.text_secondary),
+                    )
+                    .child(cjk_inline_label("分享")),
+            )
+            .map(|el| {
+                if interactive {
+                    el.test_support()
+                        .role(gpui::Role::Menu)
+                        .accessibility_id("topbar-session-more-menu")
+                        .aria_label("会话更多菜单")
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .into_any_element()
                 } else {
-                    "topbar-session-more-share-disabled-exit"
-                })
-                .relative()
-                .h(height::CONTROL)
-                .px(space::SM)
-                .rounded(radius::CONTROL)
-                .opacity(0.45)
-                .flex()
-                .items_center()
-                .gap(space::SM)
-                .text_color(palette.text_secondary)
-                .child(
-                    Icon::new(IconName::ExternalLink)
-                        .size(px(15.0))
-                        .text_color(palette.text_secondary),
-                )
-                .child(cjk_inline_label("分享")),
-        )
-        .map(|el| {
-            if interactive {
-                el.test_support()
-                    .role(gpui::Role::Menu)
-                    .accessibility_id("topbar-session-more-menu")
-                    .aria_label("会话更多菜单")
-                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .into_any_element()
-            } else {
-                el.into_any_element()
-            }
-        });
+                    el.into_any_element()
+                }
+            });
 
         div()
             .absolute()

@@ -24,7 +24,6 @@ use gpui_kit::{
 use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::motion::{DesktopTooltipExt as _, IconPressExt as _};
 use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
@@ -396,6 +395,26 @@ impl ComposerView {
             .is_some()
     }
 
+    pub fn close_floating_popovers(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        if self.clear_completion() {
+            changed = true;
+        }
+        if self.picker_open {
+            self.close_picker();
+            changed = true;
+        }
+        if self.context_popover_open {
+            self.context_popover_open = false;
+            self.context_prior_focus = None;
+            changed = true;
+        }
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
     /// Closes the single topmost open composer popover (`completion` / `picker` / `context`) and restores focus.
     pub fn dismiss_topmost_popover(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.clear_completion() {
@@ -506,6 +525,13 @@ impl ComposerView {
                 cx.notify();
             }
             InputEvent::Focus => {
+                if self.picker_open {
+                    self.close_picker();
+                }
+                if self.context_popover_open {
+                    self.context_popover_open = false;
+                    self.context_prior_focus = None;
+                }
                 cx.notify();
             }
         }
@@ -1417,56 +1443,27 @@ impl ComposerView {
 
     fn render_completion_popover(
         &self,
-        mono_family: SharedString,
+        _mono_family: SharedString,
         palette: &DesktopPalette,
-        transparency_enabled: bool,
-        scale_factor: f32,
+        _transparency_enabled: bool,
+        _scale_factor: f32,
         entity: &Entity<Self>,
     ) -> Option<gpui_kit::AnyElement> {
         let comp = self.completion.as_ref()?;
-        let mut pop = render_frosted_surface(
-            "composer-completion-popover-p2bit",
-            FrostedGlassSpec::popover(palette),
-            palette.bg_elevated,
-            transparency_enabled,
-            scale_factor,
-        )
-        .test_support()
-        .occlude()
-        .w_full()
-        .p(space::XS)
-        .rounded(radius::ROW)
-        .border_1()
-        .border_color(palette.border_hairline)
-        .flex()
-        .flex_col()
-        .gap(space::MICRO);
-
-        let header_title = match comp {
-            CompletionPopupState::Slash { .. } => "诊断技能与斜杠命令",
-            CompletionPopupState::Files { .. } => "工作区文件引用",
-        };
-        pop = pop.child(
-            apply_scale(div(), scale::CAPTION)
-                .relative()
-                .w_full()
-                .h(px(22.0))
-                .px(space::SM)
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap(space::MD)
-                .child(
-                    div()
-                        .text_color(palette.text_secondary)
-                        .child(cjk_inline_label(header_title)),
-                )
-                .child(
-                    div()
-                        .text_color(palette.text_muted)
-                        .child(cjk_inline_label("↑↓ 选择 · Tab / Enter 插入 · Esc 关闭")),
-                ),
-        );
+        let mut pop = div()
+            .id("composer-completion-popover-p2bit")
+            .test_support()
+            .occlude()
+            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .w_full()
+            .p(space::XS)
+            .rounded(radius::ROW)
+            .bg(palette.bg_elevated)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .flex()
+            .flex_col()
+            .gap(space::MICRO);
 
         match comp {
             CompletionPopupState::Slash {
@@ -1503,7 +1500,7 @@ impl ComposerView {
                     let icon = icon_for_token_key(item.short_label);
                     let slash_id = SharedString::from(format!("slash-item-{}", item.short_label));
                     let slash_label =
-                        SharedString::from(format!("{} {}", item.command, item.description));
+                        SharedString::from(format!("{} {}", item.short_label, item.description));
                     scroll = scroll.child(
                         apply_scale(div(), scale::UI)
                             .id(slash_id.clone())
@@ -1513,7 +1510,7 @@ impl ComposerView {
                             .px(space::SM)
                             .rounded(radius::CONTROL)
                             .bg(if is_sel {
-                                palette.bg_item_active
+                                palette.bg_track_recess
                             } else {
                                 gpui_kit::transparent_black()
                             })
@@ -1521,7 +1518,7 @@ impl ComposerView {
                             .items_center()
                             .justify_between()
                             .gap(space::MD)
-                            .hover(|s| s.bg(palette.bg_item_active))
+                            .hover(|s| s.bg(palette.bg_item_hover))
                             .on_click(move |_, w, cx| {
                                 ent.update(cx, |this, cx| {
                                     if let Some(CompletionPopupState::Slash {
@@ -1539,32 +1536,26 @@ impl ComposerView {
                                     .flex()
                                     .items_center()
                                     .gap(space::SM)
-                                    .child(
-                                        div()
-                                            .w(px(20.0))
-                                            .h(px(20.0))
-                                            .rounded(px(4.0))
-                                            .bg(palette.accent_subtle)
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .flex_shrink_0()
-                                            .child(
-                                                Icon::new(icon)
-                                                    .size(px(13.0))
-                                                    .text_color(palette.accent_ink),
-                                            ),
-                                    )
+                                    .child(Icon::new(icon).size(px(14.0)).text_color(if is_sel {
+                                        palette.accent_ink
+                                    } else {
+                                        palette.text_secondary
+                                    }))
                                     .child(
                                         apply_scale(div(), scale::CAPTION_MEDIUM)
-                                            .font_family(mono_family.clone())
                                             .text_color(palette.text_primary)
-                                            .child(item.command),
+                                            .child(item.short_label),
                                     ),
                             )
                             .child(
-                                apply_scale(div(), scale::CAPTION)
-                                    .text_color(palette.text_secondary)
+                                div()
+                                    .text_size(px(11.0))
+                                    .line_height(px(16.0))
+                                    .text_color(if is_sel {
+                                        palette.text_primary
+                                    } else {
+                                        palette.text_secondary
+                                    })
                                     .truncate()
                                     .child(cjk_inline_label(item.description)),
                             ),
@@ -1642,7 +1633,7 @@ impl ComposerView {
                 .child(motion::animate_popover_enter(
                     "composer-comp-pop-anim",
                     pop,
-                    palette.craft_stack_shadows(),
+                    palette.flat_popover_shadows(),
                     6.0,
                 ))
                 .into_any_element(),
@@ -1871,6 +1862,7 @@ impl Render for ComposerView {
         });
 
         // 3. `Textarea` with `28px` `InlineToken` (`MkfFr`) renderer & clipboard image paste hook
+        let has_inline_tokens = !self.textarea.read(cx).content().tokens().is_empty();
         let ent_tok = entity.clone();
         let ent_paste = entity.clone();
         let textarea_element = Textarea::new(&self.textarea)
@@ -1880,15 +1872,33 @@ impl Render for ComposerView {
             .appearance(false)
             .bordered(false)
             .text_size(scale::BODY.font_size)
-            .line_height(scale::BODY.line_height)
+            // `gpui-base` clips custom inline tokens to `line_height`; raise to `32px` while tokens are
+            // present so the `28px` `MkfFr` chip keeps crisp top/bottom borders, corners, and shadow.
+            .line_height(if has_inline_tokens {
+                px(32.0)
+            } else {
+                scale::BODY.line_height
+            })
             .token(move |tok_ctx, _window, _cx| {
                 let tok = tok_ctx.token();
                 let label = tok.label().clone();
+                let has_non_ascii = !label.is_ascii();
                 let token_icon = icon_for_token_key(tok.id().as_ref());
                 let span_range = tok_ctx.range();
                 let ent_click = ent_tok.clone();
                 let rm_id = SharedString::from(format!("inline-token-rm-{}", span_range.start));
                 let rm_label = SharedString::from(format!("移除标记：{label}"));
+                let chip_shadow = vec![gpui::BoxShadow {
+                    color: if palette.mode.is_dark() {
+                        rgba(0x0000_0038).into()
+                    } else {
+                        rgba(0x1A20_240D).into()
+                    },
+                    offset: gpui::point(px(0.0), px(1.0)),
+                    blur_radius: px(2.0),
+                    spread_radius: px(0.0),
+                    inset: false,
+                }];
 
                 div()
                     .h(height::COMPACT)
@@ -1898,6 +1908,7 @@ impl Render for ComposerView {
                     .border_1()
                     .border_color(palette.border_hairline)
                     .bg(palette.bg_special)
+                    .shadow(chip_shadow)
                     .flex()
                     .items_center()
                     .gap(space::TIGHT)
@@ -1905,7 +1916,7 @@ impl Render for ComposerView {
                         div()
                             .w(px(20.0))
                             .h(px(20.0))
-                            .rounded(px(4.0))
+                            .rounded(radius::CONTROL)
                             .bg(palette.accent_subtle)
                             .flex()
                             .items_center()
@@ -1913,15 +1924,21 @@ impl Render for ComposerView {
                             .flex_shrink_0()
                             .child(
                                 Icon::new(token_icon)
-                                    .size(px(13.0))
+                                    .size(px(14.0))
                                     .text_color(palette.accent_ink),
                             ),
                     )
-                    .child(
+                    .child(if has_non_ascii {
                         apply_scale(div(), scale::UI_MEDIUM)
                             .text_color(palette.text_primary)
-                            .child(cjk_inline_label(label)),
-                    )
+                            .child(cjk_inline_label(label))
+                            .into_any_element()
+                    } else {
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .text_color(palette.text_primary)
+                            .child(label)
+                            .into_any_element()
+                    })
                     .child(
                         div()
                             .id(rm_id.clone())
@@ -1929,11 +1946,16 @@ impl Render for ComposerView {
                             .a11y_button(rm_id, rm_label)
                             .w(px(18.0))
                             .h(px(18.0))
+                            .ml(px(-2.0))
+                            .mr(px(-4.0))
                             .rounded(radius::CONTROL)
                             .flex()
                             .items_center()
                             .justify_center()
                             .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation();
+                            })
                             .on_click(move |_, w, cx| {
                                 cx.stop_propagation();
                                 ent_click.update(cx, |this, cx| {
@@ -2084,6 +2106,9 @@ impl Render for ComposerView {
             .items_center()
             .gap(space::XS)
             .hover(|s| s.bg(palette.bg_item_hover))
+            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation();
+            })
             .on_click(move |_, w, cx| {
                 ent_picker_btn.update(cx, |this, cx| {
                     #[cfg(feature = "test-support")]
@@ -2201,7 +2226,129 @@ impl Render for ComposerView {
                 cx,
             ));
 
+        let ctx_open = self.context_popover_open;
+        let ctx_progress = self
+            .context_presence
+            .sample(
+                if ctx_open { 1.0_f32 } else { 0.0 },
+                Transition::new(if ctx_open {
+                    motion::POPOVER_OPEN
+                } else {
+                    motion::SURFACE_CLOSE
+                })
+                .ease(motion::ease_out()),
+                window,
+                cx,
+            )
+            .value
+            .clamp(0.0, 1.0);
+        let ctx_popover_opt = (ctx_open || ctx_progress > 0.001).then(|| {
+            let ent_retry = entity.clone();
+            let ent_acc = entity.clone();
+            let prov_retry = cur_provider.clone();
+            div()
+                .absolute()
+                .right(px(36.0))
+                .bottom_full()
+                .pb(space::SM)
+                .child(render_context_quota_popover(
+                    ctx_open,
+                    ctx_progress,
+                    &cur_provider,
+                    context_usage,
+                    models_ref.usage.as_ref(),
+                    self.cached_quota.as_ref().filter(|_| {
+                        self.cached_quota_provider.as_deref() == Some(cur_provider.as_str())
+                    }),
+                    self.quota_loading
+                        && self.cached_quota_provider.as_deref() == Some(cur_provider.as_str()),
+                    mono_family.clone(),
+                    &palette,
+                    transparency_enabled,
+                    scale_factor,
+                    Rc::new(move |_, cx| {
+                        let p = prov_retry.clone();
+                        ent_retry.update(cx, |this, cx| {
+                            this.refresh_quota_for_provider(p, true, cx);
+                        });
+                    }),
+                    Rc::new(move |_, cx| {
+                        ent_acc.update(cx, |this, cx| {
+                            this.context_popover_open = false;
+                            this.context_prior_focus = None;
+                            cx.emit(ComposerHostEvent::OpenAccountPage);
+                            cx.notify();
+                        });
+                    }),
+                ))
+        });
+
+        let picker_open = self.picker_open;
+        let picker_progress = self
+            .picker_presence
+            .sample(
+                if picker_open { 1.0_f32 } else { 0.0 },
+                Transition::new(if picker_open {
+                    motion::POPOVER_OPEN
+                } else {
+                    motion::SURFACE_CLOSE
+                })
+                .ease(motion::ease_out()),
+                window,
+                cx,
+            )
+            .value
+            .clamp(0.0, 1.0);
+        let picker_popover_opt = (picker_open || picker_progress > 0.001).then(|| {
+            let ent_page = entity.clone();
+            let ent_sel_m = entity.clone();
+            let ent_sel_t = entity.clone();
+            let levels = active_thinking_levels(models_ref, &cur_provider, &cur_model_id);
+            div()
+                .absolute()
+                .right_0()
+                .bottom_full()
+                .pb(space::SM)
+                .flex()
+                .flex_col()
+                .items_end()
+                .justify_end()
+                .child(render_model_picker_popover(
+                    picker_open,
+                    picker_progress,
+                    self.picker_open_epoch,
+                    self.picker_page,
+                    self.picker_slide.sample(window, cx),
+                    self.picker_hi_idx,
+                    &self.picker_scroll,
+                    &scoped_models,
+                    &cur_provider,
+                    &cur_model_id,
+                    &cur_model_label,
+                    levels,
+                    &cur_thinking,
+                    &palette,
+                    transparency_enabled,
+                    scale_factor,
+                    Rc::new(move |next_page, _, cx| {
+                        ent_page.update(cx, |this, cx| {
+                            this.set_picker_page(next_page, cx);
+                            cx.notify();
+                        });
+                    }),
+                    Rc::new(move |provider, model_id, _, cx| {
+                        ent_sel_m.update(cx, |this, cx| this.select_model(provider, model_id, cx));
+                    }),
+                    Rc::new(move |level, w, cx| {
+                        ent_sel_t.update(cx, |this, cx| this.select_thinking(level, w, cx));
+                    }),
+                    window,
+                    cx,
+                ))
+        });
+
         let right_cluster = div()
+            .relative()
             .flex()
             .items_center()
             .gap(space::SM)
@@ -2211,9 +2358,15 @@ impl Render for ComposerView {
                     .items_center()
                     .gap(space::XS)
                     .child(context_ring)
-                    .child(model_btn),
+                    .child(
+                        div()
+                            .relative()
+                            .child(model_btn)
+                            .children(picker_popover_opt),
+                    ),
             )
-            .child(send_btn);
+            .child(send_btn)
+            .children(ctx_popover_opt);
 
         let action_bar = div()
             .h(height::COMPACT)
@@ -2326,146 +2479,31 @@ impl Render for ComposerView {
             card = card.child(th);
         }
         card = card
-            .child(div().w_full().min_h(px(24.0)).child(textarea_element))
+            .child(
+                div()
+                    .w_full()
+                    .min_h(px(24.0))
+                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(textarea_element),
+            )
             .child(action_bar);
         #[cfg(feature = "test-support")]
         if let Some(layer) = crate::ux_probe::bounds_probe_layer("composer", None) {
             card = card.relative().child(layer);
         }
 
-        // Outer relative wrapper (`card` first, upward floating popovers `p2biT` / `d8zzg` / `h5jG6d` painted above `card`)
+        // Outer relative wrapper (`card` first, upward slash/file completion popover `p2biT` painted above `card`;
+        // `d8zzg` and `h5jG6d` anchor directly above their triggers inside `action_bar`).
         let mut wrapper = div().relative().w_full().child(card);
 
         if let Some(comp_pop) = self.render_completion_popover(
-            mono_family.clone(),
+            mono_family,
             &palette,
             transparency_enabled,
             scale_factor,
             &entity,
         ) {
             wrapper = wrapper.child(comp_pop);
-        }
-
-        let ctx_open = self.context_popover_open;
-        let ctx_progress = self
-            .context_presence
-            .sample(
-                if ctx_open { 1.0_f32 } else { 0.0 },
-                Transition::new(if ctx_open {
-                    motion::POPOVER_OPEN
-                } else {
-                    motion::SURFACE_CLOSE
-                })
-                .ease(motion::ease_out()),
-                window,
-                cx,
-            )
-            .value
-            .clamp(0.0, 1.0);
-        if ctx_open || ctx_progress > 0.001 {
-            let ent_retry = entity.clone();
-            let ent_acc = entity.clone();
-            let prov_retry = cur_provider.clone();
-            wrapper = wrapper.child(
-                div()
-                    .absolute()
-                    .right(px(48.0))
-                    .bottom_full()
-                    .pb(px(2.0))
-                    .child(render_context_quota_popover(
-                        ctx_open,
-                        ctx_progress,
-                        &cur_provider,
-                        context_usage,
-                        models_ref.usage.as_ref(),
-                        self.cached_quota.as_ref().filter(|_| {
-                            self.cached_quota_provider.as_deref() == Some(cur_provider.as_str())
-                        }),
-                        self.quota_loading
-                            && self.cached_quota_provider.as_deref() == Some(cur_provider.as_str()),
-                        mono_family,
-                        &palette,
-                        transparency_enabled,
-                        scale_factor,
-                        Rc::new(move |_, cx| {
-                            let p = prov_retry.clone();
-                            ent_retry.update(cx, |this, cx| {
-                                this.refresh_quota_for_provider(p, true, cx);
-                            });
-                        }),
-                        Rc::new(move |_, cx| {
-                            ent_acc.update(cx, |this, cx| {
-                                this.context_popover_open = false;
-                                this.context_prior_focus = None;
-                                cx.emit(ComposerHostEvent::OpenAccountPage);
-                                cx.notify();
-                            });
-                        }),
-                    )),
-            );
-        }
-
-        let picker_open = self.picker_open;
-        let picker_progress = self
-            .picker_presence
-            .sample(
-                if picker_open { 1.0_f32 } else { 0.0 },
-                Transition::new(if picker_open {
-                    motion::POPOVER_OPEN
-                } else {
-                    motion::SURFACE_CLOSE
-                })
-                .ease(motion::ease_out()),
-                window,
-                cx,
-            )
-            .value
-            .clamp(0.0, 1.0);
-        if picker_open || picker_progress > 0.001 {
-            let ent_page = entity.clone();
-            let ent_sel_m = entity.clone();
-            let ent_sel_t = entity.clone();
-            let levels = active_thinking_levels(models_ref, &cur_provider, &cur_model_id);
-            wrapper = wrapper.child(
-                div()
-                    .absolute()
-                    .right(px(48.0))
-                    .bottom_full()
-                    .pb(px(8.0))
-                    .child(render_model_picker_popover(
-                        picker_open,
-                        picker_progress,
-                        self.picker_open_epoch,
-                        self.picker_page,
-                        self.picker_slide.sample(window, cx),
-                        self.picker_hi_idx,
-                        &self.picker_scroll,
-                        &scoped_models,
-                        &cur_provider,
-                        &cur_model_id,
-                        &cur_model_label,
-                        levels,
-                        &cur_thinking,
-                        &palette,
-                        transparency_enabled,
-                        scale_factor,
-                        Rc::new(move |next_page, _, cx| {
-                            ent_page.update(cx, |this, cx| {
-                                this.set_picker_page(next_page, cx);
-                                cx.notify();
-                            });
-                        }),
-                        Rc::new(move |provider, model_id, _, cx| {
-                            ent_sel_m
-                                .update(cx, |this, cx| this.select_model(provider, model_id, cx));
-                        }),
-                        Rc::new(move |level, w, cx| {
-                            ent_sel_t.update(cx, |this, cx| this.select_thinking(level, w, cx));
-                        }),
-                        window,
-                        cx,
-                    )),
-            );
         }
 
         wrapper

@@ -60,7 +60,7 @@ pub mod layout {
     pub const CENTER_COLUMN_MAX_WIDTH: Pixels = px(816.0);
     pub const SUBPAGE_HORIZONTAL_INSET: Pixels = px(64.0);
     pub const MODAL_STANDARD_WIDTH: Pixels = px(384.0);
-    pub const PALETTE_MODAL_WIDTH: Pixels = px(520.0);
+    pub const PALETTE_MODAL_WIDTH: Pixels = px(540.0);
     pub const LOGIN_SHADER_WIDTH: Pixels = px(864.0);
 }
 
@@ -853,7 +853,8 @@ pub mod motion {
         .clamp(0.0, 1.0)
     }
 
-    /// Linearly interpolates two `Hsla` colors in RGBA space so transparent blends never sweep hues.
+    /// Linearly interpolates two `Hsla` colors in premultiplied RGBA space so blending opaque dark
+    /// surfaces with low-alpha light overlays (e.g. `bg_item_active` <-> `bg_active_press`) never flashes white.
     pub fn lerp_hsla(from: Hsla, to: Hsla, t: f32) -> Hsla {
         let t = t.clamp(0.0, 1.0);
         if t <= 0.0 {
@@ -864,11 +865,18 @@ pub mod motion {
         }
         let a = Rgba::from(from);
         let b = Rgba::from(to);
+        let out_a = a.a + (b.a - a.a) * t;
+        if out_a <= 1e-5 {
+            return gpui_kit::transparent_black();
+        }
+        let pr = a.r * a.a + (b.r * b.a - a.r * a.a) * t;
+        let pg = a.g * a.a + (b.g * b.a - a.g * a.a) * t;
+        let pb = a.b * a.a + (b.b * b.a - a.b * a.a) * t;
         Hsla::from(Rgba {
-            r: a.r + (b.r - a.r) * t,
-            g: a.g + (b.g - a.g) * t,
-            b: a.b + (b.b - a.b) * t,
-            a: a.a + (b.a - a.a) * t,
+            r: (pr / out_a).clamp(0.0, 1.0),
+            g: (pg / out_a).clamp(0.0, 1.0),
+            b: (pb / out_a).clamp(0.0, 1.0),
+            a: out_a.clamp(0.0, 1.0),
         })
     }
 
@@ -934,6 +942,18 @@ pub mod motion {
         window: &mut Window,
         cx: &mut App,
     ) -> Pixels {
+        flip_row_offset_y_with_duration(list_id, item_key, scope, y, FLIP_MOVE, window, cx)
+    }
+
+    pub fn flip_row_offset_y_with_duration(
+        list_id: &'static str,
+        item_key: &str,
+        scope: &SharedString,
+        y: Pixels,
+        duration: Duration,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Pixels {
         let state = window.with_element_namespace(list_id, |window| {
             window.use_keyed_state(SharedString::from(item_key.to_owned()), cx, |_, _| {
                 FlipRowState {
@@ -945,12 +965,18 @@ pub mod motion {
         });
         let now = cx.background_executor().now();
         let reduce_motion = cx.reduce_motion();
+        let dur_secs = duration.as_secs_f32().max(0.001);
+        let fast_curve = duration <= FAST;
         let offset = state.update(cx, |state, _| {
             let mut offset = state.anim.map_or(px(0.0), |(start, delta)| {
                 let elapsed = now.saturating_duration_since(start);
-                delta
-                    * (1.0
-                        - ease_in_out()((elapsed.as_secs_f32() / FLIP_MOVE.as_secs_f32()).min(1.0)))
+                let progress = (elapsed.as_secs_f32() / dur_secs).min(1.0);
+                let eased = if fast_curve {
+                    ease_out()(progress)
+                } else {
+                    ease_in_out()(progress)
+                };
+                delta * (1.0 - eased)
             });
             if reduce_motion || state.scope != *scope {
                 offset = px(0.0);
@@ -1968,8 +1994,13 @@ impl DesktopPalette {
         }
     }
 
-    /// Dual-layer outer shadow for the workspace container (`d7oLH` / `k7X8V`).
+    /// Dual-layer outer shadow for the workspace container (`d7oLH`).
+    /// Dark mode uses the recessed `$bg-workspace` well + `1px $border-subtle` ring without a
+    /// heavy dark outer blur that causes 8-bit banding on `#141416` `$bg-shell`.
     pub fn workspace_shadows(&self) -> Vec<BoxShadow> {
+        if self.mode == ResolvedTheme::Dark {
+            return Vec::new();
+        }
         vec![
             BoxShadow {
                 color: self.shadow_panel_sm,
@@ -1990,6 +2021,10 @@ impl DesktopPalette {
 
     /// Compact elevation (`--craft-lift`) for pills, buttons, and compact special cards.
     pub fn craft_lift_shadows(&self) -> Vec<BoxShadow> {
+        let (contact, mid) = match self.mode {
+            ResolvedTheme::Light => (self.shadow_panel_sm, self.shadow_panel_sm),
+            ResolvedTheme::Dark => (c(0x0000_0038), c(0x0000_0047)),
+        };
         vec![
             BoxShadow {
                 color: self.highlight_top,
@@ -1999,16 +2034,16 @@ impl DesktopPalette {
                 inset: true,
             },
             BoxShadow {
-                color: self.shadow_panel_sm,
+                color: contact,
                 offset: point(px(0.0), px(1.0)),
-                blur_radius: px(2.0),
+                blur_radius: px(3.0),
                 spread_radius: px(0.0),
                 inset: false,
             },
             BoxShadow {
-                color: self.shadow_panel_sm,
+                color: mid,
                 offset: point(px(0.0), px(4.0)),
-                blur_radius: px(10.0),
+                blur_radius: px(12.0),
                 spread_radius: px(0.0),
                 inset: false,
             },
@@ -2017,55 +2052,125 @@ impl DesktopPalette {
 
     /// Three-layer stacked elevation (`--craft-stack` + top highlight) for `ZWAs1` composer, `H2p2z` popovers, `K3x72` modals, and special cards.
     pub fn craft_stack_shadows(&self) -> Vec<BoxShadow> {
-        vec![
-            BoxShadow {
-                color: self.highlight_top,
-                offset: point(px(0.0), px(1.0)),
-                blur_radius: px(0.0),
-                spread_radius: px(0.0),
-                inset: true,
-            },
-            BoxShadow {
-                color: self.shadow_panel_sm,
-                offset: point(px(0.0), px(1.0)),
-                blur_radius: px(2.0),
-                spread_radius: px(0.0),
-                inset: false,
-            },
-            BoxShadow {
-                color: self.shadow_panel_sm,
-                offset: point(px(0.0), px(6.0)),
-                blur_radius: px(14.0),
-                spread_radius: px(-2.0),
-                inset: false,
-            },
-            BoxShadow {
-                color: self.shadow_panel_lg,
-                offset: point(px(0.0), px(18.0)),
-                blur_radius: px(36.0),
-                spread_radius: px(-6.0),
-                inset: false,
-            },
-        ]
+        match self.mode {
+            ResolvedTheme::Light => vec![
+                BoxShadow {
+                    color: self.highlight_top,
+                    offset: point(px(0.0), px(1.0)),
+                    blur_radius: px(0.0),
+                    spread_radius: px(0.0),
+                    inset: true,
+                },
+                BoxShadow {
+                    color: self.shadow_panel_sm,
+                    offset: point(px(0.0), px(1.0)),
+                    blur_radius: px(2.0),
+                    spread_radius: px(0.0),
+                    inset: false,
+                },
+                BoxShadow {
+                    color: self.shadow_panel_sm,
+                    offset: point(px(0.0), px(6.0)),
+                    blur_radius: px(14.0),
+                    spread_radius: px(-2.0),
+                    inset: false,
+                },
+                BoxShadow {
+                    color: self.shadow_panel_lg,
+                    offset: point(px(0.0), px(18.0)),
+                    blur_radius: px(36.0),
+                    spread_radius: px(-6.0),
+                    inset: false,
+                },
+            ],
+            // Dark mode uses a monotonic alpha ramp across overlapping blurs to avoid a hard
+            // contact-shadow collar step over bright shader/surface regions.
+            ResolvedTheme::Dark => vec![
+                BoxShadow {
+                    color: self.highlight_top,
+                    offset: point(px(0.0), px(1.0)),
+                    blur_radius: px(0.0),
+                    spread_radius: px(0.0),
+                    inset: true,
+                },
+                BoxShadow {
+                    color: c(0x0000_003D),
+                    offset: point(px(0.0), px(1.0)),
+                    blur_radius: px(3.0),
+                    spread_radius: px(0.0),
+                    inset: false,
+                },
+                BoxShadow {
+                    color: c(0x0000_0047),
+                    offset: point(px(0.0), px(6.0)),
+                    blur_radius: px(14.0),
+                    spread_radius: px(-1.0),
+                    inset: false,
+                },
+                BoxShadow {
+                    color: c(0x0000_0061),
+                    offset: point(px(0.0), px(16.0)),
+                    blur_radius: px(34.0),
+                    spread_radius: px(-4.0),
+                    inset: false,
+                },
+            ],
+        }
     }
 
-    /// Composer elevation + subtle neutral focus halo (`--focus-shadow` + `--craft-stack`).
-    pub fn composer_shadows(&self, focused: bool) -> Vec<BoxShadow> {
-        let mut list = self.craft_stack_shadows();
-        if focused {
-            let halo = match self.mode {
-                ResolvedTheme::Light => c(0x1111_140E),
-                ResolvedTheme::Dark => c(0xF2F2_F40E),
-            };
-            list.push(BoxShadow {
-                color: halo,
-                offset: point(px(0.0), px(2.0)),
-                blur_radius: px(8.0),
-                spread_radius: px(1.0),
-                inset: false,
-            });
+    /// Subtle single-layer flat shadow for small dropdowns, context menus, and tooltips
+    /// (no glossy top specular highlight or multi-layer stack).
+    pub fn flat_popover_shadows(&self) -> Vec<BoxShadow> {
+        let color = match self.mode {
+            ResolvedTheme::Light => c(0x1111_1114),
+            ResolvedTheme::Dark => c(0x0000_0048),
+        };
+        vec![BoxShadow {
+            color,
+            offset: point(px(0.0), px(4.0)),
+            blur_radius: px(12.0),
+            spread_radius: px(0.0),
+            inset: false,
+        }]
+    }
+
+    /// Composer elevation aligned with `ZTzRO` / `ZWAs1`: subtle grounding shadow without
+    /// stacking an extra blurred focus ring on top of `border_focus`.
+    pub fn composer_shadows(&self, _focused: bool) -> Vec<BoxShadow> {
+        match self.mode {
+            ResolvedTheme::Light => vec![
+                BoxShadow {
+                    color: self.shadow_panel_sm,
+                    offset: point(px(0.0), px(1.0)),
+                    blur_radius: px(2.0),
+                    spread_radius: px(0.0),
+                    inset: false,
+                },
+                BoxShadow {
+                    color: self.shadow_panel_lg,
+                    offset: point(px(0.0), px(8.0)),
+                    blur_radius: px(20.0),
+                    spread_radius: px(-4.0),
+                    inset: false,
+                },
+            ],
+            ResolvedTheme::Dark => vec![
+                BoxShadow {
+                    color: c(0x0000_0030),
+                    offset: point(px(0.0), px(2.0)),
+                    blur_radius: px(6.0),
+                    spread_radius: px(0.0),
+                    inset: false,
+                },
+                BoxShadow {
+                    color: c(0x0000_004A),
+                    offset: point(px(0.0), px(10.0)),
+                    blur_radius: px(22.0),
+                    spread_radius: px(-4.0),
+                    inset: false,
+                },
+            ],
         }
-        list
     }
 }
 
@@ -2199,6 +2304,23 @@ pub fn apply_desktop_theme(
         kit_theme.colors.popover_foreground = palette.text_primary;
         kit_theme.colors.danger = palette.status_danger;
         kit_theme.colors.danger_foreground = palette.text_on_accent;
+    }
+
+    {
+        let base_theme = gpui_kit::base::Theme::global_mut(cx);
+        base_theme.appearance = match resolved {
+            ResolvedTheme::Light => gpui_kit::base::ThemeAppearance::Light,
+            ResolvedTheme::Dark => gpui_kit::base::ThemeAppearance::Dark,
+        };
+        base_theme.tokens.typography.sans = ui_font.clone();
+        base_theme.tokens.typography.mono = mono_font.clone();
+        base_theme.tokens.colors.background = palette.bg_workspace;
+        base_theme.tokens.colors.surface = palette.bg_workspace;
+        base_theme.tokens.colors.foreground = palette.text_primary;
+        base_theme.tokens.colors.muted_foreground = palette.text_secondary;
+        base_theme.tokens.colors.border = palette.border_subtle;
+        base_theme.tokens.colors.primary = palette.accent_solid;
+        base_theme.tokens.colors.primary_foreground = palette.text_on_accent;
     }
 
     cx.set_global(DesktopThemeGlobal {
@@ -2363,10 +2485,10 @@ pub fn render_subpage_header_xwjof(
 }
 
 /// Renders the `28px` keyboard shortcut badge master `ZCGS3` (`cst-pilot-desktop.pen` 「00B · 按钮与输入」):
-/// `h: 28px, px: 8px, r: 4px`, `$bg-surface` fill + `1px $border-subtle`, `12/16 @ 500` `JetBrains Mono` `$text-primary`.
+/// `h: 28px, px: 8px, r: 4px`, `$bg-surface` fill + `1px $border-subtle`, `12/16 @ 500` `Source Han Sans CN` `$text-primary`.
 pub fn render_kbd_zcgs3(
     keys: impl Into<SharedString>,
-    mono_family: SharedString,
+    _mono_family: SharedString,
     palette: &DesktopPalette,
 ) -> gpui_kit::Div {
     use gpui_kit::{ParentElement as _, Styled as _};
@@ -2377,7 +2499,6 @@ pub fn render_kbd_zcgs3(
         .border_1()
         .border_color(palette.border_subtle)
         .bg(palette.bg_surface)
-        .font_family(mono_family)
         .text_color(palette.text_primary)
         .flex()
         .items_center()

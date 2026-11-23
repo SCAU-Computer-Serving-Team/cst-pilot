@@ -1518,40 +1518,61 @@ async fn message_actions_direct_fork_queue_edit_backfill_scroll_anchor_and_ime_c
         );
     });
 
-    // 3. Edit Turn 0 (`user-edit-btn-u-0` / `assistant-edit-btn-u-0`): non-empty draft opens `overwrite-draft-confirm-card`;
-    // keeping preserves draft, confirming navigates to `u-0` (rewinding leaf to root) and backfills `"你好"`.
+    // 3. Edit Turn 0 (`user-edit-btn-u-0`; assistant side `VS7mw` has no edit button):
+    // enters seamless inline editing inside the original user bubble without opening any draft-overwrite modal
+    // and without disturbing the unsent bottom composer draft `"保留中的草稿"`.
     cx.update_window(win_handle, |_, window, cx| {
         let ml = shell.read(cx).workbench().read(cx).message_list().clone();
         ml.update(cx, |m, cx| m.scroll_to_top(cx));
         window.render_frame(cx);
+        assert!(
+            window.try_find("assistant-edit-btn-u-0").is_none(),
+            "assistant action bar must not render edit message button"
+        );
         window.click("user-edit-btn-u-0", cx);
     })
     .unwrap();
     cx.update_window(win_handle, |_, window, cx| {
         window.render_frame(cx);
-        assert!(window.find("overwrite-draft-confirm-card").visible());
-        window.click("overwrite-draft-keep-btn", cx);
-        assert!(window.try_find("overwrite-draft-confirm-card").is_none());
+        assert!(
+            window.try_find("overwrite-draft-confirm-card").is_none(),
+            "inline bubble edit must not show draft overwrite dialog"
+        );
+        assert!(window.find("user-inline-edit-bubble-u-0").visible());
+        window.click("user-inline-edit-cancel-u-0", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("user-inline-edit-bubble-u-0").is_none());
     })
     .unwrap();
     assert_eq!(backend.state.lock().unwrap().navigated_entries.len(), 1);
 
     cx.update_window(win_handle, |_, window, cx| {
-        window.click("assistant-edit-btn-u-0", cx);
-    })
-    .unwrap();
-    cx.update_window(win_handle, |_, window, cx| {
+        window.click("user-edit-btn-u-0", cx);
         window.render_frame(cx);
-        assert!(window.find("overwrite-draft-confirm-card").visible());
-        window.click("overwrite-draft-confirm-btn", cx);
+        let inline_ta = shell
+            .read(cx)
+            .workbench()
+            .read(cx)
+            .message_list()
+            .read(cx)
+            .inline_edit_textarea()
+            .expect("inline bubble textarea must be active");
+        inline_ta.update(cx, |st, cx| {
+            st.set_value("修改后的你好", window, cx);
+        });
+        window.render_frame(cx);
+        window.click("user-inline-edit-submit-u-0", cx);
     })
     .unwrap();
 
-    let st_clear = Arc::clone(&backend.state);
-    let shell_clear = shell.clone();
+    let st_edit_done = Arc::clone(&backend.state);
+    let shell_edit_done = shell.clone();
     cx.wait_for(win_handle, Duration::from_secs(3), move |_, cx| {
-        let rewound = st_clear.lock().unwrap().navigated_entries.len() == 2;
-        let val = shell_clear
+        let g = st_edit_done.lock().unwrap();
+        let rewound = g.navigated_entries.len() == 2;
+        let sent_edited =
+            g.sent_messages.len() == 2 && g.sent_messages[1].1["text"] == "修改后的你好";
+        let draft_preserved = shell_edit_done
             .read(cx)
             .workbench()
             .read(cx)
@@ -1560,8 +1581,9 @@ async fn message_actions_direct_fork_queue_edit_backfill_scroll_anchor_and_ime_c
             .textarea_state()
             .read(cx)
             .value()
-            .to_string();
-        rewound && val == "你好"
+            .as_ref()
+            == "保留中的草稿";
+        rewound && sent_edited && draft_preserved
     })
     .await;
     assert_eq!(
@@ -1630,11 +1652,11 @@ async fn message_actions_direct_fork_queue_edit_backfill_scroll_anchor_and_ime_c
 
     let st_queued = Arc::clone(&backend.state);
     cx.wait_for(win_handle, Duration::from_secs(3), move |_, _| {
-        st_queued.lock().unwrap().sent_messages.len() == 2
+        st_queued.lock().unwrap().sent_messages.len() == 3
     })
     .await;
     assert_eq!(
-        backend.state.lock().unwrap().sent_messages[1].1["text"],
+        backend.state.lock().unwrap().sent_messages[2].1["text"],
         "检查内存占用"
     );
 
@@ -1693,4 +1715,110 @@ async fn message_actions_direct_fork_queue_edit_backfill_scroll_anchor_and_ime_c
         ws.draft_mut(key).images.clear();
         assert_eq!(ws.image_pool().used_bytes(), 0);
     });
+}
+
+#[gpui::test]
+async fn markdown_code_block_renders_header_bar_and_triggers_copy_notice(
+    cx: &mut gpui::TestAppContext,
+) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use cst_desktop::theme::DesktopPalette;
+    use cst_desktop::workbench::markdown_view::{
+        MarkdownStreamStore, build_markdown_style, render_assistant_markdown_with_copy_notice,
+    };
+    use gpui_kit::test::TestQueryExt as _;
+    use gpui_kit::{IntoElement, ParentElement as _, Styled as _, div, px};
+
+    struct CodeBlockProbe {
+        state: gpui::Entity<gpui_kit::base::text::TextViewState>,
+        copied_hits: Arc<AtomicUsize>,
+    }
+
+    impl gpui::Render for CodeBlockProbe {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            _cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            let palette = DesktopPalette::light();
+            let style = build_markdown_style(&palette);
+            let hits = Arc::clone(&self.copied_hits);
+            div()
+                .w(px(816.0))
+                .p_0()
+                .child(render_assistant_markdown_with_copy_notice(
+                    &self.state,
+                    false,
+                    true,
+                    &palette,
+                    style,
+                    Some(Arc::new(move |_| {
+                        hits.fetch_add(1, Ordering::SeqCst);
+                    })),
+                ))
+        }
+    }
+
+    let copied_hits = Arc::new(AtomicUsize::new(0));
+    let copied_hits_view = Arc::clone(&copied_hits);
+    cx.update(|cx| {
+        gpui_kit::init(cx);
+    });
+    let win = cx.add_window(|_window, cx| {
+        let mut store = MarkdownStreamStore::default();
+        let md = "测试说明：\n\n```powershell\npowercfg /h off\n```\n";
+        let state = store.sync_entry("code-probe", md, cx);
+        CodeBlockProbe {
+            state,
+            copied_hits: copied_hits_view,
+        }
+    });
+
+    cx.update_window(*win, |_, window, cx| {
+        window.render_frame(cx);
+        let block = window
+            .elements()
+            .into_iter()
+            .find(|el| {
+                el.path()
+                    .last()
+                    .is_some_and(|id| id.to_string().starts_with("md-code-block-"))
+            })
+            .expect("custom header-bar code block must render");
+        assert!(
+            (f32::from(block.bounds().size.width) - 816.0).abs() < 1.0,
+            "code block must fill full 816px column width, got {}",
+            f32::from(block.bounds().size.width)
+        );
+        let header = window
+            .elements()
+            .into_iter()
+            .find(|el| {
+                el.path()
+                    .last()
+                    .is_some_and(|id| id.to_string().starts_with("md-code-header-"))
+            })
+            .expect("code block header bar must render");
+        assert_eq!(f32::from(header.bounds().size.height), 36.0);
+
+        let copy_id = window
+            .elements()
+            .into_iter()
+            .find_map(|el| {
+                el.path().last().and_then(|id| {
+                    id.to_string()
+                        .starts_with("md-code-copy-")
+                        .then(|| id.clone())
+                })
+            })
+            .expect("code block copy button must render");
+        window.click(copy_id, cx);
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|c| c.text()),
+            Some("powercfg /h off".to_owned())
+        );
+        assert_eq!(copied_hits.load(Ordering::SeqCst), 1);
+    })
+    .unwrap();
 }

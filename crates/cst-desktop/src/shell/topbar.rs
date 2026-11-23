@@ -44,10 +44,9 @@ fn stagger_progress(t: f32, start: f32, end: f32) -> f32 {
     motion::ease_out()(raw)
 }
 
-/// Exact horizontal span (`28px` avatar + `4px` gap + `28px` settings + `4px` gap) occupied by
-/// the collapsed-sidebar right compensation buttons so the segmented control & web button glide
-/// smoothly instead of jumping when the sidebar toggles.
-const RIGHT_COMPENSATION_WIDTH_PX: f32 = 64.0;
+/// Exact horizontal span (`28px` avatar + `4px` gap + `28px` settings) occupied by the
+/// collapsed-sidebar right compensation buttons inside their sliding slot.
+const RIGHT_COMPENSATION_WIDTH_PX: f32 = 60.0;
 
 /// Truncates a collapsed-topbar session title to at most 5 visible (non-whitespace) characters.
 /// Returns `(display_text, truncated)` so callers render the vertical right-half feather mask
@@ -205,13 +204,14 @@ pub fn render_topbar(
         div()
             .pl(space::GROUP)
             .h_full()
+            .overflow_hidden()
             .flex()
             .items_center()
             .gap(space::XS)
             .child(
                 div()
                     .relative()
-                    .left(px(-6.0 * (1.0 - p_brand)))
+                    .left(px(-16.0 * (1.0 - p_brand)))
                     .opacity(0.01 + 0.99 * p_brand)
                     .flex()
                     .items_center()
@@ -287,6 +287,8 @@ pub fn render_topbar(
             )
             .child(
                 div()
+                    .relative()
+                    .left(px(-16.0 * (1.0 - p_div)))
                     .mx(space::MICRO)
                     .w(px(1.0))
                     .h(px(14.0))
@@ -328,19 +330,24 @@ pub fn render_topbar(
                             window,
                             cx,
                         );
-                        let bg = motion::lerp_hsla(
-                            motion::lerp_hsla(
-                                if recent_drawer_open {
-                                    palette.bg_item_active
-                                } else {
-                                    gpui_kit::transparent_black()
-                                },
-                                palette.bg_item_hover,
-                                hover_t,
-                            ),
-                            palette.bg_active_press,
-                            press_t,
+                        let open_t = motion::animated_state_progress(
+                            "topbar-recent-drawer-open",
+                            recent_drawer_open,
+                            window,
+                            cx,
                         );
+                        let idle_or_hover = motion::lerp_hsla(
+                            gpui_kit::transparent_black(),
+                            palette.bg_item_hover,
+                            hover_t,
+                        );
+                        let resting_bg =
+                            motion::lerp_hsla(idle_or_hover, palette.bg_item_active, open_t);
+                        let bg = if recent_drawer_open {
+                            resting_bg
+                        } else {
+                            motion::lerp_hsla(resting_bg, palette.bg_active_press, press_t)
+                        };
                         let icon_fg = motion::lerp_hsla(
                             palette.text_secondary,
                             palette.text_primary,
@@ -403,7 +410,7 @@ pub fn render_topbar(
                             .track_focus(recent_btn_focus)
                             .tab_index(0)
                             .relative()
-                            .left(px(-14.0 * (1.0 - p_recent)))
+                            .left(px(-16.0 * (1.0 - p_recent)))
                             .opacity(0.01 + 0.99 * p_recent)
                             .h(height::COMPACT)
                             .pl(space::SM)
@@ -478,7 +485,7 @@ pub fn render_topbar(
                     nav_group = nav_group.child(
                         div()
                             .relative()
-                            .left(px(-14.0 * (1.0 - p_more)))
+                            .left(px(-16.0 * (1.0 - p_more)))
                             .opacity(0.01 + 0.99 * p_more)
                             .child(
                                 div()
@@ -523,7 +530,7 @@ pub fn render_topbar(
                     .child(
                         div()
                             .relative()
-                            .left(px(-14.0 * (1.0 - p_new)))
+                            .left(px(-16.0 * (1.0 - p_new)))
                             .opacity(0.01 + 0.99 * p_new)
                             .child(topbar_icon_btn(
                                 "topbar-new-session-btn",
@@ -539,7 +546,7 @@ pub fn render_topbar(
                     .child(
                         div()
                             .relative()
-                            .left(px(-14.0 * (1.0 - p_dash)))
+                            .left(px(-16.0 * (1.0 - p_dash)))
                             .opacity(0.01 + 0.99 * p_dash)
                             .child(topbar_icon_btn(
                                 "topbar-dashboard-btn",
@@ -554,14 +561,47 @@ pub fn render_topbar(
                     )
             })
     } else if collapsed_t > 0.01 {
-        // Fast, non-interactive exit mirror while sidebar expands back (`150ms ease_out`, zero delay).
+        // Non-interactive rightward exit mirror while sidebar expands from the left and squeezes icons out.
+        let exit_dx = px(18.0 * (1.0 - collapsed_t));
+        let exit_opacity = 0.01 + 0.99 * collapsed_t;
         let mut exit_row = div()
             .relative()
-            .left(px(-10.0 * (1.0 - collapsed_t)))
-            .opacity(0.01 + 0.99 * collapsed_t)
+            .left(exit_dx)
+            .opacity(exit_opacity)
             .flex()
             .items_center()
             .gap(space::XS)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .child(
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label("CST Pilot")),
+                    )
+                    .child(
+                        div()
+                            .w(height::COMPACT)
+                            .h(height::COMPACT)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Icon::new(IconName::PanelLeft)
+                                    .size(px(16.0))
+                                    .text_color(palette.text_secondary),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .mx(space::MICRO)
+                    .w(px(1.0))
+                    .h(px(14.0))
+                    .bg(palette.border_strong),
+            )
             .child(
                 apply_scale(div(), scale::UI_MEDIUM)
                     .h(height::COMPACT)
@@ -599,7 +639,7 @@ pub fn render_topbar(
             );
         }
         div()
-            .pl(space::MD)
+            .pl(space::GROUP)
             .h_full()
             .overflow_hidden()
             .flex()
@@ -792,30 +832,18 @@ pub fn render_topbar(
         space::TIGHT
     };
 
-    let shared_right_shift_px = if sidebar_collapsed {
-        RIGHT_COMPENSATION_WIDTH_PX * (1.0 - collapsed_t)
-    } else if collapsed_t > 0.01 {
-        -RIGHT_COMPENSATION_WIDTH_PX * collapsed_t
-    } else {
-        0.0
-    };
+    let slot_t = motion::ease_out()(collapsed_t);
+    let slot_w = px(RIGHT_COMPENSATION_WIDTH_PX * slot_t);
+    let slot_gap = px(f32::from(space::XS) * slot_t);
 
-    let mut right_cluster = div()
-        .relative()
-        .h_full()
-        .flex()
-        .items_center()
-        .gap(right_gap)
-        .child(
-            div()
-                .relative()
-                .left(px(shared_right_shift_px))
-                .flex()
-                .items_center()
-                .gap(right_gap)
-                .child(view_segmented)
-                .child(web_btn),
-        );
+    let mut controls_group = div().h_full().flex().items_center().child(
+        div()
+            .flex()
+            .items_center()
+            .gap(right_gap)
+            .child(view_segmented)
+            .child(web_btn),
+    );
 
     if sidebar_collapsed {
         let on_acc = Rc::clone(&cb.on_toggle_account_menu);
@@ -839,167 +867,196 @@ pub fn render_topbar(
         );
         let p_acc = stagger_progress(collapsed_t, 0.04, 0.84);
         let p_set = stagger_progress(collapsed_t, 0.18, 1.00);
-        right_cluster = right_cluster.child(
+        controls_group = controls_group.child(
             div()
+                .ml(slot_gap)
+                .w(slot_w)
                 .h_full()
                 .overflow_hidden()
                 .flex()
                 .items_center()
-                .gap(space::XS)
+                .flex_shrink_0()
                 .child(
                     div()
-                        .id("topbar-account-btn")
-                        .test_support()
-                        .a11y_button("topbar-account-btn", "账号菜单")
-                        .desktop_tooltip_with_hover(
-                            "tooltip-topbar-account-btn".into(),
-                            "账号菜单".into(),
-                            false,
-                            Some(acc_hs),
-                        )
-                        .track_focus(account_btn_focus)
-                        .tab_index(0)
-                        .relative()
-                        .top(px(-12.0 * (1.0 - p_acc)))
-                        .opacity(0.01 + 0.99 * p_acc)
-                        .w(height::COMPACT)
-                        .h(height::COMPACT)
-                        .rounded(radius::CONTROL)
-                        .bg(acc_bg)
+                        .w(px(RIGHT_COMPENSATION_WIDTH_PX))
+                        .h_full()
                         .flex()
                         .items_center()
-                        .justify_center()
-                        .on_icon_press(acc_press_state)
-                        .on_click(move |_, w, cx| (on_acc)(w, cx))
+                        .gap(space::XS)
+                        .flex_shrink_0()
                         .child(
-                            apply_scale(div(), scale::CAPTION_MEDIUM)
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .w(px(20.0))
-                                .h(px(20.0))
-                                .rounded(radius::FULL)
-                                .bg(palette.bg_item_active)
-                                .text_color(palette.text_primary)
+                            div()
+                                .id("topbar-account-btn")
+                                .test_support()
+                                .a11y_button("topbar-account-btn", "账号菜单")
+                                .desktop_tooltip_with_hover(
+                                    "tooltip-topbar-account-btn".into(),
+                                    "账号菜单".into(),
+                                    false,
+                                    Some(acc_hs),
+                                )
+                                .track_focus(account_btn_focus)
+                                .tab_index(0)
+                                .relative()
+                                .left(px(-16.0 * (1.0 - p_acc)))
+                                .opacity(0.01 + 0.99 * p_acc)
+                                .w(height::COMPACT)
+                                .h(height::COMPACT)
+                                .rounded(radius::CONTROL)
+                                .bg(acc_bg)
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(account_initial),
-                        ),
-                )
-                .child({
-                    let (set_pressed, set_press_state) =
-                        motion::icon_press_state("topbar-settings-btn", window, cx);
-                    let (set_hovered, set_hs) =
-                        motion::PointerFlag::keyed("hover-topbar-settings-btn", window, cx);
-                    let set_hover_t = motion::animated_state_progress(
-                        "topbar-settings-btn",
-                        set_hovered,
-                        window,
-                        cx,
-                    );
-                    let set_press_t = motion::animated_press_progress(
-                        "topbar-settings-btn",
-                        set_pressed,
-                        window,
-                        cx,
-                    );
-                    let set_bg = motion::lerp_hsla(
-                        motion::lerp_hsla(
-                            gpui_kit::transparent_black(),
-                            palette.bg_item_hover,
-                            set_hover_t,
-                        ),
-                        palette.bg_active_press,
-                        set_press_t,
-                    );
-                    div()
-                        .id("topbar-settings-btn")
-                        .test_support()
-                        .a11y_button("topbar-settings-btn", "账号与设置菜单")
-                        .desktop_tooltip_with_hover(
-                            "tooltip-topbar-settings-btn".into(),
-                            "账号与设置菜单".into(),
-                            false,
-                            Some(set_hs),
+                                .on_icon_press(acc_press_state)
+                                .on_click(move |_, w, cx| (on_acc)(w, cx))
+                                .child(
+                                    apply_scale(div(), scale::CAPTION_MEDIUM)
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .w(px(20.0))
+                                        .h(px(20.0))
+                                        .rounded(radius::FULL)
+                                        .bg(palette.bg_item_active)
+                                        .text_color(palette.text_primary)
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(account_initial),
+                                ),
                         )
-                        .track_focus(settings_btn_focus)
-                        .tab_index(0)
-                        .relative()
-                        .top(px(-12.0 * (1.0 - p_set)))
-                        .opacity(0.01 + 0.99 * p_set)
-                        .w(height::COMPACT)
-                        .h(height::COMPACT)
-                        .rounded(radius::CONTROL)
-                        .bg(set_bg)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .on_icon_press(set_press_state)
-                        .on_click(move |_, w, cx| (on_set)(w, cx))
-                        .child(motion::animated_icon_press(
-                            "topbar-settings-btn",
-                            set_pressed,
-                            Icon::new(IconName::Settings)
-                                .size(px(16.0))
-                                .text_color(palette.text_secondary),
-                            window,
-                            cx,
-                        ))
-                }),
+                        .child({
+                            let (set_pressed, set_press_state) =
+                                motion::icon_press_state("topbar-settings-btn", window, cx);
+                            let (set_hovered, set_hs) =
+                                motion::PointerFlag::keyed("hover-topbar-settings-btn", window, cx);
+                            let set_hover_t = motion::animated_state_progress(
+                                "topbar-settings-btn",
+                                set_hovered,
+                                window,
+                                cx,
+                            );
+                            let set_press_t = motion::animated_press_progress(
+                                "topbar-settings-btn",
+                                set_pressed,
+                                window,
+                                cx,
+                            );
+                            let set_bg = motion::lerp_hsla(
+                                motion::lerp_hsla(
+                                    gpui_kit::transparent_black(),
+                                    palette.bg_item_hover,
+                                    set_hover_t,
+                                ),
+                                palette.bg_active_press,
+                                set_press_t,
+                            );
+                            div()
+                                .id("topbar-settings-btn")
+                                .test_support()
+                                .a11y_button("topbar-settings-btn", "账号与设置菜单")
+                                .desktop_tooltip_with_hover(
+                                    "tooltip-topbar-settings-btn".into(),
+                                    "账号与设置菜单".into(),
+                                    false,
+                                    Some(set_hs),
+                                )
+                                .track_focus(settings_btn_focus)
+                                .tab_index(0)
+                                .relative()
+                                .left(px(-16.0 * (1.0 - p_set)))
+                                .opacity(0.01 + 0.99 * p_set)
+                                .w(height::COMPACT)
+                                .h(height::COMPACT)
+                                .rounded(radius::CONTROL)
+                                .bg(set_bg)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .on_icon_press(set_press_state)
+                                .on_click(move |_, w, cx| (on_set)(w, cx))
+                                .child(motion::animated_icon_press(
+                                    "topbar-settings-btn",
+                                    set_pressed,
+                                    Icon::new(IconName::Settings)
+                                        .size(px(16.0))
+                                        .text_color(palette.text_secondary),
+                                    window,
+                                    cx,
+                                ))
+                        }),
+                ),
         );
     } else if collapsed_t > 0.01 {
-        // Inert visual-only exit for avatar + settings sliding upward & fading out while sidebar expands.
-        right_cluster = right_cluster.child(
+        // Inert rightward exit while slot squeezes closed and shared controls glide back right.
+        let exit_dx = px(16.0 * (1.0 - collapsed_t));
+        let exit_op = 0.01 + 0.99 * collapsed_t;
+        controls_group = controls_group.child(
             div()
-                .absolute()
-                .top_0()
-                .bottom_0()
-                .right(px(129.0))
+                .ml(slot_gap)
+                .w(slot_w)
+                .h_full()
                 .overflow_hidden()
                 .flex()
                 .items_center()
-                .gap(space::XS)
+                .flex_shrink_0()
                 .child(
                     div()
-                        .relative()
-                        .top(px(-8.0 * (1.0 - collapsed_t)))
-                        .opacity(0.01 + 0.99 * collapsed_t)
-                        .w(height::COMPACT)
-                        .h(height::COMPACT)
+                        .w(px(RIGHT_COMPENSATION_WIDTH_PX))
+                        .h_full()
                         .flex()
                         .items_center()
-                        .justify_center()
+                        .gap(space::XS)
+                        .flex_shrink_0()
                         .child(
-                            apply_scale(div(), scale::CAPTION_MEDIUM)
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .w(px(20.0))
-                                .h(px(20.0))
-                                .rounded(radius::FULL)
-                                .bg(palette.bg_item_active)
-                                .text_color(palette.text_primary)
+                            div()
+                                .relative()
+                                .left(exit_dx)
+                                .opacity(exit_op)
+                                .w(height::COMPACT)
+                                .h(height::COMPACT)
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(account_initial),
-                        ),
-                )
-                .child(
-                    div()
-                        .relative()
-                        .top(px(-8.0 * (1.0 - collapsed_t)))
-                        .opacity(0.01 + 0.99 * collapsed_t)
-                        .w(height::COMPACT)
-                        .h(height::COMPACT)
-                        .flex()
-                        .items_center()
-                        .justify_center()
+                                .child(
+                                    apply_scale(div(), scale::CAPTION_MEDIUM)
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .w(px(20.0))
+                                        .h(px(20.0))
+                                        .rounded(radius::FULL)
+                                        .bg(palette.bg_item_active)
+                                        .text_color(palette.text_primary)
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(account_initial),
+                                ),
+                        )
                         .child(
-                            Icon::new(IconName::Settings)
-                                .size(px(16.0))
-                                .text_color(palette.text_secondary),
+                            div()
+                                .relative()
+                                .left(exit_dx)
+                                .opacity(exit_op)
+                                .w(height::COMPACT)
+                                .h(height::COMPACT)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    Icon::new(IconName::Settings)
+                                        .size(px(16.0))
+                                        .text_color(palette.text_secondary),
+                                ),
                         ),
                 ),
         );
     }
+
+    let mut right_cluster = div()
+        .relative()
+        .h_full()
+        .flex()
+        .items_center()
+        .gap(right_gap)
+        .child(controls_group);
 
     right_cluster = right_cluster
         .child(div().w(px(1.0)).h(px(14.0)).bg(palette.border_strong))

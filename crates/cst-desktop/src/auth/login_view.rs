@@ -90,10 +90,16 @@ impl LoginView {
         let subscriptions = [&api_key_input, &base_url_input]
             .into_iter()
             .map(|input| {
-                cx.subscribe(input, |this, _, event: &InputEvent, cx| {
-                    if matches!(event, InputEvent::Change) && this.api_key_error.take().is_some() {
-                        cx.notify();
+                cx.subscribe(input, |this, _, event: &InputEvent, cx| match event {
+                    InputEvent::Change => {
+                        if this.api_key_error.take().is_some() {
+                            cx.notify();
+                        }
                     }
+                    InputEvent::Focus => {
+                        this.dismiss_dropdowns_on_outside_click(cx);
+                    }
+                    _ => {}
                 })
             })
             .collect();
@@ -181,6 +187,15 @@ impl LoginView {
         }
         self.provider_dropdown_open = false;
         self.provider_trigger_focus.focus(window, cx);
+        cx.notify();
+        true
+    }
+
+    pub fn dismiss_dropdowns_on_outside_click(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.provider_dropdown_open {
+            return false;
+        }
+        self.provider_dropdown_open = false;
         cx.notify();
         true
     }
@@ -513,7 +528,7 @@ impl LoginView {
 
     fn render_cstoa_qr_pane(
         &mut self,
-        mono_family: SharedString,
+        _mono_family: SharedString,
         palette: &DesktopPalette,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -645,7 +660,6 @@ impl LoginView {
                     }))
                     .child(
                         apply_scale(div(), scale::CAPTION)
-                            .font_family(mono_family)
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(if has_live_qr {
                                 palette.text_primary
@@ -866,6 +880,9 @@ impl Render for LoginView {
                             .border_1()
                             .border_color(palette.border_hairline)
                             .occlude()
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation();
+                            })
                             .child(
                                 div()
                                     .w_full()
@@ -955,6 +972,9 @@ impl Render for LoginView {
                                     .justify_between()
                                     .gap(space::SM)
                                     .hover(|s| s.bg(palette.bg_surface))
+                                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation();
+                                    })
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.toggle_provider_menu(&key_providers, window, cx);
                                     }))
@@ -1009,6 +1029,7 @@ impl Render for LoginView {
                                             .aria_label("API Key 密钥")
                                             .appearance(false)
                                             .bordered(false)
+                                            .focus_bordered(false)
                                             .w_full()
                                             .h_full()
                                             .mask_toggle(),
@@ -1052,6 +1073,7 @@ impl Render for LoginView {
                                             .aria_label("自定义 Base URL")
                                             .appearance(false)
                                             .bordered(false)
+                                            .focus_bordered(false)
                                             .w_full()
                                             .h_full(),
                                     ),

@@ -1031,6 +1031,15 @@ impl ClientHandle {
             .await
     }
 
+    pub async fn list_recent_exports(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<crate::state::RecentExportSummary>, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move { http.list_recent_exports(limit).await })
+            .await
+    }
+
     pub async fn open_export_directory(&self, export_id: String) -> Result<Value, ClientError> {
         let http = self.core.http.clone();
         self.spawn_tokio(async move { http.open_export_directory(&export_id).await })
@@ -1953,6 +1962,32 @@ async fn run_state_reducer_loop(
                             desired_subs = next_subs;
                             sub_debounce_pending = true;
                             sub_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(SUBSCRIPTION_DEBOUNCE_MS));
+                        }
+                        // Background preload the 10 most recent sessions so switching conversations opens instantly.
+                        if cur_mode == ChannelModeDto::AppActive {
+                            let recent_ids: Vec<String> = {
+                                let guard = core.snapshot.lock().expect("snapshot lock");
+                                guard
+                                    .sessions
+                                    .iter()
+                                    .take(10)
+                                    .map(|s| s.id.clone())
+                                    .collect()
+                            };
+                            for sid in recent_ids {
+                                if !session_store.has_ready(&sid)
+                                    && !session_store.is_loading(&sid)
+                                    && let Some(generation) = session_store.begin_loading_if_absent(&sid)
+                                {
+                                    spawn_session_snapshot_fetch(
+                                        core.http.clone(),
+                                        done_tx.clone(),
+                                        sid,
+                                        generation,
+                                        Vec::new(),
+                                    );
+                                }
+                            }
                         }
                         if dirty.any() && !refresh_timer_armed {
                             refresh_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(STATE_REFRESH_COALESCE_MS));

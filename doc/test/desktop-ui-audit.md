@@ -36,13 +36,13 @@
 - [x] `zdtJ6` 对话中的工具混排流与多工具折叠切换（已修正独立 `read` 图片脱离折叠段并保持折叠锚点 `expansion_anchor` 不串位，已完成双主题 `winapp` 与 `workbench_and_ime_ui` 单测验证）
 - [ ] `Ed7xS` 终端（内置 TUI 视图切换、顶栏分段控件 `topbar-view-gui-btn` / `topbar-view-tui-btn`、窄幅与草稿衔接；阶段 10 待开发：`crates/cst-tui` 尚未创建，点击「终端」切换呈现占位说明「窗口内置终端视图将在阶段 10 开放。」）
 - [x] `juqeU` 状态提示与软件更新（`h1BufF` 顶部通知、`WO6NQ` 更新/凭据缺省弹层、`pFooK` 退出确认「继续使用」/「停止任务并退出」与红标已完成双主题 `winapp` 截图核查；更新下载进度、取消与交接锁屏、焦点陷阱与降级草稿检查由 `settings_and_update` 与 `shell_and_mode_ui` 实测覆盖，无线上签名更新包实机截图）
-- [x] `OmK5U` 输入与快捷面板（已对齐输入浮层 Z 轴叠放序、补全标题栏与 `/skill:` 分隔线及 `Ctrl+K` 底栏底色；`Ctrl+K` 面板、`/`/`@` 补全、上下文圆环额度弹层与双级模型/思考强度已完成双主题 `winapp` 截图核查；`queue`/`steer` 乐观重排回滚、IME/动作层键位、防重入与 `sol` 并发修补由 `workbench_and_ime_ui` 实测通过，队列卡未单采 `winapp` 实图）
+- [ ] `OmK5U` 输入与快捷面板（已对齐输入浮层 Z 轴叠放序、补全标题栏与 `/skill:` 分隔线；`/`/`@` 补全、上下文圆环额度弹层与双级模型/思考强度已完成双主题 `winapp` 截图核查；`queue`/`steer` 乐观重排回滚、IME/动作层键位、防重入与 `sol` 并发修补由 `workbench_and_ime_ui` 实测通过；`X9p2ZR` `Ctrl+P` 命令与导航面板及 `MMTeT` `Ctrl+O` 会话与近期导出面板已完成画布、代码与 `settings_and_update` / `shell_and_mode_ui` 回归测试，待补双主题 `winapp` 真窗核查）
 - [ ] `KsR0v` 仪表盘（概览指标卡片、图表/配额布局与深浅色对比度；待开发占位：当前显示「本地用量仪表盘将在后续版本开放。」）
 
 ### 02 · 会话管理（`C49doB`）
 
 - [x] `Fp7xb` 全部会话（自然日分组、长标题 `lzrMn` 列表行、`UWt8w`/`UyJBj` 右键菜单、重命名弹窗及空校验 `X2gAh`、`h5AY3` 侧栏多选与全部会话批量模式已完成双主题 `winapp` 截图核查及 `sol` 复核闭环；`409` 删除冲突回滚、失效多选清理与重命名竞态由 `settings_and_update` 与 `shell_and_mode_ui` 实测覆盖）
-- [x] `bliwY` 分支树（五种过滤模式、节点间距与 `2px` 引导线、底部快捷键提示条、`c1wymw` 跳转总结弹窗已完成双主题 `winapp` 截图核查及 `sol` 复核闭环，并补正同会话分支跳转后激活刷新；`Ctrl+O`/方向键/IME 隔离与 `Esc` 逐层退回由 `settings_and_update` 实测覆盖）
+- [ ] `bliwY` 分支树（五种过滤模式、节点间距与 `2px` 引导线已完成双主题 `winapp` 核查；已按 [ADR-012](../ADR.md) 取消分支树专属快捷键并移除底部提示条，同步调整 `c1wymw` 弹窗为「直接回退 / 总结 / 自定义提示词总结」并去除底部取消按钮，已通过 `settings_and_update` 回归测试，待补双主题 `winapp` 真窗复核）
 - [x] `P7uGp` 会话导出（导出选项、格式/主题切换与 `CST Pilot` 预览区已完成双主题 `winapp` 截图核查；生成落盘通知、打开导出目录与离页取消轮询防误开目录由 `settings_and_update` 实测覆盖，真窗未拉起系统资源管理器）
 
 ### 03 · 设置（`Trond`）
@@ -50,7 +50,7 @@
 - [x] `sxkCI` 常规（`VPWAF` 设置导航、外观浅/深/跟随系统切换、系统集成与更新状态行 `c4PWw` 已完成双主题 `winapp` 核查）
 - [x] `t7zsNf` 模型服务（已核查列表与 `T5us8O` `已连接` 徽标、自定义网关 `q8NLwK` 增删改、`providers-apikey-input` 掩码及 1 级红框校验、凭据请求流内存清零及 `delete_custom_provider` 修复；真窗 `winapp` 与 `settings_and_update` 闭环）
 - [x] `b9mFa` 模型偏好（已核查 `H2p2z` 默认模型/筛选毛玻璃浮层及 Z 轴叠放序、`search`/`refresh-cw`/`plus` 组头、`N 个已启用` 计数、乐观排序回滚及 `cst-server` 全量重排保留顺序；真窗 `winapp` 与 `settings_and_update` 闭环）
-- [x] `i6TeGT` 快捷键（快捷键列表与 `ZCGS3` 键位胶囊已完成双主题 `winapp` 核查）
+- [ ] `i6TeGT` 快捷键（已按 [ADR-012](../ADR.md) 更新为 `Ctrl + P` / `Ctrl + O` 并移除分支树快捷键分组条目，代码与编译已落地，待重跑双主题 `winapp` 真窗核查）
 
 ### 04 · 账号与登录（`ABJtA`）
 
@@ -81,7 +81,7 @@
 - [x] **浮层与弹窗组（`popover` / `modal` / `toast`）**：已完成 `220ms`/`240ms` `ease_out` 位移淡入（阴影按 `d^3` 渐强）、`2600ms` 顶部通知/报错条 `BannerCountdownState`（`timer_epoch` 防重用 + 悬停暂停/恢复 + 切页/遮挡/替换清悬停），以及最近会话抽屉与账号菜单可折返 `150ms` 无交互退场（关闭首帧即卸交互/无障碍节点并保持 `Esc` 单帧归焦），并经 `shell_and_mode_ui` 与双主题 `winapp` 核实；容器级 `scale(0.96)` 已按 [ADR-008](../ADR.md) 登记替代
 - [x] **展开与位移组（`collapse` / `chevron` / `flip` / `pageSlide` / `sidebarShift` / `drawer`）**：过程块与工具原始数据已接入 `MeasuredCollapse` 可折返测量高度插值（`240ms` 开 / `150ms` 关，关闭首帧即卸子交互控件并持续跟踪动态内容高度）；展开侧栏已补齐 `240ms`/`150ms` 双向滑移；侧栏会话、模型偏好与排队栏已接入列表内相对坐标 `FLIP` 位置追踪（不因滚动、筛选或切会话误触发）；`chevron`、`pageSlide`、`sidebarShift` 与 `recent-sessions-drawer` 均经 `shell_and_mode_ui` 与 `sol` 复核实测
 - [x] **反馈与指示组（`checkStroke` / `iconSwap` / `segPill` / `tabIndicator`）**：复选勾选已改用 GPUI `canvas` + `PathBuilder::stroke` 实现真矢量两段路径描边动画（`340ms` 勾选 / `150ms` 取消，已通过双主题 `winapp` 核对）；`iconSwap`（`240ms ease_spring` `0.65 -> 1` + `1600ms` 连点重置）、`segPill` 与 `tabIndicator` 均通过无头测试与双主题 `winapp` 实测
-- [x] **零延迟与节律组（`tooltipGroup` / `welcomeStagger` / `streamAppend` / `runningLight` / `shaderFreeze`）**：`Ctrl+K` `0ms` 瞬开、欢迎屏单次错位、`RunningLight` 离屏停帧、着色器 `0 FPS` 停帧与减少动态同步均已实测；已实现按窗口隔离的共享 `TooltipOverlay` 冷却组（`theme/tooltip.rs`，`400ms` 初始延迟 / `300ms` 冷却直切，切页/弹窗/失焦/卸载自动清旧提示），挂载于顶栏、侧栏、输入栏、消息操作栏图标按钮并接入 `web-search-warn-tooltip`，已通过 `desktop_tooltips_share_delay_but_not_window_or_anchor_lifetime` 与双主题 `winapp` 核对
+- [x] **零延迟与节律组（`tooltipGroup` / `welcomeStagger` / `streamAppend` / `runningLight` / `shaderFreeze`）**：快捷面板 `0ms` 瞬开、欢迎屏单次错位、`RunningLight` 离屏停帧、着色器 `0 FPS` 停帧与减少动态同步均已实测；已实现按窗口隔离的共享 `TooltipOverlay` 冷却组（`theme/tooltip.rs`，`400ms` 初始延迟 / `300ms` 冷却直切，切页/弹窗/失焦/卸载自动清旧提示），挂载于顶栏、侧栏、输入栏、消息操作栏图标按钮并接入 `web-search-warn-tooltip`，已通过 `desktop_tooltips_share_delay_but_not_window_or_anchor_lifetime` 与双主题 `winapp` 核对
 
 ---
 

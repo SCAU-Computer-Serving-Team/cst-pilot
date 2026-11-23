@@ -11,7 +11,6 @@ use gpui_kit::{
 };
 
 use crate::accessibility::A11yElementExt as _;
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::motion::DesktopTooltipExt as _;
 use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, motion, radius, scale, space,
@@ -37,8 +36,8 @@ pub struct WebSearchBarProps<'a> {
 pub fn render_web_search_bar(
     props: WebSearchBarProps<'_>,
     palette: &DesktopPalette,
-    transparency_enabled: bool,
-    scale_factor: f32,
+    _transparency_enabled: bool,
+    _scale_factor: f32,
     on_toggle_expand: crate::tools::ToggleDetailsFn,
     on_hover_warning: crate::tools::HoverWarningFn,
     window: &mut Window,
@@ -300,37 +299,37 @@ pub fn render_web_search_bar(
                 .bottom_full()
                 .pb(space::XS)
                 .child(
-                    render_frosted_surface(
-                        format!("web-search-warn-tooltip-{}", props.call_id),
-                        FrostedGlassSpec::popover(palette),
-                        palette.bg_elevated,
-                        transparency_enabled,
-                        scale_factor,
-                    )
-                    .test_support()
-                    .max_w(px(320.0))
-                    .px(space::SM)
-                    .py(space::XS)
-                    .rounded(radius::CONTROL)
-                    .border_1()
-                    .border_color(palette.border_hairline)
-                    .child(
-                        apply_scale(div(), scale::CAPTION)
-                            .relative()
-                            .text_color(palette.text_primary)
-                            .child(SharedString::from(reason_text)),
-                    )
-                    .with_animation(
-                        SharedString::from(format!(
-                            "web-search-warn-tooltip-anim-{}",
+                    div()
+                        .id(SharedString::from(format!(
+                            "web-search-warn-tooltip-{}",
                             props.call_id
-                        )),
-                        Animation::new(motion::FAST).with_easing(motion::ease_out()),
-                        |el, d| {
-                            let t = d.clamp(0.0, 1.0);
-                            el.opacity(0.01 + 0.99 * t).mt(px(4.0 * (1.0 - t)))
-                        },
-                    ),
+                        )))
+                        .test_support()
+                        .max_w(px(320.0))
+                        .px(space::SM)
+                        .py(space::XS)
+                        .rounded(radius::CONTROL)
+                        .bg(palette.bg_elevated)
+                        .border_1()
+                        .border_color(palette.border_subtle)
+                        .shadow(palette.flat_popover_shadows())
+                        .child(
+                            apply_scale(div(), scale::CAPTION)
+                                .relative()
+                                .text_color(palette.text_primary)
+                                .child(SharedString::from(reason_text)),
+                        )
+                        .with_animation(
+                            SharedString::from(format!(
+                                "web-search-warn-tooltip-anim-{}",
+                                props.call_id
+                            )),
+                            Animation::new(motion::FAST).with_easing(motion::ease_out()),
+                            |el, d| {
+                                let t = d.clamp(0.0, 1.0);
+                                el.opacity(0.01 + 0.99 * t).mt(px(4.0 * (1.0 - t)))
+                            },
+                        ),
                 ),
         );
     }

@@ -69,6 +69,7 @@ impl ExportDocTheme {
 #[derive(Debug, Clone)]
 pub enum ExportViewEvent {
     BackToChat,
+    ExportCompleted,
     Notice(String),
     ErrorMessage(String),
 }
@@ -242,6 +243,7 @@ impl ExportView {
                     Ok((id, dir)) => {
                         this.last_completed_export_id = Some(id);
                         this.last_completed_dir = dir;
+                        cx.emit(ExportViewEvent::ExportCompleted);
                         this.open_export_directory(true, cx);
                     }
                     Err(msg) => cx.emit(ExportViewEvent::ErrorMessage(msg)),
@@ -328,7 +330,6 @@ impl ExportView {
                                 .gap(space::SM)
                                 .child(
                                     apply_scale(div(), scale::CAPTION_MEDIUM)
-                                        .font_family(mono_family.clone())
                                         .px(space::SM)
                                         .py(space::MICRO)
                                         .rounded(radius::CONTROL)
@@ -495,6 +496,44 @@ impl ExportView {
                             apply_scale(div(), scale::BODY)
                                 .text_color(doc_palette.text_primary)
                                 .child(SharedString::from(split.final_text)),
+                        );
+                    }
+                    if let Some(ref err_pres) = split.assistant_error {
+                        let mut err_col = div()
+                            .id(SharedString::from(format!("export-preview-error-{t_idx}")))
+                            .test_support()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap(space::SM)
+                            .child(
+                                apply_scale(div(), scale::BODY)
+                                    .text_color(doc_palette.text_primary)
+                                    .child(SharedString::from(err_pres.headline.clone())),
+                            );
+                        if let Some(ref raw_detail) = err_pres.raw_detail {
+                            err_col = err_col.child(
+                                div()
+                                    .w_full()
+                                    .p(space::MD)
+                                    .rounded(radius::ROW)
+                                    .bg(doc_palette.bg_surface)
+                                    .border_1()
+                                    .border_color(doc_palette.border_subtle)
+                                    .font_family(mono_family.clone())
+                                    .text_size(scale::CAPTION.font_size)
+                                    .line_height(scale::CAPTION.line_height)
+                                    .text_color(doc_palette.text_secondary)
+                                    .child(SharedString::from(raw_detail.clone())),
+                            );
+                        }
+                        turn_box = turn_box.child(err_col);
+                    }
+                    if split.was_aborted {
+                        turn_box = turn_box.child(
+                            apply_scale(div(), scale::UI)
+                                .text_color(doc_palette.text_muted)
+                                .child("已停止生成"),
                         );
                     }
                 }

@@ -1,5 +1,6 @@
 import { ChevronRight, CircleAlert, Info, KeyRound, WifiOff, X } from "lucide-react";
 import { Link } from "react-router";
+import type { TranscriptFormat } from "../conversation/transcript-disclosure";
 import { presentError } from "../data/error-presenter";
 import { CodeBlock } from "./code-block";
 import { Notification, NotificationDetail } from "./notification";
@@ -9,12 +10,14 @@ export function ErrorNotice({
 	onRetry,
 	model = false,
 	input = false,
+	format,
 	onDismiss,
 }: {
 	message: string;
 	onRetry?: () => void;
 	model?: boolean;
 	input?: boolean;
+	format?: TranscriptFormat;
 	onDismiss?: () => void;
 }) {
 	const error = presentError(message, { model, input });
@@ -69,21 +72,25 @@ export function ErrorNotice({
 					<strong>{error.title}</strong>
 					{error.description && <p>{error.description}</p>}
 				</div>
-				{error.kind === "auth" ? (
-					<Link className="notice-action" to="/settings#accounts">
-						重新登录
-					</Link>
-				) : onRetry ? (
-					<button type="button" className="notice-action" onClick={onRetry}>
-						{error.kind === "connection" ? "重新连接" : "重试"}
-					</button>
-				) : model ? (
-					<Link className="notice-action" to="/settings">
-						模型设置
-					</Link>
-				) : null}
+				{!format &&
+					(error.kind === "auth" ? (
+						<Link className="notice-action" to="/settings#accounts">
+							重新登录
+						</Link>
+					) : onRetry ? (
+						<button type="button" className="notice-action" onClick={onRetry}>
+							{error.kind === "connection" ? "重新连接" : "重试"}
+						</button>
+					) : model ? (
+						<Link className="notice-action" to="/settings">
+							模型设置
+						</Link>
+					) : null)}
 			</section>
-			<details className="error-details">
+			<details
+				className={format ? "error-details export-disclosure" : "error-details"}
+				open={format === "png" || undefined}
+			>
 				<summary>
 					技术详情 <ChevronRight size={14} aria-hidden="true" />
 				</summary>

@@ -1073,6 +1073,31 @@ impl AppHttpClient {
         .await
     }
 
+    pub async fn list_recent_exports(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<crate::state::RecentExportSummary>, ClientError> {
+        let clamped = limit.clamp(1, 50);
+        let value = self
+            .request_value(
+                Method::GET,
+                &format!("/api/exports/recent?limit={clamped}"),
+                None,
+                None,
+                Some(Duration::from_secs(10)),
+            )
+            .await?;
+        let exports = value
+            .get("exports")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        serde_json::from_value(exports).map_err(|err| ClientError::Server {
+            status: 200,
+            code: "invalid_response".to_owned(),
+            message: format!("解析近期导出列表失败：{err}"),
+        })
+    }
+
     pub async fn open_export_directory(&self, export_id: &str) -> Result<Value, ClientError> {
         let eid = encode_segment(export_id);
         self.request_value(

@@ -1429,10 +1429,12 @@ async fn headless_gpui_motion_primitives_interruptible_reversal_reduce_motion_on
         open_desktop_shell_window_with_handle(handle.clone(), Some(font_report), cx).unwrap()
     });
 
-    // Ctrl+K instant (0ms) open and Escape close
+    // Ctrl+P / Ctrl+O instant (0ms) open, in-place switch, and Escape close
     cx.update_window(win_handle, |_, window, cx| {
         window.render_frame(cx);
-        window.press("ctrl-k", cx);
+        window.press("ctrl-p", cx);
+        assert!(window.find("command-palette-modal-i70mz").visible());
+        window.press("ctrl-o", cx);
         assert!(window.find("command-palette-modal-i70mz").visible());
         window.press("escape", cx);
         assert!(window.try_find("command-palette-modal-i70mz").is_none());

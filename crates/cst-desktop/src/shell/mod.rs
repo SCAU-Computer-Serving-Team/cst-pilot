@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use cst_client::{
     ChannelModeDto, ClientError, ClientHandle, ClientSnapshot, DesktopSettingsPatchDto,
-    ExitCheckReport, ThemeModeDto, UpdatePhaseDto, WorkspaceView,
+    ExitCheckReport, RecentExportSummary, ThemeModeDto, UpdatePhaseDto, WorkspaceView,
 };
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement as _;
@@ -32,7 +32,7 @@ use crate::background::{
     FrostedGlassSpec, ShaderFrameScheduler, SkyPreset, has_active_hardware_diagnostic,
     render_frosted_surface, render_sky_background_rounded,
 };
-use crate::palette::{CommandPaletteEvent, CommandPaletteModal, PaletteCommandTarget};
+use crate::palette::{CommandPaletteEvent, CommandPaletteModal, PaletteCommandTarget, PaletteMode};
 use crate::sessions::all_sessions::{AllSessionsEvent, AllSessionsView};
 use crate::sessions::branch_tree::{BranchTreeEvent, BranchTreeView};
 use crate::sessions::export_view::{ExportView, ExportViewEvent};
@@ -71,6 +71,7 @@ gpui_kit::actions!(
         NewSession,
         OpenSettings,
         ToggleCommandPalette,
+        ToggleQuickOpenPalette,
         DismissTopSurface,
         RequestAppExit
     ]
@@ -83,7 +84,8 @@ pub fn register_shell_keys(cx: &mut App) {
         KeyBinding::new("ctrl-b", ToggleSidebar, Some(SHELL_KEY_CONTEXT)),
         KeyBinding::new("ctrl-n", NewSession, Some(SHELL_KEY_CONTEXT)),
         KeyBinding::new("ctrl-,", OpenSettings, Some(SHELL_KEY_CONTEXT)),
-        KeyBinding::new("ctrl-k", ToggleCommandPalette, Some(SHELL_KEY_CONTEXT)),
+        KeyBinding::new("ctrl-p", ToggleCommandPalette, Some(SHELL_KEY_CONTEXT)),
+        KeyBinding::new("ctrl-o", ToggleQuickOpenPalette, Some(SHELL_KEY_CONTEXT)),
         KeyBinding::new("escape", DismissTopSurface, Some(SHELL_KEY_CONTEXT)),
     ]);
 }
@@ -129,6 +131,8 @@ pub struct AppShell {
     sidebar_search_input: Entity<InputState>,
     command_palette: Option<Entity<CommandPaletteModal>>,
     command_palette_sub: Option<Subscription>,
+    recent_exports_cache: Vec<RecentExportSummary>,
+    recent_exports_task: Option<Task<()>>,
     missing_key_modal: Option<MissingKeyModalState>,
     pending_return_session_id: Option<Option<String>>,
     startup_missing_key_checked: bool,
@@ -280,10 +284,10 @@ impl AppShell {
         subscriptions.push(cx.subscribe_in(
             &sidebar_search_input,
             window,
-            |_, _, ev: &InputEvent, _, cx| {
-                if matches!(ev, InputEvent::Change) {
-                    cx.notify();
-                }
+            |this, _, ev: &InputEvent, _, cx| match ev {
+                InputEvent::Change => cx.notify(),
+                InputEvent::Focus => this.dismiss_click_outside_surfaces(cx),
+                _ => {}
             },
         ));
 
@@ -351,6 +355,8 @@ impl AppShell {
             sidebar_search_input,
             command_palette: None,
             command_palette_sub: None,
+            recent_exports_cache: Vec::new(),
+            recent_exports_task: None,
             missing_key_modal: None,
             pending_return_session_id: None,
             startup_missing_key_checked: false,
@@ -1289,31 +1295,86 @@ impl AppShell {
     }
 
     pub fn toggle_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.command_palette.is_none() && self.blocks_workspace_shortcuts(cx) {
+        self.toggle_palette(PaletteMode::Commands, window, cx);
+    }
+
+    pub fn toggle_quick_open_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_palette(PaletteMode::QuickOpen, window, cx);
+    }
+
+    pub fn toggle_palette(
+        &mut self,
+        mode: PaletteMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.route == ShellRoute::Login {
             return;
         }
-        #[cfg(feature = "test-support")]
-        crate::ux_probe::mark_input("command_palette");
-        if let Some(palette_ent) = self.command_palette.take() {
-            self.command_palette_sub = None;
-            if let Some(pf) = palette_ent.read(cx).prior_focus() {
-                pf.focus(window, cx);
+        if let Some(palette_ent) = self.command_palette.clone() {
+            if palette_ent.read(cx).mode() == mode {
+                self.command_palette = None;
+                self.command_palette_sub = None;
+                if let Some(pf) = palette_ent.read(cx).prior_focus() {
+                    pf.focus(window, cx);
+                }
+                cx.notify();
+                return;
+            }
+            palette_ent.update(cx, |m, cx| m.switch_mode(mode, window, cx));
+            if mode == PaletteMode::QuickOpen {
+                self.refresh_recent_exports(cx);
             }
             cx.notify();
             return;
         }
+        if self.blocks_workspace_shortcuts(cx) {
+            return;
+        }
+        #[cfg(feature = "test-support")]
+        crate::ux_probe::mark_input("command_palette");
         let prior = window.focused(cx);
         let sessions = self.snapshot.sessions.as_ref().clone();
-        let has_active_session = self.route == ShellRoute::Session
-            && self
-                .client
-                .with_workspace(|ws| ws.active_session_id().is_some());
-        let modal =
-            cx.new(|cx| CommandPaletteModal::new(sessions, has_active_session, prior, window, cx));
+        let active_session_id = self
+            .client
+            .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
+        let has_active_session = self.route == ShellRoute::Session && active_session_id.is_some();
+        let cached_exports = self.recent_exports_cache.clone();
+        let modal = cx.new(|cx| {
+            CommandPaletteModal::new(
+                mode,
+                sessions,
+                active_session_id,
+                has_active_session,
+                cached_exports,
+                prior,
+                window,
+                cx,
+            )
+        });
         let sub = cx.subscribe_in(&modal, window, Self::on_command_palette_event);
         self.command_palette = Some(modal);
         self.command_palette_sub = Some(sub);
+        if mode == PaletteMode::QuickOpen {
+            self.refresh_recent_exports(cx);
+        }
         cx.notify();
+    }
+
+    fn refresh_recent_exports(&mut self, cx: &mut Context<Self>) {
+        let client = self.client.clone();
+        self.recent_exports_task = Some(cx.spawn(async move |weak, cx| {
+            let res = client.list_recent_exports(20).await;
+            let _ = weak.update(cx, |this, cx| {
+                this.recent_exports_task = None;
+                if let Ok(list) = res {
+                    this.recent_exports_cache = list.clone();
+                    if let Some(ref cp) = this.command_palette {
+                        cp.update(cx, |m, cx| m.set_recent_exports(list, cx));
+                    }
+                }
+            });
+        }));
     }
 
     fn on_command_palette_event(
@@ -1416,6 +1477,18 @@ impl AppShell {
             PaletteCommandTarget::OpenSession(sid) => {
                 self.activate_session_by_id(sid, cx);
             }
+            PaletteCommandTarget::OpenExport(export_id) => {
+                let client = self.client.clone();
+                cx.spawn(async move |weak, cx| {
+                    let res = client.open_export_directory(export_id).await;
+                    let _ = weak.update(cx, |this, cx| {
+                        if let Err(err) = res {
+                            this.show_workspace_error(err.to_string(), cx);
+                        }
+                    });
+                })
+                .detach();
+            }
             PaletteCommandTarget::NewSession => {
                 self.set_route(ShellRoute::Home, cx);
                 self.sidebar_batch_mode = false;
@@ -1427,6 +1500,16 @@ impl AppShell {
                     })
                     .detach();
                 cx.notify();
+            }
+            PaletteCommandTarget::OpenAllSessions => {
+                self.sidebar_batch_mode = false;
+                self.sidebar_selected_ids.clear();
+                self.set_route(ShellRoute::AllSessions, cx);
+                self.all_sessions_view
+                    .update(cx, |view, cx| view.focus_from_keyboard(window, cx));
+            }
+            PaletteCommandTarget::ToggleSidebar => {
+                self.toggle_sidebar(window, cx);
             }
             PaletteCommandTarget::OpenSettings => {
                 self.set_route(ShellRoute::Settings, cx);
@@ -2085,6 +2168,24 @@ impl AppShell {
         }
     }
 
+    fn dismiss_click_outside_surfaces(&mut self, cx: &mut Context<Self>) {
+        let _ = self
+            .workbench
+            .update(cx, |wb, cx| wb.dismiss_composer_popovers(cx));
+        let _ = self
+            .settings_view
+            .update(cx, |sv, cx| sv.dismiss_click_outside_dropdowns(cx));
+        let _ = self
+            .branch_tree_view
+            .update(cx, |bt, cx| bt.dismiss_filter_dropdown(cx));
+        let _ = self
+            .all_sessions_view
+            .update(cx, |av, cx| av.dismiss_context_menu(cx));
+        let _ = self
+            .login_view
+            .update(cx, |lv, cx| lv.dismiss_dropdowns_on_outside_click(cx));
+    }
+
     fn on_all_sessions_event(
         &mut self,
         _av: &Entity<AllSessionsView>,
@@ -2181,6 +2282,10 @@ impl AppShell {
     ) {
         match event {
             ExportViewEvent::BackToChat => self.return_to_chat(window, cx),
+            ExportViewEvent::ExportCompleted => {
+                self.recent_exports_cache.clear();
+                self.refresh_recent_exports(cx);
+            }
             ExportViewEvent::Notice(msg) => {
                 self.show_top_notice(msg.clone(), cx);
             }
@@ -2546,7 +2651,9 @@ impl Render for AppShell {
         if let Some(ref cp) = self.command_palette {
             let sess_vec = self.snapshot.sessions.as_ref().clone();
             let has_act = self.route == ShellRoute::Session && active_session_id.is_some();
-            cp.update(cx, |m, _| m.sync_context(sess_vec, has_act));
+            cp.update(cx, |m, _| {
+                m.sync_context(sess_vec, active_session_id.clone(), has_act)
+            });
         }
 
         let (account_label, account_initial) = match self.snapshot.account.as_ref() {
@@ -2973,6 +3080,7 @@ impl Render for AppShell {
                 .pr(layout::SHELL_FRAME_INSET)
                 .pb(layout::SHELL_FRAME_INSET)
                 .bg(palette.bg_shell)
+                .overflow_hidden()
                 .child(workspace_card);
 
             let right_column = div()
@@ -2997,7 +3105,6 @@ impl Render for AppShell {
                 let s1 = entity.clone();
                 let s2 = entity.clone();
                 let s_clr = entity.clone();
-                let s_pal = entity.clone();
                 let s3 = entity.clone();
                 let s4 = entity.clone();
                 let s5 = entity.clone();
@@ -3051,9 +3158,6 @@ impl Render for AppShell {
                                 });
                                 cx.notify();
                             });
-                        }),
-                        on_open_palette: Rc::new(move |w, cx| {
-                            s_pal.update(cx, |this, cx| this.toggle_command_palette(w, cx));
                         }),
                         on_open_all_sessions: Rc::new(move |window, cx| {
                             s3.update(cx, |this, cx| {
@@ -3238,6 +3342,9 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| {
                 this.toggle_command_palette(window, cx);
             }))
+            .on_action(cx.listener(|this, _: &ToggleQuickOpenPalette, window, cx| {
+                this.toggle_quick_open_palette(window, cx);
+            }))
             .capture_action(cx.listener(|this, _: &Escape, window, cx| {
                 crate::sessions::consume_composing_escape(&this.sidebar_search_input, window, cx);
             }))
@@ -3247,6 +3354,18 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &RequestAppExit, window, cx| {
                 this.request_close_flow(window, cx);
             }))
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    this.dismiss_click_outside_surfaces(cx);
+                }),
+            )
+            .on_mouse_down(
+                gpui::MouseButton::Right,
+                cx.listener(|this, _, _, cx| {
+                    this.dismiss_click_outside_surfaces(cx);
+                }),
+            )
             .child(main_layout);
 
         if self.route != ShellRoute::Login {
@@ -3448,13 +3567,40 @@ impl Render for AppShell {
                             .text_color(palette.text_primary)
                             .child(cjk_inline_label("重命名对话")),
                     )
-                    .child(
-                        div().relative().child(
-                            Input::new(&rm.input)
-                                .accessibility_id("rename-session-input")
-                                .aria_label("新会话标题"),
-                        ),
-                    )
+                    .child({
+                        let rename_focused = rm.input.read(cx).focus_handle(cx).is_focused(window);
+                        let rename_focus_ent = rm.input.clone();
+                        div()
+                            .id("rename-session-input-box")
+                            .relative()
+                            .w_full()
+                            .h(height::FIELD)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(if rename_focused {
+                                palette.border_focus
+                            } else {
+                                palette.border_strong
+                            })
+                            .bg(palette.bg_workspace)
+                            .flex()
+                            .items_center()
+                            .on_click(move |_, w, cx| {
+                                rename_focus_ent.update(cx, |s, cx| s.focus(w, cx));
+                            })
+                            .child(
+                                div().flex_1().min_w_0().child(
+                                    Input::new(&rm.input)
+                                        .accessibility_id("rename-session-input")
+                                        .aria_label("新会话标题")
+                                        .appearance(false)
+                                        .bordered(false)
+                                        .focus_bordered(false)
+                                        .p_0(),
+                                ),
+                            )
+                    })
                     .child(
                         div()
                             .relative()

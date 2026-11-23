@@ -341,6 +341,50 @@ pub struct WebOpenDto {
     pub mode: ChannelModeDto,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentExportFileDto {
+    pub name: String,
+    #[serde(default)]
+    pub bytes: u64,
+    #[serde(default)]
+    pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentExportSummary {
+    pub id: String,
+    pub session_id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub captured_at: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub options: Value,
+    #[serde(default)]
+    pub files: Vec<RecentExportFileDto>,
+}
+
+impl RecentExportSummary {
+    pub fn format(&self) -> &str {
+        self.options
+            .get("format")
+            .and_then(Value::as_str)
+            .unwrap_or("html")
+    }
+
+    pub fn total_bytes(&self) -> u64 {
+        self.files.iter().map(|f| f.bytes).sum()
+    }
+
+    pub fn page_count(&self) -> usize {
+        self.files.len()
+    }
+}
+
 /// Immutable, `Arc`-shared client state snapshot published by the background Tokio reducer.
 #[derive(Debug, Clone)]
 pub struct ClientSnapshot {

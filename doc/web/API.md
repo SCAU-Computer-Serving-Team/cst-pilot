@@ -61,9 +61,10 @@
 | `POST` | `/api/sessions/<id>/exports/preview` | `200`。返回筛选与脱敏后的当前分支快照，不落盘 |
 | `POST` | `/api/sessions/<id>/exports` | `202`。固定快照并入队创建后台导出任务，须携带 `Idempotency-Key` |
 | `GET` | `/api/sessions/<id>/exports` | 最近 50 条导出记录，按快照时间倒序 |
+| `GET` | `/api/exports/recent?limit=<n>` | 跨会话近期已完成导出记录（默认 20 条，上限 50 条），按快照时间倒序，供桌面端 `Ctrl+O` 快速打开使用 |
 | `GET` | `/api/exports/<exportId>` | 查询任务状态（`queued / rendering / completed / failed`）、选项、目录、文件列表或错误 |
 | `GET` | `/api/exports/<exportId>/files/<index>` | 按下标读取已登记文件并核验 SHA-256。文件被修改返回 `409 export_file_changed`，缺失返回 `404 export_file_missing` |
-| `POST` | `/api/exports/<exportId>/open` | 正文 `{}`（须带 `Idempotency-Key`）。由已完成记录推导并校验真实目录后启动本机资源管理器，返回 `{ launched: true }` |
+| `POST` | `/api/exports/<exportId>/open` | 正文 `{}`（须带 `Idempotency-Key`）。由已完成记录推导并校验真实目录与目标文件后启动本机资源管理器（存在已登记文件时通过 `explorer.exe /select` 高亮选中首个导出文件），返回 `{ launched: true }` |
 
 请求参数与资源上限：
 

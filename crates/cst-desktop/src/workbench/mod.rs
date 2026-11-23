@@ -30,7 +30,6 @@ use crate::workbench::composer::{ComposerHostEvent, ComposerView, SlashNavigatio
 use crate::workbench::image_viewer::{LightboxImageTarget, render_image_lightbox_modal};
 use crate::workbench::message_list::{MessageListEvent, MessageListView, latest_forkable_entry_id};
 use crate::workbench::queue_bar::VisibleQueueItem;
-use crate::workbench::turn_segments::ImageContentPart;
 
 #[derive(Debug, Clone)]
 pub enum WorkbenchEvent {
@@ -44,12 +43,6 @@ pub enum WorkbenchEvent {
 
 #[derive(Debug, Clone)]
 enum PendingDraftOverwriteAction {
-    HistoryUserTurn {
-        session_id: String,
-        user_entry_id: String,
-        user_text: String,
-        user_images: Vec<ImageContentPart>,
-    },
     QueueItem {
         session_id: String,
         item: VisibleQueueItem,
@@ -254,6 +247,23 @@ impl WorkbenchView {
         });
     }
 
+    pub fn dismiss_composer_popovers(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut closed = false;
+        if self.header_menu_open {
+            self.header_menu_open = false;
+            self.header_menu_prior_focus = None;
+            closed = true;
+            cx.notify();
+        }
+        closed |= self
+            .home_composer
+            .update(cx, |comp, cx| comp.close_floating_popovers(cx));
+        closed |= self
+            .session_composer
+            .update(cx, |comp, cx| comp.close_floating_popovers(cx));
+        closed
+    }
+
     /// Dismisses the single topmost open workbench surface (`HUkqs` header menu -> draft-overwrite confirm -> `lightbox` -> active `ComposerView` popovers)
     /// and restores focus within 1 frame.
     pub fn dismiss_topmost_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -279,6 +289,12 @@ impl WorkbenchView {
                 prev.focus(window, cx);
             }
             cx.notify();
+            return true;
+        }
+        if self
+            .message_list
+            .update(cx, |ml, cx| ml.dismiss_inline_edit(cx))
+        {
             return true;
         }
         if self.active_session_id.is_some() {
@@ -309,22 +325,6 @@ impl WorkbenchView {
         cx: &mut Context<Self>,
     ) {
         match action {
-            PendingDraftOverwriteAction::HistoryUserTurn {
-                session_id,
-                user_entry_id,
-                user_text,
-                user_images,
-            } => {
-                self.message_list.update(cx, |ml, cx| {
-                    ml.apply_edit_and_rewrite_user_turn(
-                        session_id,
-                        user_entry_id,
-                        user_text,
-                        user_images,
-                        cx,
-                    );
-                });
-            }
             PendingDraftOverwriteAction::QueueItem {
                 session_id,
                 item,
@@ -476,23 +476,6 @@ impl WorkbenchView {
                     cx.notify();
                 });
             }
-            MessageListEvent::RequestEditUserTurn {
-                session_id,
-                user_entry_id,
-                user_text,
-                user_images,
-            } => {
-                self.request_draft_overwrite_or_run(
-                    PendingDraftOverwriteAction::HistoryUserTurn {
-                        session_id: session_id.clone(),
-                        user_entry_id: user_entry_id.clone(),
-                        user_text: user_text.clone(),
-                        user_images: user_images.clone(),
-                    },
-                    window,
-                    cx,
-                );
-            }
             MessageListEvent::RequestEditOutboxItem {
                 session_id,
                 client_message_id,
@@ -624,6 +607,7 @@ impl Render for WorkbenchView {
                         .items_center()
                         .justify_center()
                         .hover(|s| s.bg(palette.bg_item_hover))
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(move |_, w, cx| {
                             ent_more.update(cx, |this, cx| {
                                 this.header_menu_open = !this.header_menu_open;
@@ -685,114 +669,111 @@ impl Render for WorkbenchView {
                 let ent_tree = entity.clone();
                 let ent_exp = entity.clone();
 
-                let menu_card = render_frosted_surface(
-                    "session-header-more-menu",
-                    FrostedGlassSpec::popover(&palette),
-                    palette.bg_elevated,
-                    transparency_enabled,
-                    scale_factor,
-                )
-                .test_support()
-                .role(gpui::Role::Menu)
-                .accessibility_id("session-header-more-menu")
-                .aria_label("会话更多菜单")
-                .w(px(200.0))
-                .p(space::XS)
-                .rounded(radius::ROW)
-                .border_1()
-                .border_color(palette.border_hairline)
-                .flex()
-                .flex_col()
-                .gap(space::MICRO)
-                .on_click(|_, _, cx| cx.stop_propagation())
-                .child(
-                    apply_scale(div(), scale::UI)
-                        .id("session-header-tree-btn")
-                        .test_support()
-                        .a11y_menuitem("session-header-tree-btn", "分支树")
-                        .relative()
-                        .h(height::CONTROL)
-                        .px(space::SM)
-                        .rounded(radius::CONTROL)
-                        .flex()
-                        .items_center()
-                        .gap(space::SM)
-                        .text_color(palette.text_primary)
-                        .hover(|s| s.bg(palette.bg_item_active))
-                        .on_click(move |_, _, cx| {
-                            ent_tree.update(cx, |this, cx| {
-                                this.header_menu_open = false;
-                                cx.emit(WorkbenchEvent::OpenSlashRoute(
-                                    SlashNavigationTarget::Tree,
-                                ));
-                                cx.notify();
-                            });
-                        })
-                        .child(
-                            Icon::new(IconName::GitBranch)
-                                .size(px(15.0))
-                                .text_color(palette.text_secondary),
-                        )
-                        .child(cjk_inline_label("分支树")),
-                )
-                .child(
-                    apply_scale(div(), scale::UI)
-                        .id("session-header-export-btn")
-                        .test_support()
-                        .a11y_menuitem("session-header-export-btn", "导出会话")
-                        .relative()
-                        .h(height::CONTROL)
-                        .px(space::SM)
-                        .rounded(radius::CONTROL)
-                        .flex()
-                        .items_center()
-                        .gap(space::SM)
-                        .text_color(palette.text_primary)
-                        .hover(|s| s.bg(palette.bg_item_active))
-                        .on_click(move |_, _, cx| {
-                            ent_exp.update(cx, |this, cx| {
-                                this.header_menu_open = false;
-                                cx.emit(WorkbenchEvent::OpenSlashRoute(
-                                    SlashNavigationTarget::Export,
-                                ));
-                                cx.notify();
-                            });
-                        })
-                        .child(
-                            Icon::new(IconName::FileText)
-                                .size(px(15.0))
-                                .text_color(palette.text_secondary),
-                        )
-                        .child(cjk_inline_label("导出会话")),
-                )
-                .child(
-                    div()
-                        .relative()
-                        .w_full()
-                        .my(space::MICRO)
-                        .h(px(1.0))
-                        .bg(palette.border_subtle),
-                )
-                .child(
-                    apply_scale(div(), scale::UI)
-                        .id("session-header-share-disabled")
-                        .test_support()
-                        .relative()
-                        .h(height::CONTROL)
-                        .px(space::SM)
-                        .rounded(radius::CONTROL)
-                        .opacity(0.45)
-                        .flex()
-                        .items_center()
-                        .gap(space::SM)
-                        .text_color(palette.text_secondary)
-                        .child(
-                            Icon::new(IconName::ExternalLink)
-                                .size(px(15.0))
-                                .text_color(palette.text_secondary),
-                        )
-                        .child(cjk_inline_label("分享")),
-                );
+                let menu_card = div()
+                    .id("session-header-more-menu")
+                    .test_support()
+                    .role(gpui::Role::Menu)
+                    .accessibility_id("session-header-more-menu")
+                    .aria_label("会话更多菜单")
+                    .w(px(200.0))
+                    .p(space::XS)
+                    .rounded(radius::ROW)
+                    .bg(palette.bg_elevated)
+                    .border_1()
+                    .border_color(palette.border_subtle)
+                    .flex()
+                    .flex_col()
+                    .gap(space::MICRO)
+                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .child(
+                        apply_scale(div(), scale::UI)
+                            .id("session-header-tree-btn")
+                            .test_support()
+                            .a11y_menuitem("session-header-tree-btn", "分支树")
+                            .relative()
+                            .h(height::CONTROL)
+                            .px(space::SM)
+                            .rounded(radius::CONTROL)
+                            .flex()
+                            .items_center()
+                            .gap(space::SM)
+                            .text_color(palette.text_primary)
+                            .hover(|s| s.bg(palette.bg_item_active))
+                            .on_click(move |_, _, cx| {
+                                ent_tree.update(cx, |this, cx| {
+                                    this.header_menu_open = false;
+                                    cx.emit(WorkbenchEvent::OpenSlashRoute(
+                                        SlashNavigationTarget::Tree,
+                                    ));
+                                    cx.notify();
+                                });
+                            })
+                            .child(
+                                Icon::new(IconName::GitBranch)
+                                    .size(px(15.0))
+                                    .text_color(palette.text_secondary),
+                            )
+                            .child(cjk_inline_label("分支树")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI)
+                            .id("session-header-export-btn")
+                            .test_support()
+                            .a11y_menuitem("session-header-export-btn", "导出会话")
+                            .relative()
+                            .h(height::CONTROL)
+                            .px(space::SM)
+                            .rounded(radius::CONTROL)
+                            .flex()
+                            .items_center()
+                            .gap(space::SM)
+                            .text_color(palette.text_primary)
+                            .hover(|s| s.bg(palette.bg_item_active))
+                            .on_click(move |_, _, cx| {
+                                ent_exp.update(cx, |this, cx| {
+                                    this.header_menu_open = false;
+                                    cx.emit(WorkbenchEvent::OpenSlashRoute(
+                                        SlashNavigationTarget::Export,
+                                    ));
+                                    cx.notify();
+                                });
+                            })
+                            .child(
+                                Icon::new(IconName::FileText)
+                                    .size(px(15.0))
+                                    .text_color(palette.text_secondary),
+                            )
+                            .child(cjk_inline_label("导出会话")),
+                    )
+                    .child(
+                        div()
+                            .relative()
+                            .w_full()
+                            .my(space::MICRO)
+                            .h(px(1.0))
+                            .bg(palette.border_subtle),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI)
+                            .id("session-header-share-disabled")
+                            .test_support()
+                            .relative()
+                            .h(height::CONTROL)
+                            .px(space::SM)
+                            .rounded(radius::CONTROL)
+                            .opacity(0.45)
+                            .flex()
+                            .items_center()
+                            .gap(space::SM)
+                            .text_color(palette.text_secondary)
+                            .child(
+                                Icon::new(IconName::ExternalLink)
+                                    .size(px(15.0))
+                                    .text_color(palette.text_secondary),
+                            )
+                            .child(cjk_inline_label("分享")),
+                    );
 
                 session_view = session_view
                     .child(
@@ -813,7 +794,7 @@ impl Render for WorkbenchView {
                         motion::animate_popover_enter(
                             "session-header-more-anim",
                             menu_card,
-                            palette.craft_stack_shadows(),
+                            palette.flat_popover_shadows(),
                             -6.0,
                         ),
                     ));

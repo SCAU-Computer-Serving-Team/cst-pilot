@@ -292,19 +292,26 @@ pub fn render_frosted_surface(
     scale_factor: f32,
 ) -> Stateful<Div> {
     let is_elevated_card = spec.specular > 0.0;
-    let shadow_sm: Hsla = gpui_kit::rgba(if spec.tint_rgb[0] > 0.5 {
+    let is_light_tint = spec.tint_rgb[0] > 0.5;
+    let shadow_contact: Hsla = gpui_kit::rgba(if is_light_tint {
         0x1111_110F
     } else {
-        0x0000_0066
+        0x0000_003D
     })
     .into();
-    let shadow_lg: Hsla = gpui_kit::rgba(if spec.tint_rgb[0] > 0.5 {
+    let shadow_mid: Hsla = gpui_kit::rgba(if is_light_tint {
+        0x1111_110F
+    } else {
+        0x0000_0047
+    })
+    .into();
+    let shadow_lg: Hsla = gpui_kit::rgba(if is_light_tint {
         0x1111_1117
     } else {
-        0x0000_0080
+        0x0000_0061
     })
     .into();
-    let mut highlight_top: Hsla = gpui_kit::rgba(if spec.tint_rgb[0] > 0.5 {
+    let mut highlight_top: Hsla = gpui_kit::rgba(if is_light_tint {
         0xFFFF_FFF2
     } else {
         0xFFFF_FF1F
@@ -323,24 +330,24 @@ pub fn render_frosted_surface(
                 inset: true,
             },
             gpui_kit::BoxShadow {
-                color: shadow_sm,
+                color: shadow_contact,
                 offset: gpui_kit::point(px(0.0), px(1.0)),
-                blur_radius: px(2.0),
+                blur_radius: px(if is_light_tint { 2.0 } else { 3.0 }),
                 spread_radius: px(0.0),
                 inset: false,
             },
             gpui_kit::BoxShadow {
-                color: shadow_sm,
+                color: shadow_mid,
                 offset: gpui_kit::point(px(0.0), px(6.0)),
                 blur_radius: px(14.0),
-                spread_radius: px(-2.0),
+                spread_radius: px(if is_light_tint { -2.0 } else { -1.0 }),
                 inset: false,
             },
             gpui_kit::BoxShadow {
                 color: shadow_lg,
-                offset: gpui_kit::point(px(0.0), px(18.0)),
-                blur_radius: px(36.0),
-                spread_radius: px(-6.0),
+                offset: gpui_kit::point(px(0.0), px(if is_light_tint { 18.0 } else { 16.0 })),
+                blur_radius: px(if is_light_tint { 36.0 } else { 34.0 }),
+                spread_radius: px(if is_light_tint { -6.0 } else { -4.0 }),
                 inset: false,
             },
         ]);

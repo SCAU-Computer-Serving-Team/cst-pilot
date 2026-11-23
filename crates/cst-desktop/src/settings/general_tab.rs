@@ -24,7 +24,7 @@ pub fn render_general_tab(
     desktop_settings: &DesktopSettingsDto,
     current_version: &str,
     update_state: Option<&UpdateStateDto>,
-    mono_family: SharedString,
+    _mono_family: SharedString,
     palette: &DesktopPalette,
     on_select_theme: SelectThemeFn,
     on_check_or_open_update: UpdateCardActionFn,
@@ -193,7 +193,6 @@ pub fn render_general_tab(
                         )
                         .child(
                             apply_scale(div(), scale::CAPTION)
-                                .font_family(mono_family)
                                 .text_color(palette.text_secondary)
                                 .child(SharedString::from(ver_str.to_owned())),
                         ),

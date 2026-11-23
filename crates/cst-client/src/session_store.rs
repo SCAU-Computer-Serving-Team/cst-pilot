@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 
 use crate::sse::{SessionCursor, parse_single_cursor};
 
-pub const DEFAULT_MAX_CACHED_SESSIONS: usize = 12;
+pub const DEFAULT_MAX_CACHED_SESSIONS: usize = 16;
 pub const DEFAULT_MAX_CACHED_BYTES: usize = 32 * 1024 * 1024;
 pub const DEFAULT_MAX_LOADING_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 

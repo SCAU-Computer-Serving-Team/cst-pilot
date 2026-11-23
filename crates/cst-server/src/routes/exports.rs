@@ -5,7 +5,9 @@ use serde_json::{Value, json};
 
 use crate::exports::{EXPORT_CSP, build_export_preview_snapshot, parse_export_options};
 use crate::mode::CallerIdentity;
-use crate::routes::{ApiError, SseOrBytesBody, bytes_response, json_response, read_json_body};
+use crate::routes::{
+    ApiError, SseOrBytesBody, bytes_response, json_response, parse_query_params, read_json_body,
+};
 use crate::session::attachments::is_valid_session_id_key;
 use crate::state::ServerState;
 
@@ -14,6 +16,7 @@ pub async fn handle_exports_route(
     caller: CallerIdentity,
     method: &Method,
     pathname: &str,
+    query: Option<&str>,
     headers: &HeaderMap,
     raw_body: &[u8],
 ) -> Result<Option<Response<SseOrBytesBody>>, ApiError> {
@@ -22,6 +25,35 @@ pub async fn handle_exports_route(
         let export_id = parts[0];
         if export_id.is_empty() {
             return Ok(None);
+        }
+        if parts.len() == 1
+            && export_id == "recent"
+            && (*method == Method::GET || *method == Method::HEAD)
+        {
+            let params = parse_query_params(query);
+            let limit = match params.get("limit") {
+                Some(raw) => match raw.trim().parse::<usize>() {
+                    Ok(v) if v >= 1 => v.min(50),
+                    _ => {
+                        return Err(ApiError::new(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_request",
+                            "limit 参数无效",
+                        ));
+                    }
+                },
+                None => 20,
+            };
+            let list = state
+                .exports
+                .list_recent(limit)
+                .await
+                .map_err(ApiError::from)?;
+            return Ok(Some(json_response(
+                StatusCode::OK,
+                &json!({ "exports": list }),
+                method,
+            )));
         }
         if parts.len() == 1 && (*method == Method::GET || *method == Method::HEAD) {
             let job = state.exports.get(export_id).await.map_err(ApiError::from)?;
@@ -49,12 +81,12 @@ pub async fn handle_exports_route(
                     &body,
                     Some(headers),
                     || async move {
-                        let dir = state
+                        let target = state
                             .exports
-                            .directory(&eid)
+                            .open_target(&eid)
                             .await
                             .map_err(ApiError::from)?;
-                        (state.open_export_directory)(dir).await.map_err(|_| {
+                        (state.open_export_directory)(target).await.map_err(|_| {
                             ApiError::new(
                                 StatusCode::SERVICE_UNAVAILABLE,
                                 "export_launch_failed",

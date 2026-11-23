@@ -10,14 +10,19 @@ use cst_client::{
     ClientError, ClientHandle, ComposerDraft, DraftKey, OutboxItem, OutboxItemState,
     SessionViewSnapshot,
 };
-use gpui::{Image, ImageSource, ObjectFit, ScrollEvent, ScrollHandle, StyledImage as _};
+use gpui::{
+    EntityInputHandler as _, Image, ImageSource, KeyDownEvent, ObjectFit, ScrollEvent,
+    ScrollHandle, StyledImage as _,
+};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::base::text::TextViewStyle;
-use gpui_kit::component::Icon;
+use gpui_kit::component::input::{Enter, InputEvent, Textarea, TextareaState};
+use gpui_kit::component::{Icon, Sizable as _};
 use gpui_kit::{
-    App, AppContext as _, ClipboardItem, Context, Entity, EventEmitter, InteractiveElement,
-    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, TestSupportExt, Window, div, img, px,
+    App, AppContext as _, ClipboardItem, Context, Entity, EventEmitter, Focusable as _,
+    InteractiveElement, IntoElement, ParentElement, Render, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, TestSupportExt, Window, div, img, px,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -37,8 +42,7 @@ use crate::workbench::image_viewer::{
     LightboxImageTarget, gpui_image_from_bytes, gpui_image_from_handle,
 };
 use crate::workbench::markdown_view::{
-    CopyFeedbackTracker, MarkdownStreamStore, build_markdown_style,
-    render_assistant_markdown_with_style, render_copyable_text_block,
+    CopyFeedbackTracker, MarkdownStreamStore, build_markdown_style, render_copyable_text_block,
     render_copyable_text_block_inert,
 };
 use crate::workbench::turn_segments::{
@@ -56,12 +60,6 @@ pub enum MessageListEvent {
     OpenLightbox(LightboxImageTarget),
     SwitchToSession(String),
     FocusComposer,
-    RequestEditUserTurn {
-        session_id: String,
-        user_entry_id: String,
-        user_text: String,
-        user_images: Vec<ImageContentPart>,
-    },
     RequestEditOutboxItem {
         session_id: String,
         client_message_id: String,
@@ -71,6 +69,55 @@ pub enum MessageListEvent {
     },
     ErrorMessage(String),
     TopNotice(String),
+}
+
+struct InlineBubbleEdit {
+    session_id: String,
+    turn_key: String,
+    user_entry_id: String,
+    original_text: String,
+    user_images: Vec<ImageContentPart>,
+    textarea: Entity<TextareaState>,
+    _subscription: Subscription,
+}
+
+/// Estimates inline-editing user bubble dimensions `(bubble_width_px, text_height_px)` from live text
+/// so the bubble adapts smoothly while keeping its right-middle edge anchored.
+fn estimate_inline_bubble_size(text: &str, has_images: bool) -> (f32, f32) {
+    const MAX_BUBBLE_W: f32 = 560.0;
+    const H_PAD: f32 = 32.0; // `px(space::LG)` = 16 * 2
+    const MAX_INNER_W: f32 = MAX_BUBBLE_W - H_PAD;
+    const LINE_H: f32 = 24.0; // `scale::BODY` line height
+
+    let mut max_line_w: f32 = 0.0;
+    let mut wrapped_lines: usize = 0;
+
+    for raw_line in text.split('\n') {
+        let mut line_w: f32 = 0.0;
+        for ch in raw_line.chars() {
+            line_w += if !ch.is_ascii() {
+                16.2
+            } else if matches!(
+                ch,
+                'i' | 'l' | '1' | '.' | ',' | ':' | ';' | '\'' | '!' | ' '
+            ) {
+                5.8
+            } else if ch.is_ascii_uppercase() || matches!(ch, 'W' | 'M' | 'm' | 'w') {
+                11.0
+            } else {
+                9.2
+            };
+        }
+        max_line_w = max_line_w.max(line_w.min(MAX_INNER_W));
+        let visual_lines = ((line_w + 10.0) / MAX_INNER_W).ceil().max(1.0) as usize;
+        wrapped_lines += visual_lines;
+    }
+
+    let min_w = if has_images { 168.0 } else { 72.0 };
+    let target_w = (max_line_w + 14.0 + H_PAD).clamp(min_w, MAX_BUBBLE_W);
+    let clamped_lines = wrapped_lines.clamp(1, 14);
+    let text_h = (clamped_lines as f32) * LINE_H;
+    (target_w, text_h)
 }
 
 pub(crate) fn is_real_entry_id(id: &str) -> bool {
@@ -318,6 +365,7 @@ pub struct MessageListView {
     revealed_session_id: Option<String>,
     suppress_immediate_reveal: bool,
     content_reveal: motion::SurfaceReveal,
+    inline_edit: Option<InlineBubbleEdit>,
 }
 
 impl EventEmitter<MessageListEvent> for MessageListView {}
@@ -353,7 +401,20 @@ impl MessageListView {
             revealed_session_id: None,
             suppress_immediate_reveal: false,
             content_reveal: motion::SurfaceReveal::default(),
+            inline_edit: None,
         }
+    }
+
+    pub fn dismiss_inline_edit(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.inline_edit.take().is_some() {
+            cx.notify();
+            return true;
+        }
+        false
+    }
+
+    pub fn inline_edit_textarea(&self) -> Option<Entity<TextareaState>> {
+        self.inline_edit.as_ref().map(|e| e.textarea.clone())
     }
 
     fn set_process_segment_expanded(
@@ -378,6 +439,7 @@ impl MessageListView {
         let was_in_session = self.session_id.is_some();
         self.session_id = next_id;
         self.revealed_session_id = None;
+        self.inline_edit = None;
         // Switching Session A -> Session B always plays the local message-surface reveal;
         // entering from Home/other routes lets the route transition lead if data is already cached,
         // while async loads still glide in once settled.
@@ -643,123 +705,69 @@ impl MessageListView {
         None
     }
 
-    pub fn apply_edit_and_rewrite_user_turn(
+    #[allow(clippy::too_many_arguments)]
+    fn start_inline_edit(
         &mut self,
         session_id: String,
+        turn_key: String,
         user_entry_id: String,
         user_text: String,
         user_images: Vec<ImageContentPart>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.action_in_flight || !is_real_entry_id(&user_entry_id) {
             return;
         }
-        self.action_in_flight = true;
-        cx.notify();
-
-        let client = self.client.clone();
-        let key = DraftKey::Session(session_id.clone());
-        let revision = client.with_workspace(|ws| ws.draft_edit_revision(&key));
-        cx.spawn(async move |weak, cx| {
-            let images = match load_turn_images_into_pool(&client, &session_id, &user_images).await
-            {
-                Ok(images) => images,
-                Err(err) => {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.finish_action_error(&session_id, err, cx)
-                    });
-                    return;
-                }
-            };
-            if client.with_workspace(|ws| ws.draft_edit_revision(&key)) != revision {
-                let _ = weak.update(cx, |this, cx| {
-                    this.finish_action_error(
-                        &session_id,
-                        ClientError::Conflict {
-                            code: "draft_changed".into(),
-                            message: "草稿已更新，请重新点击修改。".into(),
-                        },
-                        cx,
-                    );
-                });
-                return;
-            }
-            let nav_res = client
-                .navigate_session_tree(session_id.clone(), user_entry_id, false, None)
-                .await;
-            match nav_res {
-                Err(err) => {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.action_in_flight = false;
-                        cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
-                        cx.notify();
-                    });
-                    return;
-                }
-                Ok(ref val) if val.get("cancelled").and_then(Value::as_bool) == Some(true) => {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.action_in_flight = false;
-                        cx.notify();
-                    });
-                    return;
-                }
-                Ok(_) => {}
-            }
-
-            let _ = client.reload_session(session_id.clone()).await;
-            let mut payload = ComposerDraft {
-                cursor_char_offset: user_text.chars().count(),
-                text: user_text,
-                images,
-                ..ComposerDraft::default()
-            };
-            let installed = client.with_workspace_mut(|ws| {
-                if ws.draft_edit_revision(&key) != revision {
-                    return false;
-                }
-                let d = ws.draft_mut(key);
-                d.cursor_char_offset = payload.cursor_char_offset;
-                d.text = std::mem::take(&mut payload.text);
-                d.tokens.clear();
-                d.images = std::mem::take(&mut payload.images);
-                true
-            });
-            let recovery =
-                (!installed).then(|| client.retain_recovered_payload(&session_id, &payload));
-            let _ = weak.update(cx, |this, cx| {
-                this.action_in_flight = false;
-                if this.session_id.as_deref() == Some(&session_id) {
-                    match recovery {
-                        None => cx.emit(MessageListEvent::FocusComposer),
-                        Some(Ok(())) => cx.emit(MessageListEvent::TopNotice(
-                            "当前草稿有新内容，历史消息已保留在对话中。".into(),
-                        )),
-                        Some(Err(err)) => cx.emit(MessageListEvent::ErrorMessage(err.to_string())),
-                    }
-                }
+        let initial = user_text.clone();
+        let textarea = cx.new(|cx| {
+            let mut st = TextareaState::new(window, cx)
+                .soft_wrap(true)
+                .auto_grow(1, 14);
+            st.set_value(initial, window, cx);
+            st
+        });
+        textarea.update(cx, |st, cx| {
+            st.focus(window, cx);
+        });
+        let sub = cx.subscribe(&textarea, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
                 cx.notify();
-            });
-        })
-        .detach();
+            }
+        });
+        self.inline_edit = Some(InlineBubbleEdit {
+            session_id,
+            turn_key,
+            user_entry_id,
+            original_text: user_text,
+            user_images,
+            textarea,
+            _subscription: sub,
+        });
+        cx.notify();
     }
 
-    fn request_edit_user_turn(
-        &mut self,
-        session_id: String,
-        user_entry_id: String,
-        user_text: String,
-        user_images: Vec<ImageContentPart>,
-        cx: &mut Context<Self>,
-    ) {
-        if self.action_in_flight || !is_real_entry_id(&user_entry_id) {
+    fn submit_inline_edit(&mut self, cx: &mut Context<Self>) {
+        let Some(edit) = self.inline_edit.as_ref() else {
+            return;
+        };
+        let edited_text = edit.textarea.read(cx).value().to_string();
+        if edited_text.trim().is_empty() && edit.user_images.is_empty() {
             return;
         }
-        cx.emit(MessageListEvent::RequestEditUserTurn {
-            session_id,
-            user_entry_id,
-            user_text,
-            user_images,
-        });
+        if edited_text == edit.original_text {
+            self.inline_edit = None;
+            cx.notify();
+            return;
+        }
+        let edit = self.inline_edit.take().expect("checked inline_edit");
+        self.retry_user_turn(
+            edit.session_id,
+            edit.user_entry_id,
+            edited_text,
+            edit.user_images,
+            cx,
+        );
     }
 
     fn retry_user_turn(
@@ -856,6 +864,25 @@ impl MessageListView {
         cx.notify();
     }
 
+    fn record_copied(&mut self, id: SharedString, notice: &'static str, cx: &mut Context<Self>) {
+        self.copy_tracker
+            .mark_copied(id, |v| &mut v.copy_tracker, cx);
+        cx.emit(MessageListEvent::TopNotice(notice.into()));
+    }
+
+    fn markdown_code_copied_callback(
+        entity: &Entity<Self>,
+    ) -> super::markdown_view::CodeCopiedCallback {
+        let weak = entity.downgrade();
+        Arc::new(move |cx| {
+            if let Some(ent) = weak.upgrade() {
+                ent.update(cx, |_, cx| {
+                    cx.emit(MessageListEvent::TopNotice("已复制代码内容".into()));
+                });
+            }
+        })
+    }
+
     pub(super) fn fork_from_entry(
         &mut self,
         session_id: String,
@@ -910,17 +937,16 @@ impl MessageListView {
         let text = extract_message_text(&user_entry.raw);
         let images = extract_user_images(&user_entry.raw);
 
-        let mut bubble = div()
-            .max_w(px(560.0))
-            .px(space::LG)
-            .py(space::MD)
-            .rounded(radius::ROW)
-            .bg(palette.bg_surface)
-            .flex()
-            .flex_col()
-            .gap(space::SM);
+        let editing_textarea = (!session_running)
+            .then(|| {
+                self.inline_edit.as_ref().and_then(|ed| {
+                    (ed.session_id == session_id && ed.turn_key == turn_key)
+                        .then(|| ed.textarea.clone())
+                })
+            })
+            .flatten();
 
-        if !images.is_empty() {
+        let img_row_opt = (!images.is_empty()).then(|| {
             let mut img_row = div().flex().flex_wrap().gap(space::SM);
             for (idx, part) in images.iter().enumerate() {
                 if let Some(img_arc) = self.resolve_image_part(session_id, part, cx) {
@@ -958,6 +984,177 @@ impl MessageListView {
                     );
                 }
             }
+            img_row
+        });
+
+        if let Some(edit_textarea) = editing_textarea {
+            let live_text = edit_textarea.read(cx).value().to_string();
+            let (target_w, target_text_h) =
+                estimate_inline_bubble_size(&live_text, img_row_opt.is_some());
+            let anim_w = transition(
+                SharedString::from(format!("inline-edit-w-{turn_key}")),
+                target_w,
+                Transition::new(motion::RESIZE).ease(motion::ease_out()),
+                window,
+                cx,
+            );
+            let anim_text_h = transition(
+                SharedString::from(format!("inline-edit-h-{turn_key}")),
+                target_text_h,
+                Transition::new(motion::RESIZE).ease(motion::ease_out()),
+                window,
+                cx,
+            );
+
+            let ent_submit_key = entity.clone();
+            let ent_cancel_key = entity.clone();
+            let ta_for_ime = edit_textarea.clone();
+            let ta_for_esc = edit_textarea.clone();
+
+            let mut edit_bubble = div()
+                .id(SharedString::from(format!(
+                    "user-inline-edit-bubble-{turn_key}"
+                )))
+                .test_support()
+                .w(px(anim_w))
+                .max_w(px(560.0))
+                .px(space::LG)
+                .py(space::MD)
+                .rounded(radius::ROW)
+                .bg(palette.bg_surface)
+                .flex()
+                .flex_col()
+                .justify_center()
+                .gap(space::SM)
+                .capture_action(move |action: &Enter, window, cx| {
+                    if !ta_for_ime.read(cx).focus_handle(cx).is_focused(window) {
+                        return;
+                    }
+                    if ta_for_ime.update(cx, |st, cx| st.marked_text_range(window, cx).is_some()) {
+                        cx.stop_propagation();
+                        return;
+                    }
+                    if action.shift && !action.secondary {
+                        return;
+                    }
+                    cx.stop_propagation();
+                    ent_submit_key.update(cx, |this, cx| this.submit_inline_edit(cx));
+                })
+                .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                    if event.keystroke.modifiers == gpui::Modifiers::default()
+                        && event.keystroke.key == "escape"
+                        && !event.is_held
+                        && ta_for_esc
+                            .update(cx, |st, cx| st.marked_text_range(window, cx).is_none())
+                    {
+                        cx.stop_propagation();
+                        ent_cancel_key.update(cx, |this, cx| {
+                            let _ = this.dismiss_inline_edit(cx);
+                        });
+                    }
+                });
+
+            if let Some(img_row) = img_row_opt {
+                edit_bubble = edit_bubble.child(img_row);
+            }
+
+            edit_bubble = edit_bubble.child(
+                div().w_full().h(px(anim_text_h)).child(
+                    Textarea::new(&edit_textarea)
+                        .accessibility_id(SharedString::from(format!(
+                            "user-inline-edit-input-{turn_key}"
+                        )))
+                        .aria_label("编辑用户消息")
+                        .xsmall()
+                        .appearance(false)
+                        .bordered(false)
+                        .p_0()
+                        .w_full()
+                        .h_full()
+                        .text_size(scale::BODY.font_size)
+                        .line_height(scale::BODY.line_height),
+                ),
+            );
+
+            let ent_cancel_btn = entity.clone();
+            let ent_submit_btn = entity.clone();
+            let submit_disabled =
+                self.action_in_flight || (live_text.trim().is_empty() && images.is_empty());
+
+            let edit_actions = div()
+                .id(SharedString::from(format!(
+                    "user-inline-edit-actions-{turn_key}"
+                )))
+                .test_support()
+                .h(height::INLINE)
+                .flex()
+                .items_center()
+                .justify_end()
+                .gap(space::XS)
+                .child(icon_action_24(
+                    format!("user-inline-edit-cancel-{turn_key}"),
+                    "取消编辑",
+                    IconName::X,
+                    palette.text_secondary,
+                    false,
+                    palette,
+                    window,
+                    cx,
+                    move |_, cx| {
+                        ent_cancel_btn.update(cx, |this, cx| {
+                            let _ = this.dismiss_inline_edit(cx);
+                        });
+                    },
+                ))
+                .child(icon_action_24(
+                    format!("user-inline-edit-submit-{turn_key}"),
+                    "保存并发送",
+                    IconName::Check,
+                    palette.accent_ink,
+                    submit_disabled,
+                    palette,
+                    window,
+                    cx,
+                    move |_, cx| {
+                        ent_submit_btn.update(cx, |this, cx| {
+                            this.submit_inline_edit(cx);
+                        });
+                    },
+                ));
+
+            // Right-middle anchored wrapper: right edge stays pinned via `items_end`/`justify_end`,
+            // vertical resize expands smoothly around the bubble midpoint via `items_center`.
+            return div()
+                .id(SharedString::from(format!("turn-user-{turn_key}")))
+                .test_support()
+                .w_full()
+                .flex()
+                .flex_col()
+                .items_end()
+                .gap(space::XS)
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .items_center()
+                        .justify_end()
+                        .child(edit_bubble),
+                )
+                .child(edit_actions)
+                .into_any_element();
+        }
+
+        let mut bubble = div()
+            .max_w(px(560.0))
+            .px(space::LG)
+            .py(space::MD)
+            .rounded(radius::ROW)
+            .bg(palette.bg_surface)
+            .flex()
+            .flex_col()
+            .gap(space::SM);
+
+        if let Some(img_row) = img_row_opt {
             bubble = bubble.child(img_row);
         }
 
@@ -985,6 +1182,7 @@ impl MessageListView {
         let retry_disabled = mutating_disabled || (text.trim().is_empty() && images.is_empty());
 
         let sid_edit = session_id.to_owned();
+        let tk_edit = turn_key.to_owned();
         let eid_edit = real_user_eid.clone().unwrap_or_default();
         let text_edit = text.clone();
         let imgs_edit = images.clone();
@@ -1028,11 +1226,7 @@ impl MessageListView {
                 move |_, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(text_copy.clone()));
                     ent_copy.update(cx, |this, cx| {
-                        this.copy_tracker.mark_copied(
-                            copy_id_click.clone(),
-                            |v| &mut v.copy_tracker,
-                            cx,
-                        );
+                        this.record_copied(copy_id_click.clone(), "已复制消息内容", cx);
                     });
                 },
             ))
@@ -1045,13 +1239,14 @@ impl MessageListView {
                 palette,
                 window,
                 cx,
-                move |_, cx| {
+                move |w, cx| {
                     let s = sid_edit.clone();
+                    let tk = tk_edit.clone();
                     let e = eid_edit.clone();
                     let t = text_edit.clone();
                     let im = imgs_edit.clone();
                     ent_edit.update(cx, |this, cx| {
-                        this.request_edit_user_turn(s, e, t, im, cx);
+                        this.start_inline_edit(s, tk, e, t, im, w, cx);
                     });
                 },
             ))
@@ -1383,8 +1578,12 @@ impl MessageListView {
             }),
             |cid, _, cx| {
                 cx.entity().update(cx, |this: &mut Self, cx| {
-                    this.copy_tracker
-                        .mark_copied(cid, |v| &mut v.copy_tracker, cx);
+                    let notice = if cid.as_ref().contains("cmd") {
+                        "已复制命令"
+                    } else {
+                        "已复制输出内容"
+                    };
+                    this.record_copied(cid, notice, cx);
                 });
             },
             window,
@@ -1509,8 +1708,15 @@ impl MessageListView {
             }),
             |cid, _, cx| {
                 cx.entity().update(cx, |this: &mut Self, cx| {
-                    this.copy_tracker
-                        .mark_copied(cid, |v| &mut v.copy_tracker, cx);
+                    let notice =
+                        if cid.as_ref().contains("bitlocker") || cid.as_ref().contains("key") {
+                            "已复制密钥 ID"
+                        } else if cid.as_ref().contains("runbook") {
+                            "已复制命令"
+                        } else {
+                            "已复制内容"
+                        };
+                    this.record_copied(cid, notice, cx);
                 });
             },
             |msg, cx| {
@@ -1670,10 +1876,6 @@ impl MessageListView {
                 .gap(space::MD)
                 .child(header);
 
-            let stream_key = format!("compaction-md:{turn_key}");
-            let md_entity = self
-                .markdown_store
-                .sync_entry(&stream_key, &summary_text, cx);
             let copy_id = SharedString::from(format!("compaction-copy-{turn_key}"));
             let is_copied = self.copy_tracker.is_copied(copy_id.as_ref());
             let copy_text = summary_text.clone();
@@ -1686,70 +1888,80 @@ impl MessageListView {
                 window,
                 cx,
                 |interactive, window, cx| {
-                    let body_card = div()
-                        .w_full()
-                        .px(space::LG)
-                        .py(space::MD)
-                        .rounded(radius::CONTROL)
-                        .bg(palette.bg_surface)
-                        .child(render_assistant_markdown_with_style(
-                            &md_entity,
-                            false,
-                            reduce_motion,
-                            palette,
-                            markdown_style.clone(),
-                        ));
-
-                    if !interactive {
-                        return body_card.into_any_element();
-                    }
-
                     let copy_btn_id = SharedString::from(format!("compaction-copy-btn-{turn_key}"));
+                    let copy_btn = if interactive {
+                        div()
+                            .id(copy_btn_id.clone())
+                            .test_support()
+                            .a11y_button(copy_btn_id.clone(), "复制压缩摘要")
+                            .desktop_tooltip(
+                                SharedString::from(format!("tooltip-compaction-copy-{turn_key}")),
+                                "复制压缩摘要",
+                            )
+                            .w(height::COMPACT)
+                            .h(height::COMPACT)
+                            .flex_shrink_0()
+                            .rounded(radius::CONTROL)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_click(move |_, _, cx| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
+                                ent_copy.update(cx, |this, cx| {
+                                    this.record_copied(copy_id_click.clone(), "已复制压缩摘要", cx);
+                                });
+                            })
+                            .child(motion::animated_copy_icon(
+                                copy_btn_id,
+                                is_copied,
+                                px(14.0),
+                                if is_copied {
+                                    palette.status_success
+                                } else {
+                                    palette.text_secondary
+                                },
+                                window,
+                                cx,
+                            ))
+                            .into_any_element()
+                    } else {
+                        div()
+                            .w(height::COMPACT)
+                            .h(height::COMPACT)
+                            .flex_shrink_0()
+                            .rounded(radius::CONTROL)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Icon::new(IconName::Copy)
+                                    .size(px(14.0))
+                                    .text_color(palette.text_secondary),
+                            )
+                            .into_any_element()
+                    };
+
+                    // Matches `cst-pilot-desktop.pen` `l6foNm` / `TCdOx -> WVTLP`:
+                    // `$bg-surface`, `4px` radius, `12px` padding, `$font-caption` (`12px`) `$text-secondary`
+                    // plain summary text on the left + `28×28` copy button on the top-right.
                     div()
                         .w_full()
+                        .p(space::MD)
+                        .rounded(radius::CONTROL)
+                        .bg(palette.bg_surface)
                         .flex()
-                        .flex_col()
-                        .gap(space::SM)
-                        .child(body_card)
+                        .items_start()
+                        .justify_between()
+                        .gap(space::MD)
                         .child(
-                            div()
-                                .w_full()
-                                .h(height::INLINE)
-                                .flex()
-                                .items_center()
-                                .child(icon_action_24_element(
-                                    copy_btn_id.clone(),
-                                    "复制压缩摘要",
-                                    motion::animated_copy_icon(
-                                        copy_btn_id,
-                                        is_copied,
-                                        px(14.0),
-                                        if is_copied {
-                                            palette.status_success
-                                        } else {
-                                            palette.text_secondary
-                                        },
-                                        window,
-                                        cx,
-                                    ),
-                                    false,
-                                    palette,
-                                    window,
-                                    cx,
-                                    move |_, cx| {
-                                        cx.write_to_clipboard(ClipboardItem::new_string(
-                                            copy_text.clone(),
-                                        ));
-                                        ent_copy.update(cx, |this, cx| {
-                                            this.copy_tracker.mark_copied(
-                                                copy_id_click.clone(),
-                                                |v| &mut v.copy_tracker,
-                                                cx,
-                                            );
-                                        });
-                                    },
-                                )),
+                            apply_scale(div(), scale::CAPTION)
+                                .flex_1()
+                                .min_w_0()
+                                .text_color(palette.text_secondary)
+                                .child(SharedString::from(summary_text.clone())),
                         )
+                        .child(copy_btn)
                         .into_any_element()
                 },
             ) {
@@ -1785,8 +1997,7 @@ impl MessageListView {
                     palette,
                     |cid, _, cx| {
                         cx.entity().update(cx, |this: &mut Self, cx| {
-                            this.copy_tracker
-                                .mark_copied(cid, |v| &mut v.copy_tracker, cx);
+                            this.record_copied(cid, "已复制分支总结", cx);
                         });
                     },
                     window,
@@ -2099,14 +2310,16 @@ impl MessageListView {
                                     format!("mid:{turn_key}:{}:{seg_idx}:{v_idx}", tp.entry_key);
                                 let md_entity =
                                     self.markdown_store.sync_entry(&stream_key, txt, cx);
-                                assistant_stack =
-                                    assistant_stack.child(render_assistant_markdown_with_style(
+                                assistant_stack = assistant_stack.child(
+                                    super::markdown_view::render_assistant_markdown_with_copy_notice(
                                         &md_entity,
                                         is_live_turn && tp.is_final_entry,
                                         reduce_motion,
                                         palette,
                                         markdown_style.clone(),
-                                    ));
+                                        Some(Self::markdown_code_copied_callback(entity)),
+                                    ),
+                                );
                             }
                             ConversationPart::Special { kind, call } => {
                                 assistant_stack =
@@ -2208,13 +2421,16 @@ impl MessageListView {
             let md_entity = self
                 .markdown_store
                 .sync_entry(&stream_key, &split.final_text, cx);
-            assistant_stack = assistant_stack.child(render_assistant_markdown_with_style(
-                &md_entity,
-                is_live_turn,
-                reduce_motion,
-                palette,
-                markdown_style.clone(),
-            ));
+            assistant_stack = assistant_stack.child(
+                super::markdown_view::render_assistant_markdown_with_copy_notice(
+                    &md_entity,
+                    is_live_turn,
+                    reduce_motion,
+                    palette,
+                    markdown_style.clone(),
+                    Some(Self::markdown_code_copied_callback(entity)),
+                ),
+            );
         }
 
         // Standard assistant error prose (`{服务名} {故障现象}，{处理指引}。` + single collapsed `详情` block)
@@ -2296,8 +2512,7 @@ impl MessageListView {
                             palette,
                             |cid, _, cx| {
                                 cx.entity().update(cx, |this: &mut Self, cx| {
-                                    this.copy_tracker
-                                        .mark_copied(cid, |v| &mut v.copy_tracker, cx);
+                                    this.record_copied(cid, "已复制错误详情", cx);
                                 });
                             },
                             window,
@@ -2368,16 +2583,10 @@ impl MessageListView {
                 });
 
             let mutating_busy = session.running || self.action_in_flight;
-            let edit_disabled = mutating_busy || real_user_eid.is_none();
             let fork_disabled = mutating_busy || real_fork_eid.is_none();
-            let retry_disabled = edit_disabled
+            let retry_disabled = mutating_busy
+                || real_user_eid.is_none()
                 || (user_text_for_turn.trim().is_empty() && user_images_for_turn.is_empty());
-
-            let sid_edit = session.id.clone();
-            let eid_edit = real_user_eid.clone().unwrap_or_default();
-            let ut_edit = user_text_for_turn.clone();
-            let uimg_edit = user_images_for_turn.clone();
-            let ent_edit = entity.clone();
 
             let sid_fork = session.id.clone();
             let fork_eid = real_fork_eid.unwrap_or_default();
@@ -2426,30 +2635,7 @@ impl MessageListView {
                     move |_, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
                         ent_copy.update(cx, |this, cx| {
-                            this.copy_tracker.mark_copied(
-                                copy_id_click.clone(),
-                                |v| &mut v.copy_tracker,
-                                cx,
-                            );
-                        });
-                    },
-                ))
-                .child(icon_action_24(
-                    format!("assistant-edit-btn-{turn_key}"),
-                    "修改消息",
-                    IconName::Pencil,
-                    palette.text_secondary,
-                    edit_disabled,
-                    palette,
-                    window,
-                    cx,
-                    move |_, cx| {
-                        let s = sid_edit.clone();
-                        let e = eid_edit.clone();
-                        let t = ut_edit.clone();
-                        let im = uimg_edit.clone();
-                        ent_edit.update(cx, |this, cx| {
-                            this.request_edit_user_turn(s, e, t, im, cx);
+                            this.record_copied(copy_id_click.clone(), "已复制回答内容", cx);
                         });
                     },
                 ))
@@ -2620,8 +2806,7 @@ impl MessageListView {
                             palette,
                             |cid, _, cx| {
                                 cx.entity().update(cx, |this: &mut Self, cx| {
-                                    this.copy_tracker
-                                        .mark_copied(cid, |v| &mut v.copy_tracker, cx);
+                                    this.record_copied(cid, "已复制思考内容", cx);
                                 });
                             },
                             window,
@@ -2637,12 +2822,13 @@ impl MessageListView {
             ConversationPart::Text(txt) => {
                 let stream_key = format!("proc:{turn_key}:{seg_key}:{}:{part_idx}", tp.entry_key);
                 let md_entity = self.markdown_store.sync_entry(&stream_key, txt, cx);
-                render_assistant_markdown_with_style(
+                super::markdown_view::render_assistant_markdown_with_copy_notice(
                     &md_entity,
                     live && tp.is_final_entry,
                     reduce_motion,
                     palette,
                     markdown_style.clone(),
+                    Some(Self::markdown_code_copied_callback(entity)),
                 )
                 .into_any_element()
             }
@@ -2693,14 +2879,6 @@ impl Render for MessageListView {
             return div()
                 .id("message-list-loading")
                 .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    apply_scale(div(), scale::UI)
-                        .text_color(palette.text_muted)
-                        .child("正在加载对话内容…"),
-                )
                 .into_any_element();
         };
 
@@ -2760,7 +2938,6 @@ impl Render for MessageListView {
             .w_full()
             .max_w(layout::CENTER_COLUMN_MAX_WIDTH)
             .mx_auto()
-            .px(space::GROUP)
             .py(space::GROUP)
             .flex()
             .flex_col()
@@ -2892,7 +3069,7 @@ impl Render for MessageListView {
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll_handle)
                     .on_scroll(cx.listener(Self::on_scroll_wheel))
-                    .child(list_col),
+                    .child(div().w_full().px(space::GROUP).child(list_col)),
             );
         #[cfg(feature = "test-support")]
         if let Some(layer) = crate::ux_probe::bounds_probe_layer("scroll_area", None) {

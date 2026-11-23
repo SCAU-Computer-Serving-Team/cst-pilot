@@ -14,7 +14,6 @@ use gpui_kit::{TestSupportExt as _, component::ElementExt};
 
 use super::motion::{FAST, PointerFlag, ease_out};
 use super::{DesktopThemeGlobal, apply_scale, radius, scale, space};
-use crate::background::{FrostedGlassSpec, render_frosted_surface};
 
 struct DesktopTooltipRegistry {
     windows: HashMap<WindowId, WeakEntity<DesktopTooltips>>,
@@ -205,46 +204,22 @@ struct DesktopTooltipContentView {
 }
 
 impl Render for DesktopTooltipContentView {
-    fn render(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
         let theme = DesktopThemeGlobal::current(cx);
         let palette = theme.palette;
-        if self.frosted {
-            let transparency = theme.transparency_enabled;
-            let scale_factor = window.scale_factor();
-            return render_frosted_surface(
-                self.elem_id.clone(),
-                FrostedGlassSpec::popover(&palette),
-                palette.bg_elevated,
-                transparency,
-                scale_factor,
-            )
-            .test_support()
-            .max_w(px(320.0))
-            .px(space::SM)
-            .py(space::XS)
-            .rounded(radius::CONTROL)
-            .border_1()
-            .border_color(palette.border_hairline)
-            .child(
-                apply_scale(div(), scale::CAPTION)
-                    .relative()
-                    .text_color(palette.text_primary)
-                    .child(self.text.clone()),
-            )
-            .into_any_element();
-        }
+        let max_w = if self.frosted { px(320.0) } else { px(280.0) };
 
         div()
             .id(self.elem_id.clone())
             .test_support()
-            .max_w(px(280.0))
+            .max_w(max_w)
             .px(space::SM)
             .py(space::XS)
             .rounded(radius::CONTROL)
             .bg(palette.bg_elevated)
             .border_1()
-            .border_color(palette.border_hairline)
-            .shadow(palette.craft_lift_shadows())
+            .border_color(palette.border_subtle)
+            .shadow(palette.flat_popover_shadows())
             .child(
                 apply_scale(div(), scale::CAPTION)
                     .text_color(palette.text_primary)

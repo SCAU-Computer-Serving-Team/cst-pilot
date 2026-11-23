@@ -1,13 +1,15 @@
 mod editor;
 
 use cst_client::{ClientError, ClientHandle};
+use gpui::{KeyDownEvent, MouseDownEvent};
 use gpui_kit::assets::IconName;
+use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Input, InputContentType, InputEvent, InputState};
 use gpui_kit::{
-    AppContext as _, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, TestSupportExt, Window,
-    div, px,
+    AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
+    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, TestSupportExt, Window, div, px,
 };
 use serde_json::{Value, json};
 use zeroize::Zeroizing;
@@ -45,10 +47,10 @@ impl CustomApiProtocol {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::OpenaiCompletions => "OpenAI Chat",
+            Self::OpenaiCompletions => "OpenAI Chat Completions",
             Self::OpenaiResponses => "OpenAI Responses",
-            Self::AnthropicMessages => "Anthropic",
-            Self::GoogleGenerativeAi => "Gemini",
+            Self::AnthropicMessages => "Anthropic Messages",
+            Self::GoogleGenerativeAi => "Google Gemini",
         }
     }
 
@@ -62,6 +64,28 @@ impl CustomApiProtocol {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TokenFieldKind {
+    ContextWindow,
+    MaxTokens,
+}
+
+pub(super) const CONTEXT_WINDOW_PRESETS: &[(&str, u64)] = &[
+    ("128K", 128_000),
+    ("256K", 256_000),
+    ("512K", 512_000),
+    ("1M", 1_000_000),
+];
+
+pub(super) const MAX_OUTPUT_PRESETS: &[(&str, u64)] = &[
+    ("16K", 16_384),
+    ("32K", 32_768),
+    ("64K", 65_536),
+    ("128K", 128_000),
+    ("256K", 256_000),
+    ("384K", 384_000),
+];
+
 pub struct EditableModelRow {
     pub id_input: Entity<InputState>,
     pub name_input: Entity<InputState>,
@@ -74,6 +98,8 @@ pub struct EditableModelRow {
 fn format_token_window(n: u64) -> String {
     if n >= 1_000_000 && n.is_multiple_of(1_000_000) {
         format!("{}M", n / 1_000_000)
+    } else if n >= 16_384 && n.is_multiple_of(1_024) {
+        format!("{}K", n / 1_024)
     } else if n >= 1_000 {
         format!("{}K", n / 1_000)
     } else {
@@ -81,24 +107,41 @@ fn format_token_window(n: u64) -> String {
     }
 }
 
-fn next_context_window(cur: u64) -> u64 {
-    match cur {
-        0..=32_768 => 64_000,
-        32_769..=65_536 => 128_000,
-        65_537..=131_072 => 200_000,
-        131_073..=262_144 => 1_000_000,
-        _ => 32_000,
+pub(super) fn cycle_token_preset(current: u64, presets: &[(&str, u64)]) -> u64 {
+    if let Some(pos) = presets.iter().position(|&(_, v)| v == current) {
+        presets[(pos + 1) % presets.len()].1
+    } else {
+        presets
+            .iter()
+            .find(|&&(_, v)| v > current)
+            .unwrap_or(&presets[0])
+            .1
     }
 }
 
-fn next_max_tokens(cur: u64) -> u64 {
-    match cur {
-        0..=4_096 => 8_192,
-        4_097..=8_192 => 16_384,
-        8_193..=16_384 => 32_768,
-        16_385..=32_768 => 65_536,
-        _ => 4_096,
+fn parse_token_window_input(raw: &str) -> Option<u64> {
+    let cleaned: String = raw
+        .trim()
+        .chars()
+        .filter(|c| !matches!(c, ',' | '_' | ' '))
+        .collect();
+    if cleaned.is_empty() {
+        return None;
     }
+    let lower = cleaned.to_ascii_lowercase();
+    let (num_part, mult) = if let Some(s) = lower.strip_suffix('m') {
+        (s, 1_000_000.0_f64)
+    } else if let Some(s) = lower.strip_suffix('k') {
+        (s, 1_000.0_f64)
+    } else {
+        (lower.as_str(), 1.0_f64)
+    };
+    let val = num_part.parse::<f64>().ok()?;
+    if !val.is_finite() || val <= 0.0 {
+        return None;
+    }
+    let out = (val * mult).round() as u64;
+    (out > 0).then_some(out)
 }
 
 #[derive(Debug, Clone)]
@@ -121,6 +164,11 @@ pub struct ProvidersTabView {
     base_url_input: Entity<InputState>,
     api_key_input: Entity<InputState>,
     protocol: CustomApiProtocol,
+    protocol_dropdown_open: bool,
+    protocol_dropdown_index: usize,
+    protocol_focus: FocusHandle,
+    inline_token_edit: Option<(usize, TokenFieldKind)>,
+    inline_token_input: Entity<InputState>,
     revision: Option<String>,
     editable_rows: Vec<EditableModelRow>,
     saving: bool,
@@ -154,30 +202,57 @@ impl ProvidersTabView {
                 .placeholder("输入或更新 API Key（留空保持已有密钥）")
                 .masked(true)
         });
+        let inline_token_input = cx.new(|cx| InputState::new(window, cx).placeholder("如 128K"));
 
-        let mut subs = vec![cx.subscribe(&search_input, |_, _, event: &InputEvent, cx| {
-            if matches!(event, InputEvent::Change) {
-                cx.notify();
-            }
-        })];
-        for inp in [&provider_id_input, &provider_name_input, &base_url_input] {
-            subs.push(cx.subscribe(inp, |this, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Change) {
-                    this.form_error = None;
-                    this.key_error = None;
-                    cx.notify();
-                }
-            }));
-        }
+        let mut subs =
+            vec![cx.subscribe(
+                &search_input,
+                |this, _, event: &InputEvent, cx| match event {
+                    InputEvent::Change => {
+                        cx.notify();
+                    }
+                    InputEvent::Focus => {
+                        this.dismiss_click_outside_dropdowns(cx);
+                    }
+                    _ => {}
+                },
+            )];
         subs.push(
-            cx.subscribe(&api_key_input, |this, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Change) {
-                    this.form_error = None;
-                    this.key_error = None;
-                    cx.notify();
+            cx.subscribe(&inline_token_input, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Blur) {
+                    this.commit_inline_token_edit(cx);
                 }
             }),
         );
+        for inp in [&provider_id_input, &provider_name_input, &base_url_input] {
+            subs.push(
+                cx.subscribe(inp, |this, _, event: &InputEvent, cx| match event {
+                    InputEvent::Change => {
+                        this.form_error = None;
+                        this.key_error = None;
+                        cx.notify();
+                    }
+                    InputEvent::Focus => {
+                        this.dismiss_click_outside_dropdowns(cx);
+                    }
+                    _ => {}
+                }),
+            );
+        }
+        subs.push(cx.subscribe(
+            &api_key_input,
+            |this, _, event: &InputEvent, cx| match event {
+                InputEvent::Change => {
+                    this.form_error = None;
+                    this.key_error = None;
+                    cx.notify();
+                }
+                InputEvent::Focus => {
+                    this.dismiss_click_outside_dropdowns(cx);
+                }
+                _ => {}
+            },
+        ));
 
         Self {
             client,
@@ -191,6 +266,11 @@ impl ProvidersTabView {
             base_url_input,
             api_key_input,
             protocol: CustomApiProtocol::OpenaiCompletions,
+            protocol_dropdown_open: false,
+            protocol_dropdown_index: 0,
+            protocol_focus: cx.focus_handle(),
+            inline_token_edit: None,
+            inline_token_input,
             revision: None,
             editable_rows: Vec::new(),
             saving: false,
@@ -258,6 +338,74 @@ impl ProvidersTabView {
         });
     }
 
+    pub fn has_dropdown(&self) -> bool {
+        self.protocol_dropdown_open || self.inline_token_edit.is_some()
+    }
+
+    pub fn dismiss_dropdowns(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        if self.protocol_dropdown_open {
+            self.protocol_dropdown_open = false;
+            changed = true;
+        }
+        if self.inline_token_edit.take().is_some() {
+            changed = true;
+        }
+        if changed {
+            cx.notify();
+        }
+        changed
+    }
+
+    pub fn dismiss_click_outside_dropdowns(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.protocol_dropdown_open {
+            return false;
+        }
+        self.protocol_dropdown_open = false;
+        cx.notify();
+        true
+    }
+
+    pub(super) fn start_inline_token_edit(
+        &mut self,
+        row_idx: usize,
+        kind: TokenFieldKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(row) = self.editable_rows.get(row_idx) else {
+            return;
+        };
+        self.protocol_dropdown_open = false;
+        let current = match kind {
+            TokenFieldKind::ContextWindow => row.context_window,
+            TokenFieldKind::MaxTokens => row.max_tokens,
+        };
+        let initial = format_token_window(current);
+        self.inline_token_edit = Some((row_idx, kind));
+        self.inline_token_input.update(cx, |inp, cx| {
+            inp.set_value(initial, window, cx);
+            inp.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    pub(super) fn commit_inline_token_edit(&mut self, cx: &mut Context<Self>) {
+        let Some((row_idx, kind)) = self.inline_token_edit.take() else {
+            return;
+        };
+        let raw = self.inline_token_input.read(cx).value().to_string();
+        if let Some(parsed) = parse_token_window_input(&raw)
+            && let Some(row) = self.editable_rows.get_mut(row_idx)
+        {
+            match kind {
+                TokenFieldKind::ContextWindow => row.context_window = parsed,
+                TokenFieldKind::MaxTokens => row.max_tokens = parsed,
+            }
+        }
+        cx.notify();
+    }
+
     fn reset_form(&mut self) {
         self.generation += 1;
         self.loading = false;
@@ -267,6 +415,8 @@ impl ProvidersTabView {
         self.creating_new_custom = false;
         self.active_provider_id = None;
         self.search_visible = false;
+        self.protocol_dropdown_open = false;
+        self.inline_token_edit = None;
         self.key_error = None;
         self.form_error = None;
     }
@@ -411,7 +561,7 @@ impl ProvidersTabView {
             id_input,
             name_input,
             context_window: 128_000,
-            max_tokens: 16_384,
+            max_tokens: 65_536,
             reasoning: true,
             image: false,
         });
@@ -545,6 +695,8 @@ impl ProvidersTabView {
     }
 
     fn save_inline_provider_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.commit_inline_token_edit(cx);
+        self.protocol_dropdown_open = false;
         if self.saving
             || self.loading
             || !self.inline_edit_mode
@@ -689,7 +841,7 @@ impl Render for ProvidersTabView {
         let snap = self.client.snapshot();
         let (slide_opacity, slide_dx) = self.page_slide.sample(window, cx);
 
-        // 1. Custom / Inline Provider Editor Mode (`q8NLwK`)
+        // 1. Custom / Inline Provider Editor Mode (`Geto8` -> `q8NLwK`)
         if self.creating_new_custom || self.inline_edit_mode {
             return div()
                 .id("settings-providers-tab")
@@ -701,26 +853,42 @@ impl Render for ProvidersTabView {
                 .opacity(slide_opacity)
                 .flex()
                 .flex_col()
-                .gap(space::MD)
+                .gap(space::GROUP)
+                .on_mouse_down(
+                    gpui::MouseButton::Left,
+                    cx.listener(|this, _, _, cx| {
+                        this.protocol_dropdown_open = false;
+                        cx.notify();
+                    }),
+                )
                 .child(
                     div()
+                        .w_full()
                         .flex()
                         .flex_col()
-                        .gap(space::XS)
+                        .gap(space::SM)
+                        .child(self.render_back_bar(&palette, cx))
                         .child(
-                            apply_scale(div(), scale::TITLE)
-                                .text_color(palette.text_primary)
-                                .child(cjk_inline_label("自定义提供商")),
-                        )
-                        .child(
-                            apply_scale(div(), scale::UI)
-                                .text_color(palette.text_secondary)
-                                .child(cjk_inline_label(
-                                    "连接兼容 OpenAI、Anthropic 或 Google 接口的提供商。",
-                                )),
+                            div()
+                                .w_full()
+                                .flex()
+                                .items_center()
+                                .gap(space::MD)
+                                .child(
+                                    apply_scale(div(), scale::TITLE)
+                                        .text_color(palette.text_primary)
+                                        .child(cjk_inline_label("自定义提供商")),
+                                )
+                                .child(
+                                    apply_scale(div(), scale::UI)
+                                        .text_color(palette.text_secondary)
+                                        .child(cjk_inline_label(
+                                            "连接兼容 OpenAI、Anthropic 或 Google 接口的服务。",
+                                        )),
+                                ),
                         ),
                 )
-                .child(self.render_custom_provider_editor(mono_family, &palette, cx));
+                .child(self.render_custom_provider_editor(mono_family, &palette, window, cx));
         }
 
         // 2. Built-in Provider Detail / Credential Management Mode (`T5us8O`)
@@ -812,7 +980,6 @@ impl Render for ProvidersTabView {
                                 .flex_1()
                                 .min_w_0()
                                 .truncate()
-                                .font_family(mono_family.clone())
                                 .text_color(palette.text_secondary)
                                 .child(SharedString::from(m.id.clone())),
                         )
@@ -827,7 +994,6 @@ impl Render for ProvidersTabView {
                         .child(
                             apply_scale(div(), scale::CAPTION)
                                 .w(px(76.0))
-                                .font_family(mono_family.clone())
                                 .text_color(palette.text_secondary)
                                 .child(SharedString::from(format_token_window(
                                     m.context_window.unwrap_or(128_000),
@@ -932,6 +1098,7 @@ impl Render for ProvidersTabView {
                                                 .aria_label("服务 API Key")
                                                 .appearance(false)
                                                 .bordered(false)
+                                                .focus_bordered(false)
                                                 .w_full()
                                                 .h_full()
                                                 .mask_toggle(),
@@ -978,11 +1145,47 @@ impl Render for ProvidersTabView {
                 )
                 .child(self.render_model_list_header("模型列表", &palette, cx))
                 .children(self.search_visible.then(|| {
-                    Input::new(&self.search_input)
-                        .accessibility_id("providers-search-input")
-                        .aria_label("筛选模型")
+                    let search_focused = self
+                        .search_input
+                        .read(cx)
+                        .focus_handle(cx)
+                        .is_focused(window);
+                    let search_focus_ent = self.search_input.clone();
+                    div()
+                        .id("providers-builtin-search-box")
+                        .w_full()
                         .h(height::FIELD)
-                        .cleanable(true)
+                        .px(space::MD)
+                        .rounded(radius::CONTROL)
+                        .border_1()
+                        .border_color(if search_focused {
+                            palette.border_focus
+                        } else {
+                            palette.border_strong
+                        })
+                        .bg(palette.bg_workspace)
+                        .flex()
+                        .items_center()
+                        .gap(space::SM)
+                        .on_click(move |_, w, cx| {
+                            search_focus_ent.focus_handle(cx).focus(w, cx);
+                        })
+                        .child(
+                            Icon::new(IconName::Search)
+                                .size(px(14.0))
+                                .text_color(palette.text_muted),
+                        )
+                        .child(
+                            div().flex_1().min_w_0().child(
+                                Input::new(&self.search_input)
+                                    .accessibility_id("providers-search-input")
+                                    .aria_label("筛选模型")
+                                    .appearance(false)
+                                    .bordered(false)
+                                    .focus_bordered(false)
+                                    .p_0(),
+                            ),
+                        )
                 }))
                 .child(model_table)
                 .children(is_configured.then(|| {
@@ -1098,32 +1301,34 @@ impl Render for ProvidersTabView {
         const PROVIDERS_COLLAPSED_LIMIT: usize = 5;
         let total_providers_count = 1 + ordered_others.len();
         let can_collapse_providers = total_providers_count > PROVIDERS_COLLAPSED_LIMIT;
-        let visible_other_limit = if can_collapse_providers && !self.providers_expanded {
-            PROVIDERS_COLLAPSED_LIMIT.saturating_sub(1)
-        } else {
-            ordered_others.len()
-        };
-        for prov in ordered_others.into_iter().take(visible_other_limit) {
-            let pid = prov.id.clone();
-            let pid_btn = pid.clone();
-            let (status_label, status_color) = if prov.requires_login {
-                ("凭据已失效，请重新配置", palette.status_warning)
-            } else if prov.configured == Some(true) {
-                ("已就绪", palette.status_success)
-            } else {
-                ("尚未配置凭据", palette.status_warning)
-            };
+        let head_limit = PROVIDERS_COLLAPSED_LIMIT.saturating_sub(1);
+        let render_provider_row =
+            |prov: &cst_client::ProviderStatusDto, interactive: bool, cx: &mut Context<Self>| {
+                let pid = prov.id.clone();
+                let pid_btn = pid.clone();
+                let (status_label, status_color) = if prov.requires_login {
+                    ("凭据已失效，请重新配置", palette.status_warning)
+                } else if prov.configured == Some(true) {
+                    ("已就绪", palette.status_success)
+                } else {
+                    ("尚未配置凭据", palette.status_warning)
+                };
 
-            let row_id = SharedString::from(format!("provider-row-{pid}"));
-            let row_label = SharedString::from(format!("{}（{}）", prov.name, status_label));
-            let manage_id = SharedString::from(format!("provider-manage-btn-{pid_btn}"));
-            let manage_label = SharedString::from(format!("管理 {}", prov.name));
+                let row_id = SharedString::from(if interactive {
+                    format!("provider-row-{pid}")
+                } else {
+                    format!("provider-row-{pid}-exit")
+                });
+                let row_label = SharedString::from(format!("{}（{}）", prov.name, status_label));
+                let manage_id = SharedString::from(if interactive {
+                    format!("provider-manage-btn-{pid_btn}")
+                } else {
+                    format!("provider-manage-btn-{pid_btn}-exit")
+                });
+                let manage_label = SharedString::from(format!("管理 {}", prov.name));
 
-            merged_card = merged_card.child(
-                div()
+                let row = div()
                     .id(row_id.clone())
-                    .test_support()
-                    .a11y_listitem(row_id, row_label, false)
                     .w_full()
                     .h(px(72.0))
                     .px(space::LG)
@@ -1133,10 +1338,6 @@ impl Render for ProvidersTabView {
                     .items_center()
                     .justify_between()
                     .gap(space::LG)
-                    .hover(|s| s.bg(palette.bg_item_hover))
-                    .on_click(cx.listener(move |this, _, w, cx| {
-                        this.select_provider(pid.clone(), w, cx);
-                    }))
                     .child(
                         div()
                             .flex()
@@ -1153,32 +1354,72 @@ impl Render for ProvidersTabView {
                                     .text_color(status_color)
                                     .child(cjk_inline_label(status_label)),
                             ),
-                    )
-                    .child(
-                        apply_scale(div(), scale::UI_MEDIUM)
-                            .id(manage_id.clone())
-                            .test_support()
-                            .a11y_button(manage_id, manage_label)
-                            .h(height::CONTROL)
-                            .px(space::MD)
-                            .rounded(radius::CONTROL)
-                            .border_1()
-                            .border_color(palette.border_strong)
-                            .bg(palette.bg_workspace)
-                            .text_color(palette.text_primary)
-                            .flex()
-                            .items_center()
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(move |this, _, w, cx| {
-                                this.select_provider(pid_btn.clone(), w, cx);
-                                cx.stop_propagation();
-                            }))
-                            .child(cjk_inline_label("管理")),
-                    ),
-            );
+                    );
+                let manage_btn = apply_scale(div(), scale::UI_MEDIUM)
+                    .id(manage_id.clone())
+                    .h(height::CONTROL)
+                    .px(space::MD)
+                    .rounded(radius::CONTROL)
+                    .border_1()
+                    .border_color(palette.border_strong)
+                    .bg(palette.bg_workspace)
+                    .text_color(palette.text_primary)
+                    .flex()
+                    .items_center()
+                    .child(cjk_inline_label("管理"));
+                let manage_btn_any = if interactive {
+                    manage_btn
+                        .test_support()
+                        .a11y_button(manage_id, manage_label)
+                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .on_click(cx.listener(move |this, _, w, cx| {
+                            this.select_provider(pid_btn.clone(), w, cx);
+                            cx.stop_propagation();
+                        }))
+                        .into_any_element()
+                } else {
+                    manage_btn.into_any_element()
+                };
+                let row = row.child(manage_btn_any);
+                if interactive {
+                    row.test_support()
+                        .a11y_listitem(row_id, row_label, false)
+                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .on_click(cx.listener(move |this, _, w, cx| {
+                            this.select_provider(pid.clone(), w, cx);
+                        }))
+                        .into_any_element()
+                } else {
+                    row.into_any_element()
+                }
+            };
+
+        for prov in ordered_others.iter().take(head_limit) {
+            merged_card = merged_card.child(render_provider_row(prov, true, cx));
         }
 
         if can_collapse_providers {
+            let overflow_providers: Vec<cst_client::ProviderStatusDto> = ordered_others
+                .iter()
+                .skip(head_limit)
+                .map(|p| (*p).clone())
+                .collect();
+            if let Some(collapsed_section) = motion::animated_collapse_with_exit(
+                "providers-expand-list",
+                self.providers_expanded,
+                window,
+                cx,
+                |interactive, _, cx| {
+                    let mut list = div().w_full().flex().flex_col();
+                    for prov in &overflow_providers {
+                        list = list.child(render_provider_row(prov, interactive, cx));
+                    }
+                    list.into_any_element()
+                },
+            ) {
+                merged_card = merged_card.child(collapsed_section);
+            }
+
             let expanded = self.providers_expanded;
             let toggle_label = if expanded {
                 SharedString::from("收起列表")
@@ -1205,15 +1446,15 @@ impl Render for ProvidersTabView {
                         cx.notify();
                     }))
                     .child(cjk_inline_label(toggle_label))
-                    .child(
-                        Icon::new(if expanded {
-                            IconName::ChevronUp
-                        } else {
-                            IconName::ChevronRight
-                        })
-                        .size(px(14.0))
-                        .text_color(palette.text_secondary),
-                    ),
+                    .child(motion::animated_chevron(
+                        "providers-expand-chevron",
+                        expanded,
+                        true,
+                        px(14.0),
+                        palette.text_secondary,
+                        window,
+                        cx,
+                    )),
             );
         }
 

@@ -55,7 +55,7 @@ pub fn render_update_dialog(
     scrim_progress: f32,
     dialog: &UpdateDialogState,
     update_state: Option<&UpdateStateDto>,
-    mono_family: SharedString,
+    _mono_family: SharedString,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
@@ -217,7 +217,6 @@ pub fn render_update_dialog(
             )
             .children(right_size_badge.map(|sz| {
                 apply_scale(div(), scale::CAPTION)
-                    .font_family(mono_family.clone())
                     .text_color(palette.text_secondary)
                     .flex_shrink_0()
                     .child(SharedString::from(sz))
@@ -261,7 +260,6 @@ pub fn render_update_dialog(
                 )
                 .child(
                     apply_scale(div(), scale::CAPTION)
-                        .font_family(mono_family)
                         .text_color(palette.text_secondary)
                         .child(SharedString::from(dl_label)),
                 ),

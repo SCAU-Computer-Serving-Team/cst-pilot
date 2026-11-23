@@ -8,15 +8,27 @@ impl ProvidersTabView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         // Strictly 3 icon-only action buttons (`search`, `refresh-cw`, `plus`) on right — ZERO text buttons!
+        let model_count = self.editable_rows.len();
         div()
             .w_full()
             .flex()
             .items_center()
             .justify_between()
             .child(
-                apply_scale(div(), scale::BODY_SEMIBOLD)
-                    .text_color(palette.text_primary)
-                    .child(cjk_inline_label(title)),
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .child(
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label(title)),
+                    )
+                    .children((self.inline_edit_mode && model_count > 0).then(|| {
+                        apply_scale(div(), scale::UI)
+                            .text_color(palette.text_secondary)
+                            .child(cjk_inline_label(format!("{model_count} 个模型")))
+                    })),
             )
             .child(
                 div()
@@ -97,52 +109,555 @@ impl ProvidersTabView {
             )
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn render_token_cell(
+        &self,
+        row_idx: usize,
+        kind: TokenFieldKind,
+        value: u64,
+        col_width: gpui_kit::Pixels,
+        _mono_family: &SharedString,
+        palette: &DesktopPalette,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let is_editing = self.inline_token_edit == Some((row_idx, kind));
+        let formatted = format_token_window(value);
+        let cell_id = SharedString::from(match kind {
+            TokenFieldKind::ContextWindow => format!("edit-row-cw-{row_idx}"),
+            TokenFieldKind::MaxTokens => format!("edit-row-mt-{row_idx}"),
+        });
+        let aria_label = match kind {
+            TokenFieldKind::ContextWindow => {
+                format!("上下文窗口：{formatted}（单击切换，双击输入）")
+            }
+            TokenFieldKind::MaxTokens => format!("最大输出：{formatted}（单击切换，双击输入）"),
+        };
+        let presets = match kind {
+            TokenFieldKind::ContextWindow => CONTEXT_WINDOW_PRESETS,
+            TokenFieldKind::MaxTokens => MAX_OUTPUT_PRESETS,
+        };
+
+        let mut cell = div()
+            .relative()
+            .w(col_width)
+            .h(height::FIELD)
+            .flex()
+            .items_center()
+            .border_b_1()
+            .border_color(if is_editing {
+                palette.accent_solid
+            } else {
+                gpui_kit::transparent_black()
+            });
+
+        if is_editing {
+            cell = cell.child(
+                div()
+                    .w_full()
+                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                        if event.keystroke.modifiers != gpui::Modifiers::default() {
+                            return;
+                        }
+                        match event.keystroke.key.as_str() {
+                            "enter" if !event.is_held => {
+                                this.commit_inline_token_edit(cx);
+                                cx.stop_propagation();
+                            }
+                            "escape" if !event.is_held => {
+                                this.inline_token_edit = None;
+                                cx.notify();
+                                cx.stop_propagation();
+                            }
+                            _ => {}
+                        }
+                    }))
+                    .child(
+                        Input::new(&self.inline_token_input)
+                            .accessibility_id(SharedString::from(format!("{cell_id}-input")))
+                            .aria_label(aria_label)
+                            .appearance(false)
+                            .bordered(false)
+                            .focus_bordered(false)
+                            .p_0()
+                            .text_size(scale::UI.font_size)
+                            .line_height(scale::UI.line_height)
+                            .w_full()
+                            .h(height::CONTROL),
+                    ),
+            );
+        } else {
+            cell = cell.child(
+                apply_scale(div(), scale::UI)
+                    .id(cell_id.clone())
+                    .test_support()
+                    .a11y_button(cell_id, aria_label)
+                    .w_full()
+                    .h_full()
+                    .text_color(palette.text_primary)
+                    .flex()
+                    .items_center()
+                    .hover(|s| s.text_color(palette.accent_ink))
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                            cx.stop_propagation();
+                            if event.click_count >= 2 {
+                                this.start_inline_token_edit(row_idx, kind, window, cx);
+                            } else {
+                                this.protocol_dropdown_open = false;
+                                this.commit_inline_token_edit(cx);
+                                if let Some(row) = this.editable_rows.get_mut(row_idx) {
+                                    match kind {
+                                        TokenFieldKind::ContextWindow => {
+                                            row.context_window =
+                                                cycle_token_preset(row.context_window, presets);
+                                        }
+                                        TokenFieldKind::MaxTokens => {
+                                            row.max_tokens =
+                                                cycle_token_preset(row.max_tokens, presets);
+                                        }
+                                    }
+                                }
+                                cx.notify();
+                            }
+                        }),
+                    )
+                    .child(SharedString::from(formatted)),
+            );
+        }
+
+        cell
+    }
+
     pub(super) fn render_custom_provider_editor(
         &self,
         mono_family: SharedString,
         palette: &DesktopPalette,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let mut protocol_row = div().flex().flex_wrap().gap(space::XS);
-        for proto in CustomApiProtocol::ALL {
-            let active = self.protocol == proto;
-            let proto_id = SharedString::from(format!("custom-proto-{}", proto.wire_value()));
-            protocol_row = protocol_row.child(
-                apply_scale(div(), scale::CAPTION_MEDIUM)
-                    .id(proto_id.clone())
-                    .test_support()
-                    .a11y_tab(proto_id, proto.label(), active)
-                    .h(height::COMPACT)
-                    .px(space::SM)
-                    .rounded(radius::CONTROL)
-                    .border_1()
-                    .border_color(if active {
-                        palette.border_strong
-                    } else {
-                        palette.border_subtle
-                    })
-                    .bg(if active {
-                        palette.bg_item_active
-                    } else {
-                        palette.bg_workspace
-                    })
-                    .text_color(if active {
-                        palette.text_primary
-                    } else {
-                        palette.text_secondary
-                    })
-                    .flex()
-                    .items_center()
-                    .hover(|s| s.bg(palette.bg_item_hover))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.protocol = proto;
-                        cx.notify();
-                    }))
-                    .child(SharedString::from(proto.label())),
-            );
-        }
+        let name_focused = self
+            .provider_name_input
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window);
+        let pid_focused = self
+            .provider_id_input
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window);
+        let url_focused = self
+            .base_url_input
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window);
+        let key_focused = self
+            .api_key_input
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window);
 
-        // Borderless hairline editable table with `32px` column header row (`思考` / `图片` 16×16 checkboxes)
+        let pid_empty =
+            self.form_error.is_some() && self.provider_id_input.read(cx).value().trim().is_empty();
+        let name_empty = self.form_error.is_some()
+            && self.provider_name_input.read(cx).value().trim().is_empty();
+        let url_empty =
+            self.form_error.is_some() && self.base_url_input.read(cx).value().trim().is_empty();
+
+        // Flat deferred protocol dropdown popover aligned to trigger text (`left: -12px` offsets `p: 4px + item px: 8px`)
+        let protocol_popover = self.protocol_dropdown_open.then(|| {
+            let mut items = div().w_full().flex().flex_col().gap(space::MICRO);
+            for (idx, proto) in CustomApiProtocol::ALL.iter().copied().enumerate() {
+                let is_selected = self.protocol == proto;
+                let proto_id = SharedString::from(format!("custom-proto-{}", proto.wire_value()));
+                items = items.child(
+                    apply_scale(div(), scale::UI)
+                        .id(proto_id.clone())
+                        .test_support()
+                        .a11y_listitem(proto_id, proto.label(), is_selected)
+                        .h(height::CONTROL)
+                        .px(space::SM)
+                        .rounded(radius::CONTROL)
+                        .bg(if self.protocol_dropdown_index == idx && !is_selected {
+                            palette.bg_item_hover
+                        } else {
+                            gpui_kit::transparent_black()
+                        })
+                        .text_color(palette.text_primary)
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(space::SM)
+                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.protocol = proto;
+                            this.protocol_dropdown_open = false;
+                            cx.notify();
+                            cx.stop_propagation();
+                        }))
+                        .child(SharedString::from(proto.label()))
+                        .children(is_selected.then(|| {
+                            Icon::new(IconName::Check)
+                                .size(px(13.0))
+                                .text_color(palette.accent_ink)
+                        })),
+                );
+            }
+
+            gpui::deferred(
+                div().absolute().top(px(42.0)).left(px(-12.0)).child(
+                    motion::animate_popover_enter(
+                        "custom-protocol-popover-anim",
+                        div()
+                            .id("custom-protocol-popover")
+                            .test_support()
+                            .a11y_dialog("custom-protocol-popover", "选择接口协议")
+                            .w(px(268.0))
+                            .p(space::XS)
+                            .rounded(radius::ROW)
+                            .bg(palette.bg_elevated)
+                            .border_1()
+                            .border_color(palette.border_subtle)
+                            .occlude()
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation();
+                            })
+                            .child(
+                                div()
+                                    .w_full()
+                                    .focus_trap("custom-protocol-focus", &self.protocol_focus)
+                                    .on_key_down(cx.listener(
+                                        |this, event: &KeyDownEvent, _, cx| {
+                                            if event.keystroke.modifiers
+                                                != gpui::Modifiers::default()
+                                            {
+                                                return;
+                                            }
+                                            let len = CustomApiProtocol::ALL.len();
+                                            match event.keystroke.key.as_str() {
+                                                "up" => {
+                                                    this.protocol_dropdown_index = this
+                                                        .protocol_dropdown_index
+                                                        .checked_sub(1)
+                                                        .unwrap_or(len - 1);
+                                                    cx.notify();
+                                                    cx.stop_propagation();
+                                                }
+                                                "down" => {
+                                                    this.protocol_dropdown_index =
+                                                        (this.protocol_dropdown_index + 1) % len;
+                                                    cx.notify();
+                                                    cx.stop_propagation();
+                                                }
+                                                "enter" | "space" if !event.is_held => {
+                                                    if let Some(&proto) = CustomApiProtocol::ALL
+                                                        .get(this.protocol_dropdown_index)
+                                                    {
+                                                        this.protocol = proto;
+                                                    }
+                                                    this.protocol_dropdown_open = false;
+                                                    cx.notify();
+                                                    cx.stop_propagation();
+                                                }
+                                                "escape" if !event.is_held => {
+                                                    this.protocol_dropdown_open = false;
+                                                    cx.notify();
+                                                    cx.stop_propagation();
+                                                }
+                                                _ => {}
+                                            }
+                                        },
+                                    ))
+                                    .child(items),
+                            ),
+                        palette.flat_popover_shadows(),
+                        -6.0,
+                    ),
+                ),
+            )
+            .with_priority(10)
+        });
+
+        // Borderless hairline connection properties group (`Geto8` -> `bB67m` -> `Yop98`)
+        let connection_section = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(space::SM)
+            .child(
+                apply_scale(div(), scale::BODY_SEMIBOLD)
+                    .text_color(palette.text_primary)
+                    .child(cjk_inline_label("服务连接")),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    // 1. 服务名称 (`MfnjS`)
+                    .child(
+                        div()
+                            .w_full()
+                            .h(height::FIELD)
+                            .border_b_1()
+                            .border_color(if name_empty {
+                                palette.status_danger
+                            } else if name_focused {
+                                palette.accent_solid
+                            } else {
+                                palette.border_subtle
+                            })
+                            .flex()
+                            .items_center()
+                            .gap(space::LG)
+                            .child(
+                                apply_scale(div(), scale::UI)
+                                    .w(px(184.0))
+                                    .flex_shrink_0()
+                                    .text_color(if name_focused {
+                                        palette.accent_ink
+                                    } else {
+                                        palette.text_secondary
+                                    })
+                                    .child(cjk_inline_label("服务名称")),
+                            )
+                            .child(
+                                div().flex_1().min_w_0().child(
+                                    Input::new(&self.provider_name_input)
+                                        .accessibility_id("providers-name-input")
+                                        .disabled(self.loading || self.saving)
+                                        .aria_label("服务名称")
+                                        .appearance(false)
+                                        .bordered(false)
+                                        .focus_bordered(false)
+                                        .p_0()
+                                        .text_size(scale::UI.font_size)
+                                        .line_height(scale::UI.line_height)
+                                        .w_full()
+                                        .h(height::CONTROL),
+                                ),
+                            ),
+                    )
+                    // 2. 服务 ID (`jwCXL`)
+                    .child(
+                        div()
+                            .w_full()
+                            .h(height::FIELD)
+                            .border_b_1()
+                            .border_color(if pid_empty {
+                                palette.status_danger
+                            } else if pid_focused {
+                                palette.accent_solid
+                            } else {
+                                palette.border_subtle
+                            })
+                            .flex()
+                            .items_center()
+                            .gap(space::LG)
+                            .child(
+                                apply_scale(div(), scale::UI)
+                                    .w(px(184.0))
+                                    .flex_shrink_0()
+                                    .text_color(if pid_focused {
+                                        palette.accent_ink
+                                    } else {
+                                        palette.text_secondary
+                                    })
+                                    .child(cjk_inline_label("服务 ID")),
+                            )
+                            .child(
+                                div().flex_1().min_w_0().child(
+                                    Input::new(&self.provider_id_input)
+                                        .accessibility_id("providers-id-input")
+                                        .disabled(
+                                            self.loading
+                                                || self.saving
+                                                || !self.creating_new_custom,
+                                        )
+                                        .aria_label("服务 ID")
+                                        .appearance(false)
+                                        .bordered(false)
+                                        .focus_bordered(false)
+                                        .p_0()
+                                        .text_size(scale::UI.font_size)
+                                        .line_height(scale::UI.line_height)
+                                        .w_full()
+                                        .h(height::CONTROL),
+                                ),
+                            ),
+                    )
+                    // 3. 接口协议 (`u0VG75`, borderless dropdown row)
+                    .child(
+                        div()
+                            .relative()
+                            .w_full()
+                            .h(height::FIELD)
+                            .border_b_1()
+                            .border_color(if self.protocol_dropdown_open {
+                                palette.accent_solid
+                            } else {
+                                palette.border_subtle
+                            })
+                            .flex()
+                            .items_center()
+                            .gap(space::LG)
+                            .child(
+                                apply_scale(div(), scale::UI)
+                                    .w(px(184.0))
+                                    .flex_shrink_0()
+                                    .text_color(if self.protocol_dropdown_open {
+                                        palette.accent_ink
+                                    } else {
+                                        palette.text_secondary
+                                    })
+                                    .child(cjk_inline_label("接口协议")),
+                            )
+                            .child(
+                                div()
+                                    .relative()
+                                    .flex_1()
+                                    .h_full()
+                                    .child(
+                                        apply_scale(div(), scale::UI)
+                                            .id("custom-protocol-dropdown-trigger")
+                                            .test_support()
+                                            .a11y_toggle_button(
+                                                "custom-protocol-dropdown-trigger",
+                                                format!("接口协议：{}", self.protocol.label()),
+                                                self.protocol_dropdown_open,
+                                            )
+                                            .w_full()
+                                            .h_full()
+                                            .text_color(palette.text_primary)
+                                            .flex()
+                                            .items_center()
+                                            .justify_between()
+                                            .gap(space::SM)
+                                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                                cx.stop_propagation();
+                                            })
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.commit_inline_token_edit(cx);
+                                                this.protocol_dropdown_open =
+                                                    !this.protocol_dropdown_open;
+                                                if this.protocol_dropdown_open {
+                                                    this.protocol_dropdown_index =
+                                                        CustomApiProtocol::ALL
+                                                            .iter()
+                                                            .position(|&p| p == this.protocol)
+                                                            .unwrap_or(0);
+                                                    this.protocol_focus.focus(window, cx);
+                                                }
+                                                cx.notify();
+                                                cx.stop_propagation();
+                                            }))
+                                            .child(SharedString::from(self.protocol.label()))
+                                            .child(motion::animated_chevron(
+                                                "custom-protocol-chevron",
+                                                self.protocol_dropdown_open,
+                                                true,
+                                                px(14.0),
+                                                palette.text_secondary,
+                                                window,
+                                                cx,
+                                            )),
+                                    )
+                                    .children(protocol_popover),
+                            ),
+                    )
+                    // 4. Base URL (`W2aZbT`)
+                    .child(
+                        div()
+                            .w_full()
+                            .h(height::FIELD)
+                            .border_b_1()
+                            .border_color(if url_empty {
+                                palette.status_danger
+                            } else if url_focused {
+                                palette.accent_solid
+                            } else {
+                                palette.border_subtle
+                            })
+                            .flex()
+                            .items_center()
+                            .gap(space::LG)
+                            .child(
+                                apply_scale(div(), scale::UI)
+                                    .w(px(184.0))
+                                    .flex_shrink_0()
+                                    .text_color(if url_focused {
+                                        palette.accent_ink
+                                    } else {
+                                        palette.text_secondary
+                                    })
+                                    .child("Base URL"),
+                            )
+                            .child(
+                                div().flex_1().min_w_0().child(
+                                    Input::new(&self.base_url_input)
+                                        .accessibility_id("providers-baseurl-input")
+                                        .disabled(self.loading || self.saving)
+                                        .aria_label("服务 Base URL")
+                                        .appearance(false)
+                                        .bordered(false)
+                                        .focus_bordered(false)
+                                        .p_0()
+                                        .text_size(scale::UI.font_size)
+                                        .line_height(scale::UI.line_height)
+                                        .w_full()
+                                        .h(height::CONTROL),
+                                ),
+                            ),
+                    )
+                    // 5. API Key (`l0m9s`)
+                    .child(
+                        div()
+                            .w_full()
+                            .h(height::FIELD)
+                            .border_b_1()
+                            .border_color(if key_focused {
+                                palette.accent_solid
+                            } else {
+                                palette.border_subtle
+                            })
+                            .flex()
+                            .items_center()
+                            .gap(space::LG)
+                            .child(
+                                apply_scale(div(), scale::UI)
+                                    .w(px(184.0))
+                                    .flex_shrink_0()
+                                    .text_color(if key_focused {
+                                        palette.accent_ink
+                                    } else {
+                                        palette.text_secondary
+                                    })
+                                    .child("API Key"),
+                            )
+                            .child(
+                                div().flex_1().min_w_0().child(
+                                    Input::new(&self.api_key_input)
+                                        .accessibility_id("providers-apikey-input")
+                                        .disabled(self.loading || self.saving)
+                                        .content_type(InputContentType::Password)
+                                        .aria_label("服务 API Key")
+                                        .appearance(false)
+                                        .bordered(false)
+                                        .focus_bordered(false)
+                                        .p_0()
+                                        .text_size(scale::UI.font_size)
+                                        .line_height(scale::UI.line_height)
+                                        .w_full()
+                                        .h(height::CONTROL)
+                                        .mask_toggle(),
+                                ),
+                            ),
+                    ),
+            );
+
+        // Borderless hairline editable model table (`Geto8` -> `haI3x`, columns `184 / 204 / 112 / 104 / 48 / 48 / 20`)
         let mut hairline_table = div()
             .id("providers-hairline-edit-table")
             .test_support()
@@ -154,58 +669,57 @@ impl ProvidersTabView {
                     .w_full()
                     .h(height::CONTROL)
                     .border_b_1()
-                    .border_color(palette.border_subtle)
+                    .border_color(palette.border_strong)
                     .flex()
                     .items_center()
-                    .gap(space::SM)
+                    .gap(space::LG)
                     .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .flex_1()
-                            .text_color(palette.text_secondary)
+                        apply_scale(div(), scale::CAPTION)
+                            .w(px(184.0))
+                            .flex_shrink_0()
+                            .text_color(palette.text_muted)
                             .child(cjk_inline_label("模型 ID")),
                     )
                     .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
+                        apply_scale(div(), scale::CAPTION)
                             .flex_1()
-                            .text_color(palette.text_secondary)
+                            .min_w_0()
+                            .text_color(palette.text_muted)
                             .child(cjk_inline_label("显示名称")),
                     )
                     .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .w(px(76.0))
-                            .text_color(palette.text_secondary)
+                        apply_scale(div(), scale::CAPTION)
+                            .w(px(108.0))
+                            .flex_shrink_0()
+                            .text_color(palette.text_muted)
                             .child(cjk_inline_label("上下文窗口")),
                     )
                     .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .w(px(68.0))
-                            .text_color(palette.text_secondary)
+                        apply_scale(div(), scale::CAPTION)
+                            .w(px(96.0))
+                            .flex_shrink_0()
+                            .text_color(palette.text_muted)
                             .child(cjk_inline_label("最大输出")),
                     )
                     .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .w(px(40.0))
+                        apply_scale(div(), scale::CAPTION)
+                            .w(px(44.0))
+                            .flex_shrink_0()
                             .flex()
                             .justify_center()
-                            .text_color(palette.text_secondary)
+                            .text_color(palette.text_muted)
                             .child(cjk_inline_label("思考")),
                     )
                     .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .w(px(40.0))
+                        apply_scale(div(), scale::CAPTION)
+                            .w(px(44.0))
+                            .flex_shrink_0()
                             .flex()
                             .justify_center()
-                            .text_color(palette.text_secondary)
+                            .text_color(palette.text_muted)
                             .child(cjk_inline_label("图片")),
                     )
-                    .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .w(px(36.0))
-                            .flex()
-                            .justify_center()
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("移除")),
-                    ),
+                    .child(div().w(px(28.0)).flex_shrink_0()),
             );
 
         let filter_q = self.search_input.read(cx).value().to_lowercase();
@@ -219,95 +733,101 @@ impl ProvidersTabView {
             }
             let reasoning = row.reasoning;
             let image = row.image;
-            let cw_text = format_token_window(row.context_window);
-            let mt_text = format_token_window(row.max_tokens);
-            let cw_id = SharedString::from(format!("edit-row-cw-{idx}"));
-            let mt_id = SharedString::from(format!("edit-row-mt-{idx}"));
+            let id_focused = row.id_input.read(cx).focus_handle(cx).is_focused(window);
+            let name_focused = row.name_input.read(cx).focus_handle(cx).is_focused(window);
             let rm_id = SharedString::from(format!("edit-row-remove-{idx}"));
 
             hairline_table = hairline_table.child(
                 div()
-                    .py(space::SM)
+                    .w_full()
+                    .h(height::FIELD)
                     .border_b_1()
-                    .border_color(palette.border_hairline)
+                    .border_color(palette.border_subtle)
                     .flex()
                     .items_center()
-                    .gap(space::SM)
+                    .gap(space::LG)
                     .child(
-                        div().flex_1().child(
-                            Input::new(&row.id_input)
-                                .disabled(self.saving)
-                                .accessibility_id(SharedString::from(format!(
-                                    "providers-row-id-input-{idx}"
-                                )))
-                                .aria_label(format!("第 {} 行模型 ID", idx + 1)),
-                        ),
-                    )
-                    .child(
-                        div().flex_1().child(
-                            Input::new(&row.name_input)
-                                .disabled(self.saving)
-                                .accessibility_id(SharedString::from(format!(
-                                    "providers-row-name-input-{idx}"
-                                )))
-                                .aria_label(format!("第 {} 行模型显示名称", idx + 1)),
-                        ),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION)
-                            .id(cw_id.clone())
-                            .test_support()
-                            .a11y_button(cw_id, format!("切换上下文窗口：{cw_text}"))
-                            .w(px(76.0))
-                            .h(height::COMPACT)
-                            .px(space::XS)
-                            .rounded(radius::CONTROL)
-                            .border_1()
-                            .border_color(palette.border_subtle)
-                            .bg(palette.bg_workspace)
-                            .font_family(mono_family.clone())
-                            .text_color(palette.text_primary)
+                        div()
+                            .w(px(184.0))
+                            .h_full()
+                            .flex_shrink_0()
+                            .border_b_1()
+                            .border_color(if id_focused {
+                                palette.accent_solid
+                            } else {
+                                gpui_kit::transparent_black()
+                            })
                             .flex()
                             .items_center()
-                            .justify_center()
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(r) = this.editable_rows.get_mut(idx) {
-                                    r.context_window = next_context_window(r.context_window);
-                                    cx.notify();
-                                }
-                            }))
-                            .child(SharedString::from(cw_text)),
-                    )
-                    .child(
-                        apply_scale(div(), scale::CAPTION)
-                            .id(mt_id.clone())
-                            .test_support()
-                            .a11y_button(mt_id, format!("切换最大输出：{mt_text}"))
-                            .w(px(68.0))
-                            .h(height::COMPACT)
-                            .px(space::XS)
-                            .rounded(radius::CONTROL)
-                            .border_1()
-                            .border_color(palette.border_subtle)
-                            .bg(palette.bg_workspace)
-                            .font_family(mono_family.clone())
-                            .text_color(palette.text_primary)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .hover(|s| s.bg(palette.bg_item_hover))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if let Some(r) = this.editable_rows.get_mut(idx) {
-                                    r.max_tokens = next_max_tokens(r.max_tokens);
-                                    cx.notify();
-                                }
-                            }))
-                            .child(SharedString::from(mt_text)),
+                            .child(
+                                Input::new(&row.id_input)
+                                    .disabled(self.saving)
+                                    .accessibility_id(SharedString::from(format!(
+                                        "providers-row-id-input-{idx}"
+                                    )))
+                                    .aria_label(format!("第 {} 行模型 ID", idx + 1))
+                                    .appearance(false)
+                                    .bordered(false)
+                                    .focus_bordered(false)
+                                    .p_0()
+                                    .text_size(scale::UI.font_size)
+                                    .line_height(scale::UI.line_height)
+                                    .w_full()
+                                    .h(height::CONTROL),
+                            ),
                     )
                     .child(
                         div()
-                            .w(px(40.0))
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .border_b_1()
+                            .border_color(if name_focused {
+                                palette.accent_solid
+                            } else {
+                                gpui_kit::transparent_black()
+                            })
+                            .flex()
+                            .items_center()
+                            .child(
+                                Input::new(&row.name_input)
+                                    .disabled(self.saving)
+                                    .accessibility_id(SharedString::from(format!(
+                                        "providers-row-name-input-{idx}"
+                                    )))
+                                    .aria_label(format!("第 {} 行模型显示名称", idx + 1))
+                                    .appearance(false)
+                                    .bordered(false)
+                                    .focus_bordered(false)
+                                    .p_0()
+                                    .text_size(scale::UI.font_size)
+                                    .line_height(scale::UI.line_height)
+                                    .w_full()
+                                    .h(height::CONTROL),
+                            ),
+                    )
+                    .child(self.render_token_cell(
+                        idx,
+                        TokenFieldKind::ContextWindow,
+                        row.context_window,
+                        px(108.0),
+                        &mono_family,
+                        palette,
+                        cx,
+                    ))
+                    .child(self.render_token_cell(
+                        idx,
+                        TokenFieldKind::MaxTokens,
+                        row.max_tokens,
+                        px(96.0),
+                        &mono_family,
+                        palette,
+                        cx,
+                    ))
+                    .child(
+                        div()
+                            .w(px(44.0))
+                            .flex_shrink_0()
                             .flex()
                             .items_center()
                             .justify_center()
@@ -326,7 +846,8 @@ impl ProvidersTabView {
                     )
                     .child(
                         div()
-                            .w(px(40.0))
+                            .w(px(44.0))
+                            .flex_shrink_0()
                             .flex()
                             .items_center()
                             .justify_center()
@@ -345,7 +866,8 @@ impl ProvidersTabView {
                     )
                     .child(
                         div()
-                            .w(px(36.0))
+                            .w(px(28.0))
+                            .flex_shrink_0()
                             .flex()
                             .items_center()
                             .justify_center()
@@ -364,12 +886,16 @@ impl ProvidersTabView {
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         if idx < this.editable_rows.len() {
                                             this.editable_rows.remove(idx);
+                                            if this.inline_token_edit.is_some_and(|(r, _)| r >= idx)
+                                            {
+                                                this.inline_token_edit = None;
+                                            }
                                             cx.notify();
                                         }
                                     }))
                                     .child(
                                         Icon::new(IconName::Trash)
-                                            .size(px(13.0))
+                                            .size(px(16.0))
                                             .text_color(palette.text_muted),
                                     ),
                             ),
@@ -377,216 +903,12 @@ impl ProvidersTabView {
             );
         }
 
-        let pid_empty =
-            self.form_error.is_some() && self.provider_id_input.read(cx).value().trim().is_empty();
-        let name_empty = self.form_error.is_some()
-            && self.provider_name_input.read(cx).value().trim().is_empty();
-        let url_empty =
-            self.form_error.is_some() && self.base_url_input.read(cx).value().trim().is_empty();
-
         div()
             .w_full()
             .flex()
             .flex_col()
-            .gap(space::MD)
-            .child(self.render_back_bar(palette, cx))
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .w_full()
-                            .h(px(44.0))
-                            .border_b_1()
-                            .border_color(palette.border_subtle)
-                            .flex()
-                            .items_center()
-                            .gap(space::LG)
-                            .child(
-                                apply_scale(div(), scale::UI)
-                                    .w(px(140.0))
-                                    .flex_shrink_0()
-                                    .text_color(palette.text_secondary)
-                                    .child(cjk_inline_label("服务标识")),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .h(height::CONTROL)
-                                    .px(space::XS)
-                                    .rounded(radius::CONTROL)
-                                    .border_1()
-                                    .border_color(if pid_empty {
-                                        palette.status_danger
-                                    } else {
-                                        palette.border_subtle
-                                    })
-                                    .bg(palette.bg_workspace)
-                                    .flex()
-                                    .items_center()
-                                    .child(
-                                        Input::new(&self.provider_id_input)
-                                            .accessibility_id("providers-id-input")
-                                            .disabled(
-                                                self.loading
-                                                    || self.saving
-                                                    || !self.creating_new_custom,
-                                            )
-                                            .aria_label("服务标识")
-                                            .appearance(false)
-                                            .bordered(false)
-                                            .w_full()
-                                            .h_full(),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .h(px(44.0))
-                            .border_b_1()
-                            .border_color(palette.border_subtle)
-                            .flex()
-                            .items_center()
-                            .gap(space::LG)
-                            .child(
-                                apply_scale(div(), scale::UI)
-                                    .w(px(140.0))
-                                    .flex_shrink_0()
-                                    .text_color(palette.text_secondary)
-                                    .child(cjk_inline_label("显示名称")),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .h(height::CONTROL)
-                                    .px(space::XS)
-                                    .rounded(radius::CONTROL)
-                                    .border_1()
-                                    .border_color(if name_empty {
-                                        palette.status_danger
-                                    } else {
-                                        palette.border_subtle
-                                    })
-                                    .bg(palette.bg_workspace)
-                                    .flex()
-                                    .items_center()
-                                    .child(
-                                        Input::new(&self.provider_name_input)
-                                            .accessibility_id("providers-name-input")
-                                            .disabled(self.loading || self.saving)
-                                            .aria_label("服务显示名称")
-                                            .appearance(false)
-                                            .bordered(false)
-                                            .w_full()
-                                            .h_full(),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .min_h(px(44.0))
-                            .py(space::XS)
-                            .border_b_1()
-                            .border_color(palette.border_subtle)
-                            .flex()
-                            .items_center()
-                            .gap(space::LG)
-                            .child(
-                                apply_scale(div(), scale::UI)
-                                    .w(px(140.0))
-                                    .flex_shrink_0()
-                                    .text_color(palette.text_secondary)
-                                    .child(cjk_inline_label("接口协议")),
-                            )
-                            .child(div().flex_1().child(protocol_row)),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .h(px(44.0))
-                            .border_b_1()
-                            .border_color(palette.border_subtle)
-                            .flex()
-                            .items_center()
-                            .gap(space::LG)
-                            .child(
-                                apply_scale(div(), scale::UI)
-                                    .w(px(140.0))
-                                    .flex_shrink_0()
-                                    .text_color(palette.text_secondary)
-                                    .child("Base URL"),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .h(height::CONTROL)
-                                    .px(space::XS)
-                                    .rounded(radius::CONTROL)
-                                    .border_1()
-                                    .border_color(if url_empty {
-                                        palette.status_danger
-                                    } else {
-                                        palette.border_subtle
-                                    })
-                                    .bg(palette.bg_workspace)
-                                    .flex()
-                                    .items_center()
-                                    .child(
-                                        Input::new(&self.base_url_input)
-                                            .accessibility_id("providers-baseurl-input")
-                                            .disabled(self.loading || self.saving)
-                                            .aria_label("服务 Base URL")
-                                            .appearance(false)
-                                            .bordered(false)
-                                            .w_full()
-                                            .h_full(),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .h(px(44.0))
-                            .flex()
-                            .items_center()
-                            .gap(space::LG)
-                            .child(
-                                apply_scale(div(), scale::UI)
-                                    .w(px(140.0))
-                                    .flex_shrink_0()
-                                    .text_color(palette.text_secondary)
-                                    .child("API Key"),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .h(height::CONTROL)
-                                    .px(space::XS)
-                                    .rounded(radius::CONTROL)
-                                    .border_1()
-                                    .border_color(palette.border_subtle)
-                                    .bg(palette.bg_workspace)
-                                    .flex()
-                                    .items_center()
-                                    .child(
-                                        Input::new(&self.api_key_input)
-                                            .accessibility_id("providers-apikey-input")
-                                            .disabled(self.loading || self.saving)
-                                            .content_type(InputContentType::Password)
-                                            .aria_label("服务 API Key")
-                                            .appearance(false)
-                                            .bordered(false)
-                                            .w_full()
-                                            .h_full()
-                                            .mask_toggle(),
-                                    ),
-                            ),
-                    ),
-            )
+            .gap(space::GROUP)
+            .child(connection_section)
             .children(self.form_error.clone().map(|err| {
                 apply_scale(div(), scale::CAPTION)
                     .id("providers-form-error-text")
@@ -595,15 +917,58 @@ impl ProvidersTabView {
                     .text_color(palette.status_danger)
                     .child(err)
             }))
-            .child(self.render_model_list_header("模型列表", palette, cx))
-            .children(self.search_visible.then(|| {
-                Input::new(&self.search_input)
-                    .accessibility_id("providers-search-input")
-                    .aria_label("筛选模型")
-                    .h(height::FIELD)
-                    .cleanable(true)
-            }))
-            .child(hairline_table)
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(space::SM)
+                    .child(self.render_model_list_header("模型", palette, cx))
+                    .children(self.search_visible.then(|| {
+                        let search_focused = self
+                            .search_input
+                            .read(cx)
+                            .focus_handle(cx)
+                            .is_focused(window);
+                        let search_focus_ent = self.search_input.clone();
+                        div()
+                            .id("providers-custom-search-box")
+                            .w_full()
+                            .h(height::CONTROL)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(if search_focused {
+                                palette.border_focus
+                            } else {
+                                palette.border_strong
+                            })
+                            .bg(palette.bg_workspace)
+                            .flex()
+                            .items_center()
+                            .gap(space::SM)
+                            .on_click(move |_, w, cx| {
+                                search_focus_ent.focus_handle(cx).focus(w, cx);
+                            })
+                            .child(
+                                Icon::new(IconName::Search)
+                                    .size(px(14.0))
+                                    .text_color(palette.text_muted),
+                            )
+                            .child(
+                                div().flex_1().min_w_0().child(
+                                    Input::new(&self.search_input)
+                                        .accessibility_id("providers-search-input")
+                                        .aria_label("筛选模型")
+                                        .appearance(false)
+                                        .bordered(false)
+                                        .focus_bordered(false)
+                                        .p_0(),
+                                ),
+                            )
+                    }))
+                    .child(hairline_table),
+            )
             .child(
                 div()
                     .flex()
@@ -637,6 +1002,8 @@ impl ProvidersTabView {
                                 "providers-inline-save-btn",
                                 if self.saving {
                                     "正在保存"
+                                } else if self.creating_new_custom {
+                                    "添加提供商"
                                 } else {
                                     "保存"
                                 },
@@ -654,6 +1021,8 @@ impl ProvidersTabView {
                             }))
                             .child(cjk_inline_label(if self.saving {
                                 "正在保存…"
+                            } else if self.creating_new_custom {
+                                "添加提供商"
                             } else {
                                 "保存"
                             })),

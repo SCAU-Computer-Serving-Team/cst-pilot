@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use cst_client::{ClientHandle, DraftKey};
 use gpui::KeyDownEvent;
@@ -1027,8 +1028,10 @@ pub struct BranchTreeView {
     collapsed_heads: BTreeSet<String>,
     selected_index: usize,
     pending_target_id: Option<String>,
+    summary_selected_idx: usize,
     custom_prompt_mode: bool,
     custom_prompt_input: Entity<InputState>,
+    enter_anim_start: Option<Instant>,
     focus_handle: FocusHandle,
     modal_trap_focus: FocusHandle,
     modal_prior_focus: Option<FocusHandle>,
@@ -1058,8 +1061,12 @@ impl BranchTreeView {
         cx: &mut Context<Self>,
     ) -> Self {
         let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索条目"));
-        let custom_prompt_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("输入分支总结附加提示词…"));
+        let custom_prompt_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("输入分支总结附加提示词（例如：重点保留排查结论与待确认项）…")
+        });
+        let is_open = !session_id.is_empty();
+        let enter_anim_start = is_open.then(|| cx.background_executor().now());
         let mut view = Self {
             client,
             session_id: session_id.clone(),
@@ -1069,8 +1076,10 @@ impl BranchTreeView {
             collapsed_heads: BTreeSet::new(),
             selected_index: 0,
             pending_target_id: None,
+            summary_selected_idx: 0,
             custom_prompt_mode: false,
             custom_prompt_input,
+            enter_anim_start,
             focus_handle: cx.focus_handle(),
             modal_trap_focus: cx.focus_handle(),
             modal_prior_focus: None,
@@ -1080,7 +1089,7 @@ impl BranchTreeView {
             request: TreeRequest::default(),
             layout: None,
             computed: None,
-            is_open: !session_id.is_empty(),
+            is_open,
             last_observed_session_rev: 0,
         };
         if !session_id.is_empty() {
@@ -1113,6 +1122,7 @@ impl BranchTreeView {
                 .update(cx, |input, cx| input.set_value("", window, cx));
         }
         self.is_open = !self.session_id.is_empty();
+        self.enter_anim_start = self.is_open.then(|| cx.background_executor().now());
         self.trigger_tree_fetch(cx);
         cx.notify();
     }
@@ -1152,7 +1162,9 @@ impl BranchTreeView {
         self.visit = self.visit.wrapping_add(1);
         self.request.cancel();
         self.is_open = false;
+        self.enter_anim_start = None;
         self.pending_target_id = None;
+        self.summary_selected_idx = 0;
         self.custom_prompt_mode = false;
         self.filter_dropdown_open = false;
         self.modal_prior_focus = None;
@@ -1181,6 +1193,15 @@ impl BranchTreeView {
         true
     }
 
+    pub(crate) fn dismiss_filter_dropdown(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.filter_dropdown_open {
+            return false;
+        }
+        self.filter_dropdown_open = false;
+        cx.notify();
+        true
+    }
+
     fn open_summary(&mut self, target: String, window: &mut Window, cx: &mut Context<Self>) {
         if self.has_summary_modal() || self.pending_operations.contains(&self.session_id) {
             return;
@@ -1192,6 +1213,7 @@ impl BranchTreeView {
         self.custom_prompt_input
             .update(cx, |input, cx| input.set_value("", window, cx));
         self.pending_target_id = Some(target);
+        self.summary_selected_idx = 0;
         self.custom_prompt_mode = false;
         self.modal_trap_focus.focus(window, cx);
         cx.notify();
@@ -1416,52 +1438,8 @@ impl BranchTreeView {
         .detach();
     }
 
-    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let ks = &event.keystroke;
-        let key = ks.key.as_str();
-        if self.has_summary_modal() || super::input_is_composing(&self.search_input, window, cx) {
-            return;
-        }
-        if ks.modifiers.control && key.eq_ignore_ascii_case("o") && !event.is_held {
-            self.filter_dropdown_open = false;
-            self.cycle_filter(ks.modifiers.shift, cx);
-            cx.stop_propagation();
-            return;
-        }
-        if !self.focus_handle.is_focused(window) {
-            return;
-        }
-        let computed = self.compute_rows(cx);
-        let rows = &computed.shown_rows;
-        let leaf_id = &computed.layout.leaf_id;
-        self.selected_index = self.selected_index.min(rows.len().saturating_sub(1));
-        match key {
-            "up" => {
-                self.selected_index = self.selected_index.saturating_sub(1);
-                cx.notify();
-                cx.stop_propagation();
-            }
-            "down" => {
-                self.selected_index = self
-                    .selected_index
-                    .saturating_add(1)
-                    .min(rows.len().saturating_sub(1));
-                cx.notify();
-                cx.stop_propagation();
-            }
-            "enter" if !event.is_held => {
-                if let Some(row) = rows.get(self.selected_index)
-                    && Some(row.node.id.as_str()) != leaf_id.as_deref()
-                {
-                    self.open_summary(row.node.id.clone(), window, cx);
-                }
-                cx.stop_propagation();
-            }
-            _ => {}
-        }
-    }
-
-    /// Renders `424px` wide, `8px` radius `K3x72` summary mode modal overlaid on `DZ0Fp` frosted scrim (`GyiV5`).
+    /// Renders `424px` wide `K3x72` summary selection modal (`GyiV5` -> `c1wymw`) or independent
+    /// `440px` custom prompt modal (`AtYcx` -> `l6fle`) overlaid on `DZ0Fp` frosted scrim.
     fn render_summary_mode_modal(
         &self,
         scrim_progress: f32,
@@ -1471,185 +1449,127 @@ impl BranchTreeView {
         scale_factor: f32,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
-        let t1 = target_id.to_owned();
-        let t2 = target_id.to_owned();
-        let t3 = target_id.to_owned();
+        let t_direct = target_id.to_owned();
+        let t_summary = target_id.to_owned();
+        let t_custom = target_id.to_owned();
+        let t_key = target_id.to_owned();
+        let t_custom_key = target_id.to_owned();
         let in_custom = self.custom_prompt_mode;
 
-        let summary_btn = {
-            let label = if in_custom { "直接总结" } else { "总结" };
-            apply_scale(div(), scale::UI)
-                .id("branch-mode-summary-btn")
-                .test_support()
-                .tab_index(0)
-                .a11y_button("branch-mode-summary-btn", label)
-                .w_full()
-                .h(height::FIELD)
-                .px(space::MD)
-                .rounded(radius::CONTROL)
-                .text_color(palette.text_primary)
-                .flex()
-                .items_center()
-                .gap(space::MD)
-                .hover(|s| s.bg(palette.bg_track_recess))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.execute_navigate(t2.clone(), true, None, window, cx);
-                }))
-                .child(
-                    Icon::new(IconName::Sparkles)
-                        .size(px(16.0))
-                        .text_color(palette.text_secondary),
-                )
-                .child(cjk_inline_label(label))
-        };
-
-        let mut card = render_frosted_surface(
-            "branch-summary-mode-card",
-            FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
-            palette.bg_modal,
-            transparency_enabled,
-            scale_factor,
-        )
-        .test_support()
-        .a11y_dialog("branch-summary-mode-card", "切换至所选分支节点")
-        .w(px(424.0))
-        .p(px(20.0))
-        .rounded(radius::ROW)
-        .border_1()
-        .border_color(palette.border_subtle)
-        .flex()
-        .flex_col()
-        .gap(space::MD)
-        .child(
-            div()
-                .relative()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(
-                    apply_scale(div(), scale::BODY_SEMIBOLD)
-                        .text_color(palette.text_primary)
-                        .child(cjk_inline_label("选择")),
-                )
-                .child(
-                    div()
-                        .id("branch-summary-cancel-btn")
-                        .test_support()
-                        .tab_index(0)
-                        .a11y_button("branch-summary-cancel-btn", "取消切换分支")
-                        .w(height::COMPACT)
-                        .h(height::COMPACT)
-                        .rounded(radius::CONTROL)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .hover(|s| s.bg(palette.bg_item_hover))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.dismiss_summary(window, cx);
-                        }))
-                        .child(
-                            Icon::new(IconName::X)
-                                .size(px(14.0))
-                                .text_color(palette.text_secondary),
-                        ),
-                ),
-        )
-        .child(
-            div()
-                .relative()
-                .w_full()
-                .flex()
-                .flex_col()
-                .gap(space::MICRO)
-                .child(
-                    apply_scale(div(), scale::UI)
-                        .id("branch-mode-no-summary-btn")
-                        .test_support()
-                        .tab_index(0)
-                        .a11y_button("branch-mode-no-summary-btn", "不总结")
-                        .w_full()
-                        .h(height::FIELD)
-                        .px(space::MD)
-                        .rounded(radius::CONTROL)
-                        .bg(palette.bg_track_recess)
-                        .text_color(palette.text_primary)
-                        .flex()
-                        .items_center()
-                        .gap(space::MD)
-                        .hover(|s| s.bg(palette.bg_item_active))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.execute_navigate(t1.clone(), false, None, window, cx);
-                        }))
-                        .child(
-                            Icon::new(IconName::CornerUpLeft)
-                                .size(px(16.0))
-                                .text_color(palette.text_secondary),
-                        )
-                        .child(cjk_inline_label("不总结")),
-                )
-                .child(summary_btn)
-                .child(
-                    apply_scale(div(), scale::UI)
-                        .id("branch-mode-custom-summary-btn")
-                        .test_support()
-                        .tab_index(0)
-                        .a11y_toggle_button(
-                            "branch-mode-custom-summary-btn",
-                            "用自定义提示词总结",
-                            in_custom,
-                        )
-                        .w_full()
-                        .h(height::FIELD)
-                        .px(space::MD)
-                        .rounded(radius::CONTROL)
-                        .bg(if in_custom {
-                            palette.bg_item_active
-                        } else {
-                            gpui_kit::transparent_black()
-                        })
-                        .text_color(palette.text_primary)
-                        .flex()
-                        .items_center()
-                        .gap(space::MD)
-                        .hover(|s| s.bg(palette.bg_track_recess))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.custom_prompt_mode = true;
-                            this.custom_prompt_input.update(cx, |inp, cx| {
-                                inp.focus(window, cx);
-                            });
-                            cx.notify();
-                        }))
-                        .child(
-                            Icon::new(IconName::PencilLine)
-                                .size(px(16.0))
-                                .text_color(palette.text_secondary),
-                        )
-                        .child(cjk_inline_label("用自定义提示词总结")),
-                ),
-        );
-
-        if in_custom {
-            card = card.child(
+        let modal_body = if in_custom {
+            // Independent custom-prompt dialog (`AtYcx` -> `l6fle`)
+            render_frosted_surface(
+                "branch-custom-prompt-card",
+                FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
+                palette.bg_modal,
+                transparency_enabled,
+                scale_factor,
+            )
+            .test_support()
+            .a11y_dialog("branch-custom-prompt-card", "自定义提示词总结")
+            .w(px(440.0))
+            .p(px(20.0))
+            .rounded(radius::ROW)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .flex()
+            .flex_col()
+            .gap(space::MD)
+            .child(
                 div()
                     .relative()
                     .flex()
                     .items_center()
-                    .gap(space::SM)
+                    .justify_between()
                     .child(
-                        div().flex_1().child(
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label("自定义提示词总结")),
+                    )
+                    .child(
+                        div()
+                            .id("branch-summary-cancel-btn")
+                            .test_support()
+                            .tab_index(0)
+                            .a11y_button("branch-summary-cancel-btn", "关闭自定义提示词窗口")
+                            .w(height::COMPACT)
+                            .h(height::COMPACT)
+                            .rounded(radius::CONTROL)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.dismiss_summary(window, cx);
+                            }))
+                            .child(
+                                Icon::new(IconName::X)
+                                    .size(px(14.0))
+                                    .text_color(palette.text_secondary),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .relative()
+                    .w_full()
+                    .h(px(96.0))
+                    .px(space::MD)
+                    .py(px(10.0))
+                    .rounded(radius::CONTROL)
+                    .border_1()
+                    .border_color(palette.border_strong)
+                    .bg(palette.bg_workspace)
+                    .flex()
+                    .items_start()
+                    .child(
+                        div().w_full().child(
                             Input::new(&self.custom_prompt_input)
                                 .accessibility_id("branch-tree-custom-prompt-input")
                                 .aria_label("分支总结附加提示词")
-                                .h(height::FIELD)
+                                .appearance(false)
+                                .bordered(false)
+                                .focus_bordered(false)
+                                .w_full()
                                 .cleanable(true),
                         ),
+                    ),
+            )
+            .child(
+                div()
+                    .relative()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(space::SM)
+                    .child(
+                        apply_scale(div(), scale::UI_MEDIUM)
+                            .id("branch-custom-prompt-cancel-btn")
+                            .test_support()
+                            .a11y_button("branch-custom-prompt-cancel-btn", "取消")
+                            .h(height::CONTROL)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(palette.border_strong)
+                            .bg(palette.bg_workspace)
+                            .text_color(palette.text_primary)
+                            .flex()
+                            .items_center()
+                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .tab_index(0)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.dismiss_summary(window, cx);
+                            }))
+                            .child(cjk_inline_label("取消")),
                     )
                     .child(
                         apply_scale(div(), scale::UI_MEDIUM)
                             .id("branch-custom-summary-submit-btn")
                             .test_support()
                             .a11y_button("branch-custom-summary-submit-btn", "执行总结")
-                            .h(height::FIELD)
+                            .h(height::CONTROL)
                             .px(space::LG)
                             .rounded(radius::CONTROL)
                             .bg(palette.accent_solid)
@@ -1662,7 +1582,7 @@ impl BranchTreeView {
                                 let value = this.custom_prompt_input.read(cx).value();
                                 let prompt = value.trim();
                                 this.execute_navigate(
-                                    t3.clone(),
+                                    t_custom.clone(),
                                     true,
                                     (!prompt.is_empty()).then(|| prompt.to_owned()),
                                     window,
@@ -1671,8 +1591,166 @@ impl BranchTreeView {
                             }))
                             .child(cjk_inline_label("执行总结")),
                     ),
-            );
-        }
+            )
+            .into_any_element()
+        } else {
+            let sel = self.summary_selected_idx.min(2);
+            render_frosted_surface(
+                "branch-summary-mode-card",
+                FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
+                palette.bg_modal,
+                transparency_enabled,
+                scale_factor,
+            )
+            .test_support()
+            .a11y_dialog("branch-summary-mode-card", "切换至所选分支节点")
+            .w(px(424.0))
+            .p(px(20.0))
+            .rounded(radius::ROW)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .flex()
+            .flex_col()
+            .gap(space::MD)
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        apply_scale(div(), scale::BODY_SEMIBOLD)
+                            .pl(space::MD)
+                            .text_color(palette.text_primary)
+                            .child(cjk_inline_label("选择")),
+                    )
+                    .child(
+                        div()
+                            .id("branch-summary-cancel-btn")
+                            .test_support()
+                            .tab_index(0)
+                            .a11y_button("branch-summary-cancel-btn", "关闭选择弹窗")
+                            .w(height::COMPACT)
+                            .h(height::COMPACT)
+                            .rounded(radius::CONTROL)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.dismiss_summary(window, cx);
+                            }))
+                            .child(
+                                Icon::new(IconName::X)
+                                    .size(px(14.0))
+                                    .text_color(palette.text_secondary),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .relative()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(space::MICRO)
+                    .child(
+                        apply_scale(div(), scale::UI)
+                            .id("branch-mode-direct-btn")
+                            .test_support()
+                            .tab_index(0)
+                            .a11y_button("branch-mode-direct-btn", "直接回退")
+                            .w_full()
+                            .h(height::FIELD)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .bg(if sel == 0 {
+                                palette.bg_item_active
+                            } else {
+                                gpui_kit::transparent_black()
+                            })
+                            .text_color(palette.text_primary)
+                            .flex()
+                            .items_center()
+                            .gap(space::MD)
+                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.execute_navigate(t_direct.clone(), false, None, window, cx);
+                            }))
+                            .child(
+                                Icon::new(IconName::RotateCcw)
+                                    .size(px(16.0))
+                                    .text_color(palette.text_secondary),
+                            )
+                            .child(cjk_inline_label("直接回退")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI)
+                            .id("branch-mode-summary-btn")
+                            .test_support()
+                            .tab_index(0)
+                            .a11y_button("branch-mode-summary-btn", "总结")
+                            .w_full()
+                            .h(height::FIELD)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .bg(if sel == 1 {
+                                palette.bg_item_active
+                            } else {
+                                gpui_kit::transparent_black()
+                            })
+                            .text_color(palette.text_primary)
+                            .flex()
+                            .items_center()
+                            .gap(space::MD)
+                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.execute_navigate(t_summary.clone(), true, None, window, cx);
+                            }))
+                            .child(
+                                Icon::new(IconName::Sparkles)
+                                    .size(px(16.0))
+                                    .text_color(palette.text_secondary),
+                            )
+                            .child(cjk_inline_label("总结")),
+                    )
+                    .child(
+                        apply_scale(div(), scale::UI)
+                            .id("branch-mode-custom-summary-btn")
+                            .test_support()
+                            .tab_index(0)
+                            .a11y_button("branch-mode-custom-summary-btn", "自定义提示词总结")
+                            .w_full()
+                            .h(height::FIELD)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .bg(if sel == 2 {
+                                palette.bg_item_active
+                            } else {
+                                gpui_kit::transparent_black()
+                            })
+                            .text_color(palette.text_primary)
+                            .flex()
+                            .items_center()
+                            .gap(space::MD)
+                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.custom_prompt_mode = true;
+                                this.custom_prompt_input.update(cx, |inp, cx| {
+                                    inp.focus(window, cx);
+                                });
+                                cx.notify();
+                            }))
+                            .child(
+                                Icon::new(IconName::PencilLine)
+                                    .size(px(16.0))
+                                    .text_color(palette.text_secondary),
+                            )
+                            .child(cjk_inline_label("自定义提示词总结")),
+                    ),
+            )
+            .into_any_element()
+        };
 
         render_frosted_surface(
             "branch-summary-scrim-dz0fp",
@@ -1697,9 +1775,76 @@ impl BranchTreeView {
             div()
                 .tab_stop(false)
                 .focus_trap("branch-summary-focus-trap", &self.modal_trap_focus)
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                    if this.custom_prompt_mode {
+                        if event.keystroke.key == "enter"
+                            && !event.is_held
+                            && !super::input_is_composing(&this.custom_prompt_input, window, cx)
+                            && (event.keystroke.modifiers == gpui::Modifiers::default()
+                                || event.keystroke.modifiers.control)
+                        {
+                            let value = this.custom_prompt_input.read(cx).value();
+                            let prompt = value.trim();
+                            this.execute_navigate(
+                                t_custom_key.clone(),
+                                true,
+                                (!prompt.is_empty()).then(|| prompt.to_owned()),
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }
+                        return;
+                    }
+                    if event.keystroke.modifiers != gpui::Modifiers::default() {
+                        return;
+                    }
+                    match event.keystroke.key.as_str() {
+                        "up" => {
+                            this.summary_selected_idx =
+                                this.summary_selected_idx.checked_sub(1).unwrap_or(2);
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
+                        "down" => {
+                            this.summary_selected_idx = (this.summary_selected_idx + 1) % 3;
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
+                        "home" => {
+                            this.summary_selected_idx = 0;
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
+                        "end" => {
+                            this.summary_selected_idx = 2;
+                            cx.notify();
+                            cx.stop_propagation();
+                        }
+                        "enter" | "space" if !event.is_held => {
+                            match this.summary_selected_idx {
+                                0 => this.execute_navigate(t_key.clone(), false, None, window, cx),
+                                1 => this.execute_navigate(t_key.clone(), true, None, window, cx),
+                                _ => {
+                                    this.custom_prompt_mode = true;
+                                    this.custom_prompt_input.update(cx, |inp, cx| {
+                                        inp.focus(window, cx);
+                                    });
+                                    cx.notify();
+                                }
+                            }
+                            cx.stop_propagation();
+                        }
+                        _ => {}
+                    }
+                }))
                 .child(motion::animate_modal_enter(
-                    "branch-summary-modal-anim",
-                    card,
+                    if in_custom {
+                        "branch-custom-prompt-modal-anim"
+                    } else {
+                        "branch-summary-modal-anim"
+                    },
+                    div().child(modal_body),
                     palette.craft_stack_shadows(),
                 )),
         )
@@ -1711,7 +1856,6 @@ impl Render for BranchTreeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme_global = DesktopThemeGlobal::current(cx);
         let palette = theme_global.palette;
-        let mono_family = theme_global.mono_font_family;
         let transparency_enabled = theme_global.transparency_enabled;
         let scale_factor = window.scale_factor();
 
@@ -1841,6 +1985,7 @@ impl Render for BranchTreeView {
             .justify_between()
             .gap(space::SM)
             .hover(|s| s.bg(palette.bg_item_hover))
+            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(|this, _, _, cx| {
                 this.filter_dropdown_open = !this.filter_dropdown_open;
                 cx.notify();
@@ -1874,19 +2019,75 @@ impl Render for BranchTreeView {
                     .flex()
                     .items_center()
                     .gap(space::MD)
-                    .child(
-                        div().w(px(240.0)).child(
-                            Input::new(&self.search_input)
-                                .accessibility_id("branch-tree-search-input")
-                                .aria_label("搜索条目")
-                                .prefix(
-                                    Icon::new(IconName::Search)
-                                        .size(px(14.0))
-                                        .text_color(palette.text_muted),
-                                )
-                                .cleanable(true),
-                        ),
-                    )
+                    .child({
+                        let search_focused = self
+                            .search_input
+                            .read(cx)
+                            .focus_handle(cx)
+                            .is_focused(window);
+                        let search_focus_ent = self.search_input.clone();
+                        let has_q = !self.search_input.read(cx).value().is_empty();
+                        div()
+                            .id("branch-tree-search-box")
+                            .w(px(240.0))
+                            .h(height::CONTROL)
+                            .px(space::MD)
+                            .rounded(radius::CONTROL)
+                            .border_1()
+                            .border_color(if search_focused {
+                                palette.border_focus
+                            } else {
+                                palette.border_strong
+                            })
+                            .bg(palette.bg_workspace)
+                            .flex()
+                            .items_center()
+                            .gap(space::SM)
+                            .on_click(move |_, w, cx| {
+                                search_focus_ent.focus_handle(cx).focus(w, cx);
+                            })
+                            .child(
+                                Icon::new(IconName::Search)
+                                    .size(px(14.0))
+                                    .text_color(palette.text_muted),
+                            )
+                            .child(
+                                div().flex_1().min_w_0().child(
+                                    Input::new(&self.search_input)
+                                        .accessibility_id("branch-tree-search-input")
+                                        .aria_label("搜索条目")
+                                        .appearance(false)
+                                        .bordered(false)
+                                        .focus_bordered(false)
+                                        .p_0(),
+                                ),
+                            )
+                            .children(has_q.then(|| {
+                                div()
+                                    .id("branch-tree-search-clear-btn")
+                                    .w(px(20.0))
+                                    .h(px(20.0))
+                                    .rounded(radius::CONTROL)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .flex_shrink_0()
+                                    .hover(|s| s.bg(palette.bg_item_hover))
+                                    .on_click(cx.listener(|this, _, w, cx| {
+                                        this.search_input.update(cx, |i, cx| {
+                                            i.set_value("", w, cx);
+                                            i.focus(w, cx);
+                                        });
+                                        cx.notify();
+                                        cx.stop_propagation();
+                                    }))
+                                    .child(
+                                        Icon::new(IconName::X)
+                                            .size(px(13.0))
+                                            .text_color(palette.text_muted),
+                                    )
+                            }))
+                    })
                     .child(filter_trigger),
             )
             .child(
@@ -1938,7 +2139,6 @@ impl Render for BranchTreeView {
                     )
                     .child(
                         apply_scale(div(), scale::CAPTION)
-                            .font_family(mono_family)
                             .text_color(palette.text_secondary)
                             .child(cjk_inline_label(counter_text)),
                     ),
@@ -1964,6 +2164,27 @@ impl Render for BranchTreeView {
                 ),
             );
         } else {
+            let reduce_motion = cx.reduce_motion();
+            let enter_elapsed = if reduce_motion {
+                self.enter_anim_start = None;
+                None
+            } else if let Some(started) = self.enter_anim_start {
+                let elapsed = cx
+                    .background_executor()
+                    .now()
+                    .saturating_duration_since(started);
+                let animated_count = rows.len().min(16);
+                let total_ms = ((animated_count.saturating_sub(1) as u64) * 24).min(280) + 220;
+                if elapsed >= Duration::from_millis(total_ms) {
+                    self.enter_anim_start = None;
+                    None
+                } else {
+                    window.request_animation_frame();
+                    Some(elapsed)
+                }
+            } else {
+                None
+            };
             for (idx, row) in rows.iter().enumerate() {
                 let nid = row.node.id.clone();
                 let is_active_leaf = Some(nid.as_str()) == leaf_id.as_deref();
@@ -2224,12 +2445,29 @@ impl Render for BranchTreeView {
                     );
                 }
 
+                let (row_opacity, row_slide_y) = if let Some(elapsed) = enter_elapsed {
+                    if idx < 16 {
+                        let delay_ms = ((idx as u64) * 24).min(280);
+                        let elapsed_ms = elapsed.as_secs_f32() * 1000.0;
+                        let local = ((elapsed_ms - delay_ms as f32) / 220.0).clamp(0.0, 1.0);
+                        let eased = motion::ease_out()(local);
+                        (0.01 + 0.99 * eased, 14.0 * (1.0 - eased))
+                    } else {
+                        (1.0, 0.0)
+                    }
+                } else {
+                    (1.0, 0.0)
+                };
+
                 tree_col = tree_col.child(
                     div()
                         .id(row_id.clone())
                         .test_support()
                         .a11y_treeitem(row_id, row_label, is_active_leaf)
                         .group(row_group)
+                        .relative()
+                        .top(px(row_slide_y))
+                        .opacity(row_opacity)
                         .w_full()
                         .h(height::FIELD)
                         .px(space::GROUP)
@@ -2260,28 +2498,24 @@ impl Render for BranchTreeView {
             }
         }
 
-        // Filter dropdown popover (`yzhcw`: `164px` `H2p2z` frosted glass positioned below filter trigger)
+        // Flat filter dropdown popover positioned below filter trigger
         let filter_popover = self.filter_dropdown_open.then(|| {
-            let mut menu = render_frosted_surface(
-                "tree-filter-dropdown-menu",
-                FrostedGlassSpec::popover(&palette),
-                palette.bg_elevated,
-                transparency_enabled,
-                scale_factor,
-            )
-            .test_support()
-            .role(gpui::Role::Menu)
-            .accessibility_id("tree-filter-dropdown-menu")
-            .aria_label("视图过滤选项")
-            .w(px(164.0))
-            .p(space::TIGHT)
-            .rounded(radius::ROW)
-            .border_1()
-            .border_color(palette.border_hairline)
-            .flex()
-            .flex_col()
-            .gap(space::MICRO)
-            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation());
+            let mut menu = div()
+                .id("tree-filter-dropdown-menu")
+                .test_support()
+                .role(gpui::Role::Menu)
+                .accessibility_id("tree-filter-dropdown-menu")
+                .aria_label("视图过滤选项")
+                .w(px(164.0))
+                .p(space::TIGHT)
+                .rounded(radius::ROW)
+                .bg(palette.bg_elevated)
+                .border_1()
+                .border_color(palette.border_subtle)
+                .flex()
+                .flex_col()
+                .gap(space::MICRO)
+                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation());
 
             for mode in TreeFilterMode::ALL_MODES {
                 let active = self.filter_mode == mode;
@@ -2338,7 +2572,7 @@ impl Render for BranchTreeView {
                     motion::animate_popover_enter(
                         "tree-filter-dropdown-anim",
                         menu,
-                        palette.craft_stack_shadows(),
+                        palette.flat_popover_shadows(),
                         -6.0,
                     ),
                 ))
@@ -2371,7 +2605,6 @@ impl Render for BranchTreeView {
                 super::consume_composing_escape(&this.search_input, window, cx);
                 super::consume_composing_escape(&this.custom_prompt_input, window, cx);
             }))
-            .on_key_down(cx.listener(Self::on_key_down))
             .relative()
             .size_full()
             .flex()
@@ -2386,27 +2619,8 @@ impl Render for BranchTreeView {
                     .w_full()
                     .overflow_y_scroll()
                     .py(space::SM)
-                    .pb(px(52.0))
+                    .pb(space::LG)
                     .child(tree_col),
-            )
-            .child(
-                div().absolute().left(space::GROUP).bottom(space::LG).child(
-                    apply_scale(div(), scale::CAPTION)
-                        .id("branch-tree-kbd-hint-na2qi")
-                        .test_support()
-                        .h(height::COMPACT)
-                        .px(space::MD)
-                        .rounded(radius::CONTROL)
-                        .border_1()
-                        .border_color(palette.border_subtle)
-                        .bg(palette.bg_surface)
-                        .text_color(palette.text_secondary)
-                        .flex()
-                        .items_center()
-                        .child(cjk_inline_label(
-                            "Ctrl+O 切换过滤 · ↑↓ 跳转条目 · Enter 选择节点",
-                        )),
-                ),
             )
             .children(filter_popover)
             .children(summary_modal_opt)

@@ -366,7 +366,6 @@ pub fn render_bitlocker_card<V: 'static>(
 
         let countdown_el = countdown_display.map(|(txt, col)| {
             apply_scale(div(), scale::CAPTION)
-                .font_family(mono_family.clone())
                 .text_color(col)
                 .flex_shrink_0()
                 .child(SharedString::from(txt))
@@ -827,7 +826,6 @@ fn render_volume_rows(
         if let Some(pct) = vol.percentage {
             metrics_row = metrics_row.child(
                 apply_scale(div(), scale::CAPTION)
-                    .font_family(mono_family.clone())
                     .text_color(palette.text_secondary)
                     .child(SharedString::from(format!("加密比例 {pct:.0}%"))),
             );
