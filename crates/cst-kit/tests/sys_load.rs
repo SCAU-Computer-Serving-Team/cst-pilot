@@ -247,6 +247,53 @@ fn gpu_retries_engine_once_but_does_not_repeat_nvidia_or_discard_lhm_errors() {
     assert_eq!(value["collectionErrors"].as_array().unwrap().len(), 2);
 }
 #[test]
+fn gpu_partial_engine_samples_do_not_retry_or_lose_memory() {
+    let hardware = Hardware {
+        batches: Mutex::new(VecDeque::from([Ok(CounterBatch {
+            samples: vec![
+                sample("engine", "pid_1_luid_a_phys_0_eng_0_engtype_3D", 10.0),
+                sample("memory", "pid_1_luid_a_phys_0", 3.0 * 1048576.0),
+            ],
+            errors: vec![err("engine")],
+        })])),
+        nvidia: Ok(Some(json!([{"uuid":"a"}]))),
+        ..Hardware::default()
+    };
+    let result = sys_load::gpu(&Source::default(), &hardware, 10, &ctl()).unwrap();
+    assert_eq!(hardware.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(result["byGpuPct"][0]["gpuPct"], 10.0);
+    assert_eq!(result["byDedicatedMB"][0]["dedicatedMB"], 3.0);
+    assert!(result["counterErrors"]["engine"].is_string());
+}
+
+#[test]
+fn gpu_successful_engine_retry_keeps_first_memory_samples() {
+    let hardware = Hardware {
+        batches: Mutex::new(VecDeque::from([
+            Ok(CounterBatch {
+                samples: vec![sample("memory", "pid_1_luid_a_phys_0", 3.0 * 1048576.0)],
+                errors: vec![err("engine")],
+            }),
+            Ok(CounterBatch {
+                samples: vec![sample(
+                    "engine",
+                    "pid_1_luid_a_phys_0_eng_0_engtype_3D",
+                    15.0,
+                )],
+                errors: vec![err("memory")],
+            }),
+        ])),
+        nvidia: Ok(Some(json!([{"uuid":"a"}]))),
+        ..Hardware::default()
+    };
+    let result = sys_load::gpu(&Source::default(), &hardware, 10, &ctl()).unwrap();
+    assert_eq!(hardware.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(result["byGpuPct"][0]["gpuPct"], 15.0);
+    assert_eq!(result["byDedicatedMB"][0]["dedicatedMB"], 3.0);
+    assert!(result["counterErrors"]["memory"].is_null());
+}
+
+#[test]
 fn gpu_memory_error_does_not_retry_and_nvidia_success_skips_lhm() {
     let hardware = Hardware {
         batches: Mutex::new(VecDeque::from([Ok(CounterBatch {

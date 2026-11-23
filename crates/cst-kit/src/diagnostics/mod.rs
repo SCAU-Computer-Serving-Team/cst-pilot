@@ -119,7 +119,7 @@ where
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
             worker.check()?;
-            let value = run(source.as_ref(), input, &worker)?;
+            let value = win_native::with_wmi_scope(|| run(source.as_ref(), input, &worker))?;
             worker.check()?;
             Ok(value)
         })

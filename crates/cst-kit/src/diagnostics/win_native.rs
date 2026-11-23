@@ -7,6 +7,13 @@ use tokio_util::sync::CancellationToken;
 mod windows;
 #[cfg(windows)]
 pub use windows::WindowsSource;
+
+pub(super) fn with_wmi_scope<T>(run: impl FnOnce() -> T) -> T {
+    #[cfg(windows)]
+    return windows::with_wmi_scope(run);
+    #[cfg(not(windows))]
+    run()
+}
 #[cfg(not(windows))]
 pub struct WindowsSource;
 
@@ -123,6 +130,9 @@ pub struct EventRead {
     pub truncated: bool,
 }
 pub type EventVisitor<'a> = dyn FnMut(EventRecord) -> Result<(), String> + 'a;
+/// The native formatter and its handles remain on the diagnostic worker thread.
+pub type EventMessage = Box<dyn FnOnce() -> Option<String>>;
+pub type LazyEventVisitor<'a> = dyn FnMut(EventRecord, EventMessage) -> Result<(), String> + 'a;
 
 /// The only platform seam. Collectors own projection/filtering; sources own read-only OS calls.
 pub trait DiagnosticSource: Send + Sync {
@@ -142,6 +152,21 @@ pub trait DiagnosticSource: Send + Sync {
         visitor: &mut EventVisitor<'_>,
         control: &Control,
     ) -> Result<EventRead, NativeError>;
+    fn events_lazy(
+        &self,
+        query: &EventQuery,
+        visitor: &mut LazyEventVisitor<'_>,
+        control: &Control,
+    ) -> Result<EventRead, NativeError> {
+        self.events(
+            query,
+            &mut |mut event| {
+                let message = event.message.take();
+                visitor(event, Box::new(move || message))
+            },
+            control,
+        )
+    }
 }
 
 #[cfg(not(windows))]

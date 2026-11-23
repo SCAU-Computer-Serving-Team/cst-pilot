@@ -87,6 +87,8 @@ pub fn search(
     let context = input.context.unwrap_or(0).min(20);
     let (root, include) = search_root(cwd, input.path.as_deref())?;
     let root = guard.check(root)?;
+    let canonical_cwd = cwd.canonicalize().ok();
+    let relative_root = canonical_cwd.as_deref().unwrap_or(cwd);
     let excludes = globs(input.exclude.as_deref().unwrap_or(&[]))?;
     let sensitive = input
         .case_sensitive
@@ -115,7 +117,9 @@ pub fn search(
         .require_git(false)
         .sort_by_file_path(|a, b| a.cmp(b));
     walker.filter_entry(move |entry| {
-        entry.file_name() != ".git" && filter_guard.check(entry.path()).is_ok()
+        entry.file_name() != ".git"
+            && (!entry.file_type().is_some_and(|kind| kind.is_dir())
+                || filter_guard.check(entry.path()).is_ok())
     });
     let mut matches = Vec::new();
     let mut output_bytes = 512;
@@ -143,12 +147,8 @@ pub fn search(
             continue;
         }
         let path = entry.path();
-        let display = path
-            .strip_prefix(cwd)
-            .unwrap_or(path)
-            .to_string_lossy()
-            .replace('\\', "/");
-        let include_path = path.strip_prefix(cwd).unwrap_or(path);
+        let include_path = path.strip_prefix(relative_root).unwrap_or(path);
+        let display = include_path.to_string_lossy().replace('\\', "/");
         if include
             .as_ref()
             .is_some_and(|filter| !filter.is_match(include_path))
@@ -228,6 +228,7 @@ pub fn search(
                 }
             }
         } else if fuzzy_match(&input.pattern, &display, sensitive)
+            && guard.check(path).is_ok()
             && !push_bounded(
                 &mut matches,
                 &mut output_bytes,
@@ -357,4 +358,52 @@ fn read_line(
         }
     }
     Ok((total, total > MAX_LINE_BYTES))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::path_guard::CHECKS;
+
+    #[cfg(windows)]
+    #[test]
+    fn fff_matches_relative_globs_with_unextended_windows_cwd() {
+        let temp = std::env::temp_dir().join(format!("cst-fff-cwd-{}", uuid::Uuid::new_v4()));
+        let cwd = PathBuf::from(crate::diagnostics::wz_index::display_path(&temp));
+        std::fs::create_dir_all(cwd.join("src")).unwrap();
+        std::fs::write(cwd.join("src/log.txt"), b"needle").unwrap();
+        let guard = PathGuard::new(&cwd).unwrap();
+        for content in [false, true] {
+            let input = serde_json::from_value(json!({
+                "pattern": if content {"needle"} else {"log"}, "path":"src/*.txt"
+            }))
+            .unwrap();
+            let value = search(&guard, &cwd, input, content, &CancellationToken::new()).unwrap();
+            assert_eq!(value["matches"][0]["path"], "src/log.txt");
+        }
+        std::fs::remove_dir_all(cwd).unwrap();
+    }
+
+    #[test]
+    fn fff_leaves_non_candidates_out_of_path_guard_work() {
+        let temp = std::env::temp_dir().join(format!("cst-fff-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&temp).unwrap();
+        let cwd = temp.canonicalize().unwrap();
+        let guard = PathGuard::new(&cwd).unwrap();
+        for i in 0..32 {
+            std::fs::write(cwd.join(format!("noise-{i}.txt")), b"needle").unwrap();
+        }
+        std::fs::write(cwd.join("needle.txt"), b"needle").unwrap();
+        for (content, max_checks) in [(false, 3), (true, 4)] {
+            CHECKS.set(0);
+            let input = serde_json::from_value(json!({
+                "pattern":"needle", "path":"needle.*"
+            }))
+            .unwrap();
+            let value = search(&guard, &cwd, input, content, &CancellationToken::new()).unwrap();
+            assert_eq!(value["matches"].as_array().unwrap().len(), 1);
+            assert!(CHECKS.get() <= max_checks);
+        }
+        std::fs::remove_dir_all(temp).unwrap();
+    }
 }

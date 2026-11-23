@@ -340,7 +340,7 @@ fn ls_preserves_omitted_counts_and_never_publishes_walk() {
 }
 #[cfg(windows)]
 #[test]
-fn ls_uses_complete_shared_index_and_large_file_fallback() {
+fn ls_live_empty_file_overrides_stale_cached_bytes() {
     let fixture = Fixture::new();
     fs::create_dir(fixture.0.join("dir")).unwrap();
     fs::write(fixture.0.join("pagefile.sys"), []).unwrap();
@@ -368,8 +368,23 @@ fn ls_uses_complete_shared_index_and_large_file_fallback() {
     )
     .unwrap();
     assert_eq!(value["method"], "wiztree-index");
-    assert_eq!(value["entries"][0]["bytes"], 2 * 1024 * 1024);
+    assert_eq!(value["entries"][1]["name"], "pagefile.sys");
+    assert_eq!(value["entries"][1]["bytes"], 0);
     assert_eq!(source.calls.load(Ordering::SeqCst), 1);
+
+    fs::create_dir(fixture.0.join("new")).unwrap();
+    fs::write(fixture.0.join("new/child.txt"), b"hello").unwrap();
+    let mixed = ls::run(
+        &index,
+        &fixture.0,
+        20,
+        &control(),
+        walk::WalkLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(mixed["method"], "walk");
+    assert_eq!(mixed["entries"][1]["name"], "new");
+    assert_eq!(mixed["entries"][1]["bytes"], 5);
 }
 #[test]
 fn unc_never_builds_a_volume_index() {

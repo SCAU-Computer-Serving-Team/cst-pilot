@@ -1,4 +1,6 @@
-use super::win_native::{Control, DiagnosticSource, EventQuery, EventRecord, add_errors};
+use super::win_native::{
+    Control, DiagnosticSource, EventMessage, EventQuery, EventRecord, add_errors,
+};
 use regex::RegexBuilder;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -37,6 +39,8 @@ pub struct EventInput {
     pub record_id: Option<u64>,
     pub id: Option<u16>,
 }
+// Reserve expressions for the time window and optional level filter in EvtQuery.
+const MAX_QUERY_IDS: usize = 16;
 const BOOT: &[u16] = &[12, 13, 6005, 6006, 6009, 41, 6008, 1001, 1074, 19, 7045];
 const SERVICE: &[u16] = &[
     7000, 7001, 7002, 7003, 7009, 7011, 7013, 7022, 7023, 7024, 7025, 7026, 7031, 7032, 7034, 7038,
@@ -62,6 +66,9 @@ pub fn run(
     {
         return Err("level 只接受 warn 或 error。".into());
     }
+    if matches!(input.scope, EventScope::Detail) {
+        return detail(source, &input, control);
+    }
     let mut errors = Vec::new();
     let admin = match source.admin() {
         Ok(v) => Some(v),
@@ -70,9 +77,6 @@ pub fn run(
             None
         }
     };
-    if matches!(input.scope, EventScope::Detail) {
-        return detail(source, &input, control);
-    }
     let (scope,logs,extra,filter)=match input.scope {
         EventScope::Recent=>("recent",vec!["System".into(),"Application".into()],level(input.level.as_deref().unwrap_or("warn")),None),
         EventScope::Boot=>{
@@ -90,7 +94,12 @@ pub fn run(
         EventScope::Query=>{
             let mut clauses = Vec::new();
             if let Some(tier) = &input.level { clauses.push(level(tier)); }
-            if let Some(values) = &input.ids && !values.is_empty() { clauses.push(ids(values)); }
+            if let Some(values) = &input.ids && !values.is_empty() {
+                if values.len() > MAX_QUERY_IDS {
+                    return Err(format!("query.ids 最多接受 {MAX_QUERY_IDS} 个事件 ID。"));
+                }
+                clauses.push(ids(values));
+            }
             ("query",vec![input.log_name.clone().unwrap_or_else(||"System".into())],clauses.join(" and "),input.msg.as_deref())
         }
         EventScope::Detail=>unreachable!(),
@@ -114,12 +123,17 @@ pub fn run(
         None
     };
     if scope == "security" && admin != Some(true) {
-        let mut value = json!({"logs":logs,"hours":hours,"top":top,"total":0,"truncated":false,"events":[],"counts":[],"countsTruncated":false,"unreadable":0,"firstTime":null,"lastTime":null,"admin":admin,"degraded":true,"notice":"无法读取 Security 通道：需要管理员权限；当前结果不表示没有登录事件。"});
+        let notice = if admin.is_none() {
+            "无法确认管理员权限，未读取 Security 通道；当前结果不表示没有登录事件。"
+        } else {
+            "无法读取 Security 通道：需要管理员权限；当前结果不表示没有登录事件。"
+        };
+        let mut value = json!({"logs":logs,"hours":hours,"top":top,"total":0,"truncated":false,"events":[],"counts":[],"countsTruncated":false,"unreadable":0,"firstTime":null,"lastTime":null,"admin":admin,"degraded":true,"notice":notice});
         add_errors(&mut value, errors);
         return Ok(json!({scope:value}));
     }
     let mut seen = HashSet::new();
-    let mut events: Vec<EventRecord> = Vec::new();
+    let mut events: Vec<(EventRecord, Option<EventMessage>)> = Vec::new();
     let mut counts: HashMap<(String, u16), (usize, String)> = HashMap::new();
     let mut total = 0;
     let mut unreadable = 0;
@@ -142,7 +156,7 @@ pub fn run(
                 format!(" and ({extra})")
             }
         );
-        let mut visitor = |event: EventRecord| -> Result<(), String> {
+        let mut visitor = |mut event: EventRecord, message: EventMessage| -> Result<(), String> {
             control.check()?;
             if !seen.insert((event.log.clone(), event.record_id)) {
                 return Ok(());
@@ -150,15 +164,22 @@ pub fn run(
             if provider
                 .as_ref()
                 .is_some_and(|re| !re.is_match(&event.provider))
-                || filter.as_ref().is_some_and(|text| {
-                    !event
-                        .message
-                        .as_ref()
-                        .is_some_and(|s| s.to_lowercase().contains(text))
-                })
             {
                 return Ok(());
             }
+            let message = if let Some(text) = &filter {
+                event.message = message();
+                match &event.message {
+                    None => {
+                        unreadable += 1;
+                        return Ok(());
+                    }
+                    Some(msg) if !msg.to_lowercase().contains(text) => return Ok(()),
+                    Some(_) => None,
+                }
+            } else {
+                Some(message)
+            };
             total += 1;
             if first.as_ref().is_none_or(|t| event.time < *t) {
                 first = Some(event.time.clone());
@@ -176,16 +197,18 @@ pub fn run(
             } else {
                 counts_truncated = true;
             }
-            events.push(event);
-            events.sort_by(|a, b| {
-                b.time
-                    .cmp(&a.time)
-                    .then_with(|| b.record_id.cmp(&a.record_id))
+            let position = events.partition_point(|(current, _)| {
+                (&current.time, current.record_id) >= (&event.time, event.record_id)
             });
-            events.truncate(top);
+            if position < top {
+                if events.len() == top {
+                    events.pop();
+                }
+                events.insert(position, (event, message));
+            }
             Ok(())
         };
-        match source.events(
+        match source.events_lazy(
             &EventQuery {
                 log: log.clone(),
                 xpath,
@@ -201,6 +224,15 @@ pub fn run(
             Err(error) => errors.push(error),
         }
     }
+    let mut rows = Vec::with_capacity(events.len());
+    for (mut event, message) in events {
+        control.check()?;
+        if let Some(message) = message {
+            event.message = message();
+            unreadable += usize::from(event.message.is_none());
+        }
+        rows.push(record(&event, 200));
+    }
     let mut count_rows:Vec<_>=counts.into_iter().map(|((provider,id),(n,last))|json!({"key":format!("{provider}/{id}"),"provider":provider,"id":id,"n":n,"last":last})).collect();
     count_rows.sort_by(|a, b| {
         b["n"]
@@ -208,7 +240,7 @@ pub fn run(
             .cmp(&a["n"].as_u64())
             .then_with(|| a["key"].as_str().cmp(&b["key"].as_str()))
     });
-    let mut value = json!({"logs":logs,"hours":hours,"top":top,"total":total,"truncated":total>top||scan_truncated,"events":events.iter().map(|e|record(e,200)).collect::<Vec<_>>(),"counts":count_rows,"countsTruncated":counts_truncated,"unreadable":unreadable,"firstTime":first,"lastTime":last,"admin":admin,"notice":"Windows Event Log 原生只读查询；列表消息最多 200 字符，counts 最多 100 组。unreadable 表示消息或记录无法读取，空结果需结合权限与采集错误判读。"});
+    let mut value = json!({"logs":logs,"hours":hours,"top":top,"total":total,"truncated":total>top||scan_truncated,"events":rows,"counts":count_rows,"countsTruncated":counts_truncated,"unreadable":unreadable,"firstTime":first,"lastTime":last,"admin":admin,"notice":"Windows Event Log 原生只读查询；列表消息最多 200 字符，counts 最多 100 组。unreadable 表示消息或记录无法读取，空结果需结合权限与采集错误判读。"});
     if total == 0 && errors.is_empty() && unreadable == 0 && !scan_truncated {
         value["noMatch"] = json!(true);
     }

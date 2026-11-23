@@ -5,6 +5,11 @@ use std::path::{Path, PathBuf};
 use cst_os::KitLayout;
 use pi_runtime::ReadOperations;
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 #[derive(Clone)]
 pub struct PathGuard {
     layout: KitLayout,
@@ -33,6 +38,8 @@ impl PathGuard {
 
     /// Resolve aliases before comparing; re-evaluate protected aliases on every access.
     pub fn check(&self, path: impl AsRef<Path>) -> Result<PathBuf, String> {
+        #[cfg(test)]
+        CHECKS.update(|count| count + 1);
         let path = path.as_ref();
         reject_alternate_stream(path)?;
         let resolved = path.canonicalize().map_err(|_| "目标路径无法读取。")?;

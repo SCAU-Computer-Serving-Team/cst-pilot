@@ -142,7 +142,11 @@ fn values(counter: PDH_HCOUNTER, key: &str) -> Result<(Vec<CounterSample>, usize
     }
     Err("PDH 实例持续变化，无法读取完整快照。".into())
 }
-pub fn sample(set: CounterSet, control: &Control) -> Result<CounterBatch, String> {
+pub fn sample(
+    set: CounterSet,
+    engine_only: bool,
+    control: &Control,
+) -> Result<CounterBatch, String> {
     control.check()?;
     let specs: &[(&str, &str)] = match set {
         CounterSet::Gpu => &[
@@ -162,6 +166,9 @@ pub fn sample(set: CounterSet, control: &Control) -> Result<CounterBatch, String
     let mut batch = CounterBatch::default();
     let mut handles = Vec::new();
     for (key, path) in specs {
+        if engine_only && *key != "engine" {
+            continue;
+        }
         control.check()?;
         let add = || {
             let localized = localize(path)?;

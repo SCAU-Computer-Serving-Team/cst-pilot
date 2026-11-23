@@ -162,7 +162,7 @@ pub fn run(
     };
     control.check()?;
     let sources = match scope {
-        "core" => 6,
+        "core" => 5,
         "external" => 2,
         _ => 1,
     };

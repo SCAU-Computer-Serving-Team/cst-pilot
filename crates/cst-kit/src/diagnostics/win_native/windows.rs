@@ -1,10 +1,10 @@
 use super::{
-    Control, DiagnosticSource, EventQuery, EventRead, EventVisitor, NativeError, ProcessSample,
-    SpaceSample, SpaceSnapshot, StartupSnapshot,
+    Control, DiagnosticSource, EventQuery, EventRead, EventVisitor, LazyEventVisitor, NativeError,
+    ProcessSample, SpaceSample, SpaceSnapshot, StartupSnapshot,
 };
 use futures_util::StreamExt;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, RPC_E_TOO_LATE};
 use windows::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetLogicalDrives};
 use windows::Win32::System::Com::{
@@ -93,25 +93,71 @@ fn wmi_error(source: &str, error: WMIError) -> NativeError {
     }
 }
 
-impl DiagnosticSource for WindowsSource {
+#[derive(Default)]
+struct WmiCache {
+    runtime: Option<tokio::runtime::Runtime>,
+    connections: HashMap<String, WMIConnection>,
+    com: Option<Com>,
+}
+
+thread_local! {
+    static WMI_CACHE: RefCell<Option<WmiCache>> = const { RefCell::new(None) };
+}
+
+pub(super) fn with_wmi_scope<T>(run: impl FnOnce() -> T) -> T {
+    struct Restore(Option<WmiCache>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            WMI_CACHE.replace(self.0.take());
+        }
+    }
+    let _restore = Restore(WMI_CACHE.replace(Some(WmiCache::default())));
+    run()
+}
+
+impl WmiCache {
     fn query(
-        &self,
+        &mut self,
         namespace: &str,
         wql: &str,
         control: &Control,
     ) -> Result<Vec<Value>, NativeError> {
-        stopped("WMI", control)?;
-        let _com = Com::new()?;
-        let connection =
-            WMIConnection::with_namespace_path(namespace).map_err(|e| wmi_error(namespace, e))?;
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .map_err(|e| NativeError {
-                source: "WMI".into(),
-                code: None,
-                message: e.to_string(),
-            })?;
+        if self.com.is_none() {
+            self.com = Some(Com::new()?);
+        }
+        if !self.connections.contains_key(namespace) {
+            let connection = WMIConnection::with_namespace_path(namespace)
+                .map_err(|e| wmi_error(namespace, e))?;
+            self.connections.insert(namespace.into(), connection);
+        }
+        self.runtime()?;
+        let connection = &self.connections[namespace];
+        let runtime = self.runtime.as_ref().expect("WMI runtime initialized");
+        Self::query_with(runtime, connection, wql, control)
+    }
+
+    fn runtime(&mut self) -> Result<&tokio::runtime::Runtime, NativeError> {
+        if self.runtime.is_none() {
+            self.runtime = Some(
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_time()
+                    .build()
+                    .map_err(|e| NativeError {
+                        source: "WMI".into(),
+                        code: None,
+                        message: e.to_string(),
+                    })?,
+            );
+        }
+        Ok(self.runtime.as_ref().expect("WMI runtime initialized"))
+    }
+
+    fn query_with(
+        runtime: &tokio::runtime::Runtime,
+        connection: &WMIConnection,
+        wql: &str,
+        control: &Control,
+    ) -> Result<Vec<Value>, NativeError> {
         runtime.block_on(async{
             let work=async{
                 let mut stream=connection.exec_query_async(wql).map_err(|e|wmi_error(wql,e))?;
@@ -129,6 +175,21 @@ impl DiagnosticSource for WindowsSource {
                 _=tokio::time::sleep(control.remaining())=>Err(NativeError{source:wql.into(),code:None,message:"WMI 查询超时。".into()}),
                 result=work=>result,
             }
+        })
+    }
+}
+
+impl DiagnosticSource for WindowsSource {
+    fn query(
+        &self,
+        namespace: &str,
+        wql: &str,
+        control: &Control,
+    ) -> Result<Vec<Value>, NativeError> {
+        stopped("WMI", control)?;
+        WMI_CACHE.with(|cache| match cache.borrow_mut().as_mut() {
+            Some(cache) => cache.query(namespace, wql, control),
+            None => WmiCache::default().query(namespace, wql, control),
         })
     }
     fn processes(&self, control: &Control) -> Result<Vec<ProcessSample>, NativeError> {
@@ -197,6 +258,50 @@ impl DiagnosticSource for WindowsSource {
         visitor: &mut EventVisitor<'_>,
         control: &Control,
     ) -> Result<EventRead, NativeError> {
+        let mut missing_messages = 0;
+        let mut read = self.events_lazy(
+            query,
+            &mut |mut event, message| {
+                event.message = message();
+                missing_messages += usize::from(event.message.is_none());
+                visitor(event)
+            },
+            control,
+        )?;
+        read.unreadable += missing_messages;
+        Ok(read)
+    }
+    fn events_lazy(
+        &self,
+        query: &EventQuery,
+        visitor: &mut LazyEventVisitor<'_>,
+        control: &Control,
+    ) -> Result<EventRead, NativeError> {
         events::query(query, visitor, control)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wmi_runtime_is_reused_within_scope_and_dropped_afterwards() {
+        assert!(WMI_CACHE.with(|cache| cache.borrow().is_none()));
+        with_wmi_scope(|| {
+            let runtime = WMI_CACHE.with(|cell| {
+                let mut cell = cell.borrow_mut();
+                let cache = cell.as_mut().unwrap();
+                cache.runtime().unwrap() as *const _
+            });
+            WMI_CACHE.with(|cell| {
+                let mut cell = cell.borrow_mut();
+                assert_eq!(
+                    cell.as_mut().unwrap().runtime().unwrap() as *const _,
+                    runtime
+                );
+            });
+        });
+        assert!(WMI_CACHE.with(|cache| cache.borrow().is_none()));
     }
 }

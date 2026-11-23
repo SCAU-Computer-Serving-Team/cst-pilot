@@ -89,6 +89,21 @@ impl ScanSnapshot {
         merged
     }
     pub fn usage(&self, root: &Path, top: usize, filesystem: Option<&str>) -> Value {
+        self.usage_with_elevation(
+            root,
+            top,
+            filesystem,
+            cst_os::is_elevated().unwrap_or(false),
+        )
+    }
+
+    fn usage_with_elevation(
+        &self,
+        root: &Path,
+        top: usize,
+        filesystem: Option<&str>,
+        elevated: bool,
+    ) -> Value {
         let rows = |items: &[Ranked]| {
             items
                 .iter()
@@ -99,7 +114,7 @@ impl ScanSnapshot {
         let mut extensions: Vec<_> = self.extensions.iter().collect();
         extensions.sort_by(|a, b| b.1.0.cmp(&a.1.0).then_with(|| a.0.cmp(b.0)));
         json!({
-            "method":if filesystem.is_some_and(|fs| fs.eq_ignore_ascii_case("NTFS")) {"wiztree-mft"} else {"wiztree-walk"},
+            "method":if elevated && filesystem.is_some_and(|fs| fs.eq_ignore_ascii_case("NTFS")) {"wiztree-mft"} else {"wiztree-walk"},
             "root":super::wz_index::display_path(root),"totalGB":gib(self.total),
             "topDirs":rows(&self.top_dirs),"topFiles":rows(&self.top_files),
             "extAgg":extensions.into_iter().take(top.min(40)).map(|(ext,(bytes,files))|json!({"ext":ext,"files":files,"sizeGB":gib(*bytes)})).collect::<Vec<_>>(),
@@ -245,4 +260,23 @@ pub fn gib(bytes: u64) -> f64 {
 }
 pub fn pct(bytes: u64, total: u64) -> Option<f64> {
     (total > 0).then(|| rounded(bytes as f64 / total as f64 * 100.0, 1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ntfs_wiztree_requires_elevation_for_mft_label() {
+        let snapshot = ScanSnapshot::default();
+        let path = Path::new(r"C:\data");
+        assert_eq!(
+            snapshot.usage_with_elevation(path, 1, Some("NTFS"), false)["method"],
+            "wiztree-walk"
+        );
+        assert_eq!(
+            snapshot.usage_with_elevation(path, 1, Some("NTFS"), true)["method"],
+            "wiztree-mft"
+        );
+    }
 }

@@ -147,18 +147,19 @@ pub fn run(
                 })
                 .collect::<Vec<_>>()
         );
-        if let Err(error) = &ids {
+        if ids.is_err() {
             result["infoNotice"] =
                 json!("无法确定目标卷对应的物理盘，physicalDisks 保留全量设备。");
-            errors.push(error.clone());
         }
+    }
+    if let Err(error) = &ids {
+        errors.push(error.clone());
     }
     if need_health {
         if let Err(error) = &ids {
             result["smart"] = Value::Null;
             result["smartNotice"] = json!("无法确定目标卷对应的物理盘，已停止查询 SMART。");
             result["smartErrors"] = json!([{"deviceId":drive,"error":error.message}]);
-            errors.push(error.clone());
         } else {
             let targets: Vec<_> = physical
                 .iter()

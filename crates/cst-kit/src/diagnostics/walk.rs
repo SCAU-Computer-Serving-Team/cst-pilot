@@ -182,6 +182,10 @@ pub fn usage(
     control: &Control,
     limits: WalkLimits,
 ) -> Result<Value, String> {
+    let meta = fs::symlink_metadata(root).map_err(|_| "目标目录无法读取。")?;
+    if linked(&meta) || !meta.is_dir() {
+        return Err("目标必须是目录且不能是链接或重解析点。".into());
+    }
     let start = Instant::now();
     let mut budget = WalkBudget::new(limits);
     let mut largest = TopN::new(top + 1);
