@@ -114,6 +114,31 @@ struct RenameSessionModalState {
     prior_focus: Option<FocusHandle>,
 }
 
+#[derive(Default)]
+struct ClickOutsideGuard(Option<std::rc::Weak<std::cell::Cell<bool>>>);
+
+impl gpui::Global for ClickOutsideGuard {}
+
+pub(crate) fn keep_popover_open_on_mouse_down(
+    event: &gpui::MouseDownEvent,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if !window.has_active_prompt()
+        && matches!(
+            event.button,
+            gpui::MouseButton::Left | gpui::MouseButton::Right
+        )
+        && let Some(guard) = cx
+            .default_global::<ClickOutsideGuard>()
+            .0
+            .as_ref()
+            .and_then(std::rc::Weak::upgrade)
+    {
+        guard.set(true);
+    }
+}
+
 pub struct AppShell {
     client: ClientHandle,
     snapshot: std::sync::Arc<ClientSnapshot>,
@@ -3299,6 +3324,7 @@ impl Render for AppShell {
             row_layout.child(right_column)
         };
 
+        let click_outside_shell = cx.entity().downgrade();
         let mut root = div()
             .id("cst-app-shell")
             .test_support()
@@ -3354,17 +3380,30 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &RequestAppExit, window, cx| {
                 this.request_close_flow(window, cx);
             }))
-            .on_mouse_down(
-                gpui::MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
-                    this.dismiss_click_outside_surfaces(cx);
-                }),
-            )
-            .on_mouse_down(
-                gpui::MouseButton::Right,
-                cx.listener(|this, _, _, cx| {
-                    this.dismiss_click_outside_surfaces(cx);
-                }),
+            .child(
+                // The empty hitbox sees every window click in capture, even if a control
+                // later stops bubbling or an occluding overlay covers the shell.
+                div()
+                    .absolute()
+                    .size(px(0.0))
+                    .on_mouse_down_out(move |event, _, cx| {
+                        if !matches!(
+                            event.button,
+                            gpui::MouseButton::Left | gpui::MouseButton::Right
+                        ) {
+                            return;
+                        }
+                        let shell = click_outside_shell.clone();
+                        let guard = Rc::new(std::cell::Cell::new(false));
+                        cx.default_global::<ClickOutsideGuard>().0 = Some(Rc::downgrade(&guard));
+                        cx.defer(move |cx| {
+                            if !guard.get() {
+                                let _ = shell.update(cx, |this, cx| {
+                                    this.dismiss_click_outside_surfaces(cx);
+                                });
+                            }
+                        });
+                    }),
             )
             .child(main_layout);
 

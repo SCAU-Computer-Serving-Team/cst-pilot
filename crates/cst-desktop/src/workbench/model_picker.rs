@@ -140,6 +140,7 @@ pub fn render_context_ring_button(
         .items_center()
         .justify_center()
         .hover(|s| s.bg(palette.bg_item_hover))
+        .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_click(move |_, w, cx| on_toggle(w, cx))
         .child(
@@ -530,6 +531,7 @@ pub fn render_context_quota_popover(
         card.test_support()
             .occlude()
             .a11y_dialog("composer-context-popover-h5jg6d", "上下文容量与剩余额度")
+            .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(|_, _, cx| cx.stop_propagation())
             .into_any_element()
@@ -558,28 +560,31 @@ fn shape_text_width(
     family: &SharedString,
     window: &Window,
 ) -> f32 {
-    if text.is_empty() {
-        return 0.0;
-    }
-    let run = TextRun {
-        len: text.len(),
-        font: Font {
-            family: family.clone(),
-            weight,
-            ..Default::default()
-        },
-        color: Hsla::default(),
-        background_color: None,
-        underline: None,
-        strikethrough: None,
-    };
-    let line = window.text_system().shape_line(
-        SharedString::from(text.to_owned()),
-        font_size,
-        &[run],
-        None,
-    );
-    f32::from(line.width).ceil()
+    // Custom model metadata may contain line breaks; shape_line only accepts one line.
+    text.lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let run = TextRun {
+                len: line.len(),
+                font: Font {
+                    family: family.clone(),
+                    weight,
+                    ..Default::default()
+                },
+                color: Hsla::default(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            f32::from(
+                window
+                    .text_system()
+                    .shape_line(line.to_owned().into(), font_size, &[run], None)
+                    .width,
+            )
+            .ceil()
+        })
+        .fold(0.0, f32::max)
 }
 
 fn compute_picker_height(
@@ -1250,6 +1255,7 @@ pub fn render_model_picker_popover(
         card.test_support()
             .occlude()
             .a11y_dialog("composer-model-picker-d8zzg", "模型与思考强度选择")
+            .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(|_, _, cx| cx.stop_propagation())
             .into_any_element()

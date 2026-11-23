@@ -2163,7 +2163,9 @@ async fn run_state_reducer_loop(
                             session_store.remove(&sid);
                         }
 
-                        if session_store.is_loading(&sid) {
+                        let is_app_active = core.snapshot.lock().expect("snapshot lock").channel_mode == ChannelModeDto::AppActive;
+                        let already_loading = session_store.is_loading(&sid);
+                        if already_loading && (!is_app_active || confirmed_subs.contains(&sid)) {
                             pending_session_waiters.entry(sid).or_default().push(reply);
                             continue;
                         }
@@ -2172,12 +2174,9 @@ async fn run_state_reducer_loop(
                         // 1. Mark session as `Loading(generation)` to buffer incoming SSE frames
                         // 2. Submit `PUT /subscriptions` FIRST (in AppActive)
                         // 3. Fetch `GET /api/sessions/<sid>` and merge buffered frames past `eventCursor`
-                        let generation = session_store
-                            .begin_loading_if_absent(&sid)
-                            .unwrap_or_else(|| session_store.reset_to_loading(&sid));
+                        let generation = session_store.begin_loading_if_absent(&sid);
                         desired_subs = compute_desired_subscriptions(&core);
                         sub_debounce_pending = false;
-                        let is_app_active = core.snapshot.lock().expect("snapshot lock").channel_mode == ChannelModeDto::AppActive;
                         if is_app_active {
                             let last_ids = build_subscription_last_event_ids(
                                 &desired_subs,
@@ -2193,12 +2192,19 @@ async fn run_state_reducer_loop(
                                     confirmed_subs = parse_subscribed_set(&subscribed, &desired_subs);
                                 }
                                 Err(error) => {
-                                    session_store.cancel_loading_if_generation(&sid, generation);
+                                    if let Some(generation) = generation {
+                                        session_store.cancel_loading_if_generation(&sid, generation);
+                                    }
+                                    sub_debounce_pending = true;
+                                    sub_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(SUBSCRIPTION_DEBOUNCE_MS));
                                     let _ = reply.send(Err(error));
                                     continue;
                                 }
                             }
                         }
+                        // A speculative GET may have captured its snapshot before the subscription
+                        // existed. Supersede it after subscribing so no intervening frame is lost.
+                        let generation = generation.unwrap_or_else(|| session_store.reset_to_loading(&sid));
                         spawn_session_snapshot_fetch(
                             core.http.clone(),
                             done_tx.clone(),

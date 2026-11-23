@@ -1454,6 +1454,7 @@ impl ComposerView {
             .id("composer-completion-popover-p2bit")
             .test_support()
             .occlude()
+            .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .w_full()
             .p(space::XS)
@@ -2106,6 +2107,7 @@ impl Render for ComposerView {
             .items_center()
             .gap(space::XS)
             .hover(|s| s.bg(palette.bg_item_hover))
+            .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
                 cx.stop_propagation();
             })

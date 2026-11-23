@@ -3,7 +3,7 @@ import { SpecialTool } from "../cards/special-tool";
 import type { PendingBitLocker } from "../data/bitlocker-state";
 import type { Message } from "../data/web-state";
 import { ErrorNotice } from "../shell/error-notice";
-import { splitTurn, type Turn } from "./conversation-parts";
+import { assistantErrors, splitTurn, type Turn } from "./conversation-parts";
 import { Markdown } from "./markdown";
 import { MessageImage } from "./message-image";
 import { ProcessSegment } from "./process-segment";
@@ -72,13 +72,14 @@ export function AssistantContent({
 				) : null;
 			})}
 			{finalText && <Markdown text={finalText} live={live} />}
-			{(last?.message.stopReason === "error" || last?.message.errorMessage) && (
+			{assistantErrors(turn, Boolean(format)).map(({ id: entryId, message }) => (
 				<ErrorNotice
+					key={entryId ?? message.timestamp}
 					model
 					format={format}
-					message={last.message.errorMessage || "模型调用失败，请检查登录状态和模型设置。"}
+					message={message.errorMessage || "模型调用失败，请检查登录状态和模型设置。"}
 				/>
-			)}
+			))}
 			{last?.message.stopReason === "aborted" && <p className="message-warning">已停止生成</p>}
 			{children}
 		</article>

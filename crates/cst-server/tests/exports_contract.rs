@@ -163,8 +163,16 @@ fn snapshot_options_date_filtering_and_pagination_contract() {
         assert!(parse_export_options(&invalid_opts).is_err());
     }
 
+    let image = json!({ "type": "image", "mimeType": "image/png", "data": "aW1hZ2U=" });
     let entries = vec![
-        json!({ "id": "u1", "message": { "role": "user", "content": "第一轮", "timestamp": 1 } }),
+        json!({
+            "id": "u1",
+            "message": {
+                "role": "user",
+                "content": [{ "type": "text", "text": "第一轮" }, image],
+                "timestamp": 1
+            }
+        }),
         json!({
             "id": "a1",
             "message": {
@@ -238,6 +246,7 @@ fn snapshot_options_date_filtering_and_pagination_contract() {
         .filter_map(|e| e.get("id").and_then(Value::as_str))
         .collect();
     assert_eq!(chosen_ids, vec!["u1", "a2", "a3-err", "a4-err-only-stop"]);
+    assert_eq!(first["entries"][0]["message"]["content"][1], image);
     assert_eq!(
         first["entries"][2]["message"]["provider"],
         json!("deepseek")

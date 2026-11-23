@@ -607,6 +607,7 @@ impl Render for WorkbenchView {
                         .items_center()
                         .justify_center()
                         .hover(|s| s.bg(palette.bg_item_hover))
+                        .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(move |_, w, cx| {
                             ent_more.update(cx, |this, cx| {
@@ -684,6 +685,7 @@ impl Render for WorkbenchView {
                     .flex()
                     .flex_col()
                     .gap(space::MICRO)
+                    .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(|_, _, cx| cx.stop_propagation())
                     .child(

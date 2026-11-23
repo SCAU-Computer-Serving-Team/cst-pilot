@@ -683,6 +683,7 @@ impl Render for PreferencesTabView {
                     .border_1()
                     .border_color(palette.border_subtle)
                     .occlude()
+                    .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(
                         div()
@@ -811,6 +812,7 @@ impl Render for PreferencesTabView {
                     .justify_between()
                     .gap(space::XS)
                     .hover(|s| s.bg(palette.bg_surface))
+                    .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.toggle_dropdown(true, default_index, window, cx);
@@ -953,6 +955,7 @@ impl Render for PreferencesTabView {
                         .border_1()
                         .border_color(palette.border_subtle)
                         .occlude()
+                        .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .child(
                             div()
@@ -1177,6 +1180,7 @@ impl Render for PreferencesTabView {
                     .justify_between()
                     .gap(space::SM)
                     .hover(|s| s.bg(palette.bg_surface))
+                    .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                     .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.toggle_dropdown(false, filter_index, window, cx);

@@ -1221,12 +1221,25 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         // Verify click-outside dismissal on both model preference dropdowns.
         window.click("pref-default-model-trigger", cx);
         assert!(window.find("pref-default-model-popover").visible());
+        window.right_click("pref-default-model-popover", cx);
+    })
+    .unwrap();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("pref-default-model-popover").visible());
         window.click("settings-subpage-header-title-track", cx);
+    })
+    .unwrap();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
         assert!(window.try_find("pref-default-model-popover").is_none());
-
         window.click("pref-filter-dropdown-btn", cx);
         assert!(window.find("pref-filter-popover").visible());
         window.click("settings-subpage-header-title-track", cx);
+    })
+    .unwrap();
+    cx.update_window(win_handle, |_, window, cx| {
+        window.render_frame(cx);
         assert!(window.try_find("pref-filter-popover").is_none());
 
         // Verify Ctrl+P -> 打开全部会话 keeps keyboard arrow navigation continuous.

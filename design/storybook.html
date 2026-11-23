@@ -8063,6 +8063,13 @@ Next: 核对开机自启项与后台高负载进程。</div>
       let pinnedId = null;
       let hoverId = null;
       let ro = null;
+      let frameId = null;
+      let disposed = false;
+      const copyTimers = new Map();
+      const clearCopyTimers = () => {
+        copyTimers.forEach(clearTimeout);
+        copyTimers.clear();
+      };
 
       const SPECS = [
         { id: "h1",     code: "H1",         tag: "一级标题",   params: "Source Han Sans CN · 24/32 · 600 · pb 10px · 1px $border-subtle 底线" },
@@ -8161,8 +8168,18 @@ Next: 核对开机自启项与后台高负载进程。</div>
         applyActive();
       };
 
+      const scheduleDraw = () => {
+        if (disposed || frameId !== null) return;
+        frameId = requestAnimationFrame(() => {
+          frameId = null;
+          drawCircuit();
+        });
+      };
+
       const render = () => {
         if (ro) { ro.disconnect(); ro = null; }
+        clearCopyTimers();
+        hoverId = null;
         const introText = "当前系统盘总容量 953.9 GB，可用空间低于安全阈值。非代码、非注释场景统一使用思源黑体（Source Han Sans CN），代码、命令行、路径与注释使用 JetBrains Mono。";
         const introHtml = streamingDemo
           ? introText.match(/[A-Za-z0-9.]+|\s+|./g).map((tok, i) => /^\s+$/.test(tok) ? tok : `<span class="md-stream-w" style="animation-delay:${Math.min(i * 12, 900)}ms">${tok}</span>`).join("")
@@ -8302,28 +8319,43 @@ Next: 核对开机自启项与后台高负载进程。</div>
           });
         });
         stageEl.querySelectorAll(".md-copy-btn").forEach(btn => {
-          btn.addEventListener("click", () => {
+          btn.addEventListener("click", async () => {
+            const code = btn.closest(".md-code-block")?.querySelector("pre")?.textContent;
+            if (code == null) return;
+            try {
+              await navigator.clipboard.writeText(code);
+            } catch {
+              if (!disposed && btn.isConnected) showToast({ text: "无法复制代码内容", variant: "danger" });
+              return;
+            }
+            if (disposed || !btn.isConnected) return;
+            clearTimeout(copyTimers.get(btn));
             btn.innerHTML = icon("check", 14);
             btn.style.color = "var(--status-success)";
             showToast({ text: "已复制代码内容" });
-            window.setTimeout(() => {
+            copyTimers.set(btn, window.setTimeout(() => {
+              copyTimers.delete(btn);
               btn.innerHTML = icon("copy", 14);
               btn.style.color = "";
-            }, 1600);
+            }, 1600));
           });
         });
 
         const board = stageEl.querySelector(".md-circuit-board");
         if (board && typeof ResizeObserver !== "undefined") {
-          ro = new ResizeObserver(() => requestAnimationFrame(drawCircuit));
+          ro = new ResizeObserver(scheduleDraw);
           ro.observe(board);
         }
-        requestAnimationFrame(() => requestAnimationFrame(drawCircuit));
-        if (document.fonts && document.fonts.ready) {
-          document.fonts.ready.then(() => requestAnimationFrame(drawCircuit));
-        }
+        scheduleDraw();
       };
 
+      AppState.cleanups.push(() => {
+        disposed = true;
+        ro?.disconnect();
+        if (frameId !== null) cancelAnimationFrame(frameId);
+        clearCopyTimers();
+      });
+      document.fonts?.ready.then(scheduleDraw);
       render();
       controlsEl.querySelector("#md-toggle-stream").addEventListener("click", () => {
         streamingDemo = true;
@@ -8336,7 +8368,7 @@ Next: 核对开机自启项与后台高负载进程。</div>
         const board = stageEl.querySelector(".md-circuit-board");
         if (board) {
           board.dataset.guides = guidesOn ? "on" : "off";
-          if (guidesOn) requestAnimationFrame(drawCircuit);
+          if (guidesOn) scheduleDraw();
         }
       });
     },

@@ -670,6 +670,9 @@ impl AllSessionsView {
                                 .items_center()
                                 .justify_center()
                                 .hover(|s| s.bg(palette.bg_item_hover))
+                                .capture_any_mouse_down(
+                                    crate::shell::keep_popover_open_on_mouse_down,
+                                )
                                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                                 .on_click(move |_, _, cx| {
                                     cx.stop_propagation();
@@ -727,6 +730,11 @@ impl AllSessionsView {
                         .justify_between()
                         .gap(space::MD)
                         .hover(|s| s.bg(palette.bg_item_hover))
+                        .capture_any_mouse_down(|event, window, cx| {
+                            if event.button == MouseButton::Right {
+                                crate::shell::keep_popover_open_on_mouse_down(event, window, cx);
+                            }
+                        })
                         .on_mouse_down(MouseButton::Right, move |_, _, cx| {
                             cx.stop_propagation();
                             let s_id = sid_rclick.clone();
@@ -825,6 +833,9 @@ impl AllSessionsView {
                                     .border_1()
                                     .border_color(palette.border_subtle)
                                     .occlude()
+                                    .capture_any_mouse_down(
+                                        crate::shell::keep_popover_open_on_mouse_down,
+                                    )
                                     .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                         cx.stop_propagation();
                                     })

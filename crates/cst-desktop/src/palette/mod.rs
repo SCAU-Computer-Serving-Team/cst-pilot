@@ -427,6 +427,16 @@ impl CommandPaletteModal {
         entries.iter().position(|e| !e.disabled)
     }
 
+    fn scroll_to_entry(&self, entries: &[PaletteEntry], index: usize) {
+        // ScrollHandle addresses actual children, including each group heading and separator.
+        let transitions = entries[..=index]
+            .windows(2)
+            .filter(|pair| pair[0].group != pair[1].group)
+            .count();
+        self.scroll_handle
+            .scroll_to_item(index + 1 + 2 * transitions);
+    }
+
     fn step_selection(&mut self, entries: &[PaletteEntry], forward: bool) {
         if entries.is_empty() || !entries.iter().any(|e| !e.disabled) {
             return;
@@ -441,7 +451,7 @@ impl CommandPaletteModal {
             };
             if !entries[idx].disabled {
                 self.selected_idx = idx;
-                self.scroll_handle.scroll_to_item(idx);
+                self.scroll_to_entry(entries, idx);
                 return;
             }
         }
@@ -478,7 +488,7 @@ impl CommandPaletteModal {
             "home" => {
                 if let Some(first) = Self::first_enabled_index(&entries) {
                     self.selected_idx = first;
-                    self.scroll_handle.scroll_to_item(first);
+                    self.scroll_to_entry(&entries, first);
                     cx.notify();
                 }
                 cx.stop_propagation();
@@ -486,7 +496,7 @@ impl CommandPaletteModal {
             "end" => {
                 if let Some(last) = entries.iter().rposition(|e| !e.disabled) {
                     self.selected_idx = last;
-                    self.scroll_handle.scroll_to_item(last);
+                    self.scroll_to_entry(&entries, last);
                     cx.notify();
                 }
                 cx.stop_propagation();

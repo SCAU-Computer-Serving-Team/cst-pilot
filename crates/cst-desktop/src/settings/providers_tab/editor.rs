@@ -321,6 +321,7 @@ impl ProvidersTabView {
                             .border_1()
                             .border_color(palette.border_subtle)
                             .occlude()
+                            .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
                                 cx.stop_propagation();
                             })
@@ -535,6 +536,9 @@ impl ProvidersTabView {
                                             .items_center()
                                             .justify_between()
                                             .gap(space::SM)
+                                            .capture_any_mouse_down(
+                                                crate::shell::keep_popover_open_on_mouse_down,
+                                            )
                                             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
                                                 cx.stop_propagation();
                                             })

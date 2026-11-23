@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use gpui::{FontWeight, HighlightStyle, Overflow, StyleRefinement, rems};
 use gpui_kit::base::Easing;
@@ -50,8 +50,6 @@ fn wrap_fenced_code_markdown(code: &str) -> String {
     let fence = "`".repeat(max_run.max(2) + 1);
     if code.is_empty() {
         format!("{fence}\n{fence}")
-    } else if code.ends_with('\n') {
-        format!("{fence}\n{code}{fence}")
     } else {
         format!("{fence}\n{code}\n{fence}")
     }
@@ -858,11 +856,9 @@ pub fn render_assistant_markdown_with_copy_notice(
             let copied_state = window.use_keyed_state(
                 SharedString::from(format!("md-code-copied-{state_entity_id:?}-{span_start}")),
                 cx,
-                |_, _| Option::<Instant>::None,
+                |_, _| Option::<gpui::Task<()>>::None,
             );
-            let copied_recently = copied_state
-                .read(cx)
-                .is_some_and(|t| t.elapsed() < motion::ICON_SWAP_RESTORE);
+            let copied_recently = copied_state.read(cx).is_some();
             let copied_state_click = copied_state.clone();
             let weak_notify = state_weak.clone();
             let on_copied_cb = on_code_copied.clone();
@@ -884,9 +880,23 @@ pub fn render_assistant_markdown_with_copy_notice(
                 .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(move |_, _, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(code_str.to_string()));
-                    let now = Instant::now();
+                    let weak_exp = weak_notify.clone();
                     copied_state_click.update(cx, |slot, cx| {
-                        *slot = Some(now);
+                        let timer = cx.background_executor().timer(motion::ICON_SWAP_RESTORE);
+                        // Replacing the task cancels the previous click's restore.
+                        *slot = Some(cx.spawn(async move |weak, cx| {
+                            timer.await;
+                            if weak
+                                .update(cx, |slot, cx| {
+                                    *slot = None;
+                                    cx.notify();
+                                })
+                                .is_ok()
+                                && let Some(ent) = weak_exp.upgrade()
+                            {
+                                ent.update(cx, |_, cx| cx.notify());
+                            }
+                        }));
                         cx.notify();
                     });
                     if let Some(ent) = weak_notify.upgrade() {
@@ -895,23 +905,6 @@ pub fn render_assistant_markdown_with_copy_notice(
                     if let Some(ref cb) = on_copied_cb {
                         cb(cx);
                     }
-                    let copied_state_exp = copied_state_click.downgrade();
-                    let weak_exp = weak_notify.clone();
-                    cx.spawn(async move |cx| {
-                        cx.background_executor()
-                            .timer(motion::ICON_SWAP_RESTORE)
-                            .await;
-                        let _ = copied_state_exp.update(cx, |slot, cx| {
-                            if *slot == Some(now) {
-                                *slot = None;
-                                cx.notify();
-                            }
-                        });
-                        if let Some(ent) = weak_exp.upgrade() {
-                            ent.update(cx, |_, cx| cx.notify());
-                        }
-                    })
-                    .detach();
                 })
                 .child(motion::animated_copy_icon(
                     motion_copy_id,
@@ -1221,6 +1214,8 @@ mod tests {
             "```\npowercfg /h off\n```"
         );
         assert_eq!(wrap_fenced_code_markdown(""), "```\n```");
+        // The parser removes the newline before the closing fence, so keep an extra separator.
+        assert_eq!(wrap_fenced_code_markdown("a\n\n"), "```\na\n\n\n```");
         assert_eq!(
             wrap_fenced_code_markdown("echo ```hello```"),
             "````\necho ```hello```\n````"

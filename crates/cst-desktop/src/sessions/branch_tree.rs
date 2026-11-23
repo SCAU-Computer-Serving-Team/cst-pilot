@@ -1985,6 +1985,7 @@ impl Render for BranchTreeView {
             .justify_between()
             .gap(space::SM)
             .hover(|s| s.bg(palette.bg_item_hover))
+            .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(|this, _, _, cx| {
                 this.filter_dropdown_open = !this.filter_dropdown_open;
@@ -2515,6 +2516,7 @@ impl Render for BranchTreeView {
                 .flex()
                 .flex_col()
                 .gap(space::MICRO)
+                .capture_any_mouse_down(crate::shell::keep_popover_open_on_mouse_down)
                 .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation());
 
             for mode in TreeFilterMode::ALL_MODES {

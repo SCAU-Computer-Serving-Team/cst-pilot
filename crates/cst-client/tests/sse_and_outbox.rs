@@ -506,6 +506,8 @@ async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handle
     let release_slow_models = Arc::new(Notify::new());
     let slow_s1_started = Arc::new(Notify::new());
     let release_slow_s1 = Arc::new(Notify::new());
+    let subscribed_s1_fetch_started = Arc::new(Notify::new());
+    let release_subscribed_s1_fetch = Arc::new(Notify::new());
 
     let models_call_seq = Arc::new(AtomicUsize::new(0));
     let s1_fetch_seq = Arc::new(AtomicUsize::new(0));
@@ -516,6 +518,8 @@ async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handle
     let release_slow_models_h = Arc::clone(&release_slow_models);
     let slow_s1_started_h = Arc::clone(&slow_s1_started);
     let release_slow_s1_h = Arc::clone(&release_slow_s1);
+    let subscribed_s1_fetch_started_h = Arc::clone(&subscribed_s1_fetch_started);
+    let release_subscribed_s1_fetch_h = Arc::clone(&release_subscribed_s1_fetch);
     let models_seq_h = Arc::clone(&models_call_seq);
     let s1_seq_h = Arc::clone(&s1_fetch_seq);
     let mux_tx_h = Arc::clone(&mux_tx_slot);
@@ -526,6 +530,8 @@ async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handle
         let release_slow_models = Arc::clone(&release_slow_models_h);
         let slow_s1_started = Arc::clone(&slow_s1_started_h);
         let release_slow_s1 = Arc::clone(&release_slow_s1_h);
+        let subscribed_s1_fetch_started = Arc::clone(&subscribed_s1_fetch_started_h);
+        let release_subscribed_s1_fetch = Arc::clone(&release_subscribed_s1_fetch_h);
         let models_seq = Arc::clone(&models_seq_h);
         let s1_seq = Arc::clone(&s1_seq_h);
         let mux_tx = Arc::clone(&mux_tx_h);
@@ -590,7 +596,7 @@ async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handle
             if req.target == "/api/sessions/s1" {
                 let n = s1_seq.fetch_add(1, Ordering::SeqCst);
                 if n == 0 {
-                    // Generation 1 snapshot: stall until after ResetSession completes Generation 2!
+                    // The speculative snapshot starts before any subscription to s1.
                     slow_s1_started.notify_one();
                     release_slow_s1.notified().await;
                     return RawReply::Json {
@@ -605,6 +611,11 @@ async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handle
                     };
                 }
                 if n == 1 {
+                    assert!(subs.lock().unwrap().iter().any(|body| body["sessions"] == json!(["s1"])));
+                    subscribed_s1_fetch_started.notify_one();
+                    release_subscribed_s1_fetch.notified().await;
+                }
+                if n <= 2 {
                     return RawReply::Json {
                         status: 200,
                         body: json!({
@@ -726,13 +737,21 @@ async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handle
         "fresh-model"
     );
 
-    // 2. Generation + `eventCursor` watermark during overlapping `ActivateSession` + `ResetSession`
+    // 2. Activating during preload must subscribe first, then start a fresh GET.
+    tokio::time::timeout(Duration::from_secs(3), slow_s1_started.notified())
+        .await
+        .expect("preload did not start");
     let h_act = handle.clone();
     let act_task = tokio::spawn(async move { h_act.activate_session(Some("s1".into())).await });
-    slow_s1_started.notified().await;
+    tokio::time::timeout(
+        Duration::from_secs(3),
+        subscribed_s1_fetch_started.notified(),
+    )
+    .await
+    .expect("activation did not replace the unsubscribed preload");
 
     let mux_sender = mux_tx_slot.lock().unwrap().clone().unwrap();
-    // Emit ResetSession -> starts generation 2 (`ep1:10`), followed by overlapping `ep1:9` (must skip!) and `ep1:11` (must apply!)
+    // Reset starts the next generation at ep1:10. The overlapping ep1:9 must be skipped.
     mux_sender
         .send("id: global:g0:1,s1:ep1:10\nevent: reset\ndata: {\"scope\":\"session\",\"sessionId\":\"s1\"}\n\n".to_owned())
         .unwrap();
@@ -753,8 +772,9 @@ async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handle
         )
         .unwrap();
 
-    // Release slow generation 1 (`ep1:2`, `"m-old"`): must be discarded!
+    // Release both superseded snapshots: neither may overwrite the reset generation.
     release_slow_s1.notify_one();
+    release_subscribed_s1_fetch.notify_one();
     let loaded_s1 = act_task.await.unwrap().unwrap().unwrap();
     let _ = loaded_s1;
     tokio::time::sleep(Duration::from_millis(80)).await;

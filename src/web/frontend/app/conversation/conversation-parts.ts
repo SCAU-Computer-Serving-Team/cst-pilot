@@ -89,6 +89,12 @@ export function activeTurnIndex(turns: Turn[], running: boolean): number {
 	return last;
 }
 
+/** Live chat shows the final state of a turn; exports retain errors from earlier attempts. */
+export function assistantErrors(turn: Turn, exportTranscript: boolean): TurnEntry[] {
+	const candidates = exportTranscript ? turn.assistants : turn.assistants.slice(-1);
+	return candidates.filter(({ message }) => message.stopReason === "error" || Boolean(message.errorMessage));
+}
+
 export type TurnPart = { entry: TurnEntry; final: boolean; part: ConversationPart };
 
 /** 最后一条助手消息的末尾非空文本放在过程外；末尾思考不遮住正文，工具调用仍划分过程边界。 */
