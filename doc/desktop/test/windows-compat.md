@@ -110,7 +110,7 @@ $av = (Get-CimInstance -Namespace root\SecurityCenter2 -ClassName AntiVirusProdu
 
 | 检查项 | 实测结果 | 发现与处置 |
 |---|---|---|
-| PE 导入表（3 个 Release 二进制） | 普通及延迟导入中未发现 WebView2 或 `icuuc.dll`；三者均导入 `VCRUNTIME140.dll` | `destination_list.rs` 使用 Rust 在缓冲区内找 NUL，去掉了 `u_strlen` 依赖。发布前需确认运行库随包提供或改为静态链接，并在干净系统验收 |
+| PE 导入表（3 个 `dist` 发行二进制） | 普通及延迟导入中无 `WebView2`、`icuuc.dll`、`VCRUNTIME140.dll` 或 `MSVCP*.dll`，仅依赖 Windows 内置系统 DLL | `xtask dist --profile dist` 在 Windows 下默认附加 `-C target-feature=+crt-static` 静态链接 CRT；`destination_list.rs` 使用 Rust 在缓冲区内找 NUL，去掉了 `u_strlen` 依赖 |
 | 旧版 Win10 DWM 暗色边框 | 已实现回退，待真机验证 | `configure_dwm_dark_mode` 仅在属性 `20` 返回 `E_INVALIDARG` 时尝试属性 `19` |
 | 中文、空格与括号路径（`测试 用户 (中文)\cst pilot`） | 启动、打开登录页和双进程退出均通过 | 探针首帧 `409.15 ms`；脚本在 `869.7 ms` 确认可取到窗口与首帧探针；点击关闭后 `2123.2 ms` 内两个进程退出 |
 | 无效代理环境变量（`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 均指向 `127.0.0.1:9`）及 `PI_OFFLINE=1` | 本机回环可用 | 后端健康检查、`/api/models` 请求及桌面端启动成功；未测真实代理下的 CSTOA 登录 |

@@ -132,24 +132,27 @@
    ```
 3. **L3（发布前实机矩阵）**：将 `T09`、`T11`、`T14`、`T15`、`T19`、`T20`、`T21`、`T31`、`T34`、`T42`、`T47`、`T50`、`T52` 纳入 [TESTING.md · 实机环境覆盖矩阵](../../test/TESTING.md#实机环境覆盖矩阵) 与 [windows-compat.md](../../desktop/test/windows-compat.md)，逐环境留存 JSON 原始输出与耗时记录。
 
-## 6. 源码审计待修复缺陷与待决事项
+## 6. 源码审计修复进展与待决事项
 
-### 6.1 明确缺陷（建议直接修复）
+### 6.1 明确缺陷修复状态
 
-| 优先级 | 位置 | 缺陷描述 |
+2026-11-23 已完成全部明确 BUG 修复与 L1/L2 回归验证（`live_windows_tools.rs` 8 组全过，`cst-kit` / `cst-client` L1 回归全过）：
+
+| 优先级 | 位置 | 缺陷与处置结果 |
 |---|---|---|
-| P1 | `crates/cst-kit/src/diagnostics/driver.rs:165` | `driver(core)` 执行 5 次 WMI 查询却按 `sources = 6` 判断全失败，WMI 停用时漏报错误 |
-| P1 | `crates/cst-kit/src/bitlocker/core.rs:157-162` | 指定 `drive` 且采集报错为空时，先返回“未找到唯一卷”并吞掉 `collectionErrors` 真实权限/命名空间原因 |
-| P1 | `lhm/host/cst-lhm-host.exe` | 仓库与发行流程未预先产出 `cst-lhm-host.exe`，导致 Rust `sys(sensor)`/`sys(gpu)` 的 LHM 路径默认不可用 |
-| P1 | `crates/cst-kit/src/diagnostics/win_native/windows/events.rs:175-180` | 对全部扫描事件（最高 10 万条）提前执行 `EvtFormatMessage` 并计入 `unreadable`，拖慢大通道查询并误标降级 |
-| P1 | `crates/cst-kit/src/tools/path_guard.rs:35-70` + `fff.rs:118,160` | `fffind`/`ffgrep` 每个遍历条目执行 15–50 次文件句柄/规范化系统调用，大目录易超时 |
-| P2 | `crates/cst-kit/src/diagnostics/hardware/pdh.rs:188-192` + `sys_load.rs:141-143` | GPU 短命进程无效实例触发整批二次 1.2 秒重采并覆写首轮 `memory` 样本 |
-| P2 | `crates/cst-kit/src/diagnostics/win_native/windows.rs:104-115` | 每次 WMI 查询重复初始化 COM、重建 `WMIConnection` 与 Tokio 运行时 |
-| P2 | `crates/cst-kit/src/diagnostics/ls.rs:55,83-87,115` | 单个不可读目录项中止整次 `ls`；0 字节文件误用旧 `cached_file`；子目录回退遍历仍标 `wiztree-index` |
-| P2 | `crates/cst-kit/src/diagnostics/disk.rs:153,161` + `scan.rs:102` | `disk(all)` 关联失败重复记录同一错误；非管理员扫描 NTFS 子目录仍标 `wiztree-mft` |
-| P2 | `crates/cst-kit/src/diagnostics/hardware.rs:83` | `nvidia-smi.exe` 仅查 `System32`，未兜底 `Program Files\NVIDIA Corporation\NVSMI` |
-| P2 | `crates/cst-kit/src/diagnostics/sys.rs:79,176` | `proc` 的 `cpuPct` 未钳制上界 100；`overview` 在 BIOS 厂商为空时丢失版本号 |
-| P2 | `crates/cst-kit/src/diagnostics/eventlog.rs:116,180` | `admin` 检测失败仍报“需要管理员权限”；每条命中事件重复整表排序且未限制 `query.ids` 长度 |
+| P1 | `crates/cst-kit/src/diagnostics/driver.rs` | **已修**：`driver(core)` 全失败判定修正为 5 次查询 |
+| P1 | `crates/cst-kit/src/bitlocker/core.rs` | **已修**：指定 `drive` 且卷列表为空时优先透出 `collectionErrors` 真实原因与脱敏错误码 |
+| P1 | `crates/cst-kit/src/diagnostics/win_native/windows/events.rs`、`eventlog.rs` | **已修**：延迟 `EvtFormatMessage` 至最终 `top` 或消息筛选候选，消除 10 万条提前格式化与误计 `unreadable` |
+| P1 | `crates/cst-kit/src/tools/fff.rs`、`path_guard.rs` | **已修**：遍历阶段先按路径条件筛候选再做文件级 `PathGuard` 校验；同步修复 Windows 扩展路径 `cwd` 导致相对 glob 漏匹配问题（注：2,500 文件 `ffgrep` 仍耗时约 5.2 秒，后续可进一步缓存只读会话级保护句柄） |
+| P1 | `crates/cst-kit/src/diagnostics/walk.rs` | **已修**：`walk::usage` 入口补充目录存在性与重解析点校验，不存在路径直接报错 |
+| P2 | `crates/cst-kit/src/diagnostics/hardware/pdh.rs`、`sys_load.rs` | **已修**：GPU 存在有效引擎样本时不误触发二次重采；仅引擎无样本时单重采引擎并保留首轮显存数据 |
+| P2 | `crates/cst-kit/src/diagnostics/win_native/windows.rs`、`mod.rs` | **已修**：同次诊断阻塞任务内复用 COM、Tokio 运行时与同命名空间 WMI 连接，结束即释放 |
+| P2 | `crates/cst-kit/src/diagnostics/ls.rs` | **已修**：单项 `read_dir` 失败跳过并标不完整；0 字节文件使用实时元数据；子目录回退遍历改标 `walk` |
+| P2 | `crates/cst-kit/src/diagnostics/disk.rs`、`scan.rs` | **已修**：`disk(all)` 盘符关联失败去重；`wiztree-mft` 仅在确认提权且 NTFS 时标注 |
+| P2 | `crates/cst-kit/src/diagnostics/hardware.rs` | **已修**：`nvidia-smi.exe` 优先 `System32`，回退至已知 `Program Files\NVIDIA Corporation\NVSMI` 路径并拒绝链接 |
+| P2 | `crates/cst-kit/src/diagnostics/sys.rs` | **已修**：`proc` 的 `cpuPct` 钳制至 `0–100`；`overview` 在 BIOS 厂商为空时保留版本号 |
+| P2 | `crates/cst-kit/src/diagnostics/eventlog.rs` | **已修**：区分权限检测失败与非管理员；`query.ids` 上限锁定为 16 项 |
+| 待定 | `lhm/host/cst-lhm-host.exe` | **暂留至依赖评审**：开发仓库按 `lhm/README.md` 不存二进制，运行时已正确降级并保留热区与频率数据 |
 
 ### 6.2 待拍板的设计议题
 

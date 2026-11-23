@@ -30,7 +30,7 @@
 |---|---|
 | `path` | 规范化目录路径 |
 | `totalChildren` / `totalSize` | 直接子项总数 / 已统计子项大小文本（不完整时为下界） |
-| `method` | `"wiztree-index"`（命中共享卷缓存）或 `"walk"`（原生目录遍历） |
+| `method` | `"wiztree-index"`（使用共享卷缓存且未遍历子目录）或 `"walk"`（原生遍历，可能同时使用部分缓存） |
 | `entries[]` | 按字节降序排列，元素为 `{ name, type: "dir"\|"file"\|"unknown", size: string\|null, bytes: number\|null, pct: number\|null }` |
 | `omitted` | 截断时存在，结构为 `{ count, size, unknownCount, note }` |
 | `notice` | 预算截断或权限受限说明 |
@@ -85,7 +85,7 @@
 | `kind` | `boot` | `"all"`（默认）、`"unexpected"`、`"bluescreen"` |
 | `type` | `security` | `"all"`（默认）、`"logonFail"`、`"lockout"` |
 | `app` / `name` / `msg` | `crash` / `service` / `query` | 消息字面子串（1–200 字符，不区分大小写） |
-| `logName` / `ids` / `provider` | `query`（`logName` 亦用于 `detail`） | 通道名（`query` 默认 `"System"`，`detail` 必填）/ `0–65535` 整数数组 / 提供程序正则（1–128 字节，忽略大小写） |
+| `logName` / `ids` / `provider` | `query`（`logName` 亦用于 `detail`） | 通道名（`query` 默认 `"System"`，`detail` 必填）/ 最多 16 个 `0–65535` 整数 / 提供程序正则（1–128 字节，忽略大小写） |
 | `recordId` / `id` | `detail` | 二选一必填。`recordId` 匹配精确记录号，`id` 取该事件 ID 最新一条，同时必须提供 `logName` |
 
 - **返回（顶层键为 `[scope]`）**：
