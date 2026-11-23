@@ -13,6 +13,7 @@ export type EditQueueItemDetail = {
 	version: number;
 	text: string;
 	skill?: string;
+	images: InboxSnapshot["items"][number]["images"];
 	refresh: () => Promise<void>;
 };
 
@@ -122,6 +123,7 @@ export function QueuePanel({ id, queue, refresh }: { id: string; queue: InboxSna
 														version: queue.version,
 														text: item.text,
 														skill: item.skill,
+														images: item.images,
 														refresh,
 													},
 												}),

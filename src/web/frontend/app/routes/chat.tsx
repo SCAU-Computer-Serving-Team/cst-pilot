@@ -59,7 +59,14 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 			/* 本地清理失败时保留备份，下一次同步重试。 */
 		}
 	}, [detail, example, outbox]);
-	const [forkBusy, setForkBusy] = useState(false);
+	const forkBusy = useRef(false);
+	const active = useRef(false);
+	useEffect(() => {
+		active.current = true;
+		return () => {
+			active.current = false;
+		};
+	}, []);
 	const [messageMenuOpen, setMessageMenuOpen] = useState(false);
 	const messageMenuTrigger = useRef<HTMLButtonElement>(null);
 	usePanelDismiss(messageMenuOpen, () => setMessageMenuOpen(false), undefined, messageMenuTrigger);
@@ -155,29 +162,39 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 		await refresh();
 	}
 	async function forkDirectly(explicitEntryId?: string) {
-		if (!sessionId || forkBusy) return;
+		if (!sessionId || forkBusy.current) return;
 		if (detail?.running || streaming) {
 			setSummaryNote("请等待当前回复完成后再分支新会话。");
 			return;
 		}
 		const targetEntryId =
-			explicitEntryId ?? [...entries].reverse().find((entry) => entry.id && entry.message.role !== "user")?.id;
+			explicitEntryId ??
+			[...(loadedDetail?.entries ?? [])]
+				.reverse()
+				.find(
+					(entry) =>
+						entry.id &&
+						entry.message.role === "assistant" &&
+						entry.message.stopReason != null &&
+						entry.message.stopReason !== "toolUse",
+				)?.id;
 		if (!targetEntryId) {
 			setSummaryNote("当前会话尚无可用于分支的已完成回复。");
 			return;
 		}
-		setForkBusy(true);
+		forkBusy.current = true;
 		setSummaryNote("");
 		try {
 			const created = await apiJson<{ id: string }>(sessionPath(sessionId, "/fork"), {
 				method: "POST",
 				body: { entryId: targetEntryId },
 			});
-			navigate(`/s/${created.id}`);
+			if (!created?.id) throw new Error("后台未返回新会话 ID。");
+			if (active.current) navigate(`/s/${encodeURIComponent(created.id)}`);
 		} catch (cause) {
 			setSummaryNote(cause instanceof Error ? cause.message : "分支会话失败，请重试");
 		} finally {
-			setForkBusy(false);
+			forkBusy.current = false;
 		}
 	}
 	return (

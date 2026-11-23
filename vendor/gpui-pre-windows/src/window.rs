@@ -57,6 +57,7 @@ pub struct WindowsWindowState {
     pub frame_signal: Arc<PlatformFrameSignal>,
     pub input_handler: Cell<Option<PlatformInputHandler>>,
     pub ime_enabled: Cell<bool>,
+    pub ime_completion: RefCell<Option<String>>,
     pub pending_surrogate: Cell<Option<u16>>,
     pub last_reported_modifiers: Cell<Option<Modifiers>>,
     pub last_reported_capslock: Cell<Option<Capslock>>,
@@ -176,6 +177,7 @@ impl WindowsWindowState {
             frame_signal: Arc::new(PlatformFrameSignal::new()),
             input_handler: Cell::new(input_handler),
             ime_enabled: Cell::new(true),
+            ime_completion: RefCell::new(None),
             pending_surrogate: Cell::new(pending_surrogate),
             last_reported_modifiers: Cell::new(last_reported_modifiers),
             last_reported_capslock: Cell::new(last_reported_capslock),
@@ -1080,8 +1082,8 @@ impl PlatformWindow for WindowsWindow {
         self.0.update_ime_position(self.0.hwnd, caret_position);
     }
 
-    fn finish_ime_composition(&self) {
-        self.0.finish_ime_composition(self.0.hwnd);
+    fn finish_ime_composition(&self) -> Option<String> {
+        self.0.finish_ime_composition(self.0.hwnd)
     }
 
     fn cancel_ime_composition(&self) {

@@ -1069,6 +1069,22 @@ impl ChatActionsMockBackend {
                             return;
                         }
 
+                        if method == "GET" && path == "/api/sessions/sess-forked/attachments/queue-attachment" {
+                            use image::ImageEncoder as _;
+                            assert!(st.lock().unwrap().deleted_queue_items.is_empty());
+                            let mut png = Vec::new();
+                            image::codecs::png::PngEncoder::new(&mut png)
+                                .write_image(&[255, 0, 0, 255], 1, 1, image::ExtendedColorType::Rgba8)
+                                .unwrap();
+                            let header = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                png.len()
+                            );
+                            let _ = stream.write_all(header.as_bytes()).await;
+                            let _ = stream.write_all(&png).await;
+                            return;
+                        }
+
                         let (status_line, resp_json) = {
                             let mut guard = st.lock().unwrap();
                             match (method, path) {
@@ -1234,6 +1250,7 @@ impl ChatActionsMockBackend {
                                             "id": "q1",
                                             "text": "然后是D盘",
                                             "skill": "disk",
+                                            "images": [{"id": "queue-attachment", "mimeType": "image/png"}],
                                             "status": "pending",
                                             "delivery": "queue"
                                         })]
@@ -1669,4 +1686,11 @@ async fn message_actions_direct_fork_queue_edit_backfill_scroll_anchor_and_ime_c
         assert_eq!(g.deleted_queue_items[0].0, "q1");
         assert_eq!(g.deleted_queue_items[0].1["version"], 3);
     }
+    handle.with_workspace_mut(|ws| {
+        let key = DraftKey::Session("sess-forked".into());
+        assert_eq!(ws.draft(&key).unwrap().images.len(), 1);
+        assert!(ws.image_pool().used_bytes() > 0);
+        ws.draft_mut(key).images.clear();
+        assert_eq!(ws.image_pool().used_bytes(), 0);
+    });
 }

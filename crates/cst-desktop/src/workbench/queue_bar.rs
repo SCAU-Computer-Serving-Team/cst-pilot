@@ -20,6 +20,7 @@ pub struct VisibleQueueItem {
     pub id: String,
     pub text: String,
     pub skill: Option<String>,
+    pub attachment_ids: Vec<String>,
     pub status: String,
     pub delivery: String,
     pub uncertain: bool,
@@ -83,6 +84,15 @@ impl ParsedQueueSnapshot {
                         .and_then(Value::as_str)
                         .filter(|s| !s.is_empty())
                         .map(str::to_owned),
+                    attachment_ids: item
+                        .get("images")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|image| {
+                            image.get("id").and_then(Value::as_str).map(str::to_owned)
+                        })
+                        .collect(),
                     status,
                     delivery,
                     uncertain,

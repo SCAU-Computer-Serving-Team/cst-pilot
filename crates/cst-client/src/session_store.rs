@@ -621,11 +621,12 @@ fn apply_frame_to_snapshot(snap: &mut SessionViewSnapshot, frame: BufferedSessio
                         if msg.get("role").and_then(Value::as_str) != Some("system") {
                             let added_bytes = serde_json::to_vec(msg).map(|b| b.len()).unwrap_or(0);
                             let previous_bytes = upsert_message(&mut snap.messages, msg.clone());
-                            upsert_entry_message(&mut snap.entries, msg.clone());
+                            let (old_entry, new_entry) =
+                                upsert_entry_message(&mut snap.entries, msg.clone());
                             snap.estimated_bytes = snap
                                 .estimated_bytes
-                                .saturating_sub(previous_bytes)
-                                .saturating_add(added_bytes);
+                                .saturating_sub(previous_bytes + old_entry)
+                                .saturating_add(added_bytes + new_entry);
                         }
                     }
                 }
@@ -644,15 +645,23 @@ fn apply_frame_to_snapshot(snap: &mut SessionViewSnapshot, frame: BufferedSessio
                                 .unwrap_or(0);
                             let previous_bytes =
                                 upsert_persisted_entry(&mut snap.entries, normalized.clone());
-                            if let Some(msg) = normalized.get("message")
-                                && msg.get("role").and_then(Value::as_str) != Some("system")
-                            {
-                                let _ = upsert_message(&mut snap.messages, msg.clone());
-                            }
+                            // Summaries belong to the tree projection. Compaction/tree events
+                            // reload the model context instead of appending synthetic messages.
+                            let (old_message, new_message) =
+                                if entry.get("type").and_then(Value::as_str) == Some("message")
+                                    && let Some(msg) = normalized.get("message")
+                                {
+                                    (
+                                        upsert_message(&mut snap.messages, msg.clone()),
+                                        json_size(msg),
+                                    )
+                                } else {
+                                    (0, 0)
+                                };
                             snap.estimated_bytes = snap
                                 .estimated_bytes
-                                .saturating_sub(previous_bytes)
-                                .saturating_add(added_bytes);
+                                .saturating_sub(previous_bytes + old_message)
+                                .saturating_add(added_bytes + new_message);
                         }
                     }
                 }
@@ -718,13 +727,27 @@ fn message_dedup_key(msg: &Value) -> Option<String> {
     ))
 }
 
+fn same_message(left: &Value, right: &Value) -> bool {
+    if left == right {
+        return true;
+    }
+    let Some(key) = message_dedup_key(left) else {
+        return false;
+    };
+    message_dedup_key(right).as_ref() == Some(&key)
+        && (!key.starts_with("timestamp:") || left.get("content") == right.get("content"))
+}
+
+fn json_size(value: &Value) -> usize {
+    serde_json::to_vec(value).map_or(0, |bytes| bytes.len())
+}
+
 /// Merge messages already covered by the HTTP snapshot and return the replaced size.
 fn upsert_message(messages: &mut Arc<Vec<Value>>, msg: Value) -> usize {
     let vec = Arc::make_mut(messages);
-    let key = message_dedup_key(&msg);
     if let Some(existing) = vec
         .iter_mut()
-        .find(|existing| **existing == msg || (key.is_some() && key == message_dedup_key(existing)))
+        .rfind(|existing| same_message(existing, &msg))
     {
         let previous = serde_json::to_vec(existing).map_or(0, |bytes| bytes.len());
         *existing = msg;
@@ -774,19 +797,16 @@ fn normalize_appended_entry(entry: &Value) -> Option<Value> {
 fn upsert_persisted_entry(entries: &mut Arc<Vec<Value>>, entry: Value) -> usize {
     let vec = Arc::make_mut(entries);
     let target_id = entry.get("id").and_then(Value::as_str);
-    let msg_key = entry.get("message").and_then(message_dedup_key);
-    if let Some(existing) = vec.iter_mut().find(|existing| {
+    let msg = entry.get("message");
+    if let Some(existing) = vec.iter_mut().rfind(|existing| {
         let existing_id = existing.get("id").and_then(Value::as_str);
         if target_id.is_some() && existing_id == target_id {
             return true;
         }
         let is_synthetic =
             existing_id.is_none_or(|id| id.starts_with("stream-") || id.starts_with("entry-"));
-        if is_synthetic && msg_key.is_some() {
-            let em = existing.get("message").unwrap_or(existing);
-            return message_dedup_key(em) == msg_key;
-        }
-        false
+        is_synthetic
+            && msg.is_some_and(|msg| same_message(existing.get("message").unwrap_or(existing), msg))
     }) {
         let previous = serde_json::to_vec(existing).map_or(0, |bytes| bytes.len());
         *existing = entry;
@@ -796,13 +816,18 @@ fn upsert_persisted_entry(entries: &mut Arc<Vec<Value>>, entry: Value) -> usize 
     0
 }
 
-fn upsert_entry_message(entries: &mut Arc<Vec<Value>>, msg: Value) {
-    let vec = Arc::make_mut(entries);
-    let key = message_dedup_key(&msg);
-    if let Some(existing) = vec.iter_mut().find(|entry| {
-        let em = entry.get("message").unwrap_or(entry);
-        *em == msg || (key.is_some() && key == message_dedup_key(em))
-    }) {
+fn upsert_entry_message(entries: &mut Arc<Vec<Value>>, msg: Value) -> (usize, usize) {
+    if let Some(index) = entries
+        .iter()
+        .rposition(|entry| same_message(entry.get("message").unwrap_or(entry), &msg))
+    {
+        let existing = &entries[index];
+        if existing.get("parentId").is_some() {
+            // The persisted entry is authoritative, including any snapshot-only decoration.
+            return (0, 0);
+        }
+        let previous = json_size(existing);
+        let existing = &mut Arc::make_mut(entries)[index];
         if let Some(obj) = existing.as_object_mut()
             && obj.contains_key("message")
         {
@@ -810,17 +835,15 @@ fn upsert_entry_message(entries: &mut Arc<Vec<Value>>, msg: Value) {
         } else {
             *existing = msg;
         }
-        return;
+        return (previous, json_size(existing));
     }
-    let synthetic_id = format!(
-        "stream-{}-{}",
-        msg.get("role").and_then(Value::as_str).unwrap_or("msg"),
-        msg.get("timestamp").and_then(Value::as_u64).unwrap_or(0)
-    );
-    vec.push(json!({
-        "id": synthetic_id,
+    let entry = json!({
+        "id": format!("stream-{}-{}", msg["role"].as_str().unwrap_or("msg"), entries.len()),
         "message": msg,
-    }));
+    });
+    let size = json_size(&entry);
+    Arc::make_mut(entries).push(entry);
+    (0, size)
 }
 
 fn apply_assistant_delta(slot: &mut Option<Value>, delta_ev: &Value) {
@@ -963,6 +986,51 @@ mod tests {
             store.finish_loading_snapshot("s1", g2, json!({"id": "s1", "messages": []})),
             FinishLoadingOutcome::BufferOverflowNeedsReload
         ));
+    }
+
+    #[test]
+    fn same_millisecond_messages_keep_distinct_entries_and_account_for_both_copies() {
+        let mut store = SessionStore::default();
+        let generation = store.begin_loading_if_absent("s").unwrap();
+        store.finish_loading_snapshot(
+            "s",
+            generation,
+            json!({"id": "s", "messages": [], "entries": []}),
+        );
+        for (id, content) in [("a1", "first"), ("a2", "second")] {
+            let message = json!({"role": "assistant", "timestamp": 5, "content": content});
+            store.apply_session_event(
+                "s",
+                None,
+                json!({"type": "message_end", "message": message}),
+                0,
+            );
+            store.apply_session_event(
+                "s",
+                None,
+                json!({
+                    "type": "entry_appended", "entry": {
+                        "id": id, "type": "message", "parentId": null, "message": message
+                    }
+                }),
+                0,
+            );
+        }
+        let map = store.export_ready_map();
+        let snapshot = &map["s"];
+        assert_eq!(snapshot.entries.len(), 2);
+        assert_eq!(snapshot.entries[0]["id"], "a1");
+        assert_eq!(snapshot.entries[1]["id"], "a2");
+        assert_eq!(snapshot.messages.len(), 2);
+        // Array separators are ignored by the incremental estimate.
+        assert_eq!(
+            snapshot.estimated_bytes,
+            serde_json::to_vec(snapshot.messages.as_ref())
+                .unwrap()
+                .len()
+                + serde_json::to_vec(snapshot.entries.as_ref()).unwrap().len()
+                - 2,
+        );
     }
 
     #[test]

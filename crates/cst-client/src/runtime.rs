@@ -369,6 +369,31 @@ impl ClientHandle {
         f(&guard)
     }
 
+    /// Retains recovered content in the local outbox when the destination draft changed.
+    pub fn retain_recovered_payload(
+        &self,
+        session_id: &str,
+        draft: &ComposerDraft,
+    ) -> Result<(), ClientError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_millis() as u64);
+        let item = OutboxItem::from_draft(Some(session_id.to_owned()), draft, now)?;
+        let id = item.client_message_id.clone();
+        let mut outbox = self.core.outbox.lock().expect("outbox lock");
+        outbox.enqueue_session(session_id, item);
+        // enqueue_session normalizes non-sending states.
+        outbox.mark_session_error(
+            session_id,
+            &id,
+            &ClientError::Conflict {
+                code: "draft_changed".into(),
+                message: "草稿已更新，请从此处恢复编辑。".into(),
+            },
+        );
+        Ok(())
+    }
+
     pub fn with_presenter_cache<R>(&self, f: impl FnOnce(&mut ToolPresenterCache) -> R) -> R {
         let mut guard = self
             .core
@@ -1628,18 +1653,20 @@ async fn run_state_reducer_loop(
                             if let Some(ref cur) = session_cursor {
                                 update_monotonic_session_cursor(&mut session_cursors, &session_id, cur);
                             }
-                            if let Some(cmid) = event
-                                .get("message")
-                                .or_else(|| event.get("entry").and_then(|e| e.get("message")))
+                            let ev_type = event.get("type").and_then(Value::as_str);
+                            let committed_message = match ev_type {
+                                Some("message_end") => event.get("message"),
+                                Some("entry_appended") => event.get("entry").and_then(|e| e.get("message")),
+                                _ => None,
+                            };
+                            if let Some(cmid) = committed_message
                                 .and_then(|m| m.get("clientMessageId"))
                                 .and_then(Value::as_str)
+                                && core.outbox.lock().expect("outbox lock").mark_accepted(&session_id, cmid)
                             {
-                                core.outbox
-                                    .lock()
-                                    .expect("outbox lock")
-                                    .mark_accepted(&session_id, cmid);
+                                session_dirty = true;
+                                needs_immediate_publish = true;
                             }
-                            let ev_type = event.get("type").and_then(Value::as_str);
                             let is_high_freq_delta = matches!(
                                 ev_type,
                                 Some("message_update" | "tool_execution_update")
@@ -2147,12 +2174,13 @@ async fn run_state_reducer_loop(
                     }
                     WorkerCommand::ReloadSession { session_id, reply } => {
                         let generation = session_store.reset_to_loading(&session_id);
+                        pending_session_waiters.entry(session_id.clone()).or_default().push(reply);
                         spawn_session_snapshot_fetch(
                             core.http.clone(),
                             done_tx.clone(),
                             session_id,
                             generation,
-                            vec![reply],
+                            Vec::new(),
                         );
                     }
                     WorkerCommand::RefreshGlobals { op_revision, reply } => {

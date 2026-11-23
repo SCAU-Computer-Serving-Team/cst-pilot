@@ -6992,9 +6992,9 @@ impl Window {
         });
     }
 
-    /// Commits any active platform IME composition string on the focused window.
-    pub fn finish_ime_composition(&self) {
-        self.platform_window.finish_ime_composition();
+    /// Completes native IME composition and returns the committed text for the caller to apply.
+    pub fn finish_ime_composition(&self) -> Option<String> {
+        self.platform_window.finish_ime_composition()
     }
 
     /// Cancels and discards any active platform IME composition string on the focused window.

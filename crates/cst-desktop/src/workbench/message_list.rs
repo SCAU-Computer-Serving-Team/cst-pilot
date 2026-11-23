@@ -78,28 +78,16 @@ pub(crate) fn is_real_entry_id(id: &str) -> bool {
 }
 
 pub(crate) fn latest_forkable_entry_id(session: &SessionViewSnapshot) -> Option<String> {
-    for raw in session.entries.iter().rev() {
-        let Some(eid) = raw.get("id").and_then(Value::as_str) else {
-            continue;
-        };
-        if !is_real_entry_id(eid) {
-            continue;
-        }
-        let role = raw
-            .get("message")
-            .unwrap_or(raw)
-            .get("role")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        if role != "user" && role != "system" {
-            return Some(eid.to_owned());
-        }
-    }
-    session
-        .leaf_id
-        .as_deref()
-        .filter(|id| is_real_entry_id(id))
-        .map(str::to_owned)
+    session.entries.iter().rev().find_map(|entry| {
+        let message = entry.get("message").unwrap_or(entry);
+        let id = entry.get("id")?.as_str()?;
+        (is_real_entry_id(id)
+            && message["role"] == "assistant"
+            && message["stopReason"]
+                .as_str()
+                .is_some_and(|reason| reason != "toolUse"))
+        .then(|| id.to_owned())
+    })
 }
 
 struct PendingSecretInput {
@@ -397,7 +385,6 @@ impl MessageListView {
         self.content_reveal.clear();
         self.last_observed_revision = 0;
         self.auto_follow_bottom = true;
-        self.action_in_flight = false;
         self.visible_turn_limit = DEFAULT_VISIBLE_TURN_WINDOW;
         self.segment_expansion_overrides.clear();
         self.expanded_thinking.clear();
@@ -671,8 +658,32 @@ impl MessageListView {
         cx.notify();
 
         let client = self.client.clone();
+        let key = DraftKey::Session(session_id.clone());
+        let revision = client.with_workspace(|ws| ws.draft_edit_revision(&key));
         cx.spawn(async move |weak, cx| {
-            let images = load_turn_images_into_pool(&client, &session_id, &user_images).await;
+            let images = match load_turn_images_into_pool(&client, &session_id, &user_images).await
+            {
+                Ok(images) => images,
+                Err(err) => {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.finish_action_error(&session_id, err, cx)
+                    });
+                    return;
+                }
+            };
+            if client.with_workspace(|ws| ws.draft_edit_revision(&key)) != revision {
+                let _ = weak.update(cx, |this, cx| {
+                    this.finish_action_error(
+                        &session_id,
+                        ClientError::Conflict {
+                            code: "draft_changed".into(),
+                            message: "草稿已更新，请重新点击修改。".into(),
+                        },
+                        cx,
+                    );
+                });
+                return;
+            }
             let nav_res = client
                 .navigate_session_tree(session_id.clone(), user_entry_id, false, None)
                 .await;
@@ -696,17 +707,36 @@ impl MessageListView {
             }
 
             let _ = client.reload_session(session_id.clone()).await;
-            let key = DraftKey::Session(session_id);
-            client.with_workspace_mut(|ws| {
+            let mut payload = ComposerDraft {
+                cursor_char_offset: user_text.chars().count(),
+                text: user_text,
+                images,
+                ..ComposerDraft::default()
+            };
+            let installed = client.with_workspace_mut(|ws| {
+                if ws.draft_edit_revision(&key) != revision {
+                    return false;
+                }
                 let d = ws.draft_mut(key);
-                d.cursor_char_offset = user_text.chars().count();
-                d.text = user_text;
+                d.cursor_char_offset = payload.cursor_char_offset;
+                d.text = std::mem::take(&mut payload.text);
                 d.tokens.clear();
-                d.images = images;
+                d.images = std::mem::take(&mut payload.images);
+                true
             });
+            let recovery =
+                (!installed).then(|| client.retain_recovered_payload(&session_id, &payload));
             let _ = weak.update(cx, |this, cx| {
                 this.action_in_flight = false;
-                cx.emit(MessageListEvent::FocusComposer);
+                if this.session_id.as_deref() == Some(&session_id) {
+                    match recovery {
+                        None => cx.emit(MessageListEvent::FocusComposer),
+                        Some(Ok(())) => cx.emit(MessageListEvent::TopNotice(
+                            "当前草稿有新内容，历史消息已保留在对话中。".into(),
+                        )),
+                        Some(Err(err)) => cx.emit(MessageListEvent::ErrorMessage(err.to_string())),
+                    }
+                }
                 cx.notify();
             });
         })
@@ -752,7 +782,16 @@ impl MessageListView {
         let active_provider = resolve_session_active_provider(&self.client, &session_id);
         let client = self.client.clone();
         cx.spawn(async move |weak, cx| {
-            let images = load_turn_images_into_pool(&client, &session_id, &user_images).await;
+            let images = match load_turn_images_into_pool(&client, &session_id, &user_images).await
+            {
+                Ok(images) => images,
+                Err(err) => {
+                    let _ = weak.update(cx, |this, cx| {
+                        this.finish_action_error(&session_id, err, cx)
+                    });
+                    return;
+                }
+            };
             let nav_res = client
                 .navigate_session_tree(session_id.clone(), user_entry_id, false, None)
                 .await;
@@ -782,9 +821,15 @@ impl MessageListView {
                 images,
                 ..ComposerDraft::default()
             };
-            let submit_res = client.submit_direct_payload(session_id, payload).await;
+            let submit_res = client
+                .submit_direct_payload(session_id.clone(), payload)
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 this.action_in_flight = false;
+                if this.session_id.as_deref() != Some(&session_id) {
+                    cx.notify();
+                    return;
+                }
                 this.scroll_to_bottom_and_follow(cx);
                 match submit_res {
                     Ok(_) => {}
@@ -803,7 +848,20 @@ impl MessageListView {
         .detach();
     }
 
-    fn fork_from_entry(&mut self, session_id: String, entry_id: String, cx: &mut Context<Self>) {
+    fn finish_action_error(&mut self, session_id: &str, err: ClientError, cx: &mut Context<Self>) {
+        self.action_in_flight = false;
+        if self.session_id.as_deref() == Some(session_id) {
+            cx.emit(MessageListEvent::ErrorMessage(err.to_string()));
+        }
+        cx.notify();
+    }
+
+    pub(super) fn fork_from_entry(
+        &mut self,
+        session_id: String,
+        entry_id: String,
+        cx: &mut Context<Self>,
+    ) {
         if self.action_in_flight || !is_real_entry_id(&entry_id) {
             return;
         }
@@ -812,10 +870,14 @@ impl MessageListView {
 
         let client = self.client.clone();
         cx.spawn(async move |weak, cx| {
-            let res = client.fork_session(session_id, entry_id).await;
+            let res = client.fork_session(session_id.clone(), entry_id).await;
             let _ = client.refresh_globals().await;
             let _ = weak.update(cx, |this, cx| {
                 this.action_in_flight = false;
+                if this.session_id.as_deref() != Some(&session_id) {
+                    cx.notify();
+                    return;
+                }
                 match res {
                     Ok(new_sid) => {
                         if !new_sid.is_empty() {
@@ -2729,7 +2791,7 @@ impl Render for MessageListView {
                             crate::ux_probe::mark_input("show_earlier");
                             ent_more.update(cx, |this, cx| {
                                 this.visible_turn_limit += batch;
-                                this.scroll_handle.scroll_to_top_of_item(batch);
+                                this.scroll_to_top(cx);
                                 cx.notify();
                             });
                         })
@@ -3103,36 +3165,28 @@ async fn load_turn_images_into_pool(
     client: &ClientHandle,
     session_id: &str,
     parts: &[ImageContentPart],
-) -> Vec<cst_client::SharedImageHandle> {
-    if parts.is_empty() {
-        return Vec::new();
-    }
+) -> Result<Vec<cst_client::SharedImageHandle>, ClientError> {
     let pool = client.with_workspace(|ws| ws.image_pool().clone());
-    let mut out = Vec::with_capacity(parts.len());
+    let mut draft = ComposerDraft::default();
+    let invalid_image = || ClientError::BadRequest {
+        code: "invalid_image".into(),
+        message: "无法读取历史消息的附图。".into(),
+    };
     for part in parts {
-        let bytes_opt = if let Some(ref b64) = part.data_base64
-            && !b64.is_empty()
-        {
+        let bytes = if let Some(b64) = part.data_base64.as_deref().filter(|s| !s.is_empty()) {
             base64::engine::general_purpose::STANDARD
                 .decode(b64.trim())
-                .ok()
-        } else if let Some(ref aid) = part.attachment_id
-            && !aid.is_empty()
-        {
+                .map_err(|_| invalid_image())?
+        } else if let Some(id) = part.attachment_id.as_deref().filter(|s| !s.is_empty()) {
             client
-                .get_session_attachment_bytes(session_id.to_owned(), aid.clone())
-                .await
-                .ok()
+                .get_session_attachment_bytes(session_id.to_owned(), id.to_owned())
+                .await?
         } else {
-            None
+            return Err(invalid_image());
         };
-        if let Some(bytes) = bytes_opt
-            && let Ok(handle) = pool.admit_image(bytes, None)
-        {
-            out.push(handle);
-        }
+        draft.attach_image(pool.admit_image(bytes, None)?)?;
     }
-    out
+    Ok(draft.images)
 }
 
 fn now_epoch_ms() -> u64 {

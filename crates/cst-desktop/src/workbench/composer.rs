@@ -456,7 +456,9 @@ impl ComposerView {
         if self.textarea.read(cx).content() != content || had_ime_mark {
             self.clear_completion();
             self.had_active_ime_mark = false;
-            window.cancel_ime_composition();
+            if had_ime_mark {
+                window.cancel_ime_composition();
+            }
             self.textarea.update(cx, |st, cx| {
                 EntityInputHandler::unmark_text(st, window, cx);
                 st.set_value(content, window, cx);
@@ -1056,9 +1058,13 @@ impl ComposerView {
 
     pub fn trigger_submit_from_button(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.is_ime_composing(window, cx) {
-            window.finish_ime_composition();
+            let committed = window.finish_ime_composition();
             self.textarea.update(cx, |st, cx| {
-                EntityInputHandler::unmark_text(st, window, cx);
+                if let Some(text) = committed {
+                    EntityInputHandler::replace_text_in_range(st, None, &text, window, cx);
+                } else {
+                    EntityInputHandler::unmark_text(st, window, cx);
+                }
             });
             self.had_active_ime_mark = false;
         }
@@ -1256,37 +1262,62 @@ impl ComposerView {
         let mutation = QueueMutation::Delete(item.id.clone());
         self.queue_pending = Some((sid.clone(), mutation.project(queue)));
         let client = self.client.clone();
+        let key = DraftKey::Session(sid.clone());
+        let (draft_revision, pool) =
+            client.with_workspace(|ws| (ws.draft_edit_revision(&key), ws.image_pool().clone()));
         cx.spawn_in(window, async move |weak, cx| {
-            let result = mutation.send(client, sid.clone(), version).await;
+            let result = async {
+                let mut draft = ComposerDraft {
+                    cursor_char_offset: item.text.chars().count(),
+                    text: item.text,
+                    ..ComposerDraft::default()
+                };
+                if let Some(skill) = item.skill {
+                    let cmd = format!("/skill:{skill}");
+                    draft.tokens.push(DraftToken::Command {
+                        raw: cmd.clone(),
+                        name: cmd,
+                    });
+                }
+                for id in item.attachment_ids {
+                    let bytes = client.get_session_attachment_bytes(sid.clone(), id).await?;
+                    draft.attach_image(pool.admit_image(bytes, None)?)?;
+                }
+                let response = mutation.send(client.clone(), sid.clone(), version).await?;
+                Ok::<_, ClientError>((response, draft))
+            }
+            .await;
             let _ = weak.update_in(cx, |this, window, cx| {
                 this.queue_pending = None;
                 match result {
-                    Ok(response) => {
+                    Ok((response, mut draft)) => {
                         if let Some(raw) = response.get("queue") {
                             this.queue_receipt =
                                 Some((sid.clone(), ParsedQueueSnapshot::from_json(Some(raw))));
                         }
-                        let key = DraftKey::Session(sid.clone());
-                        let tokens = item
-                            .skill
-                            .as_deref()
-                            .filter(|s| !s.is_empty())
-                            .map(|s| {
-                                let cmd = format!("/skill:{s}");
-                                vec![DraftToken::Command {
-                                    raw: cmd.clone(),
-                                    name: cmd,
-                                }]
-                            })
-                            .unwrap_or_default();
-                        this.client.with_workspace_mut(|ws| {
-                            let d = ws.draft_mut(key);
-                            d.cursor_char_offset = item.text.chars().count();
-                            d.text = item.text;
-                            d.tokens = tokens;
-                            d.images.clear();
+                        let active = this.draft_key == key;
+                        let composing = active && this.is_ime_composing(window, cx);
+                        let installed = this.client.with_workspace_mut(|ws| {
+                            if composing || ws.draft_edit_revision(&key) != draft_revision {
+                                return false;
+                            }
+                            let target = ws.draft_mut(key);
+                            target.cursor_char_offset = draft.cursor_char_offset;
+                            target.text = std::mem::take(&mut draft.text);
+                            target.tokens = std::mem::take(&mut draft.tokens);
+                            target.images = std::mem::take(&mut draft.images);
+                            true
                         });
-                        if this.draft_key == DraftKey::Session(sid) {
+                        if !installed {
+                            match this.client.retain_recovered_payload(&sid, &draft) {
+                                Ok(()) => cx.emit(ComposerHostEvent::TopNotice(
+                                    "当前草稿有新内容，排队消息已保留在对话中。".into(),
+                                )),
+                                Err(err) => {
+                                    cx.emit(ComposerHostEvent::ErrorMessage(err.to_string()))
+                                }
+                            }
+                        } else if active {
                             this.pull_from_workspace(window, cx);
                             this.focus_handle(cx).focus(window, cx);
                         }

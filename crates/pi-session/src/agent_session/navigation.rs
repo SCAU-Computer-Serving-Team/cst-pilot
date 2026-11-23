@@ -54,16 +54,15 @@ impl AgentSession {
         cancel: CancellationToken,
     ) -> Result<NavigateTreeResult, String> {
         let old_leaf_id = self.with_session_manager(|sm| sm.get_leaf_id().map(ToOwned::to_owned));
-        if old_leaf_id.as_deref() == Some(target_id) {
-            return Ok(NavigateTreeResult {
-                cancelled: false,
-                ..NavigateTreeResult::default()
-            });
-        }
-
         let target_entry = self
             .with_session_manager(|sm| sm.get_entry(target_id).cloned())
             .ok_or_else(|| format!("Entry {target_id} not found"))?;
+        // Editing a user/custom message at the current leaf still rewinds to its parent.
+        let rewinds_to_parent = matches!(&target_entry, SessionEntry::Message(m) if m.message.role() == "user")
+            || matches!(&target_entry, SessionEntry::CustomMessage(_));
+        if old_leaf_id.as_deref() == Some(target_id) && !rewinds_to_parent {
+            return Ok(NavigateTreeResult::default());
+        }
 
         let collected = self.with_session_manager(|sm| {
             collect_entries_for_branch_summary(sm, old_leaf_id.as_deref(), Some(target_id))

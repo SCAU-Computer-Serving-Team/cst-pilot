@@ -426,26 +426,9 @@ impl WorkbenchView {
                             return;
                         }
                         if let Some(eid) = latest_forkable_entry_id(sess) {
-                            let sid_owned = sid.clone();
-                            let client = self.client.clone();
-                            cx.spawn(async move |weak, cx| {
-                                let res = client.fork_session(sid_owned, eid).await;
-                                let _ = client.refresh_globals().await;
-                                let _ = weak.update(cx, |_, cx| match res {
-                                    Ok(new_sid) => {
-                                        if !new_sid.is_empty() {
-                                            cx.emit(WorkbenchEvent::ActivatedSession(new_sid));
-                                            cx.emit(WorkbenchEvent::TopNotice(
-                                                "已从当前节点分支新会话".into(),
-                                            ));
-                                        }
-                                    }
-                                    Err(e) => {
-                                        cx.emit(WorkbenchEvent::WorkspaceError(e.to_string()))
-                                    }
-                                });
-                            })
-                            .detach();
+                            self.message_list.update(cx, |list, cx| {
+                                list.fork_from_entry(sid.clone(), eid, cx);
+                            });
                         } else {
                             cx.emit(WorkbenchEvent::TopNotice(
                                 "当前会话尚无可用于分支的已完成回复".into(),

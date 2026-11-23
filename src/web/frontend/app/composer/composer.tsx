@@ -90,6 +90,7 @@ export function Composer({
 	const dragDepth = useRef(0);
 	const [pendingEditId, setPendingEditId] = useState<string | null>(null);
 	const [pendingQueueEdit, setPendingQueueEdit] = useState<EditQueueItemDetail | null>(null);
+	const queueEditBusy = useRef(false);
 	const attachmentBusy = useRef(false);
 	const imageGeneration = useRef(0);
 	const imagesRef = useRef(images);
@@ -650,8 +651,9 @@ export function Composer({
 			setSending(false);
 		}
 	}
-	async function replaceDraft(draft: SavedDraft, saveCurrent: boolean) {
-		if (restoring.current || submitLock.current || imagesLoading || attaching) throw new Error("请等待当前操作完成");
+	async function replaceDraft(draft: SavedDraft, saveCurrent: boolean, removeFromQueue?: () => Promise<unknown>) {
+		if (restoring.current || submitLock.current || imagesLoading || attachmentBusy.current)
+			throw new Error("请等待当前操作完成");
 		restoring.current = true;
 		const revision = editorRevision.current;
 		const generation = imageGeneration.current;
@@ -661,7 +663,14 @@ export function Composer({
 			if (loaded.length !== draft.images.length) throw new Error("图片不完整，请保留发送记录并重新添加图片。");
 			if (revision !== editorRevision.current || generation !== imageGeneration.current)
 				throw new Error("草稿已更新，请重新点击编辑。");
+			if (removeFromQueue) await removeFromQueue();
 			const saved = readSavedDrafts(sessionStorage, draftKey);
+			if (removeFromQueue && (revision !== editorRevision.current || generation !== imageGeneration.current)) {
+				saved.push(draft);
+				sessionStorage.setItem(`${draftKey}:saved`, JSON.stringify(saved));
+				if (generation === imageGeneration.current) setSavedCount(saved.length);
+				return;
+			}
 			if (!saveCurrent) saved.pop();
 			const current = { text: readEditor(true), images: imagesRef.current.map((image) => image.hash) };
 			if (current.text || current.images.length) saved.push(current);
@@ -698,18 +707,41 @@ export function Composer({
 			.finally(() => outbox.endEdit(item.id));
 	}
 	async function performQueueItemEdit(detail: EditQueueItemDetail) {
-		if (!sessionId || detail.sessionId !== sessionId) return;
+		if (!sessionId || detail.sessionId !== sessionId || queueEditBusy.current) return;
+		if (restoring.current || submitLock.current || imagesLoading || attachmentBusy.current) {
+			setError("请等待当前操作完成");
+			return;
+		}
+		queueEditBusy.current = true;
+		const revision = editorRevision.current;
+		const generation = imageGeneration.current;
+		const held: DraftImage[] = [];
 		try {
-			await apiJson(sessionPath(detail.sessionId, `/queue/${encodeURIComponent(detail.itemId)}`), {
-				method: "DELETE",
-				body: { version: detail.version },
-			});
-			await detail.refresh();
+			let totalBytes = 0;
+			for (const image of detail.images) {
+				const response = await fetch(sessionPath(sessionId, `/attachments/${encodeURIComponent(image.id)}`));
+				if (!response.ok) throw new Error("无法读取排队消息的附图");
+				const file = new File([await response.blob()], image.id, { type: image.mimeType });
+				held.push(await addImage(file, totalBytes));
+				totalBytes += file.size;
+			}
+			if (revision !== editorRevision.current || generation !== imageGeneration.current) {
+				throw new Error("草稿已更新，请重新点击编辑。");
+			}
 			const serialized = detail.skill ? `/skill:${detail.skill} ${detail.text}` : detail.text;
-			await replaceDraft({ text: serialized, images: [] }, true);
+			await replaceDraft({ text: serialized, images: held.map((image) => image.hash) }, true, () =>
+				apiJson(sessionPath(detail.sessionId, `/queue/${encodeURIComponent(detail.itemId)}`), {
+					method: "DELETE",
+					body: { version: detail.version },
+				}),
+			);
 		} catch (cause) {
-			await detail.refresh().catch(() => {});
 			setError(cause instanceof Error ? cause.message : "无法编辑排队消息");
+		} finally {
+			queueEditBusy.current = false;
+			for (const image of held) URL.revokeObjectURL(image.url);
+			if (held.length) void releaseImageHolds(held).catch(() => {});
+			void detail.refresh().catch(() => {});
 		}
 	}
 	// biome-ignore lint/correctness/useExhaustiveDependencies: 事件读写当前会话 DOM 和 refs，不随输入内容重新订阅。

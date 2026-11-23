@@ -427,6 +427,70 @@ mod controlled_http {
     }
 }
 
+#[tokio::test]
+async fn rejected_direct_payload_stays_recoverable_without_overwriting_the_composer() {
+    use controlled_http::{RawReply, spawn_controlled_server};
+    use cst_client::{ComposerDraft, OutboxItemState};
+
+    let fixture = ServerFixture::new();
+    let (port, _) = spawn_controlled_server(|req| async move {
+        if req.method == "POST" && req.target == "/api/sessions/s1/messages" {
+            return RawReply::Json {
+                status: 409,
+                body: json!({"error": {"code": "credentials_required", "message": "缺少密钥"}}),
+            };
+        }
+        RawReply::Json {
+            status: 200,
+            body: json!({}),
+        }
+    })
+    .await;
+    let process = ProcessIdentity::current().unwrap();
+    let handle = CstClient::from_verified_endpoint(
+        &tokio::runtime::Handle::current(),
+        VerifiedServerEndpoint {
+            kit_root: fixture.root.clone(),
+            pid: process.pid,
+            process_created: process.created,
+            port,
+            version: "v0.9.5".into(),
+            http: AppHttpClient::new(port, "test-token").unwrap(),
+            spawned_by_client: false,
+        },
+        None,
+    )
+    .unwrap();
+    let key = DraftKey::Session("s1".into());
+    handle.with_workspace_mut(|ws| ws.draft_mut(key.clone()).text = "保留草稿".into());
+
+    let error = handle
+        .submit_direct_payload(
+            "s1".into(),
+            ComposerDraft {
+                text: "重新生成这轮".into(),
+                ..ComposerDraft::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(error.is_credentials_required(), "{error:?}");
+    handle.with_workspace(|ws| assert_eq!(ws.draft(&key).unwrap().text, "保留草稿"));
+    handle.with_outbox(|outbox| {
+        let items = outbox.session_items("s1");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].text, "重新生成这轮");
+        assert!(matches!(
+            items[0].state,
+            OutboxItemState::Failed {
+                credentials_required: true,
+                ..
+            }
+        ));
+    });
+    handle.stop();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn op_revision_prevents_stale_query_overwrite_and_cursor_generation_handles_reset_and_overflow()
  {
