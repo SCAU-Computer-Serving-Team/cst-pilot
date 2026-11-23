@@ -26,7 +26,7 @@
 | [auth](auth/SPEC.md) | `crates/cst-kit/src/auth/`、`crates/cst-server/src/routes/{auth,models}.rs` | [SPEC](auth/SPEC.md) · [ARCHITECTURE](auth/ARCHITECTURE.md) · [API](auth/API.md) |
 | [telemetry](telemetry/SPEC.md) | `crates/cst-kit/src/telemetry/`、`cst-pilot-server` | [SPEC](telemetry/SPEC.md) · [ARCHITECTURE](telemetry/ARCHITECTURE.md) · [API](telemetry/API.md) · [OPERATIONS](telemetry/OPERATIONS.md) |
 | [web](web/SPEC.md) | `src/web/frontend/`、`crates/cst-server/src/exports/`、`design/cst-pilot-web.pen` | [SPEC](web/SPEC.md) · [ARCHITECTURE](web/ARCHITECTURE.md) · [API](web/API.md) · [路由广度 E2E](web/test/bsk-e2e.md) · [深度状态机 E2E](web/test/bsk-deep-e2e.md) · [UX 量化 E2E](web/test/ux-e2e.md) |
-| [desktop](desktop/SPEC.md) | `design/cst-pilot-desktop.pen`、`crates/{cst-client,cst-desktop}`、`scripts/dev/desktop-{secret,record}.ps1` | [SPEC](desktop/SPEC.md) · [ARCHITECTURE](desktop/ARCHITECTURE.md) · [CLI 自动化手册](desktop/test/winapp-cli.md) · [UX 与性能 E2E](desktop/test/ux-e2e.md) · [Windows 兼容性与真机验收](desktop/test/windows-compat.md) |
+| [desktop](desktop/SPEC.md) | `design/cst-pilot-desktop.pen`、`crates/{cst-client,cst-desktop}`、`scripts/dev/desktop-{secret,record}.ps1` | [SPEC](desktop/SPEC.md) · [ARCHITECTURE](desktop/ARCHITECTURE.md) · [CLI 自动化手册](desktop/test/winapp-cli.md) · [全功能遍历 E2E](desktop/test/feature-e2e.md) · [UX 与性能 E2E](desktop/test/ux-e2e.md) · [Windows 兼容性与真机验收](desktop/test/windows-compat.md) |
 | [release](release/SPEC.md) | `crates/cst-updater/`、`crates/cst-kit/src/update/`、`src/web/frontend/scripts/`、`pack/` | [SPEC](release/SPEC.md) · [ARCHITECTURE](release/ARCHITECTURE.md) |
 
 ## Rust 子包设计与路线图
@@ -46,6 +46,7 @@
 | [rust/plan/8.5.pre-desktop-cleanup.md](rust/plan/8.5.pre-desktop-cleanup.md) | 阶段 9 前置清理：`cst-os`/`cst-updater`/`cst-kit` 包边界收口、`pi-core` 可选编译开关与字体文档解耦设计 |
 | [rust/plan/9.desktop.md](rust/plan/9.desktop.md) | 阶段 9 `crates/cst-client` 与 `crates/cst-desktop` GPUI 桌面端详细设计 |
 | [rust/plan/9.1.desktop-automation.md](rust/plan/9.1.desktop-automation.md) | 阶段 9.1 桌面端外部解耦 CLI（`winapp ui`）自动化操作、无回显凭据投递与截图录屏详细设计 |
+| [rust/plan/9.2.config-isolation-and-packaging.md](rust/plan/9.2.config-isolation-and-packaging.md) | 阶段 9.2 配置目录隔离（`app/` + `data/`）、纯 Rust 打包策略与存量兼容性设计 |
 
 ## 同名文件职责
 
