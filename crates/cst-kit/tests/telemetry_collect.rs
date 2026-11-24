@@ -376,6 +376,45 @@ fn tool_metrics_count_once_and_omit_all_business_arguments_and_body() {
     assert_eq!(disk.total_ms, 40);
     assert_eq!(disk.max_ms, 40);
     assert!(disk.result_bytes > 0);
+    // Normal native-walk without `degradedFrom` / `degraded` does not count as degraded.
+    state.tool_start(
+        "4",
+        "disk",
+        &json!({"scope":"usage","path":"C:\\sub"}),
+        1450,
+    );
+    let clean_walk = cst_kit::diagnostics::result::diagnostic_result(
+        json!({"usage":{"method":"native-walk","totalGB":1.0}}),
+    )
+    .unwrap();
+    state.tool_end("4", &clean_walk, false, Some(12), 1462);
+    let updated = state.snapshot(2, true, "quit", 2001, None);
+    let disk_after = updated
+        .metrics
+        .tools
+        .iter()
+        .find(|t| t.name == "disk")
+        .unwrap();
+    assert_eq!(disk_after.calls, 2);
+    assert_eq!(disk_after.degraded, 1);
+    // New `usage.degradedFrom` without top-level `degraded: true` must still count as degraded,
+    // while `usage.truncated: true` alone must NOT count as output-size `truncated`.
+    state.tool_start("5", "disk", &json!({"scope":"usage","path":"C:\\"}), 1470);
+    let mft_fallback = cst_kit::diagnostics::result::diagnostic_result(
+        json!({"usage":{"method":"native-walk","degradedFrom":"native-mft: 权限不足","truncated":true,"totalGB":1.0}}),
+    )
+    .unwrap();
+    state.tool_end("5", &mft_fallback, false, Some(25), 1495);
+    let after_fallback = state.snapshot(3, true, "quit", 2002, None);
+    let disk_fb = after_fallback
+        .metrics
+        .tools
+        .iter()
+        .find(|t| t.name == "disk")
+        .unwrap();
+    assert_eq!(disk_fb.calls, 3);
+    assert_eq!(disk_fb.degraded, 2);
+    assert_eq!(disk_fb.truncated, 1);
     let rb = record
         .metrics
         .tools

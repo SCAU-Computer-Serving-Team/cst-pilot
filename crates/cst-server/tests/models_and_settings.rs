@@ -9,6 +9,7 @@ use cst_kit::telemetry::TelemetryOptions;
 use cst_kit::tools::ssrf::{HttpRequest, HttpResponse, HttpTransport};
 use cst_kit::update::service::UpdateOptions;
 use cst_kit::{Kit, KitHost, SKILL_NAMES};
+use cst_server::discovery::{ServerInstanceLock, discovery_file_path, read_discovery_file};
 use cst_server::{RunningServer, ServerConfig};
 use pi_agent::BoxFuture;
 use serde_json::{Value, json};
@@ -1237,4 +1238,73 @@ async fn app_update_routes_check_prepare_cancel_and_launch_guards() {
     let _ = child.wait();
     drop(sse_stream);
     server.shutdown().await;
+}
+
+#[tokio::test]
+async fn running_server_publishes_and_cleans_up_dynamically_bound_port() {
+    let fixture = TestKitDir::new();
+    let kit = Kit::new(&fixture.0).unwrap();
+    let oa = OaClient::with_transport(
+        "https://oa.example.test",
+        Arc::new(CountingOaTransport::default()),
+        Arc::new(cst_kit::auth::oa::SystemClock),
+    )
+    .unwrap();
+    let auth = AuthRuntime::create(kit.root(), Channel::Gui, oa)
+        .await
+        .unwrap();
+    let host = KitHost::new(
+        kit,
+        auth,
+        TelemetryOptions::default(),
+        UpdateOptions::Disabled,
+    )
+    .await
+    .unwrap();
+
+    let mut cfg = ServerConfig::new(&fixture.0);
+    // Exercise dynamic-port publication without relying on the host's default port or environment.
+    cfg.port = Some(0);
+    cfg.mode_config.standalone_web = true;
+    let server = RunningServer::start(host, cfg).await.unwrap();
+
+    assert!(server.port() > 0);
+    assert_eq!(server.state.port(), server.port());
+    let lock_conflict = ServerInstanceLock::acquire(&fixture.0)
+        .err()
+        .expect("running server should hold the instance lock");
+    assert!(lock_conflict.starts_with("server_already_running:"));
+
+    let discovery = read_discovery_file(&fixture.0)
+        .expect("discovery file should be written with the bound port");
+    assert_eq!(discovery.port, server.port());
+    assert_eq!(discovery.token, server.app_token());
+    let origin = format!("http://127.0.0.1:{}", discovery.port);
+    assert_eq!(origin, server.base_url());
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let health = async {
+        client
+            .get(format!("{origin}/api/health"))
+            .header("Origin", &origin)
+            .header("X-CST-Client", "app")
+            .bearer_auth(&discovery.token)
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Value>()
+            .await
+    }
+    .await;
+
+    server.shutdown().await;
+    let health = health.unwrap();
+    assert_eq!(health["pid"], discovery.pid);
+    assert_eq!(health["connected"], true);
+    assert!(!discovery_file_path(&fixture.0).try_exists().unwrap());
+    ServerInstanceLock::acquire(&fixture.0).expect("shutdown should release the instance lock");
 }

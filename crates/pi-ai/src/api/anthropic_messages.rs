@@ -63,8 +63,8 @@ pub fn from_claude_code_name(name: &str, tools: &[Tool]) -> String {
     name.to_owned()
 }
 
-fn is_anthropic_oauth_token(api_key: Option<&str>) -> bool {
-    api_key.is_some_and(|k| k.contains("sk-ant-oat"))
+fn is_anthropic_oauth(model: &Model, api_key: Option<&str>) -> bool {
+    model.provider != "github-copilot" && api_key.is_some_and(|k| k.contains("sk-ant-oat"))
 }
 
 fn normalize_anthropic_tool_call_id(id: &str) -> String {
@@ -346,7 +346,7 @@ pub fn build_anthropic_params(
     context: &TranscriptContext,
     options: Option<&StreamOptions>,
 ) -> Value {
-    let is_oauth = is_anthropic_oauth_token(options.and_then(|o| o.api_key.as_deref()));
+    let is_oauth = is_anthropic_oauth(model, options.and_then(|o| o.api_key.as_deref()));
     let compat: ProviderCompat = model.compat.clone().unwrap_or_default();
     let retention = resolve_cache_retention(
         options.and_then(|o| o.cache_retention),
@@ -471,12 +471,13 @@ pub fn build_anthropic_params(
         } else {
             None
         };
-        params.insert(
-            "tools".to_owned(),
-            Value::Array(convert_anthropic_tools_with_oauth(
-                &tools, tool_cc, is_oauth,
-            )),
-        );
+        let mut wire_tools = convert_anthropic_tools_with_oauth(&tools, tool_cc, is_oauth);
+        if compat.supports_eager_tool_input_streaming.unwrap_or(true) {
+            for tool in &mut wire_tools {
+                tool["eager_input_streaming"] = Value::Bool(true);
+            }
+        }
+        params.insert("tools".to_owned(), Value::Array(wire_tools));
     }
 
     if let Some(tc) = options.and_then(|o| o.tool_choice) {
@@ -905,6 +906,59 @@ pub fn process_anthropic_sse_events(
     Ok(())
 }
 
+fn merge_beta_features(
+    model: &Model,
+    payload: &Value,
+    is_oauth: bool,
+    headers: &mut ProviderHeaders,
+) {
+    const BETA: &str = "anthropic-beta";
+    let mut features = Vec::new();
+    if is_oauth {
+        features.extend(["claude-code-20250219", "oauth-2025-04-20"]);
+    }
+    if payload.get("tools").is_some()
+        && model
+            .compat
+            .as_ref()
+            .and_then(|c| c.supports_eager_tool_input_streaming)
+            == Some(false)
+    {
+        features.push("fine-grained-tool-streaming-2025-05-14");
+    }
+    if payload["thinking"]["type"] == "enabled" {
+        features.push("interleaved-thinking-2025-05-14");
+    }
+
+    let configured = model
+        .headers
+        .iter()
+        .flatten()
+        .filter(|(name, _)| name.eq_ignore_ascii_case(BETA))
+        .map(|(_, value)| value.as_str());
+    let request = headers
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case(BETA))
+        .map(|(_, value)| value.as_deref())
+        .next_back();
+    let beta = if request == Some(None) {
+        None // Explicit request deletion also removes any model value.
+    } else {
+        for feature in configured
+            .chain(request.flatten())
+            .flat_map(|value| value.split(','))
+        {
+            let feature = feature.trim();
+            if !feature.is_empty() && !features.contains(&feature) {
+                features.push(feature);
+            }
+        }
+        (!features.is_empty()).then(|| features.join(","))
+    };
+    headers.retain(|name, _| !name.eq_ignore_ascii_case(BETA));
+    headers.insert(BETA.to_owned(), beta);
+}
+
 fn anthropic_endpoint_url(base_url: &str) -> String {
     let trimmed = base_url.trim_end_matches('/');
     if trimmed.ends_with("/v1") {
@@ -936,7 +990,9 @@ pub fn stream(
                 options.as_ref().and_then(|o| o.headers.as_ref()),
             )?;
 
-            let is_oauth = is_anthropic_oauth_token(Some(api_key.as_str()));
+            let mut effective_options = options.unwrap_or_default();
+            effective_options.api_key = Some(api_key.clone());
+            let is_oauth = is_anthropic_oauth(&model, Some(&api_key));
             let is_bearer = is_oauth || model.provider == "github-copilot";
             let bearer_val = format!("Bearer {api_key}");
             let claude_cli_ua = format!("claude-cli/{CLAUDE_CODE_VERSION}");
@@ -955,29 +1011,29 @@ pub fn stream(
             if is_oauth {
                 default_headers.push(("user-agent", &claude_cli_ua));
                 default_headers.push(("x-app", "cli"));
-                default_headers.push(("anthropic-beta", "claude-code-20250219,oauth-2025-04-20"));
             }
 
-            let mut opt_headers: ProviderHeaders = options
-                .as_ref()
-                .and_then(|o| o.headers.clone())
-                .unwrap_or_default();
+            let mut opt_headers = effective_options.headers.clone().unwrap_or_default();
             inject_copilot_dynamic_headers(&model, context.messages(), &mut opt_headers);
 
+            let raw_payload = build_anthropic_params(&model, &context, Some(&effective_options));
+            merge_beta_features(&model, &raw_payload, is_oauth, &mut opt_headers);
+            let identity = if is_oauth {
+                None
+            } else {
+                effective_options.identity.as_ref()
+            };
             let headers = build_header_map(
-                options.as_ref().and_then(|o| o.identity.as_ref()),
+                (&model.provider, &model.base_url),
+                identity,
+                effective_options.session_id.as_deref(),
                 &default_headers,
                 model.headers.as_ref(),
                 Some(&opt_headers),
             );
 
-            let headers = super::invoke_on_headers(options.as_ref(), headers, &model).await?;
-
-            let mut effective_options = options.unwrap_or_default();
-            if effective_options.api_key.is_none() {
-                effective_options.api_key = Some(api_key);
-            }
-            let raw_payload = build_anthropic_params(&model, &context, Some(&effective_options));
+            let headers =
+                super::invoke_on_headers(Some(&effective_options), headers, &model).await?;
             let payload = invoke_on_payload(Some(&effective_options), raw_payload, &model).await?;
             let url = anthropic_endpoint_url(&model.base_url);
             let client = reqwest::Client::new();

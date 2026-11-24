@@ -1621,7 +1621,7 @@ fn push_notices(
         blocks.push(ToolBlock::Notice {
             id: format!("degraded-{at}"),
             text: format!(
-                "WizTree 不可用，已降级为逐文件统计（{}）。数值为下界。",
+                "快速卷索引不可用，已回退为目录遍历统计（{}）。",
                 words(Some(deg))
             ),
             status: NoticeStatus::Warning,
@@ -2674,6 +2674,75 @@ mod tests {
         assert_eq!(status, SpecialStatus::Degraded);
         assert!(delivery.is_none());
         assert!(commands.is_empty());
+    }
+
+    #[test]
+    fn disk_usage_presenter_distinguishes_clean_walk_fallback_and_legacy_replay() {
+        let call = ToolCallInput {
+            id: "u1".into(),
+            name: "disk".into(),
+            arguments: json!({"scope": "usage", "path": "C:\\Users"})
+                .as_object()
+                .unwrap()
+                .clone(),
+            execution: None,
+        };
+        // Clean native-walk is Success without any WizTree warning
+        let clean = map_tool(
+            &call,
+            &ToolResultInput {
+                details: Some(json!({
+                    "usage": {
+                        "method": "native-walk",
+                        "root": "C:\\Users",
+                        "totalGB": 12.5,
+                        "truncated": false,
+                        "topDirs": [{"path": "C:\\Users\\a", "sizeGB": 12.5, "pct": 100.0}],
+                        "notice": "原生并行目录遍历完成"
+                    }
+                })),
+                ..Default::default()
+            },
+        );
+        assert_eq!(clean.status, CardStatus::Success);
+        assert!(!format!("{:?}", clean.blocks).contains("WizTree"));
+
+        // MFT fallback emits generic fast-index warning notice
+        let fallback = map_tool(
+            &call,
+            &ToolResultInput {
+                details: Some(json!({
+                    "usage": {
+                        "method": "native-walk",
+                        "root": "C:\\",
+                        "totalGB": 20.0,
+                        "degradedFrom": "native-mft: 权限不足",
+                        "topDirs": [{"path": "C:\\Windows", "sizeGB": 20.0, "pct": 100.0}]
+                    }
+                })),
+                ..Default::default()
+            },
+        );
+        assert!(format!("{:?}", fallback.blocks).contains("快速卷索引不可用"));
+        assert!(!format!("{:?}", fallback.blocks).contains("WizTree"));
+
+        // Legacy session replay (`method: "wiztree"` / `"node-walk"`) still renders cleanly
+        let legacy = map_tool(
+            &call,
+            &ToolResultInput {
+                details: Some(json!({
+                    "usage": {
+                        "method": "node-walk",
+                        "root": "C:\\old",
+                        "totalGB": 5.0,
+                        "degradedFrom": "wiztree",
+                        "topDirs": [{"path": "C:\\old\\a", "sizeGB": 5.0, "pct": 100.0}]
+                    }
+                })),
+                ..Default::default()
+            },
+        );
+        assert!(format!("{:?}", legacy.blocks).contains("快速卷索引不可用"));
     }
 }
 

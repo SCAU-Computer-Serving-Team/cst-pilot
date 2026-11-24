@@ -20,6 +20,7 @@ pub struct SessionViewSnapshot {
     pub messages: Arc<Vec<Value>>,
     pub entries: Arc<Vec<Value>>,
     pub context_usage: Option<Value>,
+    pub usage: Option<Value>,
     pub queue: Option<Value>,
     pub ui: Option<Value>,
     pub bitlocker: Option<Value>,
@@ -69,6 +70,7 @@ impl SessionViewSnapshot {
             messages: Arc::new(messages_vec),
             entries: Arc::new(entries_vec),
             context_usage: obj.get("contextUsage").cloned(),
+            usage: obj.get("usage").cloned(),
             queue: obj.get("queue").cloned(),
             ui: obj.get("ui").cloned(),
             bitlocker: obj.get("bitlocker").cloned(),
@@ -430,6 +432,43 @@ impl SessionStore {
         )
     }
 
+    pub fn apply_session_usage(
+        &mut self,
+        session_id: &str,
+        context_usage: Option<Option<Value>>,
+        usage: Option<Option<Value>>,
+    ) -> bool {
+        let next_rev = self.alloc_revision();
+        let snapshot = match self.slots.get_mut(session_id) {
+            Some(SlotState::Ready { snapshot, .. }) => snapshot,
+            Some(SlotState::Loading {
+                previous: Some((snapshot, _)),
+                ..
+            }) => snapshot,
+            _ => return false,
+        };
+        let mut updated = (**snapshot).clone();
+        let mut changed = false;
+        if let Some(ctx) = context_usage
+            && updated.context_usage != ctx
+        {
+            updated.context_usage = ctx;
+            changed = true;
+        }
+        if let Some(u) = usage
+            && updated.usage != u
+        {
+            updated.usage = u;
+            changed = true;
+        }
+        if !changed {
+            return false;
+        }
+        updated.revision = next_rev;
+        *snapshot = Arc::new(updated);
+        true
+    }
+
     fn apply_frame(
         &mut self,
         session_id: &str,
@@ -576,6 +615,12 @@ fn apply_frame_to_snapshot(snap: &mut SessionViewSnapshot, frame: BufferedSessio
             let Some(ev_type) = ev.get("type").and_then(Value::as_str) else {
                 return;
             };
+            if let Some(ctx) = ev.get("contextUsage") {
+                snap.context_usage = (!ctx.is_null()).then(|| ctx.clone());
+            }
+            if let Some(usage) = ev.get("usage") {
+                snap.usage = (!usage.is_null()).then(|| usage.clone());
+            }
             match ev_type {
                 "agent_start" | "turn_start" => {
                     snap.running = true;

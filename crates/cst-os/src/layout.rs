@@ -126,16 +126,6 @@ impl KitLayout {
         }
     }
 
-    pub fn wiztree_dir(&self) -> PathBuf {
-        let app_wt = self.tools_dir().join("wiztree");
-        if app_wt.is_dir() || !self.is_dev_workspace() {
-            app_wt
-        } else {
-            let dev_wt = self.root.join("wiztree");
-            if dev_wt.is_dir() { dev_wt } else { app_wt }
-        }
-    }
-
     pub fn lhm_dir(&self) -> PathBuf {
         let app_lhm = self.tools_dir().join("lhm");
         if app_lhm.is_dir() || !self.is_dev_workspace() {
@@ -208,10 +198,6 @@ impl KitLayout {
 
     pub fn tmp_dir(&self) -> PathBuf {
         self.state_dir().join("tmp")
-    }
-
-    pub fn wiztree_tmp_dir(&self) -> PathBuf {
-        self.tmp_dir().join("wiztree")
     }
 
     pub fn server_json_path(&self) -> PathBuf {
@@ -333,10 +319,6 @@ mod tests {
             layout.data_dir().join("telemetry")
         );
         assert_eq!(layout.locks_dir(), layout.root().join(".state/locks"));
-        assert_eq!(
-            layout.wiztree_tmp_dir(),
-            layout.root().join(".state/tmp/wiztree")
-        );
         assert_eq!(
             layout.server_exe(),
             layout.root().join("app/cst-server.exe")

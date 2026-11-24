@@ -38,7 +38,7 @@ fn show_error_dialog(message: &str) {
 /// - Split-token administrators (`TokenElevationTypeLimited`) keep `cst-pilot.exe` at Medium Integrity Level
 ///   so screenshot tools, global hotkeys, Explorer drag-and-drop, and zero-UAC single-instance wakeups
 ///   are never blocked by Windows UIPI, while `cst-client` elevates headless `cst-server.exe` via UAC
-///   so all diagnostic tools (WizTree MFT, BitLocker, SMART, EventLog) always run elevated.
+///   so all diagnostic tools (NTFS $MFT, BitLocker, SMART, EventLog) always run elevated.
 /// - Restricted standard accounts (`TokenElevationTypeDefault` + non-admin) fall back to elevating the whole process
 ///   at entry so desktop and server share the same target administrator SID.
 ///

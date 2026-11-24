@@ -280,7 +280,7 @@ impl ProvidersTabView {
                         .px(space::SM)
                         .rounded(radius::CONTROL)
                         .bg(if self.protocol_dropdown_index == idx && !is_selected {
-                            palette.bg_item_hover
+                            palette.bg_item_active
                         } else {
                             gpui_kit::transparent_black()
                         })
@@ -289,7 +289,7 @@ impl ProvidersTabView {
                         .items_center()
                         .justify_between()
                         .gap(space::SM)
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .hover(|s| s.bg(palette.bg_item_active))
                         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.protocol = proto;
@@ -317,7 +317,7 @@ impl ProvidersTabView {
                             .w(px(268.0))
                             .p(space::XS)
                             .rounded(radius::ROW)
-                            .bg(palette.bg_elevated)
+                            .bg(palette.bg_glass)
                             .border_1()
                             .border_color(palette.border_subtle)
                             .occlude()
@@ -739,6 +739,9 @@ impl ProvidersTabView {
             let image = row.image;
             let id_focused = row.id_input.read(cx).focus_handle(cx).is_focused(window);
             let name_focused = row.name_input.read(cx).focus_handle(cx).is_focused(window);
+            let id_filled = !row.id_input.read(cx).value().trim().is_empty();
+            let name_filled = !row.name_input.read(cx).value().trim().is_empty();
+            let show_delete = !row.is_new || (id_filled && name_filled);
             let rm_id = SharedString::from(format!("edit-row-remove-{idx}"));
 
             hairline_table = hairline_table.child(
@@ -875,7 +878,7 @@ impl ProvidersTabView {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(
+                            .children(show_delete.then(|| {
                                 div()
                                     .id(rm_id.clone())
                                     .test_support()
@@ -901,8 +904,8 @@ impl ProvidersTabView {
                                         Icon::new(IconName::Trash)
                                             .size(px(16.0))
                                             .text_color(palette.text_muted),
-                                    ),
-                            ),
+                                    )
+                            })),
                     ),
             );
         }

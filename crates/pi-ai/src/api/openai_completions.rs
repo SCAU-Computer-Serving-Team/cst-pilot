@@ -1135,7 +1135,9 @@ pub fn stream(
 
             let auth_val = format!("Bearer {api_key}");
             let headers = build_header_map(
+                (&model.provider, &model.base_url),
                 options.as_ref().and_then(|o| o.identity.as_ref()),
+                options.as_ref().and_then(|o| o.session_id.as_deref()),
                 &[
                     ("authorization", &auth_val),
                     ("content-type", "application/json"),

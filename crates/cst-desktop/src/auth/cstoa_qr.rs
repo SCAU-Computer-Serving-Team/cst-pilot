@@ -8,6 +8,32 @@ use qrcode::types::Color as QrColor;
 use qrcode::{EcLevel, QrCode};
 use serde_json::Value;
 
+#[derive(Debug, Clone)]
+pub struct QrMatrix {
+    pub width: usize,
+    pub dark: Vec<bool>,
+}
+
+/// Pure-Rust in-memory QR matrix encoder (`qrcode` -> exact boolean module grid).
+/// Rendering modules directly via GPUI `canvas` avoids texture-atlas bilinear edge bleed
+/// and stays crisp across all Windows DPI scaling factors.
+pub fn encode_qr_matrix_offline(verification_uri_complete: &str) -> Result<Arc<QrMatrix>, String> {
+    let trimmed = verification_uri_complete.trim();
+    if trimmed.is_empty() {
+        return Err("授权链接为空，无法生成二维码。".into());
+    }
+
+    let code = QrCode::with_error_correction_level(trimmed.as_bytes(), EcLevel::M)
+        .map_err(|e| format!("二维码编码失败：{e}"))?;
+    let width = code.width();
+    let dark = code
+        .to_colors()
+        .into_iter()
+        .map(|c| c == QrColor::Dark)
+        .collect();
+    Ok(Arc::new(QrMatrix { width, dark }))
+}
+
 /// Pure-Rust in-memory QR code rasterizer (`qrcode` -> `RgbaImage` -> `gpui::Image`).
 /// Never transmits `verification_uri_complete` over any external network service.
 pub fn rasterize_qr_image_offline(verification_uri_complete: &str) -> Result<Arc<Image>, String> {

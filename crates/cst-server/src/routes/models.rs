@@ -240,24 +240,7 @@ pub async fn handle_models_route(
             );
         }
 
-        let usage_json = stats.as_ref().map(|st| {
-            let denom = st.input_tokens + st.cache_read_tokens;
-            let hit_rate = if denom > 0 {
-                Some((st.cache_read_tokens as f64) / (denom as f64))
-            } else {
-                None
-            };
-            json!({
-                "tokens": {
-                    "input": st.input_tokens,
-                    "output": st.output_tokens,
-                    "cacheRead": st.cache_read_tokens,
-                    "cacheWrite": st.cache_write_tokens,
-                    "total": st.total_tokens,
-                },
-                "cacheHitRate": hit_rate,
-            })
-        });
+        let usage_json = stats.as_ref().map(crate::session::slot::session_usage_json);
 
         let models_json: Vec<Value> = available
             .iter()

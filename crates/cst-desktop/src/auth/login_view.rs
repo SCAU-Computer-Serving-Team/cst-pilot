@@ -1,22 +1,22 @@
 use std::{sync::Arc, time::Duration};
 
 use cst_client::{ClientError, ClientHandle};
-use gpui::{Image, StyledImage as _};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Input, InputContentType, InputEvent, InputState};
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, FontWeight, InteractiveElement, IntoElement,
-    ObjectFit, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, TestSupportExt, Window, div, img, px,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
+    TestSupportExt, Window, div, px,
 };
 use serde_json::Value;
 use zeroize::Zeroizing;
 
 use crate::accessibility::A11yElementExt as _;
 use crate::auth::cstoa_qr::{
-    extract_cstoa_oauth_error, now_epoch_ms, parse_cstoa_oauth_payload, rasterize_qr_image_offline,
+    QrMatrix, encode_qr_matrix_offline, extract_cstoa_oauth_error, now_epoch_ms,
+    parse_cstoa_oauth_payload,
 };
 use crate::background::{
     FrostedGlassSpec, SkyPreset, render_frosted_surface, render_login_9_stop_fade,
@@ -50,7 +50,7 @@ pub struct LoginView {
     client: ClientHandle,
     tab: LoginMethodTab,
     sky_time_secs: f32,
-    qr_image: Option<Arc<Image>>,
+    qr_matrix: Option<Arc<QrMatrix>>,
     active: bool,
     generation: u64,
     qr_generation: u64,
@@ -71,6 +71,9 @@ pub struct LoginView {
     provider_index: usize,
     provider_scroll: gpui::ScrollHandle,
     saving_key: bool,
+    enter_opacity: f32,
+    enter_dx: gpui::Pixels,
+    enter_dy: gpui::Pixels,
     tab_slide: motion::PageSlide,
     _subscriptions: Vec<Subscription>,
 }
@@ -81,11 +84,11 @@ impl LoginView {
     pub fn new(client: ClientHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let api_key_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("输入 API Key 密钥…")
+                .placeholder("输入 API Key")
                 .masked(true)
         });
         let base_url_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("可选自定义 Base URL…"));
+            cx.new(|cx| InputState::new(window, cx).placeholder("https://api.example.com/v1"));
 
         let subscriptions = [&api_key_input, &base_url_input]
             .into_iter()
@@ -108,7 +111,7 @@ impl LoginView {
             client,
             tab: LoginMethodTab::CstoaQr,
             sky_time_secs: 0.0,
-            qr_image: None,
+            qr_matrix: None,
             active: false,
             generation: 0,
             qr_generation: 0,
@@ -129,6 +132,9 @@ impl LoginView {
             provider_index: 0,
             provider_scroll: gpui::ScrollHandle::new(),
             saving_key: false,
+            enter_opacity: 1.0,
+            enter_dx: px(0.0),
+            enter_dy: px(0.0),
             tab_slide: motion::PageSlide::default(),
             _subscriptions: subscriptions,
         }
@@ -136,14 +142,29 @@ impl LoginView {
 
     pub fn set_active(&mut self, active: bool, cx: &mut Context<Self>) {
         self.active = active;
+        self.tab_slide = motion::PageSlide::default();
         if !active {
-            self.set_tab(LoginMethodTab::CstoaQr, cx);
+            self.enter_opacity = 1.0;
+            self.enter_dx = px(0.0);
+            self.enter_dy = px(0.0);
+            self.set_tab_inner(LoginMethodTab::CstoaQr, false, cx);
+        } else if self.tab == LoginMethodTab::CstoaQr {
+            self.start_cstoa_qr_flow(cx);
         }
         cx.notify();
     }
 
+    pub fn open_tab_without_slide(&mut self, tab: LoginMethodTab, cx: &mut Context<Self>) {
+        self.tab_slide = motion::PageSlide::default();
+        self.set_tab_inner(tab, false, cx);
+    }
+
     pub fn set_tab(&mut self, tab: LoginMethodTab, cx: &mut Context<Self>) {
-        if self.tab != tab {
+        self.set_tab_inner(tab, self.active, cx);
+    }
+
+    fn set_tab_inner(&mut self, tab: LoginMethodTab, animate_slide: bool, cx: &mut Context<Self>) {
+        if animate_slide && self.tab != tab {
             let tab_order = |t: LoginMethodTab| match t {
                 LoginMethodTab::CstoaQr => 0,
                 LoginMethodTab::ApiKey => 1,
@@ -174,6 +195,9 @@ impl LoginView {
             });
         })
         .detach();
+        if self.active && tab == LoginMethodTab::CstoaQr {
+            self.start_cstoa_qr_flow(cx);
+        }
         cx.notify();
     }
 
@@ -204,6 +228,12 @@ impl LoginView {
         self.sky_time_secs = sky_time_secs;
     }
 
+    pub fn set_enter_transition(&mut self, opacity: f32, dx: gpui::Pixels, dy: gpui::Pixels) {
+        self.enter_opacity = opacity.clamp(0.0, 1.0);
+        self.enter_dx = dx;
+        self.enter_dy = dy;
+    }
+
     fn reset_qr(&mut self, cx: &mut Context<Self>) {
         self.qr_generation += 1;
         // Cancel any active server-side QR flow immediately when leaving or switching tabs
@@ -218,7 +248,7 @@ impl LoginView {
                 })
                 .detach();
         }
-        self.qr_image = None;
+        self.qr_matrix = None;
         self.qr_error = None;
         self.qr_expires_at_ms = 0;
         self.qr_loading = false;
@@ -234,7 +264,7 @@ impl LoginView {
         if !self.active
             || self.tab != LoginMethodTab::CstoaQr
             || self.qr_running
-            || self.qr_image.is_some()
+            || self.qr_matrix.is_some()
             || self.qr_error.is_some()
             || self.qr_expires_at_ms != 0
         {
@@ -276,9 +306,8 @@ impl LoginView {
                             Some(parsed) if flow_id.is_some() => {
                                 this.active_qr_flow_id = flow_id.clone();
                                 this.qr_expires_at_ms = parsed.expires_at_ms;
-                                match rasterize_qr_image_offline(&parsed.verification_uri_complete)
-                                {
-                                    Ok(image) => this.qr_image = Some(image),
+                                match encode_qr_matrix_offline(&parsed.verification_uri_complete) {
+                                    Ok(matrix) => this.qr_matrix = Some(matrix),
                                     Err(err) => this.qr_error = Some(err.into()),
                                 }
                             }
@@ -298,7 +327,7 @@ impl LoginView {
                         }
                     }
                     cx.notify();
-                    this.qr_image.is_some()
+                    this.qr_matrix.is_some()
                 })
                 .unwrap_or(false);
 
@@ -342,7 +371,7 @@ impl LoginView {
                             let _ = weak.update(cx, |this, cx| {
                                 if this.qr_generation == generation {
                                     this.active_qr_flow_id = None;
-                                    this.qr_image = None;
+                                    this.qr_matrix = None;
                                     this.qr_expires_at_ms = 0;
                                     this.qr_loading = false;
                                     this.qr_error = Some(err_msg.into());
@@ -533,7 +562,7 @@ impl LoginView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         if self.active
-            && self.qr_image.is_none()
+            && self.qr_matrix.is_none()
             && !self.qr_running
             && self.qr_error.is_none()
             && self.qr_expires_at_ms == 0
@@ -550,10 +579,64 @@ impl LoginView {
             None
         };
 
-        let has_live_qr = self.qr_image.is_some() && !expired;
-        let qr_box = if let Some(ref qr_img) = self.qr_image
+        let has_live_qr = self.qr_matrix.is_some() && !expired;
+        let qr_pending =
+            self.qr_loading || (self.qr_running && self.qr_error.is_none() && !expired);
+        let qr_box = if let Some(ref qr_matrix) = self.qr_matrix
             && !expired
         {
+            // Render QR modules directly onto the single `$radius-row` (`8px`) white card (`kzCcS`)
+            // via vector `canvas` + `paint_quad` so D3D11 texture-atlas bilinear sampling never
+            // produces an inner gray border halo around the QR area in light or dark themes.
+            let matrix = Arc::clone(qr_matrix);
+            let qr_canvas = gpui::canvas(
+                |_, _, _| {},
+                move |bounds, _, window, _cx| {
+                    let n = matrix.width;
+                    if n == 0 {
+                        return;
+                    }
+                    let side = f32::from(bounds.size.width).min(f32::from(bounds.size.height));
+                    let scale = window.scale_factor().max(1.0);
+                    let origin_x =
+                        f32::from(bounds.origin.x) + (f32::from(bounds.size.width) - side) * 0.5;
+                    let origin_y =
+                        f32::from(bounds.origin.y) + (f32::from(bounds.size.height) - side) * 0.5;
+                    let edge = |idx: usize| -> f32 {
+                        ((idx as f32 * side * scale) / (n as f32)).round() / scale
+                    };
+                    let dark_color = gpui::rgb(0x111827);
+                    for row in 0..n {
+                        let y0 = origin_y + edge(row);
+                        let y1 = origin_y + edge(row + 1);
+                        let h = (y1 - y0).max(1.0 / scale);
+                        let mut col = 0;
+                        while col < n {
+                            if !matrix.dark[row * n + col] {
+                                col += 1;
+                                continue;
+                            }
+                            let start_col = col;
+                            while col < n && matrix.dark[row * n + col] {
+                                col += 1;
+                            }
+                            let x0 = origin_x + edge(start_col);
+                            let x1 = origin_x + edge(col);
+                            let w = (x1 - x0).max(1.0 / scale);
+                            window.paint_quad(gpui::fill(
+                                gpui::Bounds::new(
+                                    gpui::point(px(x0), px(y0)),
+                                    gpui::size(px(w), px(h)),
+                                ),
+                                dark_color,
+                            ));
+                        }
+                    }
+                },
+            )
+            .w(px(144.0))
+            .h(px(144.0));
+
             div()
                 .id("cstoa-qr-image-box")
                 .test_support()
@@ -564,27 +647,22 @@ impl LoginView {
                 .border_1()
                 .border_color(palette.border_subtle)
                 .bg(gpui_kit::white())
+                .shadow(palette.craft_stack_shadows())
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(
-                    img(qr_img.clone())
-                        .w(px(148.0))
-                        .h(px(148.0))
-                        .object_fit(ObjectFit::Contain),
-                )
+                .child(qr_canvas)
                 .into_any_element()
         } else {
-            let placeholder_msg =
-                if self.qr_loading || (self.qr_running && self.qr_error.is_none() && !expired) {
-                    SharedString::from("正在生成本地二维码…")
-                } else if expired {
-                    SharedString::from("二维码已过期")
-                } else if let Some(ref err) = self.qr_error {
-                    err.clone()
-                } else {
-                    SharedString::from("点击下方刷新获取二维码")
-                };
+            let placeholder_msg = if qr_pending {
+                SharedString::from("正在生成本地二维码…")
+            } else if expired {
+                SharedString::from("二维码已过期")
+            } else if let Some(ref err) = self.qr_error {
+                err.clone()
+            } else {
+                SharedString::from("点击下方刷新获取二维码")
+            };
             div()
                 .id("cstoa-qr-refresh-placeholder")
                 .test_support()
@@ -619,14 +697,14 @@ impl LoginView {
                 let secs = s % 60;
                 SharedString::from(format!("{mins:02}:{secs:02}"))
             }
-            None if self.qr_loading => SharedString::from("加载中"),
+            None if qr_pending => SharedString::from("加载中"),
             None if expired => SharedString::from("00:00"),
             None => SharedString::from("待刷新"),
         };
 
         let dot_color = if has_live_qr {
             palette.status_success
-        } else if self.qr_loading {
+        } else if qr_pending {
             palette.status_warning
         } else {
             palette.text_muted
@@ -709,6 +787,8 @@ impl Render for LoginView {
 
         // Underlying left `864×800` absolute sky canvas (`tM7YQ` / `jiQRy`) with `.pen` `856px`
         // sky shader inset (`rtOFG` / `Q3yEX8`) over solid `$bg-workspace` + 9-stop horizontal fade.
+        // Keeping the feather mask at full alpha while fading the D3D11 sky surface by `enter_opacity`
+        // yields exact pre-composited cross-fade (`p * Final + (1 - p) * bg`) with zero right-edge flash.
         let left_canvas = div()
             .id("login-sky-canvas-864")
             .test_support()
@@ -724,7 +804,7 @@ impl Render for LoginView {
                 render_sky_background_rounded(
                     SkyPreset::login_for_theme(palette.mode),
                     self.sky_time_secs,
-                    1.0,
+                    self.enter_opacity,
                     [0.0; 4],
                     scale_factor,
                 ),
@@ -1183,6 +1263,9 @@ impl Render for LoginView {
             ));
 
         let (tab_op, tab_dx) = self.tab_slide.sample(window, cx);
+        let content_op = (self.enter_opacity * tab_op).clamp(0.0, 1.0);
+        let content_dx = self.enter_dx + tab_dx;
+        let content_dy = self.enter_dy;
 
         // Right login main area overlapping smoothly from the fade blend zone rightward
         let right_viewport = div()
@@ -1199,8 +1282,9 @@ impl Render for LoginView {
                     .id("login-viewport-300")
                     .test_support()
                     .relative()
-                    .left(tab_dx)
-                    .opacity(tab_op)
+                    .left(content_dx)
+                    .top(content_dy)
+                    .opacity(content_op)
                     .w(px(300.0))
                     .flex_shrink_0()
                     .flex()

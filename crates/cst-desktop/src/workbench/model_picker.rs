@@ -270,7 +270,7 @@ pub fn render_context_quota_popover(
         .w(px(336.0))
         .p(space::LG)
         .rounded(radius::ROW)
-        .bg(palette.bg_elevated)
+        .bg(palette.bg_glass)
         .border_1()
         .border_color(palette.border_subtle)
         .flex()
@@ -826,7 +826,6 @@ pub fn render_model_picker_popover(
     progress: f32,
     open_epoch: u64,
     page: ModelPickerPage,
-    (page_opacity, page_offset): (f32, gpui_kit::Pixels),
     highlighted_idx: usize,
     scroll_handle: &gpui_kit::ScrollHandle,
     scoped_models: &[ModelChoiceDto],
@@ -886,16 +885,22 @@ pub fn render_model_picker_popover(
         ))
         .w(px(anim_width))
         .h(px(anim_height))
-        .p(space::XS)
         .rounded(radius::ROW)
-        .bg(palette.bg_elevated)
+        .bg(palette.bg_glass)
         .border_1()
         .border_color(palette.border_subtle)
         .overflow_hidden();
 
+    // Anchor inner content to the fixed bottom-right corner at its target dimensions so only the
+    // outer border/background resizes between pages while text stays stationary without reflow/slide.
+    let inner_w = (target_width - PICKER_CARD_CHROME_H).max(1.0);
+    let inner_h = (target_height - PICKER_CARD_CHROME_V).max(1.0);
     let mut page_body = div()
-        .size_full()
-        .min_h_0()
+        .absolute()
+        .right(space::XS)
+        .bottom(space::XS)
+        .w(px(inner_w))
+        .h(px(inner_h))
         .flex()
         .flex_col()
         .gap(space::MICRO);
@@ -1250,7 +1255,7 @@ pub fn render_model_picker_popover(
         }
     }
 
-    let card = card.child(page_body.relative().left(page_offset).opacity(page_opacity));
+    let card = card.child(page_body);
     if interactive {
         card.test_support()
             .occlude()

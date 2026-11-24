@@ -22,7 +22,7 @@
 |---|---|---|
 | [pi-core](pi-core/SPEC.md) | `crates/pi-{ai,agent,session,runtime}` | [SPEC](pi-core/SPEC.md) · [ARCHITECTURE](pi-core/ARCHITECTURE.md) · [API](pi-core/API.md) |
 | [server](server/SPEC.md) | `crates/cst-server`、`pi-web-rust.cmd` | [SPEC](server/SPEC.md) · [ARCHITECTURE](server/ARCHITECTURE.md) · [API](server/API.md) |
-| [diagnostics](diagnostics/SPEC.md) | `crates/cst-kit/src/{kit,tools,diagnostics,runbook,bitlocker}`、`app/skills/`、`wiztree/`、`lhm/` | [SPEC](diagnostics/SPEC.md) · [ARCHITECTURE](diagnostics/ARCHITECTURE.md) · [API](diagnostics/API.md) · [工具设计评估与测试规范](diagnostics/test/tools-test-spec.md) |
+| [diagnostics](diagnostics/SPEC.md) | `crates/cst-kit/src/{kit,tools,diagnostics,runbook,bitlocker}`、`app/skills/`、`lhm/`（`wiztree/` 仅限冻结的旧版 Node 过渡包） | [SPEC](diagnostics/SPEC.md) · [ARCHITECTURE](diagnostics/ARCHITECTURE.md) · [API](diagnostics/API.md) · [工具设计评估与测试规范](diagnostics/test/tools-test-spec.md) |
 | [auth](auth/SPEC.md) | `crates/cst-kit/src/auth/`、`crates/cst-server/src/routes/{auth,models}.rs` | [SPEC](auth/SPEC.md) · [ARCHITECTURE](auth/ARCHITECTURE.md) · [API](auth/API.md) |
 | [telemetry](telemetry/SPEC.md) | `crates/cst-kit/src/telemetry/`、`cst-pilot-server` | [SPEC](telemetry/SPEC.md) · [ARCHITECTURE](telemetry/ARCHITECTURE.md) · [API](telemetry/API.md) · [OPERATIONS](telemetry/OPERATIONS.md) |
 | [web](web/SPEC.md) | `src/web/frontend/`、`crates/cst-server/src/exports/`、`design/cst-pilot-web.pen` | [SPEC](web/SPEC.md) · [ARCHITECTURE](web/ARCHITECTURE.md) · [API](web/API.md) · [路由广度 E2E](web/test/bsk-e2e.md) · [深度状态机 E2E](web/test/bsk-deep-e2e.md) · [UX 量化 E2E](web/test/ux-e2e.md) |
@@ -47,6 +47,7 @@
 | [rust/plan/9.desktop.md](rust/plan/9.desktop.md) | 阶段 9 `crates/cst-client` 与 `crates/cst-desktop` GPUI 桌面端详细设计 |
 | [rust/plan/9.1.desktop-automation.md](rust/plan/9.1.desktop-automation.md) | 阶段 9.1 桌面端外部解耦 CLI（`winapp ui`）自动化操作、无回显凭据投递与截图录屏详细设计 |
 | [rust/plan/9.2.config-isolation-and-packaging.md](rust/plan/9.2.config-isolation-and-packaging.md) | 阶段 9.2 配置目录隔离（`app/` + `data/`）、纯 Rust 打包策略与存量兼容性设计 |
+| [rust/plan/9.3.optimization.md](rust/plan/9.3.optimization.md) | 阶段 9.3 性能优化与工程收敛：纯 Rust MFT / Win32 IOCTL 存储工具重构、其余工具与全栈性能专题 |
 
 ## 同名文件职责
 

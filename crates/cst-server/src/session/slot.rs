@@ -511,7 +511,26 @@ impl SessionSlot {
 
         let unsub = session.subscribe(Arc::new(move |event| {
             accepted_for_session.on_event(&event);
-            if let Some(projected) = decorators_for_session.project_browser_event(&event) {
+            let usage_update = matches!(
+                event,
+                AgentSessionEvent::TurnEnd { .. }
+                    | AgentSessionEvent::AgentEnd { .. }
+                    | AgentSessionEvent::CompactionEnd { .. }
+            )
+            .then(|| {
+                let stats = hosted_for_session.session().get_session_stats();
+                let usage = session_usage_json(&stats);
+                let context_usage =
+                    serde_json::to_value(&stats.context_usage).unwrap_or(Value::Null);
+                (context_usage, usage)
+            });
+            if let Some(mut projected) = decorators_for_session.project_browser_event(&event) {
+                if let Some((ref context_usage, ref usage)) = usage_update
+                    && let Some(obj) = projected.as_object_mut()
+                {
+                    obj.insert("contextUsage".to_owned(), context_usage.clone());
+                    obj.insert("usage".to_owned(), usage.clone());
+                }
                 events_for_session.publish("session", &projected);
             }
             let is_non_visible_message_lifecycle = matches!(
@@ -539,14 +558,21 @@ impl SessionSlot {
                 _ => {}
             }
 
-            if matches!(event, AgentSessionEvent::AgentEnd { .. }) {
-                global_for_session.publish(
-                    "state",
-                    &json!({
-                        "type": "usage_changed",
-                        "sessionId": id_for_session,
-                    }),
-                );
+            if matches!(
+                event,
+                AgentSessionEvent::AgentEnd { .. } | AgentSessionEvent::CompactionEnd { .. }
+            ) {
+                let mut state_ev = json!({
+                    "type": "usage_changed",
+                    "sessionId": id_for_session,
+                });
+                if let Some((ref context_usage, ref usage)) = usage_update
+                    && let Some(obj) = state_ev.as_object_mut()
+                {
+                    obj.insert("contextUsage".to_owned(), context_usage.clone());
+                    obj.insert("usage".to_owned(), usage.clone());
+                }
+                global_for_session.publish("state", &state_ev);
                 let provider = hosted_for_session.session().model().provider;
                 if hosted_for_session
                     .auth
@@ -764,7 +790,8 @@ impl SessionSlot {
             }
         }
 
-        let context_usage = session.get_context_usage();
+        let stats = session.get_session_stats();
+        let usage_json = session_usage_json(&stats);
         let queue = self.inbox.snapshot().await?;
         let raw = json!({
             "id": self.id,
@@ -775,7 +802,8 @@ impl SessionSlot {
             "entries": entries_json,
             "running": session.is_streaming(),
             "compacting": session.is_compacting(),
-            "contextUsage": context_usage,
+            "contextUsage": stats.context_usage,
+            "usage": usage_json,
             "queue": queue,
             "ui": self.ui.snapshot(),
         });
@@ -799,12 +827,63 @@ impl SessionSlot {
     }
 }
 
+pub(crate) fn session_usage_json(st: &pi_session::SessionStats) -> Value {
+    let denom = st.input_tokens + st.cache_read_tokens;
+    let hit_rate = if denom > 0 {
+        Some((st.cache_read_tokens as f64) / (denom as f64))
+    } else {
+        None
+    };
+    json!({
+        "tokens": {
+            "input": st.input_tokens,
+            "output": st.output_tokens,
+            "cacheRead": st.cache_read_tokens,
+            "cacheWrite": st.cache_write_tokens,
+            "total": st.total_tokens,
+        },
+        "cacheHitRate": hit_rate,
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{SlotInboxExecutor, record_attempt_error};
+    use super::{SlotInboxExecutor, record_attempt_error, session_usage_json};
     use pi_agent::AgentMessage;
     use pi_ai::{AssistantMessage, StopReason};
+    use pi_session::SessionStats;
     use serde_json::json;
+
+    #[test]
+    fn session_usage_json_computes_cache_hit_rate_and_handles_empty_totals() {
+        let mut stats = SessionStats {
+            session_file: None,
+            session_id: "s1".into(),
+            user_messages: 0,
+            assistant_messages: 0,
+            tool_calls: 0,
+            tool_results: 0,
+            total_messages: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            total_tokens: 0,
+            cost: 0.0,
+            context_usage: None,
+        };
+        let empty = session_usage_json(&stats);
+        assert!(empty["cacheHitRate"].is_null());
+
+        stats.input_tokens = 1307;
+        stats.output_tokens = 136;
+        stats.cache_read_tokens = 5632;
+        stats.total_tokens = 7075;
+        let populated = session_usage_json(&stats);
+        let rate = populated["cacheHitRate"].as_f64().unwrap();
+        assert!((rate - (5632.0 / (1307.0 + 5632.0))).abs() < 1e-9);
+        assert_eq!(populated["tokens"]["total"], 7075);
+    }
 
     fn make_assistant(stop_reason: StopReason, error_message: Option<&str>) -> AgentMessage {
         let mut msg: AssistantMessage = serde_json::from_value(json!({

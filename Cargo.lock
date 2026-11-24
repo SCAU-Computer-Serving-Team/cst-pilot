@@ -1556,6 +1556,7 @@ dependencies = [
  "globset",
  "hmac",
  "ignore",
+ "ntfs-ng",
  "pi-agent",
  "pi-ai",
  "pi-runtime",
@@ -4904,6 +4905,12 @@ checksum = "c3b335231dfd352ffb0f8017f3b6027a4917f7df785ea2143d8af2adc66980ae"
 dependencies = [
  "winapi",
 ]
+
+[[package]]
+name = "ntfs-ng"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "589e5d40de9109afe5efcfa5321c4c9aadeb0a30fda80a7f029a8c380a06e86d"
 
 [[package]]
 name = "num"

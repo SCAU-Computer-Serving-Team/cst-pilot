@@ -1599,7 +1599,7 @@ async fn run_state_reducer_loop(
                         }
                     }
                     KeepaliveSignal::StateEvent { payload, .. } => {
-                        handle_global_state_payload(
+                        let usage_patch = handle_global_state_payload(
                             &core,
                             &revision_tx,
                             &payload,
@@ -1610,6 +1610,14 @@ async fn run_state_reducer_loop(
                             &client_id,
                             &mux_tx,
                         );
+                        if let Some((sid, ctx_patch, usage_val_patch)) = usage_patch
+                            && session_store.apply_session_usage(&sid, ctx_patch, usage_val_patch)
+                        {
+                            let map = Arc::new(session_store.export_ready_map());
+                            publish(&core, &revision_tx, &mut |snap| {
+                                snap.loaded_sessions = Arc::clone(&map);
+                            });
+                        }
                         if dirty.any() && !refresh_timer_armed {
                             refresh_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(STATE_REFRESH_COALESCE_MS));
                             refresh_timer_armed = true;
@@ -2227,10 +2235,16 @@ async fn run_state_reducer_loop(
                     WorkerCommand::RefreshGlobals { op_revision, reply } => {
                         let http = core.http.clone();
                         let done_tx_clone = done_tx.clone();
+                        let active_sid = core
+                            .workspace
+                            .lock()
+                            .expect("workspace lock")
+                            .active_session_id()
+                            .map(str::to_owned);
                         tokio::spawn(async move {
                             let (state_res, models_res, auth_res, acc_res, ds_res, upd_res) = tokio::join!(
                                 http.state(),
-                                http.get_models(None),
+                                http.get_models(active_sid.as_deref()),
                                 http.get_auth_providers(),
                                 http.get_account(false),
                                 http.get_desktop_settings(),
@@ -2603,6 +2617,12 @@ async fn run_state_reducer_loop(
                 let http = core.http.clone();
                 let done_tx_clone = done_tx.clone();
                 let is_web_active = core.snapshot.lock().expect("snapshot lock").channel_mode == ChannelModeDto::WebActive;
+                let active_sid = core
+                    .workspace
+                    .lock()
+                    .expect("workspace lock")
+                    .active_session_id()
+                    .map(str::to_owned);
                 tokio::spawn(async move {
                     let state_fut = async {
                         if flags.sessions_and_state {
@@ -2630,7 +2650,7 @@ async fn run_state_reducer_loop(
                     };
                     let models_fut = async {
                         if flags.models {
-                            http.get_models(None).await.ok()
+                            http.get_models(active_sid.as_deref()).await.ok()
                         } else {
                             None
                         }
@@ -2684,6 +2704,8 @@ async fn run_state_reducer_loop(
     }
 }
 
+type SessionUsagePatch = (String, Option<Option<Value>>, Option<Option<Value>>);
+
 #[allow(clippy::too_many_arguments)]
 fn handle_global_state_payload(
     core: &Arc<SharedClientCore>,
@@ -2695,16 +2717,33 @@ fn handle_global_state_payload(
     confirmed_subs: &mut BTreeSet<String>,
     client_id: &str,
     mux_tx: &BoundedMultiplexSender,
-) {
-    let Some(ev_type) = payload.get("type").and_then(Value::as_str) else {
-        return;
-    };
+) -> Option<SessionUsagePatch> {
+    let ev_type = payload.get("type").and_then(Value::as_str)?;
+    let mut usage_patch = None;
     match ev_type {
         "sessions_changed" => {
             dirty.sessions_and_state = true;
         }
         "models_changed" => {
             dirty.models = true;
+        }
+        "usage_changed" => {
+            dirty.models = true;
+            if let Some(sid) = payload
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+            {
+                let ctx_patch = payload
+                    .get("contextUsage")
+                    .map(|v| (!v.is_null()).then(|| v.clone()));
+                let usage_val_patch = payload
+                    .get("usage")
+                    .map(|v| (!v.is_null()).then(|| v.clone()));
+                if ctx_patch.is_some() || usage_val_patch.is_some() {
+                    usage_patch = Some((sid.to_owned(), ctx_patch, usage_val_patch));
+                }
+            }
         }
         "quota_changed" => dirty.auth = true,
         "auth_changed" => {
@@ -2806,6 +2845,7 @@ fn handle_global_state_payload(
         }
         _ => {}
     }
+    usage_patch
 }
 
 fn compute_desired_subscriptions(core: &Arc<SharedClientCore>) -> Vec<String> {

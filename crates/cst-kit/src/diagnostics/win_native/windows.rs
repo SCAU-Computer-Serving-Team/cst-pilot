@@ -1,21 +1,20 @@
 use super::{
     Control, DiagnosticSource, EventQuery, EventRead, EventVisitor, LazyEventVisitor, NativeError,
-    ProcessSample, SpaceSample, SpaceSnapshot, StartupSnapshot,
+    NativeHealthRow, ProcessSample, SpaceSnapshot, StartupSnapshot, VolumeSnapshot,
 };
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 use std::{cell::RefCell, collections::HashMap};
 use windows::Win32::Foundation::{CloseHandle, HANDLE, RPC_E_TOO_LATE};
-use windows::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetLogicalDrives};
 use windows::Win32::System::Com::{
     COINIT_MULTITHREADED, CoInitializeEx, CoInitializeSecurity, CoUninitialize, EOAC_NONE,
     RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE,
 };
-use windows::core::PCWSTR;
 use wmi::{Variant, WMIConnection, WMIError};
 mod events;
 mod process;
 mod registry;
+mod storage;
 
 pub struct WindowsSource;
 pub(super) fn wide(text: &str) -> Vec<u16> {
@@ -196,51 +195,33 @@ impl DiagnosticSource for WindowsSource {
         process::snapshot(control)
     }
     fn space(&self, drive: Option<&str>, control: &Control) -> Result<SpaceSnapshot, NativeError> {
-        let drives = unsafe { GetLogicalDrives() };
-        if drives == 0 {
-            return Err(native_error(
-                "GetLogicalDrives",
-                windows::core::Error::from_thread(),
-            ));
-        }
-        let mut rows = Vec::new();
-        let mut errors = Vec::new();
-        for index in 0..26u8 {
-            stopped("Storage", control)?;
-            let letter = (b'A' + index) as char;
-            let name = format!("{letter}:");
-            if drives & (1 << index) == 0 || drive.is_some_and(|d| d != name) {
-                continue;
-            }
-            let path = wide(&format!("{name}\\"));
-            let mut total = 0;
-            let mut free = 0;
-            match unsafe {
-                GetDiskFreeSpaceExW(
-                    PCWSTR(path.as_ptr()),
-                    None,
-                    Some(&mut total),
-                    Some(&mut free),
-                )
-            } {
-                Ok(()) => rows.push(SpaceSample {
-                    drive: name,
-                    total,
-                    free,
-                }),
-                Err(e) => {
-                    errors.push(native_error(&format!("GetDiskFreeSpaceExW({name})"), e));
-                }
-            }
-        }
-        if drive.is_some() && rows.is_empty() && errors.is_empty() {
-            return Err(NativeError {
-                source: "Storage".into(),
-                code: None,
-                message: "指定盘符不存在或无法读取。".into(),
-            });
-        }
-        Ok(SpaceSnapshot { rows, errors })
+        storage::space(drive, control)
+    }
+    fn volume_disk_numbers(
+        &self,
+        drive: &str,
+        control: &Control,
+    ) -> Result<Option<Vec<u32>>, NativeError> {
+        storage::volume_disk_numbers(drive, control)
+    }
+    fn native_volumes(
+        &self,
+        drive: Option<&str>,
+        control: &Control,
+    ) -> Result<Option<VolumeSnapshot>, NativeError> {
+        storage::native_volumes(drive, control)
+    }
+    fn native_physical_disks(&self, control: &Control) -> Result<Option<Vec<Value>>, NativeError> {
+        storage::native_physical_disks(control)
+    }
+    fn native_disk_health(
+        &self,
+        disk_number: u32,
+        device_id: &str,
+        expected_serial: Option<&str>,
+        control: &Control,
+    ) -> Result<Option<NativeHealthRow>, NativeError> {
+        storage::native_disk_health(disk_number, device_id, expected_serial, control)
     }
     fn startup(&self, control: &Control) -> Result<StartupSnapshot, NativeError> {
         registry::snapshot(control)

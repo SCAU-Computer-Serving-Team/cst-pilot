@@ -1139,9 +1139,20 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         // Collapse sidebar on `1280×800` window so full login canvas reaches its `864px` max width alongside `300px` viewport
         window.press("ctrl-b", cx);
         let sky = window.find("login-sky-canvas-864");
+        assert_eq!(f32::from(sky.bounds().origin.y), 0.0);
         assert_eq!(f32::from(sky.bounds().size.width), 864.0);
         let vp = window.find("login-viewport-300");
         assert_eq!(f32::from(vp.bounds().size.width), 300.0);
+
+        // Re-entering Login from another route must keep the full-bleed sky + feather canvas
+        // pinned at `y == 0.0` on frame 0 (only `login-viewport-300` glides vertically).
+        shell.update(cx, |s, cx| s.set_route(ShellRoute::Settings, cx));
+        window.render_frame(cx);
+        shell.update(cx, |s, cx| s.set_route(ShellRoute::Login, cx));
+        window.render_frame(cx);
+        let sky_entry = window.find("login-sky-canvas-864");
+        assert_eq!(f32::from(sky_entry.bounds().origin.y), 0.0);
+        assert_eq!(f32::from(sky_entry.bounds().size.width), 864.0);
     })
     .unwrap();
     assert_eq!(backend.state.lock().unwrap().cstoa_logout_calls, 1);

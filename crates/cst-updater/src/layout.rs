@@ -195,6 +195,24 @@ pub fn classify(path: &str) -> Result<Area, String> {
     }
 }
 
+/// Rejects retired third-party component paths (`app/tools/wiztree` and any child, case-insensitive)
+/// for newly packaged/verified release trees and archives (both files and empty directories).
+pub fn reject_retired_release_path(path: &str) -> Result<(), String> {
+    let lower = path.to_lowercase();
+    if lower == "app/tools/wiztree" || lower.starts_with("app/tools/wiztree/") {
+        return Err("升级包包含已移除的第三方组件路径（app/tools/wiztree）。".into());
+    }
+    Ok(())
+}
+
+/// Stricter classifier for newly packaged/verified releases: rejects retired components
+/// (`app/tools/wiztree/`) while [`classify`] keeps legacy installation cleanup & rollback working.
+pub fn classify_release(path: &str) -> Result<Area, String> {
+    let area = classify(path)?;
+    reject_retired_release_path(path)?;
+    Ok(area)
+}
+
 /// Arrays are user choices and remain intact. Models-store merges by stable model id.
 pub fn merge_defaults(
     path: &str,

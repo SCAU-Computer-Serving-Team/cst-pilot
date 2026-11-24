@@ -21,17 +21,17 @@
 
 通用行为约束：
 
-1. **只读与写入例外**：查询与检索工具不修改系统配置、服务状态或机主文件。`disk usage` 与 `ls` 仅在 `wiztree/tmp/` 写入临时 CSV 并在结束时清理。`command_plan` 写入 `agent/home/command-plans/`，`runbook_deliver` 与 `runbook` 写入 `artifacts/<日期>/runbook/`。仅 `bitlocker` 的 `unlock` 与 `decrypt` 经本地确认后变更卷状态。
-2. **敏感路径与内网阻断**：`read`、`fffind` 与 `ffgrep` 统一阻断 `agent/home/{auth,models,mcp-auth,web-search}.json`、`agent/home/telemetry/identity.json` 与 `.state/` 目录，同时拦截目录外硬链接、Windows 设备路径（`\\.\`）与 NTFS 备用数据流。联网工具每次请求与重定向前校验解析后的 IP，拒绝回环与私网地址，仅按配置放行 `198.18.0.0/15` TUN 假 IP 网段。
+1. **只读与写入例外**：查询与检索工具不修改系统配置、服务状态或机主文件，存储诊断全程零临时文件落盘。`command_plan` 写入 `data/plans/`，`runbook_deliver` 与 `runbook` 写入 `artifacts/<日期>/runbook/`。仅 `bitlocker` 的 `unlock` 与 `decrypt` 经本地确认后变更卷状态。
+2. **敏感路径与内网阻断**：`read`、`fffind` 与 `ffgrep` 统一阻断 `data/config/{auth,models,mcp-auth,web-search}.json`、`data/telemetry/identity.json` 与 `.state/` 目录，同时拦截目录外硬链接、Windows 设备路径（`\\.\`）与 NTFS 备用数据流。联网工具每次请求与重定向前校验解析后的 IP，拒绝回环与私网地址，仅按配置放行 `198.18.0.0/15` TUN 假 IP 网段。
 3. **口径与错误诚实**：工具固定说明（`notice`）仅陈述数据来源、单位、采样窗口与采集限制，不输出故障定性或修复建议。部分数据源失败时保留成功数据并标记 `degraded: true`。整次查询失败时返回错误并标记 `isError: true`。空数组或 `null` 必须结合错误字段判读，禁止直接当作健康或零值。
 
 ## 查询工具规则
 
 ### ls 与 disk（存储分析）
 
-- **ls 大小来源与预算**：优先读取进程内共享卷缓存，缺失时触发全盘 WizTree 导出或回退原生目录遍历。原生遍历共用 **50 万条目、30 秒**预算，跳过符号链接与重解析点。超限或遇到权限拒绝时停止并标注 `totalSize` 为下界，未知大小保持 `null`，任一子项不完整时全部 `pct` 置 `null`。UNC 路径直接走原生遍历。
-- **disk space / info / health**：容量按二进制 GiB（`字节 ÷ 2³⁰`）换算，`freeGB: 0` 表示剩余空间为零。指定 `drive` 且盘符与物理盘关联失败时，`info` 返回全量 `physicalDisks` 并附 `infoNotice`，`health` 拒绝查询 SMART 并说明原因。SMART 仅在遭遇权限拒绝时提示管理员权限，`smart: null` 不代表硬盘健康或损坏。
-- **disk usage 扫描与降级**：调用随包 WizTree（`/admin=0`）导出 CSV 并流式生成 `topDirs`（含不同深度，父子不可相加）、`topFiles`、`extAgg`、`staleFiles`（≥50 MiB 且 ≥1 年未修改）。通过原生卷信息判断卷文件系统类型区分扫描方式，WizTree 失败时降级为原生遍历并仅返回目录排行。
+- **ls 大小来源与预算**：每次在单一调用级预算（**50 万条目、30 秒**）内实时枚举目标目录直接子项。默认使用受控并发 Win32 目录遍历一次统计所有直接子目录，直接文件与兄弟子目录共享查询范围确定性硬链接去重表（跳过符号链接、重解析点与云占位目录；完全驻留云文件正常计入）。目录自身不可打开时输出 `bytes: null`。实验开关 `CST_ENABLE_MFT=1` 开启且全部直接子目录均命中同卷有效 `$MFT` 快照（核验 `FileReference` 与 `PathPolicy::LIVE` 路径一致）时返回 `method: "native-index"`，否则整次统一走 `walk`，不混用两套归属口径。超限或遇到权限拒绝时停止并标注 `totalSize` 为下界，任一子项不完整时全部 `pct` 置 `null`。UNC 路径直接走原生遍历。
+- **disk space / info / health**：容量按二进制 GiB（`字节 ÷ 2³⁰`）换算，`freeGB: 0` 表示剩余空间为零。`space` 与 `volumes` 使用 Win32 原生接口（带线程防弹窗与网络卷统一短超时隔离，`all` 复用同次卷探测），盘符映射优先 `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`（要求全部 extent 可验证，否则回退 WMI），`health` 优先 Win32 原生 NVMe/ATA 存储 IOCTL（交叉核验序列号并严格输出 `API.md` 6 项字段），不支持或身份不明时回退单次批量 WMI。指定 `drive` 且关联失败时，`info` 返回全量 `physicalDisks` 并附 `infoNotice`，`health` 拒绝查询 SMART 并说明原因。SMART 仅在遭遇权限拒绝时提示管理员权限，`smart: null` 不代表硬盘健康或损坏。
+- **disk usage 扫描与降级**：发行路径默认使用受控并发 Win32 `FileIdBothDirectoryInfo` 遍历（`method: "native-walk"`）。仅在通过实盘门禁或显式设置实验开关 `CST_ENABLE_MFT=1`（且未设 `CST_DISABLE_MFT=1`）时，已提权的本地 NTFS 盘根尝试纯 Rust `ntfs-ng` 直读 `$MFT`（`method: "native-mft"`），损坏或缺失记录拒绝发布快照并自动回退 `native-walk` 附 `degradedFrom`。两套后端均输出 `topDirs`（含不同深度，父子不可相加）、`topFiles`（`{ path, sizeGB, modified }`）、`extAgg`、`staleFiles`（≥50 MiB 且 ≥1 年未修改），并执行确定性硬链接去重与云占位保护。
 
 ### sys 与 startup（实时负载与启动配置）
 

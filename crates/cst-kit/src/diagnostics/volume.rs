@@ -1,157 +1,54 @@
+use super::scan::ScanSnapshot;
+use super::volume_index::{ScanSource, VolumeIdentity};
 use super::win_native::Control;
-use super::wz_index::{ScanSource, VolumeIdentity, display_path, drive_key, path_key};
-use std::fs::{self, File};
-use std::io::{Read, Result as IoResult};
-use std::path::{Path, PathBuf};
 
-pub struct NativeScanSource {
-    root: PathBuf,
-}
+#[derive(Default)]
+pub struct NativeScanSource;
+
 impl NativeScanSource {
-    pub fn new(root: impl AsRef<Path>) -> Self {
-        Self {
-            root: root.as_ref().into(),
-        }
+    pub fn new() -> Self {
+        Self
     }
 }
-struct ExportFile {
-    file: Option<File>,
-    path: PathBuf,
-    _directories: Vec<File>,
-}
-impl Read for ExportFile {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
-        self.file.as_mut().expect("export file is open").read(buf)
-    }
-}
-impl Drop for ExportFile {
-    fn drop(&mut self) {
-        self.file.take();
-        let _ = fs::remove_file(&self.path);
-    }
-}
+
 impl ScanSource for NativeScanSource {
     fn identity(&self, drive: &str) -> Result<VolumeIdentity, String> {
         volume_identity(drive)
     }
-    fn export(&self, root: &Path, control: &Control) -> Result<Box<dyn Read + Send>, String> {
+
+    fn scan_volume(&self, drive: &str, control: &Control) -> Result<ScanSnapshot, String> {
         control.check()?;
-        let layout = cst_os::KitLayout::new(&self.root)?;
-        let executable = layout.wiztree_dir().join("WizTree64.exe");
-        if !executable.is_file() {
-            return Err("随包 WizTree 不可用。".into());
+        if !super::mft::mft_enabled() {
+            return Err("原生 $MFT 直读默认关闭，当前使用目录遍历。".into());
         }
-        #[cfg(windows)]
-        if let Some(drive) = drive_key(root)
-            && path_key(root) == drive
-            && volume_identity(&drive).is_ok_and(|id| id.filesystem.eq_ignore_ascii_case("NTFS"))
-            && !cst_os::is_elevated().unwrap_or(false)
-        {
-            return Err("当前非管理员权限，无法通过 WizTree 读取 NTFS 主文件表（MFT）。".into());
+        let identity = volume_identity(drive)?;
+        if !identity.filesystem.eq_ignore_ascii_case("NTFS") {
+            return Err(format!(
+                "卷 {drive} 文件系统为 {}，仅本地 NTFS 支持原生 $MFT 索引。",
+                identity.filesystem
+            ));
         }
-        let directories = pin_temporary(layout.root())?;
-        let path = layout
-            .wiztree_tmp_dir()
-            .join(format!("wz-{}.csv", uuid::Uuid::new_v4()));
-        let mut exported = ExportFile {
-            file: None,
-            path: path.clone(),
-            _directories: directories,
-        };
-        let cli_root = wiztree_target_arg(root);
-        let cli_export = display_path(&path);
-        super::native_job::run(
-            &executable,
-            &[
-                cli_root.into(),
-                "/admin=0".into(),
-                format!("/export={cli_export}").into(),
-                "/exportfolders=1".into(),
-                "/exportfiles=1".into(),
-            ],
-            control,
-            1024 * 1024,
-        )?;
-        control.check()?;
-        let meta = fs::symlink_metadata(&path).map_err(|_| "WizTree 未生成导出文件。")?;
-        if super::walk::linked(&meta) || !meta.is_file() {
-            return Err("WizTree 导出路径无效。".into());
+        if !cst_os::is_elevated().unwrap_or(false) {
+            return Err("当前非管理员权限，无法直读 NTFS 主文件表（$MFT）。".into());
         }
-        let mut options = fs::OpenOptions::new();
-        options.read(true);
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::OpenOptionsExt;
-            options.share_mode(1);
-        }
-        let file = options
-            .open(&path)
-            .map_err(|_| "WizTree 导出文件无法打开。")?;
-        let handle =
-            same_file::Handle::from_file(file.try_clone().map_err(|_| "无法验证 CSV 文件身份。")?)
-                .map_err(|_| "无法验证 CSV 文件身份。")?;
-        if handle != same_file::Handle::from_path(&path).map_err(|_| "无法验证 CSV 文件身份。")?
-        {
-            return Err("WizTree 导出文件身份发生变化。".into());
-        }
-        exported.file = Some(file);
-        Ok(Box::new(exported))
-    }
-}
-fn wiztree_target_arg(root: &Path) -> String {
-    let clean = display_path(root);
-    let trimmed = clean.trim_end_matches(['\\', '/']);
-    let bytes = trimmed.as_bytes();
-    if bytes.len() == 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        format!("{trimmed}\\")
-    } else if trimmed.is_empty() {
-        clean
-    } else {
-        trimmed.to_owned()
+        super::mft::scan_ntfs_volume(drive, identity.volume_guid.as_deref(), control)
     }
 }
 
-fn pin_temporary(root: &Path) -> Result<Vec<File>, String> {
-    let mut files = Vec::new();
-    let mut path = root.to_path_buf();
-    for part in ["", ".state", "tmp", "wiztree"] {
-        if !part.is_empty() {
-            path.push(part);
-        }
-        match fs::create_dir(&path) {
-            Ok(()) => (),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
-            Err(_) => return Err("WizTree 临时目录无法创建。".into()),
-        }
-        let mut options = fs::OpenOptions::new();
-        options.read(true);
-        #[cfg(windows)]
-        {
-            use std::os::windows::fs::OpenOptionsExt;
-            options
-                .access_mode(0)
-                .share_mode(3)
-                .custom_flags(0x02000000 | 0x00200000);
-        }
-        let file = options
-            .open(&path)
-            .map_err(|_| "WizTree 临时目录无法锁定。")?;
-        let meta = file.metadata().map_err(|_| "WizTree 临时目录无法验证。")?;
-        if super::walk::linked(&meta) || !meta.is_dir() {
-            return Err("WizTree 临时目录包含链接或重解析点。".into());
-        }
-        files.push(file);
-    }
-    Ok(files)
-}
 #[cfg(windows)]
 fn volume_identity(drive: &str) -> Result<VolumeIdentity, String> {
+    use std::fs;
     use std::os::windows::{ffi::OsStrExt, fs::OpenOptionsExt, io::AsRawHandle};
     use windows::Win32::Foundation::HANDLE;
     use windows::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle, GetVolumeInformationW,
+        BY_HANDLE_FILE_INFORMATION, GetDriveTypeW, GetFileInformationByHandle,
+        GetVolumeInformationW, GetVolumeNameForVolumeMountPointW,
     };
     use windows::core::PCWSTR;
+
+    const DRIVE_FIXED: u32 = 3;
+    const DRIVE_REMOVABLE: u32 = 2;
+
     if drive.len() != 2 || !drive.as_bytes()[0].is_ascii_alphabetic() || drive.as_bytes()[1] != b':'
     {
         return Err("卷身份查询需要有效盘符。".into());
@@ -161,6 +58,23 @@ fn volume_identity(drive: &str) -> Result<VolumeIdentity, String> {
         .encode_wide()
         .chain(Some(0))
         .collect();
+    // Reject mapped network drives, CD-ROMs, and unknown mounts before touching volume metadata.
+    let drive_type = unsafe { GetDriveTypeW(PCWSTR(wide.as_ptr())) };
+    if drive_type != DRIVE_FIXED && drive_type != DRIVE_REMOVABLE {
+        return Err("目标卷不是本地固定或可移动磁盘。".into());
+    }
+    let mut guid_buf = [0u16; 128];
+    let volume_guid =
+        unsafe { GetVolumeNameForVolumeMountPointW(PCWSTR(wide.as_ptr()), &mut guid_buf).ok() }
+            .map(|()| {
+                let len = guid_buf
+                    .iter()
+                    .position(|&c| c == 0)
+                    .unwrap_or(guid_buf.len());
+                String::from_utf16_lossy(&guid_buf[..len])
+            })
+            .filter(|g| !g.is_empty());
+
     let mut serial = 0u32;
     let mut filesystem = [0u16; 64];
     // SAFETY: drive root is NUL-terminated and all output buffers remain alive.
@@ -198,8 +112,10 @@ fn volume_identity(drive: &str) -> Result<VolumeIdentity, String> {
         filesystem: String::from_utf16_lossy(&filesystem[..len]),
         root_created: ((info.ftCreationTime.dwHighDateTime as u64) << 32)
             | info.ftCreationTime.dwLowDateTime as u64,
+        volume_guid,
     })
 }
+
 #[cfg(not(windows))]
 fn volume_identity(_: &str) -> Result<VolumeIdentity, String> {
     Err("卷身份查询仅支持 Windows。".into())

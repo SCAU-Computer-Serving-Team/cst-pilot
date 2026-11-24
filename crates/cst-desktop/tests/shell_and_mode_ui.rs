@@ -358,6 +358,23 @@ fn d3d11_single_window_sky_frosted_glass_and_device_recovery() {
         );
     }
 
+    // 1b. Semi-transparent login sky fades cleanly over backdrop instead of snapping to 100%
+    h1.clear_split_black_white();
+    D3d11SkySurface {
+        preset: SkyPreset::LoginLight,
+        time_sec: 0.0,
+        opacity: 0.01,
+        corner_radii_phys: [0.0; 4],
+    }
+    .paint(&h1.make_draw_ctx(0.0, 0.0, 256.0, 160.0, D3D_FEATURE_LEVEL_11_0_RAW))
+    .unwrap();
+    let faded_px = h1.readback_bgra();
+    let left_sample = faded_px[80 * 256 + 40];
+    assert!(
+        left_sample[0] <= 12 && left_sample[1] <= 12 && left_sample[2] <= 12,
+        "opacity=0.01 sky over black must stay near-black without flashing opaque: {left_sample:?}"
+    );
+
     // 2. Sharp black/white split + frosted glass overlay -> Gaussian blur across x=128 inside overlay, untouched outside!
     h1.clear_split_black_white();
     let palette = DesktopPalette::light();
@@ -529,6 +546,7 @@ fn shader_frame_scheduler_zero_fps_freeze_and_static_start_frame() {
             streaming_assistant: None,
             bitlocker: None,
             context_usage: None,
+            usage: None,
             queue: None,
             ui: None,
             estimated_bytes: 0,

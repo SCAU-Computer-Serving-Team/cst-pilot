@@ -679,7 +679,7 @@ impl Render for WorkbenchView {
                     .w(px(200.0))
                     .p(space::XS)
                     .rounded(radius::ROW)
-                    .bg(palette.bg_elevated)
+                    .bg(palette.bg_glass)
                     .border_1()
                     .border_color(palette.border_subtle)
                     .flex()
@@ -866,11 +866,10 @@ impl Render for WorkbenchView {
                         .left_0()
                         .right_0()
                         .h_full()
-                        .opacity(sky_op)
                         .child(render_sky_background_rounded(
                             SkyPreset::home_for_theme(palette.mode),
                             self.sky_time,
-                            1.0,
+                            sky_op,
                             [8.0, 8.0, 8.0, 8.0],
                             scale_factor,
                         )),

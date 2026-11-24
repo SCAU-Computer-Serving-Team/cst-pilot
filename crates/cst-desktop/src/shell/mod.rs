@@ -1113,6 +1113,7 @@ impl AppShell {
                                         || a.queue != b.queue
                                         || a.ui != b.ui
                                         || a.context_usage != b.context_usage
+                                        || a.usage != b.usage
                                 }
                                 (None, None) => false,
                                 _ => true,
@@ -2414,9 +2415,9 @@ impl AppShell {
             }
             AccountViewEvent::OpenLoginTab(tab) => {
                 let target_tab = *tab;
-                self.set_route(ShellRoute::Login, cx);
                 self.login_view
-                    .update(cx, |lv, cx| lv.set_tab(target_tab, cx));
+                    .update(cx, |lv, cx| lv.open_tab_without_slide(target_tab, cx));
+                self.set_route(ShellRoute::Login, cx);
                 cx.notify();
             }
             AccountViewEvent::LoggedOutCstoa => {
@@ -2670,8 +2671,14 @@ impl Render for AppShell {
             wb.sync_route_and_sky(wb_session_id, sky_time, window, cx);
         });
         if self.route == ShellRoute::Login {
-            self.login_view
-                .update(cx, |lv, _| lv.set_sky_time(sky_time));
+            self.login_view.update(cx, |lv, _| {
+                lv.set_sky_time(sky_time);
+                lv.set_enter_transition(
+                    route_sample.container_opacity,
+                    route_sample.container_dx,
+                    route_sample.container_dy,
+                );
+            });
         }
         if let Some(ref cp) = self.command_palette {
             let sess_vec = self.snapshot.sessions.as_ref().clone();
@@ -2715,15 +2722,7 @@ impl Render for AppShell {
                 .size_full()
                 .overflow_hidden()
                 .bg(palette.bg_workspace)
-                .child(
-                    div()
-                        .relative()
-                        .size_full()
-                        .opacity(route_sample.container_opacity)
-                        .left(route_sample.container_dx)
-                        .top(route_sample.container_dy)
-                        .child(self.login_view.clone()),
-                )
+                .child(self.login_view.clone())
                 .child(
                     div()
                         .absolute()
@@ -2986,22 +2985,15 @@ impl Render for AppShell {
                     .right_0()
                     .bottom_0()
                     .overflow_hidden()
-                    .child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .left_0()
-                            .right_0()
-                            .h_full()
-                            .opacity(1.0 - curtain.sky_progress)
-                            .child(render_sky_background_rounded(
-                                SkyPreset::home_for_theme(palette.mode),
-                                curtain.frozen_sky_time,
-                                1.0,
-                                [f32::from(radius::ROW); 4],
-                                scale_factor,
-                            )),
-                    )
+                    .child(div().absolute().top_0().left_0().right_0().h_full().child(
+                        render_sky_background_rounded(
+                            SkyPreset::home_for_theme(palette.mode),
+                            curtain.frozen_sky_time,
+                            (1.0 - curtain.sky_progress).clamp(0.0, 1.0),
+                            [f32::from(radius::ROW); 4],
+                            scale_factor,
+                        ),
+                    ))
                     .child(
                         div()
                             .relative()

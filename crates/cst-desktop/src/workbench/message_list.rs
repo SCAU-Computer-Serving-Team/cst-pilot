@@ -1765,19 +1765,6 @@ impl MessageListView {
             } else {
                 summary_raw
             };
-            let tokens_before = comp_entry
-                .raw
-                .get("tokensBefore")
-                .and_then(Value::as_u64)
-                .unwrap_or(0);
-            let tokens_label = (tokens_before > 0).then(|| {
-                let k = (tokens_before as f64 / 1000.0).round() as u64;
-                if k > 0 {
-                    format!("压缩前 {k}k tokens")
-                } else {
-                    format!("压缩前 {tokens_before} tokens")
-                }
-            });
             let ts_label = (comp_entry.timestamp_ms > 0)
                 .then(|| format_timestamp_hhmm(comp_entry.timestamp_ms))
                 .flatten();
@@ -1795,22 +1782,25 @@ impl MessageListView {
                 window,
                 cx,
             );
-            let hdr_icon_fg =
+            let hdr_fg =
                 motion::lerp_hsla(palette.text_secondary, palette.text_primary, hdr_hover_t);
 
-            let header = div()
+            // Matches normal tool row (`BuK2W` / `normal_card.rs`):
+            // `28px` frameless row, `16×16` `circle-check` (`$status-success`), `$font-ui`
+            // `$text-secondary` -> hover `$text-primary`, right-aligned `$font-caption` time + chevron.
+            let header = apply_scale(div(), scale::UI)
                 .id(hdr_id.clone())
                 .test_support()
                 .a11y_toggle_button(hdr_id, "上下文已压缩", is_open)
                 .aria_expanded(is_open)
                 .w_full()
-                .h(height::CONTROL)
-                .border_b_1()
-                .border_color(palette.bg_surface)
+                .h(height::COMPACT)
+                .px(px(0.0))
                 .flex()
                 .items_center()
                 .justify_between()
-                .gap(space::MD)
+                .gap(space::SM)
+                .text_color(hdr_fg)
                 .on_hover(move |active, w, cx| {
                     if *active {
                         motion::PointerFlag::enter(&hdr_hs, w, cx);
@@ -1835,37 +1825,39 @@ impl MessageListView {
                         .gap(space::SM)
                         .min_w_0()
                         .child(
-                            Icon::new(IconName::Minimize2)
+                            Icon::new(IconName::CircleCheck)
                                 .size(px(16.0))
-                                .text_color(hdr_icon_fg),
+                                .text_color(palette.status_success),
                         )
                         .child(
-                            apply_scale(div(), scale::BODY_MEDIUM)
-                                .text_color(palette.text_primary)
+                            div()
+                                .min_w_0()
+                                .truncate()
                                 .child(cjk_inline_label("上下文已压缩")),
-                        )
-                        .children(tokens_label.map(|meta| {
-                            apply_scale(div(), scale::UI)
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::SM)
+                        .flex_shrink_0()
+                        .children(ts_label.map(|hhmm| {
+                            apply_scale(div(), scale::CAPTION)
+                                .font_family(mono_family.clone())
                                 .text_color(palette.text_muted)
-                                .child(cjk_inline_label(meta))
+                                .child(SharedString::from(hhmm))
                         }))
                         .child(motion::animated_chevron(
                             format!("compaction-chev-{turn_key}"),
                             is_open,
                             false,
                             px(16.0),
-                            hdr_icon_fg,
+                            hdr_fg,
                             window,
                             cx,
                         )),
-                )
-                .children(ts_label.map(|hhmm| {
-                    apply_scale(div(), scale::UI)
-                        .font_family(mono_family.clone())
-                        .text_color(palette.text_secondary)
-                        .flex_shrink_0()
-                        .child(cjk_inline_label(hhmm))
-                }));
+                );
 
             let mut container = div()
                 .id(SharedString::from(format!("turn-compaction-{turn_key}")))
@@ -1873,7 +1865,6 @@ impl MessageListView {
                 .w_full()
                 .flex()
                 .flex_col()
-                .gap(space::MD)
                 .child(header);
 
             let copy_id = SharedString::from(format!("compaction-copy-{turn_key}"));
@@ -1942,26 +1933,56 @@ impl MessageListView {
                             .into_any_element()
                     };
 
-                    // Matches `cst-pilot-desktop.pen` `l6foNm` / `TCdOx -> WVTLP`:
-                    // `$bg-surface`, `4px` radius, `12px` padding, `$font-caption` (`12px`) `$text-secondary`
-                    // plain summary text on the left + `28×28` copy button on the top-right.
+                    // Matches normal tool expanded body (`VwO1J` / `normal_card.rs`):
+                    // `16px` left gutter with centered `2px` `$border-subtle` vertical guide rail,
+                    // `8px` gap (`24px` total indent), and `$bg-surface` `4px` radius `12px` padding
+                    // summary block + `28×28` top-right copy button.
+                    let guide_rail = div()
+                        .w(px(16.0))
+                        .flex_shrink_0()
+                        .flex()
+                        .justify_center()
+                        .pt(px(2.0))
+                        .pb(px(4.0))
+                        .child(
+                            div()
+                                .w(px(2.0))
+                                .h_full()
+                                .rounded(radius::FULL)
+                                .bg(palette.border_subtle),
+                        );
+
+                    let right_col = div()
+                        .flex_1()
+                        .min_w_0()
+                        .pt(space::MICRO)
+                        .pb(space::MICRO)
+                        .child(
+                            div()
+                                .w_full()
+                                .p(space::MD)
+                                .rounded(radius::CONTROL)
+                                .bg(palette.bg_surface)
+                                .flex()
+                                .items_start()
+                                .justify_between()
+                                .gap(space::MD)
+                                .child(
+                                    apply_scale(div(), scale::CAPTION)
+                                        .flex_1()
+                                        .min_w_0()
+                                        .text_color(palette.text_secondary)
+                                        .child(SharedString::from(summary_text.clone())),
+                                )
+                                .child(copy_btn),
+                        );
+
                     div()
                         .w_full()
-                        .p(space::MD)
-                        .rounded(radius::CONTROL)
-                        .bg(palette.bg_surface)
                         .flex()
-                        .items_start()
-                        .justify_between()
-                        .gap(space::MD)
-                        .child(
-                            apply_scale(div(), scale::CAPTION)
-                                .flex_1()
-                                .min_w_0()
-                                .text_color(palette.text_secondary)
-                                .child(SharedString::from(summary_text.clone())),
-                        )
-                        .child(copy_btn)
+                        .gap(space::SM)
+                        .child(guide_rail)
+                        .child(right_col)
                         .into_any_element()
                 },
             ) {
@@ -3016,24 +3037,26 @@ impl Render for MessageListView {
                     .id("session-compacting-status")
                     .test_support()
                     .w_full()
-                    .h(height::CONTROL)
-                    .border_b_1()
-                    .border_color(palette.bg_surface)
+                    .h(height::COMPACT)
+                    .px(px(0.0))
                     .flex()
                     .items_center()
                     .gap(space::SM)
-                    .child(
-                        Icon::new(IconName::Minimize2)
-                            .size(px(16.0))
-                            .text_color(palette.text_secondary),
-                    )
+                    .child(motion::animated_spinner(
+                        format!("compacting-spin-{sid}"),
+                        px(16.0),
+                        palette.accent_ink,
+                        running_light_allowed,
+                        window,
+                        cx,
+                    ))
                     .child(render_running_light_label_with_scale(
                         "正在压缩上下文…",
                         running_light_allowed,
                         started_instant,
                         palette.text_secondary,
                         palette.text_primary,
-                        scale::BODY_MEDIUM,
+                        scale::UI,
                         window,
                     )),
             );
@@ -3435,6 +3458,7 @@ mod tests {
             messages: Arc::clone(&messages),
             entries: Arc::new(Vec::new()),
             context_usage: None,
+            usage: None,
             queue: None,
             ui: None,
             bitlocker: None,
@@ -3515,6 +3539,7 @@ mod tests {
             ]),
             entries,
             context_usage: None,
+            usage: None,
             queue: None,
             ui: None,
             bitlocker: None,

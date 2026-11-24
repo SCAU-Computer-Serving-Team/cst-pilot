@@ -1061,10 +1061,8 @@ impl BranchTreeView {
         cx: &mut Context<Self>,
     ) -> Self {
         let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索条目"));
-        let custom_prompt_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("输入分支总结附加提示词（例如：重点保留排查结论与待确认项）…")
-        });
+        let custom_prompt_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("附加提示词（可选）"));
         let is_open = !session_id.is_empty();
         let enter_anim_start = is_open.then(|| cx.background_executor().now());
         let mut view = Self {
@@ -2510,7 +2508,7 @@ impl Render for BranchTreeView {
                 .w(px(164.0))
                 .p(space::TIGHT)
                 .rounded(radius::ROW)
-                .bg(palette.bg_elevated)
+                .bg(palette.bg_glass)
                 .border_1()
                 .border_color(palette.border_subtle)
                 .flex()
@@ -2538,7 +2536,7 @@ impl Render for BranchTreeView {
                         .flex()
                         .items_center()
                         .justify_between()
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .hover(|s| s.bg(palette.bg_item_active))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.filter_mode = mode;
                             this.filter_dropdown_open = false;

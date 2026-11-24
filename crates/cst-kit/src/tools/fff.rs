@@ -369,7 +369,7 @@ mod tests {
     #[test]
     fn fff_matches_relative_globs_with_unextended_windows_cwd() {
         let temp = std::env::temp_dir().join(format!("cst-fff-cwd-{}", uuid::Uuid::new_v4()));
-        let cwd = PathBuf::from(crate::diagnostics::wz_index::display_path(&temp));
+        let cwd = PathBuf::from(crate::diagnostics::volume_index::display_path(&temp));
         std::fs::create_dir_all(cwd.join("src")).unwrap();
         std::fs::write(cwd.join("src/log.txt"), b"needle").unwrap();
         let guard = PathGuard::new(&cwd).unwrap();

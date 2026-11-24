@@ -180,26 +180,21 @@ pub fn render_sky_background_rounded(
     corner_radii_logical: [f32; 4],
     scale_factor: f32,
 ) -> Div {
-    let (top_color, bottom_color) = preset.fallback_gradient_stops();
+    let clamped_opacity = opacity.clamp(0.0, 1.0);
     let sf = scale_factor.max(1.0);
     let base = div()
         .size_full()
         .rounded_tl(px(corner_radii_logical[0]))
         .rounded_tr(px(corner_radii_logical[1]))
         .rounded_br(px(corner_radii_logical[2]))
-        .rounded_bl(px(corner_radii_logical[3]))
-        .bg(linear_gradient(
-            180.0,
-            linear_color_stop(top_color, 0.0),
-            linear_color_stop(bottom_color, 1.0),
-        ));
+        .rounded_bl(px(corner_radii_logical[3]));
 
     #[cfg(windows)]
     if d3d_sm50_supported() {
         let renderer: Arc<dyn gpui::WindowsSurfaceRenderer> = Arc::new(D3d11SkySurface {
             preset,
             time_sec,
-            opacity,
+            opacity: clamped_opacity,
             corner_radii_phys: [
                 corner_radii_logical[0] * sf,
                 corner_radii_logical[1] * sf,
@@ -207,11 +202,30 @@ pub fn render_sky_background_rounded(
                 corner_radii_logical[3] * sf,
             ],
         });
-        return base.child(gpui_kit::surface(renderer).size_full());
+        // Skip the opaque fallback gradient while the D3D11 surface is semi-transparent during
+        // route transitions so it alpha-blends cleanly against `$bg-workspace` under feather masks.
+        let surface_wrap = if clamped_opacity >= 0.999 {
+            let (top_color, bottom_color) = preset.fallback_gradient_stops();
+            base.bg(linear_gradient(
+                180.0,
+                linear_color_stop(top_color, 0.0),
+                linear_color_stop(bottom_color, 1.0),
+            ))
+        } else {
+            base
+        };
+        return surface_wrap.child(gpui_kit::surface(renderer).size_full());
     }
 
-    let _ = (time_sec, opacity);
-    base
+    let (mut top_color, mut bottom_color) = preset.fallback_gradient_stops();
+    top_color.a *= clamped_opacity;
+    bottom_color.a *= clamped_opacity;
+    let _ = time_sec;
+    base.bg(linear_gradient(
+        180.0,
+        linear_color_stop(top_color, 0.0),
+        linear_color_stop(bottom_color, 1.0),
+    ))
 }
 
 /// Renders the 9-stop nonlinear horizontal fade mask on the right side of Login's `864×800` shader canvas

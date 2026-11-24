@@ -2300,7 +2300,7 @@ pub fn apply_desktop_theme(
         kit_theme.colors.primary = palette.accent_solid;
         kit_theme.colors.primary_hover = palette.accent_hover;
         kit_theme.colors.primary_foreground = palette.text_on_accent;
-        kit_theme.colors.popover = palette.bg_elevated;
+        kit_theme.colors.popover = palette.bg_glass;
         kit_theme.colors.popover_foreground = palette.text_primary;
         kit_theme.colors.danger = palette.status_danger;
         kit_theme.colors.danger_foreground = palette.text_on_accent;
@@ -2505,4 +2505,17 @@ pub fn render_kbd_zcgs3(
         .justify_center()
         .flex_shrink_0()
         .child(keys.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DesktopPalette;
+
+    #[test]
+    fn popover_surface_keeps_contrast_against_menu_row_hover_in_both_themes() {
+        for palette in [DesktopPalette::light(), DesktopPalette::dark()] {
+            assert_ne!(palette.bg_glass, palette.bg_item_active);
+            assert_ne!(palette.bg_glass, palette.status_danger_subtle);
+        }
+    }
 }

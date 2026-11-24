@@ -624,7 +624,7 @@ impl Render for PreferencesTabView {
                                     .px(space::SM)
                                     .rounded(radius::CONTROL)
                                     .bg(if is_kbd_hi {
-                                        palette.bg_item_hover
+                                        palette.bg_item_active
                                     } else {
                                         gpui_kit::transparent_black()
                                     })
@@ -633,7 +633,7 @@ impl Render for PreferencesTabView {
                                     .items_center()
                                     .justify_between()
                                     .gap(space::SM)
-                                    .hover(|s| s.bg(palette.bg_item_hover))
+                                    .hover(|s| s.bg(palette.bg_item_active))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.set_default_model(
                                             prov_c.clone(),
@@ -679,7 +679,7 @@ impl Render for PreferencesTabView {
                     .w(px(300.0))
                     .p(space::XS)
                     .rounded(radius::ROW)
-                    .bg(palette.bg_elevated)
+                    .bg(palette.bg_glass)
                     .border_1()
                     .border_color(palette.border_subtle)
                     .occlude()
@@ -877,7 +877,7 @@ impl Render for PreferencesTabView {
                         .px(space::SM)
                         .rounded(radius::CONTROL)
                         .bg(if self.picker_keyboard_nav && self.picker_index == 0 {
-                            palette.bg_item_hover
+                            palette.bg_item_active
                         } else {
                             gpui_kit::transparent_black()
                         })
@@ -886,7 +886,7 @@ impl Render for PreferencesTabView {
                         .items_center()
                         .justify_between()
                         .gap(space::SM)
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .hover(|s| s.bg(palette.bg_item_active))
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.provider_filter = None;
                             this.dismiss_dropdowns(window, cx);
@@ -915,7 +915,7 @@ impl Render for PreferencesTabView {
                         .px(space::SM)
                         .rounded(radius::CONTROL)
                         .bg(if is_kbd_hi {
-                            palette.bg_item_hover
+                            palette.bg_item_active
                         } else {
                             gpui_kit::transparent_black()
                         })
@@ -924,7 +924,7 @@ impl Render for PreferencesTabView {
                         .items_center()
                         .justify_between()
                         .gap(space::SM)
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .hover(|s| s.bg(palette.bg_item_active))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.provider_filter = Some(p_click.clone());
                             this.dismiss_dropdowns(window, cx);
@@ -951,7 +951,7 @@ impl Render for PreferencesTabView {
                         .w(px(220.0))
                         .p(space::XS)
                         .rounded(radius::ROW)
-                        .bg(palette.bg_elevated)
+                        .bg(palette.bg_glass)
                         .border_1()
                         .border_color(palette.border_subtle)
                         .occlude()

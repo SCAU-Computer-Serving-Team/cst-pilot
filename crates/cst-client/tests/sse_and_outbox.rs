@@ -1235,3 +1235,245 @@ async fn session_send_lost_202_reconciles_by_original_message_id_without_duplica
 
     handle.stop();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn post_compaction_agent_end_and_usage_changed_refresh_context_usage_and_cache_hit_rate() {
+    use controlled_http::{RawReply, spawn_controlled_server};
+    use serde_json::Value;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::mpsc;
+
+    let fixture = ServerFixture::new();
+    let stage = Arc::new(AtomicUsize::new(0));
+    let mux_tx_slot: Arc<Mutex<Option<mpsc::UnboundedSender<String>>>> = Arc::new(Mutex::new(None));
+    let keepalive_tx_slot: Arc<Mutex<Option<mpsc::UnboundedSender<String>>>> =
+        Arc::new(Mutex::new(None));
+    let models_queries: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let stage_h = Arc::clone(&stage);
+    let mux_h = Arc::clone(&mux_tx_slot);
+    let keep_h = Arc::clone(&keepalive_tx_slot);
+    let models_q_h = Arc::clone(&models_queries);
+
+    let (port, _requests) = spawn_controlled_server(move |req| {
+        let stage = Arc::clone(&stage_h);
+        let mux_slot = Arc::clone(&mux_h);
+        let keep_slot = Arc::clone(&keep_h);
+        let models_q = Arc::clone(&models_q_h);
+        async move {
+            if req.target == "/api/app/events" {
+                let (tx, rx) = mpsc::unbounded_channel();
+                let _ = tx.send("event: heartbeat\ndata: {}\n\n".to_owned());
+                *keep_slot.lock().unwrap() = Some(tx);
+                return RawReply::SseStream(rx);
+            }
+            if req.target.starts_with("/api/events/stream?") {
+                let (tx, rx) = mpsc::unbounded_channel();
+                let _ = tx.send(
+                    "id: global:g0:1\nevent: state\ndata: {\"type\":\"stream_ready\",\"subscribedSessions\":[]}\n\n"
+                        .to_owned(),
+                );
+                *mux_slot.lock().unwrap() = Some(tx);
+                return RawReply::SseStream(rx);
+            }
+            if req.target.starts_with("/api/events/stream/") && req.method == "PUT" {
+                return RawReply::Json {
+                    status: 200,
+                    body: json!({ "subscribed": ["s-comp"] }),
+                };
+            }
+            if req.target == "/api/sessions/s-comp" {
+                let cur_stage = stage.load(Ordering::SeqCst);
+                let body = if cur_stage == 0 {
+                    json!({
+                        "id": "s-comp",
+                        "eventCursor": "ep1:1",
+                        "running": false,
+                        "compacting": false,
+                        "contextUsage": { "tokens": null, "contextWindow": 131072, "percent": null },
+                        "usage": { "tokens": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }, "cacheHitRate": null },
+                        "messages": [],
+                        "entries": []
+                    })
+                } else {
+                    json!({
+                        "id": "s-comp",
+                        "eventCursor": "ep1:3",
+                        "running": false,
+                        "compacting": false,
+                        "contextUsage": { "tokens": 7075, "contextWindow": 131072, "percent": 5.398 },
+                        "usage": { "tokens": { "input": 1307, "output": 136, "cacheRead": 5632, "cacheWrite": 0, "total": 7075 }, "cacheHitRate": 0.8116 },
+                        "messages": [],
+                        "entries": []
+                    })
+                };
+                return RawReply::Json { status: 200, body };
+            }
+            if req.target.starts_with("/api/models") {
+                models_q.lock().unwrap().push(req.target.clone());
+                let cur_stage = stage.load(Ordering::SeqCst);
+                let has_sid = req.target.contains("sessionId=s-comp");
+                let usage = if has_sid && cur_stage > 0 {
+                    json!({ "tokens": { "input": 1307, "output": 136, "cacheRead": 5632, "cacheWrite": 0, "total": 7075 }, "cacheHitRate": 0.8116 })
+                } else {
+                    Value::Null
+                };
+                let ctx = if has_sid && cur_stage > 0 {
+                    json!({ "tokens": 7075, "contextWindow": 131072, "percent": 5.398 })
+                } else {
+                    Value::Null
+                };
+                return RawReply::Json {
+                    status: 200,
+                    body: json!({
+                        "models": [],
+                        "catalog": [],
+                        "contextUsage": ctx,
+                        "usage": usage
+                    }),
+                };
+            }
+            if req.target == "/api/app/settings" {
+                return RawReply::Json {
+                    status: 200,
+                    body: json!({ "theme": "dark", "defaultView": "gui", "sidebarCollapsed": false, "windowMaximized": false }),
+                };
+            }
+            if req.target == "/api/auth" {
+                return RawReply::Json {
+                    status: 200,
+                    body: json!({ "providers": [] }),
+                };
+            }
+            if req.target.starts_with("/api/account") {
+                return RawReply::Json {
+                    status: 200,
+                    body: json!({ "loggedIn": false }),
+                };
+            }
+            if req.target == "/api/app/update/status" {
+                return RawReply::Json {
+                    status: 200,
+                    body: json!({
+                        "currentVersion": "v0.9.5",
+                        "status": { "phase": "unavailable", "message": "未启用" }
+                    }),
+                };
+            }
+            RawReply::Json {
+                status: 200,
+                body: json!({
+                    "version": "v0.9.5",
+                    "channelMode": "app_active",
+                    "commands": [],
+                    "sessions": [{ "id": "s-comp", "title": "压缩测试会话", "running": false }]
+                }),
+            }
+        }
+    })
+    .await;
+
+    let self_id = ProcessIdentity::current().unwrap();
+    let handle = CstClient::from_verified_endpoint(
+        &tokio::runtime::Handle::current(),
+        VerifiedServerEndpoint {
+            kit_root: fixture.root.clone(),
+            pid: self_id.pid,
+            process_created: self_id.created,
+            port,
+            version: "v0.9.5".into(),
+            http: AppHttpClient::new(port, "test-token").unwrap(),
+            spawned_by_client: false,
+        },
+        None,
+    )
+    .unwrap();
+
+    let ready_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while tokio::time::Instant::now() < ready_deadline
+        && (!handle.snapshot().connected
+            || mux_tx_slot.lock().unwrap().is_none()
+            || keepalive_tx_slot.lock().unwrap().is_none())
+    {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let initial = handle
+        .activate_session(Some("s-comp".into()))
+        .await
+        .unwrap()
+        .expect("s-comp loaded");
+    assert!(initial.context_usage.as_ref().unwrap()["tokens"].is_null());
+    assert!(initial.usage.as_ref().unwrap()["cacheHitRate"].is_null());
+
+    // Post-compaction chat reply finishes: server emits inline usage on `agent_end` + global `usage_changed`.
+    stage.store(1, Ordering::SeqCst);
+    mux_tx_slot
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .send(
+            "id: global:g0:2,s-comp:ep1:2\nevent: session\ndata: {\"sessionId\":\"s-comp\",\"event\":{\"type\":\"agent_end\",\"contextUsage\":{\"tokens\":7075,\"contextWindow\":131072,\"percent\":5.398},\"usage\":{\"tokens\":{\"input\":1307,\"output\":136,\"cacheRead\":5632,\"cacheWrite\":0,\"total\":7075},\"cacheHitRate\":0.8116}}}\n\n"
+                .to_owned(),
+        )
+        .unwrap();
+    keepalive_tx_slot
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .send(
+            "event: state\ndata: {\"type\":\"usage_changed\",\"sessionId\":\"s-comp\",\"contextUsage\":{\"tokens\":7075,\"contextWindow\":131072,\"percent\":5.398},\"usage\":{\"tokens\":{\"input\":1307,\"output\":136,\"cacheRead\":5632,\"cacheWrite\":0,\"total\":7075},\"cacheHitRate\":0.8116}}\n\n"
+                .to_owned(),
+        )
+        .unwrap();
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let snap = handle.snapshot();
+        let sess_ok = snap.loaded_sessions.get("s-comp").is_some_and(|s| {
+            s.context_usage
+                .as_ref()
+                .and_then(|u| u.get("tokens"))
+                .and_then(Value::as_u64)
+                == Some(7075)
+                && s.usage
+                    .as_ref()
+                    .and_then(|u| u.get("cacheHitRate"))
+                    .and_then(Value::as_f64)
+                    .is_some_and(|r| (r - 0.8116).abs() < 1e-4)
+        });
+        let models_ok = snap.models.as_ref().is_some_and(|m| {
+            m.usage
+                .as_ref()
+                .and_then(|u| u.get("cacheHitRate"))
+                .and_then(Value::as_f64)
+                .is_some_and(|r| (r - 0.8116).abs() < 1e-4)
+        });
+        if sess_ok && models_ok {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "expected post-compaction usage refresh, got session={:?}, models={:?}",
+            snap.loaded_sessions
+                .get("s-comp")
+                .map(|s| (&s.context_usage, &s.usage)),
+            snap.models.as_ref().map(|m| (&m.context_usage, &m.usage)),
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    assert!(
+        models_queries
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|q| q.contains("sessionId=s-comp")),
+        "usage_changed refresh must query /api/models with active sessionId"
+    );
+
+    handle.stop();
+}

@@ -303,6 +303,11 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         &kit_dir.join("app/licenses"),
         |_| true,
     )?;
+    // Ensure required Rust third-party license text (`ntfs-ng`) is always present in dist tree.
+    copy_required_file(
+        &root.join("app/licenses/ntfs-ng-LICENSE.txt"),
+        &kit_dir.join("app/licenses/ntfs-ng-LICENSE.txt"),
+    )?;
 
     // Copy shared fonts (prefer repo `app/fonts`, fallback `assets/fonts`)
     let fonts_src = if root.join("app/fonts").is_dir() {
@@ -315,21 +320,7 @@ fn run_dist(raw_args: impl Iterator<Item = String>) -> Result<(), String> {
         copy_required_file(&fonts_src.join(name), &kit_dir.join(rel))?;
     }
 
-    // Copy external diagnostic tools (`wiztree`, `lhm`) if present
-    let wiztree_src = if root.join("app/tools/wiztree").is_dir() {
-        root.join("app/tools/wiztree")
-    } else {
-        root.join("wiztree")
-    };
-    if wiztree_src.is_dir() {
-        copy_dir_filtered(&wiztree_src, &kit_dir.join("app/tools/wiztree"), |rel| {
-            let lower = rel.to_lowercase();
-            !(lower == "tmp"
-                || lower.starts_with("tmp/")
-                || lower == "wiztree3.ini"
-                || lower == "wiztree3.ini.bad")
-        })?;
-    }
+    // Copy external diagnostic tool (`lhm`) if present
     let lhm_src = if root.join("app/tools/lhm").is_dir() {
         root.join("app/tools/lhm")
     } else {

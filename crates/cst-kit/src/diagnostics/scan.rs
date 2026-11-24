@@ -1,14 +1,70 @@
-use super::win_native::{Control, rounded};
-use super::wz_index::{in_tree, path_key};
-use chrono::{Local, NaiveDateTime, TimeZone};
+use super::mft::MftIndex;
+use super::volume_index::{VolumeIdentity, display_path, in_tree, path_key};
+use super::win_native::rounded;
 use serde_json::{Value, json};
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, HashMap};
-use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
+use std::sync::Arc;
+use std::time::Instant;
 
-const MIB: u64 = 1024 * 1024;
-const INDEX_BYTES: usize = 128 * 1024 * 1024;
+pub const MIB: u64 = 1024 * 1024;
+pub const STALE_MIN_BYTES: u64 = 50 * MIB;
+pub const STALE_AGE_SECS: i64 = 365 * 86400;
+
+pub fn ext_key(name: &str) -> String {
+    name.rsplit_once('.')
+        .filter(|(_, ext)| !ext.is_empty())
+        .map(|(_, ext)| ext.to_lowercase().chars().take(12).collect::<String>())
+        .unwrap_or_else(|| "(无扩展名)".into())
+}
+
+/// Shared deterministic comparator for hardlink representative selection across both `native-walk`
+/// and `native-mft`: compares case-folded directory key, case-folded file name, and finally
+/// breaks any case-only tie using the original directory and file names.
+pub fn hardlink_rank_key<'a>(
+    dir_key: &'a str,
+    name: &'a str,
+) -> (String, String, &'a str, &'a str) {
+    (dir_key.to_uppercase(), name.to_uppercase(), dir_key, name)
+}
+
+pub fn format_modified_utc(unix_secs: i64) -> Option<String> {
+    if unix_secs <= 0 {
+        return None;
+    }
+    chrono::DateTime::from_timestamp(unix_secs, 0)
+        .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+}
+
+pub fn format_bytes(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 * 1024 {
+        format!("{:.2} GB", bytes as f64 / 1073741824.0)
+    } else if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / 1048576.0)
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ScanMethod {
+    #[default]
+    NativeMft,
+    NativeWalk,
+}
+
+impl ScanMethod {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NativeMft => "native-mft",
+            Self::NativeWalk => "native-walk",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Ranked {
     pub bytes: u64,
@@ -27,6 +83,7 @@ impl PartialOrd for Ranked {
         Some(self.cmp(other))
     }
 }
+
 pub struct TopN {
     limit: usize,
     rows: BinaryHeap<Reverse<Ranked>>,
@@ -38,7 +95,23 @@ impl TopN {
             rows: BinaryHeap::new(),
         }
     }
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+    pub fn would_accept(&self, bytes: u64) -> bool {
+        if self.limit == 0 {
+            return false;
+        }
+        self.rows.len() < self.limit
+            || self
+                .rows
+                .peek()
+                .is_some_and(|smallest| bytes >= smallest.0.bytes)
+    }
     pub fn add(&mut self, row: Ranked) {
+        if self.limit == 0 {
+            return;
+        }
         if self.rows.len() < self.limit {
             self.rows.push(Reverse(row));
         } else if self.rows.peek().is_some_and(|smallest| row > smallest.0) {
@@ -54,10 +127,14 @@ impl TopN {
             .collect()
     }
 }
-#[derive(Clone, Default)]
+
+#[derive(Clone)]
 pub struct ScanSnapshot {
     pub root: String,
-    pub identity: Option<super::wz_index::VolumeIdentity>,
+    pub identity: Option<VolumeIdentity>,
+    pub captured_at: Instant,
+    pub method: ScanMethod,
+    pub mft_index: Option<Arc<MftIndex>>,
     pub dirs: HashMap<String, u64>,
     pub files: HashMap<String, u64>,
     pub total: u64,
@@ -67,9 +144,71 @@ pub struct ScanSnapshot {
     pub top_files: Vec<Ranked>,
     pub stale: Vec<Ranked>,
     pub extensions: HashMap<String, (u64, u64)>,
+    pub ext_overflow: bool,
 }
+
+impl Default for ScanSnapshot {
+    fn default() -> Self {
+        Self {
+            root: String::new(),
+            identity: None,
+            captured_at: Instant::now(),
+            method: ScanMethod::NativeMft,
+            mft_index: None,
+            dirs: HashMap::new(),
+            files: HashMap::new(),
+            total: 0,
+            rows: 0,
+            file_count: 0,
+            top_dirs: Vec::new(),
+            top_files: Vec::new(),
+            stale: Vec::new(),
+            extensions: HashMap::new(),
+            ext_overflow: false,
+        }
+    }
+}
+
 impl ScanSnapshot {
+    pub fn estimated_bytes(&self) -> usize {
+        let index_bytes = self
+            .mft_index
+            .as_ref()
+            .map_or(0, |idx| idx.estimated_bytes());
+        let map_bytes = self
+            .dirs
+            .keys()
+            .map(|k| k.len() + 48)
+            .sum::<usize>()
+            .saturating_add(self.files.keys().map(|k| k.len() + 48).sum::<usize>())
+            .saturating_add(self.extensions.len().saturating_mul(64));
+        index_bytes.saturating_add(map_bytes).saturating_add(4096)
+    }
+
+    pub fn covers_target(&self, target: &Path) -> bool {
+        if let Some(mft) = &self.mft_index {
+            mft.covers_path(target)
+        } else {
+            self.dirs.contains_key(&path_key(target))
+        }
+    }
+
+    pub fn lookup_dir(&self, file_id: Option<u64>, path: &Path) -> Option<u64> {
+        if let Some(mft) = &self.mft_index {
+            mft.lookup_dir(file_id, path)
+        } else {
+            self.dirs.get(&path_key(path)).copied()
+        }
+    }
+
+    pub fn lookup_file(&self, path: &Path) -> Option<u64> {
+        self.files.get(&path_key(path)).copied()
+    }
+
     pub fn merge(&self, incoming: &Self) -> Self {
+        if incoming.mft_index.is_some() {
+            return incoming.clone();
+        }
         let mut merged = incoming.clone();
         let root = path_key(Path::new(&incoming.root));
         for (key, bytes) in &self.dirs {
@@ -88,165 +227,60 @@ impl ScanSnapshot {
             .retain(|key, _| !in_tree(&root, key) || key == &root);
         merged
     }
-    pub fn usage(&self, root: &Path, top: usize, filesystem: Option<&str>) -> Value {
-        self.usage_with_elevation(
-            root,
-            top,
-            filesystem,
-            cst_os::is_elevated().unwrap_or(false),
-        )
-    }
 
-    fn usage_with_elevation(
-        &self,
-        root: &Path,
-        top: usize,
-        filesystem: Option<&str>,
-        elevated: bool,
-    ) -> Value {
-        let rows = |items: &[Ranked]| {
-            items
-                .iter()
-                .take(top)
-                .map(|r| json!({"path":r.path,"sizeGB":gib(r.bytes),"pct":pct(r.bytes,self.total)}))
-                .collect::<Vec<_>>()
-        };
+    pub fn usage(&self, root: &Path, top: usize, filesystem: Option<&str>) -> Value {
+        let top_dirs = self
+            .top_dirs
+            .iter()
+            .take(top)
+            .map(|r| json!({"path": r.path, "sizeGB": gib(r.bytes), "pct": pct(r.bytes, self.total)}))
+            .collect::<Vec<_>>();
+        let top_files = self
+            .top_files
+            .iter()
+            .take(top)
+            .map(|r| {
+                json!({
+                    "path": r.path,
+                    "sizeGB": gib(r.bytes),
+                    "modified": r.modified
+                })
+            })
+            .collect::<Vec<_>>();
         let mut extensions: Vec<_> = self.extensions.iter().collect();
         extensions.sort_by(|a, b| b.1.0.cmp(&a.1.0).then_with(|| a.0.cmp(b.0)));
+        let ext_note = if self.ext_overflow {
+            "扩展名种类超过 65,536 上限，extAgg 可能为下界。"
+        } else {
+            ""
+        };
         json!({
-            "method":if elevated && filesystem.is_some_and(|fs| fs.eq_ignore_ascii_case("NTFS")) {"wiztree-mft"} else {"wiztree-walk"},
-            "root":super::wz_index::display_path(root),"totalGB":gib(self.total),
-            "topDirs":rows(&self.top_dirs),"topFiles":rows(&self.top_files),
-            "extAgg":extensions.into_iter().take(top.min(40)).map(|(ext,(bytes,files))|json!({"ext":ext,"files":files,"sizeGB":gib(*bytes)})).collect::<Vec<_>>(),
-            "staleFiles":self.stale.iter().take(top).map(|r|json!({"path":r.path,"sizeGB":gib(r.bytes),"modified":r.modified})).collect::<Vec<_>>(),
-            "notice":format!("WizTree 完整导出 {} 行，其中文件 {} 个。文件系统：{}。目录排行包含不同深度，父子目录不可相加；陈旧文件为至少 50 MiB 且一年未修改。",self.rows,self.file_count,filesystem.unwrap_or("未知，按目录遍历标注"))
+            "method": self.method.as_str(),
+            "root": display_path(root),
+            "totalGB": gib(self.total),
+            "topDirs": top_dirs,
+            "topFiles": top_files,
+            "extAgg": extensions
+                .into_iter()
+                .take(top.min(40))
+                .map(|(ext, (bytes, files))| json!({"ext": ext, "files": files, "sizeGB": gib(*bytes)}))
+                .collect::<Vec<_>>(),
+            "staleFiles": self
+                .stale
+                .iter()
+                .take(top)
+                .map(|r| json!({"path": r.path, "sizeGB": gib(r.bytes), "modified": r.modified}))
+                .collect::<Vec<_>>(),
+            "notice": format!(
+                "纯 Rust 原生索引统计 {} 条记录，其中文件 {} 个。文件系统：{}。{ext_note}目录排行包含不同深度，父子目录不可相加；陈旧文件为至少 50 MiB 且一年未修改。",
+                self.rows,
+                self.file_count,
+                filesystem.unwrap_or("未知")
+            )
         })
     }
 }
-/// Each physical record is bounded before handing it to csv. Windows paths do
-/// not contain newlines, so an unterminated quoted record is rejected, not buffered.
-pub fn parse_export(
-    reader: Box<dyn Read + Send>,
-    root: &Path,
-    control: &Control,
-) -> Result<ScanSnapshot, String> {
-    let mut reader = BufReader::new(reader);
-    let mut result = ScanSnapshot {
-        root: root.to_string_lossy().into_owned(),
-        ..Default::default()
-    };
-    let root_key = path_key(root);
-    let mut dirs = TopN::new(100);
-    let mut files = TopN::new(100);
-    let mut stale = TopN::new(100);
-    let mut line = Vec::new();
-    let mut index_bytes = 0usize;
-    let now = Local::now().timestamp();
-    loop {
-        control.check()?;
-        line.clear();
-        let count = reader
-            .by_ref()
-            .take(65537)
-            .read_until(b'\n', &mut line)
-            .map_err(|_| "WizTree CSV 读取失败。")?;
-        if count == 0 {
-            break;
-        }
-        if count > 65536 {
-            return Err("WizTree CSV 单行超过 64 KiB。".into());
-        }
-        let line = line.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&line);
-        let mut csv = csv::ReaderBuilder::new()
-            .has_headers(false)
-            .flexible(true)
-            .from_reader(line);
-        let Some(row) = csv.records().next() else {
-            continue;
-        };
-        let row = row.map_err(|_| "WizTree CSV 格式无效。")?;
-        let Some(path) = row.get(0) else {
-            continue;
-        };
-        let Some(bytes) = row.get(1).and_then(|s| s.parse::<u64>().ok()) else {
-            if path.contains(":\\") || path.contains(":/") {
-                return Err("WizTree CSV 数据行大小无效。".into());
-            }
-            continue;
-        };
-        let key = path_key(Path::new(path));
-        if !in_tree(&key, &root_key) || path.split(['\\', '/']).any(|s| s == "." || s == "..") {
-            return Err("WizTree CSV 包含扫描范围外的路径。".into());
-        }
-        result.rows += 1;
-        let is_dir = path.ends_with(['\\', '/']);
-        if is_dir {
-            if result.dirs.insert(key.clone(), bytes).is_some() {
-                return Err("WizTree CSV 包含重复目录。".into());
-            }
-            index_bytes = index_bytes.saturating_add(key.len() + 64);
-            if key == root_key {
-                result.total = bytes;
-            } else {
-                dirs.add(Ranked {
-                    path: path.into(),
-                    bytes,
-                    modified: None,
-                });
-            }
-        } else {
-            result.file_count += 1;
-            files.add(Ranked {
-                path: path.into(),
-                bytes,
-                modified: None,
-            });
-            if bytes >= MIB {
-                result.files.insert(key.clone(), bytes);
-                index_bytes = index_bytes.saturating_add(key.len() + 64);
-            }
-            let name = path.rsplit(['\\', '/']).next().unwrap_or(path);
-            let ext = name
-                .rsplit_once('.')
-                .filter(|(_, ext)| !ext.is_empty())
-                .map(|(_, ext)| ext.to_lowercase().chars().take(12).collect::<String>())
-                .unwrap_or_else(|| "(无扩展名)".into());
-            if !result.extensions.contains_key(&ext) && result.extensions.len() >= 65536 {
-                return Err("WizTree 扩展名种类超过扫描预算。".into());
-            }
-            let agg = result.extensions.entry(ext).or_default();
-            agg.0 = agg.0.checked_add(bytes).ok_or("WizTree 文件大小溢出。")?;
-            agg.1 += 1;
-            let modified = row.iter().skip(2).find_map(|s| {
-                NaiveDateTime::parse_from_str(s.trim(), "%Y/%m/%d %H:%M:%S")
-                    .ok()
-                    .map(|date| (s, date))
-            });
-            if bytes >= 50 * MIB
-                && let Some((text, date)) = modified
-                && let Some(date) = Local.from_local_datetime(&date).earliest()
-                && now - date.timestamp() >= 365 * 86400
-            {
-                stale.add(Ranked {
-                    path: path.into(),
-                    bytes,
-                    modified: Some(text.into()),
-                });
-            }
-        }
-        if index_bytes > INDEX_BYTES {
-            return Err("WizTree 卷索引超过 128 MiB 内存预算。".into());
-        }
-    }
-    if !result.dirs.contains_key(&root_key) {
-        return Err("WizTree CSV 缺少扫描根目录，未发布缓存。".into());
-    }
-    result.top_dirs = dirs.sorted();
-    result.top_files = files.sorted();
-    result.stale = stale.sorted();
-    control.check()?;
-    Ok(result)
-}
+
 pub fn gib(bytes: u64) -> f64 {
     let value = bytes as f64 / 1073741824.0;
     if bytes == 0 {
@@ -258,25 +292,7 @@ pub fn gib(bytes: u64) -> f64 {
         .find(|v| *v > 0.0)
         .unwrap_or(value)
 }
+
 pub fn pct(bytes: u64, total: u64) -> Option<f64> {
     (total > 0).then(|| rounded(bytes as f64 / total as f64 * 100.0, 1))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ntfs_wiztree_requires_elevation_for_mft_label() {
-        let snapshot = ScanSnapshot::default();
-        let path = Path::new(r"C:\data");
-        assert_eq!(
-            snapshot.usage_with_elevation(path, 1, Some("NTFS"), false)["method"],
-            "wiztree-walk"
-        );
-        assert_eq!(
-            snapshot.usage_with_elevation(path, 1, Some("NTFS"), true)["method"],
-            "wiztree-mft"
-        );
-    }
 }

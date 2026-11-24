@@ -479,8 +479,24 @@ pub fn require_client_api_key(
     Err(format!("No API key for provider: {provider}"))
 }
 
+fn endpoint_host(base_url: &str) -> Option<String> {
+    reqwest::Url::parse(base_url)
+        .ok()?
+        .host_str()
+        .map(str::to_owned)
+}
+
+pub(crate) fn is_openrouter_target(provider: &str, base_url: &str) -> bool {
+    provider == "openrouter"
+        || endpoint_host(base_url)
+            .as_deref()
+            .is_some_and(|host| host == "openrouter.ai" || host.ends_with(".openrouter.ai"))
+}
+
 pub fn build_header_map(
+    (provider, base_url): (&str, &str),
     identity: Option<&ClientIdentity>,
+    session_id: Option<&str>,
     default_headers: &[(&str, &str)],
     model_headers: Option<&BTreeMap<String, String>>,
     option_headers: Option<&ProviderHeaders>,
@@ -510,37 +526,61 @@ pub fn build_header_map(
         });
     merged.insert("user-agent".to_owned(), ("User-Agent".to_owned(), ua));
 
-    if let Some(id) = identity {
-        if let Some(Some(attr)) = &id.attribution {
+    let host = endpoint_host(base_url);
+    let opencode =
+        matches!(provider, "opencode" | "opencode-go") || host.as_deref() == Some("opencode.ai");
+
+    if let Some(id) = identity
+        && id.attribution != Some(None)
+    {
+        let attr = id.attribution.as_ref().and_then(Option::as_ref);
+        // Match the hostname, not text in a path, query, or unrelated domain.
+        let mut insert = |name: &str, value: &str| {
             merged.insert(
-                "x-openrouter-title".to_owned(),
-                ("X-OpenRouter-Title".to_owned(), attr.name.clone()),
+                name.to_ascii_lowercase(),
+                (name.to_owned(), value.to_owned()),
             );
-            merged.insert(
-                "http-referer".to_owned(),
-                ("HTTP-Referer".to_owned(), attr.url.clone()),
-            );
-            if let Some(cats) = &attr.categories
-                && !cats.is_empty()
+        };
+        if is_openrouter_target(provider, base_url) {
+            if let Some(name) = id
+                .app_name
+                .as_deref()
+                .or_else(|| attr.map(|a| a.name.as_str()))
             {
-                merged.insert(
-                    "x-openrouter-categories".to_owned(),
-                    ("X-OpenRouter-Categories".to_owned(), cats.join(",")),
-                );
+                insert("X-OpenRouter-Title", name);
+            }
+            if let Some(url) = id
+                .app_url
+                .as_deref()
+                .or_else(|| attr.map(|a| a.url.as_str()))
+            {
+                insert("HTTP-Referer", url);
+            }
+            if let Some(cats) = attr
+                .and_then(|a| a.categories.as_ref())
+                .filter(|cats| !cats.is_empty())
+            {
+                insert("X-OpenRouter-Categories", &cats.join(","));
+            }
+        } else if let Some(attr) = attr {
+            if provider == "nvidia" || host.as_deref() == Some("integrate.api.nvidia.com") {
+                let mut name = attr.name.chars();
+                if let Some(first) = name.next() {
+                    let origin: String = first.to_uppercase().chain(name).collect();
+                    insert("X-BILLING-INVOKE-ORIGIN", &origin);
+                }
+            } else if opencode {
+                insert("x-opencode-client", &attr.name);
             }
         }
-        if let Some(app_name) = &id.app_name {
-            merged.insert(
-                "x-openrouter-title".to_owned(),
-                ("X-OpenRouter-Title".to_owned(), app_name.clone()),
-            );
-        }
-        if let Some(app_url) = &id.app_url {
-            merged.insert(
-                "http-referer".to_owned(),
-                ("HTTP-Referer".to_owned(), app_url.clone()),
-            );
-        }
+    }
+
+    // OpenCode session routing is independent of client attribution and caching.
+    if opencode && let Some(id) = session_id.filter(|id| !id.is_empty()) {
+        merged.insert(
+            "x-opencode-session".to_owned(),
+            ("x-opencode-session".to_owned(), id.to_owned()),
+        );
     }
 
     for &(k, v) in default_headers {

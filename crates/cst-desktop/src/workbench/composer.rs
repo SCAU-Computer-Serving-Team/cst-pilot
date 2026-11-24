@@ -215,7 +215,6 @@ pub struct ComposerView {
     picker_open_epoch: u64,
     picker_presence: TransitionState<f32>,
     picker_page: ModelPickerPage,
-    picker_slide: motion::PageSlide,
     picker_hi_idx: usize,
     picker_scroll: ScrollHandle,
     picker_prior_focus: Option<FocusHandle>,
@@ -314,7 +313,6 @@ impl ComposerView {
             picker_open_epoch: 0,
             picker_presence: TransitionState::default(),
             picker_page: ModelPickerPage::Main,
-            picker_slide: motion::PageSlide::default(),
             picker_hi_idx: 0,
             picker_scroll: ScrollHandle::new(),
             picker_prior_focus: None,
@@ -423,7 +421,7 @@ impl ComposerView {
         }
         if self.picker_open {
             if self.picker_page != ModelPickerPage::Main {
-                self.set_picker_page(ModelPickerPage::Main, cx);
+                self.set_picker_page(ModelPickerPage::Main);
                 cx.notify();
                 return true;
             }
@@ -635,19 +633,10 @@ impl ComposerView {
 
     fn close_picker(&mut self) -> Option<FocusHandle> {
         self.picker_open = false;
-        self.picker_slide = motion::PageSlide::default();
         self.picker_prior_focus.take()
     }
 
-    fn set_picker_page(&mut self, page: ModelPickerPage, cx: &App) {
-        if self.picker_page != page {
-            let direction = if matches!(page, ModelPickerPage::Main) {
-                -1.0
-            } else {
-                1.0
-            };
-            self.picker_slide.start(direction, cx);
-        }
+    fn set_picker_page(&mut self, page: ModelPickerPage) {
         self.picker_page = page;
         self.picker_hi_idx = 0;
         self.picker_scroll = ScrollHandle::new();
@@ -684,14 +673,11 @@ impl ComposerView {
             "end" if count > 0 => self.picker_hi_idx = count - 1,
             "down" | "up" | "home" | "end" => {}
             "enter" if !event.is_held => match self.picker_page {
-                ModelPickerPage::Main => self.set_picker_page(
-                    if index == 0 {
-                        ModelPickerPage::Models
-                    } else {
-                        ModelPickerPage::Thinking
-                    },
-                    cx,
-                ),
+                ModelPickerPage::Main => self.set_picker_page(if index == 0 {
+                    ModelPickerPage::Models
+                } else {
+                    ModelPickerPage::Thinking
+                }),
                 ModelPickerPage::Models => {
                     if let Some(model) = scoped.get(index) {
                         self.select_model(model.provider.clone(), model.id.clone(), cx);
@@ -761,7 +747,7 @@ impl ComposerView {
             });
         })
         .detach();
-        self.set_picker_page(ModelPickerPage::Main, cx);
+        self.set_picker_page(ModelPickerPage::Main);
         cx.notify();
     }
 
@@ -1459,7 +1445,7 @@ impl ComposerView {
             .w_full()
             .p(space::XS)
             .rounded(radius::ROW)
-            .bg(palette.bg_elevated)
+            .bg(palette.bg_glass)
             .border_1()
             .border_color(palette.border_subtle)
             .flex()
@@ -1673,10 +1659,19 @@ impl Render for ComposerView {
         let (cur_provider, cur_model_id, cur_model_label, cur_thinking) =
             self.current_model_choice(&snap);
         let scoped_models = resolve_scoped_models(models_ref);
-        let context_usage = active_session
-            .as_ref()
-            .and_then(|s| s.context_usage.as_ref())
-            .or(models_ref.context_usage.as_ref());
+        let (context_usage, usage_stats) = match &self.draft_key {
+            DraftKey::Session(_) => (
+                active_session
+                    .as_ref()
+                    .and_then(|s| s.context_usage.as_ref())
+                    .or(models_ref.context_usage.as_ref()),
+                active_session
+                    .as_ref()
+                    .and_then(|s| s.usage.as_ref())
+                    .or(models_ref.usage.as_ref()),
+            ),
+            DraftKey::NewSession => (None, None),
+        };
         let percent_opt = context_usage
             .and_then(|u| u.get("percent"))
             .and_then(Value::as_f64);
@@ -2123,8 +2118,7 @@ impl Render for ComposerView {
                     } else {
                         this.picker_open = true;
                         this.picker_open_epoch = this.picker_open_epoch.wrapping_add(1);
-                        this.picker_page = ModelPickerPage::Main;
-                        this.set_picker_page(ModelPickerPage::Main, cx);
+                        this.set_picker_page(ModelPickerPage::Main);
                         this.picker_prior_focus = w.focused(cx);
                         this.model_btn_focus.focus(w, cx);
                     }
@@ -2258,7 +2252,7 @@ impl Render for ComposerView {
                     ctx_progress,
                     &cur_provider,
                     context_usage,
-                    models_ref.usage.as_ref(),
+                    usage_stats,
                     self.cached_quota.as_ref().filter(|_| {
                         self.cached_quota_provider.as_deref() == Some(cur_provider.as_str())
                     }),
@@ -2320,7 +2314,6 @@ impl Render for ComposerView {
                     picker_progress,
                     self.picker_open_epoch,
                     self.picker_page,
-                    self.picker_slide.sample(window, cx),
                     self.picker_hi_idx,
                     &self.picker_scroll,
                     &scoped_models,
@@ -2334,7 +2327,7 @@ impl Render for ComposerView {
                     scale_factor,
                     Rc::new(move |next_page, _, cx| {
                         ent_page.update(cx, |this, cx| {
-                            this.set_picker_page(next_page, cx);
+                            this.set_picker_page(next_page);
                             cx.notify();
                         });
                     }),

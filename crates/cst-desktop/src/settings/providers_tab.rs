@@ -93,6 +93,8 @@ pub struct EditableModelRow {
     pub max_tokens: u64,
     pub reasoning: bool,
     pub image: bool,
+    pub is_new: bool,
+    pub _subs: Vec<Subscription>,
 }
 
 fn format_token_window(n: u64) -> String {
@@ -186,23 +188,19 @@ impl EventEmitter<ProvidersTabEvent> for ProvidersTabView {}
 
 impl ProvidersTabView {
     pub fn new(client: ClientHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("按模型 ID 或名称筛选…"));
-        let provider_id_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder("服务标识（小写字母/数字/连字符，如 my-gateway）")
-        });
+        let search_input = cx.new(|cx| InputState::new(window, cx).placeholder("筛选模型…"));
+        let provider_id_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("如 my-gateway"));
         let provider_name_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("服务显示名称（如 本地网关）"));
-        let base_url_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Base URL（如 https://api.example.com/v1）")
-        });
+            cx.new(|cx| InputState::new(window, cx).placeholder("如 本地网关"));
+        let base_url_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("https://api.example.com/v1"));
         let api_key_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("输入或更新 API Key（留空保持已有密钥）")
+                .placeholder("输入 API Key")
                 .masked(true)
         });
-        let inline_token_input = cx.new(|cx| InputState::new(window, cx).placeholder("如 128K"));
+        let inline_token_input = cx.new(|cx| InputState::new(window, cx).placeholder("128K"));
 
         let mut subs =
             vec![cx.subscribe(
@@ -526,7 +524,7 @@ impl ProvidersTabView {
                 let reasoning = m.get("reasoning").and_then(Value::as_bool).unwrap_or(false);
                 let image = m.get("image").and_then(Value::as_bool).unwrap_or(false);
                 let id_inp = cx.new(|cx| {
-                    let mut s = InputState::new(window, cx).placeholder("model-id");
+                    let mut s = InputState::new(window, cx).placeholder("模型 ID");
                     s.set_value(mid, window, cx);
                     s
                 });
@@ -542,6 +540,8 @@ impl ProvidersTabView {
                     max_tokens: mt,
                     reasoning,
                     image,
+                    is_new: false,
+                    _subs: Vec::new(),
                 });
             }
         }
@@ -554,8 +554,20 @@ impl ProvidersTabView {
         }
         self.form_error = None;
 
-        let id_input = cx.new(|cx| InputState::new(window, cx).placeholder("新模型 ID…"));
-        let name_input = cx.new(|cx| InputState::new(window, cx).placeholder("模型名称…"));
+        let id_input = cx.new(|cx| InputState::new(window, cx).placeholder("模型 ID"));
+        let name_input = cx.new(|cx| InputState::new(window, cx).placeholder("显示名称"));
+        let subs = vec![
+            cx.subscribe(&id_input, |_, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            }),
+            cx.subscribe(&name_input, |_, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    cx.notify();
+                }
+            }),
+        ];
         id_input.update(cx, |i, cx| i.focus(window, cx));
         self.editable_rows.push(EditableModelRow {
             id_input,
@@ -564,6 +576,8 @@ impl ProvidersTabView {
             max_tokens: 65_536,
             reasoning: true,
             image: false,
+            is_new: true,
+            _subs: subs,
         });
         cx.notify();
     }
@@ -869,23 +883,11 @@ impl Render for ProvidersTabView {
                         .gap(space::SM)
                         .child(self.render_back_bar(&palette, cx))
                         .child(
-                            div()
-                                .w_full()
-                                .flex()
-                                .items_center()
-                                .gap(space::MD)
-                                .child(
-                                    apply_scale(div(), scale::TITLE)
-                                        .text_color(palette.text_primary)
-                                        .child(cjk_inline_label("自定义提供商")),
-                                )
-                                .child(
-                                    apply_scale(div(), scale::UI)
-                                        .text_color(palette.text_secondary)
-                                        .child(cjk_inline_label(
-                                            "连接兼容 OpenAI、Anthropic 或 Google 接口的服务。",
-                                        )),
-                                ),
+                            div().w_full().flex().items_center().gap(space::MD).child(
+                                apply_scale(div(), scale::TITLE)
+                                    .text_color(palette.text_primary)
+                                    .child(cjk_inline_label("自定义提供商")),
+                            ),
                         ),
                 )
                 .child(self.render_custom_provider_editor(mono_family, &palette, window, cx));

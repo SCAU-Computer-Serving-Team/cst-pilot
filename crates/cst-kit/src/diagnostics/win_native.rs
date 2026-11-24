@@ -101,6 +101,24 @@ pub struct SpaceSnapshot {
     pub rows: Vec<SpaceSample>,
     pub errors: Vec<NativeError>,
 }
+#[derive(Clone, Debug, Default)]
+pub struct VolumeSnapshot {
+    pub rows: Vec<Value>,
+    pub errors: Vec<NativeError>,
+}
+#[derive(Clone, Debug)]
+pub struct NativeHealthRow {
+    pub row: Value,
+    pub controller_scope: bool,
+}
+impl NativeHealthRow {
+    pub fn device(row: Value) -> Self {
+        Self {
+            row,
+            controller_scope: false,
+        }
+    }
+}
 #[derive(Default)]
 pub struct StartupSnapshot {
     pub reg_items: Vec<Value>,
@@ -144,6 +162,41 @@ pub trait DiagnosticSource: Send + Sync {
     ) -> Result<Vec<Value>, NativeError>;
     fn processes(&self, control: &Control) -> Result<Vec<ProcessSample>, NativeError>;
     fn space(&self, drive: Option<&str>, control: &Control) -> Result<SpaceSnapshot, NativeError>;
+    /// Native volume -> Windows physical disk number mapping (`IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`).
+    /// Returning `Ok(None)` lets callers fall back to WMI.
+    fn volume_disk_numbers(
+        &self,
+        _drive: &str,
+        _control: &Control,
+    ) -> Result<Option<Vec<u32>>, NativeError> {
+        Ok(None)
+    }
+    /// Native logical volume enumeration matching `Win32_LogicalDisk` column keys plus per-volume errors.
+    /// Returning `Ok(None)` lets callers fall back to WMI.
+    fn native_volumes(
+        &self,
+        _drive: Option<&str>,
+        _control: &Control,
+    ) -> Result<Option<VolumeSnapshot>, NativeError> {
+        Ok(None)
+    }
+    /// Native physical disk enumeration fallback (e.g. WinPE without Storage WMI),
+    /// matching `MSFT_PhysicalDisk` column keys.
+    fn native_physical_disks(&self, _control: &Control) -> Result<Option<Vec<Value>>, NativeError> {
+        Ok(None)
+    }
+    /// Native SMART / reliability probe for a physical disk number (`\\.\PhysicalDriveN`),
+    /// optionally cross-checking `expected_serial` before returning a 6-field `API.md` SMART row.
+    /// Returning `Ok(None)` means native IOCTL is unsupported or identity did not match -> fall back to batch WMI.
+    fn native_disk_health(
+        &self,
+        _disk_number: u32,
+        _device_id: &str,
+        _expected_serial: Option<&str>,
+        _control: &Control,
+    ) -> Result<Option<NativeHealthRow>, NativeError> {
+        Ok(None)
+    }
     fn startup(&self, control: &Control) -> Result<StartupSnapshot, NativeError>;
     fn admin(&self) -> Result<bool, NativeError>;
     fn events(

@@ -825,7 +825,9 @@ pub fn stream(
             )?;
 
             let headers = build_header_map(
+                (&model.provider, &model.base_url),
                 options.as_ref().and_then(|o| o.identity.as_ref()),
+                options.as_ref().and_then(|o| o.session_id.as_deref()),
                 &[
                     ("x-goog-api-key", &api_key),
                     ("content-type", "application/json"),

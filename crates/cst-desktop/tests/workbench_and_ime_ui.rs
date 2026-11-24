@@ -962,11 +962,14 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
     .unwrap();
 
     // Height smoothly transitions (`300ms ease_out`) from Main (76px) to Thinking (4 rows);
-    // wait for the resize animation to reveal `thinking-option-max`.
+    // content is bottom-anchored so `thinking-picker-back-btn` reveals once the top edge expands.
     cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
         window
-            .try_find("thinking-option-max")
+            .try_find("thinking-picker-back-btn")
             .is_some_and(|el| el.visible())
+            && window
+                .try_find("thinking-option-max")
+                .is_some_and(|el| el.visible())
     })
     .await;
 

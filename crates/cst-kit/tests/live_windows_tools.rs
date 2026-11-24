@@ -20,9 +20,9 @@ use cst_kit::bitlocker::{
 };
 use cst_kit::diagnostics::hardware::NativeHardware;
 use cst_kit::diagnostics::volume::NativeScanSource;
+use cst_kit::diagnostics::volume_index::VolumeIndex;
 use cst_kit::diagnostics::walk::WalkLimits;
 use cst_kit::diagnostics::win_native::{Control, WindowsSource};
-use cst_kit::diagnostics::wz_index::WzIndex;
 use cst_kit::diagnostics::{disk, driver, eventlog, ls, startup, sys};
 use cst_kit::runbook::RunbookStore;
 use cst_kit::runbook::model::{DeliverInput, Level, PlanInput, RunbookInput, RunbookItem, Shell};
@@ -66,20 +66,6 @@ impl TempKit {
             .unwrap();
         }
         Self { root }
-    }
-
-    fn copy_repo_wiztree(&self) -> bool {
-        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(Path::parent)
-            .unwrap();
-        let src = repo_root.join("wiztree/WizTree64.exe");
-        if !src.is_file() {
-            return false;
-        }
-        let dst_dir = self.root.join("app/tools/wiztree");
-        fs::create_dir_all(&dst_dir).unwrap();
-        fs::copy(&src, dst_dir.join("WizTree64.exe")).is_ok()
     }
 }
 
@@ -176,6 +162,28 @@ fn live_disk_space_info_health_all_and_usage() {
         health["smartNotice"].is_string(),
         "smartNotice must be present"
     );
+    if let Some(smart_rows) = health["smart"].as_array() {
+        let allowed = std::collections::BTreeSet::from([
+            "DeviceId",
+            "Wear",
+            "Temperature",
+            "PowerOnHours",
+            "ReadErrorsTotal",
+            "WriteErrorsTotal",
+        ]);
+        for row in smart_rows {
+            let keys: std::collections::BTreeSet<&str> = row
+                .as_object()
+                .expect("smart row must be object")
+                .keys()
+                .map(String::as_str)
+                .collect();
+            assert!(
+                keys.is_subset(&allowed),
+                "unexpected smart keys outside API.md contract: {keys:?}"
+            );
+        }
+    }
     println!(
         "[live] disk(health): smart_rows={} errors={} in {}ms",
         health["smart"].as_array().map_or(0, Vec::len),
@@ -198,47 +206,43 @@ fn live_disk_space_info_health_all_and_usage() {
     assert!(all.get("physicalDisks").is_some());
     assert!(all.get("smartNotice").is_some());
 
-    // 4. disk(usage) on isolated temp tree with WizTree (if present) and nonexistent path
+    // 4. disk(usage) through production `storage_tools::run_usage` defaults to `native-walk`
+    //    (zero WizTree temp writes, no spurious `degradedFrom`, strict `API.md` `topFiles` keys)
     let kit = TempKit::new("disk-usage");
-    let has_wt = kit.copy_repo_wiztree();
     let sample = kit.root.join("测试 目录 (中文)");
     fs::create_dir_all(sample.join("sub_a")).unwrap();
     fs::write(sample.join("sub_a/big.bin"), vec![0xABu8; 256 * 1024]).unwrap();
     fs::write(sample.join("empty.txt"), b"").unwrap();
 
-    let index = WzIndex::new(Arc::new(NativeScanSource::new(&kit.root)));
-    let scan_ctrl = control(60);
+    let prod_index = VolumeIndex::new_production(Arc::new(NativeScanSource::new()));
     let t3 = Instant::now();
-    let scan = index.scan(&sample, true, &scan_ctrl);
-    let usage_val = match scan {
-        Ok(Some(snap)) => snap.usage(
-            &sample,
-            10,
-            snap.identity.as_ref().map(|id| id.filesystem.as_str()),
-        ),
-        other => {
-            let mut v =
-                cst_kit::diagnostics::walk::usage(&sample, 10, &control(30), WalkLimits::default())
-                    .expect("walk usage fallback");
-            if let Err(err) = other {
-                v["degradedFrom"] = json!(format!("wiztree: {err}"));
-            }
-            v
-        }
-    };
+    let usage_val =
+        cst_kit::diagnostics::storage_tools::run_usage(&prod_index, &sample, 10, &control(30))
+            .expect("native walk usage");
     let usage_ms = t3.elapsed().as_millis();
+    assert_eq!(usage_val["method"], "native-walk");
+    assert!(usage_val.get("degradedFrom").is_none());
     assert!(usage_val["topDirs"].is_array());
-    assert!(usage_val["totalGB"].is_number());
-    // Ensure zero leftover temp CSV files in `.state/tmp/wiztree`
-    let wz_tmp = kit.root.join(".state/tmp/wiztree");
-    if wz_tmp.is_dir() {
-        let leftovers = fs::read_dir(&wz_tmp).unwrap().count();
-        assert_eq!(leftovers, 0, "leftover WizTree temp CSVs found");
+    let top_files = usage_val["topFiles"].as_array().expect("topFiles array");
+    for f in top_files {
+        let keys: std::collections::BTreeSet<&str> =
+            f.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(
+            keys,
+            std::collections::BTreeSet::from(["modified", "path", "sizeGB"])
+        );
     }
+    assert!(usage_val["extAgg"].is_array());
+    assert!(usage_val["totalGB"].is_number());
+    assert!(
+        !kit.root.join(".state/tmp/wiztree").exists(),
+        ".state/tmp/wiztree must not be created"
+    );
     println!(
-        "[live] disk(usage): has_wiztree={has_wt} method={} degradedFrom={:?} in {}ms",
+        "[live] disk(usage): method={} topDirs={} topFiles={} in {}ms",
         usage_val["method"],
-        usage_val.get("degradedFrom"),
+        usage_val["topDirs"].as_array().unwrap().len(),
+        usage_val["topFiles"].as_array().unwrap().len(),
         usage_ms
     );
 
@@ -277,7 +281,7 @@ fn live_ls_sorting_omitted_zero_byte_and_junction() {
         .expect("mklink /J");
     assert!(status.success(), "mklink /J failed");
 
-    let index = WzIndex::new(Arc::new(NativeScanSource::new(&kit.root)));
+    let index = VolumeIndex::new(Arc::new(NativeScanSource::new()));
     let t0 = Instant::now();
     let res = ls::run(&index, &target, 3, &control(30), WalkLimits::default())
         .expect("ls::run should succeed");
@@ -1212,4 +1216,439 @@ async fn live_diagnostics_concurrency_and_cancellation() {
         "[live] concurrency + cancellation (4 tasks): finished in {}ms",
         t0.elapsed().as_millis()
     );
+}
+
+fn percentile_ms(samples: &[f64], p: f64) -> f64 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let mut sorted = samples.to_vec();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    let idx = ((sorted.len() as f64 * p).ceil() as usize)
+        .saturating_sub(1)
+        .min(sorted.len() - 1);
+    sorted[idx]
+}
+
+fn current_process_working_set_mb() -> f64 {
+    use cst_kit::diagnostics::win_native::DiagnosticSource;
+    let pid = std::process::id();
+    let source = WindowsSource;
+    source
+        .processes(&control(10))
+        .ok()
+        .and_then(|list| list.into_iter().find(|p| p.pid == pid))
+        .and_then(|p| p.working_set)
+        .map_or(0.0, |b| b as f64 / (1024.0 * 1024.0))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "live Windows stage 9.3 1A/1B benchmark gate"]
+async fn live_stage93_1a_1b_benchmarks() {
+    use cst_kit::diagnostics::result::diagnostic_result;
+    use cst_kit::diagnostics::walk;
+    use cst_kit::diagnostics::win_native::DiagnosticSource;
+
+    let source: Arc<dyn DiagnosticSource> = Arc::new(WindowsSource);
+
+    // --- 1A: End-to-end queued + JSON-encoded latency (20 rounds after 1 warm-up) ---
+    let bench_scope = async |label: &str, scope: disk::DiskScope, drive: Option<&str>| {
+        let make_in = || disk::DiskInput {
+            scope: match scope {
+                disk::DiskScope::Space => disk::DiskScope::Space,
+                disk::DiskScope::Info => disk::DiskScope::Info,
+                disk::DiskScope::Health => disk::DiskScope::Health,
+                disk::DiskScope::All => disk::DiskScope::All,
+                disk::DiskScope::Usage => disk::DiskScope::Usage,
+            },
+            drive: drive.map(str::to_owned),
+            path: None,
+            top: None,
+        };
+        // Warm-up
+        let warm = cst_kit::diagnostics::execute(
+            source.clone(),
+            make_in(),
+            CancellationToken::new(),
+            Duration::from_secs(30),
+            disk::run,
+        )
+        .await
+        .expect("warm-up failed");
+        let _ = diagnostic_result(warm).expect("warm-up encode");
+
+        let mut times = Vec::with_capacity(20);
+        for _ in 0..20 {
+            let t0 = Instant::now();
+            let val = cst_kit::diagnostics::execute(
+                source.clone(),
+                make_in(),
+                CancellationToken::new(),
+                Duration::from_secs(30),
+                disk::run,
+            )
+            .await
+            .expect("disk bench failed");
+            let _ = diagnostic_result(val).expect("diagnostic_result encode");
+            times.push(t0.elapsed().as_secs_f64() * 1000.0);
+        }
+        let min = percentile_ms(&times, 0.0);
+        let p50 = percentile_ms(&times, 0.50);
+        let p95 = percentile_ms(&times, 0.95);
+        let max = percentile_ms(&times, 1.0);
+        println!("[1A] {label}: min={min:.1}ms p50={p50:.1}ms p95={p95:.1}ms max={max:.1}ms");
+        p95
+    };
+
+    let p95_space = bench_scope("disk(space)", disk::DiskScope::Space, None).await;
+    let p95_health = bench_scope("disk(health)", disk::DiskScope::Health, None).await;
+    let p95_info = bench_scope("disk(info, C:)", disk::DiskScope::Info, Some("C:")).await;
+    let p95_all = bench_scope("disk(all, C:)", disk::DiskScope::All, Some("C:")).await;
+    assert!(
+        p95_space <= 50.0,
+        "disk(space) P95 exceeded 50ms: {p95_space}"
+    );
+    assert!(
+        p95_health <= 50.0,
+        "disk(health) P95 exceeded 50ms: {p95_health}"
+    );
+    println!(
+        "[1A summary] space_p95={p95_space:.1}ms health_p95={p95_health:.1}ms info_p95={p95_info:.1}ms all_p95={p95_all:.1}ms"
+    );
+
+    // --- 1B: Production `walk::usage` hot-scan benchmark & cancellation slot recovery ---
+    let pf = Path::new(r"C:\Program Files");
+    let _ = walk::usage(pf, 20, &control(60), WalkLimits::default()).expect("warm Program Files");
+    let mut pf_times = Vec::new();
+    let mut pf_scanned = 0u64;
+    let mut pf_total = 0.0f64;
+    for _ in 0..3 {
+        let t0 = Instant::now();
+        let val = walk::usage(pf, 20, &control(60), WalkLimits::default()).expect("Program Files");
+        let _ = diagnostic_result(serde_json::json!({"usage": val})).expect("encode usage");
+        pf_times.push(t0.elapsed().as_secs_f64() * 1000.0);
+        pf_scanned = val["stats"]["filesScanned"].as_u64().unwrap_or(0);
+        pf_total = val["totalGB"].as_f64().unwrap_or(0.0);
+    }
+    let pf_best = percentile_ms(&pf_times, 0.0);
+    let pf_med = percentile_ms(&pf_times, 0.5);
+    println!(
+        "[1B] C:\\Program Files (3 runs): best={pf_best:.1}ms median={pf_med:.1}ms scanned={pf_scanned} totalGB={pf_total}"
+    );
+    assert!(
+        pf_med <= 500.0,
+        "1B gate failed: C:\\Program Files hot walk median {pf_med:.1}ms > 500ms"
+    );
+
+    for dir in [r"C:\Windows\System32", r"C:\Windows\WinSxS"] {
+        let p = Path::new(dir);
+        if p.is_dir() {
+            let t0 = Instant::now();
+            let val = walk::usage(p, 20, &control(60), WalkLimits::default()).expect("walk sysdir");
+            println!(
+                "[1B] {dir}: {:.1}ms scanned={} truncated={} totalGB={}",
+                t0.elapsed().as_secs_f64() * 1000.0,
+                val["stats"]["filesScanned"],
+                val["truncated"],
+                val["totalGB"]
+            );
+        }
+    }
+
+    // Cancellation & 4-slot recovery: launch 4 concurrent walks on C:\Windows, cancel at 30ms,
+    // verify all 4 abort promptly and a follow-up `disk(space)` executes immediately.
+    let cancel = CancellationToken::new();
+    let trigger = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        trigger.cancel();
+    });
+    let t_cancel = Instant::now();
+    let mut futs = Vec::new();
+    for _ in 0..4 {
+        let src = source.clone();
+        let tok = cancel.clone();
+        futs.push(cst_kit::diagnostics::execute(
+            src,
+            (),
+            tok,
+            Duration::from_secs(10),
+            |_, (), ctl| walk::usage(Path::new(r"C:\Windows"), 10, ctl, WalkLimits::default()),
+        ));
+    }
+    let results = futures_util::future::join_all(futs).await;
+    let cancel_ms = t_cancel.elapsed().as_secs_f64() * 1000.0;
+    assert!(
+        results.iter().all(Result::is_err),
+        "all 4 walks must cancel"
+    );
+    let t_after = Instant::now();
+    let after = cst_kit::diagnostics::execute(
+        source.clone(),
+        disk::DiskInput {
+            scope: disk::DiskScope::Space,
+            drive: None,
+            path: None,
+            top: None,
+        },
+        CancellationToken::new(),
+        Duration::from_secs(10),
+        disk::run,
+    )
+    .await
+    .expect("slot recovery after 4 cancelled walks");
+    assert!(!after["space"].as_array().unwrap().is_empty());
+    println!(
+        "[1B] 4-slot cancellation ({cancel_ms:.1}ms) -> follow-up disk(space) recovered in {:.1}ms",
+        t_after.elapsed().as_secs_f64() * 1000.0
+    );
+}
+
+#[test]
+#[ignore = "live Windows stage 9.3 1C elevated $MFT gate (requires Admin + CST_ENABLE_MFT=1)"]
+fn live_stage93_1c_elevated_mft_gate() {
+    use cst_kit::diagnostics::result::diagnostic_result;
+    use cst_kit::diagnostics::{mft, storage_tools, walk};
+
+    assert!(
+        cst_os::is_elevated().unwrap_or(false),
+        "live_stage93_1c_elevated_mft_gate must run in an elevated Administrator process"
+    );
+    assert!(
+        mft::mft_enabled(),
+        "set CST_ENABLE_MFT=1 before running the 1C elevated gate"
+    );
+
+    let ws_before = current_process_working_set_mb();
+    let prod_index = VolumeIndex::new_production(Arc::new(NativeScanSource::new()));
+    assert!(prod_index.allows_mft());
+
+    // 1. Cold full-volume `$MFT` scan on C:\
+    let t_c = Instant::now();
+    let c_usage = storage_tools::run_usage(&prod_index, Path::new(r"C:\"), 20, &control(180))
+        .expect("elevated C:\\ $MFT scan must succeed");
+    let c_encoded = diagnostic_result(serde_json::json!({"usage": c_usage.clone()}))
+        .expect("encode C:\\ usage");
+    let c_ms = t_c.elapsed().as_secs_f64() * 1000.0;
+    let ws_after_c = current_process_working_set_mb();
+
+    assert_eq!(
+        c_usage["method"], "native-mft",
+        "C:\\ must use native-mft: {c_usage}"
+    );
+    assert!(
+        c_usage.get("degradedFrom").is_none(),
+        "unexpected degradation: {c_usage}"
+    );
+    let c_total_gb = c_usage["totalGB"].as_f64().unwrap_or(0.0);
+    assert!(
+        c_total_gb > 1.0,
+        "C:\\ totalGB unexpectedly low: {c_total_gb}"
+    );
+    for f in c_usage["topFiles"].as_array().unwrap() {
+        let keys: std::collections::BTreeSet<&str> =
+            f.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(
+            keys,
+            std::collections::BTreeSet::from(["modified", "path", "sizeGB"]),
+            "topFiles must strictly match API.md keys"
+        );
+    }
+    let cached_c = prod_index
+        .cached(Path::new(r"C:\"))
+        .expect("C:\\ snapshot must be cached");
+    let cached_c_mb = cached_c.estimated_bytes() as f64 / (1024.0 * 1024.0);
+    println!(
+        "[1C] C:\\ cold $MFT: {:.1}ms totalGB={:.2} rows={} files={} est_cache={:.2}MiB ws={:.1}->{:.1}MiB json_bytes={}",
+        c_ms,
+        c_total_gb,
+        cached_c.rows,
+        cached_c.file_count,
+        cached_c_mb,
+        ws_before,
+        ws_after_c,
+        c_encoded.content.len()
+    );
+
+    // 2. Warm `ls` drill-down with live FileReference + PathPolicy::LIVE verification
+    let mut ls_reports = Vec::new();
+    for dir in [r"C:\", r"C:\Windows", r"C:\Program Files"] {
+        let p = Path::new(dir);
+        if !p.is_dir() {
+            continue;
+        }
+        let t_ls = Instant::now();
+        let ls_val = ls::run(&prod_index, p, 20, &control(30), WalkLimits::default())
+            .expect("warm ls failed");
+        let _ = diagnostic_result(ls_val.clone()).expect("encode ls");
+        let ls_ms = t_ls.elapsed().as_secs_f64() * 1000.0;
+        println!(
+            "[1C] warm ls({dir}): {:.1}ms method={} totalChildren={} totalSize={}",
+            ls_ms, ls_val["method"], ls_val["totalChildren"], ls_val["totalSize"]
+        );
+        ls_reports.push(serde_json::json!({
+            "path": dir,
+            "ms": (ls_ms * 10.0).round() / 10.0,
+            "method": ls_val["method"],
+            "totalChildren": ls_val["totalChildren"],
+            "totalSize": ls_val["totalSize"],
+            "notice": ls_val.get("notice"),
+        }));
+    }
+
+    // Cross-check C:\Program Files between MFT-backed ls/cache and live elevated native-walk
+    let pf_path = Path::new(r"C:\Program Files");
+    let t_pf_walk = Instant::now();
+    let pf_walk = walk::usage(pf_path, 20, &control(60), WalkLimits::default())
+        .expect("elevated walk C:\\Program Files");
+    let pf_walk_ms = t_pf_walk.elapsed().as_secs_f64() * 1000.0;
+    let pf_mft_gb = {
+        let ls_c = ls::run(
+            &prod_index,
+            Path::new(r"C:\"),
+            50,
+            &control(30),
+            WalkLimits::default(),
+        )
+        .expect("ls C:\\");
+        ls_c["entries"]
+            .as_array()
+            .and_then(|arr| {
+                arr.iter().find(|e| {
+                    e["name"]
+                        .as_str()
+                        .is_some_and(|n| n.eq_ignore_ascii_case("Program Files"))
+                })
+            })
+            .and_then(|e| e["bytes"].as_u64())
+            .map(|b| b as f64 / 1073741824.0)
+    };
+    println!(
+        "[1C] C:\\Program Files cross-check: mft_gb={:?} vs elevated_walk_gb={} ({:.1}ms, truncated={})",
+        pf_mft_gb, pf_walk["totalGB"], pf_walk_ms, pf_walk["truncated"]
+    );
+
+    // 3. Second volume cancellation + recovery + multi-volume memory check
+    let mut second_vol_report = serde_json::Value::Null;
+    for candidate in [r"D:\", r"E:\", r"F:\", r"G:\"] {
+        let p = Path::new(candidate);
+        if !p.is_dir() {
+            continue;
+        }
+        // Cancel mid-scan after 10ms
+        let tok = CancellationToken::new();
+        let trig = tok.clone();
+        let h = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(10));
+            trig.cancel();
+        });
+        let t_cancel = Instant::now();
+        let cancel_res = storage_tools::run_usage(
+            &prod_index,
+            p,
+            20,
+            &Control::new(tok, Duration::from_secs(60)),
+        );
+        let cancel_ms = t_cancel.elapsed().as_secs_f64() * 1000.0;
+        h.join().unwrap();
+        println!(
+            "[1C] {candidate} mid-scan cancel: elapsed={:.1}ms cancelled={}",
+            cancel_ms,
+            cancel_res.is_err()
+        );
+
+        // Full cold scan on second volume
+        let t_v2 = Instant::now();
+        let v2_usage = storage_tools::run_usage(&prod_index, p, 20, &control(180))
+            .expect("second volume $MFT scan");
+        let v2_ms = t_v2.elapsed().as_secs_f64() * 1000.0;
+        println!(
+            "[1C] {candidate} cold result: {:.1}ms method={} degradedFrom={:?} totalGB={}",
+            v2_ms,
+            v2_usage["method"],
+            v2_usage.get("degradedFrom"),
+            v2_usage["totalGB"]
+        );
+        assert_eq!(
+            v2_usage["method"], "native-mft",
+            "{candidate} should succeed with native-mft after prior cancel: {v2_usage}"
+        );
+        let v2_cached = prod_index.cached(p).expect("second volume cached");
+        let ws_after_v2 = current_process_working_set_mb();
+        println!(
+            "[1C] {candidate} cold $MFT: {:.1}ms method={} totalGB={} rows={} files={} est_cache={:.2}MiB ws={:.1}MiB",
+            v2_ms,
+            v2_usage["method"],
+            v2_usage["totalGB"],
+            v2_cached.rows,
+            v2_cached.file_count,
+            v2_cached.estimated_bytes() as f64 / (1024.0 * 1024.0),
+            ws_after_v2
+        );
+        second_vol_report = serde_json::json!({
+            "drive": candidate,
+            "cancelMs": (cancel_ms * 10.0).round() / 10.0,
+            "cancelReturnedErr": cancel_res.is_err(),
+            "coldMs": (v2_ms * 10.0).round() / 10.0,
+            "method": v2_usage["method"],
+            "totalGB": v2_usage["totalGB"],
+            "rows": v2_cached.rows,
+            "files": v2_cached.file_count,
+            "estCacheMiB": ((v2_cached.estimated_bytes() as f64 / (1024.0 * 1024.0)) * 100.0).round() / 100.0,
+            "wsAfterMiB": (ws_after_v2 * 10.0).round() / 10.0,
+        });
+        break;
+    }
+
+    // 4. Elevated disk(health) verification on all local physical disks
+    let t_h = Instant::now();
+    let health = disk::run(
+        &WindowsSource,
+        disk::DiskInput {
+            scope: disk::DiskScope::Health,
+            drive: None,
+            path: None,
+            top: None,
+        },
+        &control(30),
+    )
+    .expect("elevated disk(health)");
+    let health_ms = t_h.elapsed().as_secs_f64() * 1000.0;
+    println!(
+        "[1C] elevated disk(health): {:.1}ms rows={} errors={}",
+        health_ms,
+        health["smart"].as_array().map_or(0, Vec::len),
+        health["smartErrors"].as_array().map_or(0, Vec::len)
+    );
+
+    if let Ok(out_path) = std::env::var("CST_1C_REPORT_PATH") {
+        let report = serde_json::json!({
+            "elevated": true,
+            "wsBeforeMiB": (ws_before * 10.0).round() / 10.0,
+            "cDrive": {
+                "coldMs": (c_ms * 10.0).round() / 10.0,
+                "method": c_usage["method"],
+                "totalGB": c_total_gb,
+                "rows": cached_c.rows,
+                "files": cached_c.file_count,
+                "estCacheMiB": (cached_c_mb * 100.0).round() / 100.0,
+                "wsAfterMiB": (ws_after_c * 10.0).round() / 10.0,
+                "notice": c_usage["notice"],
+            },
+            "warmLs": ls_reports,
+            "programFilesCrossCheck": {
+                "mftGB": pf_mft_gb.map(|v| (v * 100.0).round() / 100.0),
+                "elevatedWalkGB": pf_walk["totalGB"],
+                "elevatedWalkMs": (pf_walk_ms * 10.0).round() / 10.0,
+                "elevatedWalkTruncated": pf_walk["truncated"],
+            },
+            "secondVolume": second_vol_report,
+            "elevatedHealth": {
+                "ms": (health_ms * 10.0).round() / 10.0,
+                "rows": health["smart"].as_array().map_or(0, Vec::len),
+                "errors": health["smartErrors"].as_array().map_or(0, Vec::len),
+            }
+        });
+        let _ = fs::write(&out_path, serde_json::to_string_pretty(&report).unwrap());
+    }
 }

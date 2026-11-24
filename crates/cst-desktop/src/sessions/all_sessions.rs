@@ -829,7 +829,7 @@ impl AllSessionsView {
                                     .w(px(200.0))
                                     .p(space::XS)
                                     .rounded(radius::ROW)
-                                    .bg(palette.bg_elevated)
+                                    .bg(palette.bg_glass)
                                     .border_1()
                                     .border_color(palette.border_subtle)
                                     .occlude()

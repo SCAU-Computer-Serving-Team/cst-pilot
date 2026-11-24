@@ -30,7 +30,7 @@
 |---|---|
 | `path` | 规范化目录路径 |
 | `totalChildren` / `totalSize` | 直接子项总数 / 已统计子项大小文本（不完整时为下界） |
-| `method` | `"wiztree-index"`（使用共享卷缓存且未遍历子目录）或 `"walk"`（原生遍历，可能同时使用部分缓存） |
+| `method` | `"native-index"`（命中共享卷缓存且未遍历子目录）或 `"walk"`（原生并行遍历，可能同时使用部分缓存） |
 | `entries[]` | 按字节降序排列，元素为 `{ name, type: "dir"\|"file"\|"unknown", size: string\|null, bytes: number\|null, pct: number\|null }` |
 | `omitted` | 截断时存在，结构为 `{ count, size, unknownCount, note }` |
 | `notice` | 预算截断或权限受限说明 |
@@ -46,7 +46,7 @@
 | `space` | `space[]: { drive, totalGB, freeGB, usedPct }[]`、可选 `degraded`、`collectionErrors` |
 | `info` | `physicalDisks[]: { FriendlyName, SerialNumber, MediaType, BusType, HealthStatus, OperationalStatus, DeviceId, sizeGB }[]`、`volumes[]: { drive, label, fs, driveType, totalGB, freeGB }[]`、可选 `infoNotice`、`degraded`、`collectionErrors` |
 | `health` | `smart: { DeviceId, Wear, Temperature, PowerOnHours, ReadErrorsTotal, WriteErrorsTotal, ... }[] \| null`、可选 `smartErrors[]: { deviceId, error, code? }[]`、`smartNotice`、`degraded` |
-| `usage` | `usage: { root, totalGB, method: "wiztree-mft"\|"wiztree-walk"\|"node-walk", topDirs[]: { path, sizeGB, pct }[], topFiles[]: { path, sizeGB, modified }[]?, extAgg[]: { ext, files, sizeGB }[]?（最多 40 项）, staleFiles[]: { path, sizeGB, modified }[]?, stats?: { filesScanned, elapsedSec, budget }, truncated?, denied[]?, degradedFrom?, notice }` |
+| `usage` | `usage: { root, totalGB, method: "native-mft"\|"native-walk", topDirs[]: { path, sizeGB, pct }[], topFiles[]: { path, sizeGB, modified }[]?, extAgg[]: { ext, files, sizeGB }[]?（最多 40 项）, staleFiles[]: { path, sizeGB, modified }[]?, stats?: { filesScanned, elapsedSec, budget }, truncated?, denied[]?, degradedFrom?, notice }` |
 | `all` | 同层合并 `space`、`info`、`health` 的全部字段 |
 
 ## sys
