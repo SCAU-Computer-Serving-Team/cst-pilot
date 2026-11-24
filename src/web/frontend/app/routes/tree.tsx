@@ -17,12 +17,14 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { draftKey } from "../composer/drafts";
 import { apiJson, sessionPath } from "../data/api";
 import { useSessionTitle, useSessionTree } from "../data/web-state";
 import { focusableElements, resolveDialogTabTarget } from "../shell/dialog-focus";
+import { KbdFocusOverlay, useKeyboardFocusStyle, usePointerMutex } from "../shell/kbd-focus";
+import { isNavigationKeyEvent, scrollRowIntoView } from "../shell/keyboard-navigation";
 import { Notification } from "../shell/notification";
 import { usePanelDismiss } from "../shell/panel-dismiss";
 import { SidebarHeaderToggle, useWorkspaceShell } from "../shell/workspace-shell-context";
@@ -42,6 +44,7 @@ import {
 	type TreeRow,
 	VIEW_FILTERS,
 	type ViewFilter,
+	visibleTreeCursor,
 } from "../tree/branch-tree";
 import { sampleTree } from "../tree/branch-tree-sample";
 
@@ -71,6 +74,10 @@ function RowPrefix({ row }: { row: TreeRow }) {
 
 export default function SessionTree() {
 	const { sessionId } = useParams();
+	return <SessionTreeView key={sessionId} sessionId={sessionId} />;
+}
+
+function SessionTreeView({ sessionId }: { sessionId?: string }) {
 	const navigate = useNavigate();
 	const [params] = useSearchParams();
 	const preview = params.get("preview") === "1";
@@ -100,9 +107,22 @@ export default function SessionTree() {
 	}, [shell?.appActive]);
 	const [toast, setToast] = useState("");
 	const [actionError, setActionError] = useState("");
-	// 键盘游标：null 表示跟随当前叶（leafIndex）。
-	const [cursor, setCursor] = useState<number | null>(null);
-	const rowRefs = useRef(new Map<string, HTMLElement>());
+	// 未指定条目时跟随当前叶。
+	const [cursorId, setCursorId] = useState<string | null>(null);
+	const [kbdActive, setKbdActive] = useState(false);
+	const clearKeyboard = useCallback(() => setKbdActive(false), []);
+	const kbdStyle = useKeyboardFocusStyle();
+	const listRef = useRef<HTMLUListElement>(null);
+	const rowRefs = useRef(new Map<string, HTMLLIElement>());
+	const mounted = useRef(false);
+	const initialLeafScrolled = useRef(false);
+	useLayoutEffect(() => {
+		mounted.current = true;
+		if (!preview) listRef.current?.focus({ preventScroll: true });
+		return () => {
+			mounted.current = false;
+		};
+	}, [preview]);
 	// 选中一行：当前叶位置不变时只给消息弹窗，否则打开选择对话框。
 	const selectRow = useCallback(
 		(id: string) => {
@@ -122,8 +142,9 @@ export default function SessionTree() {
 					body: { entryId },
 				});
 				if (result.editorText) sessionStorage.setItem(draftKey(sessionId), result.editorText);
-				navigate(`/s/${sessionId}`, { viewTransition: true });
+				if (mounted.current) navigate(`/s/${sessionId}`, { viewTransition: true });
 			} catch (cause) {
+				if (!mounted.current) return;
 				setActionError(cause instanceof Error ? cause.message : "分支导航未完成");
 				await refresh();
 			}
@@ -152,6 +173,7 @@ export default function SessionTree() {
 	useEffect(() => {
 		if (!choice) return;
 		const previous = document.activeElement;
+		const list = listRef.current;
 		const frame = requestAnimationFrame(() => {
 			choiceDialogRef.current?.querySelector<HTMLElement>(".summary-option")?.focus({ preventScroll: true });
 		});
@@ -200,14 +222,16 @@ export default function SessionTree() {
 		return () => {
 			cancelAnimationFrame(frame);
 			window.removeEventListener("keydown", onKey, true);
+			if (document.querySelector(".standby-scrim")) return;
 			if (
-				!document.querySelector(".standby-scrim") &&
 				previous instanceof HTMLElement &&
 				previous !== document.body &&
 				previous.isConnected &&
 				!previous.closest("[inert]")
 			) {
 				previous.focus({ preventScroll: true });
+			} else if (list?.isConnected && !list.closest("[inert]")) {
+				list.focus({ preventScroll: true });
 			}
 		};
 	}, [choice]);
@@ -227,17 +251,23 @@ export default function SessionTree() {
 		return allRows.filter((row) => matchesSearch(row.node, rowTexts.get(row.node.entry.id)!, query));
 	}, [allRows, foldResult, query, rowTexts]);
 	const leafIndex = useMemo(() => rows.findIndex((row) => row.node.entry.id === leafId), [rows, leafId]);
-	const rawCursorIndex = cursor ?? (leafIndex >= 0 ? leafIndex : rows.length - 1);
-	const cursorIndex = rows.length ? Math.max(0, Math.min(rawCursorIndex, rows.length - 1)) : -1;
+	const resolvedCursor = visibleTreeCursor(allRows, rows, cursorId ?? leafId);
+	const cursorIndex = resolvedCursor >= 0 ? resolvedCursor : leafIndex >= 0 ? leafIndex : rows.length - 1;
+	const overlayBlocked = !!choice || filterOpen || !!shell?.appActive || !!shell?.overlay;
+	const targetId = kbdActive && !overlayBlocked ? (rows[cursorIndex]?.node.entry.id ?? null) : null;
+	usePointerMutex(targetId !== null, clearKeyboard);
 
-	// 全局仅处理 Esc 返回会话（方向键与 Enter 收敛在树列表内部，避免拦截按钮或待机层）。
+	const moveTo = useCallback((row: TreeRow) => {
+		listRef.current?.focus({ preventScroll: true });
+		setCursorId(row.node.entry.id);
+		setKbdActive(true);
+	}, []);
+
+	// Esc 返回会话；方向键、Home/End 与 Enter 收敛在树列表内部，避免拦截按钮、弹层或待机层。
 	useEffect(() => {
-		if (preview || shell?.appActive || shell?.overlay) return;
+		if (preview || overlayBlocked) return;
 		const onKey = (event: KeyboardEvent) => {
 			if (
-				event.key !== "Escape" ||
-				choice ||
-				filterOpen ||
 				event.defaultPrevented ||
 				event.isComposing ||
 				event.keyCode === 229 ||
@@ -247,30 +277,104 @@ export default function SessionTree() {
 			) {
 				return;
 			}
-			const target = event.target as HTMLElement | null;
-			if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+			const target = event.target;
+			const list = listRef.current;
+			if (!(target instanceof HTMLElement) || !list) return;
+			if (target.isContentEditable || target.matches("input, textarea, select")) return;
+			if (event.key === "Escape") {
+				event.preventDefault();
+				navigate(`/s/${sessionId}`, { viewTransition: true });
+				return;
+			}
+			const row = rows[cursorIndex];
+			const fromList =
+				target === document.body || target === list || (list.contains(target) && target.matches(".tree-row"));
+			if (!fromList || !row || !isNavigationKeyEvent(event)) return;
+			const id = row.node.entry.id;
+			switch (event.key) {
+				case "ArrowUp":
+				case "ArrowDown": {
+					const step = event.key === "ArrowUp" ? -1 : 1;
+					const base = leafIndex < 0 && !kbdActive ? 0 : cursorIndex;
+					moveTo(rows[Math.max(0, Math.min(rows.length - 1, base + step))]);
+					break;
+				}
+				case "Home":
+					moveTo(rows[0]);
+					break;
+				case "End":
+					moveTo(rows[rows.length - 1]);
+					break;
+				case "ArrowLeft": {
+					if (query.trim()) return;
+					if (foldable(row) && !folded.has(id)) {
+						moveTo(row);
+						setFolded((current) => new Set(current).add(id));
+					} else {
+						const parent = allRows[row.parentIndex];
+						const index = visibleTreeCursor(allRows, rows, parent?.node.entry.id ?? null);
+						moveTo(rows[index] ?? row);
+					}
+					break;
+				}
+				case "ArrowRight": {
+					if (query.trim()) return;
+					if (folded.has(id) && foldable(row)) {
+						moveTo(row);
+						setFolded((current) => {
+							const next = new Set(current);
+							next.delete(id);
+							return next;
+						});
+					} else {
+						const child = rows[cursorIndex + 1];
+						moveTo(child?.parentIndex === row.index ? child : row);
+					}
+					break;
+				}
+				case "Enter":
+					if (event.repeat) return;
+					moveTo(row);
+					selectRow(id);
+					break;
+				default:
+					return;
+			}
 			event.preventDefault();
-			navigate(`/s/${sessionId}`, { viewTransition: true });
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [preview, shell?.appActive, shell?.overlay, choice, filterOpen, navigate, sessionId]);
+	}, [
+		preview,
+		overlayBlocked,
+		rows,
+		allRows,
+		folded,
+		query,
+		leafIndex,
+		cursorIndex,
+		kbdActive,
+		moveTo,
+		selectRow,
+		navigate,
+		sessionId,
+	]);
 
-	// 游标行滚动到可见区域。
-	useEffect(() => {
-		if (cursorIndex < 0 || cursorIndex >= rows.length) return;
-		rowRefs.current.get(rows[cursorIndex].node.entry.id)?.scrollIntoView({ block: "nearest" });
-	}, [cursorIndex, rows]);
-
-	function moveTreeCursor(nextIndex: number) {
-		if (!rows.length) return;
-		const clamped = Math.max(0, Math.min(nextIndex, rows.length - 1));
-		setCursor(clamped);
-		const nextId = rows[clamped]?.node.entry.id;
-		if (nextId) {
-			rowRefs.current.get(nextId)?.focus({ preventScroll: true });
+	useLayoutEffect(() => {
+		const list = listRef.current;
+		if (!list) return;
+		if (cursorIndex >= 0 && targetId) {
+			const row = rowRefs.current.get(targetId);
+			if (row) scrollRowIntoView(list, row);
+			initialLeafScrolled.current = true;
+		} else if (!initialLeafScrolled.current && leafId && leafIndex >= 0) {
+			const leaf = rowRefs.current.get(leafId);
+			if (leaf) {
+				scrollRowIntoView(list, leaf);
+				initialLeafScrolled.current = true;
+			}
 		}
-	}
+	}, [targetId, cursorIndex, leafId, leafIndex]);
 
 	function toggleFold(row: TreeRow) {
 		const id = row.node.entry.id;
@@ -321,6 +425,13 @@ export default function SessionTree() {
 								event.preventDefault();
 								event.stopPropagation();
 								setQuery("");
+								return;
+							}
+							if (preview || !isNavigationKeyEvent(event.nativeEvent)) return;
+							if ((event.key === "ArrowDown" || event.key === "Enter") && rows[0]) {
+								event.preventDefault();
+								event.stopPropagation();
+								moveTo(rows[0]);
 							}
 						}}
 					/>
@@ -385,7 +496,16 @@ export default function SessionTree() {
 					{leafIndex >= 0 ? leafIndex + 1 : "–"} / {rows.length} 条
 				</span>
 			</div>
-			<ul className="tree-list" aria-label="分支树条目">
+			<ul
+				className="tree-list kbd-focus-scope"
+				ref={listRef}
+				tabIndex={-1}
+				aria-label="分支树条目"
+				data-kbd-active={targetId !== null || undefined}
+				onBlur={(event) => {
+					if (!event.currentTarget.contains(event.relatedTarget) && !choice) clearKeyboard();
+				}}
+			>
 				{tree === undefined ? (
 					<li className="tree-empty">正在读取分支树…</li>
 				) : rows.length === 0 ? (
@@ -404,33 +524,32 @@ export default function SessionTree() {
 									else rowRefs.current.delete(id);
 								}}
 								tabIndex={index === cursorIndex ? 0 : -1}
-								className={`tree-row tree-row-${text.kind} ${id === leafId ? "tree-row-current" : ""} ${
-									index === cursorIndex ? "tree-row-cursor" : ""
-								}`}
-								onFocus={() => setCursor(index)}
+								className={`tree-row tree-row-${text.kind} ${id === leafId ? "tree-row-current" : ""}`}
+								onFocus={(event) => {
+									if (event.target !== event.currentTarget) {
+										clearKeyboard();
+										return;
+									}
+									setCursorId(id);
+									setKbdActive(event.currentTarget.matches(":focus-visible"));
+								}}
 								onClick={() => {
-									setCursor(index);
+									clearKeyboard();
+									setCursorId(id);
 									selectRow(id);
 								}}
 								onKeyDown={(event) => {
-									if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-									if (event.target !== event.currentTarget) return;
-									if (event.key === "ArrowUp") {
-										event.preventDefault();
-										moveTreeCursor(index - 1);
-									} else if (event.key === "ArrowDown") {
-										event.preventDefault();
-										moveTreeCursor(index + 1);
-									} else if (event.key === "Home") {
-										event.preventDefault();
-										moveTreeCursor(0);
-									} else if (event.key === "End") {
-										event.preventDefault();
-										moveTreeCursor(rows.length - 1);
-									} else if (event.key === "Enter") {
-										event.preventDefault();
-										selectRow(id);
-									}
+									if (
+										event.target !== event.currentTarget ||
+										event.key !== "Enter" ||
+										event.repeat ||
+										!isNavigationKeyEvent(event.nativeEvent) ||
+										preview ||
+										overlayBlocked
+									)
+										return;
+									event.preventDefault();
+									selectRow(id);
 								}}
 							>
 								<RowPrefix row={row} />
@@ -453,7 +572,6 @@ export default function SessionTree() {
 											event.stopPropagation();
 											toggleFold(row);
 										}}
-										onKeyDown={(event) => event.stopPropagation()}
 									>
 										{isFolded ? (
 											<>
@@ -472,6 +590,15 @@ export default function SessionTree() {
 						);
 					})
 				)}
+				<KbdFocusOverlay
+					containerRef={listRef}
+					itemRefs={rowRefs}
+					targetId={targetId}
+					as="li"
+					style={kbdStyle}
+					insetX={20}
+					insetY={1}
+				/>
 			</ul>
 			{!!choice && (
 				<div className="summary-scrim tier-3-scrim" role="none" onMouseDown={() => setChoice("")}>

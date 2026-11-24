@@ -278,17 +278,18 @@
 .session-list-group h2 { margin: 0 0 var(--space-inline); padding-inline: var(--space-component); color: var(--text-secondary); font-size: var(--font-ui); font-weight: 500; line-height: var(--line-ui); }
 .session-list { display: flex; flex-direction: column; gap: var(--space-micro); margin: 0; padding: 0; list-style: none; }
 .session-list-item { position: relative; display: flex; align-items: center; gap: var(--space-inline); min-width: 0; border-radius: var(--radius-control); transition: background-color var(--fast) var(--ease-out); }
-.session-list-item:hover { background: var(--bg-hover); }
+.session-list-content:not([data-kbd-active]) .session-list-item:hover { background: var(--bg-hover); }
 .session-list-item:has(.sidebar-session-select[data-selected]) { background: var(--bg-item-active); }
 .session-list-item .sidebar-session-row { flex: 1; min-width: 0; }
 .session-list-item .sidebar-session { height: var(--h-header); padding: 0 var(--space-component); font-size: var(--font-body); color: var(--text-primary); line-height: var(--line-body); background: transparent; }
 .session-list-item .sidebar-session:hover { background: transparent; }
 .session-list-item .sidebar-session:focus-visible { background: var(--bg-hover); }
+.session-list-content:focus-visible { outline: none; }
 .session-list-item .session-check-control { left: var(--space-component); }
 .session-list-main[data-managing] .session-check-control { opacity: 1; }
 .session-list-main[data-managing] .sidebar-selection-text { transform: translateX(calc(var(--icon-body) + var(--space-inline))); width: calc(100% - var(--icon-body) - var(--space-inline)); }
 .session-list-more { flex: none; margin-right: var(--space-detail); opacity: 0; color: var(--text-secondary); transition: opacity var(--fast) var(--ease-out), background-color var(--fast) var(--ease-out), color var(--fast) var(--ease-out), transform var(--duration-press) var(--ease-out); }
-.session-list-item:hover .session-list-more,
+.session-list-content:not([data-kbd-active]) .session-list-item:hover .session-list-more,
 .session-list-item:focus-within .session-list-more,
 .session-list-item[data-menu-open="true"] .session-list-more { opacity: 1; }
 @media (hover: none) {

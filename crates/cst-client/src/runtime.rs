@@ -43,6 +43,7 @@ use self::delivery::{execute_retry_outbox, execute_send_draft, reconcile_uncerta
 pub const MAX_MULTIPLEX_SUBSCRIPTIONS: usize = 32;
 const SUBSCRIPTION_DEBOUNCE_MS: u64 = 40;
 const STATE_REFRESH_COALESCE_MS: u64 = 25;
+const USAGE_REFRESH_COALESCE_MS: u64 = 60;
 const STARTUP_DESKTOP_SETTINGS_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone)]
@@ -101,6 +102,9 @@ enum WorkerCommand {
     ReloadSession {
         session_id: String,
         reply: oneshot::Sender<Result<Option<Arc<SessionViewSnapshot>>, ClientError>>,
+    },
+    RefreshSessionUsage {
+        session_id: String,
     },
     RefreshGlobals {
         op_revision: u64,
@@ -787,6 +791,14 @@ impl ClientHandle {
             .await
     }
 
+    /// Actively triggers a `GET /api/sessions/:id/usage` refresh for the given session.
+    pub fn refresh_session_usage(&self, session_id: String) {
+        let _ = self
+            .core
+            .cmd_tx
+            .send(WorkerCommand::RefreshSessionUsage { session_id });
+    }
+
     pub async fn navigate_session_tree(
         &self,
         session_id: String,
@@ -1399,6 +1411,12 @@ enum InternalAsyncCompletion {
         session_id: String,
         generation: u64,
     },
+    SessionUsageFetched {
+        session_id: String,
+        seq: u64,
+        generation: u64,
+        result: Result<Value, ClientError>,
+    },
     ReconciledUncertain {
         result: Result<ReconcileReport, ClientError>,
         reply: Option<oneshot::Sender<Result<ReconcileReport, ClientError>>>,
@@ -1478,6 +1496,8 @@ async fn run_state_reducer_loop(
     let mut mux_cancel: Option<CancellationToken> = None;
     let mut active_mux_generation = 0u64;
     let mut send_tails: BTreeMap<String, watch::Receiver<()>> = BTreeMap::new();
+    let mut usage_fetches = UsageFetches::default();
+    let mut pending_usage_sessions: BTreeSet<String> = BTreeSet::new();
 
     let publish = |core: &Arc<SharedClientCore>,
                    revision_tx: &watch::Sender<u64>,
@@ -1544,6 +1564,9 @@ async fn run_state_reducer_loop(
     let refresh_sleep = tokio::time::sleep(Duration::from_millis(1));
     tokio::pin!(refresh_sleep);
     let mut refresh_timer_armed = true;
+    let usage_refresh_sleep = tokio::time::sleep(Duration::from_secs(3600));
+    tokio::pin!(usage_refresh_sleep);
+    let mut usage_timer_armed = false;
     let stream_publish_sleep = tokio::time::sleep(Duration::from_secs(3600));
     tokio::pin!(stream_publish_sleep);
     let mut stream_publish_dirty = false;
@@ -1583,6 +1606,16 @@ async fn run_state_reducer_loop(
                                     reply: None,
                                 });
                             });
+                            if let Some(active_sid) = core
+                                .workspace
+                                .lock()
+                                .expect("workspace lock")
+                                .active_session_id()
+                                .map(str::to_owned)
+                                && session_store.has_ready(&active_sid)
+                            {
+                                usage_fetches.start(&core.http, &done_tx, &session_store, active_sid);
+                            }
                         }
                     }
                     KeepaliveSignal::Disconnected => {
@@ -1597,9 +1630,19 @@ async fn run_state_reducer_loop(
                             refresh_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(STATE_REFRESH_COALESCE_MS));
                             refresh_timer_armed = true;
                         }
+                        if let Some(active_sid) = core
+                            .workspace
+                            .lock()
+                            .expect("workspace lock")
+                            .active_session_id()
+                            .map(str::to_owned)
+                            && session_store.has_ready(&active_sid)
+                        {
+                            usage_fetches.start(&core.http, &done_tx, &session_store, active_sid);
+                        }
                     }
                     KeepaliveSignal::StateEvent { payload, .. } => {
-                        let usage_patch = handle_global_state_payload(
+                        if let Some(usage_sid) = handle_global_state_payload(
                             &core,
                             &revision_tx,
                             &payload,
@@ -1609,14 +1652,16 @@ async fn run_state_reducer_loop(
                             &mut confirmed_subs,
                             &client_id,
                             &mux_tx,
-                        );
-                        if let Some((sid, ctx_patch, usage_val_patch)) = usage_patch
-                            && session_store.apply_session_usage(&sid, ctx_patch, usage_val_patch)
+                        ) && session_store.has_ready(&usage_sid)
                         {
-                            let map = Arc::new(session_store.export_ready_map());
-                            publish(&core, &revision_tx, &mut |snap| {
-                                snap.loaded_sessions = Arc::clone(&map);
-                            });
+                            pending_usage_sessions.insert(usage_sid);
+                            if !usage_timer_armed {
+                                usage_refresh_sleep.as_mut().reset(
+                                    tokio::time::Instant::now()
+                                        + Duration::from_millis(USAGE_REFRESH_COALESCE_MS),
+                                );
+                                usage_timer_armed = true;
+                            }
                         }
                         if dirty.any() && !refresh_timer_armed {
                             refresh_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(STATE_REFRESH_COALESCE_MS));
@@ -1638,6 +1683,8 @@ async fn run_state_reducer_loop(
                 let mut session_dirty = false;
                 let mut needs_immediate_publish = false;
                 let mut reload_sessions = BTreeSet::new();
+                let mut immediate_usage_sessions = BTreeSet::new();
+                let mut coalesce_usage_sessions = BTreeSet::new();
                 for envelope in batch {
                     if envelope.mux_generation != active_mux_generation {
                         continue;
@@ -1650,6 +1697,16 @@ async fn run_state_reducer_loop(
                     match envelope.signal {
                         MultiplexSignal::StreamReady { subscribed_sessions } => {
                             confirmed_subs = subscribed_sessions.into_iter().collect();
+                            if let Some(active_sid) = core
+                                .workspace
+                                .lock()
+                                .expect("workspace lock")
+                                .active_session_id()
+                                .map(str::to_owned)
+                                && session_store.has_ready(&active_sid)
+                            {
+                                immediate_usage_sessions.insert(active_sid);
+                            }
                             let current_desired = compute_desired_subscriptions(&core);
                             if confirmed_subs.len() != current_desired.len()
                                 || current_desired.iter().any(|id| !confirmed_subs.contains(id))
@@ -1688,6 +1745,13 @@ async fn run_state_reducer_loop(
                                 ev_type,
                                 Some("message_update" | "tool_execution_update")
                             );
+                            let is_assistant_reply_finished = (ev_type == Some("message_end")
+                                && event
+                                    .get("message")
+                                    .and_then(|m| m.get("role"))
+                                    .and_then(Value::as_str)
+                                    == Some("assistant"))
+                                || matches!(ev_type, Some("turn_end" | "agent_end"));
                             let needs_snapshot_reload = matches!(
                                 ev_type,
                                 Some("session_tree" | "compaction_end")
@@ -1710,6 +1774,11 @@ async fn run_state_reducer_loop(
                                     || session_store.is_loading(&session_id))
                             {
                                 reload_sessions.insert(session_id);
+                            } else if is_assistant_reply_finished
+                                && (session_store.has_ready(&session_id)
+                                    || session_store.is_loading(&session_id))
+                            {
+                                coalesce_usage_sessions.insert(session_id);
                             }
                         }
                         MultiplexSignal::QueueEvent {
@@ -1791,6 +1860,20 @@ async fn run_state_reducer_loop(
                 for session_id in reload_sessions {
                     let generation = session_store.reset_to_loading(&session_id);
                     spawn_session_snapshot_fetch(core.http.clone(), done_tx.clone(), session_id, generation, Vec::new());
+                }
+                for session_id in immediate_usage_sessions {
+                    pending_usage_sessions.remove(&session_id);
+                    usage_fetches.start(&core.http, &done_tx, &session_store, session_id);
+                }
+                if !coalesce_usage_sessions.is_empty() {
+                    pending_usage_sessions.extend(coalesce_usage_sessions);
+                    if !usage_timer_armed {
+                        usage_refresh_sleep.as_mut().reset(
+                            tokio::time::Instant::now()
+                                + Duration::from_millis(USAGE_REFRESH_COALESCE_MS),
+                        );
+                        usage_timer_armed = true;
+                    }
                 }
                 if session_dirty {
                     let now = tokio::time::Instant::now();
@@ -2054,6 +2137,11 @@ async fn run_state_reducer_loop(
                                 publish(&core, &revision_tx, &mut |snap| {
                                     snap.loaded_sessions = Arc::clone(&map);
                                 });
+                                let active = core.workspace.lock().expect("workspace lock").active_session_id() == Some(session_id.as_str());
+                                if active {
+                                    pending_usage_sessions.remove(&session_id);
+                                    usage_fetches.start(&core.http, &done_tx, &session_store, session_id);
+                                }
                                 for waiter in waiters {
                                     let _ = waiter.send(Ok(Some(loaded.clone())));
                                 }
@@ -2101,6 +2189,31 @@ async fn run_state_reducer_loop(
                                     let _ = waiter.send(Ok(existing.clone()));
                                 }
                             }
+                        }
+                    }
+                    InternalAsyncCompletion::SessionUsageFetched {
+                        session_id,
+                        seq,
+                        generation,
+                        result,
+                    } => {
+                        if !usage_fetches.finish(&session_id, seq) {
+                            continue;
+                        }
+                        if let Ok(payload) = result
+                            && payload["sessionId"].as_str() == Some(session_id.as_str())
+                            && let (Some(context), Some(usage)) = (payload.get("contextUsage"), payload.get("usage"))
+                            && session_store.apply_session_usage(
+                                &session_id,
+                                generation,
+                                (!context.is_null()).then(|| context.clone()),
+                                (!usage.is_null()).then(|| usage.clone()),
+                            )
+                        {
+                            let map = Arc::new(session_store.export_ready_map());
+                            publish(&core, &revision_tx, &mut |snap| {
+                                snap.loaded_sessions = Arc::clone(&map);
+                            });
                         }
                     }
                     InternalAsyncCompletion::ReconciledUncertain { result, reply } => {
@@ -2164,6 +2277,7 @@ async fn run_state_reducer_loop(
                                     sub_debounce_pending = true;
                                     sub_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(SUBSCRIPTION_DEBOUNCE_MS));
                                 }
+                                usage_fetches.start(&core.http, &done_tx, &session_store, sid);
                                 let _ = reply.send(Ok(existing));
                                 continue;
                             }
@@ -2231,6 +2345,10 @@ async fn run_state_reducer_loop(
                             generation,
                             Vec::new(),
                         );
+                    }
+                    WorkerCommand::RefreshSessionUsage { session_id } => {
+                        pending_usage_sessions.remove(&session_id);
+                        usage_fetches.start(&core.http, &done_tx, &session_store, session_id);
                     }
                     WorkerCommand::RefreshGlobals { op_revision, reply } => {
                         let http = core.http.clone();
@@ -2581,6 +2699,13 @@ async fn run_state_reducer_loop(
                     snap.loaded_sessions = Arc::clone(&map);
                 });
             }
+            () = &mut usage_refresh_sleep, if usage_timer_armed => {
+                usage_timer_armed = false;
+                let batch = std::mem::take(&mut pending_usage_sessions);
+                for sid in batch {
+                    usage_fetches.start(&core.http, &done_tx, &session_store, sid);
+                }
+            }
             () = &mut sub_sleep, if sub_debounce_pending => {
                 sub_debounce_pending = false;
                 let cur_mode = core.snapshot.lock().expect("snapshot lock").channel_mode;
@@ -2704,8 +2829,6 @@ async fn run_state_reducer_loop(
     }
 }
 
-type SessionUsagePatch = (String, Option<Option<Value>>, Option<Option<Value>>);
-
 #[allow(clippy::too_many_arguments)]
 fn handle_global_state_payload(
     core: &Arc<SharedClientCore>,
@@ -2717,9 +2840,9 @@ fn handle_global_state_payload(
     confirmed_subs: &mut BTreeSet<String>,
     client_id: &str,
     mux_tx: &BoundedMultiplexSender,
-) -> Option<SessionUsagePatch> {
+) -> Option<String> {
     let ev_type = payload.get("type").and_then(Value::as_str)?;
-    let mut usage_patch = None;
+    let mut usage_session_id = None;
     match ev_type {
         "sessions_changed" => {
             dirty.sessions_and_state = true;
@@ -2728,22 +2851,11 @@ fn handle_global_state_payload(
             dirty.models = true;
         }
         "usage_changed" => {
-            dirty.models = true;
-            if let Some(sid) = payload
+            usage_session_id = payload
                 .get("sessionId")
                 .and_then(Value::as_str)
                 .filter(|s| !s.is_empty())
-            {
-                let ctx_patch = payload
-                    .get("contextUsage")
-                    .map(|v| (!v.is_null()).then(|| v.clone()));
-                let usage_val_patch = payload
-                    .get("usage")
-                    .map(|v| (!v.is_null()).then(|| v.clone()));
-                if ctx_patch.is_some() || usage_val_patch.is_some() {
-                    usage_patch = Some((sid.to_owned(), ctx_patch, usage_val_patch));
-                }
-            }
+                .map(str::to_owned);
         }
         "quota_changed" => dirty.auth = true,
         "auth_changed" => {
@@ -2845,7 +2957,7 @@ fn handle_global_state_payload(
         }
         _ => {}
     }
-    usage_patch
+    usage_session_id
 }
 
 fn compute_desired_subscriptions(core: &Arc<SharedClientCore>) -> Vec<String> {
@@ -2891,6 +3003,68 @@ fn collect_pinned_sessions(core: &Arc<SharedClientCore>) -> BTreeSet<String> {
         }
     }
     set
+}
+
+#[derive(Default)]
+struct UsageFetches {
+    sequence: u64,
+    in_flight: BTreeMap<String, (u64, tokio::task::AbortHandle)>,
+}
+
+impl UsageFetches {
+    fn start(
+        &mut self,
+        http: &AppHttpClient,
+        done_tx: &mpsc::UnboundedSender<InternalAsyncCompletion>,
+        sessions: &SessionStore,
+        session_id: String,
+    ) {
+        // Snapshot and usage reads overlap on the server. Refresh after loading
+        // instead of letting one generation's response overwrite another's snapshot.
+        let Some(generation) = sessions.ready_generation(&session_id) else {
+            return;
+        };
+        if let Some((_, previous)) = self.in_flight.remove(&session_id) {
+            previous.abort();
+        }
+        self.sequence = self.sequence.wrapping_add(1);
+        let seq = self.sequence;
+        let id = session_id.clone();
+        let http = http.clone();
+        let done_tx = done_tx.clone();
+        let task = tokio::spawn(async move {
+            let result = http.get_session_usage(&id).await;
+            let _ = done_tx.send(InternalAsyncCompletion::SessionUsageFetched {
+                session_id: id,
+                seq,
+                generation,
+                result,
+            });
+        });
+        self.in_flight
+            .insert(session_id, (seq, task.abort_handle()));
+    }
+
+    fn finish(&mut self, session_id: &str, seq: u64) -> bool {
+        if self
+            .in_flight
+            .get(session_id)
+            .is_some_and(|(current, _)| *current == seq)
+        {
+            self.in_flight.remove(session_id);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl Drop for UsageFetches {
+    fn drop(&mut self) {
+        for (_, task) in self.in_flight.values() {
+            task.abort();
+        }
+    }
 }
 
 fn spawn_session_snapshot_fetch(

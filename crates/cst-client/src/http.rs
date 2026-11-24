@@ -663,6 +663,18 @@ impl AppHttpClient {
         .await
     }
 
+    pub async fn get_session_usage(&self, session_id: &str) -> Result<Value, ClientError> {
+        let sid = encode_segment(session_id);
+        self.request_value(
+            Method::GET,
+            &format!("/api/sessions/{sid}/usage"),
+            None,
+            None,
+            Some(Duration::from_secs(5)),
+        )
+        .await
+    }
+
     pub async fn navigate_session_tree(
         &self,
         session_id: &str,

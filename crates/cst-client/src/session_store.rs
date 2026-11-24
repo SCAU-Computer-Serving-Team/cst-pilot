@@ -69,8 +69,8 @@ impl SessionViewSnapshot {
             compacting,
             messages: Arc::new(messages_vec),
             entries: Arc::new(entries_vec),
-            context_usage: obj.get("contextUsage").cloned(),
-            usage: obj.get("usage").cloned(),
+            context_usage: obj.get("contextUsage").filter(|v| !v.is_null()).cloned(),
+            usage: obj.get("usage").filter(|v| !v.is_null()).cloned(),
             queue: obj.get("queue").cloned(),
             ui: obj.get("ui").cloned(),
             bitlocker: obj.get("bitlocker").cloned(),
@@ -116,6 +116,7 @@ enum SlotState {
         previous: Option<(Arc<SessionViewSnapshot>, u64)>,
     },
     Ready {
+        generation: u64,
         snapshot: Arc<SessionViewSnapshot>,
         last_touched: u64,
     },
@@ -221,6 +222,13 @@ impl SessionStore {
         matches!(self.slots.get(session_id), Some(SlotState::Ready { .. }))
     }
 
+    pub(crate) fn ready_generation(&self, session_id: &str) -> Option<u64> {
+        match self.slots.get(session_id) {
+            Some(SlotState::Ready { generation, .. }) => Some(*generation),
+            _ => None,
+        }
+    }
+
     pub fn ready_cursor(&self, session_id: &str) -> Option<SessionCursor> {
         match self.slots.get(session_id) {
             Some(SlotState::Ready { snapshot, .. }) => snapshot.event_cursor.clone(),
@@ -266,6 +274,7 @@ impl SessionStore {
             Some(SlotState::Ready {
                 snapshot,
                 last_touched,
+                ..
             }) => Some((snapshot, last_touched)),
             Some(SlotState::Loading { previous, .. }) => previous,
             None => None,
@@ -312,6 +321,7 @@ impl SessionStore {
                 self.slots.insert(
                     session_id.to_owned(),
                     SlotState::Ready {
+                        generation,
                         snapshot,
                         last_touched,
                     },
@@ -397,6 +407,7 @@ impl SessionStore {
         self.slots.insert(
             session_id.to_owned(),
             SlotState::Ready {
+                generation,
                 snapshot: Arc::clone(&arc),
                 last_touched: touch,
             },
@@ -432,43 +443,6 @@ impl SessionStore {
         )
     }
 
-    pub fn apply_session_usage(
-        &mut self,
-        session_id: &str,
-        context_usage: Option<Option<Value>>,
-        usage: Option<Option<Value>>,
-    ) -> bool {
-        let next_rev = self.alloc_revision();
-        let snapshot = match self.slots.get_mut(session_id) {
-            Some(SlotState::Ready { snapshot, .. }) => snapshot,
-            Some(SlotState::Loading {
-                previous: Some((snapshot, _)),
-                ..
-            }) => snapshot,
-            _ => return false,
-        };
-        let mut updated = (**snapshot).clone();
-        let mut changed = false;
-        if let Some(ctx) = context_usage
-            && updated.context_usage != ctx
-        {
-            updated.context_usage = ctx;
-            changed = true;
-        }
-        if let Some(u) = usage
-            && updated.usage != u
-        {
-            updated.usage = u;
-            changed = true;
-        }
-        if !changed {
-            return false;
-        }
-        updated.revision = next_rev;
-        *snapshot = Arc::new(updated);
-        true
-    }
-
     fn apply_frame(
         &mut self,
         session_id: &str,
@@ -502,6 +476,7 @@ impl SessionStore {
             Some(SlotState::Ready {
                 snapshot,
                 last_touched,
+                ..
             }) => (snapshot, last_touched),
             None => return false,
         };
@@ -542,6 +517,7 @@ impl SessionStore {
                 if let SlotState::Ready {
                     snapshot,
                     last_touched,
+                    ..
                 } = state
                 {
                     ready_count += 1;
@@ -568,6 +544,36 @@ impl SessionStore {
             evicted_any = true;
         }
         evicted_any
+    }
+
+    pub(crate) fn apply_session_usage(
+        &mut self,
+        session_id: &str,
+        generation: u64,
+        context_usage: Option<Value>,
+        usage: Option<Value>,
+    ) -> bool {
+        let Some(SlotState::Ready {
+            generation: current,
+            snapshot,
+            ..
+        }) = self.slots.get_mut(session_id)
+        else {
+            return false;
+        };
+        if *current != generation {
+            return false;
+        }
+        if snapshot.context_usage == context_usage && snapshot.usage == usage {
+            return false;
+        }
+        let mut updated = (**snapshot).clone();
+        updated.context_usage = context_usage;
+        updated.usage = usage;
+        updated.revision = self.next_revision;
+        self.next_revision = self.next_revision.wrapping_add(1);
+        *snapshot = Arc::new(updated);
+        true
     }
 
     pub fn export_ready_map(&self) -> BTreeMap<String, Arc<SessionViewSnapshot>> {
@@ -615,12 +621,6 @@ fn apply_frame_to_snapshot(snap: &mut SessionViewSnapshot, frame: BufferedSessio
             let Some(ev_type) = ev.get("type").and_then(Value::as_str) else {
                 return;
             };
-            if let Some(ctx) = ev.get("contextUsage") {
-                snap.context_usage = (!ctx.is_null()).then(|| ctx.clone());
-            }
-            if let Some(usage) = ev.get("usage") {
-                snap.usage = (!usage.is_null()).then(|| usage.clone());
-            }
             match ev_type {
                 "agent_start" | "turn_start" => {
                     snap.running = true;
@@ -936,6 +936,44 @@ fn now_epoch_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn late_usage_response_cannot_overwrite_reloaded_branch() {
+        let mut store = SessionStore::default();
+        let initial = store.begin_loading_if_absent("s1").unwrap();
+        store.finish_loading_snapshot("s1", initial, json!({"id": "s1", "leafId": "a"}));
+        assert!(store.apply_session_usage(
+            "s1",
+            initial,
+            None,
+            Some(json!({"sourceEntryId": "a"}))
+        ));
+
+        let reloaded = store.reset_to_loading("s1");
+        assert!(!store.apply_session_usage("s1", initial, None, None));
+        store.finish_loading_snapshot(
+            "s1",
+            reloaded,
+            json!({
+                "id": "s1",
+                "leafId": "b",
+                "usage": {"sourceEntryId": "b"}
+            }),
+        );
+        assert!(!store.apply_session_usage(
+            "s1",
+            initial,
+            None,
+            Some(json!({"sourceEntryId": "a"}))
+        ));
+        assert_eq!(
+            store.export_ready_map()["s1"].usage,
+            Some(json!({"sourceEntryId": "b"}))
+        );
+
+        assert!(store.apply_session_usage("s1", reloaded, Some(json!({"tokens": 42})), None));
+        assert!(store.export_ready_map()["s1"].usage.is_none());
+    }
 
     #[test]
     fn buffered_assistant_completion_overlapping_http_snapshot_is_applied_once() {

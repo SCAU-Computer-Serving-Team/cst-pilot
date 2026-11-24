@@ -6,6 +6,7 @@ pub mod index;
 pub mod interactions;
 pub mod receipts;
 pub mod slot;
+pub mod usage;
 
 use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 use std::fs;
@@ -808,6 +809,10 @@ impl SessionPool {
             .await
             .map_err(SessionPoolError::InvalidInput)?;
         self.sync_unflushed_metadata(&slot)?;
+        self.global_events.publish(
+            "state",
+            &json!({"type": "usage_changed", "sessionId": session_id}),
+        );
         Ok(())
     }
 

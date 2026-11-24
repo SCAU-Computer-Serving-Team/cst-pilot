@@ -3,11 +3,12 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use cst_client::{ClientHandle, DraftKey};
-use gpui::KeyDownEvent;
+use gpui::{KeyDownEvent, MouseMoveEvent, Pixels, Point, ScrollHandle};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Escape, Input, InputState};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
     IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled,
@@ -17,6 +18,9 @@ use serde_json::{Map, Value, json};
 
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::theme::kbd_focus::{
+    KbdRowTarget, pointer_moved_past_threshold, render_gliding_row_indicator,
+};
 use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
     scale, space,
@@ -650,6 +654,24 @@ fn layout_visible_tree(nodes: &[Rc<RawTreeNode>], tree: &VisibleTree) -> Vec<Lay
     rows
 }
 
+fn visible_tree_cursor(
+    all_rows: &[LayoutTreeRow],
+    rows: &[LayoutTreeRow],
+    id: Option<&str>,
+) -> Option<usize> {
+    let id = id?;
+    let mut row = all_rows.iter().find(|row| row.node.id == id)?;
+    loop {
+        if let Some(index) = rows
+            .iter()
+            .position(|candidate| candidate.index == row.index)
+        {
+            return Some(index);
+        }
+        row = all_rows.get(usize::try_from(row.parent_index).ok()?)?;
+    }
+}
+
 fn apply_fold_rows(
     rows: &[LayoutTreeRow],
     folded: &BTreeSet<String>,
@@ -1016,6 +1038,7 @@ pub enum BranchTreeEvent {
     PrefillComposer { session_id: String, text: String },
     SummarizingStarted { session_id: String },
     SummarizingFinished { session_id: String },
+    Notice(String),
     ErrorMessage(String),
 }
 
@@ -1026,7 +1049,11 @@ pub struct BranchTreeView {
     filter_dropdown_open: bool,
     search_input: Entity<InputState>,
     collapsed_heads: BTreeSet<String>,
-    selected_index: usize,
+    selected_id: Option<String>,
+    keyboard_active: bool,
+    last_keyboard_row: Option<(String, usize)>,
+    last_pointer_pos: Option<Point<Pixels>>,
+    scroll_handle: ScrollHandle,
     pending_target_id: Option<String>,
     summary_selected_idx: usize,
     custom_prompt_mode: bool,
@@ -1072,7 +1099,11 @@ impl BranchTreeView {
             filter_dropdown_open: false,
             search_input,
             collapsed_heads: BTreeSet::new(),
-            selected_index: 0,
+            selected_id: None,
+            keyboard_active: false,
+            last_keyboard_row: None,
+            last_pointer_pos: None,
+            scroll_handle: ScrollHandle::new(),
             pending_target_id: None,
             summary_selected_idx: 0,
             custom_prompt_mode: false,
@@ -1110,7 +1141,9 @@ impl BranchTreeView {
         let changed = self.session_id != session_id;
         if changed {
             self.session_id = session_id;
-            self.selected_index = 0;
+            self.selected_id = None;
+            self.last_keyboard_row = None;
+            self.scroll_handle.set_offset(Default::default());
             self.collapsed_heads.clear();
             self.loaded_tree = None;
             self.layout = None;
@@ -1119,9 +1152,136 @@ impl BranchTreeView {
             self.search_input
                 .update(cx, |input, cx| input.set_value("", window, cx));
         }
+        self.keyboard_active = false;
+        self.last_pointer_pos = None;
         self.is_open = !self.session_id.is_empty();
         self.enter_anim_start = self.is_open.then(|| cx.background_executor().now());
         self.trigger_tree_fetch(cx);
+        cx.notify();
+    }
+
+    pub(crate) fn focus_from_keyboard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_handle.focus(window, cx);
+        self.keyboard_active = true;
+        self.selected_id = None;
+        self.last_keyboard_row = None;
+        self.last_pointer_pos = Some(window.mouse_position());
+        cx.notify();
+    }
+
+    fn on_list_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.keyboard_active
+            && pointer_moved_past_threshold(&mut self.last_pointer_pos, event.position)
+        {
+            self.keyboard_active = false;
+            cx.notify();
+        }
+    }
+
+    fn cursor_index(&self, computed: &ComputedTreeView) -> Option<usize> {
+        let all = &computed.layout.all_rows;
+        let shown = &computed.shown_rows;
+        let leaf = computed.layout.leaf_id.as_deref();
+        visible_tree_cursor(all, shown, self.selected_id.as_deref().or(leaf))
+            .or_else(|| visible_tree_cursor(all, shown, leaf))
+            .or_else(|| (!shown.is_empty()).then_some(0))
+    }
+
+    fn select_keyboard_row(&mut self, rows: &[LayoutTreeRow], index: usize, window: &Window) {
+        self.keyboard_active = true;
+        self.selected_id = Some(rows[index].node.id.clone());
+        self.last_pointer_pos = Some(window.mouse_position());
+        self.scroll_handle.scroll_to_item(index);
+    }
+
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.has_summary_modal()
+            || self.filter_dropdown_open
+            || event.keystroke.modifiers != gpui::Modifiers::default()
+        {
+            return;
+        }
+        let key = event.keystroke.key.as_str();
+        let search_focused = self
+            .search_input
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(window);
+        if search_focused {
+            if matches!(key, "down" | "enter")
+                && !super::input_is_composing(&self.search_input, window, cx)
+            {
+                let computed = self.compute_rows(cx);
+                if !computed.shown_rows.is_empty() {
+                    self.focus_handle.focus(window, cx);
+                    self.select_keyboard_row(&computed.shown_rows, 0, window);
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }
+            return;
+        }
+
+        if !self.focus_handle.is_focused(window) {
+            return;
+        }
+        let computed = self.compute_rows(cx);
+        let rows = &computed.shown_rows;
+        let Some(cur) = self.cursor_index(&computed) else {
+            return;
+        };
+        let len = rows.len();
+        let row = &rows[cur];
+        let id = &row.node.id;
+        let next = match key {
+            "down" if self.keyboard_active => (cur + 1).min(len - 1),
+            "up" if self.keyboard_active => cur.saturating_sub(1),
+            "down" | "up" => cur,
+            "home" => 0,
+            "end" => len - 1,
+            "left" if computed.query.is_empty() => {
+                if row.is_foldable() && self.collapsed_heads.insert(id.clone()) {
+                    cur
+                } else {
+                    let parent_id = usize::try_from(row.parent_index)
+                        .ok()
+                        .and_then(|index| computed.layout.all_rows.get(index))
+                        .map(|row| row.node.id.as_str());
+                    visible_tree_cursor(&computed.layout.all_rows, rows, parent_id).unwrap_or(cur)
+                }
+            }
+            "right" if computed.query.is_empty() => {
+                if row.is_foldable() && self.collapsed_heads.remove(id) {
+                    cur
+                } else if rows
+                    .get(cur + 1)
+                    .is_some_and(|child| child.parent_index == row.index as isize)
+                {
+                    cur + 1
+                } else {
+                    cur
+                }
+            }
+            "enter" if !event.is_held => {
+                self.select_keyboard_row(rows, cur, window);
+                if Some(id.as_str()) == computed.layout.leaf_id.as_deref() {
+                    cx.emit(BranchTreeEvent::Notice("你已经在本消息处".into()));
+                } else {
+                    self.open_summary(id.clone(), window, cx);
+                }
+                cx.stop_propagation();
+                cx.notify();
+                return;
+            }
+            _ => return,
+        };
+        self.select_keyboard_row(rows, next, window);
+        cx.stop_propagation();
         cx.notify();
     }
 
@@ -1160,6 +1320,10 @@ impl BranchTreeView {
         self.visit = self.visit.wrapping_add(1);
         self.request.cancel();
         self.is_open = false;
+        self.keyboard_active = false;
+        self.selected_id = None;
+        self.last_keyboard_row = None;
+        self.last_pointer_pos = None;
         self.enter_anim_start = None;
         self.pending_target_id = None;
         self.summary_selected_idx = 0;
@@ -1228,7 +1392,6 @@ impl BranchTreeView {
             self.filter_mode.next()
         };
         self.collapsed_heads.clear();
-        self.selected_index = 0;
         cx.notify();
     }
 
@@ -1887,7 +2050,19 @@ impl Render for BranchTreeView {
         let leaf_idx = leaf_id
             .as_deref()
             .and_then(|lid| rows.iter().position(|r| r.node.id == lid));
-        self.selected_index = self.selected_index.min(rows.len().saturating_sub(1));
+        let keyboard_row = (self.keyboard_active
+            && self.focus_handle.is_focused(window)
+            && !self.has_summary_modal()
+            && !self.filter_dropdown_open)
+            .then(|| self.cursor_index(&computed))
+            .flatten();
+        let next_row = keyboard_row.map(|idx| (rows[idx].node.id.clone(), idx));
+        if next_row != self.last_keyboard_row {
+            self.last_keyboard_row = next_row;
+            if let Some(idx) = keyboard_row {
+                self.scroll_handle.scroll_to_item(idx);
+            }
+        }
 
         // 1. Header `OMpWf` (`44px`: MessageSquare per `V5XocM` + Session title + `· 分支树` on left, close `X` on right)
         let header = div()
@@ -2144,7 +2319,15 @@ impl Render for BranchTreeView {
             );
 
         // 3. Full-width `udjpo` tree list (`40px` rows, `px: 24px`, `32px` geometric tree slots + `28px` role icon slot)
-        let mut tree_col = div().w_full().flex().flex_col();
+        let mut tree_col = div()
+            .id("branch-tree-scroll")
+            .track_scroll(&self.scroll_handle)
+            .size_full()
+            .overflow_y_scroll()
+            .py(space::SM)
+            .pb(space::LG)
+            .flex()
+            .flex_col();
         let search_active = !self.search_input.read(cx).value().trim().is_empty();
 
         if rows.is_empty() {
@@ -2187,7 +2370,6 @@ impl Render for BranchTreeView {
             for (idx, row) in rows.iter().enumerate() {
                 let nid = row.node.id.clone();
                 let is_active_leaf = Some(nid.as_str()) == leaf_id.as_deref();
-                let is_selected = idx == self.selected_index;
                 let pres = presentations
                     .get(&nid)
                     .cloned()
@@ -2293,8 +2475,6 @@ impl Render for BranchTreeView {
 
                 let row_bg = if is_active_leaf {
                     palette.bg_item_active
-                } else if is_selected {
-                    palette.bg_item_hover
                 } else {
                     gpui_kit::transparent_black()
                 };
@@ -2469,20 +2649,18 @@ impl Render for BranchTreeView {
                         .opacity(row_opacity)
                         .w_full()
                         .h(height::FIELD)
+                        .flex_shrink_0()
                         .px(space::GROUP)
                         .bg(row_bg)
                         .flex()
                         .items_center()
                         .justify_between()
-                        .hover(move |s| {
-                            if is_active_leaf {
-                                s.bg(palette.bg_item_active)
-                            } else {
-                                s.bg(palette.bg_item_hover)
-                            }
+                        .when(keyboard_row.is_none() && !is_active_leaf, |row| {
+                            row.hover(|s| s.bg(palette.bg_item_hover))
                         })
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            this.selected_index = idx;
+                            this.selected_id = Some(nid_click.clone());
+                            this.keyboard_active = false;
                             this.filter_dropdown_open = false;
                             if !is_active_leaf {
                                 this.open_summary(nid_click.clone(), window, cx);
@@ -2541,7 +2719,7 @@ impl Render for BranchTreeView {
                             this.filter_mode = mode;
                             this.filter_dropdown_open = false;
                             this.collapsed_heads.clear();
-                            this.selected_index = 0;
+                            this.keyboard_active = false;
                             this.focus_handle.focus(window, cx);
                             cx.notify();
                         }))
@@ -2596,11 +2774,33 @@ impl Render for BranchTreeView {
             )
         });
 
+        let kbd_style = snap.desktop_settings.keyboard_focus_style;
+        let kbd_target = keyboard_row.map(|idx| {
+            let row_h = f32::from(height::FIELD);
+            KbdRowTarget {
+                top: f32::from(space::SM) + (idx as f32) * row_h + 1.0,
+                height: row_h - 2.0,
+                inset_x: 14.0,
+                corner_radius: 6.5,
+            }
+        });
+        let kbd_overlay = render_gliding_row_indicator(
+            "branch-tree",
+            kbd_style,
+            kbd_target,
+            &self.scroll_handle,
+            &palette,
+            window,
+            cx,
+        );
+
         div()
             .id("branch-tree-view")
             .test_support()
             .a11y_region("branch-tree-view", "分支树视图")
             .track_focus(&self.focus_handle)
+            .on_mouse_move(cx.listener(Self::on_list_mouse_move))
+            .on_key_down(cx.listener(Self::on_key_down))
             .capture_action(cx.listener(|this, _: &Escape, window, cx| {
                 super::consume_composing_escape(&this.search_input, window, cx);
                 super::consume_composing_escape(&this.custom_prompt_input, window, cx);
@@ -2613,14 +2813,13 @@ impl Render for BranchTreeView {
             .child(toolbar)
             .child(
                 div()
-                    .id("branch-tree-scroll")
+                    .relative()
                     .flex_1()
                     .min_h_0()
                     .w_full()
-                    .overflow_y_scroll()
-                    .py(space::SM)
-                    .pb(space::LG)
-                    .child(tree_col),
+                    .overflow_hidden()
+                    .child(tree_col)
+                    .children(kbd_overlay),
             )
             .children(filter_popover)
             .children(summary_modal_opt)
@@ -2739,6 +2938,10 @@ mod tests {
         let (folded_rows, hidden) = apply_fold_rows(&rows, &folded);
         assert_eq!(folded_rows.len(), 1);
         assert_eq!(hidden.get("u1").copied(), Some(3));
+        assert_eq!(
+            visible_tree_cursor(&rows, &folded_rows, Some("a1")),
+            Some(0)
+        );
 
         // LabeledOnly shows only `u2`.
         let vis_labeled = build_visible_raw_tree(&roots, Some("a1"), TreeFilterMode::LabeledOnly);

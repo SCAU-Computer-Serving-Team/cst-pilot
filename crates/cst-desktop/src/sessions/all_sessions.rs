@@ -4,12 +4,13 @@ use std::rc::Rc;
 use chrono::{DateTime, Local, NaiveDate};
 use cst_client::{ClientError, ClientHandle, SessionSummary};
 use gpui::KeyDownEvent;
-use gpui::{MouseButton, Pixels, ScrollStrategy, Size, size};
+use gpui::{MouseButton, MouseMoveEvent, Pixels, Point, ScrollStrategy, Size, size};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::base::{VirtualListScrollHandle, v_virtual_list};
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Escape, Input, InputState};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, FocusHandle, InteractiveElement, IntoElement,
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, TestSupportExt,
@@ -18,6 +19,9 @@ use gpui_kit::{
 
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::theme::kbd_focus::{
+    KbdRowTarget, pointer_moved_past_threshold, render_gliding_row_indicator,
+};
 use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion,
     radius, render_subpage_header_xwjof, scale, space,
@@ -131,7 +135,9 @@ pub struct AllSessionsView {
     focus: FocusHandle,
     rename_trap_focus: FocusHandle,
     rename_prior_focus: Option<FocusHandle>,
-    keyboard_index: Option<usize>,
+    keyboard_session: Option<String>,
+    last_keyboard_row: Option<usize>,
+    last_pointer_pos: Option<Point<Pixels>>,
     cached_rows: Vec<VirtualSessionRow>,
     cached_sizes: Rc<Vec<Size<Pixels>>>,
 }
@@ -153,7 +159,9 @@ impl AllSessionsView {
             focus: cx.focus_handle(),
             rename_trap_focus: cx.focus_handle(),
             rename_prior_focus: None,
-            keyboard_index: None,
+            keyboard_session: None,
+            last_keyboard_row: None,
+            last_pointer_pos: None,
             cached_rows: Vec::new(),
             cached_sizes: Rc::new(Vec::new()),
         }
@@ -169,21 +177,15 @@ impl AllSessionsView {
 
     pub(crate) fn focus_from_keyboard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.focus.focus(window, cx);
-        let visible = self.visible_sessions();
-        if visible.is_empty() {
-            self.keyboard_index = None;
-        } else {
-            self.keyboard_index = Some(0);
-            let today = Local::now().date_naive();
-            let rows = group_sessions_by_natural_day(&visible, today);
-            if let Some(first_row) = rows
-                .iter()
-                .position(|r| matches!(r, VirtualSessionRow::Session(_)))
-            {
-                self.scroll_handle
-                    .scroll_to_item(first_row, ScrollStrategy::Nearest);
-            }
-        }
+        self.last_pointer_pos = Some(window.mouse_position());
+        self.last_keyboard_row = None;
+        self.keyboard_session =
+            group_sessions_by_natural_day(&self.visible_sessions(), Local::now().date_naive())
+                .into_iter()
+                .find_map(|row| match row {
+                    VirtualSessionRow::Session(session) => Some(session.id),
+                    VirtualSessionRow::GroupHeader(_) => None,
+                });
         cx.notify();
     }
 
@@ -206,8 +208,45 @@ impl AllSessionsView {
         self.renaming_session_id = None;
         self.rename_input = None;
         self.rename_prior_focus = None;
-        self.keyboard_index = None;
+        self.keyboard_session = None;
+        self.last_keyboard_row = None;
+        self.last_pointer_pos = None;
         cx.notify();
+    }
+
+    fn on_list_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.keyboard_session.is_some()
+            && pointer_moved_past_threshold(&mut self.last_pointer_pos, event.position)
+        {
+            self.keyboard_session = None;
+            cx.notify();
+        }
+    }
+
+    fn keyboard_row(&self) -> Option<usize> {
+        let id = self.keyboard_session.as_deref()?;
+        self.cached_rows
+            .iter()
+            .position(|row| matches!(row, VirtualSessionRow::Session(session) if session.id == id))
+    }
+
+    fn kbd_indicator_target(&self, row_idx: usize) -> Option<KbdRowTarget> {
+        let row_top: f32 = self.cached_sizes[..row_idx]
+            .iter()
+            .map(|size| f32::from(size.height))
+            .sum();
+        let row_h = f32::from(self.cached_sizes.get(row_idx)?.height);
+        Some(KbdRowTarget {
+            top: row_top - 2.0,
+            height: row_h + 4.0,
+            inset_x: -3.0,
+            corner_radius: 6.5,
+        })
     }
 
     fn session_rows(&self) -> Vec<(usize, String)> {
@@ -234,68 +273,42 @@ impl AllSessionsView {
             return;
         }
         let len = sessions.len();
-        match event.keystroke.key.as_str() {
-            "down" => {
-                let next = match self.keyboard_index {
-                    Some(cur) if cur < len => (cur + 1) % len,
-                    _ => 0,
-                };
-                self.keyboard_index = Some(next);
-                self.scroll_handle
-                    .scroll_to_item(sessions[next].0, ScrollStrategy::Nearest);
-                cx.stop_propagation();
-                cx.notify();
-            }
-            "up" => {
-                let next = match self.keyboard_index {
-                    Some(cur) if cur < len => cur.checked_sub(1).unwrap_or(len - 1),
-                    _ => len - 1,
-                };
-                self.keyboard_index = Some(next);
-                self.scroll_handle
-                    .scroll_to_item(sessions[next].0, ScrollStrategy::Nearest);
-                cx.stop_propagation();
-                cx.notify();
-            }
-            "home" => {
-                self.keyboard_index = Some(0);
-                self.scroll_handle
-                    .scroll_to_item(sessions[0].0, ScrollStrategy::Nearest);
-                cx.stop_propagation();
-                cx.notify();
-            }
-            "end" => {
-                let last = len - 1;
-                self.keyboard_index = Some(last);
-                self.scroll_handle
-                    .scroll_to_item(sessions[last].0, ScrollStrategy::Nearest);
-                cx.stop_propagation();
-                cx.notify();
-            }
-            "enter" if !event.is_held => {
-                let idx = self.keyboard_index.unwrap_or(0).min(len - 1);
-                let sid = sessions[idx].1.clone();
-                if self.batch_mode {
-                    if !self.selected_ids.remove(&sid) {
-                        self.selected_ids.insert(sid);
+        let current = self
+            .keyboard_session
+            .as_deref()
+            .and_then(|id| sessions.iter().position(|(_, sid)| sid == id));
+        let next = match event.keystroke.key.as_str() {
+            "down" => current.map_or(0, |idx| (idx + 1) % len),
+            "up" => current
+                .and_then(|idx| idx.checked_sub(1))
+                .unwrap_or(len - 1),
+            "home" => 0,
+            "end" => len - 1,
+            key @ ("enter" | "space") if !event.is_held => {
+                if let Some(idx) = current {
+                    let sid = sessions[idx].1.clone();
+                    if self.batch_mode {
+                        if !self.selected_ids.remove(&sid) {
+                            self.selected_ids.insert(sid);
+                        }
+                        cx.notify();
+                    } else if key == "enter" {
+                        cx.emit(AllSessionsEvent::OpenSession(sid));
+                    } else {
+                        return;
                     }
-                    cx.notify();
-                } else {
-                    cx.emit(AllSessionsEvent::OpenSession(sid));
+                    cx.stop_propagation();
                 }
-                cx.stop_propagation();
+                return;
             }
-            "space" if self.batch_mode && !event.is_held => {
-                let idx = self.keyboard_index.unwrap_or(0).min(len - 1);
-                let sid = sessions[idx].1.clone();
-                if !self.selected_ids.remove(&sid) {
-                    self.selected_ids.insert(sid);
-                }
-                cx.stop_propagation();
-                cx.notify();
-            }
-            _ => {}
-        }
+            _ => return,
+        };
+        self.keyboard_session = Some(sessions[next].1.clone());
+        self.last_pointer_pos = Some(window.mouse_position());
+        self.scroll_handle
+            .scroll_to_item(sessions[next].0, ScrollStrategy::Nearest);
+        cx.stop_propagation();
+        cx.notify();
     }
 
     fn close_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -538,13 +551,6 @@ impl AllSessionsView {
         let palette = theme_global.palette;
         let entity: Entity<Self> = cx.entity();
         let batch_mode = self.batch_mode;
-        let kbd_row_idx = self.keyboard_index.and_then(|ki| {
-            self.cached_rows
-                .iter()
-                .enumerate()
-                .filter_map(|(i, r)| matches!(r, VirtualSessionRow::Session(_)).then_some(i))
-                .nth(ki)
-        });
 
         let mut elements = Vec::with_capacity(range.len());
         for idx in range {
@@ -702,7 +708,6 @@ impl AllSessionsView {
                         );
                     }
 
-                    let is_kbd_focused = kbd_row_idx == Some(idx);
                     let row_id = SharedString::from(format!("all-sessions-row-{sid}"));
                     let mut row_el = div()
                         .id(row_id.clone())
@@ -714,22 +719,19 @@ impl AllSessionsView {
                         .rounded(radius::CONTROL)
                         .bg(if batch_mode && is_checked {
                             palette.bg_item_active
-                        } else if is_kbd_focused {
-                            palette.bg_item_hover
                         } else {
                             gpui_kit::transparent_black()
                         })
                         .border_1()
-                        .border_color(if is_kbd_focused && batch_mode && is_checked {
-                            palette.border_focus
-                        } else {
-                            gpui_kit::transparent_black()
-                        })
+                        .border_color(gpui_kit::transparent_black())
                         .flex()
                         .items_center()
                         .justify_between()
                         .gap(space::MD)
-                        .hover(|s| s.bg(palette.bg_item_hover))
+                        .when(
+                            self.keyboard_session.is_none() || !self.focus.is_focused(window),
+                            |row| row.hover(|s| s.bg(palette.bg_item_hover)),
+                        )
                         .capture_any_mouse_down(|event, window, cx| {
                             if event.button == MouseButton::Right {
                                 crate::shell::keep_popover_open_on_mouse_down(event, window, cx);
@@ -753,7 +755,7 @@ impl AllSessionsView {
                             let target = sid_click.clone();
                             ent_click.update(cx, |this, cx| {
                                 this.context_menu = None;
-                                this.keyboard_index = None;
+                                this.keyboard_session = None;
                                 this.focus.focus(window, cx);
                                 if this.batch_mode {
                                     if !this.selected_ids.remove(&target) {
@@ -1132,10 +1134,16 @@ impl Render for AllSessionsView {
         }
         let today = Local::now().date_naive();
         self.cached_rows = group_sessions_by_natural_day(&visible, today);
-        if visible.is_empty() {
-            self.keyboard_index = None;
-        } else if let Some(ref mut idx) = self.keyboard_index {
-            *idx = (*idx).min(visible.len() - 1);
+        let keyboard_row = self.keyboard_row();
+        if keyboard_row.is_none() {
+            self.keyboard_session = None;
+        }
+        if keyboard_row != self.last_keyboard_row {
+            self.last_keyboard_row = keyboard_row;
+            if let Some(row) = keyboard_row {
+                self.scroll_handle
+                    .scroll_to_item(row, ScrollStrategy::Nearest);
+            }
         }
         self.cached_sizes = Rc::new(
             self.cached_rows
@@ -1266,6 +1274,25 @@ impl Render for AllSessionsView {
                 )
         });
 
+        let kbd_style = self.client.snapshot().desktop_settings.keyboard_focus_style;
+        let kbd_target = if self.has_rename_modal()
+            || self.context_menu.is_some()
+            || !self.focus.is_focused(window)
+        {
+            None
+        } else {
+            keyboard_row.and_then(|row| self.kbd_indicator_target(row))
+        };
+        let kbd_overlay = render_gliding_row_indicator(
+            "all-sessions",
+            kbd_style,
+            kbd_target,
+            self.scroll_handle.base_handle(),
+            &palette,
+            window,
+            cx,
+        );
+
         let body_el = if self.cached_rows.is_empty() {
             div()
                 .flex_1()
@@ -1280,16 +1307,23 @@ impl Render for AllSessionsView {
                 )
                 .into_any_element()
         } else {
-            v_virtual_list(
-                entity,
-                "all-sessions-virtual-list",
-                Rc::clone(&self.cached_sizes),
-                Self::render_virtual_range,
-            )
-            .track_scroll(&self.scroll_handle)
-            .flex_1()
-            .w_full()
-            .into_any_element()
+            div()
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .child(
+                    v_virtual_list(
+                        entity,
+                        "all-sessions-virtual-list",
+                        Rc::clone(&self.cached_sizes),
+                        Self::render_virtual_range,
+                    )
+                    .track_scroll(&self.scroll_handle)
+                    .size_full(),
+                )
+                .children(kbd_overlay)
+                .into_any_element()
         };
 
         let menu_overlay = self.context_menu.as_ref().and_then(|menu| {
@@ -1331,6 +1365,7 @@ impl Render for AllSessionsView {
             .test_support()
             .a11y_region("all-sessions-view", "全部会话")
             .track_focus(&self.focus)
+            .on_mouse_move(cx.listener(Self::on_list_mouse_move))
             .on_key_down(cx.listener(Self::on_key_down))
             .relative()
             .size_full()

@@ -615,6 +615,13 @@ pub async fn handle_sessions_route(
                     state.pool.global_events.publish(
                         "state",
                         &json!({
+                            "type": "usage_changed",
+                            "sessionId": id_owned,
+                        }),
+                    );
+                    state.pool.global_events.publish(
+                        "state",
+                        &json!({
                             "type": "sessions_changed",
                             "sessionId": id_owned,
                         }),

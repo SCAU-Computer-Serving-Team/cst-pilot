@@ -62,10 +62,37 @@ impl DesktopViewMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum KeyboardFocusStyle {
+    #[default]
+    Brackets,
+    Rail,
+}
+
+impl KeyboardFocusStyle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Brackets => "brackets",
+            Self::Rail => "rail",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "brackets" => Some(Self::Brackets),
+            "rail" => Some(Self::Rail),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebSettingsData {
     pub theme: ThemeMode,
+    #[serde(default)]
+    pub keyboard_focus_style: KeyboardFocusStyle,
     #[serde(default)]
     pub empty_model_scope: bool,
 }
@@ -75,6 +102,8 @@ pub struct WebSettingsData {
 pub struct DesktopSettingsData {
     #[serde(default)]
     pub theme: ThemeMode,
+    #[serde(default)]
+    pub keyboard_focus_style: KeyboardFocusStyle,
     #[serde(default)]
     pub default_view: DesktopViewMode,
     #[serde(default)]
@@ -99,6 +128,7 @@ pub struct DesktopSettingsData {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DesktopSettingsPatch {
     pub theme: Option<ThemeMode>,
+    pub keyboard_focus_style: Option<KeyboardFocusStyle>,
     pub default_view: Option<DesktopViewMode>,
     pub sidebar_collapsed: Option<bool>,
     pub display_hint: Option<String>,
@@ -199,17 +229,24 @@ impl WebSettingsStore {
                         ));
                     }
                 };
+                let keyboard_focus_style = obj
+                    .get("keyboardFocusStyle")
+                    .and_then(Value::as_str)
+                    .and_then(KeyboardFocusStyle::parse)
+                    .unwrap_or_default();
                 let empty_model_scope = obj
                     .get("emptyModelScope")
                     .and_then(Value::as_bool)
                     .unwrap_or(false);
                 Ok(WebSettingsData {
                     theme,
+                    keyboard_focus_style,
                     empty_model_scope,
                 })
             }
             Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(WebSettingsData {
                 theme: replacement_theme.unwrap_or(ThemeMode::Light),
+                keyboard_focus_style: KeyboardFocusStyle::default(),
                 empty_model_scope: false,
             }),
             Err(err) => Err(SettingsError::Storage(StorageError::from_io(
@@ -224,9 +261,22 @@ impl WebSettingsStore {
     }
 
     pub async fn save_theme(&self, theme: ThemeMode) -> Result<WebSettingsData, SettingsError> {
+        self.save_preferences(Some(theme), None).await
+    }
+
+    pub async fn save_preferences(
+        &self,
+        theme: Option<ThemeMode>,
+        keyboard_focus_style: Option<KeyboardFocusStyle>,
+    ) -> Result<WebSettingsData, SettingsError> {
         let _guard = self.serial.lock().await;
-        let mut current = self.read_internal(Some(theme)).await?;
-        current.theme = theme;
+        let mut current = self.read_internal(theme).await?;
+        if let Some(t) = theme {
+            current.theme = t;
+        }
+        if let Some(style) = keyboard_focus_style {
+            current.keyboard_focus_style = style;
+        }
         atomic_write_json(&self.file, &current, "保存 Web 设置")
             .await
             .map_err(SettingsError::Storage)?;
@@ -261,6 +311,11 @@ fn decode_desktop_map(map: &serde_json::Map<String, Value>) -> DesktopSettingsDa
         .get("theme")
         .and_then(Value::as_str)
         .and_then(ThemeMode::parse)
+        .unwrap_or_default();
+    let keyboard_focus_style = map
+        .get("keyboardFocusStyle")
+        .and_then(Value::as_str)
+        .and_then(KeyboardFocusStyle::parse)
         .unwrap_or_default();
     let default_view = map
         .get("defaultView")
@@ -304,6 +359,7 @@ fn decode_desktop_map(map: &serde_json::Map<String, Value>) -> DesktopSettingsDa
 
     DesktopSettingsData {
         theme,
+        keyboard_focus_style,
         default_view,
         sidebar_collapsed,
         display_hint,
@@ -421,6 +477,18 @@ impl DesktopSettingsStore {
             map.insert(
                 "theme".to_owned(),
                 Value::String(ThemeMode::Light.as_str().to_owned()),
+            );
+        }
+
+        if let Some(style) = patch.keyboard_focus_style {
+            map.insert(
+                "keyboardFocusStyle".to_owned(),
+                Value::String(style.as_str().to_owned()),
+            );
+        } else if !map.contains_key("keyboardFocusStyle") {
+            map.insert(
+                "keyboardFocusStyle".to_owned(),
+                Value::String(KeyboardFocusStyle::default().as_str().to_owned()),
             );
         }
 

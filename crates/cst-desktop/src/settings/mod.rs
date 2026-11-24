@@ -7,7 +7,9 @@ pub mod update_dialog;
 use std::cell::Cell;
 use std::rc::Rc;
 
-use cst_client::{ClientHandle, DesktopSettingsPatchDto, ThemeModeDto, UpdatePhaseDto};
+use cst_client::{
+    ClientHandle, DesktopSettingsPatchDto, KeyboardFocusStyleDto, ThemeModeDto, UpdatePhaseDto,
+};
 use gpui_kit::assets::IconName;
 use gpui_kit::base::motion::{Transition, transition};
 use gpui_kit::{
@@ -118,6 +120,8 @@ pub struct SettingsView {
     tab_rects: Rc<[Cell<(f32, f32)>; 4]>,
     providers_tab: Entity<ProvidersTabView>,
     preferences_tab: Entity<PreferencesTabView>,
+    keyboard_style_saving: bool,
+    pending_keyboard_style: Option<KeyboardFocusStyleDto>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -161,8 +165,38 @@ impl SettingsView {
             tab_rects: Rc::new(Default::default()),
             providers_tab,
             preferences_tab,
+            keyboard_style_saving: false,
+            pending_keyboard_style: None,
             _subscriptions: subs,
         }
+    }
+
+    fn save_keyboard_style(&mut self, style: KeyboardFocusStyleDto, cx: &mut Context<Self>) {
+        if self.keyboard_style_saving {
+            self.pending_keyboard_style = Some(style);
+            return;
+        }
+        self.keyboard_style_saving = true;
+        let client = self.client.clone();
+        cx.spawn(async move |weak, cx| {
+            let result = client
+                .patch_desktop_settings(DesktopSettingsPatchDto {
+                    keyboard_focus_style: Some(style),
+                    ..DesktopSettingsPatchDto::default()
+                })
+                .await;
+            let _ = weak.update(cx, |this, cx| {
+                this.keyboard_style_saving = false;
+                if let Err(err) = result {
+                    cx.emit(SettingsViewEvent::ErrorMessage(err.to_string()));
+                }
+                if let Some(next) = this.pending_keyboard_style.take() {
+                    this.save_keyboard_style(next, cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub fn set_category(&mut self, category: SettingsCategory, cx: &mut Context<Self>) {
@@ -343,6 +377,7 @@ impl Render for SettingsView {
 
         let entity = cx.entity();
         let e_theme = entity.clone();
+        let e_kbd_style = entity.clone();
         let e_check = entity.clone();
         let e_cancel = entity.clone();
 
@@ -373,6 +408,9 @@ impl Render for SettingsView {
                         .detach();
                         cx.notify();
                     });
+                }),
+                Rc::new(move |style: KeyboardFocusStyleDto, _, cx| {
+                    e_kbd_style.update(cx, |this, cx| this.save_keyboard_style(style, cx));
                 }),
                 Rc::new(move |_, cx| {
                     e_check.update(cx, |this, cx| {

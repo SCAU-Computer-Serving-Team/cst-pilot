@@ -22,6 +22,7 @@ import { addImage, collectDraftImages, type DraftImage, loadImages, releaseImage
 import { draftKey as makeDraftKey, readSavedDrafts, type SavedDraft } from "./drafts";
 import { ModelPicker } from "./model-picker";
 import { scopedModels } from "./scoped-models";
+import { useSessionUsage } from "./use-session-usage";
 
 type Selection = ModelChoice | null;
 export type ComposerConfig = {
@@ -48,10 +49,6 @@ const commandLabels: Record<string, string> = {
 };
 const knownCommands = Object.keys(commandLabels);
 
-type SessionUsage = {
-	tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
-	cacheHitRate: number | null;
-};
 export function Composer({
 	home = false,
 	sessionId,
@@ -115,12 +112,7 @@ export function Composer({
 	const composerRef = useRef<HTMLElement>(null);
 	const [models, setModels] = useState<Model[]>([]);
 	const [enabled, setEnabled] = useState<string[] | null>(null);
-	const [loadedContext, setLoadedContext] = useState<{
-		tokens: number | null;
-		contextWindow: number;
-		percent: number | null;
-	} | null>(null);
-	const [usageStats, setUsageStats] = useState<SessionUsage | null>(null);
+	const { payload: sessionUsage, refresh: refreshUsage } = useSessionUsage(sessionId, !!onSend);
 	const [selected, setSelected] = useState<Selection>(null);
 	const manualHomeModel = useRef(false);
 	const initialKeyPrompt = useRef(false);
@@ -448,12 +440,7 @@ export function Composer({
 		if (name !== "state") return;
 		try {
 			const data = JSON.parse(event?.data ?? "null");
-			if (
-				data?.type === "auth_changed" ||
-				data?.type === "models_changed" ||
-				data?.type === "settings_changed" ||
-				(data?.type === "usage_changed" && data.sessionId === sessionId)
-			)
+			if (data?.type === "auth_changed" || data?.type === "models_changed" || data?.type === "settings_changed")
 				setModelRevision((value) => value + 1);
 		} catch {
 			/* 后续重连重新读取。 */
@@ -466,8 +453,6 @@ export function Composer({
 		apiJson<
 			ModelSelectionPayload & {
 				thinkingLevels?: string[];
-				contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
-				usage?: SessionUsage | null;
 			}
 		>(`/api/models${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`, { signal: controller.signal })
 			.then((data) => {
@@ -510,8 +495,6 @@ export function Composer({
 						);
 						setThinkingLevels(levels);
 					}
-					setLoadedContext(data.contextUsage ?? null);
-					setUsageStats(data.usage ?? null);
 				}
 			})
 			.catch((cause: unknown) => {
@@ -524,8 +507,8 @@ export function Composer({
 		};
 	}, [sessionId, modelRevision]);
 
-	const usage = contextUsage ?? loadedContext;
-	const cacheHitRate = usageStats?.cacheHitRate ?? null;
+	const usage = sessionUsage ? sessionUsage.contextUsage : sessionId ? (contextUsage ?? null) : null;
+	const cacheHitRate = sessionUsage?.usage?.cacheHitRate ?? null;
 	const availableThinking = thinkingLevels.length ? thinkingLevels : ["off"];
 	const scoped = scopedModels(models, enabled);
 	const choices =
@@ -545,6 +528,7 @@ export function Composer({
 			setThinkingLevels(levels);
 			manualHomeModel.current = !sessionId;
 			setSelected(changed);
+			if (sessionId) refreshUsage();
 			setError("");
 			return true;
 		} catch (cause) {
@@ -1069,7 +1053,12 @@ export function Composer({
 					</Button>
 					<span className="composer-spacer" />
 					<div className="composer-model-controls">
-						<ContextMeter usage={usage} cacheHitRate={cacheHitRate} provider={selected?.provider ?? ""} />
+						<ContextMeter
+							usage={usage}
+							cacheHitRate={cacheHitRate}
+							provider={selected?.provider ?? ""}
+							onOpen={sessionId && onSend ? refreshUsage : undefined}
+						/>
 						<ModelPicker
 							selected={selected}
 							models={choices}

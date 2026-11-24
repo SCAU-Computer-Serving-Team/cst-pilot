@@ -7,6 +7,7 @@ pub mod models;
 pub mod sessions;
 pub mod settings;
 pub mod static_files;
+pub mod usage;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -578,6 +579,10 @@ async fn dispatch_api_route(
     ))
     .await?
     {
+        return Ok(Some(resp));
+    }
+
+    if let Some(resp) = Box::pin(usage::handle_usage_route(state, method, pathname)).await? {
         return Ok(Some(resp));
     }
 

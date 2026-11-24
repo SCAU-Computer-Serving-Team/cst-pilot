@@ -12,13 +12,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
+use crate::extensions::ContextUsage;
 use crate::messages::{
     BashExecutionMessage, BranchSummaryMessage, CompactionSummaryMessage, CustomMessage,
     CustomMessageContent, convert_to_llm_with_options,
 };
 use crate::session_manager::{
     ProjectedSessionEntry, SessionEntry, SessionProjection, build_session_projection,
-    session_entry_to_context_messages,
+    get_latest_compaction_entry, session_entry_to_context_messages,
 };
 use crate::usage_totals::combine_usage;
 
@@ -298,6 +299,46 @@ pub struct ContextUsageEstimate {
     pub usage_tokens: u64,
     pub trailing_tokens: u64,
     pub last_usage_index: Option<usize>,
+}
+
+/// Estimate context capacity from a projection and its branch captured together.
+pub fn context_usage_for_branch(
+    projection: &SessionProjection,
+    branch: &[SessionEntry],
+    context_window: u64,
+) -> Option<ContextUsage> {
+    if context_window == 0 {
+        return None;
+    }
+    if let Some(latest_comp) = get_latest_compaction_entry(branch) {
+        let post_compaction_ids: BTreeSet<_> = branch
+            .iter()
+            .rev()
+            .take_while(|e| e.id() != latest_comp.id)
+            .map(SessionEntry::id)
+            .collect();
+        let has_post_compaction_usage = projection.entries.iter().any(|e| {
+            post_compaction_ids.contains(e.source_entry.id())
+                && e.messages.iter().any(|m| {
+                    matches!(m, AgentMessage::Assistant(a)
+                        if !matches!(a.stop_reason, StopReason::Aborted | StopReason::Error)
+                            && calculate_context_tokens(&a.usage) > 0)
+                })
+        });
+        if !has_post_compaction_usage {
+            return Some(ContextUsage {
+                tokens: None,
+                context_window,
+                percent: None,
+            });
+        }
+    }
+    let estimate = estimate_projected_context_tokens(projection, branch);
+    Some(ContextUsage {
+        tokens: Some(estimate.tokens),
+        context_window,
+        percent: Some((estimate.tokens as f64 / context_window as f64) * 100.0),
+    })
 }
 
 fn estimate_blocks_chars(blocks: &[UserContentBlock]) -> usize {

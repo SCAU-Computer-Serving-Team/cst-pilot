@@ -33,6 +33,14 @@ pub enum ThemeModeDto {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
+pub enum KeyboardFocusStyleDto {
+    #[default]
+    Brackets,
+    Rail,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
 pub enum DefaultViewDto {
     #[default]
     Gui,
@@ -44,6 +52,8 @@ pub enum DefaultViewDto {
 pub struct DesktopSettingsDto {
     #[serde(default)]
     pub theme: ThemeModeDto,
+    #[serde(default)]
+    pub keyboard_focus_style: KeyboardFocusStyleDto,
     #[serde(default)]
     pub default_view: DefaultViewDto,
     #[serde(default)]
@@ -68,6 +78,7 @@ impl Default for DesktopSettingsDto {
     fn default() -> Self {
         Self {
             theme: ThemeModeDto::Light,
+            keyboard_focus_style: KeyboardFocusStyleDto::Brackets,
             default_view: DefaultViewDto::Gui,
             sidebar_collapsed: false,
             display_hint: None,
@@ -86,6 +97,8 @@ impl Default for DesktopSettingsDto {
 pub struct DesktopSettingsPatchDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<ThemeModeDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keyboard_focus_style: Option<KeyboardFocusStyleDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_view: Option<DefaultViewDto>,
     #[serde(skip_serializing_if = "Option::is_none")]

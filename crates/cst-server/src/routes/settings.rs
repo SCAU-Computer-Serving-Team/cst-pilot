@@ -5,7 +5,7 @@ use crate::auth_guard::WEB_THEME_COOKIE_NAME;
 use crate::mode::CallerIdentity;
 use crate::routes::{ApiError, SseOrBytesBody, json_response, parse_query_params, read_json_body};
 use crate::session::attachments::is_valid_session_id_key;
-use crate::settings::ThemeMode;
+use crate::settings::{KeyboardFocusStyle, ThemeMode};
 use crate::state::ServerState;
 
 pub async fn handle_settings_route(
@@ -22,7 +22,10 @@ pub async fn handle_settings_route(
             let settings = state.web_settings.read().await.map_err(ApiError::from)?;
             return Ok(Some(json_response(
                 StatusCode::OK,
-                &json!({ "theme": settings.theme }),
+                &json!({
+                    "theme": settings.theme,
+                    "keyboardFocusStyle": settings.keyboard_focus_style,
+                }),
                 method,
             )));
         }
@@ -32,30 +35,42 @@ pub async fn handle_settings_route(
                 return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_request",
-                    "请求的主题设置无效",
+                    "请求的外观设置无效",
                 ));
             };
-            let Some(theme_str) = obj.get("theme").and_then(Value::as_str) else {
+            if obj.is_empty()
+                || obj
+                    .keys()
+                    .any(|k| k != "theme" && k != "keyboardFocusStyle")
+            {
                 return Err(ApiError::new(
                     StatusCode::BAD_REQUEST,
                     "invalid_request",
-                    "请求的主题设置无效",
-                ));
-            };
-            let Some(theme) = ThemeMode::parse(theme_str) else {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_request",
-                    "请求的主题设置无效",
-                ));
-            };
-            if obj.len() != 1 {
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_request",
-                    "请求的主题设置无效",
+                    "请求的外观设置无效",
                 ));
             }
+            let theme = match obj.get("theme") {
+                None => None,
+                Some(v) => Some(v.as_str().and_then(ThemeMode::parse).ok_or_else(|| {
+                    ApiError::new(
+                        StatusCode::BAD_REQUEST,
+                        "invalid_request",
+                        "请求的主题设置无效",
+                    )
+                })?),
+            };
+            let keyboard_focus_style = match obj.get("keyboardFocusStyle") {
+                None => None,
+                Some(v) => Some(v.as_str().and_then(KeyboardFocusStyle::parse).ok_or_else(
+                    || {
+                        ApiError::new(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_request",
+                            "请求的方向键选中样式无效",
+                        )
+                    },
+                )?),
+            };
             let result = state
                 .write_once(
                     caller,
@@ -66,7 +81,7 @@ pub async fn handle_settings_route(
                     || async move {
                         let saved = state
                             .web_settings
-                            .save_theme(theme)
+                            .save_preferences(theme, keyboard_focus_style)
                             .await
                             .map_err(ApiError::from)?;
                         state.pool.global_events.publish(
@@ -76,17 +91,22 @@ pub async fn handle_settings_route(
                                 "scope": "web",
                             }),
                         );
-                        Ok(json!({ "theme": saved.theme }))
+                        Ok(json!({
+                            "theme": saved.theme,
+                            "keyboardFocusStyle": saved.keyboard_focus_style,
+                        }))
                     },
                 )
                 .await?;
             let mut resp = json_response(StatusCode::OK, &result, method);
-            let cookie = format!(
-                "{WEB_THEME_COOKIE_NAME}={}; Path=/; SameSite=Strict",
-                theme.as_str()
-            );
-            if let Ok(val) = HeaderValue::from_str(&cookie) {
-                resp.headers_mut().insert(http::header::SET_COOKIE, val);
+            if let Some(theme) = theme {
+                let cookie = format!(
+                    "{WEB_THEME_COOKIE_NAME}={}; Path=/; SameSite=Strict",
+                    theme.as_str()
+                );
+                if let Ok(val) = HeaderValue::from_str(&cookie) {
+                    resp.headers_mut().insert(http::header::SET_COOKIE, val);
+                }
             }
             return Ok(Some(resp));
         }

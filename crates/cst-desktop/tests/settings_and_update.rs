@@ -906,6 +906,13 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         window.press("escape", cx);
         assert!(window.try_find("command-palette-modal-i70mz").is_none());
 
+        // Arrow-key navigation on BranchTree (`up` / `home` / `enter`) opens 3-mode summary card without clicking
+        window.press("home", cx);
+        window.press("enter", cx);
+        assert!(window.find("branch-summary-mode-card").visible());
+        window.press("escape", cx);
+        assert!(window.try_find("branch-summary-mode-card").is_none());
+
         // Select non-leaf user node `e-user-1` -> opens 3-mode summary card (`直接回退 / 总结 / 自定义提示词总结`, no cancel button)
         window.click("tree-node-row-e-user-1", cx);
         assert!(window.find("branch-summary-mode-card").visible());
@@ -989,6 +996,8 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
             header_track.size.width,
             tabbar.size.width
         );
+        assert!(window.find("settings-kbd-focus-brackets").visible());
+        assert!(window.find("settings-kbd-focus-rail").visible());
         window.click("settings-subpage-header-back-btn", cx);
     })
     .unwrap();

@@ -1249,17 +1249,20 @@ async fn post_compaction_agent_end_and_usage_changed_refresh_context_usage_and_c
     let mux_tx_slot: Arc<Mutex<Option<mpsc::UnboundedSender<String>>>> = Arc::new(Mutex::new(None));
     let keepalive_tx_slot: Arc<Mutex<Option<mpsc::UnboundedSender<String>>>> =
         Arc::new(Mutex::new(None));
+    let usage_queries: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let models_queries: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
 
     let stage_h = Arc::clone(&stage);
     let mux_h = Arc::clone(&mux_tx_slot);
     let keep_h = Arc::clone(&keepalive_tx_slot);
+    let usage_q_h = Arc::clone(&usage_queries);
     let models_q_h = Arc::clone(&models_queries);
 
     let (port, _requests) = spawn_controlled_server(move |req| {
         let stage = Arc::clone(&stage_h);
         let mux_slot = Arc::clone(&mux_h);
         let keep_slot = Arc::clone(&keep_h);
+        let usage_q = Arc::clone(&usage_q_h);
         let models_q = Arc::clone(&models_q_h);
         async move {
             if req.target == "/api/app/events" {
@@ -1306,6 +1309,26 @@ async fn post_compaction_agent_end_and_usage_changed_refresh_context_usage_and_c
                         "usage": { "tokens": { "input": 1307, "output": 136, "cacheRead": 5632, "cacheWrite": 0, "total": 7075 }, "cacheHitRate": 0.8116 },
                         "messages": [],
                         "entries": []
+                    })
+                };
+                return RawReply::Json { status: 200, body };
+            }
+            if req.target == "/api/sessions/s-comp/usage" {
+                usage_q.lock().unwrap().push(req.target.clone());
+                let cur_stage = stage.load(Ordering::SeqCst);
+                let body = if cur_stage == 0 {
+                    json!({
+                        "sessionId": "s-comp",
+                        "leafId": "c1",
+                        "contextUsage": { "tokens": null, "contextWindow": 131072, "percent": null },
+                        "usage": { "scope": "last_assistant", "sourceEntryId": null, "tokens": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0, "total": 0 }, "cacheHitRate": null }
+                    })
+                } else {
+                    json!({
+                        "sessionId": "s-comp",
+                        "leafId": "a2",
+                        "contextUsage": { "tokens": 7075, "contextWindow": 131072, "percent": 5.398 },
+                        "usage": { "scope": "last_assistant", "sourceEntryId": "a2", "tokens": { "input": 1307, "output": 136, "cacheRead": 5632, "cacheWrite": 0, "total": 7075 }, "cacheHitRate": 0.8116 }
                     })
                 };
                 return RawReply::Json { status: 200, body };
@@ -1407,15 +1430,17 @@ async fn post_compaction_agent_end_and_usage_changed_refresh_context_usage_and_c
     assert!(initial.context_usage.as_ref().unwrap()["tokens"].is_null());
     assert!(initial.usage.as_ref().unwrap()["cacheHitRate"].is_null());
 
-    // Post-compaction chat reply finishes: server emits inline usage on `agent_end` + global `usage_changed`.
+    // Post-compaction chat reply finishes: server emits lightweight `agent_end` + global `usage_changed`,
+    // prompting client eager pull from read-only `GET /api/sessions/s-comp/usage` without refetching `/api/models`.
     stage.store(1, Ordering::SeqCst);
+    let models_count_before = models_queries.lock().unwrap().len();
     mux_tx_slot
         .lock()
         .unwrap()
         .as_ref()
         .unwrap()
         .send(
-            "id: global:g0:2,s-comp:ep1:2\nevent: session\ndata: {\"sessionId\":\"s-comp\",\"event\":{\"type\":\"agent_end\",\"contextUsage\":{\"tokens\":7075,\"contextWindow\":131072,\"percent\":5.398},\"usage\":{\"tokens\":{\"input\":1307,\"output\":136,\"cacheRead\":5632,\"cacheWrite\":0,\"total\":7075},\"cacheHitRate\":0.8116}}}\n\n"
+            "id: global:g0:2,s-comp:ep1:2\nevent: session\ndata: {\"sessionId\":\"s-comp\",\"event\":{\"type\":\"agent_end\"}}\n\n"
                 .to_owned(),
         )
         .unwrap();
@@ -1425,7 +1450,7 @@ async fn post_compaction_agent_end_and_usage_changed_refresh_context_usage_and_c
         .as_ref()
         .unwrap()
         .send(
-            "event: state\ndata: {\"type\":\"usage_changed\",\"sessionId\":\"s-comp\",\"contextUsage\":{\"tokens\":7075,\"contextWindow\":131072,\"percent\":5.398},\"usage\":{\"tokens\":{\"input\":1307,\"output\":136,\"cacheRead\":5632,\"cacheWrite\":0,\"total\":7075},\"cacheHitRate\":0.8116}}\n\n"
+            "event: state\ndata: {\"type\":\"usage_changed\",\"sessionId\":\"s-comp\"}\n\n"
                 .to_owned(),
         )
         .unwrap();
@@ -1445,34 +1470,32 @@ async fn post_compaction_agent_end_and_usage_changed_refresh_context_usage_and_c
                     .and_then(Value::as_f64)
                     .is_some_and(|r| (r - 0.8116).abs() < 1e-4)
         });
-        let models_ok = snap.models.as_ref().is_some_and(|m| {
-            m.usage
-                .as_ref()
-                .and_then(|u| u.get("cacheHitRate"))
-                .and_then(Value::as_f64)
-                .is_some_and(|r| (r - 0.8116).abs() < 1e-4)
-        });
-        if sess_ok && models_ok {
+        if sess_ok {
             break;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "expected post-compaction usage refresh, got session={:?}, models={:?}",
+            "expected post-compaction usage refresh via /usage, got session={:?}, usage_queries={:?}",
             snap.loaded_sessions
                 .get("s-comp")
                 .map(|s| (&s.context_usage, &s.usage)),
-            snap.models.as_ref().map(|m| (&m.context_usage, &m.usage)),
+            usage_queries.lock().unwrap(),
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
     assert!(
-        models_queries
+        usage_queries
             .lock()
             .unwrap()
             .iter()
-            .any(|q| q.contains("sessionId=s-comp")),
-        "usage_changed refresh must query /api/models with active sessionId"
+            .any(|q| q == "/api/sessions/s-comp/usage"),
+        "agent_end / usage_changed must pull GET /api/sessions/s-comp/usage"
+    );
+    assert_eq!(
+        models_queries.lock().unwrap().len(),
+        models_count_before,
+        "usage_changed must not trigger redundant /api/models refetch"
     );
 
     handle.stop();

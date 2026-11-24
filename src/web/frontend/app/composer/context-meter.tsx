@@ -21,10 +21,12 @@ export function ContextMeter({
 	usage,
 	cacheHitRate,
 	provider,
+	onOpen,
 }: {
 	usage: ContextUsage;
 	cacheHitRate: number | null;
 	provider: string;
+	onOpen?: () => void;
 }) {
 	const percent = Math.max(0, Math.min(100, usage?.percent ?? 0));
 	const ringOffset = RING_CIRCUMFERENCE * (1 - percent / 100);
@@ -39,6 +41,9 @@ export function ContextMeter({
 	const [pinned, setPinned] = useState(false);
 	const [dismissed, setDismissed] = useState(false);
 	const open = (pinned || hovered || focused) && !dismissed && !shell?.appActive;
+	useEffect(() => {
+		if (open) onOpen?.();
+	}, [open, onOpen]);
 	useEffect(() => {
 		if (shell?.appActive) {
 			setPinned(false);

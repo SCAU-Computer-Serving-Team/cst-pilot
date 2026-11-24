@@ -7,6 +7,7 @@
 @import "./images/image-preview.css";
 @import "./shell/session-list.css";
 @import "./palette/command-palette.css";
+@import "./shell/kbd-focus.css";
 @import "./exports/exports.css";
 @import "./conversation/markdown.css";
 @import "./conversation/outgoing-message.css";
@@ -1065,9 +1066,9 @@ a.context-more[target="_blank"] { cursor: pointer; }
 .tree-list { flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: var(--space-inline) 0 var(--space-section); list-style: none; }
 .tree-empty { margin: 48px auto; color: var(--text-secondary); text-align: center; }
 .tree-row { position: relative; display: flex; align-items: center; width: 100%; height: var(--h-field); padding: 0 var(--space-group); cursor: default; color: var(--text-primary); font-size: var(--font-body); line-height: var(--line-body); transition: background-color var(--fast) var(--ease-out); }
-.tree-row:hover, .tree-row:focus-visible { background: var(--bg-hover); outline: none; }
-.tree-row-cursor { background: var(--bg-hover); }
-.tree-row-current, .tree-row-current:hover, .tree-row-current:focus-visible { background: var(--bg-item-active); }
+.tree-list:not([data-kbd-active]) .tree-row:hover { background: var(--bg-hover); }
+.tree-row:focus-visible, .tree-list:focus-visible { outline: none; }
+.tree-row-current, .tree-list:not([data-kbd-active]) .tree-row-current:hover { background: var(--bg-item-active); }
 .tree-slot { position: relative; flex: 0 0 32px; height: 100%; }
 .tree-line { position: absolute; left: 4px; top: 0; width: 2px; height: var(--h-field); background: var(--border-strong); }
 .tree-square { position: absolute; left: 0; top: 15px; width: 10px; height: 10px; border-radius: 2px; background: var(--accent-ink); }

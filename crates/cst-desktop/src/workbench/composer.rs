@@ -718,6 +718,9 @@ impl ComposerView {
                 .select_model(sid.clone(), provider.clone(), model_id.clone())
                 .await;
             if res.is_ok() {
+                if let Some(ref session_id) = sid {
+                    client.refresh_session_usage(session_id.clone());
+                }
                 let _ = client.refresh_models(sid).await;
             }
             let _ = weak.update(cx, |this, cx| {
@@ -1663,12 +1666,8 @@ impl Render for ComposerView {
             DraftKey::Session(_) => (
                 active_session
                     .as_ref()
-                    .and_then(|s| s.context_usage.as_ref())
-                    .or(models_ref.context_usage.as_ref()),
-                active_session
-                    .as_ref()
-                    .and_then(|s| s.usage.as_ref())
-                    .or(models_ref.usage.as_ref()),
+                    .and_then(|s| s.context_usage.as_ref()),
+                active_session.as_ref().and_then(|s| s.usage.as_ref()),
             ),
             DraftKey::NewSession => (None, None),
         };
@@ -2072,6 +2071,9 @@ impl Render for ComposerView {
                         this.context_prior_focus = w.focused(cx);
                         this.context_btn_focus.focus(w, cx);
                         this.refresh_quota_for_provider(p, false, cx);
+                        if let DraftKey::Session(ref sid) = this.draft_key {
+                            this.client.refresh_session_usage(sid.clone());
+                        }
                     } else {
                         this.context_prior_focus = None;
                     }

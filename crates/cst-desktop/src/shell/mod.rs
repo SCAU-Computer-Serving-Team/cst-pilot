@@ -1571,7 +1571,7 @@ impl AppShell {
         match subview {
             SessionSubView::Tree => self.branch_tree_view.update(cx, |view, cx| {
                 view.set_session_id(sid, window, cx);
-                view.focus_handle(cx).focus(window, cx);
+                view.focus_from_keyboard(window, cx);
             }),
             SessionSubView::Export => {
                 self.export_view
@@ -2292,6 +2292,9 @@ impl AppShell {
             BranchTreeEvent::SummarizingFinished { session_id } => {
                 self.branch_summarizing_sessions.remove(session_id);
                 cx.notify();
+            }
+            BranchTreeEvent::Notice(msg) => {
+                self.show_top_notice(msg.clone(), cx);
             }
             BranchTreeEvent::ErrorMessage(msg) => {
                 self.show_workspace_error(msg.clone(), cx);

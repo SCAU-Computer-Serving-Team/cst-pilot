@@ -150,7 +150,9 @@ pub async fn handle_models_route(
             None
         };
 
-        let stats = slot.as_ref().map(|s| s.session().get_session_stats());
+        let usage = slot
+            .as_ref()
+            .map(|s| crate::session::usage::build_session_usage_payload(&s.id, s.session()));
         let (def_prov, def_mid) = default_model_reference(&settings);
         let default_model = explicit_model(runtime, &def_prov, &def_mid);
         let selected_model = slot
@@ -240,8 +242,6 @@ pub async fn handle_models_route(
             );
         }
 
-        let usage_json = stats.as_ref().map(crate::session::slot::session_usage_json);
-
         let models_json: Vec<Value> = available
             .iter()
             .map(|m| describe_model(m, runtime, &ready_providers))
@@ -261,8 +261,8 @@ pub async fn handle_models_route(
                 "unavailableEnabled": unavailable_enabled,
                 "scopeRules": enabled.as_ref().map(|_| &scope_rules),
                 "thinkingLevels": selected_levels,
-                "contextUsage": stats.and_then(|s| s.context_usage),
-                "usage": usage_json,
+                "contextUsage": usage.as_ref().and_then(|u| u.context_usage.as_ref()),
+                "usage": usage.as_ref().map(|u| &u.usage),
                 "selected": selected_desc,
             }),
             method,

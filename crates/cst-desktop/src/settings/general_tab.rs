@@ -1,23 +1,27 @@
 use std::rc::Rc;
 
-use cst_client::{DesktopSettingsDto, ThemeModeDto, UpdatePhaseDto, UpdateStateDto};
+use cst_client::{
+    DesktopSettingsDto, KeyboardFocusStyleDto, ThemeModeDto, UpdatePhaseDto, UpdateStateDto,
+};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::Icon;
 use gpui_kit::{
-    App, InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement,
-    Styled, TestSupportExt, Window, div, px, relative,
+    AnyElement, App, InteractiveElement, IntoElement, ParentElement, SharedString,
+    StatefulInteractiveElement, Styled, TestSupportExt, Window, div, px, relative,
 };
 
 use crate::accessibility::A11yElementExt as _;
 use crate::settings::update_dialog::{compute_update_progress_ratio, format_megabytes};
+use crate::theme::kbd_focus::render_kbd_style_icon;
 use crate::theme::{DesktopPalette, apply_scale, cjk_inline_label, height, radius, scale, space};
 
 pub type SelectThemeFn = Rc<dyn Fn(ThemeModeDto, &mut Window, &mut App)>;
+pub type SelectKbdFocusStyleFn = Rc<dyn Fn(KeyboardFocusStyleDto, &mut Window, &mut App)>;
 pub type UpdateCardActionFn = Rc<dyn Fn(&mut Window, &mut App)>;
 
 /// Renders the `常规` settings tab (`cst-pilot-desktop.pen` 「03 · 设置」 `q8TgB`):
 /// 1. Category heading `常规` (`20/28 @ 600`)
-/// 2. `外观` group (`$bg-workspace` + `8px` radius + `$border-subtle`, two `72px` rows with icon segmented controls)
+/// 2. `外观` group (`$bg-workspace` + `8px` radius + `$border-subtle`, three `72px` rows: 界面主题、方向键选中样式、默认启动视图)
 /// 3. `软件更新` group (`72px` `C9or7K` card with `$bg-track-recess` `keDNb` progress fill and neutral outline `s2CZVU` button).
 #[allow(clippy::too_many_arguments)]
 pub fn render_general_tab(
@@ -27,6 +31,7 @@ pub fn render_general_tab(
     _mono_family: SharedString,
     palette: &DesktopPalette,
     on_select_theme: SelectThemeFn,
+    on_select_kbd_focus_style: SelectKbdFocusStyleFn,
     on_check_or_open_update: UpdateCardActionFn,
     on_cancel_update: UpdateCardActionFn,
 ) -> impl IntoElement {
@@ -212,6 +217,10 @@ pub fn render_general_tab(
     let t_sys = Rc::clone(&on_select_theme);
     let t_light = Rc::clone(&on_select_theme);
     let t_dark = Rc::clone(&on_select_theme);
+    let k_brackets = Rc::clone(&on_select_kbd_focus_style);
+    let k_rail = Rc::clone(&on_select_kbd_focus_style);
+    let brackets_active = desktop_settings.keyboard_focus_style == KeyboardFocusStyleDto::Brackets;
+    let rail_active = desktop_settings.keyboard_focus_style == KeyboardFocusStyleDto::Rail;
 
     div()
         .id("settings-general-tab-q8tgb")
@@ -307,6 +316,68 @@ pub fn render_general_tab(
                                 .child(
                                     apply_scale(div(), scale::BODY)
                                         .text_color(palette.text_primary)
+                                        .child(cjk_inline_label("方向键选中样式")),
+                                )
+                                .child(
+                                    div()
+                                        .h(height::CONTROL)
+                                        .p(space::XS)
+                                        .rounded(radius::ROW)
+                                        .bg(palette.bg_surface)
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::MICRO)
+                                        .child(seg_pill_custom(
+                                            "settings-kbd-focus-brackets",
+                                            render_kbd_style_icon(
+                                                KeyboardFocusStyleDto::Brackets,
+                                                if brackets_active {
+                                                    palette.text_primary
+                                                } else {
+                                                    palette.text_secondary
+                                                },
+                                            ),
+                                            "四角",
+                                            brackets_active,
+                                            true,
+                                            palette,
+                                            move |w, cx| {
+                                                (k_brackets)(KeyboardFocusStyleDto::Brackets, w, cx)
+                                            },
+                                        ))
+                                        .child(seg_pill_custom(
+                                            "settings-kbd-focus-rail",
+                                            render_kbd_style_icon(
+                                                KeyboardFocusStyleDto::Rail,
+                                                if rail_active {
+                                                    palette.text_primary
+                                                } else {
+                                                    palette.text_secondary
+                                                },
+                                            ),
+                                            "游标",
+                                            rail_active,
+                                            true,
+                                            palette,
+                                            move |w, cx| {
+                                                (k_rail)(KeyboardFocusStyleDto::Rail, w, cx)
+                                            },
+                                        )),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .w_full()
+                                .h(px(72.0))
+                                .px(space::LG)
+                                .border_t_1()
+                                .border_color(palette.border_subtle)
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .child(
+                                    apply_scale(div(), scale::BODY)
+                                        .text_color(palette.text_primary)
                                         .child(cjk_inline_label("默认启动视图")),
                                 )
                                 .child(
@@ -351,6 +422,26 @@ fn seg_pill(
     palette: &DesktopPalette,
     on_click: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let icon_el = Icon::new(icon)
+        .size(px(14.0))
+        .text_color(if active {
+            palette.text_primary
+        } else {
+            palette.text_secondary
+        })
+        .into_any_element();
+    seg_pill_custom(id, icon_el, label, active, false, palette, on_click)
+}
+
+fn seg_pill_custom(
+    id: &'static str,
+    icon_el: AnyElement,
+    label: &'static str,
+    active: bool,
+    keyboard: bool,
+    palette: &DesktopPalette,
+    on_click: impl Fn(&mut Window, &mut App) + 'static,
+) -> impl IntoElement {
     let base = if active {
         apply_scale(div(), scale::UI_MEDIUM)
             .bg(palette.bg_elevated)
@@ -363,9 +454,15 @@ fn seg_pill(
             .text_color(palette.text_secondary)
     };
 
-    base.id(id)
-        .test_support()
-        .a11y_tab(id, label, active)
+    let mut pill = base.id(id).test_support();
+    if keyboard {
+        let focus_border = palette.border_focus;
+        pill = pill
+            .tab_index(0)
+            .focus_visible(move |style| style.border_1().border_color(focus_border));
+    }
+
+    pill.a11y_tab(id, label, active)
         .h(height::INLINE)
         .px(space::MD)
         .rounded(radius::CONTROL)
@@ -373,10 +470,6 @@ fn seg_pill(
         .items_center()
         .gap(space::XS)
         .on_click(move |_, w, cx| on_click(w, cx))
-        .child(Icon::new(icon).size(px(14.0)).text_color(if active {
-            palette.text_primary
-        } else {
-            palette.text_secondary
-        }))
+        .child(icon_el)
         .child(cjk_inline_label(label))
 }

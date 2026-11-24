@@ -962,7 +962,7 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
     .unwrap();
 
     // Height smoothly transitions (`300ms ease_out`) from Main (76px) to Thinking (4 rows);
-    // content is bottom-anchored so `thinking-picker-back-btn` reveals once the top edge expands.
+    // wait for both controls to be visible and the picker to finish expanding past 150px.
     cx.wait_for(win_handle, Duration::from_secs(2), |window, _| {
         window
             .try_find("thinking-picker-back-btn")
@@ -970,6 +970,9 @@ async fn headless_ime_composition_isolation_slash_tokens_draft_sharing_queue_and
             && window
                 .try_find("thinking-option-max")
                 .is_some_and(|el| el.visible())
+            && window
+                .try_find("composer-model-picker-d8zzg")
+                .is_some_and(|el| f32::from(el.bounds().size.height) > 150.0)
     })
     .await;
 
