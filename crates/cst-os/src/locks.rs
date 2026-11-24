@@ -13,7 +13,7 @@ pub struct ServerInstanceLock {
     #[cfg(windows)]
     _handle: std::os::windows::io::OwnedHandle,
     #[cfg(not(windows))]
-    _file: fs::File,
+    _file: FileLockGuard,
 }
 
 impl ServerInstanceLock {
@@ -52,7 +52,7 @@ impl ServerInstanceLock {
                 })?;
             Ok(Self {
                 address,
-                _file: file,
+                _file: FileLockGuard(file),
             })
         }
     }
@@ -70,7 +70,7 @@ pub struct SessionOwnerLock {
     #[cfg(windows)]
     _handle: std::os::windows::io::OwnedHandle,
     #[cfg(not(windows))]
-    _file: fs::File,
+    _file: FileLockGuard,
 }
 
 impl SessionOwnerLock {
@@ -108,7 +108,7 @@ impl SessionOwnerLock {
             })?;
             Ok(Self {
                 address,
-                _file: file,
+                _file: FileLockGuard(file),
             })
         }
     }
@@ -125,7 +125,7 @@ pub struct RunbookDirectoryLock {
     #[cfg(windows)]
     _handle: std::os::windows::io::OwnedHandle,
     #[cfg(not(windows))]
-    _file: fs::File,
+    _file: FileLockGuard,
 }
 
 impl RunbookDirectoryLock {
@@ -159,9 +159,13 @@ impl RunbookDirectoryLock {
         #[cfg(not(windows))]
         {
             let lock_dir = resolve_non_windows_lock_dir(&canonical);
-            let file = acquire_file_lock(&lock_dir, &address)
-                .map_err(|_| "清单目录正由另一进程写入，请稍后重试。".to_owned())?;
-            Ok(Self { _file: file })
+            let file = acquire_file_lock(&lock_dir, &address).map_err(|err| match err {
+                fs::TryLockError::WouldBlock => "清单目录正由另一进程写入，请稍后重试。".to_owned(),
+                fs::TryLockError::Error(io) => io_error("建立清单目录锁", io),
+            })?;
+            Ok(Self {
+                _file: FileLockGuard(file),
+            })
         }
     }
 }
@@ -172,7 +176,7 @@ pub struct UpdateLock {
     #[cfg(windows)]
     _handle: std::os::windows::io::OwnedHandle,
     #[cfg(not(windows))]
-    _file: fs::File,
+    _file: FileLockGuard,
 }
 
 impl UpdateLock {
@@ -203,8 +207,23 @@ impl UpdateLock {
             let lock_dir = canonical_root.join(".state").join("locks");
             let file = acquire_file_lock(&lock_dir, &name)
                 .map_err(|_| "工具包已有升级或恢复任务进行中。".to_owned())?;
-            Ok(Self { _file: file })
+            Ok(Self {
+                _file: FileLockGuard(file),
+            })
         }
+    }
+}
+
+#[cfg(any(test, not(windows)))]
+struct FileLockGuard(fs::File);
+
+#[cfg(any(test, not(windows)))]
+impl Drop for FileLockGuard {
+    fn drop(&mut self) {
+        // Explicit `LOCK_UN` releases the kernel `flock` on the shared open file description
+        // immediately, even if another thread concurrently `fork()`ed a subprocess that has not
+        // yet called `execve()` to close its inherited `O_CLOEXEC` descriptor.
+        let _ = self.0.unlock();
     }
 }
 
@@ -296,21 +315,23 @@ fn acquire_windows_first_pipe(
 
 #[cfg(test)]
 mod tests {
-    use super::acquire_file_lock;
+    use super::{FileLockGuard, acquire_file_lock};
 
     #[test]
     fn file_locks_preserve_full_identity_and_release_on_drop() {
         let root = std::env::temp_dir().join(format!("cst-os-lock-{}", uuid::Uuid::new_v4()));
         let dir = root.join(".state").join("kernel-locks");
         let address = "cst-test";
-        let first = acquire_file_lock(&dir, address).expect("first holder");
+        let first = FileLockGuard(acquire_file_lock(&dir, address).expect("first holder"));
         assert!(matches!(
             acquire_file_lock(&dir, address),
             Err(std::fs::TryLockError::WouldBlock)
         ));
-        let other = acquire_file_lock(&dir, "cst-test-other").expect("distinct identity");
+        let other =
+            FileLockGuard(acquire_file_lock(&dir, "cst-test-other").expect("distinct identity"));
         drop(first);
-        let reacquired = acquire_file_lock(&dir, address).expect("released kernel lock");
+        let reacquired =
+            FileLockGuard(acquire_file_lock(&dir, address).expect("released kernel lock"));
         drop((other, reacquired));
         std::fs::remove_dir_all(root).unwrap();
     }
