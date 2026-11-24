@@ -85,7 +85,15 @@ export function CommandPalette({
 	useEffect(() => {
 		inputRef.current?.focus({ preventScroll: true });
 		const onTabCapture = (event: KeyboardEvent) => {
-			if (event.key !== "Tab" || event.isComposing || event.keyCode === 229) return;
+			if (
+				event.key !== "Tab" ||
+				event.ctrlKey ||
+				event.altKey ||
+				event.metaKey ||
+				event.isComposing ||
+				event.keyCode === 229
+			)
+				return;
 			event.preventDefault();
 			inputRef.current?.focus({ preventScroll: true });
 		};

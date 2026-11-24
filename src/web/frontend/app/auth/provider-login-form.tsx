@@ -115,6 +115,7 @@ export function ProviderLoginForm({
 				event.key !== "Escape" ||
 				event.defaultPrevented ||
 				event.isComposing ||
+				event.keyCode === 229 ||
 				document.querySelector(".login-provider-popover")
 			)
 				return;

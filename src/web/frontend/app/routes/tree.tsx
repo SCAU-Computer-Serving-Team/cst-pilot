@@ -184,7 +184,7 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 				setChoice("");
 				return;
 			}
-			if (event.key === "Tab" && choiceDialogRef.current) {
+			if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey && choiceDialogRef.current) {
 				const items = focusableElements(choiceDialogRef.current);
 				const active =
 					document.activeElement instanceof HTMLElement && choiceDialogRef.current.contains(document.activeElement)
@@ -256,6 +256,20 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 	const overlayBlocked = !!choice || filterOpen || !!shell?.appActive || !!shell?.overlay;
 	const targetId = kbdActive && !overlayBlocked ? (rows[cursorIndex]?.node.entry.id ?? null) : null;
 	usePointerMutex(targetId !== null, clearKeyboard);
+	const [narrowViewport, setNarrowViewport] = useState(
+		() =>
+			typeof window !== "undefined" &&
+			typeof window.matchMedia === "function" &&
+			window.matchMedia("(max-width: 960px)").matches,
+	);
+	useEffect(() => {
+		if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+		const mq = window.matchMedia("(max-width: 960px)");
+		const sync = () => setNarrowViewport(mq.matches);
+		sync();
+		mq.addEventListener("change", sync);
+		return () => mq.removeEventListener("change", sync);
+	}, []);
 
 	const moveTo = useCallback((row: TreeRow) => {
 		listRef.current?.focus({ preventScroll: true });
@@ -294,9 +308,13 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 			switch (event.key) {
 				case "ArrowUp":
 				case "ArrowDown": {
+					if (!kbdActive) {
+						const initial = cursorId === null && leafIndex < 0 ? 0 : cursorIndex;
+						moveTo(rows[Math.max(0, Math.min(rows.length - 1, initial))]);
+						break;
+					}
 					const step = event.key === "ArrowUp" ? -1 : 1;
-					const base = leafIndex < 0 && !kbdActive ? 0 : cursorIndex;
-					moveTo(rows[Math.max(0, Math.min(rows.length - 1, base + step))]);
+					moveTo(rows[Math.max(0, Math.min(rows.length - 1, cursorIndex + step))]);
 					break;
 				}
 				case "Home":
@@ -352,6 +370,7 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 		folded,
 		query,
 		leafIndex,
+		cursorId,
 		cursorIndex,
 		kbdActive,
 		moveTo,
@@ -503,7 +522,7 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 				aria-label="分支树条目"
 				data-kbd-active={targetId !== null || undefined}
 				onBlur={(event) => {
-					if (!event.currentTarget.contains(event.relatedTarget) && !choice) clearKeyboard();
+					if (!event.currentTarget.contains(event.relatedTarget) && !overlayBlocked) clearKeyboard();
 				}}
 			>
 				{tree === undefined ? (
@@ -596,7 +615,7 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 					targetId={targetId}
 					as="li"
 					style={kbdStyle}
-					insetX={20}
+					insetX={narrowViewport ? 12 : 20}
 					insetY={1}
 				/>
 			</ul>

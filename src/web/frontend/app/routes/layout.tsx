@@ -54,7 +54,16 @@ function ChannelStandbyOverlay({ onRefresh }: { onRefresh: () => Promise<void> |
 			}
 		}, 0);
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key !== "Tab" || event.isComposing || event.keyCode === 229 || !cardRef.current) return;
+			if (
+				event.key !== "Tab" ||
+				event.ctrlKey ||
+				event.altKey ||
+				event.metaKey ||
+				event.isComposing ||
+				event.keyCode === 229 ||
+				!cardRef.current
+			)
+				return;
 			const items = focusableElements(cardRef.current);
 			const active =
 				document.activeElement instanceof HTMLElement && cardRef.current.contains(document.activeElement)
@@ -583,7 +592,15 @@ function WorkspaceShell({
 		focusDrawer();
 		const timer = window.setTimeout(focusDrawer, 0);
 		const onTabCapture = (event: KeyboardEvent) => {
-			if (event.key !== "Tab" || event.isComposing || event.keyCode === 229) return;
+			if (
+				event.key !== "Tab" ||
+				event.ctrlKey ||
+				event.altKey ||
+				event.metaKey ||
+				event.isComposing ||
+				event.keyCode === 229
+			)
+				return;
 			const drawer = sidebarRef.current;
 			if (!drawer) return;
 			if (

@@ -6,6 +6,7 @@ import type { PendingBitLocker } from "../data/bitlocker-state";
 import type { OutgoingMessage } from "../data/message-outbox";
 import type { Message } from "../data/web-state";
 import { readDurationMs } from "../shell/motion-tokens";
+import { setHardwareSamplingActive } from "../shell/shader-gate";
 import { useCopyFeedback } from "../shell/use-copy-feedback";
 import { useWorkspaceShell } from "../shell/workspace-shell-context";
 import { AssistantContent } from "./assistant-content";
@@ -224,6 +225,28 @@ export function Conversation({
 	}, [history, sliceStart, streaming]);
 	const turns = useMemo(() => groupTurns(display), [display]);
 	const active = activeTurnIndex(turns, running);
+	const hardwareSamplingActive = useMemo(() => {
+		if (!running || active < 0) return false;
+		const liveTurn = turns[active];
+		if (!liveTurn) return false;
+		for (const entry of liveTurn.assistants) {
+			const content = entry.message.content;
+			if (!Array.isArray(content)) continue;
+			const key = entry.id ?? `stamp:${entry.message.timestamp}`;
+			const matched = resultsByTurn.get(key);
+			for (const part of content) {
+				if (part.type !== "toolCall" || part.name !== "sys") continue;
+				const scope = part.arguments?.scope;
+				if (scope !== "gpu" && scope !== "sensor") continue;
+				if (!part.execution?.result && !matched?.has(part.id)) return true;
+			}
+		}
+		return false;
+	}, [running, active, turns, resultsByTurn]);
+	useEffect(() => {
+		setHardwareSamplingActive(hardwareSamplingActive);
+		return () => setHardwareSamplingActive(false);
+	}, [hardwareSamplingActive]);
 	const pendingTurns = outgoing.filter((item) => !history.some(({ message }) => message.clientMessageId === item.id));
 	const outgoingById = new Map(pendingTurns.map((item) => [item.id, item]));
 	const shownTurns: Turn[] = [

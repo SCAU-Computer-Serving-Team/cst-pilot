@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import { readDurationMs, readEasing } from "./motion-tokens";
 
 const targets =
@@ -9,7 +9,7 @@ export function useSidebarMotion(collapsed: boolean) {
 	const root = useRef<HTMLDivElement>(null);
 	const positions = useRef(new Map<HTMLElement, DOMRect>());
 	const animations = useRef<Animation[]>([]);
-	function capture() {
+	const capture = useCallback(() => {
 		positions.current = new Map(
 			[...(root.current?.querySelectorAll<HTMLElement>(targets) ?? [])].map((element) => [
 				element,
@@ -19,7 +19,7 @@ export function useSidebarMotion(collapsed: boolean) {
 		for (const animation of animations.current) animation.cancel();
 		animations.current = [];
 		root.current?.removeAttribute("data-sidebar-reveal");
-	}
+	}, []);
 	useLayoutEffect(() => {
 		const previous = positions.current;
 		positions.current = new Map();

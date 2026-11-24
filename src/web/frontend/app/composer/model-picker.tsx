@@ -142,10 +142,10 @@ export function ModelPicker({
 			: supportedLevels.map((level) => ({ id: level, label: thinkingLabel(level), title: thinkingLabel(level) }));
 	const selectedKey = listPage === "models" ? modelKey : thinking;
 	// 主菜单 2 行（32px + 2px 间距 + 8px 上下内边距）；子列表含顶部返回行 + 选项行。
-	// 面板宽度对齐 cst-pilot-web.pen：主面板 d8zzg=148px、思考强度 L7GWjV=84px、模型列表 216px。
+	// 面板宽度对齐 cst-pilot-web.pen：主面板与思考强度 148px（完整容纳 Medium / Minimal 与勾选标记），模型列表 216px。
 	const rowCount = page === "main" ? 2 : 1 + Math.max(1, options.length);
 	const pickerHeight = rowCount * 32 + Math.max(0, rowCount - 1) * 2 + 8;
-	const pickerWidth = page === "main" ? 148 : page === "thinking" ? 84 : 216;
+	const pickerWidth = page === "main" ? 148 : page === "thinking" ? 148 : 216;
 	return (
 		<Popover
 			isOpen={open}

@@ -22,7 +22,7 @@
 | 画布路径 | 角色与状态 |
 |---|---|
 | [cst-pilot-desktop.pen](design/cst-pilot-desktop.pen) | 桌面端与内置 TUI 主流基准画布，收录「设计规范」板、`00A–00H` 母版与 `01–07` 业务主区 |
-| [cst-pilot-web.pen](design/cst-pilot-web.pen) | Web 端单文件画布（已合并原工具画布并对齐 50 项静态变量、`mode: [light, dark]` 轴、`LKIQI` 规范板、`00A–00F`/`00H` 母版与 `01–07` 主区，保留 Web `0px` 满幅工作区、`44px` 收起态页头、响应式断点与通道状态；前端迁移见[待办](doc/TASKS.md#文档与设计规范待办)） |
+| [cst-pilot-web.pen](design/cst-pilot-web.pen) | Web 端单文件画布（已合并原工具画布并对齐 50 项静态变量、`mode: [light, dark]` 轴、`LKIQI` 规范板、`00A–00F`/`00H` 母版与 `01–07` 主区，保留 Web `0px` 满幅工作区、`44px` 收起态页头、响应式断点与通道状态；前端核心规范已对齐，余项见[待办](doc/TASKS.md#文档与设计规范待办)） |
 | [cst-pilot-colors.pen](design/cst-pilot-colors.pen) / [heroui-colors.pen](design/heroui-colors.pen) | 底层色阶与外部组件库参考画布，正式界面直接消费 [storybook.html](design/storybook.html) 语义令牌 |
 
 ## 视觉定调与三端边界
@@ -33,7 +33,7 @@
 |---|---|---|
 | GPUI 桌面端 | 执行全部语义令牌、整体版式、三档材质、着色器背景与系统箭头光标 | 主流基准 |
 | 窗口内置 TUI | 共用窗口外壳与顶栏，复用语义色阶、报错句式、焦点法则与草稿状态 | 主流基准 |
-| 本机 Web 端 | 共享设计语言、动效与报错分流；增加窄视口断点（`≤960px` 聊天侧栏抽屉化，`≤760px` 设置侧栏抽屉化，`390px` 单列）与静态着色回退 | 画布已对齐主流规范，前端待迁移 |
+| 本机 Web 端 | 共享设计语言、动效与报错分流；增加窄视口断点（`≤960px` 聊天侧栏抽屉化，`≤760px` 设置侧栏抽屉化，`390px` 单列）与静态着色回退 | 画布与前端核心规范已对齐，余项持续收敛 |
 
 ## 令牌、用色与字体约束
 

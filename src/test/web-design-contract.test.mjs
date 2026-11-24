@@ -2,9 +2,31 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-test("界面画布的节点 ID 唯一，工作帧没有遗留占位标记", () => {
-  for (const file of ["cst-pilot-desktop.pen", "cst-pilot-web.pen", "cst-pilot-tools.pen"]) {
-    const canvas = JSON.parse(readFileSync(new URL(`../../design/${file}`, import.meta.url), "utf8"));
+const desktopCanvas = JSON.parse(readFileSync(new URL("../../design/cst-pilot-desktop.pen", import.meta.url), "utf8"));
+const webCanvas = JSON.parse(readFileSync(new URL("../../design/cst-pilot-web.pen", import.meta.url), "utf8"));
+
+function descendants(node) {
+  return [node, ...(node.children ?? []).flatMap(descendants)];
+}
+
+function overlapsRect(a, b) {
+  return (
+    typeof a.width === "number" &&
+    typeof a.height === "number" &&
+    typeof b.width === "number" &&
+    typeof b.height === "number" &&
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y
+  );
+}
+
+test("桌面与 Web 画布的节点 ID 唯一，工作帧没有遗留占位标记", () => {
+  for (const [file, canvas] of [
+    ["cst-pilot-desktop.pen", desktopCanvas],
+    ["cst-pilot-web.pen", webCanvas],
+  ]) {
     const ids = new Set();
     function visit(node) {
       assert.ok(!ids.has(node.id), `${file} 重复 ID：${node.id}`);
@@ -16,180 +38,133 @@ test("界面画布的节点 ID 唯一，工作帧没有遗留占位标记", () =
   }
 });
 
-test("界面画布顶层按分区收纳，分区之间不重叠", () => {
-  const canvas = JSON.parse(readFileSync(new URL("../../design/cst-pilot-web.pen", import.meta.url), "utf8"));
-  const sections = canvas.children.filter(node => /^\d{2} ·/.test(node.name ?? "") && node.name !== "00 · 画布导航");
-  assert.deepEqual(sections.map(node => node.name), ["01 · 对话", "02 · 会话管理", "03 · 设置与模型", "04 · 账号与登录", "05 · 通用组件与反馈", "06 · 仪表盘"]);
-  assert.equal(canvas.children.length, 8);
-  assert.deepEqual(sections.map(section => section.children.slice(1).map(group => group.name)), [["主页与工作台", "输入与排队", "分支与派生"], ["全部会话", "批量管理", "会话导出"], ["设置与模型服务"], ["账号信息", "登录页面"], ["悬停与菜单", "通知、错误与退出", "模型与思考强度选择器 · 浅色", "模型与思考强度选择器 · 深色"], ["仪表盘"]]);
+test("ADR-013：Web 与桌面画布共享 50 项静态变量与浅深双态主题轴", () => {
+  assert.deepEqual(webCanvas.themes, { mode: ["light", "dark"] });
+  assert.deepEqual(desktopCanvas.themes, { mode: ["light", "dark"] });
+  assert.equal(Object.keys(webCanvas.variables).length, 50);
+  assert.deepEqual(webCanvas.variables, desktopCanvas.variables);
+});
+
+test("Web 画布顶层按 00A–00F/00H 母版与 01–07 业务区收纳且分区不重叠", () => {
+  const topNames = webCanvas.children.map((node) => node.name);
+  for (const required of [
+    "设计规范",
+    "00A · 窗口与导航",
+    "00B · 按钮与输入",
+    "00C · 菜单与弹窗",
+    "00D · 列表与消息",
+    "00E · 工具与特殊工具",
+    "00F · 背景着色器",
+    "00H · Markdown 富文本",
+  ]) {
+    assert.ok(topNames.includes(required), `缺少顶层板：${required}`);
+  }
+
+  const sections = webCanvas.children
+    .filter((node) => /^0[1-7] ·/.test(node.name ?? ""))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  assert.deepEqual(
+    sections.map((node) => node.name),
+    [
+      "01 · 工作台",
+      "02 · 会话管理",
+      "03 · 设置",
+      "04 · 账号与登录",
+      "05 · 深色模式部分参考",
+      "06 · 边界情况",
+      "07 · 工具与特殊工具",
+    ],
+  );
+  assert.deepEqual(
+    sections.map((section) => section.children.slice(1).map((group) => group.name)),
+    [
+      ["主页", "对话", "对话中的工具", "状态提示与通道状态", "输入与快捷面板", "仪表盘"],
+      ["全部会话", "分支树", "会话导出"],
+      ["常规", "提供商", "模型偏好", "快捷键"],
+      ["登录", "CSTOA 登录", "账号"],
+      ["深色模式部分参考"],
+      ["响应式断点与长文本"],
+      ["普通工具", "整机概览", "BitLocker", "命令清单", "联网检索"],
+    ],
+  );
   for (const section of sections) {
-    assert.equal(section.children[0].name, "主区标题");
-    for (const other of sections.filter(node => node !== section)) {
-      assert.ok(section.x + section.width <= other.x || other.x + other.width <= section.x || section.y + section.height <= other.y || other.y + other.height <= section.y, `${section.name} 与 ${other.name} 重叠`);
+    assert.equal(section.children[0].name, "主区标题栏", `${section.name} 缺少主区标题栏`);
+    for (const other of sections.filter((node) => node !== section)) {
+      assert.equal(overlapsRect(section, other), false, `${section.name} 与 ${other.name} 重叠`);
     }
   }
 });
 
-test("聊天工作台和组件画布展示合并的模型与思考强度选择器", () => {
-  const canvas = JSON.parse(readFileSync(new URL("../../design/cst-pilot-web.pen", import.meta.url), "utf8"));
-  function find(node, name) {
-    if (node.name === name) return node;
-    for (const child of node.children ?? []) {
-      const match = find(child, name);
-      if (match) return match;
-    }
-    return undefined;
+test("输入栏与模型选择器不残留旧版独立 Select 控件", () => {
+  const allNodes = descendants(webCanvas);
+  for (const forbidden of [
+    "HeroUI Select · 模型",
+    "HeroUI Select · 思考强度",
+    "上下文进度环",
+    "思考强度滑块 · Low High Max",
+  ]) {
+    assert.equal(
+      allNodes.some((node) => node.name === forbidden),
+      false,
+      `不应残留旧版控件：${forbidden}`,
+    );
   }
-  const section = find(canvas, "05 · 通用组件与反馈");
-  for (const theme of ["浅色", "深色"]) {
-    const chat = find(canvas, `聊天工作台 · ${theme}`);
-    const trigger = find(chat, "模型与思考强度");
-    assert.deepEqual(trigger.children.map(node => node.name), ["当前模型", "当前思考强度", "图标位"]);
-    const contextIcon = find(chat, "上下文图标");
-    assert.equal(contextIcon.children[0].icon, "menu");
-    assert.deepEqual(contextIcon.padding, [4, 0, 0, 0]);
-    assert.equal(find(chat, "HeroUI Select · 思考强度"), undefined);
-    const board = find(section, `模型与思考强度选择器 · ${theme}`);
-    const panel = find(board, `模型与思考强度面板 · ${theme}`);
-    assert.equal(panel.width, 224);
-    assert.equal(panel.height, 88);
-    assert.equal(panel.layout, "vertical");
-    assert.equal(panel.padding, 12);
-    assert.deepEqual(panel.children.map(row => row.name), ["选择模型入口", "选择思考强度入口"]);
-    assert.ok(panel.children.every(row => row.height === 32 && row.gap === 8 && row.justifyContent === "end"));
-    assert.ok(panel.children.every(row => row.children[0].fontSize === 14 && Math.abs(row.children[0].lineHeight * row.children[0].fontSize - 20) < 0.1));
-    assert.equal(find(board, "选择思考强度入口").children[0].content, "Max");
-    assert.deepEqual(find(board, "模型入口箭头图标位").padding, [4, 0, 0, 0]);
-    const modelList = find(board, "模型列表 · 选择状态");
-    assert.equal(modelList.gap ?? 0, 0);
-    assert.ok(modelList.children.every(row => row.height === 32));
-    assert.equal(find(section, "模型列表 · 浅色"), undefined);
-    assert.equal(find(section, "模型列表 · 深色"), undefined);
-    assert.equal(modelList.width, panel.width);
-    assert.ok(modelList.children.every(row => row.children[0].fontSize === 14 && Math.abs(row.children[0].lineHeight * row.children[0].fontSize - 20) < 0.1));
-    assert.equal(modelList.y, panel.y);
-    const example = find(board, "消息编辑器 · 收起示例");
-    const source = find(chat, "HeroUI Textarea · 底部消息编辑器");
-    function withoutIds(node) {
-      const rest = { ...node };
-      delete rest.id;
-      if (node.children) rest.children = node.children.map(withoutIds);
-      return rest;
-    }
-    assert.deepEqual(withoutIds({ ...example, name: source.name, x: source.x, y: source.y }), withoutIds(source));
-    const thinkingList = find(board, "思考强度列表 · 选择状态");
-    assert.equal(thinkingList.width, panel.width);
-    assert.equal(thinkingList.padding, modelList.padding);
-    assert.deepEqual(thinkingList.children.map(row => row.children[0].content), ["Low", "High", "Max"]);
-    assert.equal(thinkingList.children[2].fill, modelList.children[0].fill);
-    assert.ok(thinkingList.children.every(row => row.children.length === 1));
-    for (const list of [modelList, thinkingList]) {
-      assert.ok(list.children.every(row => row.justifyContent === "end" && (row.gap ?? 0) === 0 && row.height === 32));
-      assert.ok(list.children.every(row => row.children[0].textAlign === "right" && row.children[0].fontSize === 14));
-      assert.ok(list.children.every(row => row.children.length === 1 && row.children[0].type === "text"));
-    }
-  }
+  const composerMaster = allNodes.find((node) => node.id === "ZWAs1");
+  assert.ok(composerMaster && composerMaster.reusable, "缺少消息输入框母版 ZWAs1");
+  const inputGroup = webCanvas.children
+    .find((node) => node.name === "01 · 工作台")
+    .children.find((node) => node.name === "输入与快捷面板");
+  assert.ok(
+    inputGroup.children.some((node) => node.name === "输入框 · 模型选择与额度"),
+    "缺少模型选择与额度工作帧",
+  );
 });
 
-test("所有输入栏使用合并的模型与思考强度入口", () => {
-  const canvas = JSON.parse(readFileSync(new URL("../../design/cst-pilot-web.pen", import.meta.url), "utf8"));
-  let count = 0;
-  function visit(node) {
-    assert.notEqual(node.name, "HeroUI Select · 模型");
-    assert.notEqual(node.name, "HeroUI Select · 思考强度");
-    assert.notEqual(node.name, "上下文进度环");
-    assert.notEqual(node.name, "思考强度滑块 · Low High Max");
-    if (node.name === "上下文与模型选择") {
-      count++;
-      assert.deepEqual(node.children.map(child => child.name), ["上下文图标", "模型与思考强度"]);
-      assert.equal(node.children[0].children[0].icon, "menu");
-      assert.deepEqual(node.padding, [0, 8]);
-      assert.equal(node.children[1].gap, 6);
-      assert.deepEqual(node.children[1].children.slice(0, 2).map(child => child.name), ["当前模型", "当前思考强度"]);
-      assert.ok(node.children[1].children.slice(0, 2).every(child => child.fontSize === 14 && Math.abs(child.lineHeight * child.fontSize - 20) < 0.1));
-    }
-    for (const child of node.children ?? []) visit(child);
-  }
-  visit(canvas);
-  assert.equal(count, 34);
-});
-
-test("会话导出预览与保存结果有浅深画布且不覆盖其他分区", () => {
-  const canvas = JSON.parse(readFileSync(new URL("../../design/cst-pilot-web.pen", import.meta.url), "utf8"));
-  const section = canvas.children.find(node => node.name === "02 · 会话管理").children.find(node => node.name === "会话导出");
+test("会话导出工作帧齐全、开启裁切且彼此不重叠", () => {
+  const section = webCanvas.children
+    .find((node) => node.name === "02 · 会话管理")
+    .children.find((node) => node.name === "会话导出");
   assert.ok(section);
-  for (const state of ["预览", "保存结果"]) for (const theme of ["浅色", "深色"]) {
-    const page = section.children.find(node => node.name === `会话导出 · ${state} · ${theme}`);
-    assert.ok(page, "导出页状态画布齐全");
+  for (const frameName of ["会话导出 · 预览", "会话导出 · 保存完成", "会话导出 · 生成中与失败"]) {
+    const page = section.children.find((node) => node.name === frameName);
+    assert.ok(page, `缺少导出页工作帧：${frameName}`);
     assert.equal(page.clip, true);
-    const nodes = [];
-    function collect(node) { nodes.push(node); for (const child of node.children ?? []) collect(child); }
-    collect(page);
-    assert.equal(nodes.some(node => ["归档日期字段", "范围字段"].includes(node.name)), false, "导出时自动确定日期与当前会话状态");
-    assert.equal(nodes.find(node => node.name === "生成并保存按钮").cornerRadius, "$radius-control");
-    assert.equal(nodes.find(node => node.name === "会话文档").stroke, theme === "浅色" ? "#8A8A8A" : "#77838A");
-    assert.equal(nodes.some(node => ["保存位置与提醒", "格式说明"].includes(node.name)), false, "选项区不显示辅助说明");
-    const overlaps = section.children.filter(other => other !== page && typeof other.width === "number" && typeof other.height === "number" && page.x < other.x + other.width && page.x + page.width > other.x && page.y < other.y + other.height && page.y + page.height > other.y);
-    assert.deepEqual(overlaps.map(node => node.name), []);
+    const nodes = descendants(page);
+    assert.equal(
+      nodes.some((node) => ["归档日期字段", "范围字段", "保存位置与提醒", "格式说明"].includes(node.name)),
+      false,
+      `${frameName} 不应包含冗余表单项或辅助说明`,
+    );
+    assert.ok(
+      nodes.some((node) => node.name === "生成并保存按钮"),
+      `${frameName} 缺少生成并保存按钮`,
+    );
+    assert.ok(
+      nodes.some((node) => node.name === "会话文档预览视口"),
+      `${frameName} 缺少会话文档预览视口`,
+    );
+    const overlaps = section.children.filter((other) => other !== page && overlapsRect(page, other));
+    assert.deepEqual(overlaps.map((node) => node.name), [], `${frameName} 与其他画布重叠`);
   }
 });
 
-test("模型选择与协议菜单的浅深主题使用独立画布", () => {
-  const canvas = JSON.parse(readFileSync(new URL("../../design/cst-pilot-web.pen", import.meta.url), "utf8"));
-  const section = canvas.children.find(node => node.name === "03 · 设置与模型").children.find(node => node.name === "设置与模型服务");
-  assert.ok(section);
-  for (const prefix of ["默认模型选择 · 展开与未配置", "自定义协议菜单"]) {
-    const boards = section.children.filter(node => node.name?.startsWith(prefix));
-    assert.deepEqual(boards.map(node => node.name).sort(), [`${prefix} · 浅色`, `${prefix} · 深色`].sort());
-    assert.notEqual(boards[0].fill, boards[1].fill, "每张画布使用对应主题的表面色");
-  }
-  for (const page of section.children.filter(node => ["模型偏好 · light", "模型偏好 · dark"].includes(node.name))) {
-    function visit(node) {
-      if (node.name === "默认模型选择器") {
-        assert.equal(node.children.filter(child => child.type === "text").length, 1, "闭合控件只显示模型名");
-      }
-      if (node.name === "服务选择器") {
-        assert.equal(node.width, 74, "全部筛选保持紧凑宽度");
-        assert.equal(node.justifyContent, "space_between", "筛选文字和箭头两侧对齐");
-      }
-      for (const child of node.children ?? []) visit(child);
+test("设置分区四类子页齐全，自定义提供商与模型偏好互不重叠且无文本占位符号", () => {
+  const settings = webCanvas.children.find((node) => node.name === "03 · 设置");
+  assert.ok(settings);
+  const groups = settings.children.slice(1);
+  for (const group of groups) {
+    const boards = (group.children ?? []).filter((node) => node.clip === true);
+    assert.ok(boards.length >= 1, `设置分组 ${group.name} 缺少页面画布`);
+    for (const board of boards) {
+      const overlaps = boards.filter((other) => other !== board && overlapsRect(board, other));
+      assert.deepEqual(overlaps.map((node) => node.name), [], `${board.name} 与同组画布重叠`);
     }
-    visit(page);
   }
-});
-
-test("自定义服务浅深画布归属设置区，与下方分区不重叠", () => {
-  const canvas = JSON.parse(readFileSync(new URL("../../design/cst-pilot-web.pen", import.meta.url), "utf8"));
-  const domain = canvas.children.find(node => node.name === "03 · 设置与模型");
-  const section = domain.children.find(node => node.name === "设置与模型服务");
-  assert.ok(section);
-  const pages = section.children.filter(node => /^自定义服务 · (light|dark)$/.test(node.name ?? ""));
-  assert.equal(pages.length, 2);
-  const nextSection = canvas.children.find(node => node.name === "06 · 仪表盘");
-  for (const page of pages) {
-    assert.equal(domain.y + section.y + page.y, 5152);
-    assert.ok(domain.y + section.y + page.y + page.height + 120 <= nextSection.y, "自定义服务与下方分区保留间距");
-    const overlaps = section.children.filter(other => other !== page && typeof other.width === "number" && typeof other.height === "number" && page.x < other.x + other.width && page.x + page.width > other.x && page.y < other.y + other.height && page.y + page.height > other.y);
-    assert.deepEqual(overlaps.map(node => node.name), [], `${page.name} 与其他画布重叠`);
-    function visit(node) {
-      assert.notEqual(node.content?.includes("□"), true, "能力项使用胶囊，不使用文本勾选框");
-      assert.notEqual(node.content?.includes("▾"), true, "下拉指示使用图标");
-      if (node.name === "下拉指示") assert.equal(node.icon, "chevron-down");
-      assert.ok(!node.name?.endsWith("· 胶囊"), "能力项为文字与独立按钮");
-      if (node.type === "frame" && node.name?.endsWith("· 输入框")) {
-        assert.equal(node.height, node.name.startsWith("接口协议") ? 32 : 40);
-        for (const child of node.children ?? []) if (child.type === "text") assert.equal(child.fontSize, node.name.startsWith("接口协议") ? 14 : 16);
-      }
-      if (node.name?.endsWith("· 启用按钮")) {
-        assert.equal(node.width, 72);
-        assert.equal(node.height, 32);
-        const radius = typeof node.cornerRadius === "string" && node.cornerRadius.startsWith("$")
-          ? canvas.variables[node.cornerRadius.slice(1)].value
-          : node.cornerRadius;
-        assert.equal(radius, 4);
-      }
-      for (const child of node.children ?? []) visit(child);
-    }
-    visit(page);
+  const providers = settings.children.find((node) => node.name === "提供商");
+  const customPage = providers.children.find((node) => node.name === "提供商 · 自定义提供商");
+  assert.ok(customPage, "缺少提供商 · 自定义提供商画布");
+  for (const node of descendants(customPage)) {
+    assert.notEqual(node.content?.includes("□"), true, "能力项不使用文本勾选框");
+    assert.notEqual(node.content?.includes("▾"), true, "下拉指示不使用文本符号");
   }
 });

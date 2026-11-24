@@ -90,9 +90,9 @@
 ## ADR-014：移除 WizTree，存储诊断改用纯 Rust MFT 与 Win32 IOCTL
 
 - **日期 / 状态**：`2026-11-24` · 已拍板（阶段 9.3 实施）
-- **结论**：Rust 发行移除 `WizTree`。并行 Win32 遍历兜底，过实盘门禁的提权 NTFS 用 `ntfs-ng` 读 `$MFT`；`disk` 优先 Win32 IOCTL，WMI 兜底。
-- **依据**：去许可与写盘风险，省 18.8 MB；本机隔离对照遍历快 6.6–40×，IOCTL 快 20–499×。
-- **放弃**：随 Rust 包发 WizTree；用 GPLv3 工具。
+- **结论**：移除 `WizTree`。Win32 并行遍历兜底，提权 NTFS 过门禁用 `ntfs-ng` 读 `$MFT`；`disk` 优先 IOCTL，WMI 兜底。
+- **依据**：去许可与写盘风险，减 18.8 MB；遍历快 6.6–40×，IOCTL 快 20–499×。
+- **放弃**：随包发 WizTree；用 GPLv3 工具。
 
 ## ADR-015：会话用量与缓存命中率改由只读分支接口计算，双端主动拉取
 

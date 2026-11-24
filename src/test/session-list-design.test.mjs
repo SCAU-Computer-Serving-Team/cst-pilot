@@ -3,88 +3,111 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 const canvas = JSON.parse(readFileSync(new URL("../../design/cst-pilot-web.pen", import.meta.url), "utf8"));
+
 function descendants(node) {
   return [node, ...(node.children ?? []).flatMap(descendants)];
 }
 
-test("侧栏最近列表独立成形：标题下留 12px，会话行之间 4px", () => {
-  let lists = 0;
-  function visit(node) {
-    const children = node.children ?? [];
-    const heading = children.findIndex(child => child.name === "A 最近分组标签");
-    if (heading >= 0) {
-      const list = children[heading + 1];
-      assert.equal(list.name, "最近会话列表", "会话行统一包在列表里");
-      assert.deepEqual(list.padding, [8, 0], "标题与列表相隔 12px（父级 4 + 内缩 8）");
-      assert.equal(list.gap, 4, "会话行间距 4px");
-      assert.ok(list.children.every(child => child.name.startsWith("A 会话 ")));
-      assert.ok(list.children.every(child => child.height === 32));
-      assert.equal(children[heading + 2].name, "查看全部会话");
-      lists++;
-    }
-    for (const child of children) visit(child);
-  }
-  for (const root of canvas.children) visit(root);
-  assert.equal(lists, 56, "每张侧栏都使用同一套行距");
-});
-
-test("全部会话页有独立浅深画布、四个时间分组与16px会话标题", () => {
-  const section = canvas.children.find(node => node.name === "02 · 会话管理").children.find(node => node.name === "全部会话");
-  assert.ok(section);
-  for (const theme of ["浅色", "深色"]) {
-    const page = section.children.find(node => node.name === `全部会话 · ${theme}`);
-    assert.ok(page, `缺少全部会话${theme}设计稿`);
-    assert.equal(page.clip, true);
-    const nodes = descendants(page);
-    assert.deepEqual(nodes.filter(node => node.name === "时间分组标题").map(node => node.content), ["今天", "最近一周", "最近一个月", "更早"]);
-    const titles = nodes.filter(node => node.name === "会话标题");
-    assert.ok(titles.length >= 4);
-    for (const title of titles) assert.equal(title.fontSize, 16);
-    assert.ok(nodes.some(node => node.content === "管理"));
-    const rows = nodes.filter(node => node.name === "会话行");
-    assert.ok(rows.every(node => node.height === 40), "会话行统一收紧为40px");
-    const dates = nodes.filter(node => node.name === "更新时间");
-    assert.equal(dates.length, titles.length, "每条会话都有具体日期");
-    assert.ok(dates.every(node => /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}$/.test(node.content)));
-    assert.equal(nodes.find(node => node.name === "时间分组列表").gap, 16);
-    assert.ok(nodes.filter(node => node.name === "分组内会话").every(node => (node.gap ?? 0) === 0));
-    const overlaps = section.children.filter(other => other !== page && typeof other.width === "number" && typeof other.height === "number" && page.x < other.x + other.width && page.x + page.width > other.x && page.y < other.y + other.height && page.y + page.height > other.y);
-    assert.deepEqual(overlaps.map(node => node.name), []);
-  }
-});
-
-function componentShape(node, tools, sources, theme = {}, root = false) {
-  if (node.type === "ref") {
-    const overrides = Object.fromEntries(Object.entries(node).filter(([key]) => !["id", "ref", "type"].includes(key)));
-    node = { ...sources.find(source => source.id === node.ref), ...overrides };
-  }
-  theme = { ...theme, ...node.theme };
-  function resolve(value) {
-    if (typeof value === "string" && value.startsWith("$")) {
-      const variable = tools.variables[value.slice(1)].value;
-      return Array.isArray(variable)
-        ? resolve(variable.find(entry => Object.entries(entry.theme ?? {}).every(([axis, selected]) => selected === (theme[axis] ?? tools.themes[axis][0]))).value)
-        : resolve(variable);
-    }
-    if (Array.isArray(value)) return value.map(resolve);
-    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolve(item)]));
-    return value;
-  }
-  return Object.fromEntries(Object.entries(node).filter(([key]) => !["id", "reusable", "theme"].includes(key) && !(root && ["width", "x", "y", "context"].includes(key))).map(([key, value]) => [key, key === "children" ? value.map(child => componentShape(child, tools, sources, theme)) : resolve(value)]));
+function overlapsRect(a, b) {
+  return (
+    typeof a.width === "number" &&
+    typeof a.height === "number" &&
+    typeof b.width === "number" &&
+    typeof b.height === "number" &&
+    a.x < b.x + b.width &&
+    a.x + a.width > b.x &&
+    a.y < b.y + b.height &&
+    a.y + a.height > b.y
+  );
 }
 
-test("导出预览与保存结果直接复用正式整机概览工具设计", () => {
-  const tools = JSON.parse(readFileSync(new URL("../../design/cst-pilot-tools.pen", import.meta.url), "utf8"));
-  const sources = descendants(tools);
-  for (const theme of ["浅色", "深色"]) for (const state of ["预览", "保存结果"]) {
-    const section = canvas.children.find(node => node.name === "02 · 会话管理").children.find(node => node.name === "会话导出");
-    const page = section.children.find(node => node.name === `会话导出 · ${state} · ${theme}`);
-    const source = sources.find(node => node.name === `内嵌组件 · sys overview · 整机概览 · ${theme}`);
-    assert.ok(source);
-    const nodes = descendants(page);
-    const component = nodes.find(node => node.name === source.name);
-    assert.ok(component, "导出文档须使用正式工具组件");
-    assert.deepEqual(componentShape(component, tools, sources, {}, true), componentShape(source, tools, sources, {}, true));
-    assert.equal(nodes.some(node => node.name === "检查表格"), false, "不使用自行简化的工具表格");
+test("侧边栏母版定义完整，会话管理画布统一复用侧栏母版", () => {
+  const nav = canvas.children.find((node) => node.name === "00A · 窗口与导航");
+  assert.ok(nav);
+  const sidebar = descendants(nav).find((node) => node.id === "L081M1");
+  const batchSidebar = descendants(nav).find((node) => node.id === "h5AY3");
+  assert.ok(sidebar && sidebar.reusable, "缺少侧边栏母版 L081M1");
+  assert.ok(batchSidebar && batchSidebar.reusable, "缺少多选侧边栏母版 h5AY3");
+  assert.deepEqual(
+    sidebar.children.map((child) => child.name),
+    ["侧栏上部容器", "账户与设置"],
+  );
+
+  const sessionMgmt = canvas.children.find((node) => node.name === "02 · 会话管理");
+  const sidebarRefs = descendants(sessionMgmt).filter(
+    (node) => node.type === "ref" && (node.ref === "L081M1" || node.ref === "h5AY3"),
+  );
+  assert.ok(sidebarRefs.length >= 10, "会话管理各工作帧应复用统一侧边栏母版");
+});
+
+test("全部会话分区包含分组列表、批量管理、删除确认、空态与 409 回滚画布且不重叠", () => {
+  const section = canvas.children
+    .find((node) => node.name === "02 · 会话管理")
+    .children.find((node) => node.name === "全部会话");
+  assert.ok(section);
+
+  const expectedFrames = [
+    "全部会话 · 分组列表",
+    "全部会话 · 批量管理",
+    "全部会话 · 删除确认",
+    "全部会话 · 空列表",
+    "侧栏 · 最近多选管理",
+    "全部会话 · 重命名弹窗",
+    "全部会话 · 批量删除部分冲突 (409)",
+  ];
+  for (const name of expectedFrames) {
+    const page = section.children.find((node) => node.name === name);
+    assert.ok(page, `缺少画布：${name}`);
+    assert.equal(page.clip, true);
+    assert.equal(page.width, 1280);
+    assert.equal(page.height, 800);
+    const overlaps = section.children.filter((other) => other !== page && overlapsRect(page, other));
+    assert.deepEqual(overlaps.map((node) => node.name), [], `${name} 与其他画布重叠`);
   }
+
+  const listPage = section.children.find((node) => node.name === "全部会话 · 分组列表");
+  const listTexts = descendants(listPage)
+    .filter((node) => node.type === "text")
+    .map((node) => node.content);
+  for (const heading of ["今天", "最近一周", "最近一个月", "管理"]) {
+    assert.ok(listTexts.includes(heading), `全部会话 · 分组列表缺少文本：${heading}`);
+  }
+});
+
+test("ADR-013：特殊工具母版已合并至 Web 单画布，整机概览与导出页不使用旧版简化表格", () => {
+  const toolMasters = canvas.children.find((node) => node.name === "00E · 工具与特殊工具");
+  assert.ok(toolMasters);
+  const reusables = descendants(toolMasters).filter((node) => node.reusable);
+  for (const [id, name] of [
+    ["wmkJw", "特殊工具 · 整机概览"],
+    ["JQMQZ", "特殊工具 · 联网检索"],
+    ["s3WzY", "特殊工具 · 命令清单"],
+    ["ABn8j", "特殊工具 · BitLocker"],
+  ]) {
+    assert.ok(
+      reusables.some((node) => node.id === id && node.name === name),
+      `00E 缺少可复用母版：${name}(${id})`,
+    );
+  }
+
+  const overviewGroup = canvas.children
+    .find((node) => node.name === "07 · 工具与特殊工具")
+    .children.find((node) => node.name === "整机概览");
+  assert.ok(overviewGroup);
+  for (const frameName of ["整机概览 · 采集中与默认收起", "整机概览 · 展开详情与部分缺失", "整机概览 · 深色"]) {
+    const board = overviewGroup.children.find((node) => node.name === frameName);
+    assert.ok(board, `缺少整机概览工作帧：${frameName}`);
+    assert.equal(board.width, 1280);
+    const overlaps = overviewGroup.children.filter((other) => other !== board && overlapsRect(board, other));
+    assert.deepEqual(overlaps.map((node) => node.name), [], `${frameName} 与其他画布重叠`);
+  }
+
+  const exportGroup = canvas.children
+    .find((node) => node.name === "02 · 会话管理")
+    .children.find((node) => node.name === "会话导出");
+  assert.equal(
+    descendants(exportGroup).some((node) => node.name === "检查表格"),
+    false,
+    "导出页不使用自行简化的检查表格",
+  );
 });

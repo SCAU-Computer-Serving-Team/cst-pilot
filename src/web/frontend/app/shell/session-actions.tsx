@@ -190,7 +190,7 @@ export function SessionActionsOverlay({ actions }: { actions: ReturnType<typeof 
 						style={{ left: menu.x, top: menu.y }}
 						onKeyDown={(event) => {
 							if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-							if (event.key === "Tab") {
+							if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey) {
 								const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
 								if (!items.length) return;
 								event.preventDefault();

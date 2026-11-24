@@ -3,6 +3,7 @@ import { type ComponentProps, createContext, type ReactNode, useContext, useEffe
 import { Link, useLocation, useNavigate } from "react-router";
 import { useGlobalEvents } from "../data/web-state";
 import { Notification } from "../shell/notification";
+import { useWorkspaceShell } from "../shell/workspace-shell-context";
 import { loadSetting, settingReady } from "./settings-resource-cache";
 
 const Feedback = createContext<(message?: string, kind?: "success" | "warning") => void>(() => {});
@@ -127,22 +128,26 @@ export function SettingsHeading({
 	back?: boolean;
 }) {
 	const navigate = useNavigate();
+	const shell = useWorkspaceShell();
 	useEffect(() => {
-		if (!back) return;
+		if (!back || shell?.appActive || shell?.overlay) return;
 		const onEscape = (event: KeyboardEvent) => {
 			if (
 				event.key !== "Escape" ||
 				event.defaultPrevented ||
 				event.isComposing ||
-				document.querySelector('dialog[open], [role="listbox"], [role="tooltip"]')
+				event.keyCode === 229 ||
+				document.querySelector(
+					'.palette-scrim, .standby-scrim, .summary-scrim, dialog[open], .session-menu, .popover:not([data-exiting="true"]), .select__popover:not([data-exiting="true"]), [data-slot="popover-dialog"], [role="listbox"], [role="tooltip"]',
+				)
 			)
 				return;
 			event.preventDefault();
 			void navigate("/settings", { viewTransition: true });
 		};
-		document.addEventListener("keydown", onEscape);
-		return () => document.removeEventListener("keydown", onEscape);
-	}, [back, navigate]);
+		window.addEventListener("keydown", onEscape);
+		return () => window.removeEventListener("keydown", onEscape);
+	}, [back, navigate, shell?.appActive, shell?.overlay]);
 	return (
 		<>
 			{back && (

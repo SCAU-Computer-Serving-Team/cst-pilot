@@ -177,7 +177,11 @@ export function ProviderConfigurationForm({
 											placeholder={provider.type === "api_key" ? "••••••••••••••••" : "输入 API key"}
 											disabled={removing}
 											onKeyDown={(event) => {
-												if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+												if (
+													event.key === "Enter" &&
+													!event.nativeEvent.isComposing &&
+													event.nativeEvent.keyCode !== 229
+												) {
 													event.preventDefault();
 													saveKey();
 												}

@@ -1,5 +1,5 @@
 // 颜色常量子集测试
-// 扫描 cst-pilot-web.pen 与 cst-pilot-tools.pen 中出现的全部颜色常量，断言每个都满足以下二者之一：
+// 扫描 cst-pilot-desktop.pen 与 cst-pilot-web.pen 中出现的全部颜色常量，断言每个都满足以下二者之一：
 //   1. 在 cst-pilot-colors.pen 中定义（12 步色阶、语义色、首页 Blue hour 色表等）；
 //   2. 在下方 EXCEPTIONS 清单中，且带有出处（DESIGN.md 例外章节等）。
 // 新增颜色时：优先取色阶画布已定义的步；确需新色时在 EXCEPTIONS 登记出处。
@@ -15,7 +15,6 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const penPaths = [
   "design/cst-pilot-desktop.pen",
   "design/cst-pilot-web.pen",
-  "design/cst-pilot-tools.pen",
 ].map((p) => path.join(root, p));
 const colorsPenPath = path.join(root, "design/cst-pilot-colors.pen");
 

@@ -32,7 +32,17 @@ export function resolveDialogTabTarget<T>(
 
 /** 将 Tab / Shift+Tab 严格循环限制在原生模态 <dialog> 内部，防止焦点逃逸到 document.body。 */
 export function trapDialogTab(event: KeyboardEvent, dialog: HTMLDialogElement | null): boolean {
-	if (event.key !== "Tab" || event.isComposing || event.keyCode === 229 || !dialog || !dialog.open) return false;
+	if (
+		event.key !== "Tab" ||
+		event.ctrlKey ||
+		event.altKey ||
+		event.metaKey ||
+		event.isComposing ||
+		event.keyCode === 229 ||
+		!dialog ||
+		!dialog.open
+	)
+		return false;
 	const items = focusableElements(dialog);
 	const active =
 		document.activeElement instanceof HTMLElement && dialog.contains(document.activeElement)
