@@ -36,7 +36,15 @@ type Registry = {
 const NotificationRegistry = createContext<Registry | null>(null);
 
 /** Keep the surface mounted through its exit, including route-owned and recovery notifications. */
-export function NotificationRegion({ children, contentInset = 0 }: { children: ReactNode; contentInset?: number }) {
+export function NotificationRegion({
+	children,
+	contentInset = 0,
+	inert = false,
+}: {
+	children: ReactNode;
+	contentInset?: number;
+	inert?: boolean;
+}) {
 	const [notices, setNotices] = useState<Notice[]>([]);
 	const registry = useMemo<Registry>(
 		() => ({
@@ -71,7 +79,12 @@ export function NotificationRegion({ children, contentInset = 0 }: { children: R
 	return (
 		<NotificationRegistry value={registry}>
 			{children}
-			<div className="notification-region" style={{ "--notification-inset": `${contentInset}px` } as CSSProperties}>
+			<div
+				className="notification-region"
+				inert={inert || undefined}
+				aria-hidden={inert || undefined}
+				style={{ "--notification-inset": `${contentInset}px` } as CSSProperties}
+			>
 				{notices.map((notice) => (
 					<NotificationSurface key={notice.id} notice={notice} registry={registry} />
 				))}
@@ -150,7 +163,7 @@ function NotificationSurface({ notice, registry }: { notice: Notice; registry: R
 			id={id}
 			ref={element}
 			style={notice.exitStyle}
-			className={`notification ${className}`}
+			className={`tier-2-glass notification ${className}`}
 			aria-label={label}
 			aria-live={exiting ? "off" : "polite"}
 			aria-atomic="true"

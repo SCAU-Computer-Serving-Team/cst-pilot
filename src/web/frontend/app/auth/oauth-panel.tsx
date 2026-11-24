@@ -1,9 +1,10 @@
-import { Button, Input, Label, ListBox, Select, TextField } from "@heroui/react";
-import { ExternalLink } from "lucide-react";
+import { Input, Label, ListBox, Select, TextField } from "@heroui/react";
+import { ChevronDown, ExternalLink, RefreshCw } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { type FormEvent, type MouseEvent, useEffect, useRef, useState } from "react";
 import { type OauthPrompt, respondOauthLogin } from "../data/api";
 import { usePanelDismiss } from "../shell/panel-dismiss";
+import { useWorkspaceShell } from "../shell/workspace-shell-context";
 import { finishAuthorization, hasLocalCallback, openAuthorization } from "./oauth-window";
 import { CSTOA_PROVIDER } from "./providers";
 import { useOAuth } from "./use-oauth";
@@ -28,7 +29,11 @@ function PromptField({
 	const [value, setValue] = useState("");
 	const [choiceOpen, setChoiceOpen] = useState(false);
 	const choiceTrigger = useRef<HTMLButtonElement>(null);
+	const shell = useWorkspaceShell();
 	usePanelDismiss(choiceOpen, () => setChoiceOpen(false), undefined, choiceTrigger);
+	useEffect(() => {
+		if (shell?.appActive) setChoiceOpen(false);
+	}, [shell?.appActive]);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
 	async function submit(event: FormEvent<HTMLFormElement>) {
@@ -61,15 +66,20 @@ function PromptField({
 						<Select.Value>
 							{prompt.options.find((option) => option.id === value)?.label ?? "选择账号或组织"}
 						</Select.Value>
+						<ChevronDown size={14} aria-hidden="true" />
 					</Select.Trigger>
-					<Select.Popover className="login-provider-popover">
-						<ListBox className="login-provider-list">
+					<Select.Popover
+						className="tier-2-glass tier-2-menu login-provider-popover"
+						placement="bottom start"
+						offset={6}
+					>
+						<ListBox className="tier-2-menu-list login-provider-list">
 							{prompt.options.map((option) => (
 								<ListBox.Item
 									key={option.id}
 									id={option.id}
 									textValue={option.label}
-									className="login-provider-option"
+									className="menu-row login-provider-option"
 								>
 									{option.label}
 								</ListBox.Item>
@@ -95,18 +105,18 @@ function PromptField({
 				</p>
 			)}
 			<div className="provider-form-actions">
-				{standalone ? (
-					<Button type="button" variant="ghost" className="provider-cancel" onPress={onCancel}>
+				{standalone || (method === "api_key" && onCancel) ? (
+					<button type="button" className="btn-ghost provider-cancel" onClick={onCancel}>
 						取消
-					</Button>
+					</button>
 				) : null}
-				<Button
+				<button
 					type="submit"
-					className="login-submit"
-					isDisabled={busy || (prompt.type !== "text" && !value.trim())}
+					className="tier-1-btn-primary login-submit"
+					disabled={busy || (prompt.type !== "text" && !value.trim())}
 				>
 					{busy ? "正在提交…" : "继续"}
-				</Button>
+				</button>
 			</div>
 		</form>
 	);
@@ -158,7 +168,14 @@ export function OAuthPanel({
 	const [clock, setClock] = useState(() => Date.now());
 	useEffect(() => {
 		if (!expiresAt || status.state !== "pending") return;
-		const timer = window.setInterval(() => setClock(Date.now()), 1000);
+		const now = Date.now();
+		setClock(now);
+		if (expiresAt <= now) return;
+		const timer = window.setInterval(() => {
+			const tick = Date.now();
+			setClock(tick);
+			if (expiresAt <= tick) window.clearInterval(timer);
+		}, 1000);
 		return () => window.clearInterval(timer);
 	}, [expiresAt, status.state]);
 	const remaining = expiresAt ? Math.max(0, Math.ceil((expiresAt - clock) / 1000)) : 0;
@@ -166,6 +183,17 @@ export function OAuthPanel({
 	const terminal = status.state === "failed" || status.state === "cancelled" || expired;
 	const error = connectionError || status.error;
 	const team = method === "oauth" && providerId === CSTOA_PROVIDER;
+	const returnToApiKeyForm = method === "api_key" && !!onCancel;
+	function cancelFlow() {
+		if (returnToApiKeyForm) {
+			void cancel();
+			onCancel();
+		} else if (standalone) {
+			onCancel?.();
+		} else {
+			void cancel();
+		}
+	}
 	return (
 		<div className={`login-fields ${team || status.deviceCode ? "login-fields--qr" : "login-fields--oauth"}`}>
 			{error && (
@@ -175,7 +203,7 @@ export function OAuthPanel({
 			)}
 			{status.state === "idle" && (
 				<output className="login-message login-message--inline">
-					{team ? "正在获取二维码…" : "正在获取授权信息…"}
+					{team ? "正在获取二维码…" : method === "api_key" ? "正在验证密钥…" : "正在获取授权信息…"}
 				</output>
 			)}
 			{terminal ? (
@@ -185,9 +213,14 @@ export function OAuthPanel({
 							{expired ? "二维码已过期" : status.state === "cancelled" ? "已取消" : "登录未完成"}
 						</output>
 					)}
-					<Button type="button" className="login-submit" isDisabled={busy} onPress={() => void restart()}>
-						{team ? "重新获取二维码" : "重新授权"}
-					</Button>
+					<button
+						type="button"
+						className="tier-1-btn-primary login-action-btn"
+						disabled={busy}
+						onClick={() => (returnToApiKeyForm ? onCancel() : void restart())}
+					>
+						{team ? "重新获取二维码" : returnToApiKeyForm ? "重新输入密钥" : "重新授权"}
+					</button>
 				</>
 			) : (
 				<>
@@ -196,35 +229,55 @@ export function OAuthPanel({
 							<div className="login-qr-box">
 								<QRCodeSVG
 									value={status.deviceCode.verificationUri}
-									size={168}
+									size={148}
 									level="M"
 									bgColor="#ffffff"
-									fgColor="#1a2024"
+									fgColor="#111111"
 									title={team ? "OA 授权二维码" : `${providerName} 授权二维码`}
 								/>
 							</div>
-							<p className="login-qr-hint">{team ? "手机扫码，在 OA 页面完成授权" : "扫码授权"}</p>
-							{!team && <p className="login-qr-code">授权码：{status.deviceCode.userCode}</p>}
-							<p className="login-qr-countdown">
-								二维码剩余 {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}
-							</p>
-							{!team && (
-								<a
-									onClick={authorize}
-									className="oauth-auth-link"
-									href={status.deviceCode.verificationUri}
-									target="_blank"
-									rel="noopener noreferrer"
-								>
-									打开授权页面 <ExternalLink size={14} aria-hidden="true" />
-								</a>
+							{team ? (
+								<div className="login-qr-status">
+									<span className="login-qr-dot" aria-hidden="true" />
+									<span className="login-qr-countdown">
+										剩余 {String(Math.floor(remaining / 60)).padStart(2, "0")}:
+										{String(remaining % 60).padStart(2, "0")}
+									</span>
+									<span className="login-qr-sep" aria-hidden="true" />
+									<button
+										type="button"
+										className="login-qr-refresh"
+										disabled={busy}
+										onClick={() => void restart()}
+									>
+										<RefreshCw size={12} aria-hidden="true" />
+										刷新
+									</button>
+								</div>
+							) : (
+								<>
+									<p className="login-qr-hint">扫码授权</p>
+									<p className="login-qr-code">授权码：{status.deviceCode.userCode}</p>
+									<p className="login-qr-countdown">
+										二维码剩余 {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, "0")}
+									</p>
+									<a
+										onClick={authorize}
+										className="tier-1-btn-outline oauth-auth-link"
+										href={status.deviceCode.verificationUri}
+										target="_blank"
+										rel="noopener noreferrer"
+									>
+										打开授权页面 <ExternalLink size={14} aria-hidden="true" />
+									</a>
+								</>
 							)}
 						</div>
 					)}
 					{status.authUrl && (
 						<div className="oauth-authorization">
 							<a
-								className="oauth-auth-link"
+								className="tier-1-btn-outline oauth-auth-link"
 								onClick={authorize}
 								href={status.authUrl.url}
 								target="_blank"
@@ -257,18 +310,20 @@ export function OAuthPanel({
 								onAccepted={sync}
 								standalone={standalone}
 								method={method}
-								onCancel={onCancel}
+								onCancel={cancelFlow}
 							/>
 						))}
 					{status.state === "pending" && !status.prompt && !status.deviceCode && (
 						<output className="login-message login-message--inline">
-							{status.authUrl ? "等待授权…" : status.message || "等待授权…"}
+							{status.authUrl
+								? "等待授权…"
+								: status.message || (method === "api_key" ? "正在验证密钥…" : "等待授权…")}
 						</output>
 					)}
 					{status.links?.map((link) => (
 						<a
 							key={link.url}
-							className="oauth-auth-link"
+							className="tier-1-btn-outline oauth-auth-link"
 							href={link.url}
 							target="_blank"
 							rel="noopener noreferrer"
@@ -276,23 +331,20 @@ export function OAuthPanel({
 							{link.label || "查看授权说明"}
 						</a>
 					))}
-					{status.state === "pending" && (!standalone || !status.prompt || localCallback) && (
-						<div className="login-qr-actions">
-							{team && (
-								<Button type="button" variant="ghost" isDisabled={busy} onPress={() => void restart()}>
-									刷新二维码
-								</Button>
-							)}
-							<Button
-								type="button"
-								variant="ghost"
-								isDisabled={busy}
-								onPress={() => (standalone ? onCancel?.() : void cancel())}
-							>
-								取消
-							</Button>
-						</div>
-					)}
+					{status.state === "pending" &&
+						(!standalone || !status.prompt || localCallback) &&
+						(!team || !status.deviceCode) && (
+							<div className="login-qr-actions">
+								{team && (
+									<button type="button" className="btn-ghost" disabled={busy} onClick={() => void restart()}>
+										刷新二维码
+									</button>
+								)}
+								<button type="button" className="btn-ghost" disabled={busy} onClick={cancelFlow}>
+									取消
+								</button>
+							</div>
+						)}
 				</>
 			)}
 		</div>

@@ -1,4 +1,4 @@
-import { Button, ListBox, Select } from "@heroui/react";
+import { ListBox, Select } from "@heroui/react";
 import { Check, ChevronDown, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
@@ -6,6 +6,8 @@ import { apiJson } from "../data/api";
 import { commonOutputLimit, DEFAULT_CONTEXT_WINDOW, FALLBACK_MAX_TOKENS } from "../settings/custom-model-defaults";
 import { SettingsHeading, SettingsSection, useSettingsFeedback } from "../settings/settings-frame";
 import { useAnimatedHeight } from "../settings/use-animated-height";
+import { usePanelDismiss } from "../shell/panel-dismiss";
+import { useWorkspaceShell } from "../shell/workspace-shell-context";
 
 type ModelEntry = {
 	clientId: string;
@@ -63,6 +65,13 @@ export default function CustomModelService() {
 	const [working, setWorking] = useState(false);
 	const [error, setError] = useState("");
 	const [confirming, setConfirming] = useState(false);
+	const [protocolOpen, setProtocolOpen] = useState(false);
+	const protocolTriggerRef = useRef<HTMLButtonElement>(null);
+	const shell = useWorkspaceShell();
+	usePanelDismiss(protocolOpen, () => setProtocolOpen(false), undefined, protocolTriggerRef);
+	useEffect(() => {
+		if (shell?.appActive) setProtocolOpen(false);
+	}, [shell?.appActive]);
 	const editedOutputLimits = useRef(new Set<string>());
 	const modelList = useAnimatedHeight(`${loading}:${form.models.length}`);
 	useEffect(() => {
@@ -207,22 +216,30 @@ export default function CustomModelService() {
 								<Select
 									aria-label="接口协议"
 									className="settings-custom-select"
+									isOpen={protocolOpen}
+									onOpenChange={setProtocolOpen}
 									selectedKey={form.api}
 									onSelectionChange={(value) => {
 										if (value) setForm({ ...form, api: String(value) });
 									}}
 								>
-									<Select.Trigger>
+									<Select.Trigger ref={protocolTriggerRef}>
 										<Select.Value>{protocols.find(([id]) => id === form.api)?.[1]}</Select.Value>
 										<ChevronDown size={14} aria-hidden="true" />
 									</Select.Trigger>
 									<Select.Popover
 										placement="bottom start"
-										className="login-provider-popover settings-protocol-popover"
+										offset={6}
+										className="tier-2-glass tier-2-menu settings-protocol-popover"
 									>
-										<ListBox aria-label="接口协议">
+										<ListBox aria-label="接口协议" className="tier-2-menu-list">
 											{protocols.map(([id, title]) => (
-												<ListBox.Item key={id} id={id} textValue={title} className="login-provider-option">
+												<ListBox.Item
+													key={id}
+													id={id}
+													textValue={title}
+													className="menu-row login-provider-option"
+												>
 													<span className="login-provider-option-name">{title}</span>
 													<span className="login-provider-check">
 														<Check size={14} aria-hidden="true" />
@@ -264,7 +281,7 @@ export default function CustomModelService() {
 										aria-label={showKey ? "隐藏密钥" : "显示密钥"}
 										onClick={() => setShowKey(!showKey)}
 									>
-										{showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+										{showKey ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
 									</button>
 								</span>
 								<small>密钥保存在本地模型配置中，界面不会回显。</small>
@@ -280,6 +297,7 @@ export default function CustomModelService() {
 										{form.models.length > 1 && (
 											<button
 												type="button"
+												className="btn-icon sm-28"
 												aria-label={`移除模型 ${index + 1}`}
 												onClick={() =>
 													setForm((current) => ({
@@ -288,7 +306,7 @@ export default function CustomModelService() {
 													}))
 												}
 											>
-												<Trash2 size={16} />
+												<Trash2 size={16} aria-hidden="true" />
 											</button>
 										)}
 									</div>
@@ -364,26 +382,33 @@ export default function CustomModelService() {
 									</div>
 								</div>
 							))}
-							<Button
+							<button
 								type="button"
-								variant="ghost"
-								className="settings-action"
-								isDisabled={form.models.length >= 32}
-								onPress={() =>
+								className="tier-1-btn-outline settings-action"
+								disabled={form.models.length >= 32}
+								onClick={() =>
 									setForm((current) => ({
 										...current,
 										models: [...current.models, emptyModel(defaultMaxTokens)],
 									}))
 								}
 							>
-								<Plus size={14} /> 添加模型
-							</Button>
+								<Plus size={14} aria-hidden="true" /> 添加模型
+							</button>
 						</div>
 					</SettingsSection>
 					<div className="settings-custom-actions">
-						<Button type="submit" className="settings-add-action" isDisabled={working}>
+						<button
+							type="button"
+							className="tier-1-btn-outline"
+							disabled={working}
+							onClick={() => void navigate("/settings", { viewTransition: true })}
+						>
+							取消
+						</button>
+						<button type="submit" className="tier-1-btn-primary" disabled={working}>
 							{working ? "正在保存…" : editing ? "保存修改" : "添加服务"}
-						</Button>
+						</button>
 					</div>
 					{editing && (
 						<SettingsSection title="移除服务">
@@ -391,17 +416,27 @@ export default function CustomModelService() {
 								<span>从本地模型配置移除此服务和模型。</span>
 								{confirming ? (
 									<div className="settings-custom-confirm">
-										<Button type="button" variant="ghost" onPress={() => setConfirming(false)}>
+										<button
+											type="button"
+											className="tier-1-btn-outline"
+											disabled={working}
+											onClick={() => setConfirming(false)}
+										>
 											取消
-										</Button>
-										<Button type="button" variant="danger" isDisabled={working} onPress={() => void remove()}>
+										</button>
+										<button
+											type="button"
+											className="tier-1-btn-danger solid-danger"
+											disabled={working}
+											onClick={() => void remove()}
+										>
 											确认移除
-										</Button>
+										</button>
 									</div>
 								) : (
-									<Button type="button" variant="ghost" onPress={() => setConfirming(true)}>
+									<button type="button" className="tier-1-btn-danger" onClick={() => setConfirming(true)}>
 										移除服务
-									</Button>
+									</button>
 								)}
 							</div>
 						</SettingsSection>

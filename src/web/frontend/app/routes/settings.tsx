@@ -5,6 +5,7 @@ import { Outlet, useLocation } from "react-router";
 import { useGlobalEvents } from "../data/web-state";
 import { SettingsFeedback, SettingsLink } from "../settings/settings-frame";
 import { invalidateSetting, preloadSettings, settingsPaths } from "../settings/settings-resource-cache";
+import { SidebarHeaderToggle } from "../shell/workspace-shell-context";
 
 const tabs = [
 	{ to: "/settings/general", label: "常规" },
@@ -55,7 +56,8 @@ export default function Settings() {
 			}
 		>
 			<header className="chat-header settings-header">
-				<SettingsIcon size={22} aria-hidden="true" />
+				<SidebarHeaderToggle />
+				<SettingsIcon size={16} aria-hidden="true" />
 				<h1>设置</h1>
 			</header>
 			<SettingsFeedback>

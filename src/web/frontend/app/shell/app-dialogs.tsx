@@ -1,16 +1,25 @@
+import { TriangleAlert } from "lucide-react";
 import { type FormEvent, type RefObject, useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useDialogFocusTrap } from "./dialog-focus";
 import { ErrorNotice } from "./error-notice";
+import { readDurationMs, readEasing } from "./motion-tokens";
+import { useWorkspaceShell } from "./workspace-shell-context";
 
-function tokenDurationMs(element: HTMLElement, token: string, fallback: number): number {
-	const raw = getComputedStyle(element).getPropertyValue(token).trim();
-	const parsed = Number.parseFloat(raw);
-	return Number.isFinite(parsed) ? parsed * (raw.endsWith("ms") ? 1 : 1000) : fallback;
+/** 软件端通道接管（appActive）时立即同步关闭原生顶层 <dialog> 并卸载，避免盖在待机遮罩之上。 */
+export function useStandbyDialogClose(dialogRef: RefObject<HTMLDialogElement | null>, onDismiss: () => void): void {
+	const shell = useWorkspaceShell();
+	const dismissRef = useRef(onDismiss);
+	dismissRef.current = onDismiss;
+	useEffect(() => {
+		if (!shell?.appActive) return;
+		if (dialogRef.current?.open) dialogRef.current.close();
+		dismissRef.current();
+	}, [shell?.appActive, dialogRef]);
 }
 
 /** 执行模态弹窗 150ms (--duration-quick) 关闭过渡后再卸载；支持入场中途打断与减少动态即时关闭。 */
-function useAnimatedDialogClose(dialogRef: RefObject<HTMLDialogElement | null>) {
+export function useAnimatedDialogClose(dialogRef: RefObject<HTMLDialogElement | null>) {
 	const [closing, setClosing] = useState(false);
 	const mounted = useRef(false);
 	const closingRef = useRef(false);
@@ -32,24 +41,23 @@ function useAnimatedDialogClose(dialogRef: RefObject<HTMLDialogElement | null>) 
 			setClosing(true);
 			const modal = dialogRef.current;
 			const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
-			if (!modal || !modal.open || motion.matches) {
+			if (!modal?.open || motion.matches) {
 				if (modal?.open) modal.close();
 				onDone();
 				return;
 			}
 			const style = getComputedStyle(modal);
 			const startOpacity = style.opacity || "1";
-			const startTransform = style.transform === "none" ? "translateY(0px) scale(1)" : style.transform;
-			const distance = style.getPropertyValue("--distance-base").trim() || "8px";
-			const scale = style.getPropertyValue("--scale-large").trim() || "0.96";
-			const easing = style.getPropertyValue("--ease-smooth-out").trim() || "cubic-bezier(0.22, 1, 0.36, 1)";
-			const duration = tokenDurationMs(modal, "--duration-quick", 150);
+			const startTransform = style.transform === "none" ? "scale(1)" : style.transform;
+			const scale = style.getPropertyValue("--scale-modal").trim() || "0.96";
+			const easing = readEasing(modal);
+			const duration = readDurationMs(modal, "--duration-quick", 150);
 
 			modal.dataset.closing = "true";
 			const animation = modal.animate(
 				[
 					{ opacity: startOpacity, transform: startTransform },
-					{ opacity: 0, transform: `translateY(${distance}) scale(${scale})` },
+					{ opacity: 0, transform: `scale(${scale})` },
 				],
 				{ duration, easing, fill: "forwards" },
 			);
@@ -79,12 +87,19 @@ function useAnimatedDialogClose(dialogRef: RefObject<HTMLDialogElement | null>) 
 	return { requestClose, closing };
 }
 
-function restorePreviousFocus(element: HTMLDialogElement | null, previous: Element | null): void {
+export function restorePreviousFocus(element: HTMLDialogElement | null, previous: Element | null): void {
 	const active = document.activeElement;
 	const focusRemainedInDialog = !active || active === document.body || Boolean(element?.contains(active));
 	if (element?.open) element.close();
-	if (focusRemainedInDialog && previous instanceof HTMLElement && previous !== document.body && previous.isConnected) {
-		previous.focus();
+	if (
+		focusRemainedInDialog &&
+		!document.querySelector(".standby-scrim") &&
+		previous instanceof HTMLElement &&
+		previous !== document.body &&
+		previous.isConnected &&
+		!previous.closest("[inert]")
+	) {
+		previous.focus({ preventScroll: true });
 	}
 }
 
@@ -113,6 +128,7 @@ export function ConfirmDialog({
 	const descId = useId();
 	const { requestClose, closing } = useAnimatedDialogClose(dialog);
 	useDialogFocusTrap(dialog, cancel);
+	useStandbyDialogClose(dialog, onCancel);
 	useEffect(() => {
 		const previous = document.activeElement;
 		const element = dialog.current;
@@ -123,25 +139,34 @@ export function ConfirmDialog({
 	return createPortal(
 		<dialog
 			ref={dialog}
-			className="exit-dialog confirm-dialog"
+			className="tier-3-dialog exit-dialog confirm-dialog"
 			aria-labelledby={titleId}
 			aria-describedby={descId}
 			onCancel={(event) => {
 				event.preventDefault();
-				if (!busy) requestClose(onCancel);
+				if (!busy && !closing) requestClose(onCancel);
 			}}
 		>
-			<h2 id={titleId}>{title}</h2>
+			<div className={`dialog-title-row ${danger ? "dialog-title-row--danger" : "dialog-title-row--info"}`}>
+				{danger && <TriangleAlert size={16} aria-hidden="true" />}
+				<h2 id={titleId}>{title}</h2>
+			</div>
 			<p id={descId} className="exit-description">
 				{description}
 			</p>
 			<div className="exit-actions">
-				<button type="button" ref={cancel} disabled={busy || closing} onClick={() => requestClose(onCancel)}>
+				<button
+					type="button"
+					ref={cancel}
+					className="tier-1-btn-outline"
+					disabled={busy || closing}
+					onClick={() => requestClose(onCancel)}
+				>
 					{cancelLabel}
 				</button>
 				<button
 					type="button"
-					className={danger ? "exit-confirm" : "dialog-primary"}
+					className={danger ? "tier-1-btn-danger solid-danger exit-confirm" : "tier-1-btn-primary dialog-primary"}
 					disabled={busy || closing}
 					onClick={() => requestClose(onConfirm)}
 				>
@@ -170,6 +195,7 @@ export function SessionRenameDialog({
 	const [error, setError] = useState("");
 	const { requestClose, closing } = useAnimatedDialogClose(dialog);
 	useDialogFocusTrap(dialog, input);
+	useStandbyDialogClose(dialog, onCancel);
 	useEffect(() => {
 		const previous = document.activeElement;
 		const element = dialog.current;
@@ -201,14 +227,16 @@ export function SessionRenameDialog({
 	return createPortal(
 		<dialog
 			ref={dialog}
-			className="exit-dialog session-rename-dialog"
+			className="tier-3-dialog exit-dialog session-rename-dialog"
 			aria-labelledby={titleId}
 			onCancel={(event) => {
 				event.preventDefault();
-				if (!busy) requestClose(onCancel);
+				if (!busy && !closing) requestClose(onCancel);
 			}}
 		>
-			<h2 id={titleId}>重命名会话</h2>
+			<div className="dialog-title-row">
+				<h2 id={titleId}>重命名会话</h2>
+			</div>
 			<form className="dialog-form" onSubmit={(event) => void submit(event)}>
 				<input
 					ref={input}
@@ -226,10 +254,19 @@ export function SessionRenameDialog({
 				/>
 				{error && <ErrorNotice message={error} />}
 				<div className="exit-actions">
-					<button type="button" disabled={busy || closing} onClick={() => requestClose(onCancel)}>
+					<button
+						type="button"
+						className="tier-1-btn-outline"
+						disabled={busy || closing}
+						onClick={() => requestClose(onCancel)}
+					>
 						取消
 					</button>
-					<button type="submit" className="dialog-primary" disabled={busy || closing || !name.trim()}>
+					<button
+						type="submit"
+						className="tier-1-btn-primary dialog-primary"
+						disabled={busy || closing || !name.trim()}
+					>
 						{busy ? "正在保存…" : "保存"}
 					</button>
 				</div>

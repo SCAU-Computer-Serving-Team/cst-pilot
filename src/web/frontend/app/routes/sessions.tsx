@@ -1,12 +1,13 @@
-import { Ellipsis, ListChecks, MessagesSquare, Trash2 } from "lucide-react";
+import { Ellipsis, ListChecks, MessagesSquare, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { sampleSessions } from "../shell/sample-sessions";
 import { SessionActionsOverlay, useSessionActions } from "../shell/session-actions";
 import { SessionEntry } from "../shell/session-entry";
 import { groupSessions } from "../shell/session-list";
 import { SessionManagementToolbar } from "../shell/session-management";
 import { useWorkspaceSessions } from "../shell/sessions-context";
+import { SidebarHeaderToggle } from "../shell/workspace-shell-context";
 
 export default function Sessions() {
 	const state = useWorkspaceSessions();
@@ -39,12 +40,13 @@ export default function Sessions() {
 	const { management, openSessionMenu, setMenu } = actions;
 	return (
 		<main className="chat-main session-list-main" ref={root} data-managing={management.managing || undefined}>
-			<header className="chat-header">
-				<MessagesSquare size={22} aria-hidden="true" />
+			<header className="chat-header settings-header">
+				<SidebarHeaderToggle />
+				<MessagesSquare size={16} aria-hidden="true" />
 				<h1>全部会话</h1>
 				<button
 					type="button"
-					className="session-list-manage"
+					className="btn-ghost session-list-manage"
 					disabled={!sessions.length || management.busy || preview}
 					aria-pressed={management.managing}
 					onClick={() => {
@@ -52,7 +54,7 @@ export default function Sessions() {
 						else management.start();
 					}}
 				>
-					<ListChecks size={18} aria-hidden="true" />
+					<ListChecks size={16} aria-hidden="true" />
 					管理
 				</button>
 			</header>
@@ -72,7 +74,7 @@ export default function Sessions() {
 						/>
 						<button
 							type="button"
-							className="session-list-delete"
+							className="btn-ghost session-list-delete"
 							disabled={!management.count || management.busy}
 							onClick={() => management.requestDelete()}
 						>
@@ -84,22 +86,39 @@ export default function Sessions() {
 				{state.error && !preview && (
 					<div className="session-list-error" role="alert">
 						<p>{state.error}</p>
-						<button type="button" onClick={() => void state.refresh()}>
+						<button type="button" className="tier-1-btn-outline" onClick={() => void state.refresh()}>
 							重试
 						</button>
 					</div>
 				)}
-				{!sessions.length && (!state.error || preview) && (
-					<p className="session-list-empty" aria-live="polite">
-						{state.stage || preview ? "暂无会话" : "正在读取会话…"}
-					</p>
-				)}
+				{!sessions.length &&
+					(!state.error || preview) &&
+					(state.stage || preview ? (
+						<div className="session-list-empty-state" aria-live="polite">
+							<div className="session-list-empty-icon" aria-hidden="true">
+								<MessagesSquare size={16} />
+							</div>
+							<h2>暂无历史会话</h2>
+							<Link to="/" className="tier-1-btn-primary" viewTransition>
+								<Plus size={16} aria-hidden="true" />
+								新建对话
+							</Link>
+						</div>
+					) : (
+						<p className="session-list-empty" aria-live="polite">
+							正在读取会话…
+						</p>
+					))}
 				{groups.map((group) => (
 					<section className="session-list-group" key={group.id} aria-labelledby={`session-group-${group.id}`}>
 						<h2 id={`session-group-${group.id}`}>{group.label}</h2>
 						<ul className="session-list" aria-label={group.label}>
 							{group.sessions.map((session, index) => (
-								<li key={session.id} className="session-list-item">
+								<li
+									key={session.id}
+									className="session-list-item"
+									data-menu-open={actions.menu?.id === session.id || undefined}
+								>
 									<SessionEntry
 										session={session}
 										index={index}
@@ -108,6 +127,7 @@ export default function Sessions() {
 										selected={management.selection?.has(session.id) ?? false}
 										disabled={management.busy}
 										preview={preview}
+										menuOpen={actions.menu?.id === session.id}
 										onToggle={() => {
 											setMenu(null);
 											management.toggle(session.id);
@@ -117,16 +137,17 @@ export default function Sessions() {
 									{!management.managing && !preview && (
 										<button
 											type="button"
-											className="session-list-more"
+											className="btn-icon sm-28 session-list-more"
+											data-menu-trigger-id={session.id}
 											aria-label={`会话操作：${session.title}`}
 											aria-haspopup="menu"
 											aria-expanded={actions.menu?.id === session.id}
 											onClick={(event) => {
 												const bounds = event.currentTarget.getBoundingClientRect();
-												openSessionMenu(session, bounds.left, bounds.bottom);
+												openSessionMenu(session, bounds.left, bounds.bottom + 4, true);
 											}}
 										>
-											<Ellipsis size={18} aria-hidden="true" />
+											<Ellipsis size={16} aria-hidden="true" />
 										</button>
 									)}
 								</li>

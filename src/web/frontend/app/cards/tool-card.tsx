@@ -1,6 +1,7 @@
-import { Button, Card } from "@heroui/react";
+import { Card } from "@heroui/react";
 import {
 	Braces,
+	Check,
 	CheckCheck,
 	CircleCheck,
 	CirclePause,
@@ -17,6 +18,7 @@ import { TranscriptDisclosure, type TranscriptFormat } from "../conversation/tra
 import type { ContentPart, Message } from "../data/web-state";
 import { PreviewableImage } from "../images/image-preview";
 import { CodeBlock } from "../shell/code-block";
+import { useCopyFeedback } from "../shell/use-copy-feedback";
 import { type Block, type CardView, mapTool } from "./map-tool";
 import { isStandaloneTool, splitToolCalls, type ToolState, toolState } from "./tool-state";
 
@@ -52,6 +54,27 @@ function StatusIcon({ state, size = 16 }: { state: ToolState; size?: number }) {
 	);
 }
 
+function CommandCopyButton({ command }: { command: string }) {
+	const { status, copy } = useCopyFeedback();
+	return (
+		<>
+			<button
+				type="button"
+				className="btn-icon sm-28 tool-command-copy"
+				aria-label={status === "copied" ? "已复制命令" : "复制命令"}
+				title={status === "copied" ? "已复制" : "复制命令"}
+				data-copied={status === "copied" || undefined}
+				onClick={() => void copy(command)}
+			>
+				{status === "copied" ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+			</button>
+			<output className={status === "error" ? "tool-command-copy-error" : "visually-hidden"}>
+				{status === "copied" ? "已复制" : status === "error" ? "复制失败，请手动选择复制" : ""}
+			</output>
+		</>
+	);
+}
+
 function Listing({ block, all = false }: { block: Extract<Block, { kind: "listing" }>; all?: boolean }) {
 	const [visible, setVisible] = useState(all ? block.items.length : 40);
 	return (
@@ -67,9 +90,13 @@ function Listing({ block, all = false }: { block: Extract<Block, { kind: "listin
 				))}
 			</ol>
 			{visible < block.items.length && (
-				<Button variant="ghost" onPress={() => setVisible((value) => value + 40)}>
+				<button
+					type="button"
+					className="btn-ghost tool-listing-more"
+					onClick={() => setVisible((value) => value + 40)}
+				>
 					继续显示（剩余 {block.items.length - visible} 项）
-				</Button>
+				</button>
 			)}
 		</section>
 	);
@@ -130,16 +157,7 @@ function renderBlock(block: Block, all = false) {
 						</span>
 						<div className="tool-command">
 							<pre>{item.command}</pre>
-							<Button
-								variant="ghost"
-								isIconOnly
-								aria-label="复制命令"
-								onPress={() => {
-									void navigator.clipboard.writeText(item.command);
-								}}
-							>
-								<Copy size={14} />
-							</Button>
+							<CommandCopyButton command={item.command} />
 						</div>
 					</li>
 				))}
@@ -197,7 +215,7 @@ export const ToolCard = memo(function ToolCard({
 			const style = getComputedStyle(labels[0]);
 			context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
 			const width = Math.max(...labels.map((label) => context.measureText(label.textContent ?? "").width));
-			container.style.setProperty("--tool-label-width", `${Math.ceil(width) + 22}px`);
+			container.style.setProperty("--tool-label-width", `${Math.max(72, Math.ceil(width) + 22)}px`);
 		};
 		measure();
 		void document.fonts.ready.then(() => {

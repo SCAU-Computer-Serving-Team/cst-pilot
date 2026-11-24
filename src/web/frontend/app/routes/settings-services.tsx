@@ -13,7 +13,7 @@ export default function ModelServices() {
 			<SettingsHeading
 				title="模型服务"
 				action={
-					<SettingsLink to="/settings/add" className="settings-action settings-add-action">
+					<SettingsLink to="/settings/add" className="tier-1-btn-outline settings-action">
 						<Plus size={14} aria-hidden="true" />
 						添加服务
 					</SettingsLink>

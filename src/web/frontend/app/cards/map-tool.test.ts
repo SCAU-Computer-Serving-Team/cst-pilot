@@ -103,3 +103,50 @@ test("ls entries omit null pct and render a single unknown-size label without du
 	assert.deepEqual(listing.items[0]?.metrics, [{ label: "大小", value: "10.0 MB" }]);
 	assert.deepEqual(listing.items[1]?.metrics, [{ label: "大小", value: "大小未知" }]);
 });
+
+test("disk usage distinguishes clean native-walk, truncated walk, MFT fallback, and legacy replay", () => {
+	const clean = mapTool(
+		call("disk", "usage"),
+		result({
+			usage: {
+				method: "native-walk",
+				root: "C:\\Users",
+				totalGB: 12.5,
+				truncated: false,
+				topDirs: [{ path: "C:\\Users\\a", sizeGB: 12.5, pct: 100 }],
+				notice: "原生并行目录遍历完成",
+			},
+		}),
+	);
+	assert.equal(clean.status, "success");
+	assert.doesNotMatch(JSON.stringify(clean.blocks), /WizTree|快速卷索引不可用/);
+
+	const fallback = mapTool(
+		call("disk", "usage"),
+		result({
+			usage: {
+				method: "native-walk",
+				root: "C:\\",
+				totalGB: 20,
+				degradedFrom: "native-mft: 权限不足",
+				topDirs: [{ path: "C:\\Windows", sizeGB: 20, pct: 100 }],
+			},
+		}),
+	);
+	assert.match(JSON.stringify(fallback.blocks), /快速卷索引不可用/);
+	assert.doesNotMatch(JSON.stringify(fallback.blocks), /WizTree/);
+
+	const legacy = mapTool(
+		call("disk", "usage"),
+		result({
+			usage: {
+				method: "node-walk",
+				root: "C:\\old",
+				totalGB: 5,
+				degradedFrom: "wiztree",
+				topDirs: [{ path: "C:\\old\\a", sizeGB: 5, pct: 100 }],
+			},
+		}),
+	);
+	assert.match(JSON.stringify(legacy.blocks), /快速卷索引不可用/);
+});

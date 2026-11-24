@@ -366,3 +366,52 @@ test("首页创建会话后与会话页共用发送顺序，不让后续消息�
 	await tick();
 	assert.deepEqual(sent, ["first", "next"]);
 });
+
+test("verifyWritable 按完整记录长度校验存储配额并在正常探测后不残留脏记录", () => {
+	const { storage, outbox } = setup();
+	const sample = {
+		id: "11111111-2222-4333-8444-555555555555",
+		sessionId: "44444444-4444-4444-8444-444444444401",
+		text: "重发内容",
+		serialized: "重发内容",
+		images: ["h1"],
+	};
+	outbox.verifyWritable(sample);
+	assert.equal(outbox.getSnapshot().length, 0);
+	assert.deepEqual(parseOutbox(storage.value), []);
+
+	// 严格配额：容不下完整字段记录（含 UUID、sessionId、时间戳）时预检必须直接拒绝。
+	const exactBytes = JSON.stringify([
+		{
+			...sample,
+			fromHome: false,
+			createdAt: Date.now(),
+			state: "waiting",
+			attempted: false,
+		},
+	]).length;
+	const tightStorage = {
+		value: null as string | null,
+		getItem: () => tightStorage.value,
+		setItem: (_key: string, value: string) => {
+			if (value.length >= exactBytes) throw new Error("空间不足");
+			tightStorage.value = value;
+		},
+	};
+	const tightOutbox = new MessageOutbox(tightStorage, {
+		create: async () => "s1",
+		send: async (item) => receipt(item.id),
+		lookup: async () => ({ item: null }),
+		isRejection: () => false,
+	});
+	assert.throws(() => tightOutbox.verifyWritable(sample), /空间不足/);
+
+	storage.fail = true;
+	assert.throws(() => outbox.verifyWritable(sample), /空间不足/);
+
+	storage.fail = false;
+	storage.value = "{broken";
+	const corrupted = setup({}, storage).outbox;
+	assert.throws(() => corrupted.verifyWritable());
+	assert.equal(storage.value, "{broken");
+});

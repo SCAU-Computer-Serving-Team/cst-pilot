@@ -11563,103 +11563,16 @@
                                       "name": "上下文压缩消息 · 默认折叠态"
                                     },
                                     {
-                                      "type": "frame",
-                                      "id": "T96VEY",
+                                      "id": "jBBw8",
+                                      "type": "ref",
+                                      "ref": "l6foNm",
                                       "name": "上下文压缩消息 · 展开态示例",
                                       "width": "fill_container",
-                                      "layout": "vertical",
-                                      "gap": "$space-component",
-                                      "children": [
-                                        {
-                                          "id": "U0Tk2",
-                                          "type": "ref",
-                                          "ref": "ln9GA",
-                                          "name": "压缩头 · 已展开",
-                                          "descendants": {
-                                            "xcsMi": {
-                                              "icon": "chevron-down"
-                                            },
-                                            "aurPv": {
-                                              "content": "14:36"
-                                            }
-                                          }
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "JaNLs",
-                                          "name": "压缩摘要正文",
-                                          "width": "fill_container",
-                                          "fill": "$bg-surface",
-                                          "cornerRadius": "$radius-control",
-                                          "layout": "vertical",
-                                          "gap": "$space-inline",
-                                          "padding": [
-                                            12,
-                                            16
-                                          ],
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "z0aRgA",
-                                              "name": "摘要段落 1",
-                                              "fill": "$text-primary",
-                                              "textGrowth": "fixed-width",
-                                              "width": "fill_container",
-                                              "content": "已完成 C 盘空间与硬件概况排查：当前系统盘剩余 18.4 GB（已用 92.2%），主要占用为休眠文件 hiberfil.sys（12.8 GB）与用户目录软件缓存（30.8 GB）。",
-                                              "lineHeight": 1.57,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-ui",
-                                              "fontWeight": "normal"
-                                            },
-                                            {
-                                              "type": "text",
-                                              "id": "a6XGz2",
-                                              "name": "摘要段落 2",
-                                              "fill": "$text-secondary",
-                                              "textGrowth": "fixed-width",
-                                              "width": "fill_container",
-                                              "content": "待继续跟进：已生成清理命令清单但尚未执行，下一步排查开机启动慢与后台高负载进程。",
-                                              "lineHeight": 1.57,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-ui",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "frame",
-                                          "id": "btnTD",
-                                          "name": "压缩气泡底栏",
-                                          "width": "fill_container",
-                                          "height": 24,
-                                          "justifyContent": "space_between",
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "frame",
-                                              "id": "lZN4h",
-                                              "name": "复制摘要按钮",
-                                              "width": 24,
-                                              "height": 24,
-                                              "cornerRadius": "$radius-control",
-                                              "justifyContent": "center",
-                                              "alignItems": "center",
-                                              "children": [
-                                                {
-                                                  "type": "icon",
-                                                  "id": "Yd9Ne",
-                                                  "name": "复制图标",
-                                                  "width": 14,
-                                                  "height": 14,
-                                                  "icon": "copy",
-                                                  "library": "lucide",
-                                                  "fill": "$text-secondary"
-                                                }
-                                              ]
-                                            }
-                                          ]
+                                      "descendants": {
+                                        "TJYEy": {
+                                          "content": "14:36"
                                         }
-                                      ]
+                                      }
                                     }
                                   ]
                                 }
@@ -11727,7 +11640,7 @@
                       "id": "ctrqI",
                       "name": "图注正文",
                       "fill": "$text-secondary",
-                      "content": "执行 /compact 后作为 Assistant 回复块插入消息流，默认折叠展示「上下文已压缩 · 压缩前 Nk tokens」与时间，展开后呈现可复制的压缩摘要正文。",
+                      "content": "执行 /compact 后作为 Assistant 回复块插入消息流，默认折叠展示「上下文已压缩」与时间，展开后沿 2px 垂直引导线呈现可复制的压缩摘要正文。",
                       "lineHeight": 1.4286,
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": "$font-ui",
@@ -43683,6 +43596,176 @@
                                             },
                                             {
                                               "type": "frame",
+                                              "id": "Yf7K1",
+                                              "name": "行 · 方向键选中样式",
+                                              "width": "fill_container",
+                                              "height": 72,
+                                              "stroke": "$border-subtle",
+                                              "strokeWidth": {
+                                                "bottom": 1
+                                              },
+                                              "padding": [
+                                                "$space-component",
+                                                "$space-section"
+                                              ],
+                                              "justifyContent": "space_between",
+                                              "alignItems": "center",
+                                              "children": [
+                                                {
+                                                  "type": "frame",
+                                                  "id": "n2umF",
+                                                  "name": "左侧标题与说明",
+                                                  "layout": "vertical",
+                                                  "gap": "$space-tight",
+                                                  "children": [
+                                                    {
+                                                      "type": "frame",
+                                                      "id": "EMrof",
+                                                      "name": "项名对齐槽",
+                                                      "padding": [
+                                                        0,
+                                                        0,
+                                                        "$space-micro",
+                                                        0
+                                                      ],
+                                                      "alignItems": "center",
+                                                      "children": [
+                                                        {
+                                                          "type": "text",
+                                                          "id": "DIGCZ",
+                                                          "name": "项名",
+                                                          "fill": "$text-primary",
+                                                          "content": "方向键选中样式",
+                                                          "lineHeight": 1.5,
+                                                          "fontFamily": "Source Han Sans CN",
+                                                          "fontSize": "$font-body",
+                                                          "fontWeight": "normal"
+                                                        }
+                                                      ]
+                                                    }
+                                                  ]
+                                                },
+                                                {
+                                                  "type": "frame",
+                                                  "id": "nmc9N",
+                                                  "name": "选中样式二段开关",
+                                                  "height": 32,
+                                                  "fill": "$bg-surface",
+                                                  "cornerRadius": "$radius-row",
+                                                  "gap": "$space-micro",
+                                                  "padding": "$space-tight",
+                                                  "alignItems": "center",
+                                                  "children": [
+                                                    {
+                                                      "type": "frame",
+                                                      "id": "fApVg",
+                                                      "name": "段 · 四角",
+                                                      "height": 24,
+                                                      "fill": "$bg-elevated",
+                                                      "cornerRadius": "$radius-control",
+                                                      "stroke": "$border-subtle",
+                                                      "strokeWidth": 1,
+                                                      "strokeAlignment": "inner",
+                                                      "gap": "$space-tight",
+                                                      "padding": [
+                                                        0,
+                                                        "$space-component"
+                                                      ],
+                                                      "alignItems": "center",
+                                                      "children": [
+                                                        {
+                                                          "type": "icon",
+                                                          "id": "DDu17",
+                                                          "name": "图标",
+                                                          "width": 14,
+                                                          "height": 14,
+                                                          "icon": "scan",
+                                                          "library": "lucide",
+                                                          "fill": "$text-primary"
+                                                        },
+                                                        {
+                                                          "type": "frame",
+                                                          "id": "oPEGd",
+                                                          "name": "标签对齐槽",
+                                                          "padding": [
+                                                            0,
+                                                            0,
+                                                            "$space-micro",
+                                                            0
+                                                          ],
+                                                          "alignItems": "center",
+                                                          "children": [
+                                                            {
+                                                              "type": "text",
+                                                              "id": "A6NOb",
+                                                              "name": "标签",
+                                                              "fill": "$text-primary",
+                                                              "content": "四角",
+                                                              "lineHeight": 1.4286,
+                                                              "fontFamily": "Source Han Sans CN",
+                                                              "fontSize": "$font-ui",
+                                                              "fontWeight": "500"
+                                                            }
+                                                          ]
+                                                        }
+                                                      ]
+                                                    },
+                                                    {
+                                                      "type": "frame",
+                                                      "id": "SeezZ",
+                                                      "name": "段 · 游标",
+                                                      "height": 24,
+                                                      "cornerRadius": "$radius-control",
+                                                      "gap": "$space-tight",
+                                                      "padding": [
+                                                        0,
+                                                        "$space-component"
+                                                      ],
+                                                      "alignItems": "center",
+                                                      "children": [
+                                                        {
+                                                          "type": "icon",
+                                                          "id": "n4f54",
+                                                          "name": "图标",
+                                                          "width": 14,
+                                                          "height": 14,
+                                                          "icon": "tally-1",
+                                                          "library": "lucide",
+                                                          "fill": "$text-secondary"
+                                                        },
+                                                        {
+                                                          "type": "frame",
+                                                          "id": "OQWig",
+                                                          "name": "标签对齐槽",
+                                                          "padding": [
+                                                            0,
+                                                            0,
+                                                            "$space-micro",
+                                                            0
+                                                          ],
+                                                          "alignItems": "center",
+                                                          "children": [
+                                                            {
+                                                              "type": "text",
+                                                              "id": "h07rZ",
+                                                              "name": "标签",
+                                                              "fill": "$text-secondary",
+                                                              "content": "游标",
+                                                              "lineHeight": 1.4286,
+                                                              "fontFamily": "Source Han Sans CN",
+                                                              "fontSize": "$font-ui",
+                                                              "fontWeight": "normal"
+                                                            }
+                                                          ]
+                                                        }
+                                                      ]
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "type": "frame",
                                               "id": "zeJgA",
                                               "name": "行 · 默认视图",
                                               "width": "fill_container",
@@ -46711,17 +46794,6 @@
                                               "fontFamily": "Source Han Sans CN",
                                               "fontSize": "$font-title",
                                               "fontWeight": "600"
-                                            },
-                                            {
-                                              "type": "text",
-                                              "id": "XnLHM",
-                                              "name": "副说明",
-                                              "fill": "$text-secondary",
-                                              "content": "连接兼容 OpenAI、Anthropic 或 Google 接口的服务。",
-                                              "lineHeight": 1.4286,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-ui",
-                                              "fontWeight": "normal"
                                             }
                                           ]
                                         }
@@ -48061,20 +48133,9 @@
                                                   "id": "K3q3u",
                                                   "name": "列 · 移除",
                                                   "width": 20,
+                                                  "height": 20,
                                                   "justifyContent": "center",
-                                                  "alignItems": "center",
-                                                  "children": [
-                                                    {
-                                                      "type": "icon",
-                                                      "id": "HcDbl",
-                                                      "name": "移除图标",
-                                                      "width": 16,
-                                                      "height": 16,
-                                                      "icon": "trash-2",
-                                                      "library": "lucide",
-                                                      "fill": "$text-muted"
-                                                    }
-                                                  ]
+                                                  "alignItems": "center"
                                                 }
                                               ]
                                             }
@@ -59589,6 +59650,176 @@
                                                               "fontFamily": "Source Han Sans CN",
                                                               "fontSize": "$font-ui",
                                                               "fontWeight": "500"
+                                                            }
+                                                          ]
+                                                        }
+                                                      ]
+                                                    }
+                                                  ]
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "type": "frame",
+                                              "id": "BuSmb",
+                                              "name": "行 · 方向键选中样式",
+                                              "width": "fill_container",
+                                              "height": 72,
+                                              "stroke": "$border-subtle",
+                                              "strokeWidth": {
+                                                "bottom": 1
+                                              },
+                                              "padding": [
+                                                "$space-component",
+                                                "$space-section"
+                                              ],
+                                              "justifyContent": "space_between",
+                                              "alignItems": "center",
+                                              "children": [
+                                                {
+                                                  "type": "frame",
+                                                  "id": "fV9fR",
+                                                  "name": "左侧标题与说明",
+                                                  "layout": "vertical",
+                                                  "gap": "$space-tight",
+                                                  "children": [
+                                                    {
+                                                      "type": "frame",
+                                                      "id": "QQIWj",
+                                                      "name": "项名对齐槽",
+                                                      "padding": [
+                                                        0,
+                                                        0,
+                                                        "$space-micro",
+                                                        0
+                                                      ],
+                                                      "alignItems": "center",
+                                                      "children": [
+                                                        {
+                                                          "type": "text",
+                                                          "id": "Dkig2",
+                                                          "name": "项名",
+                                                          "fill": "$text-primary",
+                                                          "content": "方向键选中样式",
+                                                          "lineHeight": 1.5,
+                                                          "fontFamily": "Source Han Sans CN",
+                                                          "fontSize": "$font-body",
+                                                          "fontWeight": "normal"
+                                                        }
+                                                      ]
+                                                    }
+                                                  ]
+                                                },
+                                                {
+                                                  "type": "frame",
+                                                  "id": "XlKFA",
+                                                  "name": "选中样式二段开关",
+                                                  "height": 32,
+                                                  "fill": "$bg-surface",
+                                                  "cornerRadius": "$radius-row",
+                                                  "gap": "$space-micro",
+                                                  "padding": "$space-tight",
+                                                  "alignItems": "center",
+                                                  "children": [
+                                                    {
+                                                      "type": "frame",
+                                                      "id": "BYnIY",
+                                                      "name": "段 · 四角",
+                                                      "height": 24,
+                                                      "fill": "$bg-elevated",
+                                                      "cornerRadius": "$radius-control",
+                                                      "stroke": "$border-subtle",
+                                                      "strokeWidth": 1,
+                                                      "strokeAlignment": "inner",
+                                                      "gap": "$space-tight",
+                                                      "padding": [
+                                                        0,
+                                                        "$space-component"
+                                                      ],
+                                                      "alignItems": "center",
+                                                      "children": [
+                                                        {
+                                                          "type": "icon",
+                                                          "id": "cIhOr",
+                                                          "name": "图标",
+                                                          "width": 14,
+                                                          "height": 14,
+                                                          "icon": "scan",
+                                                          "library": "lucide",
+                                                          "fill": "$text-primary"
+                                                        },
+                                                        {
+                                                          "type": "frame",
+                                                          "id": "g4aCH",
+                                                          "name": "标签对齐槽",
+                                                          "padding": [
+                                                            0,
+                                                            0,
+                                                            "$space-micro",
+                                                            0
+                                                          ],
+                                                          "alignItems": "center",
+                                                          "children": [
+                                                            {
+                                                              "type": "text",
+                                                              "id": "xvOjn",
+                                                              "name": "标签",
+                                                              "fill": "$text-primary",
+                                                              "content": "四角",
+                                                              "lineHeight": 1.4286,
+                                                              "fontFamily": "Source Han Sans CN",
+                                                              "fontSize": "$font-ui",
+                                                              "fontWeight": "500"
+                                                            }
+                                                          ]
+                                                        }
+                                                      ]
+                                                    },
+                                                    {
+                                                      "type": "frame",
+                                                      "id": "S6tvw1",
+                                                      "name": "段 · 游标",
+                                                      "height": 24,
+                                                      "cornerRadius": "$radius-control",
+                                                      "gap": "$space-tight",
+                                                      "padding": [
+                                                        0,
+                                                        "$space-component"
+                                                      ],
+                                                      "alignItems": "center",
+                                                      "children": [
+                                                        {
+                                                          "type": "icon",
+                                                          "id": "J3P13X",
+                                                          "name": "图标",
+                                                          "width": 14,
+                                                          "height": 14,
+                                                          "icon": "tally-1",
+                                                          "library": "lucide",
+                                                          "fill": "$text-secondary"
+                                                        },
+                                                        {
+                                                          "type": "frame",
+                                                          "id": "iRYNc",
+                                                          "name": "标签对齐槽",
+                                                          "padding": [
+                                                            0,
+                                                            0,
+                                                            "$space-micro",
+                                                            0
+                                                          ],
+                                                          "alignItems": "center",
+                                                          "children": [
+                                                            {
+                                                              "type": "text",
+                                                              "id": "uE1zg",
+                                                              "name": "标签",
+                                                              "fill": "$text-secondary",
+                                                              "content": "游标",
+                                                              "lineHeight": 1.4286,
+                                                              "fontFamily": "Source Han Sans CN",
+                                                              "fontSize": "$font-ui",
+                                                              "fontWeight": "normal"
                                                             }
                                                           ]
                                                         }
@@ -76398,247 +76629,47 @@
               "name": "上下文压缩消息",
               "reusable": true,
               "width": 816,
-              "layout": "vertical",
-              "gap": "$space-component",
+              "height": 28,
+              "stroke": "$border-subtle",
+              "strokeAlignment": "inner",
+              "justifyContent": "space_between",
+              "alignItems": "center",
               "children": [
                 {
                   "type": "frame",
-                  "id": "o8x8q",
-                  "name": "压缩折叠头",
-                  "width": "fill_container",
-                  "stroke": "$bg-surface",
-                  "strokeWidth": {
-                    "bottom": 1
-                  },
-                  "justifyContent": "space_between",
+                  "id": "cph7f",
+                  "name": "工具状态左组",
+                  "gap": "$space-inline",
                   "alignItems": "center",
                   "children": [
                     {
-                      "type": "frame",
-                      "id": "OUXO9",
-                      "name": "压缩标题组",
-                      "gap": "$space-inline",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "icon",
-                          "id": "Rr24P",
-                          "name": "压缩图标",
-                          "width": 16,
-                          "height": 16,
-                          "icon": "minimize-2",
-                          "library": "lucide",
-                          "fill": "$text-secondary"
-                        },
-                        {
-                          "type": "frame",
-                          "id": "z4xXK",
-                          "name": "压缩标题对齐槽",
-                          "padding": [
-                            0,
-                            0,
-                            2,
-                            0
-                          ],
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "m0vqsE",
-                              "name": "压缩标题",
-                              "fill": "$text-primary",
-                              "content": "上下文已压缩",
-                              "lineHeight": 1.5,
-                              "fontFamily": "Source Han Sans CN",
-                              "fontSize": "$font-body",
-                              "fontWeight": "500"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "enAFA",
-                          "name": "压缩计数对齐槽",
-                          "padding": [
-                            0,
-                            0,
-                            2,
-                            0
-                          ],
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "wDlJ9",
-                              "name": "压缩前用量",
-                              "fill": "$text-muted",
-                              "content": "压缩前 148k tokens",
-                              "lineHeight": 1.4286,
-                              "fontFamily": "Source Han Sans CN",
-                              "fontSize": "$font-ui",
-                              "fontWeight": "normal"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "icon",
-                          "id": "xcsMi",
-                          "name": "展开指示箭头",
-                          "width": 16,
-                          "height": 16,
-                          "icon": "chevron-right",
-                          "library": "lucide",
-                          "fill": "$text-secondary"
-                        }
-                      ]
+                      "type": "icon",
+                      "id": "XJ7XY",
+                      "name": "状态图标",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "circle-check",
+                      "library": "lucide",
+                      "fill": "$status-success"
                     },
                     {
                       "type": "frame",
-                      "id": "KVI54",
-                      "name": "压缩时间对齐槽",
+                      "id": "AKVzE",
+                      "name": "调用说明槽",
                       "padding": [
                         0,
                         0,
-                        2,
+                        "$space-micro",
                         0
                       ],
                       "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
-                          "id": "aurPv",
-                          "name": "压缩时间",
+                          "id": "ZTXAh",
+                          "name": "调用说明",
                           "fill": "$text-secondary",
-                          "content": "14:35",
-                          "lineHeight": 1.4286,
-                          "fontFamily": "Source Han Sans CN",
-                          "fontSize": "$font-ui",
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    }
-                  ]
-                }
-              ]
-            },
-            {
-              "type": "frame",
-              "id": "l6foNm",
-              "name": "上下文压缩消息 · 展开态",
-              "reusable": true,
-              "width": 816,
-              "layout": "vertical",
-              "gap": "$space-component",
-              "children": [
-                {
-                  "type": "frame",
-                  "id": "A5ivtt",
-                  "name": "压缩折叠头",
-                  "width": "fill_container",
-                  "stroke": "$bg-surface",
-                  "strokeWidth": {
-                    "bottom": 1
-                  },
-                  "justifyContent": "space_between",
-                  "alignItems": "center",
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "DKmnJ",
-                      "name": "压缩标题组",
-                      "gap": "$space-inline",
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "icon",
-                          "id": "eeYwA",
-                          "name": "压缩图标",
-                          "width": 16,
-                          "height": 16,
-                          "icon": "minimize-2",
-                          "library": "lucide",
-                          "fill": "$text-secondary"
-                        },
-                        {
-                          "type": "frame",
-                          "id": "q4cYYW",
-                          "name": "压缩标题对齐槽",
-                          "padding": [
-                            0,
-                            0,
-                            2,
-                            0
-                          ],
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "eiM75",
-                              "name": "压缩标题",
-                              "fill": "$text-primary",
-                              "content": "上下文已压缩",
-                              "lineHeight": 1.5,
-                              "fontFamily": "Source Han Sans CN",
-                              "fontSize": "$font-body",
-                              "fontWeight": "500"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "q6fid",
-                          "name": "压缩计数对齐槽",
-                          "padding": [
-                            0,
-                            0,
-                            2,
-                            0
-                          ],
-                          "alignItems": "center",
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "FQKZD",
-                              "name": "压缩前用量",
-                              "fill": "$text-muted",
-                              "content": "压缩前 148k tokens",
-                              "lineHeight": 1.4286,
-                              "fontFamily": "Source Han Sans CN",
-                              "fontSize": "$font-ui",
-                              "fontWeight": "normal"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "icon",
-                          "id": "f4Nids",
-                          "name": "展开指示箭头",
-                          "width": 16,
-                          "height": 16,
-                          "icon": "chevron-down",
-                          "library": "lucide",
-                          "fill": "$text-secondary"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "nJrc4",
-                      "name": "压缩时间对齐槽",
-                      "padding": [
-                        0,
-                        0,
-                        2,
-                        0
-                      ],
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "If3V2",
-                          "name": "压缩时间",
-                          "fill": "$text-secondary",
-                          "content": "14:35",
+                          "content": "上下文已压缩",
                           "lineHeight": 1.4286,
                           "fontFamily": "Source Han Sans CN",
                           "fontSize": "$font-ui",
@@ -76650,47 +76681,220 @@
                 },
                 {
                   "type": "frame",
-                  "id": "ijilO",
-                  "name": "压缩摘要原文块",
-                  "width": "fill_container",
-                  "fill": "$bg-surface",
-                  "cornerRadius": "$radius-control",
-                  "gap": "$space-component",
-                  "padding": "$space-component",
-                  "justifyContent": "space_between",
+                  "id": "mZMT2",
+                  "name": "时间与箭头组",
+                  "gap": "$space-inline",
+                  "alignItems": "center",
                   "children": [
                     {
                       "type": "text",
-                      "id": "pCcfw",
-                      "name": "压缩摘要正文",
-                      "fill": "$text-secondary",
-                      "textGrowth": "fixed-width",
-                      "width": "fill_container",
-                      "content": "Goal\n排查 C 盘空间占用与系统盘健康度，并整理可执行的清理方案。\n\nProgress\nDone\n- 已完成磁盘空间与 SMART 采样：C 盘剩余 18.4 GB（已用 92.2%），健康状态正常。\n- 主要占用为休眠文件 hiberfil.sys（12.8 GB）与用户目录缓存（30.8 GB）。\n\nNext\n- 确认是否关闭休眠并生成可审阅清理命令清单。",
+                      "id": "VJJXr",
+                      "name": "压缩时间",
+                      "fill": "$text-muted",
+                      "content": "14:35",
                       "lineHeight": 1.3333,
                       "fontFamily": "Source Han Sans CN",
                       "fontSize": "$font-caption",
                       "fontWeight": "normal"
                     },
                     {
+                      "type": "icon",
+                      "id": "hU89H",
+                      "name": "折叠箭头",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "chevron-right",
+                      "library": "lucide",
+                      "fill": "$text-secondary"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "l6foNm",
+              "name": "上下文压缩消息 · 展开态",
+              "reusable": true,
+              "width": 816,
+              "stroke": "$border-subtle",
+              "strokeAlignment": "inner",
+              "layout": "vertical",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "Vv1ol",
+                  "name": "展开状态行",
+                  "width": "fill_container",
+                  "height": 28,
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
                       "type": "frame",
-                      "id": "AII9i",
-                      "name": "复制摘要按钮",
-                      "width": 28,
-                      "height": 28,
-                      "cornerRadius": "$radius-control",
-                      "justifyContent": "center",
+                      "id": "ruBo9",
+                      "name": "工具状态左组",
+                      "gap": "$space-inline",
                       "alignItems": "center",
                       "children": [
                         {
                           "type": "icon",
-                          "id": "BBzaw",
-                          "name": "复制图标",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "copy",
+                          "id": "YjG5m",
+                          "name": "状态图标",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "circle-check",
+                          "library": "lucide",
+                          "fill": "$status-success"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "jmGxj",
+                          "name": "调用说明槽",
+                          "padding": [
+                            0,
+                            0,
+                            "$space-micro",
+                            0
+                          ],
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "IMAVw",
+                              "name": "调用说明",
+                              "fill": "$text-secondary",
+                              "content": "上下文已压缩",
+                              "lineHeight": 1.4286,
+                              "fontFamily": "Source Han Sans CN",
+                              "fontSize": "$font-ui",
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "BgdRq",
+                      "name": "时间与箭头组",
+                      "gap": "$space-inline",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "TJYEy",
+                          "name": "压缩时间",
+                          "fill": "$text-muted",
+                          "content": "14:35",
+                          "lineHeight": 1.3333,
+                          "fontFamily": "Source Han Sans CN",
+                          "fontSize": "$font-caption",
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "GC8gB",
+                          "name": "展开箭头",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "chevron-down",
                           "library": "lucide",
                           "fill": "$text-secondary"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Qkrr2",
+                  "name": "引导线与摘要主体",
+                  "width": "fill_container",
+                  "gap": "$space-inline",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "ei9Gm",
+                      "name": "引导线列",
+                      "width": 16,
+                      "padding": [
+                        2,
+                        0,
+                        4,
+                        0
+                      ],
+                      "justifyContent": "center",
+                      "children": [
+                        {
+                          "type": "rectangle",
+                          "cornerRadius": "$radius-full",
+                          "id": "f9pDUQ",
+                          "name": "引导线",
+                          "fill": "$border-subtle",
+                          "width": 2,
+                          "height": 170
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "IjG03",
+                      "name": "摘要内容列",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "padding": [
+                        "$space-micro",
+                        0
+                      ],
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "bVNW6",
+                          "name": "压缩摘要原文块",
+                          "width": "fill_container",
+                          "fill": "$bg-surface",
+                          "cornerRadius": "$radius-control",
+                          "gap": "$space-component",
+                          "padding": "$space-component",
+                          "justifyContent": "space_between",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "f07aX",
+                              "name": "压缩摘要正文",
+                              "fill": "$text-secondary",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "Goal\n排查 C 盘空间占用与系统盘健康度，并整理可执行的清理方案。\n\nProgress\nDone\n- 已完成磁盘空间与 SMART 采样：C 盘剩余 18.4 GB（已用 92.2%），健康状态正常。\n- 主要占用为休眠文件 hiberfil.sys（12.8 GB）与用户目录缓存（30.8 GB）。\n\nNext\n- 确认是否关闭休眠并生成可审阅清理命令清单。",
+                              "lineHeight": 1.3333,
+                              "fontFamily": "Source Han Sans CN",
+                              "fontSize": "$font-caption",
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "o3sASJ",
+                              "name": "复制摘要按钮",
+                              "width": 28,
+                              "height": 28,
+                              "cornerRadius": "$radius-control",
+                              "justifyContent": "center",
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "type": "icon",
+                                  "id": "rCFMg",
+                                  "name": "复制图标",
+                                  "width": 14,
+                                  "height": 14,
+                                  "icon": "copy",
+                                  "library": "lucide",
+                                  "fill": "$text-secondary"
+                                }
+                              ]
+                            }
+                          ]
                         }
                       ]
                     }
@@ -84270,7 +84474,8 @@
               "content": "定稿规范 · 正文 Source Han Sans CN 16/26 · 代码/路径/数值 JetBrains Mono · 8px 代码/表圆角 · 无竖线表 · 3 色语义高亮",
               "lineHeight": 1.3333,
               "fontFamily": "Source Han Sans CN",
-              "fontSize": "$font-caption"
+              "fontSize": "$font-caption",
+              "fontWeight": "normal"
             }
           ]
         },
@@ -84334,7 +84539,8 @@
                       "content": "正文 16/26 · 列表距 6px · 行内代码 13px 描边 · 表格无竖线",
                       "lineHeight": 1.3333,
                       "fontFamily": "Source Han Sans CN",
-                      "fontSize": "$font-caption"
+                      "fontSize": "$font-caption",
+                      "fontWeight": "normal"
                     }
                   ]
                 },
@@ -84395,7 +84601,8 @@
                               "content": "H1 · 24/32 + 1px 底线",
                               "lineHeight": 1.3333,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": "$font-caption"
+                              "fontSize": "$font-caption",
+                              "fontWeight": "normal"
                             }
                           ]
                         },
@@ -84435,7 +84642,8 @@
                               "content": "H2 · 20/28",
                               "lineHeight": 1.3333,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": "$font-caption"
+                              "fontSize": "$font-caption",
+                              "fontWeight": "normal"
                             }
                           ]
                         },
@@ -84475,7 +84683,8 @@
                               "content": "H3 · 17/25",
                               "lineHeight": 1.3333,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": "$font-caption"
+                              "fontSize": "$font-caption",
+                              "fontWeight": "normal"
                             }
                           ]
                         },
@@ -84509,7 +84718,8 @@
                               "content": "H4–H5 · 15/24",
                               "lineHeight": 1.3333,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": "$font-caption"
+                              "fontSize": "$font-caption",
+                              "fontWeight": "normal"
                             }
                           ]
                         },
@@ -84543,7 +84753,8 @@
                               "content": "H6 · 14/22 · muted",
                               "lineHeight": 1.3333,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": "$font-caption"
+                              "fontSize": "$font-caption",
+                              "fontWeight": "normal"
                             }
                           ]
                         }
@@ -84567,7 +84778,8 @@
                           "content": "当前系统盘总容量 953.9 GB，可用空间低于安全阈值。以下改版方案通过收紧行内代码、弱化表格网格线与补充代码块语义色，提升长文与诊断结论的可扫读性。",
                           "lineHeight": 1.625,
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": "$font-body"
+                          "fontSize": "$font-body",
+                          "fontWeight": "normal"
                         },
                         {
                           "type": "frame",
@@ -84595,7 +84807,8 @@
                               "content": "位于 ",
                               "lineHeight": 1.625,
                               "fontFamily": "Source Han Sans CN",
-                              "fontSize": "$font-body"
+                              "fontSize": "$font-body",
+                              "fontWeight": "normal"
                             },
                             {
                               "type": "frame",
@@ -84619,7 +84832,8 @@
                                   "content": "C:\\hiberfil.sys",
                                   "lineHeight": 1.4,
                                   "fontFamily": "JetBrains Mono",
-                                  "fontSize": 13
+                                  "fontSize": 13,
+                                  "fontWeight": "normal"
                                 }
                               ]
                             },
@@ -84631,7 +84845,8 @@
                               "content": " ，",
                               "lineHeight": 1.625,
                               "fontFamily": "Source Han Sans CN",
-                              "fontSize": "$font-body"
+                              "fontSize": "$font-body",
+                              "fontWeight": "normal"
                             },
                             {
                               "type": "text",
@@ -84642,6 +84857,7 @@
                               "lineHeight": 1.625,
                               "fontFamily": "Source Han Sans CN",
                               "fontSize": "$font-body",
+                              "fontWeight": "normal",
                               "fontStyle": "italic"
                             },
                             {
@@ -84652,7 +84868,8 @@
                               "content": "，",
                               "lineHeight": 1.625,
                               "fontFamily": "Source Han Sans CN",
-                              "fontSize": "$font-body"
+                              "fontSize": "$font-body",
+                              "fontWeight": "normal"
                             },
                             {
                               "type": "text",
@@ -84662,7 +84879,8 @@
                               "content": "无需重装系统",
                               "lineHeight": 1.625,
                               "fontFamily": "Source Han Sans CN",
-                              "fontSize": "$font-body"
+                              "fontSize": "$font-body",
+                              "fontWeight": "normal"
                             },
                             {
                               "type": "text",
@@ -84672,7 +84890,8 @@
                               "content": "，详见 ",
                               "lineHeight": 1.625,
                               "fontFamily": "Source Han Sans CN",
-                              "fontSize": "$font-body"
+                              "fontSize": "$font-body",
+                              "fontWeight": "normal"
                             },
                             {
                               "type": "frame",
@@ -84698,7 +84917,8 @@
                                   "content": "Microsoft powercfg 文档",
                                   "lineHeight": 1.35,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": "$font-body"
+                                  "fontSize": "$font-body",
+                                  "fontWeight": "normal"
                                 }
                               ]
                             },
@@ -84710,7 +84930,8 @@
                               "content": "。",
                               "lineHeight": 1.625,
                               "fontFamily": "Source Han Sans CN",
-                              "fontSize": "$font-body"
+                              "fontSize": "$font-body",
+                              "fontWeight": "normal"
                             }
                           ]
                         }
@@ -84760,7 +84981,8 @@
                                       "content": "•",
                                       "lineHeight": 1.625,
                                       "fontFamily": "Source Han Sans CN",
-                                      "fontSize": "$font-body"
+                                      "fontSize": "$font-body",
+                                      "fontWeight": "normal"
                                     }
                                   ]
                                 },
@@ -84780,7 +85002,8 @@
                                       "content": "系统缓存目录累计占用 18.2 GB，支持安全清理：",
                                       "lineHeight": 1.625,
                                       "fontFamily": "Source Han Sans CN",
-                                      "fontSize": "$font-body"
+                                      "fontSize": "$font-body",
+                                      "fontWeight": "normal"
                                     },
                                     {
                                       "type": "frame",
@@ -84804,7 +85027,8 @@
                                           "content": "C:\\Windows\\Temp",
                                           "lineHeight": 1.4,
                                           "fontFamily": "JetBrains Mono",
-                                          "fontSize": 13
+                                          "fontSize": 13,
+                                          "fontWeight": "normal"
                                         }
                                       ]
                                     }
@@ -84846,7 +85070,8 @@
                                       "content": "◦",
                                       "lineHeight": 1.625,
                                       "fontFamily": "Source Han Sans CN",
-                                      "fontSize": "$font-body"
+                                      "fontSize": "$font-body",
+                                      "fontWeight": "normal"
                                     }
                                   ]
                                 },
@@ -84860,7 +85085,8 @@
                                   "content": "正在被系统进程占用的句柄文件将自动跳过",
                                   "lineHeight": 1.625,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": "$font-body"
+                                  "fontSize": "$font-body",
+                                  "fontWeight": "normal"
                                 }
                               ]
                             },
@@ -84892,7 +85118,8 @@
                                       "content": "•",
                                       "lineHeight": 1.625,
                                       "fontFamily": "Source Han Sans CN",
-                                      "fontSize": "$font-body"
+                                      "fontSize": "$font-body",
+                                      "fontWeight": "normal"
                                     }
                                   ]
                                 },
@@ -84906,7 +85133,8 @@
                                   "content": "用户应用缓存建议按子目录逐项核对后再删除",
                                   "lineHeight": 1.625,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": "$font-body"
+                                  "fontSize": "$font-body",
+                                  "fontWeight": "normal"
                                 }
                               ]
                             }
@@ -84948,7 +85176,8 @@
                                       "content": "1.",
                                       "lineHeight": 1.625,
                                       "fontFamily": "Source Han Sans CN",
-                                      "fontSize": "$font-body"
+                                      "fontSize": "$font-body",
+                                      "fontWeight": "normal"
                                     }
                                   ]
                                 },
@@ -84962,7 +85191,8 @@
                                   "content": "以管理员权限打开终端，确认当前休眠配置状态",
                                   "lineHeight": 1.625,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": "$font-body"
+                                  "fontSize": "$font-body",
+                                  "fontWeight": "normal"
                                 }
                               ]
                             },
@@ -85000,7 +85230,8 @@
                                       "content": "A.",
                                       "lineHeight": 1.625,
                                       "fontFamily": "Source Han Sans CN",
-                                      "fontSize": "$font-body"
+                                      "fontSize": "$font-body",
+                                      "fontWeight": "normal"
                                     }
                                   ]
                                 },
@@ -85014,7 +85245,8 @@
                                   "content": "执行关闭休眠命令释放 25.4 GB 连续空间",
                                   "lineHeight": 1.625,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": "$font-body"
+                                  "fontSize": "$font-body",
+                                  "fontWeight": "normal"
                                 }
                               ]
                             },
@@ -85052,7 +85284,8 @@
                                       "content": "B.",
                                       "lineHeight": 1.625,
                                       "fontFamily": "Source Han Sans CN",
-                                      "fontSize": "$font-body"
+                                      "fontSize": "$font-body",
+                                      "fontWeight": "normal"
                                     }
                                   ]
                                 },
@@ -85066,7 +85299,8 @@
                                   "content": "核对电源计划，确认睡眠与关机行为正常",
                                   "lineHeight": 1.625,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": "$font-body"
+                                  "fontSize": "$font-body",
+                                  "fontWeight": "normal"
                                 }
                               ]
                             },
@@ -85098,7 +85332,8 @@
                                       "content": "2.",
                                       "lineHeight": 1.625,
                                       "fontFamily": "Source Han Sans CN",
-                                      "fontSize": "$font-body"
+                                      "fontSize": "$font-body",
+                                      "fontWeight": "normal"
                                     }
                                   ]
                                 },
@@ -85112,7 +85347,8 @@
                                   "content": "重新扫描 C 盘可用容量并记录变更结果",
                                   "lineHeight": 1.625,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": "$font-body"
+                                  "fontSize": "$font-body",
+                                  "fontWeight": "normal"
                                 }
                               ]
                             }
@@ -85169,7 +85405,8 @@
                                   "content": "已完成磁盘空间分布与大文件排行采样",
                                   "lineHeight": 1.625,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": "$font-body"
+                                  "fontSize": "$font-body",
+                                  "fontWeight": "normal"
                                 }
                               ]
                             },
@@ -85203,7 +85440,8 @@
                                   "content": "等待确认后执行休眠文件清理命令",
                                   "lineHeight": 1.625,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": "$font-body"
+                                  "fontSize": "$font-body",
+                                  "fontWeight": "normal"
                                 }
                               ]
                             }
@@ -85244,7 +85482,8 @@
                           "content": "关闭休眠会同时停用 Windows 快速启动，不会影响常规睡眠与热重启；如需恢复可执行 powercfg /h on。",
                           "lineHeight": 1.6,
                           "fontFamily": "Source Han Sans CN",
-                          "fontSize": 15
+                          "fontSize": 15,
+                          "fontWeight": "normal"
                         }
                       ]
                     },
@@ -85397,7 +85636,8 @@
                                   "content": "C:\\hiberfil.sys",
                                   "lineHeight": 1.5,
                                   "fontFamily": "JetBrains Mono",
-                                  "fontSize": 13
+                                  "fontSize": 13,
+                                  "fontWeight": "normal"
                                 }
                               ]
                             },
@@ -85422,7 +85662,8 @@
                                   "lineHeight": 1.5,
                                   "textAlign": "right",
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": 13
+                                  "fontSize": 13,
+                                  "fontWeight": "normal"
                                 }
                               ]
                             },
@@ -85445,7 +85686,8 @@
                                   "content": "关闭休眠可全额释放，不影响睡眠与开关机",
                                   "lineHeight": 1.5,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": "$font-ui"
+                                  "fontSize": "$font-ui",
+                                  "fontWeight": "normal"
                                 }
                               ]
                             }
@@ -85477,7 +85719,8 @@
                                   "content": "C:\\Windows\\Temp",
                                   "lineHeight": 1.5,
                                   "fontFamily": "JetBrains Mono",
-                                  "fontSize": 13
+                                  "fontSize": 13,
+                                  "fontWeight": "normal"
                                 }
                               ]
                             },
@@ -85502,7 +85745,8 @@
                                   "lineHeight": 1.5,
                                   "textAlign": "right",
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": 13
+                                  "fontSize": 13,
+                                  "fontWeight": "normal"
                                 }
                               ]
                             },
@@ -85525,7 +85769,8 @@
                                   "content": "系统临时缓存，可直接清理（悬停行高亮示意）",
                                   "lineHeight": 1.5,
                                   "fontFamily": "Source Han Sans CN",
-                                  "fontSize": "$font-ui"
+                                  "fontSize": "$font-ui",
+                                  "fontWeight": "normal"
                                 }
                               ]
                             }
@@ -85566,7 +85811,8 @@
                               "content": "# 关闭系统休眠并立即释放 hiberfil.sys",
                               "lineHeight": 1.615,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": 13
+                              "fontSize": 13,
+                              "fontWeight": "normal"
                             }
                           ]
                         },
@@ -85585,7 +85831,8 @@
                               "content": "powercfg",
                               "lineHeight": 1.615,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": 13
+                              "fontSize": 13,
+                              "fontWeight": "normal"
                             },
                             {
                               "type": "text",
@@ -85595,7 +85842,8 @@
                               "content": " ",
                               "lineHeight": 1.615,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": 13
+                              "fontSize": 13,
+                              "fontWeight": "normal"
                             },
                             {
                               "type": "text",
@@ -85605,7 +85853,8 @@
                               "content": "/h off",
                               "lineHeight": 1.615,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": 13
+                              "fontSize": 13,
+                              "fontWeight": "normal"
                             }
                           ]
                         },
@@ -85631,7 +85880,8 @@
                               "content": "# 校验 C 盘剩余可用空间（GB）",
                               "lineHeight": 1.615,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": 13
+                              "fontSize": 13,
+                              "fontWeight": "normal"
                             }
                           ]
                         },
@@ -85650,7 +85900,8 @@
                               "content": "Get-PSDrive",
                               "lineHeight": 1.615,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": 13
+                              "fontSize": 13,
+                              "fontWeight": "normal"
                             },
                             {
                               "type": "text",
@@ -85660,7 +85911,8 @@
                               "content": " ",
                               "lineHeight": 1.615,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": 13
+                              "fontSize": 13,
+                              "fontWeight": "normal"
                             },
                             {
                               "type": "text",
@@ -85670,7 +85922,8 @@
                               "content": "C",
                               "lineHeight": 1.615,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": 13
+                              "fontSize": 13,
+                              "fontWeight": "normal"
                             },
                             {
                               "type": "text",
@@ -85680,7 +85933,8 @@
                               "content": " | ",
                               "lineHeight": 1.615,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": 13
+                              "fontSize": 13,
+                              "fontWeight": "normal"
                             },
                             {
                               "type": "text",
@@ -85690,7 +85944,8 @@
                               "content": "Select-Object",
                               "lineHeight": 1.615,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": 13
+                              "fontSize": 13,
+                              "fontWeight": "normal"
                             },
                             {
                               "type": "text",
@@ -85700,7 +85955,8 @@
                               "content": " Used, Free",
                               "lineHeight": 1.615,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": 13
+                              "fontSize": 13,
+                              "fontWeight": "normal"
                             }
                           ]
                         },
@@ -85723,7 +85979,8 @@
                               "content": "powershell",
                               "lineHeight": 1.3333,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": "$font-caption"
+                              "fontSize": "$font-caption",
+                              "fontWeight": "normal"
                             },
                             {
                               "type": "frame",
@@ -85781,7 +86038,8 @@
                               "content": "powercfg",
                               "lineHeight": 1.5,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": 13
+                              "fontSize": 13,
+                              "fontWeight": "normal"
                             },
                             {
                               "type": "text",
@@ -85791,7 +86049,8 @@
                               "content": " /h off",
                               "lineHeight": 1.5,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": 13
+                              "fontSize": 13,
+                              "fontWeight": "normal"
                             }
                           ]
                         },
@@ -85810,7 +86069,8 @@
                               "content": "cmd",
                               "lineHeight": 1.3333,
                               "fontFamily": "JetBrains Mono",
-                              "fontSize": "$font-caption"
+                              "fontSize": "$font-caption",
+                              "fontWeight": "normal"
                             },
                             {
                               "type": "frame",
@@ -85895,7 +86155,8 @@
                       "content": "全部绑定语义变量 · 自动响应深色模式",
                       "lineHeight": 1.3333,
                       "fontFamily": "Source Han Sans CN",
-                      "fontSize": "$font-caption"
+                      "fontSize": "$font-caption",
+                      "fontWeight": "normal"
                     }
                   ]
                 },

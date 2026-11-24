@@ -1,4 +1,4 @@
-import { Check } from "lucide-react";
+import { Check, Ellipsis } from "lucide-react";
 import {
 	type CSSProperties,
 	type KeyboardEvent,
@@ -24,6 +24,8 @@ export function SessionEntry({
 	preview,
 	index,
 	viewTransition,
+	showMoreButton = false,
+	menuOpen = false,
 	onToggle,
 	onNavigate,
 	onOpenMenu,
@@ -36,9 +38,11 @@ export function SessionEntry({
 	preview: boolean;
 	index: number;
 	viewTransition?: boolean;
+	showMoreButton?: boolean;
+	menuOpen?: boolean;
 	onToggle: () => void;
 	onNavigate?: (event: MouseEvent<HTMLAnchorElement>) => void;
-	onOpenMenu: (x: number, y: number) => void;
+	onOpenMenu: (x: number, y: number, toggle?: boolean) => void;
 }) {
 	const timerRef = useRef<number | null>(null);
 	const originRef = useRef<{ x: number; y: number } | null>(null);
@@ -106,23 +110,29 @@ export function SessionEntry({
 		}
 	}
 
+	const title = session.title.trim() || "新对话";
 	const content = (
 		<>
 			<span className="session-check-control" aria-hidden="true">
 				<Check size={12} />
 			</span>
-			<span className="sidebar-selection-text">{session.title}</span>
+			<span className="sidebar-selection-text">{title}</span>
 		</>
 	);
 	return (
-		<div className="sidebar-session-row" style={{ "--startup-row": Math.min(index + 1, 11) } as CSSProperties}>
+		<div
+			className="sidebar-session-row"
+			data-menu-open={menuOpen || undefined}
+			data-active={(!managing && active) || undefined}
+			style={{ "--startup-row": Math.min(index + 1, 11) } as CSSProperties}
+		>
 			{managing ? (
 				<label
 					className="sidebar-session sidebar-session-select"
 					data-session-id={session.id}
 					data-selected={selected || undefined}
 					data-disabled={disabled || undefined}
-					title={session.title}
+					title={title}
 					onPointerDown={handlePointerDown}
 					onPointerMove={handlePointerMove}
 					onPointerUp={cancelLongPress}
@@ -157,35 +167,54 @@ export function SessionEntry({
 					{content}
 				</label>
 			) : (
-				<Link
-					className={`sidebar-session ${active ? "selected" : ""}`}
-					data-session-id={session.id}
-					aria-current={active ? "page" : undefined}
-					to={`/s/${session.id}${preview ? "?preview=1" : ""}`}
-					viewTransition={viewTransition}
-					title={session.title}
-					onPointerDown={handlePointerDown}
-					onPointerMove={handlePointerMove}
-					onPointerUp={cancelLongPress}
-					onPointerCancel={cancelLongPress}
-					onTouchStart={handleTouchStart}
-					onTouchMove={handleTouchMove}
-					onTouchEnd={cancelLongPress}
-					onTouchCancel={cancelLongPress}
-					onContextMenu={handleContextMenu}
-					onKeyDown={handleKeyDown}
-					onClick={(event) => {
-						if (suppressClickRef.current) {
-							event.preventDefault();
-							event.stopPropagation();
-							suppressClickRef.current = false;
-							return;
-						}
-						onNavigate?.(event);
-					}}
-				>
-					{content}
-				</Link>
+				<>
+					<Link
+						className={`sidebar-session ${active ? "selected" : ""}`}
+						data-session-id={session.id}
+						aria-current={active ? "page" : undefined}
+						to={`/s/${session.id}${preview ? "?preview=1" : ""}`}
+						viewTransition={viewTransition}
+						title={title}
+						onPointerDown={handlePointerDown}
+						onPointerMove={handlePointerMove}
+						onPointerUp={cancelLongPress}
+						onPointerCancel={cancelLongPress}
+						onTouchStart={handleTouchStart}
+						onTouchMove={handleTouchMove}
+						onTouchEnd={cancelLongPress}
+						onTouchCancel={cancelLongPress}
+						onContextMenu={handleContextMenu}
+						onKeyDown={handleKeyDown}
+						onClick={(event) => {
+							if (suppressClickRef.current) {
+								event.preventDefault();
+								event.stopPropagation();
+								suppressClickRef.current = false;
+								return;
+							}
+							onNavigate?.(event);
+						}}
+					>
+						{content}
+					</Link>
+					{showMoreButton && !preview && (
+						<button
+							type="button"
+							className="btn-icon xs-24 sidebar-session-more"
+							data-menu-trigger-id={session.id}
+							aria-label={`会话操作：${title}`}
+							aria-haspopup="menu"
+							aria-expanded={menuOpen}
+							onClick={(event) => {
+								event.stopPropagation();
+								const bounds = event.currentTarget.getBoundingClientRect();
+								onOpenMenu(bounds.left, bounds.bottom + 4, true);
+							}}
+						>
+							<Ellipsis size={14} aria-hidden="true" />
+						</button>
+					)}
+				</>
 			)}
 		</div>
 	);

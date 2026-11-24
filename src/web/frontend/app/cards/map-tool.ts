@@ -222,7 +222,7 @@ export function mapTool(call: Call, result: Message): CardView {
 	const notice = (id: string, text: string, status: NoticeStatus) => push({ kind: "notice", id, text, status });
 
 	// 提示条：直接用工具返回的原文，不加键名前缀。
-	const degradedText = (value: unknown) => `WizTree 不可用，已降级为逐文件统计（${words(value)}）。数值为下界。`;
+	const degradedText = (value: unknown) => `快速卷索引不可用，已回退为目录遍历统计（${words(value)}）。`;
 	const errorText = (key: string, value: unknown) => {
 		const list = Array.isArray(value) ? value : [value];
 		return list.map((item) => {

@@ -1,6 +1,7 @@
 import { ToggleButton, ToggleButtonGroup, Tooltip } from "@heroui/react";
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useWorkspaceShell } from "../shell/workspace-shell-context";
 
 export function SettingsSegment({
 	label,
@@ -15,6 +16,8 @@ export function SettingsSegment({
 	disabled?: boolean;
 	onChange: (value: string) => void;
 }) {
+	const shell = useWorkspaceShell();
+	const tooltipsDisabled = Boolean(shell?.appActive);
 	const bar = useRef<HTMLDivElement>(null);
 	const movePill = useCallback((animate: boolean) => {
 		const pill = bar.current?.querySelector<HTMLElement>(".t-tabs-pill");
@@ -56,13 +59,13 @@ export function SettingsSegment({
 			<span className="t-tabs-pill" aria-hidden="true" />
 			{items.map((item) =>
 				item.icon ? (
-					<Tooltip key={item.id}>
+					<Tooltip key={item.id} delay={300} closeDelay={0} isDisabled={tooltipsDisabled}>
 						<ToggleButton id={item.id} className="t-tab settings-icon-tab" aria-label={item.label}>
-							<span title={item.label}>
+							<span>
 								<item.icon size={16} aria-hidden="true" />
 							</span>
 						</ToggleButton>
-						<Tooltip.Content>{item.label}</Tooltip.Content>
+						<Tooltip.Content className="app-tooltip">{item.label}</Tooltip.Content>
 					</Tooltip>
 				) : (
 					<ToggleButton key={item.id} id={item.id} className="t-tab">

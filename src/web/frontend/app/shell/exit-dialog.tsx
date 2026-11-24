@@ -1,6 +1,8 @@
+import { TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiJson } from "../data/api";
+import { useAnimatedDialogClose, useStandbyDialogClose } from "./app-dialogs";
 import { useDialogFocusTrap } from "./dialog-focus";
 import { ErrorNotice } from "./error-notice";
 
@@ -12,9 +14,12 @@ export function ExitDialog({ onClose }: { onClose: () => void }) {
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [exited, setExited] = useState(false);
+	const { requestClose, closing } = useAnimatedDialogClose(dialog);
 	useDialogFocusTrap(dialog, cancel);
+	useStandbyDialogClose(dialog, onClose);
 	useEffect(() => {
-		dialog.current?.showModal();
+		const element = dialog.current;
+		element?.showModal();
 		cancel.current?.focus();
 		let active = true;
 		apiJson<Lifecycle>("/api/lifecycle")
@@ -26,12 +31,21 @@ export function ExitDialog({ onClose }: { onClose: () => void }) {
 			});
 		return () => {
 			active = false;
-			dialog.current?.close();
-			document.querySelector<HTMLButtonElement>(".sidebar-account-trigger")?.focus();
+			if (element?.open) element.close();
+			if (document.querySelector(".standby-scrim")) return;
+			const target = [
+				...document.querySelectorAll<HTMLElement>(
+					".sidebar-account-trigger, .sidebar-restore-inline, .sidebar-restore",
+				),
+			].find((candidate) => !candidate.closest("[inert]"));
+			target?.focus({ preventScroll: true });
 		};
 	}, []);
+	useEffect(() => {
+		if (exited) dialog.current?.focus({ preventScroll: true });
+	}, [exited]);
 	async function confirm() {
-		if (busy || !state) return;
+		if (busy || closing || !state) return;
 		setBusy(true);
 		setError("");
 		try {
@@ -45,27 +59,33 @@ export function ExitDialog({ onClose }: { onClose: () => void }) {
 	const count = state?.sessions.filter((s) => s.running).length ?? 0;
 	return createPortal(
 		<dialog
-			className="exit-dialog"
+			className="tier-3-dialog exit-dialog"
 			data-exited={exited || undefined}
 			ref={dialog}
+			tabIndex={-1}
 			aria-labelledby="exit-title"
 			onCancel={(event) => {
 				event.preventDefault();
-				if (!busy) onClose();
+				if (!busy && !closing) requestClose(onClose);
 			}}
 		>
-			<h2 id="exit-title">{exited ? "CST Pilot 已退出" : "退出 CST Pilot？"}</h2>
+			<div className="dialog-title-row dialog-title-row--danger">
+				<TriangleAlert size={16} aria-hidden="true" />
+				<h2 id="exit-title">{exited ? "CST Pilot 已退出" : "退出 CST Pilot？"}</h2>
+			</div>
 			{exited ? (
 				<p className="exit-description">会话已保存。重开请运行 pi.cmd。</p>
 			) : (
 				<>
-					<p>
-						{!state
-							? "正在检查任务…"
-							: count
-								? `${count} 个会话运行中；退出将停止任务、暂停队列。`
-								: "将关闭服务和终端。"}
-					</p>
+					{(!error || state) && (
+						<p>
+							{!state
+								? "正在检查任务…"
+								: count
+									? `${count} 个会话运行中；退出将停止任务、暂停队列。`
+									: "将关闭服务和终端。"}
+						</p>
+					)}
 					{count > 0 && (
 						<ul className="exit-session-list">
 							{state?.sessions
@@ -78,13 +98,19 @@ export function ExitDialog({ onClose }: { onClose: () => void }) {
 					{state && <p className="exit-description">{count ? "记录保留，任务不自动重放。" : "会话保留。"}</p>}
 					{error && <ErrorNotice message={error} />}
 					<div className="exit-actions">
-						<button type="button" ref={cancel} disabled={busy} onClick={onClose}>
+						<button
+							type="button"
+							ref={cancel}
+							className="tier-1-btn-outline"
+							disabled={busy || closing}
+							onClick={() => requestClose(onClose)}
+						>
 							继续使用
 						</button>
 						<button
 							type="button"
-							className="exit-confirm"
-							disabled={busy || !state}
+							className="tier-1-btn-danger solid-danger exit-confirm"
+							disabled={busy || closing || !state}
 							onClick={() => void confirm()}
 						>
 							{busy ? "正在退出…" : count ? "停止任务并退出" : "退出程序"}

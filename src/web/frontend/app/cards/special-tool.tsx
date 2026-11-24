@@ -1,4 +1,5 @@
 import {
+	Check,
 	CircleAlert,
 	CircleCheck,
 	CircleX,
@@ -13,13 +14,14 @@ import {
 	Monitor,
 	Shield,
 } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { RunningCorner } from "../conversation/running-light";
 import { TranscriptDisclosure, type TranscriptFormat } from "../conversation/transcript-disclosure";
 import { ApiFailure, apiJson, sessionPath } from "../data/api";
 import { type PendingBitLocker, requestForCall } from "../data/bitlocker-state";
 import type { Message } from "../data/web-state";
 import { CodeBlock } from "../shell/code-block";
+import { useCopyFeedback } from "../shell/use-copy-feedback";
 import { BitLockerInput } from "./bitlocker-input";
 import {
 	mapSpecialTool,
@@ -29,7 +31,7 @@ import {
 	specialToolKind,
 } from "./special-tool-data";
 
-function StateIcon({ status }: { status: SpecialStatus }) {
+function StateIcon({ status, size = 12, title }: { status: SpecialStatus; size?: number; title?: string }) {
 	const Icon =
 		status === "running"
 			? LoaderCircle
@@ -40,38 +42,37 @@ function StateIcon({ status }: { status: SpecialStatus }) {
 					: status === "error"
 						? CircleX
 						: CircleAlert;
-	return <Icon size={12} className={`special-tool-state special-tool-state--${status}`} aria-hidden="true" />;
+	const el = <Icon size={size} className={`special-tool-state special-tool-state--${status}`} aria-hidden="true" />;
+	return title ? (
+		<span className="special-tool-state-wrap" title={title}>
+			{el}
+		</span>
+	) : (
+		el
+	);
 }
-function CopyButton({ value, label }: { value: string; label: string }) {
-	const [feedback, setFeedback] = useState("");
-	const active = useRef(true),
-		timer = useRef<number | undefined>(undefined);
-	useEffect(() => {
-		active.current = true;
-		return () => {
-			active.current = false;
-			window.clearTimeout(timer.current);
-		};
-	}, []);
-	async function copy() {
-		let message: string;
-		try {
-			await navigator.clipboard.writeText(value);
-			message = "已复制";
-		} catch {
-			message = "复制失败，请手动选择复制";
-		}
-		if (!active.current) return;
-		setFeedback(message);
-		window.clearTimeout(timer.current);
-		timer.current = window.setTimeout(() => setFeedback(""), 2000);
-	}
+function CopyButton({ value, label, compact = false }: { value: string; label: string; compact?: boolean }) {
+	const { status, copy } = useCopyFeedback();
+	const iconSize = compact ? 14 : 16;
 	return (
 		<>
-			<button type="button" className="special-tool-icon-button" aria-label={label} onClick={() => void copy()}>
-				<Copy size={14} aria-hidden="true" />
+			<button
+				type="button"
+				className={`btn-icon${compact ? " xs-24" : ""} special-tool-copy-btn`}
+				aria-label={status === "copied" ? "已复制" : label}
+				title={status === "copied" ? "已复制" : label}
+				data-copied={status === "copied" || undefined}
+				onClick={() => void copy(value)}
+			>
+				{status === "copied" ? (
+					<Check size={iconSize} aria-hidden="true" />
+				) : (
+					<Copy size={iconSize} aria-hidden="true" />
+				)}
 			</button>
-			<output className="special-tool-copy-feedback">{feedback}</output>
+			<output className={status === "error" ? "special-tool-copy-error" : "visually-hidden"}>
+				{status === "copied" ? "已复制" : status === "error" ? "复制失败，请手动选择复制" : ""}
+			</output>
 		</>
 	);
 }
@@ -123,8 +124,8 @@ function ToolDetails({
 				</dl>
 				{view.errors.map((error, index) => (
 					<p className="special-tool-detail-error" key={`${index}-${error}`}>
-						<CircleAlert size={12} aria-hidden="true" />
-						{error}
+						<CircleAlert size={14} aria-hidden="true" />
+						<span>{error}</span>
 					</p>
 				))}
 				{view.raw && <CodeBlock className="special-tool-raw">{view.raw}</CodeBlock>}
@@ -177,8 +178,8 @@ function Runbook({
 	entryId?: string;
 	callId: string;
 }) {
-	const [busy, setBusy] = useState(false),
-		[feedback, setFeedback] = useState("");
+	const [busy, setBusy] = useState(false);
+	const [feedback, setFeedback] = useState("");
 	const key = useRef<string | undefined>(undefined);
 	async function open() {
 		if (!sessionId || !entryId || busy) return;
@@ -249,7 +250,7 @@ function Runbook({
 					</button>
 				</div>
 			)}
-			{feedback && <output className="special-tool-feedback">{feedback}</output>}
+			<output className={feedback ? "special-tool-feedback" : "visually-hidden"}>{feedback}</output>
 		</>
 	);
 }
@@ -320,9 +321,15 @@ export const SpecialTool = memo(function SpecialTool({
 					triggerClassName="special-tool-search-trigger"
 					heading={
 						<>
-							<Globe size={18} aria-hidden="true" />
+							<Globe size={14} aria-hidden="true" />
 							<span>{summary}</span>
-							<StateIcon status={status} />
+							<StateIcon
+								status={status}
+								size={16}
+								title={
+									(status === "degraded" || status === "error") && view.errors[0] ? view.errors[0] : undefined
+								}
+							/>
 						</>
 					}
 					suffix={<small>{view.queries.length} 个关键词</small>}
@@ -339,7 +346,8 @@ export const SpecialTool = memo(function SpecialTool({
 						)}
 						{view.errors.map((error, index) => (
 							<p key={`${index}-${error}`} className="special-tool-detail-error">
-								{error}
+								<CircleAlert size={14} aria-hidden="true" />
+								<span>{error}</span>
 							</p>
 						))}
 					</div>
@@ -354,7 +362,7 @@ export const SpecialTool = memo(function SpecialTool({
 				<h3>{view.title}</h3>
 				<output className="special-tool-status" key={status}>
 					<StateIcon status={status} />
-					{summary}
+					<span>{summary}</span>
 				</output>
 			</header>
 			{view.kind === "sys-overview" && view.status !== "error" && <Overview view={view} />}
@@ -369,7 +377,7 @@ export const SpecialTool = memo(function SpecialTool({
 									<div key={key.id}>
 										<small>密钥 ID</small>
 										<span title={key.id}>{key.id}</span>
-										<CopyButton value={key.id} label="复制恢复密钥 ID" />
+										<CopyButton value={key.id} label="复制恢复密钥 ID" compact />
 									</div>
 								))}
 							{pending.targets.every((t) => !t.keyProtectors.some((k) => k.type === 3)) && (
@@ -391,7 +399,7 @@ export const SpecialTool = memo(function SpecialTool({
 			{(status === "error" || status === "unknown" || status === "degraded") && view.errors.length > 0 && (
 				<p className="special-tool-result-error">
 					<CircleAlert size={14} aria-hidden="true" />
-					{view.errors[0]}
+					<span>{view.errors[0]}</span>
 				</p>
 			)}
 			<footer className="special-tool-footer">

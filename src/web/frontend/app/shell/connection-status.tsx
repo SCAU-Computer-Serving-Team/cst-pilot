@@ -47,12 +47,9 @@ export function ConnectionStatus({ enabled }: { enabled: boolean }) {
 	if (!enabled || !disconnected) return null;
 	return (
 		<Notification className="connection-status" label="连接状态" kind="warning">
-			<WifiOff size={18} aria-hidden="true" />
-			<div>
-				<strong>连接断开</strong>
-				<p>正在重连，输入已保留。</p>
-			</div>
-			<button type="button" className="notice-action" onClick={() => void check()}>
+			<WifiOff size={16} aria-hidden="true" />
+			<span className="notification-message">连接断开，正在重连，输入已保留。</span>
+			<button type="button" className="btn-ghost notice-action" onClick={() => void check()}>
 				重新连接
 			</button>
 		</Notification>

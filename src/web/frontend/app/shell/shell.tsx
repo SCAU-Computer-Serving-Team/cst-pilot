@@ -1,18 +1,22 @@
-import { Button, Disclosure, Popover } from "@heroui/react";
+import { Button, Popover } from "@heroui/react";
 import {
+	ChevronDown,
 	CircleUserRound,
+	History,
 	LayoutDashboard,
 	LogIn,
 	MessageSquareWarning,
-	Monitor,
 	PanelLeft,
 	Power,
+	Search,
 	Settings,
 	SquarePen,
 	SunMoon,
+	User,
+	X,
 } from "lucide-react";
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Link, PrefetchPageLinks, useLocation, useNavigation } from "react-router";
+import { Link, PrefetchPageLinks, useLocation } from "react-router";
 import { describeAccount } from "../account/format";
 import { useAccount } from "../account/use-account";
 import { accountProvider, loginPath } from "../auth/providers";
@@ -28,45 +32,31 @@ import { usePanelDismiss } from "./panel-dismiss";
 import { sampleSessions } from "./sample-sessions";
 import { SessionActionsOverlay, useSessionActions } from "./session-actions";
 import { SessionEntry } from "./session-entry";
-import { orderedSessions, RECENT_SESSION_LIMIT } from "./session-list";
+import { filterRecentSessions, RECENT_SESSION_LIMIT } from "./session-list";
 import { SessionManagementToolbar } from "./session-management";
 import { useWorkspaceSessions } from "./sessions-context";
 import { currentTheme, nextTheme, type Theme, themeLabels } from "./theme";
 
-/** 点击时直接启动选区移动，路由提交与取消仍由 React Router 校正。 */
-function moveSidebarSelection(top: HTMLElement, selection: HTMLElement, active: HTMLElement, animate: boolean) {
-	const origin = top.getBoundingClientRect();
-	const target = active.getBoundingClientRect();
-	const transform = `translate3d(0px, ${target.top - origin.top + top.scrollTop}px, 0px)`;
-	// 宽度变化与重复测量不取消仍在播放的滑动。
-	const height = `${target.height}px`;
-	if (
-		selection.style.transform === transform &&
-		selection.style.height === height &&
-		selection.style.visibility === "visible"
-	)
-		return;
-	if (!animate) selection.style.transition = "none";
-	selection.style.transform = transform;
-	selection.style.height = height;
-	selection.style.visibility = "visible";
-	if (!animate) {
-		void selection.offsetWidth;
-		selection.style.transition = "";
-	}
-	top.dataset.selectionReady = "true";
+function avatarInitialFor(label: string): string {
+	const trimmed = label.trim();
+	if (!trimmed) return "";
+	return Array.from(trimmed)[0]?.toUpperCase() ?? "";
 }
 
 export function Sidebar({
 	preview = false,
 	startup = false,
 	collapsed = false,
+	sidebarRef,
+	collapseButtonRef,
 	onCollapse,
 	onNavigate,
 }: {
 	preview?: boolean;
 	startup?: boolean;
 	collapsed?: boolean;
+	sidebarRef?: React.RefObject<HTMLElement | null>;
+	collapseButtonRef?: React.RefObject<HTMLButtonElement | null>;
 	onCollapse: () => void;
 	onNavigate?: () => void;
 }) {
@@ -74,12 +64,12 @@ export function Sidebar({
 		if (!preview) return attachTelemetryHints(window);
 	}, [preview]);
 	const location = useLocation();
-	const navigation = useNavigation();
-	const selectionPath = navigation.location?.pathname ?? location.pathname;
 	const state = useWorkspaceSessions();
 	const ready = preview || !!state.stage || !!state.error;
 	const startupPendingList = startup && !ready;
 	const [recentOpen, setRecentOpen] = useState(true);
+	const [searchQuery, setSearchQuery] = useState("");
+	const searchInputRef = useRef<HTMLInputElement>(null);
 	const startupPending = useRef(startup);
 	const [startupRows, setStartupRows] = useState(false);
 	useLayoutEffect(() => {
@@ -94,10 +84,12 @@ export function Sidebar({
 		const timer = window.setTimeout(() => setStartupRows(false), 1100);
 		return () => window.clearTimeout(timer);
 	}, [startup, ready]);
+	const sourceSessions = preview ? sampleSessions : state.sessions;
 	const sessions = useMemo(
-		() => orderedSessions(preview ? sampleSessions : state.sessions).slice(0, RECENT_SESSION_LIMIT),
-		[preview, state.sessions],
+		() => filterRecentSessions(sourceSessions, searchQuery, RECENT_SESSION_LIMIT),
+		[sourceSessions, searchQuery],
 	);
+	const hasSearchQuery = searchQuery.trim().length > 0;
 	const [providers, setProviders] = useState<ProviderStatus[]>([]);
 	const team = accountProvider(providers);
 	const teamSignedIn = team?.type === "oauth" || team?.type === "api_key";
@@ -117,7 +109,6 @@ export function Sidebar({
 	}
 	const [theme, setTheme] = useState<Theme>(currentTheme);
 	const topRef = useRef<HTMLDivElement>(null);
-	const selectionRef = useRef<HTMLSpanElement>(null);
 	const focusSession = useCallback((id?: string) => {
 		requestAnimationFrame(() => {
 			const row = id
@@ -127,46 +118,28 @@ export function Sidebar({
 		});
 	}, []);
 	const actions = useSessionActions(sessions, focusSession, preview);
-	const { management, setMenu, openSessionMenu } = actions;
+	const { management, setMenu, clearRenaming, openSessionMenu } = actions;
 	const finishManagement = management.finish;
+	const retainSelection = management.retain;
+	const appActive = !preview && state.stage === "app_active";
+	const inactive = preview || appActive;
+
+	// 侧栏折叠或切入软件端待机态时，关闭所有悬浮层/弹窗并退出多选，避免穿透遮罩。
 	useEffect(() => {
-		if (collapsed) {
-			setMenu(null);
-			finishManagement();
-		}
-	}, [collapsed, finishManagement, setMenu]);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: 列表与导航完成/取消后重新测量，含同路径导航
-	useLayoutEffect(() => {
-		const top = topRef.current;
-		const selection = selectionRef.current;
-		const active = management.managing
-			? null
-			: Array.from(
-					top?.querySelectorAll<HTMLAnchorElement>("a.sidebar-new, a.sidebar-session, a.sidebar-all") ?? [],
-				).find((row) => new URL(row.href).pathname === selectionPath);
-		if (!top || !selection) return;
-		if (!active || (!recentOpen && active.classList.contains("sidebar-session"))) {
-			delete top.dataset.selectionReady;
-			selection.style.visibility = "hidden";
-			return;
-		}
-		const move = (animate: boolean) => moveSidebarSelection(top, selection, active, animate);
-		move(top.dataset.selectionReady === "true");
-		const observer = new ResizeObserver(() => move(false));
-		observer.observe(top);
-		observer.observe(active);
-		const panel = top.querySelector(".sidebar-recent .disclosure__content");
-		if (panel) observer.observe(panel);
-		window.addEventListener("resize", moveOnResize);
-		function moveOnResize() {
-			move(false);
-		}
-		return () => {
-			observer.disconnect();
-			window.removeEventListener("resize", moveOnResize);
-		};
-	}, [selectionPath, location.key, navigation.state, sessions, management.managing, recentOpen]);
-	const inactive = preview || state.stage === "app_active";
+		if (!collapsed && !appActive) return;
+		setAccountMenuOpen(false);
+		setMenu(null);
+		clearRenaming();
+		finishManagement();
+		if (appActive) setExitOpen(false);
+	}, [collapsed, appActive, finishManagement, setMenu, clearRenaming]);
+
+	// 搜索过滤变化时，多选集合仅保留当前可见会话，防止隐藏项残留并在清空后复活。
+	useEffect(() => {
+		if (!management.managing) return;
+		retainSelection(new Set(sessions.map((session) => session.id)));
+	}, [management.managing, sessions, retainSelection]);
+
 	const refreshAccount = useCallback(async () => {
 		if (inactive) return;
 		try {
@@ -232,153 +205,211 @@ export function Sidebar({
 			setAccountWorking(false);
 		}
 	}
+
+	const homeHref = preview ? "/?preview=1" : "/";
+	const accountDisplayName = preview
+		? "示例账号"
+		: cstoaAccount?.signedIn && !teamRequiresLogin
+			? cstoaAccount.profile.name || cstoaAccount.profile.studentId || "CSTOA 账号"
+			: teamSignedIn
+				? teamRequiresLogin
+					? "需要重新登录"
+					: "CSTOA 账号"
+				: state.stage === "preview"
+					? "页面预览"
+					: "CSTOA 未登录";
+	const accountInitial =
+		preview || (cstoaAccount?.signedIn && !teamRequiresLogin) ? avatarInitialFor(accountDisplayName) : "";
+
 	return (
 		<aside
+			ref={sidebarRef}
 			className="sidebar"
 			aria-label="会话导航"
 			data-managing={management.managing || undefined}
 			data-startup-rows={startupRows || undefined}
 			data-startup-pending={startupPendingList || undefined}
-			inert={collapsed || startupPendingList}
-			aria-hidden={collapsed || startupPendingList}
+			inert={collapsed}
+			aria-hidden={collapsed}
 		>
 			{/* 所有会话共用聊天路由，只插入一份预载声明。 */}
 			{sessions[0] && <PrefetchPageLinks page={`/s/${sessions[0].id}${preview ? "?preview=1" : ""}`} />}
 			<div className="sidebar-top" ref={topRef}>
-				<span className="sidebar-selection" ref={selectionRef} aria-hidden="true" />
+				{/* 1. 品牌与收起/新建操作行（b50Q7Y，高 40px） */}
 				<div className="sidebar-brand">
-					<Link className="product-name" to={preview ? "/?preview=1" : "/"} viewTransition>
+					<Link className="product-name" to={homeHref} viewTransition onClick={onNavigate}>
 						CST Pilot
 					</Link>
-					<Button variant="ghost" isIconOnly className="sidebar-icon" aria-label="收起侧栏" onPress={onCollapse}>
-						<PanelLeft size={22} />
-					</Button>
-				</div>
-				<div className="sidebar-new-area">
-					<Link
-						className={`sidebar-new ${!management.managing && location.pathname === "/" ? "selected" : ""}`}
-						to={preview ? "/?preview=1" : "/"}
-						viewTransition
-						onClick={onNavigate}
-					>
-						<span className="sidebar-nav-icon">
-							<SquarePen size={18} aria-hidden="true" />
-						</span>
-						新对话
-					</Link>
-					<SessionManagementToolbar
-						active={management.managing}
-						allSelected={management.allSelected}
-						busy={management.busy}
-						onToggleAll={management.toggleAll}
-						onFinish={() => {
-							setMenu(null);
-							management.finish();
-							topRef.current?.querySelector<HTMLElement>(".sidebar-new")?.focus();
-						}}
-					/>
-				</div>
-				<button type="button" className="sidebar-new sidebar-dashboard" disabled title="仪表盘功能计划中">
-					<span className="sidebar-nav-icon">
-						<LayoutDashboard size={18} aria-hidden="true" />
-					</span>
-					仪表盘
-				</button>
-				<Disclosure
-					className="sidebar-recent"
-					isExpanded={recentOpen}
-					onExpandedChange={(open) => {
-						setMenu(null);
-						if (!open) finishManagement();
-						setRecentOpen(open);
-					}}
-				>
-					<Disclosure.Heading>
-						<Disclosure.Trigger
-							className="sidebar-recent-heading"
-							style={{ "--startup-row": 0 } as CSSProperties}
+					<div className="sidebar-brand-actions">
+						<button
+							ref={collapseButtonRef}
+							type="button"
+							className="btn-icon sidebar-icon"
+							aria-label="收起侧栏"
+							title="收起侧栏"
+							onClick={onCollapse}
 						>
-							最近
-							<Disclosure.Indicator />
-						</Disclosure.Trigger>
-					</Disclosure.Heading>
-					<Disclosure.Content inert={!recentOpen} aria-hidden={!recentOpen}>
-						<div className="sidebar-recent-list">
-							{sessions.map((session, index) => (
-								<SessionEntry
-									key={session.id}
-									session={session}
-									index={index}
-									active={
-										location.pathname === `/s/${session.id}` ||
-										location.pathname.startsWith(`/s/${session.id}/`)
-									}
-									managing={management.managing}
-									selected={management.selection?.has(session.id) ?? false}
-									disabled={management.busy}
-									preview={preview}
-									viewTransition={
-										location.pathname.startsWith("/settings") || location.pathname.endsWith("/export")
-									}
-									onToggle={() => {
-										setMenu(null);
-										management.toggle(session.id);
-									}}
-									onNavigate={(event) => {
-										if (
-											event.defaultPrevented ||
-											event.button !== 0 ||
-											event.metaKey ||
-											event.ctrlKey ||
-											event.shiftKey ||
-											event.altKey
-										)
-											return;
-										if (topRef.current && selectionRef.current)
-											moveSidebarSelection(topRef.current, selectionRef.current, event.currentTarget, true);
-										onNavigate?.();
-									}}
-									onOpenMenu={(x, y) => openSessionMenu(session, x, y)}
+							<PanelLeft size={18} aria-hidden="true" />
+						</button>
+						<Link
+							className={`btn-icon sidebar-new ${!management.managing && location.pathname === "/" ? "is-home" : ""}`}
+							to={homeHref}
+							aria-label="新建对话"
+							title="新建对话"
+							viewTransition
+							onClick={onNavigate}
+						>
+							<SquarePen size={18} aria-hidden="true" />
+						</Link>
+					</div>
+				</div>
+
+				{/* 2. 主体导航与最近列表容器（pQpX5，gap 16px） */}
+				<div className="sidebar-body">
+					{/* 2a. 搜索记录框（oq4G4，高 36px） */}
+					<div className="sidebar-search-box">
+						<Search size={18} className="sidebar-search-icon" aria-hidden="true" />
+						<input
+							ref={searchInputRef}
+							type="search"
+							className="sidebar-search-input"
+							placeholder="搜索"
+							aria-label="搜索会话"
+							value={searchQuery}
+							onChange={(event) => {
+								const next = event.target.value;
+								setSearchQuery(next);
+								if (next.trim() && !recentOpen) setRecentOpen(true);
+							}}
+							onKeyDown={(event) => {
+								if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+								if (event.key === "Escape" && searchQuery) {
+									event.preventDefault();
+									event.stopPropagation();
+									setSearchQuery("");
+								}
+							}}
+						/>
+						{hasSearchQuery && (
+							<button
+								type="button"
+								className="sidebar-search-clear"
+								aria-label="清空搜索"
+								onClick={() => {
+									setSearchQuery("");
+									searchInputRef.current?.focus();
+								}}
+							>
+								<X size={13} aria-hidden="true" />
+							</button>
+						)}
+					</div>
+
+					{/* 2b. 主功能导航（WKJAy，gap 6px） */}
+					<nav className="sidebar-primary-nav" aria-label="主导航">
+						<button
+							type="button"
+							className="sidebar-nav-item sidebar-dashboard"
+							disabled
+							title="仪表盘功能计划中"
+						>
+							<LayoutDashboard size={18} aria-hidden="true" />
+							<span>仪表盘</span>
+						</button>
+						<Link
+							className={`sidebar-nav-item sidebar-all ${!management.managing && location.pathname === "/sessions" ? "selected" : ""}`}
+							to={preview ? "/sessions?preview=1" : "/sessions"}
+							aria-current={location.pathname === "/sessions" ? "page" : undefined}
+							viewTransition
+							onClick={onNavigate}
+						>
+							<History size={18} aria-hidden="true" />
+							<span>全部会话</span>
+						</Link>
+					</nav>
+
+					{/* 2c. 最近会话组（CzUNm / STl1A） */}
+					<div className="sidebar-recent">
+						<div className="sidebar-recent-bar">
+							<button
+								type="button"
+								className="sidebar-recent-heading"
+								aria-expanded={recentOpen}
+								style={{ "--startup-row": 0 } as CSSProperties}
+								onClick={() => {
+									setMenu(null);
+									if (recentOpen) finishManagement();
+									setRecentOpen((open) => !open);
+								}}
+							>
+								<span>最近</span>
+								<ChevronDown
+									size={14}
+									className="disc-chevron"
+									data-expanded={recentOpen ? "true" : "false"}
+									aria-hidden="true"
 								/>
-							))}
-							{!sessions.length && (state.stage || preview) && <p className="sidebar-empty">暂无会话</p>}
+							</button>
+							<SessionManagementToolbar
+								active={management.managing}
+								allSelected={management.allSelected}
+								hasItems={sessions.length > 0}
+								selectedCount={management.count}
+								busy={management.busy}
+								onToggleAll={management.toggleAll}
+								onDelete={management.count > 0 ? () => management.requestDelete() : undefined}
+								onFinish={() => {
+									setMenu(null);
+									management.finish();
+									topRef.current?.querySelector<HTMLElement>(".sidebar-new")?.focus();
+								}}
+							/>
 						</div>
-					</Disclosure.Content>
-				</Disclosure>
-				<Link
-					className={`sidebar-all ${location.pathname === "/sessions" ? "selected" : ""}`}
-					to={preview ? "/sessions?preview=1" : "/sessions"}
-					aria-current={location.pathname === "/sessions" ? "page" : undefined}
-					viewTransition
-					onClick={onNavigate}
-				>
-					查看全部
-				</Link>
-				{state.error && (
-					<p className="sidebar-error" role="alert">
-						{state.error}
-					</p>
-				)}
+						{recentOpen && (
+							<div className="sidebar-recent-list">
+								{sessions.map((session, index) => (
+									<SessionEntry
+										key={session.id}
+										session={session}
+										index={index}
+										active={
+											location.pathname === `/s/${session.id}` ||
+											location.pathname.startsWith(`/s/${session.id}/`)
+										}
+										managing={management.managing}
+										selected={management.selection?.has(session.id) ?? false}
+										disabled={management.busy}
+										preview={preview}
+										showMoreButton
+										menuOpen={actions.menu?.id === session.id}
+										viewTransition={
+											location.pathname.startsWith("/settings") || location.pathname.endsWith("/export")
+										}
+										onToggle={() => {
+											setMenu(null);
+											management.toggle(session.id);
+										}}
+										onNavigate={() => onNavigate?.()}
+										onOpenMenu={(x, y, toggle) => openSessionMenu(session, x, y, toggle)}
+									/>
+								))}
+								{!sessions.length && (state.stage || preview) && (
+									<p className="sidebar-empty">{hasSearchQuery ? "无匹配会话" : "暂无会话"}</p>
+								)}
+							</div>
+						)}
+					</div>
+					{state.error && (
+						<p className="sidebar-error" role="alert">
+							{state.error}
+						</p>
+					)}
+				</div>
 			</div>
 			<SessionActionsOverlay actions={actions} />
+
+			{/* 3. 底部账号与设置菜单栏（fMdf9，高 36px，整行统一作为 Popover 触发器确保 React Aria 焦距与外部点击完全自洽） */}
 			<div className="sidebar-footer">
-				<div className="device-icon">
-					<Monitor size={18} />
-				</div>
-				<div className="device-copy">
-					<span>{preview ? "示例账号" : teamSignedIn ? "CSTOA 账号" : "当前电脑"}</span>
-					<small>
-						{preview
-							? "24宣传指导 · 设计预览"
-							: teamSignedIn
-								? teamRequiresLogin
-									? "需要重新登录"
-									: "已登录"
-								: state.stage === "preview"
-									? "页面预览模式"
-									: "CSTOA 未登录"}
-					</small>
-				</div>
 				<Popover
 					isOpen={accountMenuOpen}
 					onOpenChange={(open) => {
@@ -389,79 +420,87 @@ export function Sidebar({
 					<Button
 						ref={accountTriggerRef}
 						variant="ghost"
-						isIconOnly
-						className="sidebar-account-trigger"
-						aria-label="账号菜单"
+						className="sidebar-footer-row sidebar-account-btn sidebar-account-trigger"
+						aria-label={`账号与设置菜单：${accountDisplayName}`}
+						data-open={accountMenuOpen || undefined}
 					>
-						<Settings size={22} aria-hidden="true" />
+						<span className="sidebar-avatar" aria-hidden="true">
+							{accountInitial ? accountInitial : <User size={13} />}
+						</span>
+						<span className="sidebar-account-label">{accountDisplayName}</span>
+						<span className="sidebar-footer-gear" aria-hidden="true">
+							<Settings size={18} />
+						</span>
 					</Button>
 					<Popover.Content
-						placement="right bottom"
-						offset={20}
-						containerPadding={16}
-						className="sidebar-account-popover"
+						placement="top end"
+						offset={8}
+						containerPadding={12}
+						className="tier-2-glass tier-2-menu sidebar-account-popover"
 					>
-						<Popover.Dialog aria-label="账号菜单" className="sidebar-account-menu">
-							{cstoaSummary && (
+						<Popover.Dialog aria-label="账号菜单" className="tier-2-menu-list sidebar-account-menu">
+							{(cstoaSummary || preview) && (
 								<>
 									<div className="sidebar-account-identity">
-										<strong title={cstoaSummary.identity}>{cstoaSummary.identity}</strong>
+										<strong title={preview ? "示例账号 · 设计预览" : cstoaSummary?.identity}>
+											{preview ? "示例账号 · 设计预览" : cstoaSummary?.identity}
+										</strong>
 									</div>
-									<hr className="session-menu-divider" />
+									<hr className="menu-sep" />
 								</>
 							)}
-							<Link className="sidebar-account-item" to="/account" viewTransition onClick={closeAccountMenu}>
-								<CircleUserRound size={18} aria-hidden="true" />
-								账号信息
+							<Link className="menu-row" to="/account" viewTransition onClick={closeAccountMenu}>
+								<CircleUserRound size={16} aria-hidden="true" />
+								<span>账号信息</span>
 							</Link>
 							{(!teamSignedIn || teamRequiresLogin) && (
 								<Link
-									className="sidebar-account-item"
+									className="menu-row"
 									to={loginPath("cstoa", "oauth", "/account")}
 									viewTransition={location.pathname.endsWith("/export")}
 									onClick={closeAccountMenu}
 								>
-									<LogIn size={18} aria-hidden="true" />
-									{teamRequiresLogin ? "重新登录 CSTOA" : "登录 CSTOA"}
+									<LogIn size={16} aria-hidden="true" />
+									<span>{teamRequiresLogin ? "重新登录 CSTOA" : "登录 CSTOA"}</span>
 								</Link>
 							)}
-							<Link className="sidebar-account-item" to="/settings" viewTransition onClick={closeAccountMenu}>
-								<Settings size={18} aria-hidden="true" />
-								设置
+							<Link className="menu-row" to="/settings" viewTransition onClick={closeAccountMenu}>
+								<Settings size={16} aria-hidden="true" />
+								<span>设置</span>
 							</Link>
-							<Button
-								variant="ghost"
-								className="sidebar-account-item"
-								isDisabled={accountWorking}
+							<button
+								type="button"
+								className="menu-row"
+								disabled={accountWorking}
 								aria-label={`主题，当前${themeLabels[theme]}，切换为${themeLabels[nextTheme[theme]]}`}
-								onPress={() => void changeTheme()}
+								onClick={() => void changeTheme()}
 							>
-								<SunMoon size={18} aria-hidden="true" />
+								<SunMoon size={16} aria-hidden="true" />
 								<span>主题</span>
-								<small className="sidebar-theme-value">{themeLabels[theme]}</small>
-							</Button>
+								<small className="menu-row-suffix">{themeLabels[theme]}</small>
+							</button>
 							<a
-								className="sidebar-account-item"
+								className="menu-row"
 								href="https://github.com/SCAU-Computer-Serving-Team/cst-pilot/issues/new"
 								onClick={closeAccountMenu}
 								target="_blank"
 								rel="noopener noreferrer"
 							>
-								<MessageSquareWarning size={18} aria-hidden="true" />
-								反馈问题
+								<MessageSquareWarning size={16} aria-hidden="true" />
+								<span>反馈问题</span>
 							</a>
-							<hr className="session-menu-divider" />
-							<Button
-								variant="ghost"
-								className="sidebar-account-item"
-								onPress={() => {
-									closeAccountMenu();
+							<hr className="menu-sep" />
+							<button
+								type="button"
+								className="menu-row danger"
+								onClick={() => {
+									setAccountMenuOpen(false);
 									setExitOpen(true);
 								}}
 							>
-								<Power size={18} aria-hidden="true" />
-								退出 CST Pilot
-							</Button>
+								<Power size={16} aria-hidden="true" />
+								<span>退出 CST Pilot</span>
+							</button>
 							{accountError && (
 								<p role="alert" className="sidebar-error">
 									{accountError}
@@ -478,16 +517,24 @@ export function Sidebar({
 
 export function BrandArcs() {
 	return (
-		<svg className="brand-arcs" viewBox="0 0 400 400" fill="none" aria-hidden="true">
+		<svg className="brand-arcs" viewBox="0 0 280 280" fill="none" aria-hidden="true">
 			<defs>
 				<linearGradient id="brand-arc-gradient" x1="0%" y1="100%" x2="0%" y2="0%">
-					<stop stopColor="#fff" stopOpacity="0" />
-					<stop offset="55%" stopColor="#fff" stopOpacity=".12" />
-					<stop offset="100%" stopColor="#fff" />
+					<stop offset="0%" stopColor="#fff" stopOpacity="0" />
+					<stop offset="55%" stopColor="#fff" stopOpacity="0.12" />
+					<stop offset="100%" stopColor="#fff" stopOpacity="1" />
 				</linearGradient>
 			</defs>
-			<path d="M200 200 L340 60 A197.5 197.5 0 1 0 60 340 Z" stroke="url(#brand-arc-gradient)" strokeWidth="5" />
-			<path d="M200 200 L323 77 A171.5 171.5 0 1 0 77 323 Z" stroke="url(#brand-arc-gradient)" strokeWidth="5" />
+			<path
+				d="M 237.76 237.76 A 138.25 138.25 0 1 1 237.76 42.24"
+				stroke="url(#brand-arc-gradient)"
+				strokeWidth="3.5"
+			/>
+			<path
+				d="M 225.03 225.03 A 120.25 120.25 0 1 1 225.03 54.97"
+				stroke="url(#brand-arc-gradient)"
+				strokeWidth="3.5"
+			/>
 		</svg>
 	);
 }
@@ -540,7 +587,7 @@ export function HomeSurface({
 				)}
 				<Composer home onSend={preview || paused ? undefined : send} />
 			</div>
-			<span className="home-footnote">@cst-pilot-web</span>
+			<span className="home-footnote">@cst-pilot</span>
 		</main>
 	);
 }

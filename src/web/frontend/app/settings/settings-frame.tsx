@@ -1,4 +1,3 @@
-import { Button } from "@heroui/react";
 import { ArrowLeft, CircleCheck, TriangleAlert, X } from "lucide-react";
 import { type ComponentProps, createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
@@ -97,18 +96,18 @@ export function SettingsFeedback({ children }: { children: ReactNode }) {
 					onDismiss={() => setNotice(null)}
 				>
 					{notice.kind === "warning" ? (
-						<TriangleAlert size={18} aria-hidden="true" />
+						<TriangleAlert size={16} aria-hidden="true" />
 					) : (
-						<CircleCheck size={18} aria-hidden="true" />
+						<CircleCheck size={16} aria-hidden="true" />
 					)}
 					<span className="notification-message">{notice.message}</span>
 					<button
 						type="button"
-						className="notification-close"
+						className="btn-icon xs-24 notification-close"
 						aria-label="关闭通知"
 						onClick={() => setNotice(null)}
 					>
-						<X size={18} aria-hidden="true" />
+						<X size={14} aria-hidden="true" />
 					</button>
 				</Notification>
 			)}
@@ -198,9 +197,9 @@ export function SettingsLoadState({
 			{error && (
 				<div className="settings-load-error" role="alert">
 					<span>{error}</span>
-					<Button size="sm" variant="ghost" onPress={onRetry}>
+					<button type="button" className="tier-1-btn-outline" onClick={onRetry}>
 						重试
-					</Button>
+					</button>
 				</div>
 			)}
 		</>

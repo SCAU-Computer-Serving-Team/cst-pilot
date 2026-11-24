@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { groupSessions, orderedSessions, RECENT_SESSION_LIMIT } from "./session-list.ts";
+import { filterRecentSessions, groupSessions, orderedSessions, RECENT_SESSION_LIMIT } from "./session-list.ts";
 
 test("会话按更新时间倒序，同时间保持顺序，不改动来源", () => {
 	const rows = [
@@ -59,4 +59,25 @@ test("全部会话按本地自然日分为互斥四组，保持倒序且每条�
 	assert.equal(rows[0].id, "month-start", "不修改来源数组");
 	assert.deepEqual(groupSessions([], now), [], "空列表不显示空分组");
 	assert.equal(groupSessions([rows[1]], now).length, 1, "仅显示非空分组");
+});
+
+test("侧栏搜索按更新时间倒序、忽略大小写匹配空标题为新对话并限制上限", () => {
+	const rows = [
+		{ id: "a", title: "C 盘空间异常排查", updatedAt: "2026-10-01T00:00:00Z" },
+		{ id: "b", title: "WiFi 断连诊断", updatedAt: "2026-10-05T00:00:00Z" },
+		{ id: "c", title: "   ", updatedAt: "2026-10-03T00:00:00Z" },
+		{ id: "d", title: "wifi 密码重置", updatedAt: "2026-10-04T00:00:00Z" },
+	];
+	assert.deepEqual(
+		filterRecentSessions(rows, "  WIFI ").map((row) => row.id),
+		["b", "d"],
+	);
+	assert.deepEqual(
+		filterRecentSessions(rows, "新对话").map((row) => row.id),
+		["c"],
+	);
+	assert.deepEqual(
+		filterRecentSessions(rows, "", 2).map((row) => row.id),
+		["b", "d"],
+	);
 });

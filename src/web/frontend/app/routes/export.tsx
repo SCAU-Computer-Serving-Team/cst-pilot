@@ -1,4 +1,3 @@
-import { Button } from "@heroui/react";
 import { ArrowLeft, Download } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
@@ -8,6 +7,7 @@ import { ExportPreview } from "../exports/export-preview";
 import { ExportResult } from "../exports/export-result";
 import { ExportSelect } from "../exports/export-select";
 import { ErrorNotice } from "../shell/error-notice";
+import { SidebarHeaderToggle } from "../shell/workspace-shell-context";
 
 function initialOptions(): ExportOptions {
 	const theme = document.documentElement.dataset.theme;
@@ -106,8 +106,9 @@ function ExportSessionContent({ sessionId }: { sessionId: string }) {
 	return (
 		<main className="export-workspace">
 			<header className="export-toolbar">
-				<Link to={`/s/${sessionId}`} className="export-back" viewTransition>
-					<ArrowLeft size={18} />
+				<SidebarHeaderToggle />
+				<Link to={`/s/${sessionId}`} className="btn-ghost export-back" viewTransition>
+					<ArrowLeft size={16} aria-hidden="true" />
 					返回对话
 				</Link>
 				<h1>导出会话</h1>
@@ -136,31 +137,34 @@ function ExportSessionContent({ sessionId }: { sessionId: string }) {
 							disabled={running}
 							onChange={(theme) => setOptions({ ...options, theme })}
 						/>
-						<label className="export-check">
-							<input
-								type="checkbox"
-								checked={options.includeThinking}
-								onChange={(event) => setOptions({ ...options, includeThinking: event.target.checked })}
-							/>
-							包含思考过程
-						</label>
-						<label className="export-check">
-							<input
-								type="checkbox"
-								checked={options.includeTools}
-								onChange={(event) => setOptions({ ...options, includeTools: event.target.checked })}
-							/>
-							包含工具调用结果
-						</label>
+						<div className="export-checks">
+							<label className="export-check">
+								<input
+									type="checkbox"
+									checked={options.includeThinking}
+									onChange={(event) => setOptions({ ...options, includeThinking: event.target.checked })}
+								/>
+								包含思考过程
+							</label>
+							<label className="export-check">
+								<input
+									type="checkbox"
+									checked={options.includeTools}
+									onChange={(event) => setOptions({ ...options, includeTools: event.target.checked })}
+								/>
+								包含工具调用结果
+							</label>
+						</div>
 					</fieldset>
-					<Button
-						className="export-generate"
-						isDisabled={running || !snapshot || previewPending}
-						onPress={() => void generate()}
+					<button
+						type="button"
+						className="tier-1-btn-primary export-generate"
+						disabled={running || !snapshot || previewPending}
+						onClick={() => void generate()}
 					>
-						<Download size={16} />
+						<Download size={16} aria-hidden="true" />
 						{running ? "正在生成…" : "生成并保存"}
-					</Button>
+					</button>
 					{error && (
 						<ErrorNotice
 							message={error}

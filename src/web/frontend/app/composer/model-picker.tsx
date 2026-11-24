@@ -1,13 +1,14 @@
 import { Button, ListBox, Popover } from "@heroui/react";
-import { ChevronDown, ChevronRight } from "lucide-react";
-import { type CSSProperties, useLayoutEffect, useRef, useState } from "react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { type CSSProperties, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ModelChoice } from "../data/model-selection";
 import type { Model } from "../data/web-state";
 import { usePanelDismiss } from "../shell/panel-dismiss";
+import { useWorkspaceShell } from "../shell/workspace-shell-context";
 
 const fullId = (model: Model) => `${model.provider}/${model.id}`;
 function thinkingLabel(level = "off") {
-	return level === "xhigh" ? "XHigh" : level.charAt(0).toUpperCase() + level.slice(1);
+	return level === "xhigh" || level === "max" ? "Max" : level.charAt(0).toUpperCase() + level.slice(1);
 }
 type Page = "main" | "models" | "thinking";
 
@@ -44,14 +45,36 @@ export function ModelPicker({
 	const modelButton = useRef<HTMLButtonElement>(null);
 	const thinkingButton = useRef<HTMLButtonElement>(null);
 	const listBox = useRef<HTMLDivElement>(null);
-	usePanelDismiss(open, () => {
-		navigation.current++;
-		setOpen(false);
-	});
+	const shell = useWorkspaceShell();
+	useEffect(() => {
+		if (shell?.appActive) {
+			navigation.current++;
+			setOpen(false);
+		}
+	}, [shell?.appActive]);
+	usePanelDismiss(
+		open,
+		() => {
+			navigation.current++;
+			setOpen(false);
+		},
+		triggerButton,
+	);
 	// 在组件首次挂载时抢先于 Popover 子树注册捕获监听，保证子列表 Esc 只退回主菜单，主菜单 Esc 归还入口焦点。
 	useLayoutEffect(() => {
 		function onEscape(event: KeyboardEvent) {
-			if (!openRef.current || event.key !== "Escape" || event.isComposing || event.defaultPrevented) return;
+			if (!openRef.current || event.key !== "Escape") return;
+			// 输入法组合态下的 Esc 只应交给输入法，拦截传播以阻止第三方 Popover 误关闭，且不调用 preventDefault。
+			if (event.isComposing || event.keyCode === 229) {
+				escapeSubpageGuard.current = true;
+				queueMicrotask(() => {
+					escapeSubpageGuard.current = false;
+				});
+				event.stopPropagation();
+				event.stopImmediatePropagation();
+				return;
+			}
+			if (event.defaultPrevented) return;
 			event.preventDefault();
 			event.stopPropagation();
 			event.stopImmediatePropagation();
@@ -67,7 +90,7 @@ export function ModelPicker({
 			}
 			navigation.current++;
 			setOpen(false);
-			requestAnimationFrame(() => triggerButton.current?.focus());
+			window.setTimeout(() => triggerButton.current?.focus(), 0);
 		}
 		window.addEventListener("keydown", onEscape, true);
 		return () => window.removeEventListener("keydown", onEscape, true);
@@ -118,7 +141,11 @@ export function ModelPicker({
 			? models.map((model) => ({ id: fullId(model), label: model.name, title: `${model.provider} · ${model.name}` }))
 			: supportedLevels.map((level) => ({ id: level, label: thinkingLabel(level), title: thinkingLabel(level) }));
 	const selectedKey = listPage === "models" ? modelKey : thinking;
-	const rows = page === "main" ? 2 : Math.max(1, options.length);
+	// 主菜单 2 行（32px + 2px 间距 + 8px 上下内边距）；子列表含顶部返回行 + 选项行。
+	// 面板宽度对齐 cst-pilot-web.pen：主面板 d8zzg=148px、思考强度 L7GWjV=84px、模型列表 216px。
+	const rowCount = page === "main" ? 2 : 1 + Math.max(1, options.length);
+	const pickerHeight = rowCount * 32 + Math.max(0, rowCount - 1) * 2 + 8;
+	const pickerWidth = page === "main" ? 148 : page === "thinking" ? 84 : 216;
 	return (
 		<Popover
 			isOpen={open}
@@ -136,7 +163,8 @@ export function ModelPicker({
 			<Button
 				ref={triggerButton}
 				variant="ghost"
-				className="composer-model"
+				className="btn-ghost composer-model"
+				data-open={open || undefined}
 				aria-label={`模型与思考强度：${selected?.name ?? "加载中"}，${thinkingLabel(thinking)}`}
 				isDisabled={!selected && !models.length}
 			>
@@ -145,12 +173,13 @@ export function ModelPicker({
 				</span>
 				<span className="model-current-strength">{thinkingLabel(thinking)}</span>
 				<span className="model-chevron">
-					<ChevronDown size={14} aria-hidden="true" />
+					<ChevronDown size={12} aria-hidden="true" />
 				</span>
 			</Button>
 			<Popover.Content
-				className={`composer-popover model-picker-popover t-resize ${page === "main" ? "" : "model-picker-list"}`}
-				style={{ "--picker-height": `${rows * 32 + 24}px` } as CSSProperties}
+				className={`tier-2-glass composer-popover model-picker-popover t-resize ${page === "main" ? "" : "model-picker-list"}`}
+				data-page={page}
+				style={{ "--picker-height": `${pickerHeight}px`, "--picker-width": `${pickerWidth}px` } as CSSProperties}
 				placement="top end"
 				offset={8}
 				containerPadding={16}
@@ -172,7 +201,7 @@ export function ModelPicker({
 							<Button
 								ref={modelButton}
 								variant="ghost"
-								className="model-picker-model"
+								className="menu-row model-picker-model"
 								aria-label="选择模型"
 								isDisabled={!models.length}
 								onPress={() => {
@@ -181,13 +210,16 @@ export function ModelPicker({
 									setPage("models");
 								}}
 							>
-								<span title={selected?.name}>{selected?.name ?? "选择模型"}</span>
-								<ChevronRight size={16} aria-hidden="true" />
+								<span className="model-picker-row-label">模型</span>
+								<span className="model-picker-row-value" title={selected?.name}>
+									<span className="model-picker-row-text">{selected?.name ?? "选择模型"}</span>
+									<ChevronRight size={14} aria-hidden="true" />
+								</span>
 							</Button>
 							<Button
 								ref={thinkingButton}
 								variant="ghost"
-								className="model-picker-thinking"
+								className="menu-row model-picker-thinking"
 								aria-label="选择思考强度"
 								onPress={() => {
 									navigation.current++;
@@ -195,8 +227,11 @@ export function ModelPicker({
 									setPage("thinking");
 								}}
 							>
-								<span>{thinkingLabel(thinking)}</span>
-								<ChevronRight size={16} aria-hidden="true" />
+								<span className="model-picker-row-label">思考强度</span>
+								<span className="model-picker-row-value">
+									<span className="model-picker-row-text">{thinkingLabel(thinking)}</span>
+									<ChevronRight size={14} aria-hidden="true" />
+								</span>
 							</Button>
 						</div>
 						<div
@@ -205,6 +240,10 @@ export function ModelPicker({
 							aria-hidden={page === "main"}
 							inert={page === "main"}
 						>
+							<button type="button" className="menu-row model-picker-back" onClick={back}>
+								<ChevronLeft size={14} aria-hidden="true" />
+								<span>返回</span>
+							</button>
 							<ListBox
 								ref={listBox}
 								key={listPage}
@@ -222,7 +261,10 @@ export function ModelPicker({
 							>
 								{options.map((option) => (
 									<ListBox.Item key={option.id} id={option.id} textValue={option.title}>
-										<span title={option.title}>{option.label}</span>
+										<span className="model-picker-option-label" title={option.title}>
+											{option.label}
+										</span>
+										<Check size={14} className="model-picker-option-check" aria-hidden="true" />
 									</ListBox.Item>
 								))}
 							</ListBox>

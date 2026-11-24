@@ -22,7 +22,7 @@
 | 画布路径 | 角色与状态 |
 |---|---|
 | [cst-pilot-desktop.pen](design/cst-pilot-desktop.pen) | 桌面端与内置 TUI 主流基准画布，收录「设计规范」板、`00A–00H` 母版与 `01–07` 业务主区 |
-| [cst-pilot-web.pen](design/cst-pilot-web.pen) | Web 端单文件画布（已合并原工具画布并对齐 50 项静态变量、`mode: [light, dark]` 轴、`LKIQI` 规范板、`00A–00F`/`00H` 母版与 `01–07` 主区，保留 Web 无顶栏、响应式断点与通道状态；前端迁移见[待办](doc/TASKS.md#文档与设计规范待办)） |
+| [cst-pilot-web.pen](design/cst-pilot-web.pen) | Web 端单文件画布（已合并原工具画布并对齐 50 项静态变量、`mode: [light, dark]` 轴、`LKIQI` 规范板、`00A–00F`/`00H` 母版与 `01–07` 主区，保留 Web `0px` 满幅工作区、`44px` 收起态页头、响应式断点与通道状态；前端迁移见[待办](doc/TASKS.md#文档与设计规范待办)） |
 | [cst-pilot-colors.pen](design/cst-pilot-colors.pen) / [heroui-colors.pen](design/heroui-colors.pen) | 底层色阶与外部组件库参考画布，正式界面直接消费 [storybook.html](design/storybook.html) 语义令牌 |
 
 ## 视觉定调与三端边界

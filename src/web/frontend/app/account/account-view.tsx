@@ -1,4 +1,3 @@
-import { Button } from "@heroui/react";
 import { KeyRound, LogOut, ScanQrCode } from "lucide-react";
 import { Link } from "react-router";
 import { loginPath } from "../auth/providers";
@@ -27,9 +26,11 @@ export function AccountView({
 	const quotaText = !usable ? "登录后查看" : quotaLoading ? "正在查询…" : (balance ?? quota?.reason ?? "额度暂不可用");
 	const notice = error || (usable ? account.profile.reason : "");
 	const placeholder = error ? "暂不可用" : usable ? "暂未提供" : "登录后查看";
+	const studentId = usable ? (account.profile.studentId ?? placeholder) : placeholder;
+	const name = usable ? (account.profile.name ?? placeholder) : placeholder;
 	return (
 		<div className="settings-content account-content">
-			<header className="settings-group-head">
+			<header className="account-section-head">
 				<h2>CSTOA 账号</h2>
 			</header>
 			{loading ? (
@@ -37,18 +38,29 @@ export function AccountView({
 			) : (
 				<>
 					<dl className="settings-card account-fields">
-						{[
-							["学号", usable ? (account.profile.studentId ?? placeholder) : placeholder],
-							["姓名", usable ? (account.profile.name ?? placeholder) : placeholder],
-						].map(([label, value]) => (
-							<div className="settings-row account-field" key={label}>
-								<dt>{label}</dt>
-								<dd title={value}>{value}</dd>
-							</div>
-						))}
+						<div className="settings-row account-field">
+							<dt>学号</dt>
+							<dd
+								className="account-value-mono"
+								data-muted={!usable || !account.profile.studentId || undefined}
+								title={studentId}
+							>
+								{studentId}
+							</dd>
+						</div>
+						<div className="settings-row account-field">
+							<dt>姓名</dt>
+							<dd data-muted={!usable || !account.profile.name || undefined} title={name}>
+								{name}
+							</dd>
+						</div>
 						<div className="settings-row account-field">
 							<dt>剩余额度</dt>
-							<dd className="account-quota" aria-live="polite">
+							<dd
+								className="account-quota"
+								data-muted={!usable || balance === null || undefined}
+								aria-live="polite"
+							>
 								<span title={quotaText}>{quotaText}</span>
 								{usable && quota && balance === null && !quota.requiresLogin && (
 									<button type="button" className="context-more" disabled={quotaLoading} onClick={retryQuota}>
@@ -65,15 +77,9 @@ export function AccountView({
 									<p className="message-error" role="alert">
 										{notice}
 									</p>
-									<Button
-										type="button"
-										variant="ghost"
-										className="settings-action"
-										isDisabled={working}
-										onPress={onRetry}
-									>
+									<button type="button" className="tier-1-btn-outline" disabled={working} onClick={onRetry}>
 										重试
-									</Button>
+									</button>
 								</>
 							) : (
 								<output className="settings-note account-warning">登录已失效</output>
@@ -83,25 +89,19 @@ export function AccountView({
 				</>
 			)}
 			<div className="account-actions">
-				<Link className="settings-action" to={loginPath("cstoa", "oauth", "/account")}>
+				<Link className="tier-1-btn-outline" to={loginPath("cstoa", "oauth", "/account")}>
 					<ScanQrCode size={16} aria-hidden="true" />
 					{account?.signedIn ? "重新扫码登录" : "扫码登录"}
 				</Link>
-				<Link className="settings-action" to={loginPath("cstoa", "api_key", "/account")}>
+				<Link className="tier-1-btn-outline" to={loginPath("cstoa", "api_key", "/account")}>
 					<KeyRound size={16} aria-hidden="true" />
 					APIKEY 登录
 				</Link>
 				{account?.signedIn ? (
-					<Button
-						type="button"
-						variant="ghost"
-						className="settings-action settings-action-danger"
-						isDisabled={working}
-						onPress={onLogout}
-					>
+					<button type="button" className="tier-1-btn-danger" disabled={working} onClick={onLogout}>
 						<LogOut size={16} aria-hidden="true" />
 						{working ? "正在退出…" : "退出 CSTOA"}
-					</Button>
+					</button>
 				) : null}
 			</div>
 		</div>

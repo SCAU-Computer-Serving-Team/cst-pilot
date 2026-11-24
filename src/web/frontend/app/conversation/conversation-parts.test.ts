@@ -22,7 +22,10 @@ test("导出保留后续回复覆盖的错误并识别无详情错误", () => {
 		] satisfies TurnEntry[],
 	};
 	assert.deepEqual(assistantErrors(turn, false), []);
-	assert.deepEqual(assistantErrors(turn, true).map(({ id }) => id), ["timeout", "failed"]);
+	assert.deepEqual(
+		assistantErrors(turn, true).map(({ id }) => id),
+		["timeout", "failed"],
+	);
 });
 
 const call = (id: string, name = "disk"): ContentPart => ({ type: "toolCall", id, name, arguments: {} });

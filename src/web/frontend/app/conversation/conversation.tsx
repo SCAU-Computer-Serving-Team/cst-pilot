@@ -1,10 +1,13 @@
 import { Button, Tooltip } from "@heroui/react";
-import { ArrowDown, Copy, GitBranch, GitFork, X } from "lucide-react";
+import { ArrowDown, Check, Copy, GitBranch, GitFork, RotateCcw, X } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { matchToolResults } from "../cards/match-results";
 import type { PendingBitLocker } from "../data/bitlocker-state";
 import type { OutgoingMessage } from "../data/message-outbox";
 import type { Message } from "../data/web-state";
+import { readDurationMs } from "../shell/motion-tokens";
+import { useCopyFeedback } from "../shell/use-copy-feedback";
+import { useWorkspaceShell } from "../shell/workspace-shell-context";
 import { AssistantContent } from "./assistant-content";
 import {
 	activeTurnIndex,
@@ -15,7 +18,7 @@ import {
 	textOf,
 } from "./conversation-parts";
 import { SummaryEntry } from "./summary-entry";
-import { UserMessage } from "./user-message";
+import { type UserImagePart, UserMessage } from "./user-message";
 
 const NO_OUTGOING: readonly OutgoingMessage[] = [];
 
@@ -23,24 +26,34 @@ function AssistantTurnImpl({
 	id,
 	turn,
 	live,
-	sessionRunning,
+	actionsDisabled,
 	resultsByTurn,
 	requests,
 	onFork,
+	onRetryTurn,
+	onNotice,
 	onError,
 }: {
 	id: string;
 	turn: Turn;
 	live: boolean;
-	sessionRunning: boolean;
+	actionsDisabled: boolean;
 	resultsByTurn: Map<string, Map<string, Message>>;
 	requests: PendingBitLocker[];
 	onFork: (entryId: string) => void;
+	onRetryTurn?: (entryId: string, text: string, images: UserImagePart[]) => Promise<boolean>;
+	onNotice?: (message: string) => void;
 	onError: (text: string) => void;
 }) {
 	const last = turn.assistants.at(-1);
 	// 完成时间由服务端随会话保存，刷新和切换页面沿用同一工作区间。
 	const [now, setNow] = useState(() => Date.now());
+	const { copied, copy } = useCopyFeedback({
+		onCopied: () => onNotice?.("已复制回答"),
+		onError: () => onError("无法复制，请检查浏览器权限。"),
+	});
+	const shell = useWorkspaceShell();
+	const tooltipsDisabled = Boolean(shell?.appActive);
 	useEffect(() => {
 		if (!live) return;
 		setNow(Date.now());
@@ -51,6 +64,14 @@ function AssistantTurnImpl({
 	const startedAt = turn.user?.message.timestamp ?? work[0]?.startedAt ?? turn.assistants[0]?.message.timestamp ?? now;
 	const endedAt = work.length ? Math.max(...work.map((value) => value.endedAt)) : undefined;
 	const elapsed = formatDuration(Math.max((live ? now : (endedAt ?? startedAt)) - startedAt, live ? 1000 : 0));
+	const userEntryId = turn.user?.id;
+	const userText = turn.user ? textOf(turn.user.message) : "";
+	const userImages: UserImagePart[] =
+		turn.user && Array.isArray(turn.user.message.content)
+			? turn.user.message.content.filter((part): part is UserImagePart => part.type === "image")
+			: [];
+	const canRetry =
+		!actionsDisabled && !!userEntryId && !!onRetryTurn && (Boolean(userText.trim()) || userImages.length > 0);
 	return (
 		<AssistantContent
 			id={id}
@@ -62,36 +83,56 @@ function AssistantTurnImpl({
 		>
 			{last?.id && last.message.stopReason != null && last.message.stopReason !== "toolUse" && (
 				<div className="answer-actions">
-					<Tooltip delay={80} closeDelay={0}>
+					<Tooltip delay={80} closeDelay={0} isDisabled={tooltipsDisabled}>
 						<Button
 							variant="ghost"
 							isIconOnly
-							aria-label="复制回答"
-							onPress={() => {
-								void navigator.clipboard
-									.writeText(textOf(last.message))
-									.catch(() => onError("无法复制，请检查浏览器权限。"));
-							}}
+							className="btn-icon xs-24"
+							data-copied={copied || undefined}
+							aria-label={copied ? "已复制回答" : "复制回答"}
+							onPress={() => void copy(textOf(last.message))}
 						>
-							<Copy size={16} />
+							{copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
 						</Button>
-						<Tooltip.Content placement="top">复制</Tooltip.Content>
+						<Tooltip.Content className="app-tooltip" placement="top">
+							{copied ? "已复制" : "复制"}
+						</Tooltip.Content>
 					</Tooltip>
-					<Tooltip delay={80} closeDelay={0}>
+					<Tooltip delay={80} closeDelay={0} isDisabled={tooltipsDisabled}>
 						<Button
 							variant="ghost"
 							isIconOnly
-							isDisabled={sessionRunning}
+							className="btn-icon xs-24"
+							isDisabled={actionsDisabled}
 							aria-label="从此处分支新会话"
 							onPress={() => {
 								if (last.id) onFork(last.id);
 							}}
 						>
-							<GitFork size={16} />
+							<GitFork size={14} aria-hidden="true" />
 						</Button>
-						<Tooltip.Content placement="top">从此处分支新会话</Tooltip.Content>
+						<Tooltip.Content className="app-tooltip" placement="top">
+							从此处分支新会话
+						</Tooltip.Content>
 					</Tooltip>
-					<span>
+					<Tooltip delay={80} closeDelay={0} isDisabled={tooltipsDisabled}>
+						<Button
+							variant="ghost"
+							isIconOnly
+							className="btn-icon xs-24"
+							isDisabled={!canRetry}
+							aria-label="重新生成"
+							onPress={() => {
+								if (userEntryId && onRetryTurn) void onRetryTurn(userEntryId, userText, userImages);
+							}}
+						>
+							<RotateCcw size={14} aria-hidden="true" />
+						</Button>
+						<Tooltip.Content className="app-tooltip" placement="top">
+							重新生成
+						</Tooltip.Content>
+					</Tooltip>
+					<span className="answer-timestamp">
 						{new Date(last.message.timestamp).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}
 					</span>
 				</div>
@@ -104,11 +145,13 @@ const AssistantTurn = memo(
 	AssistantTurnImpl,
 	(prev, next) =>
 		prev.live === next.live &&
-		prev.sessionRunning === next.sessionRunning &&
+		prev.actionsDisabled === next.actionsDisabled &&
 		prev.id === next.id &&
 		prev.resultsByTurn === next.resultsByTurn &&
 		prev.requests === next.requests &&
 		prev.onFork === next.onFork &&
+		prev.onRetryTurn === next.onRetryTurn &&
+		prev.onNotice === next.onNotice &&
 		prev.onError === next.onError &&
 		prev.turn.user === next.turn.user &&
 		prev.turn.assistants.length === next.turn.assistants.length &&
@@ -121,10 +164,13 @@ export function Conversation({
 	streaming,
 	requests,
 	running,
+	actionBusy = false,
 	summarizing,
 	refresh,
 	onCancelSummary,
 	onFork,
+	onRetryTurn,
+	onNotice,
 	outgoing = NO_OUTGOING,
 }: {
 	id: string;
@@ -133,11 +179,15 @@ export function Conversation({
 	streaming?: Message;
 	requests: PendingBitLocker[];
 	running: boolean;
+	actionBusy?: boolean;
 	summarizing: boolean;
 	refresh: () => Promise<void>;
 	onCancelSummary: () => Promise<void>;
 	onFork: (entryId: string) => void;
+	onRetryTurn?: (entryId: string, text: string, images: UserImagePart[]) => Promise<boolean>;
+	onNotice?: (message: string) => void;
 }) {
+	const actionsDisabled = running || actionBusy;
 	const scroll = useRef<HTMLDivElement>(null);
 	const scrollAnimation = useRef<number | null>(null);
 	const followingRef = useRef(true);
@@ -202,9 +252,7 @@ export function Conversation({
 		}
 		const start = el.scrollTop;
 		const started = performance.now();
-		const durationToken = getComputedStyle(el).getPropertyValue("--duration-fast").trim();
-		const durationValue = Number.parseFloat(durationToken);
-		const duration = Number.isFinite(durationValue) ? durationValue * (durationToken.endsWith("ms") ? 1 : 1000) : 250;
+		const duration = readDurationMs(el, "--normal", 240);
 		const step = (now: number) => {
 			const progress = Math.min((now - started) / duration, 1);
 			const eased = 1 - (1 - progress) ** 3;
@@ -261,9 +309,7 @@ export function Conversation({
 		}
 		if (!showBottom) return;
 		const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
-		const token = getComputedStyle(document.documentElement).getPropertyValue("--duration-quick").trim();
-		const value = Number.parseFloat(token);
-		const duration = Number.isFinite(value) ? value * (token.endsWith("ms") ? 1 : 1000) : 150;
+		const duration = readDurationMs(document.documentElement, "--fast", 150);
 		const timer = window.setTimeout(() => setShowBottom(false), motion.matches ? 0 : duration);
 		const finish = () => {
 			if (motion.matches) setShowBottom(false);
@@ -321,7 +367,7 @@ export function Conversation({
 				{sliceStart > 0 && (
 					<Button
 						variant="ghost"
-						className="show-earlier"
+						className="btn-ghost show-earlier"
 						onPress={() => {
 							const container = scroll.current;
 							if (container) {
@@ -356,9 +402,14 @@ export function Conversation({
 						<div className="turn" key={turnKey} data-turn-key={turnKey}>
 							{turn.user && (
 								<UserMessage
+									entryId={turn.user.id}
 									message={turn.user.message}
 									outgoing={outgoingById.get(turn.user.message.clientMessageId ?? "")}
 									fresh={turn.user.message.timestamp >= mountedAt - 2000}
+									running={actionsDisabled}
+									onRetryTurn={onRetryTurn}
+									onNotice={onNotice}
+									onError={setError}
 								/>
 							)}
 							{(turn.assistants.length > 0 || live) && (
@@ -366,10 +417,12 @@ export function Conversation({
 									id={id}
 									turn={turn}
 									live={live}
-									sessionRunning={running}
+									actionsDisabled={actionsDisabled}
 									resultsByTurn={resultsByTurn}
 									requests={requests}
 									onFork={onFork}
+									onRetryTurn={onRetryTurn}
+									onNotice={onNotice}
 									onError={setError}
 								/>
 							)}
@@ -383,11 +436,11 @@ export function Conversation({
 						<Button
 							variant="ghost"
 							isIconOnly
-							className="summary-cancel"
+							className="btn-icon xs-24 summary-cancel"
 							aria-label="取消分支总结"
 							onPress={() => void onCancelSummary()}
 						>
-							<X size={18} />
+							<X size={14} aria-hidden="true" />
 						</Button>
 					</output>
 				)}
@@ -396,6 +449,7 @@ export function Conversation({
 						{error}
 						<Button
 							variant="ghost"
+							className="btn-ghost"
 							onPress={() => {
 								setError("");
 								void refresh();
@@ -415,7 +469,7 @@ export function Conversation({
 					onPress={goToBottom}
 				>
 					<ArrowDown size={16} aria-hidden="true" />
-					回到底部
+					<span>回到底部</span>
 				</Button>
 			)}
 		</>

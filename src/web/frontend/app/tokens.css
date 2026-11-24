@@ -1,0 +1,525 @@
+/* ============================================================================
+   CST Pilot Web 设计令牌与表面材质底座
+   - A 段：50 项静态基础令牌，严格逐项对齐 design/cst-pilot-web.pen 变量表
+   - B 段：交互侧瞬态色、材质参数与动效曲线，严格对齐 design/storybook.html
+   - C 段：过渡期语义映射，阶段 2–5 逐模块清理后移除
+   ============================================================================ */
+
+/* 注册 <time> 自定义属性：确保 calc() 时长在计算值阶段直接产出确定时间，供 WAAPI 安全读取 */
+@property --fast { syntax: "<time>"; inherits: true; initial-value: 150ms; }
+@property --normal { syntax: "<time>"; inherits: true; initial-value: 240ms; }
+@property --slow { syntax: "<time>"; inherits: true; initial-value: 340ms; }
+@property --duration-press { syntax: "<time>"; inherits: true; initial-value: 120ms; }
+@property --duration-quick { syntax: "<time>"; inherits: true; initial-value: 150ms; }
+@property --duration-open { syntax: "<time>"; inherits: true; initial-value: 220ms; }
+@property --duration-fast { syntax: "<time>"; inherits: true; initial-value: 240ms; }
+@property --duration-resize { syntax: "<time>"; inherits: true; initial-value: 300ms; }
+@property --duration-medium { syntax: "<time>"; inherits: true; initial-value: 340ms; }
+@property --duration-micro { syntax: "<time>"; inherits: true; initial-value: 80ms; }
+@property --duration-stagger { syntax: "<time>"; inherits: true; initial-value: 40ms; }
+@property --duration-slow { syntax: "<time>"; inherits: true; initial-value: 400ms; }
+@property --duration-very-slow { syntax: "<time>"; inherits: true; initial-value: 500ms; }
+@property --tabs-dur { syntax: "<time>"; inherits: true; initial-value: 240ms; }
+@property --acc-expand { syntax: "<time>"; inherits: true; initial-value: 240ms; }
+@property --acc-collapse { syntax: "<time>"; inherits: true; initial-value: 150ms; }
+@property --acc-chevron { syntax: "<time>"; inherits: true; initial-value: 240ms; }
+@property --check-box { syntax: "<time>"; inherits: true; initial-value: 150ms; }
+@property --check-draw { syntax: "<time>"; inherits: true; initial-value: 340ms; }
+@property --check-uncheck { syntax: "<time>"; inherits: true; initial-value: 150ms; }
+
+/* ============================================================================
+   主题无关令牌（A 段 21 项静态几何/字号 + B 段字体栈/动效 + C 段非色值过渡映射）
+   单独留在 :root（特异性 0,1,0），确保媒体查询可无冲突覆盖 --motion-scale
+   ============================================================================ */
+:root {
+  /* --- A. 静态圆角、间距、固定盒高与字号（21 项 · 1:1 对应 cst-pilot-web.pen） --- */
+  --radius-control: 4px;
+  --radius-row: 8px;
+  --radius-special: 12px;
+  --radius-full: 9999px;
+
+  --space-micro: 2px;
+  --space-tight: 4px;
+  --space-detail: 6px;
+  --space-inline: 8px;
+  --space-component: 12px;
+  --space-section: 16px;
+  --space-group: 24px;
+
+  --h-inline: 24px;
+  --h-compact: 28px;
+  --h-control: 32px;
+  --h-field: 40px;
+  --h-header: 44px;
+
+  --font-caption: 12px;
+  --font-ui: 14px;
+  --font-body: 16px;
+  --font-title: 20px;
+  --font-hero: 40px;
+
+  /* --- B. 字体栈与动效时长/曲线/微缩放（严格对齐 design/storybook.html） --- */
+  --font-sans: "Source Han Sans CN", -apple-system, BlinkMacSystemFont, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+
+  --motion-scale: 1;
+  --instant: 0ms;
+  --fast: calc(150ms * var(--motion-scale));
+  --normal: calc(240ms * var(--motion-scale));
+  --slow: calc(340ms * var(--motion-scale));
+  --duration-press: calc(120ms * var(--motion-scale));
+  --duration-quick: var(--fast);
+  --duration-open: calc(220ms * var(--motion-scale));
+  --duration-fast: var(--normal);
+  --duration-resize: calc(300ms * var(--motion-scale));
+  --duration-medium: var(--slow);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
+  --ease-spring: cubic-bezier(0.22, 1.12, 0.36, 1);
+  --ease-smooth-out: var(--ease-out);
+  --scale-press: 0.97;
+  --scale-modal: 0.96;
+
+  /* --- C. 过渡期非色值与语义别名（阶段 2–5 逐模块清理后移除） --- */
+  --line-caption: 16px;
+  --line-ui: 20px;
+  --line-body: 24px;
+  --line-title: 28px;
+  --line-display: 32px;
+
+  --icon-inline: 14px;
+  --icon-body: 16px;
+  --icon-menu: 18px;
+  --icon-header: 22px;
+
+  --duration-micro: calc(80ms * var(--motion-scale));
+  --duration-stagger: calc(40ms * var(--motion-scale));
+  --duration-slow: calc(400ms * var(--motion-scale));
+  --duration-very-slow: calc(500ms * var(--motion-scale));
+  --ease-linear: linear;
+  --ease-bounce: var(--ease-spring);
+  --ease-bounce-strong: cubic-bezier(0.34, 1.36, 0.64, 1);
+
+  --login-unit: min(0.9px, calc(90vh / 1080), calc((100vw - 48px) / 1080));
+  --page-transition-time-scale: 1;
+  --distance-micro: 4px;
+  --distance-small: 6px;
+  --distance-base: 8px;
+  --distance-medium: 12px;
+  --distance-large: 30px;
+  --scale-large: var(--scale-modal);
+  --scale-medium: var(--scale-press);
+  --scale-small: 0.98;
+  --scale-tiny: 0.99;
+
+  --control-inline: var(--h-inline);
+  --control: var(--h-compact);
+  --control-lg: var(--h-control);
+  --control-field: var(--h-field);
+  --control-menu: var(--h-field);
+
+  --radius-menu: var(--radius-row);
+  --radius-composer: var(--radius-special);
+  --radius-card: var(--radius-special);
+  --radius-panel: var(--radius-special);
+
+  --app-ink: var(--text-primary);
+  --app-muted: var(--text-secondary);
+  --app-sidebar: var(--bg-shell);
+  --app-sidebar-border: var(--border-subtle);
+  --app-hover: var(--bg-hover);
+  --app-selected: var(--bg-item-active);
+  --app-pressed: var(--bg-active-press);
+  --app-composer: var(--bg-workspace);
+  --app-control: var(--bg-workspace);
+  --app-send: var(--accent-solid);
+  --app-send-icon: var(--text-on-accent);
+  --app-send-hover: var(--accent-solid-hover);
+  --app-send-pressed: var(--accent-solid-hover);
+  --app-focus: var(--accent-ink);
+  --app-device: var(--bg-surface);
+  --app-track: var(--bg-surface);
+
+  --chat-bg: var(--bg-workspace);
+  --chat-sidebar: var(--bg-shell);
+  --chat-header: color-mix(in srgb, var(--bg-workspace) 95%, transparent);
+  --chat-ink: var(--text-primary);
+  --chat-muted: var(--text-secondary);
+  --chat-border: var(--border-subtle);
+  --chat-input-border: var(--border-strong);
+  --chat-bubble: var(--bg-surface);
+  --chat-row: var(--bg-glass);
+  --chat-tool: var(--accent-ink);
+  --chat-success: var(--status-success);
+
+  --notice-bg: var(--bg-glass);
+  --notice-danger: var(--status-danger);
+  --notice-warning: var(--status-warning);
+
+  --login-card: var(--bg-glass);
+  --login-switch: var(--bg-surface);
+  --login-selected: var(--craft-bg-thumb);
+  --login-input-bg: var(--bg-workspace);
+  --air-fallback: var(--sky-fallback);
+
+  --settings-surface: var(--bg-workspace);
+  --settings-segment-on: var(--craft-bg-thumb);
+  --settings-ok-bg: var(--status-success-tint);
+  --settings-ok-tx: var(--status-success);
+  --settings-warn-bg: var(--status-warning-tint);
+  --settings-warn-tx: var(--status-warning);
+  --settings-danger-tx: var(--status-danger);
+
+  --tool-danger: var(--status-danger);
+  --tool-raw: var(--bg-surface);
+  --tree-line: var(--border-strong);
+  --tree-summary: var(--status-warning);
+  --primary: var(--accent-solid);
+
+  --shadow-menu: var(--craft-lift);
+  --shadow-dialog: var(--craft-stack);
+
+  --tabs-dur: var(--normal);
+  --tabs-ease: var(--ease-out);
+  --tabs-text-muted: var(--text-secondary);
+  --tabs-text-active: var(--text-primary);
+  --tabs-bar-bg: var(--craft-bg-recess);
+  --tabs-pill-bg: var(--craft-bg-thumb);
+  --acc-expand: var(--normal);
+  --acc-collapse: var(--fast);
+  --acc-chevron: var(--normal);
+  --acc-ease: var(--ease-out);
+  --check-box: var(--fast);
+  --check-draw: var(--slow);
+  --check-delay: 0ms;
+  --check-uncheck: var(--fast);
+  --check-ease: var(--ease-spring);
+  --shimmer-dur: 2000ms;
+  --shimmer-base: var(--text-secondary);
+  --shimmer-highlight: var(--text-primary);
+  --shimmer-band: 400%;
+  --running-light-duration: 2000ms;
+}
+
+/* ============================================================================
+   浅色模式颜色与表面材质（A 段 29 项色值 + B 段交互瞬态色与材质）
+   ============================================================================ */
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* --- A. 静态颜色令牌（29 项 · 1:1 对应 cst-pilot-web.pen） --- */
+  --bg-shell: #F4F4F4;
+  --bg-workspace: #FFFFFF;
+  --bg-surface: #F4F4F5;
+  --bg-elevated: #FFFFFF;
+  --bg-item-active: #EAEAEB;
+  --bg-special: #FCFCFC;
+  --bg-glass: #FFFFFF;
+  --bg-modal: #FFFFFFF2;
+  --bg-scrim: #111114;
+  --bg-track-recess: #1111110D;
+
+  --text-primary: #111111;
+  --text-secondary: #6B6B6B;
+  --text-muted: #8A8A8E;
+  --text-welcome: #FFFFFF;
+  --text-on-accent: #FFFFFF;
+
+  --border-hairline: #1111111A;
+  --border-subtle: #E4E4E7;
+  --border-strong: #D4D4D8;
+
+  --accent-solid: #1A4BE0;
+  --accent-ink: #1A4BE0;
+  --accent-tint: #EEF2FF;
+
+  --status-success: #16A34A;
+  --status-warning: #8C5A00;
+  --status-danger: #DC2626;
+
+  --shadow-panel-sm: #1111110F;
+  --shadow-panel-lg: #11111117;
+  --shadow-inset-track: #11111124;
+  --shadow-thumb: #1111111C;
+  --highlight-top: #FFFFFFF2;
+
+  /* --- B. 交互侧瞬态色与材质参数（严格对齐 storybook.html，并保证白字按钮 ≥4.5:1 AA） --- */
+  --bg-hover: rgba(17, 17, 17, 0.045);
+  --bg-active-press: rgba(17, 17, 17, 0.08);
+  --border-focus: #C2C2C8;
+  --accent-solid-hover: #1640C2;
+  --status-success-tint: rgba(22, 163, 74, 0.12);
+  --status-warning-tint: rgba(140, 90, 0, 0.12);
+  --status-danger-hover: #B91C1C;
+  --status-danger-active: #991B1B;
+  --solid-danger-bg: var(--status-danger);
+  --solid-danger-hover: var(--status-danger-hover);
+  --solid-danger-active: var(--status-danger-active);
+  --status-danger-tint: rgba(220, 38, 38, 0.14);
+  --status-danger-border: rgba(220, 38, 38, 0.36);
+
+  --craft-glass-rgb: 255, 255, 255;
+  --craft-bg-recess: rgba(17, 17, 17, 0.055);
+  --craft-bg-thumb: #FFFFFF;
+  --craft-scrim: rgba(17, 17, 20, 0.18);
+  --craft-lift: 0 1px 2px rgba(17, 17, 17, 0.06), 0 4px 10px rgba(17, 17, 17, 0.05);
+  --craft-stack: 0 1px 2px rgba(17, 17, 17, 0.05), 0 6px 14px -2px rgba(17, 17, 17, 0.07), 0 20px 38px -6px rgba(17, 17, 17, 0.10);
+  --craft-recess-shadow: inset 0 1px 2.5px rgba(17, 17, 17, 0.10), 0 1px 0 rgba(255, 255, 255, 0.90);
+  --craft-thumb-shadow: 0 1px 2px rgba(17, 17, 17, 0.08), inset 0 0 0 1px rgba(17, 17, 17, 0.06);
+
+  /* 玻璃与遮罩衍生变量：统一由 @supports 与 prefers-reduced-transparency 降级，避免后续选择器覆盖 */
+  --glass-bg-2: rgba(var(--craft-glass-rgb), 0.90);
+  --glass-bg-3: rgba(var(--craft-glass-rgb), 0.95);
+  --glass-blur-2: blur(14px) saturate(1.10);
+  --glass-blur-3: blur(14px) saturate(1.05);
+  --glass-shadow: inset 0 1px 0 0 var(--highlight-top), inset 0 0 0 1px var(--border-hairline), var(--craft-stack);
+  --scrim-bg: var(--craft-scrim);
+  --scrim-blur: blur(14px) saturate(1.05);
+
+  --focus-shadow: 0 0 0 1px rgba(17, 17, 20, 0.03), 0 2px 8px 1px rgba(17, 17, 20, 0.055);
+  --running-glyph-target: #FFFFFF;
+
+  /* 静态着色回退渐变（无 WebGL / 上下文丢失时保持 ≥4.5:1 对比度） */
+  --home-fallback: linear-gradient(180deg, #1E2A6C 0%, #3B4EA8 35%, #6072AB 100%);
+  --sky-fallback: linear-gradient(180deg, #E6F2FF 0%, #B3D9FF 40%, #80B3FF 80%, #6699E6 100%);
+}
+
+/* ============================================================================
+   深色模式颜色与表面材质（A 段静态变量 + B 段交互瞬态与材质）
+   ============================================================================ */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-shell: #141416;
+  --bg-workspace: #0D0D0F;
+  --bg-surface: #1C1C20;
+  --bg-elevated: #242429;
+  --bg-item-active: #242429;
+  --bg-special: #121215;
+  --bg-glass: #18181C;
+  --bg-modal: #18181CF2;
+  --bg-scrim: #040406;
+  --bg-track-recess: #00000066;
+
+  --text-primary: #F2F2F4;
+  --text-secondary: #85858B;
+  --text-muted: #636369;
+  --text-welcome: #FFFFFF;
+  --text-on-accent: #FFFFFF;
+
+  --border-hairline: #F2F2F41F;
+  --border-subtle: #26262B;
+  --border-strong: #34343A;
+
+  --accent-solid: #3B6BF5;
+  --accent-ink: #688FF8;
+  --accent-tint: #192342;
+
+  --status-success: #4CC38A;
+  --status-warning: #E4A247;
+  --status-danger: #E5484D;
+
+  --shadow-panel-sm: #00000066;
+  --shadow-panel-lg: #00000080;
+  --shadow-inset-track: #00000080;
+  --shadow-thumb: #00000066;
+  --highlight-top: #FFFFFF1F;
+
+  --bg-hover: rgba(242, 242, 244, 0.055);
+  --bg-active-press: rgba(242, 242, 244, 0.095);
+  --border-focus: #46464F;
+  --accent-solid-hover: #2E5CE6;
+  --status-success-tint: rgba(76, 195, 138, 0.16);
+  --status-warning-tint: rgba(228, 162, 71, 0.16);
+  --status-danger-hover: #CF363B;
+  --status-danger-active: #B52B30;
+  --solid-danger-bg: var(--status-danger-hover);
+  --solid-danger-hover: var(--status-danger-active);
+  --solid-danger-active: #9E2328;
+  --status-danger-tint: rgba(229, 72, 77, 0.22);
+  --status-danger-border: rgba(229, 72, 77, 0.44);
+
+  --craft-glass-rgb: 24, 24, 28;
+  --craft-bg-recess: rgba(0, 0, 0, 0.46);
+  --craft-bg-thumb: #2A2A32;
+  --craft-scrim: rgba(4, 4, 6, 0.38);
+  --craft-lift: 0 2px 4px rgba(0, 0, 0, 0.45), 0 6px 14px rgba(0, 0, 0, 0.32);
+  --craft-stack: 0 2px 4px rgba(0, 0, 0, 0.50), 0 10px 22px -2px rgba(0, 0, 0, 0.56), 0 26px 52px -8px rgba(0, 0, 0, 0.72);
+  --craft-recess-shadow: inset 0 1.5px 3px rgba(0, 0, 0, 0.72), 0 1px 0 rgba(255, 255, 255, 0.07);
+  --craft-thumb-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+
+  --focus-shadow: 0 0 0 1px rgba(242, 242, 244, 0.045), 0 2px 10px 1px rgba(242, 242, 244, 0.055);
+  --running-glyph-target: #060B0E;
+
+  --home-fallback: linear-gradient(180deg, #13192B 0%, #0D0D11 100%);
+  --sky-fallback: linear-gradient(180deg, #4A5AA0 0%, #2D3664 55%, #1C1C1C 100%);
+
+  /* 兜底同步 HeroUI 暗色浮层变量，避免默认 Tooltip/Popover 落回浅色底 */
+  --overlay: var(--bg-elevated);
+  --overlay-foreground: var(--text-primary);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"] {
+    color-scheme: dark;
+
+    --bg-shell: #141416;
+    --bg-workspace: #0D0D0F;
+    --bg-surface: #1C1C20;
+    --bg-elevated: #242429;
+    --bg-item-active: #242429;
+    --bg-special: #121215;
+    --bg-glass: #18181C;
+    --bg-modal: #18181CF2;
+    --bg-scrim: #040406;
+    --bg-track-recess: #00000066;
+
+    --text-primary: #F2F2F4;
+    --text-secondary: #85858B;
+    --text-muted: #636369;
+    --text-welcome: #FFFFFF;
+    --text-on-accent: #FFFFFF;
+
+    --border-hairline: #F2F2F41F;
+    --border-subtle: #26262B;
+    --border-strong: #34343A;
+
+    --accent-solid: #3B6BF5;
+    --accent-ink: #688FF8;
+    --accent-tint: #192342;
+
+    --status-success: #4CC38A;
+    --status-warning: #E4A247;
+    --status-danger: #E5484D;
+
+    --shadow-panel-sm: #00000066;
+    --shadow-panel-lg: #00000080;
+    --shadow-inset-track: #00000080;
+    --shadow-thumb: #00000066;
+    --highlight-top: #FFFFFF1F;
+
+    --bg-hover: rgba(242, 242, 244, 0.055);
+    --bg-active-press: rgba(242, 242, 244, 0.095);
+    --border-focus: #46464F;
+    --accent-solid-hover: #2E5CE6;
+    --status-success-tint: rgba(76, 195, 138, 0.16);
+    --status-warning-tint: rgba(228, 162, 71, 0.16);
+    --status-danger-hover: #CF363B;
+    --status-danger-active: #B52B30;
+    --solid-danger-bg: var(--status-danger-hover);
+    --solid-danger-hover: var(--status-danger-active);
+    --solid-danger-active: #9E2328;
+    --status-danger-tint: rgba(229, 72, 77, 0.22);
+    --status-danger-border: rgba(229, 72, 77, 0.44);
+
+    --craft-glass-rgb: 24, 24, 28;
+    --craft-bg-recess: rgba(0, 0, 0, 0.46);
+    --craft-bg-thumb: #2A2A32;
+    --craft-scrim: rgba(4, 4, 6, 0.38);
+    --craft-lift: 0 2px 4px rgba(0, 0, 0, 0.45), 0 6px 14px rgba(0, 0, 0, 0.32);
+    --craft-stack: 0 2px 4px rgba(0, 0, 0, 0.50), 0 10px 22px -2px rgba(0, 0, 0, 0.56), 0 26px 52px -8px rgba(0, 0, 0, 0.72);
+    --craft-recess-shadow: inset 0 1.5px 3px rgba(0, 0, 0, 0.72), 0 1px 0 rgba(255, 255, 255, 0.07);
+    --craft-thumb-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.10);
+
+    --focus-shadow: 0 0 0 1px rgba(242, 242, 244, 0.045), 0 2px 10px 1px rgba(242, 242, 244, 0.055);
+    --running-glyph-target: #060B0E;
+
+    --home-fallback: linear-gradient(180deg, #13192B 0%, #0D0D11 100%);
+    --sky-fallback: linear-gradient(180deg, #4A5AA0 0%, #2D3664 55%, #1C1C1C 100%);
+
+    /* 兜底同步 HeroUI 在 system 暗色下的浮层变量，避免默认 Tooltip/Popover 落回浅色底 */
+    --overlay: var(--bg-elevated);
+    --overlay-foreground: var(--text-primary);
+  }
+}
+
+/* ============================================================================
+   通用材质基元与排版辅助（严格对齐 storybook.html）
+   ============================================================================ */
+.tier-2-glass {
+  background-color: var(--glass-bg-2);
+  -webkit-backdrop-filter: var(--glass-blur-2);
+  backdrop-filter: var(--glass-blur-2);
+  border-radius: var(--radius-row);
+  box-shadow: var(--glass-shadow);
+}
+
+.tier-3-scrim {
+  background: var(--scrim-bg);
+  -webkit-backdrop-filter: var(--scrim-blur);
+  backdrop-filter: var(--scrim-blur);
+}
+
+.tier-3-dialog {
+  background-color: var(--glass-bg-3);
+  -webkit-backdrop-filter: var(--glass-blur-3);
+  backdrop-filter: var(--glass-blur-3);
+  border-radius: var(--radius-row);
+  box-shadow: var(--glass-shadow);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root,
+  :root[data-theme] {
+    --glass-bg-2: var(--bg-glass);
+    --glass-bg-3: var(--bg-glass);
+    --glass-blur-2: none;
+    --glass-blur-3: none;
+    --scrim-blur: none;
+  }
+}
+
+/* 减少透明度：通过变量全局回退 100% 实底并取消模糊，所有浮层/遮罩自动生效（对齐 storybook.html:2310-2324） */
+/* biome-ignore lint/correctness/noUnknownMediaFeatureName: CSS Media Queries Level 5 标准特性，用于减少透明度实底降级。 */
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  :root[data-theme] {
+    --glass-bg-2: var(--bg-elevated);
+    --glass-bg-3: var(--bg-elevated);
+    --glass-blur-2: none;
+    --glass-blur-3: none;
+    --glass-shadow: inset 0 0 0 1px var(--border-strong), var(--craft-stack);
+    --scrim-bg: rgba(17, 17, 20, 0.36);
+    --scrim-blur: none;
+  }
+  :root[data-theme="dark"] {
+    --scrim-bg: rgba(4, 4, 6, 0.62);
+  }
+}
+
+/* biome-ignore lint/correctness/noUnknownMediaFeatureName: CSS Media Queries Level 5 标准特性，用于 system 暗色下减少透明度降级。 */
+@media (prefers-reduced-transparency: reduce) and (prefers-color-scheme: dark) {
+  :root[data-theme="system"] {
+    --scrim-bg: rgba(4, 4, 6, 0.62);
+  }
+}
+
+.cjk {
+  display: inline-flex;
+  align-items: center;
+  padding-bottom: var(--space-micro);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  :root[data-theme] {
+    --motion-scale: 0;
+  }
+  *, *::before, *::after {
+    animation-duration: 0ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,4 +1,4 @@
-import { Button, Input, Label, TextField } from "@heroui/react";
+import { Input, Label, TextField } from "@heroui/react";
 import { ChevronRight, Eye, EyeOff, KeyRound, ScanLine } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
@@ -183,20 +183,19 @@ export function ProviderConfigurationForm({
 												}
 											}}
 										/>
-										<Button
+										<button
 											type="button"
-											variant="ghost"
-											isIconOnly
-											isDisabled={!apiKey || removing}
+											className="btn-icon sm-28"
+											disabled={!apiKey || removing}
 											aria-label={showKey ? "隐藏新密钥" : "显示新密钥"}
-											onPress={() => setShowKey(!showKey)}
+											onClick={() => setShowKey(!showKey)}
 										>
 											{showKey ? (
 												<EyeOff size={16} aria-hidden="true" />
 											) : (
 												<Eye size={16} aria-hidden="true" />
 											)}
-										</Button>
+										</button>
 									</div>
 								</TextField>
 							</div>
@@ -210,9 +209,13 @@ export function ProviderConfigurationForm({
 									{provider.type === "oauth" && !provider.requiresLogin ? "已登录" : "尚未完成授权"}
 								</span>
 							</div>
-							<Button className="settings-action" variant="ghost" onPress={() => setOauth(true)}>
+							<button
+								type="button"
+								className="tier-1-btn-outline settings-action"
+								onClick={() => setOauth(true)}
+							>
 								{provider.type ? "重新授权" : "开始授权"}
-							</Button>
+							</button>
 						</div>
 					)}
 					{pending && (
@@ -279,14 +282,14 @@ export function ProviderConfigurationForm({
 						<h3>移除凭据</h3>
 						<p className="settings-description">移除后，此服务的模型将无法继续使用。</p>
 					</div>
-					<Button
-						variant="ghost"
-						className="settings-action settings-action-danger"
-						isDisabled={removing || pending}
-						onPress={() => setConfirming(true)}
+					<button
+						type="button"
+						className="tier-1-btn-danger"
+						disabled={removing || pending}
+						onClick={() => setConfirming(true)}
 					>
 						移除凭据
-					</Button>
+					</button>
 				</section>
 			)}
 			{confirming && (

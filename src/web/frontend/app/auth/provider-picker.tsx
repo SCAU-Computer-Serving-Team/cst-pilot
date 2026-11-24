@@ -31,30 +31,31 @@ export function ProviderPicker({
 			}}
 			isDisabled={disabled || !providers.length}
 		>
-			<Label>{standalone ? "模型服务" : "Provider"}</Label>
+			<Label>模型服务</Label>
 			<Select.Trigger ref={trigger} className="login-input">
 				<Select.Value>
 					{providers.find((provider) => provider.id === selected)?.name ?? "选择模型服务"}
 				</Select.Value>
-				<ChevronDown size={16} aria-hidden="true" />
+				<ChevronDown size={14} aria-hidden="true" />
 			</Select.Trigger>
 			<Select.Popover
-				className={`login-provider-popover${standalone ? " provider-config-popover" : ""}`}
+				className={`tier-2-glass tier-2-menu login-provider-popover${standalone ? " provider-config-popover" : ""}`}
 				placement="bottom start"
+				offset={6}
 			>
-				<ListBox className="login-provider-list">
+				<ListBox className="tier-2-menu-list login-provider-list">
 					{providers.map((provider) => (
 						<ListBox.Item
 							key={provider.id}
 							id={provider.id}
 							textValue={provider.name}
-							className="login-provider-option"
+							className="menu-row login-provider-option"
 						>
 							<span className="login-provider-option-name" title={provider.name}>
 								{provider.name}
 							</span>
 							<span className="login-provider-check">
-								<Check size={16} aria-hidden="true" />
+								<Check size={14} aria-hidden="true" />
 							</span>
 						</ListBox.Item>
 					))}

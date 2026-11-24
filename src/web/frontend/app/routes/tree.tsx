@@ -1,6 +1,7 @@
-import { Button, Label, ListBox, Select } from "@heroui/react";
+import { Label, ListBox, Select } from "@heroui/react";
 import {
 	Bot,
+	Check,
 	ChevronDown,
 	ChevronsDownUp,
 	ChevronsUpDown,
@@ -21,7 +22,10 @@ import { useNavigate, useParams, useSearchParams } from "react-router";
 import { draftKey } from "../composer/drafts";
 import { apiJson, sessionPath } from "../data/api";
 import { useSessionTitle, useSessionTree } from "../data/web-state";
+import { focusableElements, resolveDialogTabTarget } from "../shell/dialog-focus";
 import { Notification } from "../shell/notification";
+import { usePanelDismiss } from "../shell/panel-dismiss";
+import { SidebarHeaderToggle, useWorkspaceShell } from "../shell/workspace-shell-context";
 import { branchSummaryHref } from "../tree/branch-summary";
 import {
 	applyFold,
@@ -82,9 +86,18 @@ export default function SessionTree() {
 	const [filter, setFilter] = useState<ViewFilter>(loadViewFilter);
 	// 视图过滤下拉弹层打开中：Esc 先关弹层，不退出树页。
 	const [filterOpen, setFilterOpen] = useState(false);
+	const filterTriggerRef = useRef<HTMLButtonElement>(null);
+	usePanelDismiss(filterOpen, () => setFilterOpen(false), undefined, filterTriggerRef);
 	const [choice, setChoice] = useState("");
 	// 键盘光标在三个选项间的位置；对话框打开时重置。
 	const [choiceIndex, setChoiceIndex] = useState(0);
+	const choiceDialogRef = useRef<HTMLDivElement>(null);
+	const shell = useWorkspaceShell();
+	useEffect(() => {
+		if (!shell?.appActive) return;
+		setChoice("");
+		setFilterOpen(false);
+	}, [shell?.appActive]);
 	const [toast, setToast] = useState("");
 	const [actionError, setActionError] = useState("");
 	// 键盘游标：null 表示跟随当前叶（leafIndex）。
@@ -131,28 +144,73 @@ export default function SessionTree() {
 	useEffect(() => {
 		if (choice) setChoiceIndex(0);
 	}, [choice]);
-	// 选择对话框的键盘操作：方向键移动光标，Enter 确认，Esc 关闭。
+	// 选择对话框打开时记录焦点并在关闭后归还；箭头键移动光标不重置焦点。
+	const choiceIndexRef = useRef(choiceIndex);
+	choiceIndexRef.current = choiceIndex;
+	const chooseRef = useRef(choose);
+	chooseRef.current = choose;
 	useEffect(() => {
 		if (!choice) return;
+		const previous = document.activeElement;
+		const frame = requestAnimationFrame(() => {
+			choiceDialogRef.current?.querySelector<HTMLElement>(".summary-option")?.focus({ preventScroll: true });
+		});
 		const onKey = (event: KeyboardEvent) => {
+			if (event.isComposing || event.keyCode === 229) return;
 			if (event.key === "Escape") {
+				event.preventDefault();
 				setChoice("");
+				return;
+			}
+			if (event.key === "Tab" && choiceDialogRef.current) {
+				const items = focusableElements(choiceDialogRef.current);
+				const active =
+					document.activeElement instanceof HTMLElement && choiceDialogRef.current.contains(document.activeElement)
+						? document.activeElement
+						: null;
+				const target = resolveDialogTabTarget(items, active, event.shiftKey);
+				if (target) {
+					event.preventDefault();
+					if (target === "dialog") choiceDialogRef.current.focus();
+					else target.focus();
+				}
 				return;
 			}
 			if (event.key === "ArrowUp" || event.key === "ArrowDown") {
 				event.preventDefault();
-				setChoiceIndex((index) => (event.key === "ArrowUp" ? (index + 2) % 3 : (index + 1) % 3));
+				const next = (choiceIndexRef.current + (event.key === "ArrowUp" ? 2 : 1)) % 3;
+				setChoiceIndex(next);
+				const options = choiceDialogRef.current?.querySelectorAll<HTMLButtonElement>(".summary-option");
+				options?.[next]?.focus({ preventScroll: true });
 				return;
 			}
 			if (event.key === "Enter") {
+				if (
+					document.activeElement instanceof HTMLButtonElement &&
+					choiceDialogRef.current?.contains(document.activeElement)
+				) {
+					return;
+				}
 				event.preventDefault();
-				const mode = (["none", "summarize", "custom"] as const)[choiceIndex];
-				void choose(mode);
+				const mode = (["none", "summarize", "custom"] as const)[choiceIndexRef.current];
+				void chooseRef.current(mode);
 			}
 		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-	}, [choice, choiceIndex, choose]);
+		window.addEventListener("keydown", onKey, true);
+		return () => {
+			cancelAnimationFrame(frame);
+			window.removeEventListener("keydown", onKey, true);
+			if (
+				!document.querySelector(".standby-scrim") &&
+				previous instanceof HTMLElement &&
+				previous !== document.body &&
+				previous.isConnected &&
+				!previous.closest("[inert]")
+			) {
+				previous.focus({ preventScroll: true });
+			}
+		};
+	}, [choice]);
 	const toolCalls = useMemo(() => collectToolCalls(tree ?? []), [tree]);
 	const allRows = useMemo(
 		() => layoutTree(buildVisibleTree(tree ?? [], leafId, filter), leafId),
@@ -169,62 +227,50 @@ export default function SessionTree() {
 		return allRows.filter((row) => matchesSearch(row.node, rowTexts.get(row.node.entry.id)!, query));
 	}, [allRows, foldResult, query, rowTexts]);
 	const leafIndex = useMemo(() => rows.findIndex((row) => row.node.entry.id === leafId), [rows, leafId]);
-	const cursorIndex = cursor ?? (leafIndex >= 0 ? leafIndex : rows.length - 1);
+	const rawCursorIndex = cursor ?? (leafIndex >= 0 ? leafIndex : rows.length - 1);
+	const cursorIndex = rows.length ? Math.max(0, Math.min(rawCursorIndex, rows.length - 1)) : -1;
 
-	// 方向键移动游标，Enter 选中行；输入框、下拉与选择对话框打开时不接管。
-	// Ctrl+O 循环切换视图过滤（Shift 反向），与 TUI 一致；换档时清空折叠集合。
-	const cycleFilter = useCallback(
-		(step: number) => {
-			const index = VIEW_FILTERS.findIndex((item) => item.id === filter);
-			const next = VIEW_FILTERS[(index + step + VIEW_FILTERS.length) % VIEW_FILTERS.length];
-			setFilter(next.id);
-			saveViewFilter(next.id);
-			setFolded(new Set());
-		},
-		[filter],
-	);
+	// 全局仅处理 Esc 返回会话（方向键与 Enter 收敛在树列表内部，避免拦截按钮或待机层）。
 	useEffect(() => {
-		if (preview) return;
+		if (preview || shell?.appActive || shell?.overlay) return;
 		const onKey = (event: KeyboardEvent) => {
-			if (choice) return;
+			if (
+				event.key !== "Escape" ||
+				choice ||
+				filterOpen ||
+				event.defaultPrevented ||
+				event.isComposing ||
+				event.keyCode === 229 ||
+				document.querySelector(
+					'.palette-scrim, .standby-scrim, .summary-scrim, dialog[open], .session-menu, .popover:not([data-exiting="true"]), .select__popover:not([data-exiting="true"]), [data-slot="popover-dialog"]',
+				)
+			) {
+				return;
+			}
 			const target = event.target as HTMLElement | null;
 			if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
-			// 行自身聚焦时 Enter 由行的按键处理，避免同一按键选中两次。
-			if (target?.classList.contains("tree-row")) return;
-			if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-				event.preventDefault();
-				setCursor((value) => {
-					const base = value ?? leafIndex;
-					const next = event.key === "ArrowUp" ? Math.max(0, base - 1) : Math.min(rows.length - 1, base + 1);
-					return rows.length ? next : null;
-				});
-				return;
-			}
-			if (event.key === "Enter" && cursorIndex >= 0 && cursorIndex < rows.length) {
-				event.preventDefault();
-				selectRow(rows[cursorIndex].node.entry.id);
-				return;
-			}
-			if (event.key === "Escape") {
-				if (filterOpen) return;
-				event.preventDefault();
-				navigate(`/s/${sessionId}`, { viewTransition: true });
-				return;
-			}
-			if (event.key.toLowerCase() === "o" && event.ctrlKey && !event.altKey && !event.metaKey) {
-				event.preventDefault();
-				cycleFilter(event.shiftKey ? -1 : 1);
-			}
+			event.preventDefault();
+			navigate(`/s/${sessionId}`, { viewTransition: true });
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
-	}, [preview, choice, rows, leafIndex, cursorIndex, selectRow, cycleFilter, filterOpen, navigate, sessionId]);
+	}, [preview, shell?.appActive, shell?.overlay, choice, filterOpen, navigate, sessionId]);
 
 	// 游标行滚动到可见区域。
 	useEffect(() => {
 		if (cursorIndex < 0 || cursorIndex >= rows.length) return;
 		rowRefs.current.get(rows[cursorIndex].node.entry.id)?.scrollIntoView({ block: "nearest" });
 	}, [cursorIndex, rows]);
+
+	function moveTreeCursor(nextIndex: number) {
+		if (!rows.length) return;
+		const clamped = Math.max(0, Math.min(nextIndex, rows.length - 1));
+		setCursor(clamped);
+		const nextId = rows[clamped]?.node.entry.id;
+		if (nextId) {
+			rowRefs.current.get(nextId)?.focus({ preventScroll: true });
+		}
+	}
 
 	function toggleFold(row: TreeRow) {
 		const id = row.node.entry.id;
@@ -240,21 +286,21 @@ export default function SessionTree() {
 	return (
 		<main className="chat-main tree-main">
 			<header className="chat-header">
-				<HardDrive size={22} />
+				<SidebarHeaderToggle />
+				<HardDrive size={16} aria-hidden="true" />
 				<h1>
 					{title}
 					<span className="tree-suffix">· 分支树</span>
 				</h1>
 				{preview && <span className="preview-tag">设计预览 · 示例数据</span>}
-				<Button
-					variant="ghost"
-					isIconOnly
-					className="tree-close"
+				<button
+					type="button"
+					className="btn-icon sm-28 tree-close"
 					aria-label="关闭分支树，返回会话"
-					onPress={() => navigate(`/s/${sessionId}${preview ? "?preview=1" : ""}`, { viewTransition: true })}
+					onClick={() => navigate(`/s/${sessionId}${preview ? "?preview=1" : ""}`, { viewTransition: true })}
 				>
-					<X size={18} />
-				</Button>
+					<X size={16} aria-hidden="true" />
+				</button>
 			</header>
 			{(error || actionError) && (
 				<div className="connection-banner" role="alert">
@@ -269,12 +315,21 @@ export default function SessionTree() {
 						placeholder="搜索条目"
 						value={query}
 						onChange={(event) => setQuery(event.target.value)}
+						onKeyDown={(event) => {
+							if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+							if (event.key === "Escape" && query) {
+								event.preventDefault();
+								event.stopPropagation();
+								setQuery("");
+							}
+						}}
 					/>
 				</div>
 				<Select
 					aria-label="视图过滤"
 					className="tree-filter"
 					selectedKey={filter}
+					isOpen={filterOpen}
 					onOpenChange={setFilterOpen}
 					onSelectionChange={(key) => {
 						setFilter(key as ViewFilter);
@@ -283,33 +338,49 @@ export default function SessionTree() {
 					}}
 				>
 					<Label className="visually-hidden">视图过滤</Label>
-					<Select.Trigger className="tree-filter-trigger">
+					<Select.Trigger ref={filterTriggerRef} className="tree-filter-trigger">
 						<span>{VIEW_FILTERS.find((item) => item.id === filter)?.label}</span>
-						<ChevronDown size={14} />
+						<ChevronDown size={14} aria-hidden="true" />
 					</Select.Trigger>
-					<Select.Popover>
-						<ListBox>
+					<Select.Popover
+						className="tier-2-glass tier-2-menu tree-filter-popover"
+						placement="bottom start"
+						offset={6}
+					>
+						<ListBox className="tier-2-menu-list">
 							{VIEW_FILTERS.map((item) => (
-								<ListBox.Item key={item.id} id={item.id} textValue={item.label}>
-									{item.label}
+								<ListBox.Item
+									key={item.id}
+									id={item.id}
+									textValue={item.label}
+									className="menu-row tree-filter-option"
+								>
+									<span>{item.label}</span>
+									{filter === item.id && <Check size={14} className="tree-filter-check" aria-hidden="true" />}
 								</ListBox.Item>
 							))}
 						</ListBox>
 					</Select.Popover>
 				</Select>
 				<span className="tree-toolbar-spacer" />
-				<Button variant="ghost" className="tree-toolbar-button" onPress={() => setFolded(new Set())}>
+				<button
+					type="button"
+					className="btn-ghost tree-toolbar-button"
+					title="全部展开"
+					onClick={() => setFolded(new Set())}
+				>
 					<ChevronsUpDown size={16} aria-hidden="true" />
 					全部展开
-				</Button>
-				<Button
-					variant="ghost"
-					className="tree-toolbar-button"
-					onPress={() => setFolded(new Set(foldableRows.map((row) => row.node.entry.id)))}
+				</button>
+				<button
+					type="button"
+					className="btn-ghost tree-toolbar-button"
+					title="全部折叠"
+					onClick={() => setFolded(new Set(foldableRows.map((row) => row.node.entry.id)))}
 				>
 					<ChevronsDownUp size={16} aria-hidden="true" />
 					全部折叠
-				</Button>
+				</button>
 				<span className="tree-counter">
 					{leafIndex >= 0 ? leafIndex + 1 : "–"} / {rows.length} 条
 				</span>
@@ -332,14 +403,34 @@ export default function SessionTree() {
 									if (el) rowRefs.current.set(id, el);
 									else rowRefs.current.delete(id);
 								}}
-								// biome-ignore lint/a11y/noNoninteractiveTabindex: 行要能 Tab 聚焦并用 Enter 选择；分支树的键盘跳段落地后改为 roving tabindex
-								tabIndex={0}
+								tabIndex={index === cursorIndex ? 0 : -1}
 								className={`tree-row tree-row-${text.kind} ${id === leafId ? "tree-row-current" : ""} ${
 									index === cursorIndex ? "tree-row-cursor" : ""
 								}`}
-								onClick={() => selectRow(id)}
+								onFocus={() => setCursor(index)}
+								onClick={() => {
+									setCursor(index);
+									selectRow(id);
+								}}
 								onKeyDown={(event) => {
-									if (event.key === "Enter" && event.target === event.currentTarget) selectRow(id);
+									if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+									if (event.target !== event.currentTarget) return;
+									if (event.key === "ArrowUp") {
+										event.preventDefault();
+										moveTreeCursor(index - 1);
+									} else if (event.key === "ArrowDown") {
+										event.preventDefault();
+										moveTreeCursor(index + 1);
+									} else if (event.key === "Home") {
+										event.preventDefault();
+										moveTreeCursor(0);
+									} else if (event.key === "End") {
+										event.preventDefault();
+										moveTreeCursor(rows.length - 1);
+									} else if (event.key === "Enter") {
+										event.preventDefault();
+										selectRow(id);
+									}
 								}}
 							>
 								<RowPrefix row={row} />
@@ -383,9 +474,11 @@ export default function SessionTree() {
 				)}
 			</ul>
 			{!!choice && (
-				<div className="summary-scrim" role="none" onMouseDown={() => setChoice("")}>
+				<div className="summary-scrim tier-3-scrim" role="none" onMouseDown={() => setChoice("")}>
 					<div
-						className="summary-dialog"
+						ref={choiceDialogRef}
+						tabIndex={-1}
+						className="summary-dialog tier-3-dialog"
 						role="dialog"
 						aria-modal="true"
 						aria-label="选择"
@@ -393,9 +486,9 @@ export default function SessionTree() {
 					>
 						<div className="summary-dialog-head">
 							<h2>选择</h2>
-							<Button variant="ghost" isIconOnly aria-label="关闭" onPress={() => setChoice("")}>
-								<X size={18} />
-							</Button>
+							<button type="button" className="btn-icon sm-28" aria-label="关闭" onClick={() => setChoice("")}>
+								<X size={16} aria-hidden="true" />
+							</button>
 						</div>
 						<div className="summary-dialog-options">
 							{[
@@ -406,11 +499,12 @@ export default function SessionTree() {
 								<button
 									type="button"
 									key={option.mode}
-									className={`summary-option ${index === choiceIndex ? "summary-option-active" : ""}`}
+									className={`menu-row summary-option ${index === choiceIndex ? "summary-option-active" : ""}`}
+									onFocus={() => setChoiceIndex(index)}
 									onMouseEnter={() => setChoiceIndex(index)}
 									onClick={() => void choose(option.mode)}
 								>
-									<option.icon size={18} aria-hidden="true" />
+									<option.icon size={16} aria-hidden="true" />
 									<span>{option.label}</span>
 								</button>
 							))}
@@ -426,15 +520,15 @@ export default function SessionTree() {
 					duration={2600}
 					onDismiss={() => setToast("")}
 				>
-					<Info size={18} aria-hidden="true" />
-					<span>{toast}</span>
+					<Info size={16} aria-hidden="true" />
+					<span className="notification-message">{toast}</span>
 					<button
 						type="button"
-						className="notification-close"
+						className="btn-icon xs-24 notification-close"
 						aria-label="关闭消息提示"
 						onClick={() => setToast("")}
 					>
-						<X size={18} aria-hidden="true" />
+						<X size={14} aria-hidden="true" />
 					</button>
 				</Notification>
 			)}

@@ -1,6 +1,7 @@
 import { CircleAlert, CircleCheck, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useAnimatedDialogClose, useStandbyDialogClose } from "./app-dialogs";
 import { useDialogFocusTrap } from "./dialog-focus";
 import { Notification } from "./notification";
 import {
@@ -32,6 +33,9 @@ export function useSessionManagement(
 		setSelection(null);
 		setTargets(null);
 	}, []);
+	const cancel = useCallback(() => {
+		if (!working.current) setTargets(null);
+	}, []);
 	function start(id?: string) {
 		if (working.current) return;
 		setResult(null);
@@ -48,9 +52,22 @@ export function useSessionManagement(
 		});
 	}
 	function toggleAll() {
-		if (working.current) return;
+		if (working.current || !sessions.length) return;
 		setSelection(selected.length === sessions.length ? new Set() : new Set(sessions.map((session) => session.id)));
 	}
+	const retain = useCallback((validIds: ReadonlySet<string>) => {
+		if (working.current) return;
+		setSelection((previous) => {
+			if (!previous) return previous;
+			let changed = false;
+			const next = new Set<string>();
+			for (const id of previous) {
+				if (validIds.has(id)) next.add(id);
+				else changed = true;
+			}
+			return changed ? next : previous;
+		});
+	}, []);
 	function requestDelete(items: readonly DeletionTarget[] = selected) {
 		if (!items.length || working.current) return;
 		setTargets(items.map(({ id, title }) => ({ id, title })));
@@ -88,33 +105,43 @@ export function useSessionManagement(
 		finish,
 		toggle,
 		toggleAll,
+		retain,
 		requestDelete,
 		confirm,
-		cancel: () => {
-			if (!working.current) setTargets(null);
-		},
+		cancel,
 		dismissResult: () => setResult(null),
 	};
 }
 
 export function SessionManagementToolbar({
 	allSelected,
+	hasItems = true,
+	selectedCount,
 	busy,
 	active,
 	onToggleAll,
+	onDelete,
 	onFinish,
 }: {
 	allSelected: boolean;
+	hasItems?: boolean;
+	selectedCount?: number;
 	busy: boolean;
 	active: boolean;
 	onToggleAll: () => void;
+	onDelete?: () => void;
 	onFinish: () => void;
 }) {
 	return (
 		<fieldset className="session-management-toolbar" aria-label="会话管理" inert={!active} aria-hidden={!active}>
-			<button type="button" disabled={busy} onClick={onToggleAll}>
+			<button type="button" disabled={busy || !hasItems} onClick={onToggleAll}>
 				{allSelected ? "取消全选" : "全选"}
 			</button>
+			{onDelete && (selectedCount ?? 0) > 0 && (
+				<button type="button" className="session-management-delete" disabled={busy} onClick={onDelete}>
+					删除
+				</button>
+			)}
 			<button type="button" disabled={busy} onClick={onFinish}>
 				完成
 			</button>
@@ -133,38 +160,63 @@ export function SessionDeleteDialog({
 }) {
 	const dialog = useRef<HTMLDialogElement>(null);
 	const cancel = useRef<HTMLButtonElement>(null);
+	const { requestClose, closing } = useAnimatedDialogClose(dialog);
 	useDialogFocusTrap(dialog, cancel);
+	useStandbyDialogClose(dialog, onCancel);
 	useEffect(() => {
 		const element = dialog.current;
 		const previous = document.activeElement;
 		element?.showModal();
 		cancel.current?.focus();
 		return () => {
-			element?.close();
-			if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
-			else document.querySelector<HTMLElement>(".sidebar-session.selected, .sidebar-new")?.focus();
+			if (element?.open) element.close();
+			if (document.querySelector(".standby-scrim")) return;
+			if (previous instanceof HTMLElement && previous.isConnected && !previous.closest("[inert]")) {
+				previous.focus({ preventScroll: true });
+				return;
+			}
+			const fallback = [
+				...document.querySelectorAll<HTMLElement>(
+					".session-list-manage, .sidebar-session.selected, .sidebar-new, .sidebar-restore-inline, .sidebar-restore",
+				),
+			].find((candidate) => !candidate.closest("[inert]") && !candidate.hasAttribute("disabled"));
+			fallback?.focus({ preventScroll: true });
 		};
 	}, []);
 	return createPortal(
 		<dialog
 			ref={dialog}
-			className="exit-dialog session-delete-dialog"
+			className="tier-3-dialog exit-dialog session-delete-dialog"
 			aria-labelledby="session-delete-title"
 			aria-describedby="session-delete-warning"
 			onCancel={(event) => {
 				event.preventDefault();
-				onCancel();
+				if (!closing) requestClose(onCancel);
 			}}
 		>
-			<h2 id="session-delete-title">删除 {count} 个会话？</h2>
+			<div className="dialog-title-row dialog-title-row--danger">
+				<TriangleAlert size={16} aria-hidden="true" />
+				<h2 id="session-delete-title">删除 {count} 个会话？</h2>
+			</div>
 			<p id="session-delete-warning" className="exit-description">
 				删除后无法恢复。
 			</p>
 			<div className="exit-actions">
-				<button type="button" ref={cancel} onClick={onCancel}>
+				<button
+					type="button"
+					ref={cancel}
+					className="tier-1-btn-outline"
+					disabled={closing}
+					onClick={() => requestClose(onCancel)}
+				>
 					取消
 				</button>
-				<button type="button" className="exit-confirm" onClick={onConfirm}>
+				<button
+					type="button"
+					className="tier-1-btn-danger solid-danger exit-confirm"
+					disabled={closing}
+					onClick={() => requestClose(onConfirm)}
+				>
 					删除
 				</button>
 			</div>
@@ -178,7 +230,7 @@ export function SessionDeleteNotice({ result, onClose }: { result: DeletionResul
 	const kind = result.failed.length ? (result.deleted.length ? "warning" : "danger") : "success";
 	return (
 		<Notification className="session-delete-notice" label="删除结果" kind={kind}>
-			<Icon size={18} className="session-delete-status" aria-hidden="true" />
+			<Icon size={16} className="session-delete-status" aria-hidden="true" />
 			<div className="session-delete-copy">
 				<p>{deletionTitle(result)}</p>
 				{result.failed.length === 1 ? (
@@ -200,11 +252,11 @@ export function SessionDeleteNotice({ result, onClose }: { result: DeletionResul
 			</div>
 			<button
 				type="button"
-				className="notification-close session-delete-close"
+				className="btn-icon xs-24 notification-close session-delete-close"
 				aria-label="关闭删除结果"
 				onClick={onClose}
 			>
-				<X size={18} aria-hidden="true" />
+				<X size={14} aria-hidden="true" />
 			</button>
 		</Notification>
 	);

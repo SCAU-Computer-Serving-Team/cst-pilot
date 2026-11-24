@@ -38,7 +38,7 @@ export function CatalogRefreshButton() {
 	return (
 		<button
 			type="button"
-			className="settings-action settings-catalog-refresh"
+			className="tier-1-btn-outline settings-action settings-catalog-refresh"
 			disabled={working}
 			aria-busy={working}
 			onClick={() => void refresh()}

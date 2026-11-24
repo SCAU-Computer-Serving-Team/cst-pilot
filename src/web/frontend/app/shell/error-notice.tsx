@@ -44,23 +44,28 @@ export function ErrorNotice({
 				duration={2600}
 				onDismiss={onDismiss}
 			>
-				<NotificationDetail icon={<Icon size={18} aria-hidden="true" />}>
+				<NotificationDetail icon={<Icon size={16} aria-hidden="true" />}>
 					{error.description && <span className="notification-detail-description">{error.description}</span>}
 					<span className="notification-detail-label">技术详情</span>
 					<CodeBlock>{error.detail}</CodeBlock>
 				</NotificationDetail>
 				<span className="notification-message">{error.title}</span>
 				{error.kind === "auth" ? (
-					<Link className="notice-action" to="/settings#accounts">
+					<Link className="btn-ghost notice-action" to="/settings#accounts">
 						重新登录
 					</Link>
 				) : model ? (
-					<Link className="notice-action" to="/settings">
+					<Link className="btn-ghost notice-action" to="/settings">
 						模型设置
 					</Link>
 				) : null}
-				<button type="button" className="notification-close" aria-label="关闭操作提示" onClick={onDismiss}>
-					<X size={18} aria-hidden="true" />
+				<button
+					type="button"
+					className="btn-icon xs-24 notification-close"
+					aria-label="关闭操作提示"
+					onClick={onDismiss}
+				>
+					<X size={14} aria-hidden="true" />
 				</button>
 			</Notification>
 		);

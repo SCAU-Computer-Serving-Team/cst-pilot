@@ -17,7 +17,7 @@ const markdownComponents: Components = {
 		</a>
 	),
 	img: () => null,
-	pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+	pre: ({ children }) => <CodeBlock header>{children}</CodeBlock>,
 	table: ({ children }) => (
 		// biome-ignore lint/a11y/noNoninteractiveTabindex: 滚动区域支持键盘横向浏览宽表格。
 		<section className="markdown-table" tabIndex={0} aria-label="表格">

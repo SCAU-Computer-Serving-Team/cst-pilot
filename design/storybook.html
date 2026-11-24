@@ -184,6 +184,11 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
 
     /* 降低一档浓度、带柔和羽化边缘的浅中性聚焦阴影 */
     --focus-shadow: 0 0 0 1px rgba(17, 17, 20, 0.03), 0 2px 8px 1px rgba(17, 17, 20, 0.055);
+    /* 方向键选中态：四角取景标 + 边轨游标共存（交互侧瞬态，不改控件原底色，180ms ease-out 滑移过渡） */
+    --kbd-bracket-color: rgba(17, 17, 20, 0.72);
+    --kbd-bracket-accent: #1A4BE0;
+    --kbd-bracket-danger: #DC2626;
+    --kbd-rail-color: #111111;
     --running-glyph-target: #FFFFFF;
 
     /* 工程标尺、双层像素网格与组件测距参考线 (Light Blueprint) */
@@ -269,6 +274,10 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     --craft-thumb-shadow: 0 1px 3px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.10);
 
     --focus-shadow: 0 0 0 1px rgba(242, 242, 244, 0.045), 0 2px 10px 1px rgba(242, 242, 244, 0.055);
+    --kbd-bracket-color: rgba(242, 242, 244, 0.78);
+    --kbd-bracket-accent: #688FF8;
+    --kbd-bracket-danger: #E5484D;
+    --kbd-rail-color: #F2F2F4;
     --running-glyph-target: #060B0E;
 
     /* 工程标尺、双层像素网格与组件测距参考线 (Dark Blueprint) */
@@ -1598,6 +1607,430 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
   }
   .sb-m-formula:hover {
     color: var(--text-primary);
+  }
+
+  /* 方向键选中态交互实验台（交互侧规范展示） */
+  .kbd-stage {
+    width: 100%;
+    max-width: 1180px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+  .kbd-stage-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border-subtle);
+    padding-bottom: 12px;
+  }
+  .kbd-hud {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .kbd-hud-mode {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 26px;
+    padding: 0 10px;
+    border-radius: var(--radius-control);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .kbd-hud-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--accent-ink);
+  }
+  .kbd-hud-mode[data-mode="pointer"] .kbd-hud-dot {
+    background: var(--text-muted);
+  }
+  .kbd-hud-key {
+    min-width: 34px;
+    height: 26px;
+    padding: 0 8px;
+    border-radius: var(--radius-control);
+    background: var(--bg-workspace);
+    border: 1px solid var(--border-strong);
+    box-shadow: 0 1px 2px var(--shadow-panel-sm);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .kbd-export-grid {
+    display: grid;
+    grid-template-columns: 288px minmax(0, 1fr);
+    gap: 32px;
+    align-items: start;
+  }
+  @media (max-width: 860px) {
+    .kbd-export-grid { grid-template-columns: 1fr; }
+  }
+  .kbd-export-panel {
+    width: 288px;
+    padding: 18px 16px;
+    border-radius: var(--radius-row);
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-workspace);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .kbd-export-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .kbd-export-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+  .kbd-dir-hint {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: opacity var(--fast) var(--ease-out);
+  }
+  .kbd-export-group[data-kbd-focus="true"] .kbd-dir-hint,
+  .kbd-dir-hint[data-visible="true"] {
+    opacity: 1;
+    color: var(--text-secondary);
+  }
+  .kbd-export-preview {
+    border-radius: var(--radius-row);
+    border: 1px solid var(--border-subtle);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 336px;
+  }
+  .kbd-export-preview[data-doc-theme="light"] {
+    background: #FFFFFF;
+    color: #111111;
+    border-color: #E4E4E7;
+  }
+  .kbd-export-preview[data-doc-theme="dark"] {
+    background: #0D0D0F;
+    color: #F2F2F4;
+    border-color: #26262B;
+  }
+  .kbd-preview-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid currentColor;
+    border-bottom-color: rgba(133, 133, 139, 0.24);
+  }
+  .kbd-preview-block {
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 20px;
+    border: 1px solid rgba(133, 133, 139, 0.22);
+  }
+  .kbd-tree-shell {
+    position: relative;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-row);
+    background: var(--bg-workspace);
+    overflow: hidden;
+  }
+  .kbd-tree-toolbar {
+    height: 52px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .kbd-tree-list {
+    padding: 8px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .kbd-tree-row {
+    height: 40px;
+    padding: 0 10px;
+    border-radius: var(--radius-control);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--text-primary);
+    font-size: 14px;
+    transition: background var(--fast) var(--ease-out), box-shadow var(--fast) var(--ease-out);
+  }
+  .kbd-tree-row:hover:not([data-active-leaf="true"]) {
+    background: var(--bg-hover);
+  }
+  .kbd-tree-row[data-active-leaf="true"] {
+    background: var(--bg-item-active);
+  }
+  .kbd-tree-slot {
+    width: 24px;
+    height: 40px;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .kbd-tree-line {
+    width: 2px;
+    flex: 1;
+    background: var(--border-strong);
+  }
+  .kbd-tree-sq {
+    width: 8px;
+    height: 8px;
+    background: var(--accent-ink);
+    flex-shrink: 0;
+  }
+  .kbd-matrix-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+  @media (max-width: 900px) {
+    .kbd-matrix-grid { grid-template-columns: 1fr; }
+  }
+  .kbd-matrix-card {
+    padding: 16px 18px;
+    border-radius: var(--radius-row);
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-workspace);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .kbd-matrix-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .kbd-matrix-sub {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 400;
+    color: var(--text-muted);
+  }
+  /* 平滑滑移选框（定稿：四角取景标 + 边轨游标共存，不改变目标内部底色，180ms ease-out 连续滑移） */
+  .kbd-style-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    border-radius: var(--radius-row);
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+  }
+  .kbd-style-pills {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .kbd-style-pill {
+    height: 28px;
+    padding: 0 10px;
+    border-radius: var(--radius-control);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12.5px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background var(--fast) var(--ease-out), color var(--fast) var(--ease-out), border-color var(--fast) var(--ease-out);
+  }
+  .kbd-style-pill:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+  .kbd-style-pill[data-active="true"] {
+    background: var(--bg-workspace);
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+    box-shadow: 0 1px 2px var(--shadow-panel-sm);
+  }
+  .kbd-style-pill kbd {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .kbd-style-note {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+  }
+  .kbd-stage-body {
+    position: relative;
+  }
+  .kbd-focus-halo {
+    position: absolute;
+    top: 0;
+    left: 0;
+    box-sizing: border-box;
+    pointer-events: none;
+    z-index: 70;
+    background: transparent;
+    opacity: 0;
+    border-radius: var(--radius-control);
+    will-change: transform, width, height, opacity;
+    transition:
+      transform var(--kbd-glide-dur, 180ms) var(--ease-out),
+      width var(--kbd-glide-dur, 180ms) var(--ease-out),
+      height var(--kbd-glide-dur, 180ms) var(--ease-out),
+      border-radius var(--kbd-glide-dur, 180ms) var(--ease-out),
+      background var(--kbd-glide-dur, 180ms) var(--ease-out),
+      opacity var(--fast) var(--ease-out);
+  }
+  .kbd-focus-halo[data-visible="true"] {
+    opacity: 1;
+  }
+  .kbd-focus-halo[data-snap="true"] {
+    transition: opacity var(--fast) var(--ease-out) !important;
+  }
+  /* 形态 1：四角取景标（外扩 3px，臂长 8px，线宽 1.5px 同心圆角短折线） */
+  .kbd-brk {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    opacity: 0;
+    border-color: var(--kbd-bracket-color);
+    border-style: solid;
+    border-width: 0;
+    transition: opacity var(--fast) var(--ease-out), border-color var(--kbd-glide-dur, 180ms) var(--ease-out);
+  }
+  .kbd-focus-halo[data-style="brackets"] .kbd-brk { opacity: 1; }
+  .kbd-focus-halo[data-style="brackets"][data-tone="accent"] .kbd-brk { border-color: var(--kbd-bracket-accent); }
+  .kbd-focus-halo[data-style="brackets"][data-tone="danger"] .kbd-brk { border-color: var(--kbd-bracket-danger); }
+  .kbd-brk.tl { top: 0; left: 0; border-top-width: 1.5px; border-left-width: 1.5px; border-top-left-radius: 5px; }
+  .kbd-brk.tr { top: 0; right: 0; border-top-width: 1.5px; border-right-width: 1.5px; border-top-right-radius: 5px; }
+  .kbd-brk.bl { bottom: 0; left: 0; border-bottom-width: 1.5px; border-left-width: 1.5px; border-bottom-left-radius: 5px; }
+  .kbd-brk.br { bottom: 0; right: 0; border-bottom-width: 1.5px; border-right-width: 1.5px; border-bottom-right-radius: 5px; }
+  /* 形态 2：边轨游标（密集列表左侧 3px 圆头竖条，横向分段/图标变形为底沿短横条） */
+  .kbd-focus-halo[data-style="rail"] {
+    background: var(--kbd-rail-color);
+  }
+  .kbd-focus-halo[data-style="rail"][data-tone="accent"] {
+    background: var(--kbd-bracket-accent);
+  }
+  .kbd-focus-halo[data-style="rail"][data-tone="danger"] {
+    background: var(--kbd-bracket-danger);
+  }
+  [data-reduced-motion="true"] .kbd-focus-halo,
+  [data-reduced-motion="true"] .kbd-brk {
+    transition: none !important;
+  }
+  /* 独立控件静态状态卡（纯 CSS 同心四角取景标 ::after，零内部底色变化） */
+  .tier-1-btn-primary[data-kbd-focus="true"],
+  .tier-1-btn-outline[data-kbd-focus="true"],
+  .tier-1-btn-danger[data-kbd-focus="true"],
+  .btn-ghost[data-kbd-focus="true"],
+  .btn-icon[data-kbd-focus="true"],
+  .chk-box[data-kbd-focus="true"],
+  .chk-row[data-kbd-focus="true"],
+  .choice-seg-btn[data-kbd-focus="true"],
+  .choice-seg-group[data-kbd-focus="true"] .choice-seg-btn[data-active="true"],
+  .vp-tab-kbd-pill {
+    position: relative;
+  }
+  .tier-1-btn-primary[data-kbd-focus="true"]::after,
+  .tier-1-btn-outline[data-kbd-focus="true"]::after,
+  .tier-1-btn-danger[data-kbd-focus="true"]::after,
+  .btn-ghost[data-kbd-focus="true"]::after,
+  .btn-icon[data-kbd-focus="true"]::after,
+  .chk-box[data-kbd-focus="true"]::after,
+  .chk-row[data-kbd-focus="true"]::after,
+  .choice-seg-btn[data-kbd-focus="true"]::after,
+  .choice-seg-group[data-kbd-focus="true"] .choice-seg-btn[data-active="true"]::after,
+  .vp-tab-kbd-pill::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: 7px;
+    border: 1.5px solid var(--kbd-bracket-color);
+    pointer-events: none;
+    -webkit-mask:
+      linear-gradient(#000 0 0) top left / 8px 8px no-repeat,
+      linear-gradient(#000 0 0) top right / 8px 8px no-repeat,
+      linear-gradient(#000 0 0) bottom left / 8px 8px no-repeat,
+      linear-gradient(#000 0 0) bottom right / 8px 8px no-repeat;
+    mask:
+      linear-gradient(#000 0 0) top left / 8px 8px no-repeat,
+      linear-gradient(#000 0 0) top right / 8px 8px no-repeat,
+      linear-gradient(#000 0 0) bottom left / 8px 8px no-repeat,
+      linear-gradient(#000 0 0) bottom right / 8px 8px no-repeat;
+  }
+  .tier-1-btn-primary[data-kbd-focus="true"]::after,
+  .chk-box[data-checked="true"][data-kbd-focus="true"]::after {
+    border-color: var(--kbd-bracket-accent);
+  }
+  .tier-1-btn-danger[data-kbd-focus="true"]::after {
+    border-color: var(--kbd-bracket-danger);
+  }
+  /* 密集列表行静态状态卡（纯 CSS 左侧 3px 圆头边轨游标 ::before，不侵入相邻行距） */
+  .menu-row[data-kbd-focus="true"],
+  .session-row-master[data-kbd-focus="true"],
+  .kbd-tree-row[data-kbd-focus="true"] {
+    position: relative;
+  }
+  .menu-row[data-kbd-focus="true"]::before,
+  .session-row-master[data-kbd-focus="true"]::before,
+  .kbd-tree-row[data-kbd-focus="true"]::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 56%;
+    max-height: 22px;
+    border-radius: 999px;
+    background: var(--kbd-rail-color);
+    pointer-events: none;
+  }
+  .menu-row.danger[data-kbd-focus="true"]::before {
+    background: var(--kbd-bracket-danger);
+  }
+  /* 启用滑移选框时，由 .kbd-focus-halo 单层承接动效，隐藏静态伪元素 */
+  .kbd-stage-body[data-glide-halo="true"] [data-kbd-halo-target="true"]::before,
+  .kbd-stage-body[data-glide-halo="true"] [data-kbd-halo-target="true"]::after,
+  .kbd-stage-body[data-glide-halo="true"] [data-kbd-focus="true"]::before,
+  .kbd-stage-body[data-glide-halo="true"] [data-kbd-focus="true"]::after {
+    opacity: 0 !important;
   }
   /* 组内 Tooltip 演示 */
   .sb-tip-wrap {
@@ -2955,14 +3388,14 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     justify-content: center;
     gap: 8px;
     box-shadow: inset 0 1px 0 var(--highlight-top), 0 1px 2px var(--shadow-panel-sm);
-    transition: transform var(--duration-press) var(--ease-out), background var(--fast) var(--ease-out), border-color var(--fast) var(--ease-out), opacity var(--fast) var(--ease-out), box-shadow var(--fast) var(--ease-out);
+    transition: transform var(--duration-press) var(--ease-out), background var(--fast) var(--ease-out), border-color var(--fast) var(--ease-out), opacity var(--fast) var(--ease-out), box-shadow 180ms var(--ease-out);
   }
   .tier-1-btn-outline:hover:not(:disabled),
   .tier-1-btn-outline[data-force="hover"] { background: var(--bg-surface); }
   .tier-1-btn-outline:active:not(:disabled),
   .tier-1-btn-outline[data-force="active"] { transform: scale(var(--scale-press)); background: var(--bg-item-active); }
   .tier-1-btn-outline[data-open="true"] { background: var(--bg-item-active); border-color: var(--border-focus); }
-  .tier-1-btn-outline[data-force="focus"] { border-color: var(--border-focus); box-shadow: var(--focus-shadow); }
+  .tier-1-btn-outline[data-force="focus"] { border-color: var(--border-focus); box-shadow: inset 0 1px 0 var(--highlight-top), var(--focus-shadow); }
   .tier-1-btn-outline:disabled { opacity: 0.45; pointer-events: none; }
 
   .tier-1-btn-danger {
@@ -2977,7 +3410,7 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     align-items: center;
     justify-content: center;
     gap: 8px;
-    transition: transform var(--duration-press) var(--ease-out), background var(--fast) var(--ease-out), border-color var(--fast) var(--ease-out), opacity var(--fast) var(--ease-out), box-shadow var(--fast) var(--ease-out);
+    transition: transform var(--duration-press) var(--ease-out), background var(--fast) var(--ease-out), border-color var(--fast) var(--ease-out), opacity var(--fast) var(--ease-out), box-shadow 180ms var(--ease-out);
   }
   .tier-1-btn-danger:not(.solid-danger):hover:not(:disabled),
   .tier-1-btn-danger:not(.solid-danger)[data-force="hover"] {
@@ -3015,7 +3448,7 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     align-items: center;
     justify-content: center;
     gap: 8px;
-    transition: transform var(--duration-press) var(--ease-out), background var(--fast) var(--ease-out), color var(--fast) var(--ease-out), box-shadow var(--fast) var(--ease-out);
+    transition: transform var(--duration-press) var(--ease-out), background var(--fast) var(--ease-out), color var(--fast) var(--ease-out), box-shadow 180ms var(--ease-out);
   }
   .btn-ghost:hover:not(:disabled),
   .btn-ghost[data-force="hover"] { background: var(--bg-hover); color: var(--text-primary); }
@@ -3023,6 +3456,7 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
   .btn-ghost[data-force="active"] { transform: scale(var(--scale-press)); background: var(--bg-active-press); color: var(--text-primary); }
   .btn-ghost[data-open="true"] { background: var(--bg-item-active); color: var(--text-primary); }
   .btn-ghost[data-force="focus"] { box-shadow: var(--focus-shadow); color: var(--text-primary); }
+  .btn-ghost[data-kbd-focus="true"] { color: var(--text-primary); }
   .btn-ghost:disabled { opacity: 0.45; pointer-events: none; }
 
   .btn-icon {
@@ -3033,7 +3467,7 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    transition: transform var(--duration-press) var(--ease-out), background var(--fast) var(--ease-out), color var(--fast) var(--ease-out), box-shadow var(--fast) var(--ease-out);
+    transition: transform var(--duration-press) var(--ease-out), background var(--fast) var(--ease-out), color var(--fast) var(--ease-out), box-shadow 180ms var(--ease-out);
   }
   .btn-icon.sm-28 { width: 28px; height: 28px; }
   .btn-icon.xs-24 { width: 24px; height: 24px; }
@@ -3043,6 +3477,7 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
   .btn-icon[data-force="active"] { transform: scale(var(--scale-press)); background: var(--bg-active-press); color: var(--text-primary); }
   .btn-icon[data-open="true"] { background: var(--accent-tint); color: var(--accent-ink); }
   .btn-icon[data-force="focus"] { box-shadow: var(--focus-shadow); color: var(--text-primary); }
+  .btn-icon[data-kbd-focus="true"] { color: var(--text-primary); }
   .btn-icon:disabled { opacity: 0.45; pointer-events: none; }
 
   .win-caption-group { height: 40px; display: inline-flex; align-items: center; }
@@ -3152,7 +3587,65 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     transition: stroke-dashoffset var(--duration-medium) var(--ease-spring);
   }
   .chk-box:active:not(:disabled) { transform: scale(0.92); }
+  .chk-box[data-force="focus"] { box-shadow: var(--focus-shadow); }
   .chk-box:disabled { opacity: 0.45; pointer-events: none; }
+
+  /* 交互侧复选框整行热区与选项分段组（四角取景标由 ::after 或 .kbd-focus-halo 承接，不改原底色） */
+  .chk-row {
+    width: 100%;
+    min-height: 30px;
+    padding: 4px 8px;
+    margin: 0 -8px;
+    box-sizing: content-box;
+    border-radius: var(--radius-control);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--text-primary);
+    text-align: left;
+    transition: background var(--fast) var(--ease-out);
+  }
+  .chk-row:hover { background: var(--bg-hover); }
+
+  .choice-seg-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+  }
+  .choice-seg-btn {
+    flex: 1;
+    height: var(--h-control);
+    padding: 0 8px;
+    border-radius: var(--radius-control);
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-workspace);
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    white-space: nowrap;
+    transition: background var(--fast) var(--ease-out), border-color var(--fast) var(--ease-out), color var(--fast) var(--ease-out);
+  }
+  .choice-seg-btn:hover:not([data-active="true"]) { background: var(--bg-hover); color: var(--text-primary); }
+  .choice-seg-btn[data-active="true"] {
+    background: var(--bg-item-active);
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+  }
+  .vp-tab-kbd-pill {
+    height: 40px;
+    padding: 0 8px;
+    border-radius: var(--radius-control);
+    display: inline-flex;
+    align-items: center;
+    font-size: 16px;
+    color: var(--text-primary);
+  }
 
   /* 浮层玻璃 (对齐 timdesignize glass-popover: 顶光在发丝内边之上 + 叠栈投影) */
   .tier-2-glass {
@@ -3437,7 +3930,7 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     gap: 12px;
     font-size: 16px;
     color: var(--text-primary);
-    transition: background var(--fast) var(--ease-out);
+    transition: background var(--fast) var(--ease-out), box-shadow var(--fast) var(--ease-out);
   }
   .session-row-master:hover:not([data-selected="true"]),
   .session-row-master[data-force="hover"] { background: var(--bg-hover); }
@@ -4319,6 +4812,7 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
       "press": { "duration": "120ms", "easing": "--ease-out", "props": ["transform"], "from": "scale(1)", "to": "scale(0.97) (checkbox 0.92)", "interruptible": true, "reducedMotion": "instant" },
       "hover": { "duration": "150ms", "easing": "--ease-out", "props": ["background", "color", "border-color"], "interruptible": true, "reducedMotion": "instant" },
       "focus": { "duration": "150ms", "easing": "--ease-out", "props": ["border-color", "box-shadow"], "interruptible": true, "reducedMotion": "instant" },
+      "kbdNav": { "duration": "180ms", "easing": "--ease-out", "props": ["transform", "width", "height", "border-radius", "opacity"], "defaultStyle": "brackets", "setting": "设置 · 常规 · 外观 · 方向键选中样式 (四角 | 游标)", "styles": ["brackets (默认: offset 3px, arm 8px, stroke 1.5px)", "rail (可选: 3px rounded left/bottom rail)"], "tokens": ["--kbd-bracket-color", "--kbd-bracket-accent", "--kbd-bracket-danger", "--kbd-rail-color"], "preserveInteriorFill": true, "interruptible": true, "pointerMutualExclusion": true, "reducedMotion": "instant" },
       "popover": { "openMs": 220, "closeMs": 150, "easing": "--ease-out", "props": ["opacity", "transform"], "origin": "trigger-edge (top left / bottom right / bottom left)", "from": "translateY(±6px) scale(0.95-0.985)", "interruptible": true, "reducedMotion": "0ms" },
       "modal": { "openMs": 240, "closeMs": 150, "easing": "--ease-out", "props": ["opacity", "transform"], "origin": "center", "from": "scale(0.96)", "interruptible": true, "reducedMotion": "0ms" },
       "toast": { "openMs": 240, "closeMs": 150, "autoDismissMs": 2600, "easing": "--ease-out", "props": ["opacity", "transform"], "from": "translateY(-8px) scale(0.97)", "pauseOnHover": true, "reducedMotion": "0ms" },
@@ -4343,6 +4837,7 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
       "press": "motion-ease-out",
       "hover": "motion-ease-out",
       "focus": "motion-ease-out",
+      "kbdNav": "motion-keyboard-nav",
       "popover": "motion-ease-out",
       "modal": "motion-ease-out",
       "pageSlide": "motion-ease-out",
@@ -4453,6 +4948,7 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     "motion-instant":       { "category": "motion",   "order": 4, "kind": "motion" },
     "motion-interruptible": { "category": "motion",   "order": 5, "kind": "motion" },
     "motion-rhythm":        { "category": "motion",   "order": 6, "kind": "motion" },
+    "motion-keyboard-nav":  { "category": "motion",   "order": 7, "kind": "motion", "zh": "方向键选中态", "en": "Keyboard Selection", "keywords": "方向键 键盘 选中态 淡阴影 导出 分支树 Ctrl+P focus kbd" },
     "toast":                { "category": "feedback", "order": 1 },
     "error-banner":         { "category": "feedback", "order": 2 },
     "alert-dialog":         { "category": "feedback", "order": 3 },
@@ -4483,39 +4979,40 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     "blue-hour-shaders":    { "category": "visuals",  "order": 2 }
   },
   "storyMotionMap": {
-    "primary-button":       ["press", "hover", "focus"],
-    "outline-button":       ["press", "hover", "focus"],
-    "danger-button":        ["press", "hover", "focus", "modal"],
-    "ghost-button":         ["press", "hover", "focus"],
-    "icon-button":          ["press", "hover", "focus", "tooltipGroup"],
+    "primary-button":       ["press", "hover", "focus", "kbdNav"],
+    "outline-button":       ["press", "hover", "focus", "kbdNav"],
+    "danger-button":        ["press", "hover", "focus", "kbdNav", "modal"],
+    "ghost-button":         ["press", "hover", "focus", "kbdNav"],
+    "icon-button":          ["press", "hover", "focus", "kbdNav", "tooltipGroup"],
     "kbd":                  [],
     "text-input":           ["focus"],
-    "search-input":         ["focus"],
-    "select":               ["popover", "chevron", "hover"],
-    "checkbox":             ["press", "checkStroke"],
+    "search-input":         ["focus", "kbdNav"],
+    "select":               ["popover", "chevron", "hover", "kbdNav"],
+    "checkbox":             ["press", "checkStroke", "kbdNav"],
     "motion-ease-out":      ["press", "hover", "popover", "modal"],
     "motion-ease-in-out":   ["segPill", "tabIndicator", "flip"],
     "motion-ease-spring":   ["iconSwap", "checkStroke"],
     "motion-instant":       ["tooltipGroup"],
     "motion-interruptible": ["collapse", "chevron", "toast", "drawer"],
     "motion-rhythm":        ["welcomeStagger", "streamAppend", "runningLight", "shaderFreeze"],
-    "sidebar":              ["flip", "sidebarShift", "drawer", "popover", "modal"],
+    "motion-keyboard-nav":  ["kbdNav", "focus", "press"],
+    "sidebar":              ["flip", "sidebarShift", "drawer", "popover", "modal", "kbdNav"],
     "topbar":               ["segPill", "modal"],
     "caption-buttons":      ["hover", "modal"],
     "chat-header":          ["popover", "hover"],
     "subpage-header":       ["hover"],
-    "settings-tabs":        ["tabIndicator", "hover"],
+    "settings-tabs":        ["tabIndicator", "hover", "kbdNav"],
     "toast":                ["toast"],
     "error-banner":         ["toast"],
     "alert-dialog":         ["modal"],
-    "context-menu":         ["popover", "hover"],
-    "menu-item":            ["hover"],
+    "context-menu":         ["popover", "hover", "kbdNav"],
+    "menu-item":            ["hover", "kbdNav"],
     "composer":             ["focus", "flip", "popover", "pageSlide", "tooltipGroup"],
     "user-message":         ["hover", "modal", "tooltipGroup"],
     "message-actions":      ["runningLight", "iconSwap", "streamAppend", "hover", "tooltipGroup"],
     "compaction-summary":   ["collapse", "chevron", "iconSwap", "runningLight"],
     "markdown-prose":       ["streamAppend", "iconSwap", "hover"],
-    "session-row":          ["hover"],
+    "session-row":          ["hover", "kbdNav"],
     "info-row":             [],
     "tool-status-row":      ["collapse", "chevron", "runningLight"],
     "tool-summary-card":    ["collapse", "chevron"],
@@ -4714,6 +5211,12 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     "motion-rhythm": [
       ["错位", "步进 40ms · 上限 300ms · 单次"],
       ["停帧", "离页 / 失焦 / sys(gpu) → 0 FPS"]
+    ],
+    "motion-keyboard-nav": [
+      ["默认四角", "全应用默认采用四角取景标：外扩 3px、臂长 8px、线宽 1.5px 同心圆角短折线（$kbd-bracket-color / $kbd-bracket-accent / $kbd-bracket-danger），不改控件原底色"],
+      ["常规可选游标", "在「设置 · 常规 · 外观 → 方向键选中样式」提供「四角 / 游标」二段开关；切换为游标后，纵向项显示左侧 3px 圆头竖条，横向分段变形为底沿短横条（$kbd-rail-color）"],
+      ["平滑滑移动效", "方向键在选项与控件之间切换时，指示器按 180ms ease-out 沿位置、宽高与圆角连续滑移，连按支持中途折返；减少动态回退 0ms"],
+      ["键鼠互斥", "按下方向键显现指示器；鼠标发生位移后平滑淡出并交回悬停态，避免界面同时出现两处高亮"]
     ]
   }
 }
@@ -6238,7 +6741,8 @@ const STORIES = [
     },
     states: [
       { name: "激活项", sub: "16px/600 + 2px Line", html: `<div style="height:40px;display:inline-flex;align-items:center;border-bottom:2px solid var(--accent-solid);font-size:16px;font-weight:600;">提供商</div>` },
-      { name: "未激活项", sub: "16px/400", html: `<div style="height:40px;display:inline-flex;align-items:center;font-size:16px;color:var(--text-secondary);">常规</div>` }
+      { name: "未激活项", sub: "16px/400", html: `<div style="height:40px;display:inline-flex;align-items:center;font-size:16px;color:var(--text-secondary);">常规</div>` },
+      { name: "方向键选中", sub: "Kbd Focus · 四角取景", html: `<div class="vp-tab-kbd-pill">模型偏好</div>` }
     ],
     hosts: {
       gpui: { note: "816px 居中列顶部 16px 字号四分类，底部 2px 主色指示条连续滑动。", html: `<span class="mono" style="font-size:12px;">VPWAF · 816 × 40px</span>` },
@@ -6734,7 +7238,7 @@ const STORIES = [
       { name: "默认态", sub: "xRNmP", html: `<button class="tier-1-btn-primary">${icon("check",16)}<span>确认操作</span></button>` },
       { name: "悬停态", sub: "Hover", html: `<button class="tier-1-btn-primary" data-force="hover">${icon("check",16)}<span>确认操作</span></button>` },
       { name: "按下态", sub: "Active (0.97)", html: `<button class="tier-1-btn-primary" data-force="active">${icon("check",16)}<span>确认操作</span></button>` },
-      { name: "键盘焦点", sub: "Focus-visible", html: `<button class="tier-1-btn-primary" data-force="focus">${icon("check",16)}<span>确认操作</span></button>` },
+      { name: "方向键选中", sub: "Kbd Focus · Enter 按下", html: `<button class="tier-1-btn-primary" data-kbd-focus="true">${icon("check",16)}<span>确认操作</span></button>` },
       { name: "禁用态", sub: "Disabled (45%)", html: `<button class="tier-1-btn-primary" disabled>${icon("check",16)}<span>确认操作</span></button>` }
     ],
     hosts: {
@@ -6781,6 +7285,7 @@ const STORIES = [
       { name: "默认态", sub: "s2CZVU", html: `<button class="tier-1-btn-outline"><span style="color:var(--text-secondary);display:inline-flex;">${icon("plus",16)}</span><span>次要操作</span></button>` },
       { name: "悬停态", sub: "Hover ($bg-surface)", html: `<button class="tier-1-btn-outline" data-force="hover"><span style="color:var(--text-secondary);display:inline-flex;">${icon("plus",16)}</span><span>次要操作</span></button>` },
       { name: "按下态", sub: "Active", html: `<button class="tier-1-btn-outline" data-force="active"><span style="color:var(--text-secondary);display:inline-flex;">${icon("plus",16)}</span><span>次要操作</span></button>` },
+      { name: "方向键选中", sub: "Kbd Focus · 四角取景", html: `<button class="tier-1-btn-outline" data-kbd-focus="true"><span style="color:var(--text-secondary);display:inline-flex;">${icon("plus",16)}</span><span>次要操作</span></button>` },
       { name: "禁用态", sub: "Disabled", html: `<button class="tier-1-btn-outline" disabled><span style="color:var(--text-secondary);display:inline-flex;">${icon("plus",16)}</span><span>次要操作</span></button>` }
     ],
     hosts: {
@@ -6839,8 +7344,9 @@ const STORIES = [
     states: [
       { name: "母版默认", sub: "U6mIVP", html: `<button class="tier-1-btn-danger">${icon("trash-2",16)}<span>删除</span></button>` },
       { name: "描边悬停", sub: "Hover (14%/22%)", html: `<button class="tier-1-btn-danger" data-force="hover">${icon("trash-2",16)}<span>删除</span></button>` },
+      { name: "描边方向键选中", sub: "Kbd Focus", html: `<button class="tier-1-btn-danger" data-kbd-focus="true">${icon("trash-2",16)}<span>删除</span></button>` },
       { name: "弹窗实心态", sub: "dYHsC Solid", html: `<button class="tier-1-btn-danger solid-danger"><span>删除</span></button>` },
-      { name: "实心悬停", sub: "Solid Hover (#B91C1C)", html: `<button class="tier-1-btn-danger solid-danger" data-force="hover"><span>删除</span></button>` }
+      { name: "实心方向键选中", sub: "Solid Kbd Focus", html: `<button class="tier-1-btn-danger solid-danger" data-kbd-focus="true"><span>删除</span></button>` }
     ],
     hosts: {
       gpui: { note: "常规页面内用 U6mIVP 红字描边；sVucQ 弹窗内 dYHsC 实例隐藏图标并铺实心红底。", html: `<div style="display:flex;gap:8px;"><button class="tier-1-btn-danger">${icon("trash-2",16)}<span>删除</span></button><button class="tier-1-btn-danger solid-danger"><span>删除</span></button></div>` },
@@ -6875,6 +7381,7 @@ const STORIES = [
       { name: "默认态", sub: "PP59g", html: `<button class="btn-ghost">${icon("list-checks",16)}<span>操作</span></button>` },
       { name: "悬停态", sub: "Hover ($bg-hover)", html: `<button class="btn-ghost" data-force="hover">${icon("list-checks",16)}<span>操作</span></button>` },
       { name: "按下态", sub: "Active", html: `<button class="btn-ghost" data-force="active">${icon("list-checks",16)}<span>操作</span></button>` },
+      { name: "方向键选中", sub: "Kbd Focus · 四角取景", html: `<button class="btn-ghost" data-kbd-focus="true">${icon("list-checks",16)}<span>操作</span></button>` },
       { name: "禁用态", sub: "Disabled", html: `<button class="btn-ghost" disabled>${icon("list-checks",16)}<span>操作</span></button>` }
     ],
     hosts: {
@@ -6911,7 +7418,7 @@ const STORIES = [
     states: [
       { name: "默认母版 (32px)", sub: "AxUEZ", html: `<button class="btn-icon">${icon("ellipsis",16)}</button>` },
       { name: "悬停态", sub: "Hover", html: `<button class="btn-icon" data-force="hover">${icon("ellipsis",16)}</button>` },
-      { name: "键盘焦点", sub: "Focus-visible", html: `<button class="btn-icon" data-force="focus">${icon("ellipsis",16)}</button>` },
+      { name: "方向键选中", sub: "Kbd Focus · 四角取景", html: `<button class="btn-icon" data-kbd-focus="true">${icon("ellipsis",16)}</button>` },
       { name: "禁用态", sub: "Disabled", html: `<button class="btn-icon" disabled>${icon("ellipsis",16)}</button>` }
     ],
     hosts: {
@@ -6955,6 +7462,7 @@ const STORIES = [
     states: [
       { name: "未选母版", sub: "XtKij", html: `<span class="chk-box" data-checked="false">${icon("check",12)}</span>` },
       { name: "已选母版", sub: "i3VjFz", html: `<span class="chk-box" data-checked="true">${icon("check",12)}</span>` },
+      { name: "整行方向键选中", sub: "Row Kbd · Enter 勾选", html: `<div class="chk-row" data-kbd-focus="true" style="width:168px;margin:0;"><span class="chk-box" data-checked="true">${icon("check",12)}</span><span>包含思考过程</span></div>` },
       { name: "禁用态", sub: "Disabled", html: `<button class="chk-box" data-checked="true" disabled>${icon("check",12)}</button>` }
     ],
     hosts: {
@@ -7185,6 +7693,7 @@ const STORIES = [
     },
     states: [
       { name: "默认母版", sub: "PHFud (200×32)", html: `<button class="tier-1-btn-outline" style="width:180px;justify-content:space-between;font-weight:400;"><span>请选择</span><span style="color:var(--text-secondary);display:inline-flex;">${icon("chevron-down",14)}</span></button>` },
+      { name: "方向键选中", sub: "Kbd Focus · 四角取景", html: `<button class="tier-1-btn-outline" data-kbd-focus="true" style="width:180px;justify-content:space-between;font-weight:400;"><span>跟随系统</span><span style="color:var(--text-secondary);display:inline-flex;">${icon("chevron-down",14)}</span></button>` },
       { name: "展开态", sub: "Open (180°)", html: `<button class="tier-1-btn-outline" data-open="true" style="width:180px;justify-content:space-between;font-weight:400;"><span>跟随系统</span><span class="drop-chevron" data-open="true" style="color:var(--text-secondary);">${icon("chevron-down",14)}</span></button>` }
     ],
     hosts: {
@@ -7270,7 +7779,8 @@ const STORIES = [
     states: [
       { name: "默认母版", sub: "UyJBj", html: `<div class="menu-row" style="width:196px;"><span class="menu-row-left"><span style="color:var(--text-secondary);display:inline-flex;">${icon("pencil",16)}</span><span>菜单项</span></span><span style="font-size:12px;color:var(--text-muted);">跟随系统</span></div>` },
       { name: "悬停聚焦", sub: "Hover ($bg-item-active)", html: `<div class="menu-row" data-focused="true" style="width:196px;"><span class="menu-row-left"><span style="color:var(--text-secondary);display:inline-flex;">${icon("pencil",16)}</span><span>菜单项</span></span><span style="font-size:12px;color:var(--text-muted);">跟随系统</span></div>` },
-      { name: "危险覆写", sub: "Danger", html: `<div class="menu-row danger" data-focused="true" style="width:196px;"><span class="menu-row-left">${icon("trash-2",16)}<span>删除</span></span></div>` }
+      { name: "方向键选中", sub: "Kbd Focus · 边轨游标", html: `<div class="menu-row" data-kbd-focus="true" style="width:196px;"><span class="menu-row-left"><span style="color:var(--text-secondary);display:inline-flex;">${icon("pencil",16)}</span><span>菜单项</span></span><span style="font-size:12px;color:var(--text-muted);">跟随系统</span></div>` },
+      { name: "危险覆写", sub: "Danger Kbd", html: `<div class="menu-row danger" data-kbd-focus="true" style="width:196px;"><span class="menu-row-left">${icon("trash-2",16)}<span>删除</span></span></div>` }
     ],
     hosts: {
       gpui: { note: "无需状态后缀时隐藏右侧 QbMDc 槽位（如重命名/管理/删除实例）。", html: `<span class="mono" style="font-size:12px;">UyJBj · 208 × 32px</span>` },
@@ -7769,7 +8279,8 @@ const STORIES = [
     states: [
       { name: "默认母版", sub: "lzrMn (44px)", html: `<div class="session-row-master" style="width:240px;"><span>C 盘空间与硬盘信息</span><span style="color:var(--text-muted);">${icon("ellipsis",16)}</span></div>` },
       { name: "悬停态", sub: "Hover ($bg-hover)", html: `<div class="session-row-master" data-force="hover" style="width:240px;"><span>C 盘空间与硬盘信息</span><span style="color:var(--text-muted);">${icon("ellipsis",16)}</span></div>` },
-      { name: "选中态", sub: "Selected", html: `<div class="session-row-master" data-selected="true" style="width:240px;"><span>C 盘空间与硬盘信息</span><span style="color:var(--text-muted);">${icon("ellipsis",16)}</span></div>` }
+      { name: "方向键选中", sub: "Kbd Focus · 边轨游标", html: `<div class="session-row-master" data-kbd-focus="true" style="width:240px;"><span>C 盘空间与硬盘信息</span><span style="color:var(--text-muted);">${icon("ellipsis",16)}</span></div>` },
+      { name: "当前项 + 方向键", sub: "Selected + Kbd", html: `<div class="session-row-master" data-selected="true" data-kbd-focus="true" style="width:240px;"><span>C 盘空间与硬盘信息</span><span style="color:var(--text-muted);">${icon("ellipsis",16)}</span></div>` }
     ],
     hosts: {
       gpui: { note: "全部会话页标准行高 44px，不加外框，右侧常驻 $text-muted 低对比三点按钮。", html: `<span class="mono" style="font-size:12px;">lzrMn · 768 × 44px</span>` },
@@ -7985,30 +8496,38 @@ const STORIES = [
     en: "Compaction Summary",
     penIds: ["ln9GA", "l6foNm"],
     meta: [
-      ["母版尺寸", "816 × 自适应 · 折叠头 32px 底边 1px $bg-surface · 展开体 l6foNm ($bg-surface 4px 圆角 12px 内边距)"],
-      ["默认状态", "默认折叠；展开后按 TCdOx / WVTLP 规格渲染 12px $text-secondary 紧凑摘要与右上 28×28 复制钮"]
+      ["母版尺寸", "816 × 自适应 · 复用普通工具（BuK2W / VwO1J）规格：28px 无框状态行 + 16px 状态图标 + 2px 垂直引导线"],
+      ["默认状态", "默认折叠（ln9GA）；展开（l6foNm）后沿状态图标正下方延伸 2px $border-subtle 引导线，右缩进 24px 展示 $bg-surface 4px 圆角 12px 摘要原文块与右上 28×28 复制钮"]
     ],
     mount(stageEl, controlsEl) {
       let open = false;
       controlsEl.innerHTML = "";
       stageEl.classList.add("stretch");
       stageEl.innerHTML = `
-        <div style="width:100%;max-width:816px;margin:0 auto;">
-          <button type="button" id="cs-row" data-pen-id="ln9GA" class="inline-disclosure" style="width:100%;height:32px;justify-content:space-between;border-bottom:1px solid var(--bg-surface);">
-            <span style="display:inline-flex;align-items:center;gap:8px;">
-              <span style="color:var(--text-secondary);display:inline-flex;">${icon("minimize-2", 16)}</span>
-              <span class="cjk" style="font-size:16px;font-weight:500;color:var(--text-primary);">上下文已压缩</span>
-              <span class="cjk" style="font-size:14px;color:var(--text-muted);">压缩前 148k tokens</span>
-              <span id="cs-chev" style="color:var(--text-secondary);display:inline-flex;transition:transform var(--normal) var(--ease-out);">${icon("chevron-right", 16)}</span>
+        <div data-pen-id="l6foNm" style="width:100%;max-width:816px;margin:0 auto;">
+          <button type="button" id="cs-row" data-pen-id="ln9GA" class="inline-disclosure" style="width:100%;height:28px;justify-content:space-between;color:var(--text-secondary);">
+            <span style="display:inline-flex;align-items:center;gap:8px;min-width:0;">
+              <span style="color:var(--status-success);display:inline-flex;flex-shrink:0;">${icon("circle-check", 16)}</span>
+              <span class="cjk" style="font-size:14px;line-height:20px;color:inherit;">上下文已压缩</span>
             </span>
-            <span class="tabular" style="font-size:14px;color:var(--text-secondary);">14:35</span>
+            <span style="display:inline-flex;align-items:center;gap:8px;flex-shrink:0;">
+              <span class="mono tabular" style="font-size:12px;line-height:16px;color:var(--text-muted);">14:35</span>
+              <span id="cs-chev" style="color:inherit;display:inline-flex;transition:transform var(--normal) var(--ease-out);">${icon("chevron-right", 16)}</span>
+            </span>
           </button>
           <div class="collapse-box" id="cs-body" data-open="false" style="height:0;opacity:0;">
-            <div data-pen-id="l6foNm" style="margin-top:12px;padding:12px;border-radius:4px;background:var(--bg-surface);display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
-              <div style="flex:1;min-width:0;font-size:12px;line-height:16px;color:var(--text-secondary);white-space:pre-wrap;">Goal: 排查 C 盘剩余空间不足并生成安全清理清单。
+            <div style="display:flex;gap:8px;">
+              <div style="width:16px;flex-shrink:0;display:flex;justify-content:center;padding:2px 0 4px;">
+                <div style="width:2px;height:100%;border-radius:9999px;background:var(--border-subtle);"></div>
+              </div>
+              <div style="flex:1;min-width:0;padding:2px 0;">
+                <div style="padding:12px;border-radius:4px;background:var(--bg-surface);display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+                  <div style="flex:1;min-width:0;font-size:12px;line-height:16px;color:var(--text-secondary);white-space:pre-wrap;">Goal: 排查 C 盘剩余空间不足并生成安全清理清单。
 Progress: 已确认 hiberfil.sys 占用 12.8 GB、用户软件缓存 30.8 GB，命令尚未执行。
 Next: 核对开机自启项与后台高负载进程。</div>
-              <button type="button" class="btn-icon sm-28" id="cs-copy" title="复制压缩摘要" aria-label="复制压缩摘要" style="flex-shrink:0;">${icon("copy", 14)}</button>
+                  <button type="button" class="btn-icon sm-28" id="cs-copy" title="复制压缩摘要" aria-label="复制压缩摘要" style="flex-shrink:0;">${icon("copy", 14)}</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -8023,13 +8542,13 @@ Next: 核对开机自启项与后台高负载进程。</div>
       stageEl.querySelector("#cs-copy").addEventListener("click", () => showToast({ text: "已复制压缩摘要" }));
     },
     states: [
-      { name: "默认折叠", sub: "ln9GA (32px)", html: `<div style="width:280px;height:32px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--bg-surface);font-size:14px;"><span style="display:inline-flex;align-items:center;gap:6px;">${icon("minimize-2",15)}<span style="font-weight:500;">上下文已压缩</span><span style="font-size:12px;color:var(--text-muted);">148k</span></span><span class="mono" style="font-size:12px;color:var(--text-secondary);">14:35</span></div>` },
-      { name: "展开态", sub: "l6foNm (WVTLP)", html: `<div style="width:280px;padding:8px 10px;border-radius:4px;background:var(--bg-surface);font-size:12px;line-height:16px;color:var(--text-secondary);display:flex;align-items:flex-start;justify-content:space-between;gap:8px;"><span>Goal: 排查 C 盘空间占用…</span><span style="flex-shrink:0;">${icon("copy",13)}</span></div>` },
-      { name: "压缩进行中", sub: "RunningLight", html: `<div style="display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--text-secondary);">${icon("minimize-2",15)}<span>正在压缩上下文…</span></div>` }
+      { name: "默认折叠", sub: "ln9GA (BuK2W 28px)", html: `<div style="width:280px;height:28px;display:flex;align-items:center;justify-content:space-between;font-size:14px;color:var(--text-secondary);"><span style="display:inline-flex;align-items:center;gap:8px;"><span style="color:var(--status-success);display:inline-flex;">${icon("circle-check",16)}</span><span>上下文已压缩</span></span><span style="display:inline-flex;align-items:center;gap:6px;"><span class="mono" style="font-size:12px;color:var(--text-muted);">14:35</span>${icon("chevron-right",14)}</span></div>` },
+      { name: "展开态", sub: "l6foNm (2px 引导线 + VwO1J)", html: `<div style="width:280px;display:flex;flex-direction:column;"><div style="height:24px;display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--text-secondary);"><span style="display:inline-flex;align-items:center;gap:6px;"><span style="color:var(--status-success);display:inline-flex;">${icon("circle-check",14)}</span><span>上下文已压缩</span></span>${icon("chevron-down",14)}</div><div style="display:flex;gap:8px;"><div style="width:14px;display:flex;justify-content:center;padding:2px 0;"><div style="width:2px;height:100%;border-radius:9999px;background:var(--border-subtle);"></div></div><div style="flex:1;padding:8px 10px;border-radius:4px;background:var(--bg-surface);font-size:12px;line-height:16px;color:var(--text-secondary);display:flex;align-items:flex-start;justify-content:space-between;gap:8px;"><span>Goal: 排查 C 盘空间占用…</span><span style="flex-shrink:0;">${icon("copy",13)}</span></div></div></div>` },
+      { name: "压缩进行中", sub: "RunningLight", html: `<div style="height:28px;display:inline-flex;align-items:center;gap:8px;font-size:14px;color:var(--text-secondary);"><span style="color:var(--accent-ink);display:inline-flex;">${icon("loader-circle",16)}</span><span>正在压缩上下文…</span></div>` }
     ],
     hosts: {
-      gpui: { note: "执行 /compact 后作为 Assistant 回复块插入消息流，默认折叠，展开采用 l6foNm ($bg-surface 4px 圆角、12px $text-secondary 紧凑摘要与右上 28×28 复制钮)。", html: `<span class="mono" style="font-size:12px;">ln9GA + l6foNm · 816px</span>` },
-      web: { note: "与桌面端共享 compactionSummary 角色，支持默认折叠与导出展开。", html: `<span class="mono" style="font-size:12px;">SummaryEntry (compactionSummary)</span>` }
+      gpui: { note: "执行 /compact 后按普通工具外观与交互渲染（28px 无框状态行 + circle-check 状态图标 + 右置时间与折叠箭头 + 2px 垂直引导线 + 缩进 24px 的 VwO1J 原文摘要块与 28×28 复制钮）。", html: `<span class="mono" style="font-size:12px;">ln9GA + l6foNm · 816px</span>` },
+      web: { note: "与桌面端共享 compactionSummary 角色及普通工具引导线样式，支持默认折叠与导出展开。", html: `<span class="mono" style="font-size:12px;">SummaryEntry (compactionSummary)</span>` }
     },
     contracts: [
       ["折叠展开与消息保留", "压缩完成后保留压缩前历史消息并在当前位置插入默认折叠的压缩气泡，展开区不复用正文 Markdown 标题排版", "进行中展示 RunningLight 扫光"]
@@ -9858,6 +10377,839 @@ Next: 核对开机自启项与后台高负载进程。</div>
     contracts: [
       ["流式与停帧", "追加词元保选区；冷启动 <=300ms 仅首屏触发", "失焦或 sys(gpu) 立即 0 FPS"]
     ]
+  },
+
+  /* @story:motion-keyboard-nav | kind:motion | cat:motion */
+  {
+    id: "motion-keyboard-nav",
+    kind: "motion",
+    zh: "方向键选中态",
+    en: "Keyboard Selection",
+    keywords: "方向键 键盘 选中态 四角取景 边轨游标 动效 滑移 导出 分支树 Ctrl+P focus kbd",
+    penIds: [],
+    thumb: `<svg width="156" height="68" viewBox="0 0 156 68" fill="none"><rect x="20" y="10" width="116" height="13" rx="3" fill="var(--bg-surface)" stroke="var(--border-subtle)"/><rect x="20" y="27" width="116" height="14" rx="3" fill="var(--bg-item-active)"/><path d="M17 31V27C17 25.3 18.3 24 20 24H24M132 24H136C137.7 24 139 25.3 139 27V31M17 37V41C17 42.7 18.3 44 20 44H24M132 44H136C137.7 44 139 42.7 139 41V37" stroke="var(--text-primary)" stroke-width="1.5" stroke-linecap="round"/><rect x="22" y="47" width="2.5" height="9" rx="1.25" fill="var(--text-primary)"/><rect x="20" y="45" width="116" height="13" rx="3" fill="none" stroke="var(--border-subtle)"/></svg>`,
+    mount(stageEl, controlsEl) {
+      let activeTab = "export"; // export | branch | matrix
+      let haloStyle = "brackets"; // brackets (默认四角) | rail (常规可选游标)
+      let inputMode = "keyboard"; // keyboard | pointer
+      let lastKeyText = "↑ / ↓";
+      let haloInitialized = false;
+
+      const STYLE_META = {
+        brackets: { label: "四角（默认）", key: "1", note: "默认样式：外扩 3px 四角短折线（臂长 8px / 线宽 1.5px），不改原底色" },
+        rail:     { label: "游标",         key: "2", note: "「设置 · 常规」可选项：纵向左侧 3px 竖条，横向分段变形为底沿短横条" }
+      };
+
+      // Tab 1: 导出选项状态
+      const exp = {
+        focusIdx: 0,
+        format: "html",       // png | html
+        docTheme: "dark",     // light | dark
+        thinking: true,
+        tools: true,
+        saved: false
+      };
+
+      // Tab 2: 分支树状态
+      const treeNodes = [
+        { id: "n0", parent: null, depth: 0, role: "user",      prefix: "用户", text: "排查 C 盘空间占用并分析大文件", foldable: false },
+        { id: "n1", parent: "n0", depth: 0, role: "assistant", prefix: "助手", text: "已扫描系统盘：更新缓存 14.8 GB，休眠文件 12.1 GB", foldable: false },
+        { id: "n2", parent: "n1", depth: 1, role: "branch",    prefix: "分支 A", text: "方案 A：仅清理 Windows Update 与临时目录", foldable: true, hasPrevSibling: false, isLast: false },
+        { id: "n3", parent: "n2", depth: 2, role: "tool",      prefix: "工具", text: "已生成安全清理命令清单（预计释放 18.2 GB）", foldable: false },
+        { id: "n4", parent: "n2", depth: 2, role: "assistant", prefix: "助手", text: "继续核对休眠文件配置 powercfg /h", foldable: false },
+        { id: "n5", parent: "n1", depth: 1, role: "branch",    prefix: "分支 B", text: "方案 B：迁移容器与缓存目录到 D 盘", foldable: true, hasPrevSibling: true, isLast: true },
+        { id: "n6", parent: "n5", depth: 2, role: "assistant", prefix: "助手", text: "已检查 D 盘剩余 246 GB，可迁移镜像目录", foldable: false }
+      ];
+      const br = {
+        query: "",
+        collapsed: new Set(),
+        activeLeaf: "n4",
+        focusArea: "list", // search | list
+        focusIdx: 2,
+        modalOpen: false,
+        modalIdx: 0,
+        modalTargetId: null
+      };
+
+      // Tab 3: 全组件矩阵状态
+      const mat = {
+        focusIdx: 0,
+        pairCol: 0,           // 0 | 1 for horizontal pairs (idx 4, idx 9)
+        chkChecked: true,
+        segVal: "html",       // png | html
+        selectIdx: 0,
+        selectOpts: ["跟随系统", "浅色", "夜间"],
+        sessionSelected: false
+      };
+
+      stageEl.innerHTML = `
+        <div class="sb-motion-stage">
+          <div class="kbd-stage" id="kn-stage" data-kbd-mode="true">
+            <div class="kbd-stage-head">
+              <div class="sb-m-live-tabs" role="tablist" aria-label="方向键选中态演示场景">
+                <button type="button" class="sb-m-live-tab" data-kn-tab="export" data-active="true" role="tab" aria-selected="true">导出选项</button>
+                <button type="button" class="sb-m-live-tab" data-kn-tab="branch" data-active="false" role="tab" aria-selected="false">分支树（Ctrl+P）</button>
+                <button type="button" class="sb-m-live-tab" data-kn-tab="matrix" data-active="false" role="tab" aria-selected="false">全组件矩阵（6 类）</button>
+              </div>
+              <div class="kbd-hud">
+                <span class="kbd-hud-mode" id="kn-hud-mode" data-mode="keyboard">
+                  <span class="kbd-hud-dot"></span>
+                  <span id="kn-hud-mode-text">键盘选中态</span>
+                </span>
+                <span>最近按键</span>
+                <span class="kbd-hud-key" id="kn-hud-key">↑ / ↓</span>
+              </div>
+            </div>
+
+            <div class="kbd-style-bar">
+              <div class="kbd-style-pills" role="radiogroup" aria-label="方向键选中态视觉方向">
+                ${Object.entries(STYLE_META).map(([k, m]) => `
+                  <button type="button" class="kbd-style-pill" data-kn-style="${k}" data-active="${k === haloStyle}">
+                    <kbd>${m.key}</kbd><span>${m.label}</span>
+                  </button>
+                `).join("")}
+              </div>
+              <span class="kbd-style-note" id="kn-style-note">${STYLE_META[haloStyle].note}</span>
+            </div>
+
+            <div class="kbd-stage-body" id="kn-stage-body" data-glide-halo="true">
+              <div id="kn-pane-export"></div>
+              <div id="kn-pane-branch" hidden></div>
+              <div id="kn-pane-matrix" hidden></div>
+              <div class="kbd-focus-halo" id="kn-focus-halo" data-style="${haloStyle}" data-visible="false" data-tone="neutral" aria-hidden="true">
+                <i class="kbd-brk tl"></i><i class="kbd-brk tr"></i><i class="kbd-brk bl"></i><i class="kbd-brk br"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      if (controlsEl) {
+        controlsEl.innerHTML = `
+          <button type="button" class="tier-1-btn-outline" id="kn-theme-btn" style="height:28px;font-size:12px;gap:6px;">
+            ${icon(AppState.theme === "dark" ? "sun" : "moon", 13)}<span class="cjk">切换主题对照</span>
+          </button>
+          <button type="button" class="tier-1-btn-outline" id="kn-slow-btn" data-active="${AppState.slowMotion}" style="height:28px;font-size:12px;gap:6px;">
+            ${icon("gauge", 13)}<span>0.25× 慢放</span>
+          </button>
+          <button type="button" class="btn-ghost" id="kn-reset-btn" style="height:28px;font-size:12px;gap:5px;">
+            ${icon("rotate-ccw", 13)}<span class="cjk">重置状态</span>
+          </button>
+          <span style="font-size:12px;color:var(--text-muted);margin-left:4px;">↑↓ 移动 · ←→ 切换/折展 · Enter/Space 勾选或确认</span>
+        `;
+      }
+
+      const stageRoot = stageEl.querySelector("#kn-stage");
+      const stageBody = stageEl.querySelector("#kn-stage-body");
+      const haloEl = stageEl.querySelector("#kn-focus-halo");
+      const hudMode = stageEl.querySelector("#kn-hud-mode");
+      const hudModeText = stageEl.querySelector("#kn-hud-mode-text");
+      const hudKey = stageEl.querySelector("#kn-hud-key");
+      const paneExport = stageEl.querySelector("#kn-pane-export");
+      const paneBranch = stageEl.querySelector("#kn-pane-branch");
+      const paneMatrix = stageEl.querySelector("#kn-pane-matrix");
+      const slowBtn = controlsEl?.querySelector("#kn-slow-btn");
+
+      function syncSlowBtn() {
+        if (!slowBtn) return;
+        slowBtn.dataset.active = String(AppState.slowMotion);
+        slowBtn.style.background = AppState.slowMotion ? "var(--bg-item-active)" : "";
+      }
+      syncSlowBtn();
+
+      function resolveHaloTarget() {
+        if (inputMode !== "keyboard") return { el: null, tone: "neutral", kind: "control" };
+        if (activeTab === "export") {
+          if (exp.focusIdx === 0) return { el: paneExport.querySelector(`[data-exp-fmt="${exp.format}"]`), tone: "neutral", kind: "control" };
+          if (exp.focusIdx === 1) return { el: paneExport.querySelector(`[data-exp-theme="${exp.docTheme}"]`), tone: "neutral", kind: "control" };
+          if (exp.focusIdx === 2) return { el: paneExport.querySelector("#kn-exp-think"), tone: "neutral", kind: "control" };
+          if (exp.focusIdx === 3) return { el: paneExport.querySelector("#kn-exp-tools"), tone: "neutral", kind: "control" };
+          if (exp.focusIdx === 4) return { el: paneExport.querySelector("#kn-exp-save"), tone: "accent", kind: "control" };
+          if (exp.focusIdx === 5) return { el: paneExport.querySelector("#kn-exp-open"), tone: "neutral", kind: "control" };
+          return { el: null, tone: "neutral", kind: "control" };
+        }
+        if (activeTab === "branch") {
+          if (br.modalOpen) return { el: paneBranch.querySelector(`[data-br-modal="${br.modalIdx}"]`), tone: "neutral", kind: "list" };
+          if (br.focusArea === "search") return { el: paneBranch.querySelector("#kn-tree-search-box"), tone: "neutral", kind: "control" };
+          return { el: paneBranch.querySelector(`[data-br-idx="${br.focusIdx}"]`), tone: "neutral", kind: "list" };
+        }
+        if (mat.focusIdx === 0) return { el: paneMatrix.querySelector('[data-mat-idx="0"]'), tone: "accent", kind: "control" };
+        if (mat.focusIdx === 1) return { el: paneMatrix.querySelector('[data-mat-idx="1"]'), tone: "danger", kind: "control" };
+        if (mat.focusIdx === 3) return { el: paneMatrix.querySelector('[data-mat-idx="3"]'), tone: "danger", kind: "control" };
+        if (mat.focusIdx === 4) {
+          return { el: paneMatrix.querySelector(`[data-mat-idx="4"][data-mat-col="${mat.pairCol}"]`), tone: "neutral", kind: "control" };
+        }
+        if (mat.focusIdx === 6) return { el: paneMatrix.querySelector(`[data-mat-seg="${mat.segVal}"]`), tone: "neutral", kind: "control" };
+        if (mat.focusIdx === 8) return { el: paneMatrix.querySelector('[data-mat-idx="8"]'), tone: "neutral", kind: "list" };
+        if (mat.focusIdx === 9) {
+          return { el: paneMatrix.querySelector(`[data-mat-idx="9"][data-mat-col="${mat.pairCol}"]`), tone: "neutral", kind: mat.pairCol === 0 ? "list" : "control" };
+        }
+        return { el: paneMatrix.querySelector(`[data-mat-idx="${mat.focusIdx}"]`), tone: "neutral", kind: "control" };
+      }
+
+      function syncHalo(snap = false) {
+        if (!haloEl || !stageBody) return;
+        stageBody.querySelectorAll('[data-kbd-halo-target="true"]').forEach(n => { delete n.dataset.kbdHaloTarget; });
+        const { el, tone, kind } = resolveHaloTarget();
+        const effectiveStyle = haloStyle;
+        haloEl.style.setProperty("--kbd-glide-dur", `${ms(180)}ms`);
+        haloEl.dataset.style = effectiveStyle;
+        if (!el) {
+          haloEl.dataset.visible = "false";
+          return;
+        }
+        el.dataset.kbdHaloTarget = "true";
+        const bodyRect = stageBody.getBoundingClientRect();
+        const rect = el.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) {
+          haloEl.dataset.visible = "false";
+          return;
+        }
+        let x = rect.left - bodyRect.left;
+        let y = rect.top - bodyRect.top;
+        let w = rect.width;
+        let h = rect.height;
+        const baseRadius = parseFloat(getComputedStyle(el).borderRadius) || 4;
+        let radius = `${baseRadius}px`;
+
+        if (effectiveStyle === "brackets") {
+          const pad = 3;
+          x -= pad; y -= pad; w += pad * 2; h += pad * 2;
+          radius = `${baseRadius + pad}px`;
+        } else if (effectiveStyle === "rail") {
+          const isHorizChoice = el.classList.contains("choice-seg-btn") || el.classList.contains("btn-icon") || (el.dataset.matCol !== undefined && kind === "control");
+          if (isHorizChoice) {
+            const barW = Math.max(16, Math.min(34, w * 0.36));
+            x = x + (w - barW) / 2;
+            y = y + h + 4;
+            w = barW;
+            h = 3;
+          } else {
+            const barH = Math.max(14, Math.min(22, h * 0.56));
+            const insetLeft = el.classList.contains("chk-row") || el.classList.contains("kbd-tree-row") || el.classList.contains("session-row-master") || el.classList.contains("menu-row");
+            x = insetLeft ? x + 2 : x - 7;
+            y = y + (h - barH) / 2;
+            w = 3;
+            h = barH;
+          }
+          radius = "999px";
+        }
+
+        const shouldSnap = snap || !haloInitialized || haloEl.dataset.visible !== "true";
+        if (shouldSnap) haloEl.dataset.snap = "true";
+        haloEl.dataset.tone = tone;
+        haloEl.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
+        haloEl.style.width = `${w.toFixed(1)}px`;
+        haloEl.style.height = `${h.toFixed(1)}px`;
+        haloEl.style.borderRadius = radius;
+        haloEl.dataset.visible = "true";
+        haloInitialized = true;
+        if (shouldSnap) {
+          void haloEl.offsetWidth;
+          delete haloEl.dataset.snap;
+        }
+      }
+
+      function syncHud() {
+        stageRoot.dataset.kbdMode = String(inputMode === "keyboard");
+        hudMode.dataset.mode = inputMode;
+        hudModeText.textContent = inputMode === "keyboard" ? "键盘选中态" : "鼠标悬停态";
+        hudKey.textContent = lastKeyText;
+      }
+
+      function getVisibleTreeNodes() {
+        const q = br.query.trim().toLowerCase();
+        if (q) {
+          return treeNodes.filter(n => n.text.toLowerCase().includes(q) || n.prefix.toLowerCase().includes(q));
+        }
+        const hiddenParents = new Set();
+        const out = [];
+        for (const n of treeNodes) {
+          if (n.parent && (br.collapsed.has(n.parent) || hiddenParents.has(n.parent))) {
+            hiddenParents.add(n.id);
+            continue;
+          }
+          out.push(n);
+        }
+        return out;
+      }
+
+      function renderExport() {
+        const isKbd = inputMode === "keyboard";
+        const f = idx => isKbd && exp.focusIdx === idx;
+        const fmtLabel = exp.format === "png" ? "PNG 长图" : "HTML 离线文档";
+        const thLabel = exp.docTheme === "light" ? "日间" : "夜间";
+        paneExport.innerHTML = `
+          <div class="kbd-export-grid">
+            <div class="kbd-export-panel">
+              <div style="font-size:16px;font-weight:600;color:var(--text-primary);">导出选项</div>
+
+              <div class="kbd-export-group" data-kbd-focus="${f(0)}">
+                <div class="kbd-export-label-row">
+                  <span>导出格式</span>
+                  <span class="kbd-dir-hint">← → 切换</span>
+                </div>
+                <div class="choice-seg-group" data-kbd-focus="${f(0)}" role="radiogroup" aria-label="导出格式">
+                  <button type="button" class="choice-seg-btn" data-exp-fmt="png" data-active="${exp.format === "png"}">PNG 长图</button>
+                  <button type="button" class="choice-seg-btn" data-exp-fmt="html" data-active="${exp.format === "html"}">HTML 离线文档</button>
+                </div>
+              </div>
+
+              <div class="kbd-export-group" data-kbd-focus="${f(1)}">
+                <div class="kbd-export-label-row">
+                  <span>文档主题</span>
+                  <span class="kbd-dir-hint">← → 切换</span>
+                </div>
+                <div class="choice-seg-group" data-kbd-focus="${f(1)}" role="radiogroup" aria-label="文档主题">
+                  <button type="button" class="choice-seg-btn" data-exp-theme="light" data-active="${exp.docTheme === "light"}">日间</button>
+                  <button type="button" class="choice-seg-btn" data-exp-theme="dark" data-active="${exp.docTheme === "dark"}">夜间</button>
+                </div>
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                <button type="button" class="chk-row" id="kn-exp-think" data-kbd-focus="${f(2)}" role="checkbox" aria-checked="${exp.thinking}">
+                  <span class="chk-box" data-checked="${exp.thinking}">${icon("check", 12)}</span>
+                  <span>包含思考过程</span>
+                </button>
+                <button type="button" class="chk-row" id="kn-exp-tools" data-kbd-focus="${f(3)}" role="checkbox" aria-checked="${exp.tools}">
+                  <span class="chk-box" data-checked="${exp.tools}">${icon("check", 12)}</span>
+                  <span>包含工具调用结果</span>
+                </button>
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <button type="button" class="tier-1-btn-primary" id="kn-exp-save" data-kbd-focus="${f(4)}" style="width:100%;">
+                  <span>生成并保存</span>
+                </button>
+                ${exp.saved ? `
+                  <button type="button" class="tier-1-btn-outline" id="kn-exp-open" data-kbd-focus="${f(5)}" style="width:100%;">
+                    ${icon("folder", 15)}<span>打开保存目录</span>
+                  </button>
+                ` : ""}
+              </div>
+            </div>
+
+            <div class="kbd-export-preview" data-doc-theme="${exp.docTheme}">
+              <div class="kbd-preview-meta">
+                <span style="font-weight:600;">导出实时预览 · C 盘空间排查</span>
+                <span class="mono" style="opacity:0.72;">${fmtLabel} · ${thLabel}</span>
+              </div>
+              <div class="kbd-preview-block" style="align-self:flex-end;max-width:72%;">帮我检查系统盘空间并列出大体积清理项</div>
+              ${exp.thinking ? `<div class="kbd-preview-block" style="opacity:0.68;font-size:12.5px;">已思考 1.8s · 优先核对 Windows Update 缓存、休眠文件与临时目录体积。</div>` : ""}
+              ${exp.tools ? `<div class="kbd-preview-block" style="font-family:var(--font-mono);font-size:12px;opacity:0.82;">sys(disk) · C: 剩余 28.4 GB / 476 GB · 更新缓存 14.8 GB</div>` : ""}
+              <div style="font-size:13.5px;line-height:22px;opacity:0.92;">已完成全盘只读采样，建议先清理更新缓存与临时目录，可安全释放约 18.2 GB。</div>
+            </div>
+          </div>
+        `;
+
+        paneExport.querySelectorAll("[data-exp-fmt]").forEach(btn => {
+          btn.addEventListener("click", () => {
+            exp.format = btn.dataset.expFmt;
+            exp.focusIdx = 0;
+            renderActiveTab(false);
+          });
+        });
+        paneExport.querySelectorAll("[data-exp-theme]").forEach(btn => {
+          btn.addEventListener("click", () => {
+            exp.docTheme = btn.dataset.expTheme;
+            exp.focusIdx = 1;
+            renderActiveTab(false);
+          });
+        });
+        paneExport.querySelector("#kn-exp-think")?.addEventListener("click", () => {
+          exp.thinking = !exp.thinking;
+          exp.focusIdx = 2;
+          renderActiveTab(false);
+        });
+        paneExport.querySelector("#kn-exp-tools")?.addEventListener("click", () => {
+          exp.tools = !exp.tools;
+          exp.focusIdx = 3;
+          renderActiveTab(false);
+        });
+        paneExport.querySelector("#kn-exp-save")?.addEventListener("click", () => {
+          exp.saved = true;
+          exp.focusIdx = 4;
+          showToast({ text: `已导出 ${fmtLabel}（${thLabel}主题）`, ignoreSlow: true });
+          renderActiveTab(false);
+        });
+        paneExport.querySelector("#kn-exp-open")?.addEventListener("click", () => {
+          exp.focusIdx = 5;
+          showToast({ text: "已在文件管理器中定位导出的文件", ignoreSlow: true });
+          renderActiveTab(false);
+        });
+      }
+
+      function renderBranch() {
+        const visible = getVisibleTreeNodes();
+        if (visible.length === 0) br.focusIdx = 0;
+        else if (br.focusIdx >= visible.length) br.focusIdx = visible.length - 1;
+        const isKbd = inputMode === "keyboard";
+        const searchFocused = isKbd && br.focusArea === "search";
+
+        const rowsHtml = visible.length ? visible.map((n, idx) => {
+          const isLeaf = n.id === br.activeLeaf;
+          const isFocused = isKbd && br.focusArea === "list" && idx === br.focusIdx && !br.modalOpen;
+          const isCollapsed = br.collapsed.has(n.id);
+          const childCount = n.foldable ? treeNodes.filter(x => x.parent === n.id).length : 0;
+          let slotsHtml = "";
+          for (let d = 0; d < n.depth; d++) {
+            if (d === n.depth - 1 && n.foldable) {
+              slotsHtml += `<span class="kbd-tree-slot"><span class="kbd-tree-line" style="opacity:${n.hasPrevSibling ? 1 : 0};"></span><span class="kbd-tree-sq"></span><span class="kbd-tree-line" style="opacity:${n.isLast ? 0 : 1};"></span></span>`;
+            } else {
+              slotsHtml += `<span class="kbd-tree-slot"><span class="kbd-tree-line" style="opacity:${d === 0 ? 0.55 : 0.35};"></span></span>`;
+            }
+          }
+          const icoName = n.role === "user" ? "user" : n.role === "branch" ? "git-branch" : n.role === "tool" ? "terminal" : "message-square";
+          const icoColor = n.role === "user" || n.role === "branch" ? "var(--accent-ink)" : n.role === "assistant" ? "var(--status-success)" : "var(--text-secondary)";
+          return `
+            <button type="button" class="kbd-tree-row" data-br-idx="${idx}" data-active-leaf="${isLeaf}" data-kbd-focus="${isFocused}">
+              <span style="display:inline-flex;align-items:center;gap:6px;min-width:0;overflow:hidden;">
+                ${slotsHtml}
+                <span style="color:${icoColor};display:inline-flex;">${icon(icoName, 15)}</span>
+                <span style="color:${icoColor};font-weight:500;flex-shrink:0;">${n.prefix}</span>
+                <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(n.text)}</span>
+              </span>
+              <span style="display:inline-flex;align-items:center;gap:8px;flex-shrink:0;font-size:12px;color:var(--text-muted);">
+                ${n.foldable ? `<span style="display:inline-flex;align-items:center;gap:3px;">${icon(isCollapsed ? "chevron-right" : "chevron-down", 13)}<span>${isCollapsed ? `已折起 ${childCount} 项` : "← 折叠"}</span></span>` : ""}
+                ${isLeaf ? `<span style="padding:1px 6px;border-radius:4px;background:var(--accent-tint);color:var(--accent-ink);font-weight:500;">当前</span>` : ""}
+              </span>
+            </button>
+          `;
+        }).join("") : `<div style="padding:28px;text-align:center;color:var(--text-muted);font-size:14px;">没有匹配的条目</div>`;
+
+        const modalOptions = [
+          { ico: "rotate-ccw", label: "直接回退" },
+          { ico: "sparkles",   label: "总结" },
+          { ico: "pencil",     label: "自定义提示词总结" }
+        ];
+
+        paneBranch.innerHTML = `
+          <div class="kbd-tree-shell">
+            <div class="kbd-tree-toolbar">
+              <div class="search-box" id="kn-tree-search-box" data-force="${searchFocused ? "focus" : ""}" style="width:240px;">
+                <span style="color:var(--text-muted);display:inline-flex;">${icon("search", 15)}</span>
+                <input type="text" id="kn-tree-search" value="${escapeHtml(br.query)}" placeholder="搜索条目（↓ 进入列表）…" autocomplete="off" />
+                ${br.query ? `<button type="button" class="btn-icon xs-24" id="kn-tree-clear" aria-label="清空">${icon("x", 13)}</button>` : ""}
+              </div>
+              <span style="font-size:12.5px;color:var(--text-muted);">↑↓ 移动 · ← 折叠/回父级 · → 展开 · Enter 切换分支</span>
+            </div>
+            <div class="kbd-tree-list">${rowsHtml}</div>
+
+            <div class="tier-3-scrim" id="kn-tree-scrim" data-open="${br.modalOpen}" data-instant="true" style="border-radius:var(--radius-row);">
+              <div class="tier-3-dialog" style="width:360px;padding:18px;display:flex;flex-direction:column;gap:10px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <span style="font-size:15px;font-weight:600;color:var(--text-primary);padding-left:6px;">切换至所选分支节点</span>
+                  <button type="button" class="btn-icon sm-28" id="kn-modal-close" aria-label="关闭">${icon("x", 14)}</button>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:4px;">
+                  ${modalOptions.map((m, mi) => `
+                    <button type="button" class="menu-row" data-br-modal="${mi}" data-kbd-focus="${br.modalOpen && br.modalIdx === mi}" style="height:38px;padding:0 10px;">
+                      <span class="menu-row-left">
+                        <span style="color:var(--text-secondary);display:inline-flex;">${icon(m.ico, 15)}</span>
+                        <span>${m.label}</span>
+                      </span>
+                    </button>
+                  `).join("")}
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        const searchInp = paneBranch.querySelector("#kn-tree-search");
+        if (searchInp) {
+          if (br.focusArea === "search" && !br.modalOpen && document.activeElement !== searchInp) {
+            searchInp.focus();
+            searchInp.setSelectionRange(searchInp.value.length, searchInp.value.length);
+          }
+          searchInp.addEventListener("focus", () => {
+            br.focusArea = "search";
+            paneBranch.querySelector("#kn-tree-search-box").dataset.force = "focus";
+          });
+          searchInp.addEventListener("input", () => {
+            br.query = searchInp.value;
+            br.focusIdx = 0;
+            renderActiveTab(true);
+          });
+        }
+        paneBranch.querySelector("#kn-tree-clear")?.addEventListener("click", () => {
+          br.query = "";
+          br.focusIdx = 0;
+          br.focusArea = "search";
+          renderActiveTab(true);
+        });
+        paneBranch.querySelectorAll("[data-br-idx]").forEach(btn => {
+          btn.addEventListener("click", () => {
+            const idx = Number(btn.dataset.brIdx);
+            const node = visible[idx];
+            if (!node) return;
+            br.focusArea = "list";
+            br.focusIdx = idx;
+            br.modalTargetId = node.id;
+            br.modalIdx = 0;
+            br.modalOpen = true;
+            renderActiveTab(false);
+          });
+        });
+        paneBranch.querySelector("#kn-modal-close")?.addEventListener("click", () => {
+          br.modalOpen = false;
+          renderActiveTab(false);
+        });
+        paneBranch.querySelectorAll("[data-br-modal]").forEach(btn => {
+          btn.addEventListener("click", () => {
+            const mi = Number(btn.dataset.brModal);
+            const labels = ["直接回退", "总结", "自定义提示词总结"];
+            if (br.modalTargetId) br.activeLeaf = br.modalTargetId;
+            br.modalOpen = false;
+            showToast({ text: `分支切换：${labels[mi]}`, ignoreSlow: true });
+            renderActiveTab(false);
+          });
+        });
+      }
+
+      function renderMatrix() {
+        const isKbd = inputMode === "keyboard";
+        const f = idx => isKbd && mat.focusIdx === idx;
+        paneMatrix.innerHTML = `
+          <div class="kbd-matrix-grid">
+            <div class="kbd-matrix-card">
+              <div class="kbd-matrix-title"><span>1. 实心按钮</span><span class="kbd-matrix-sub">四角取景 · $kbd-bracket-accent / -danger</span></div>
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <button type="button" class="tier-1-btn-primary" data-mat-idx="0" data-kbd-focus="${f(0)}">${icon("check", 15)}<span>确认操作</span></button>
+                <button type="button" class="tier-1-btn-danger solid-danger" data-mat-idx="1" data-kbd-focus="${f(1)}"><span>删除</span></button>
+              </div>
+            </div>
+
+            <div class="kbd-matrix-card">
+              <div class="kbd-matrix-title"><span>2. 描边按钮</span><span class="kbd-matrix-sub">四角取景 · $kbd-bracket-color / -danger</span></div>
+              <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <button type="button" class="tier-1-btn-outline" data-mat-idx="2" data-kbd-focus="${f(2)}">${icon("folder", 15)}<span>打开保存目录</span></button>
+                <button type="button" class="tier-1-btn-danger" data-mat-idx="3" data-kbd-focus="${f(3)}">${icon("trash-2", 15)}<span>删除</span></button>
+              </div>
+            </div>
+
+            <div class="kbd-matrix-card">
+              <div class="kbd-matrix-title"><span>3. 文字与图标按钮</span><span class="kbd-matrix-sub">← → 切左右 · Enter 触发</span></div>
+              <div style="display:flex;align-items:center;gap:14px;">
+                <button type="button" class="btn-ghost" data-mat-idx="4" data-mat-col="0" data-kbd-focus="${f(4) && mat.pairCol === 0}">${icon("list-checks", 15)}<span>管理</span></button>
+                <button type="button" class="btn-icon" data-mat-idx="4" data-mat-col="1" data-kbd-focus="${f(4) && mat.pairCol === 1}" aria-label="更多">${icon("ellipsis", 16)}</button>
+              </div>
+            </div>
+
+            <div class="kbd-matrix-card">
+              <div class="kbd-matrix-title"><span>4. 复选框整行</span><span class="kbd-matrix-sub">Enter / Space 翻转勾选</span></div>
+              <button type="button" class="chk-row" data-mat-idx="5" data-kbd-focus="${f(5)}" style="width:220px;margin:0;" role="checkbox" aria-checked="${mat.chkChecked}">
+                <span class="chk-box" data-checked="${mat.chkChecked}">${icon("check", 12)}</span>
+                <span>包含思考过程</span>
+              </button>
+            </div>
+
+            <div class="kbd-matrix-card">
+              <div class="kbd-matrix-title"><span>5. 二选一分段组与下拉框</span><span class="kbd-matrix-sub">← → 切换选项</span></div>
+              <div style="display:flex;flex-direction:column;gap:10px;">
+                <div class="choice-seg-group" data-kbd-focus="${f(6)}" style="max-width:260px;">
+                  <button type="button" class="choice-seg-btn" data-mat-seg="png" data-active="${mat.segVal === "png"}">PNG 长图</button>
+                  <button type="button" class="choice-seg-btn" data-mat-seg="html" data-active="${mat.segVal === "html"}">HTML 离线文档</button>
+                </div>
+                <button type="button" class="tier-1-btn-outline" data-mat-idx="7" data-kbd-focus="${f(7)}" style="width:200px;justify-content:space-between;font-weight:400;">
+                  <span>${mat.selectOpts[mat.selectIdx]}</span>
+                  <span style="color:var(--text-secondary);display:inline-flex;">${icon("chevron-down", 14)}</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="kbd-matrix-card">
+              <div class="kbd-matrix-title"><span>6. 列表行、菜单项与设置导航</span><span class="kbd-matrix-sub">列表边轨游标 · 导航四角取景</span></div>
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <button type="button" class="session-row-master" data-mat-idx="8" data-selected="${mat.sessionSelected}" data-kbd-focus="${f(8)}" style="height:36px;font-size:14px;">
+                  <span>C 盘空间与硬盘信息</span>
+                  <span style="color:var(--text-muted);display:inline-flex;">${icon("ellipsis", 15)}</span>
+                </button>
+                <div style="display:flex;align-items:center;gap:16px;">
+                  <button type="button" class="menu-row" data-mat-idx="9" data-mat-col="0" data-kbd-focus="${f(9) && mat.pairCol === 0}" style="width:140px;">
+                    <span class="menu-row-left"><span style="color:var(--text-secondary);display:inline-flex;">${icon("pencil", 15)}</span><span>重命名</span></span>
+                  </button>
+                  <button type="button" class="${f(9) && mat.pairCol === 1 ? "vp-tab-kbd-pill" : ""}" data-mat-idx="9" data-mat-col="1" style="height:32px;border-radius:var(--radius-control);font-size:14px;color:var(--text-primary);padding:0 8px;">模型偏好</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+
+        paneMatrix.querySelectorAll("[data-mat-idx]").forEach(el => {
+          el.addEventListener("click", () => {
+            const idx = Number(el.dataset.matIdx);
+            mat.focusIdx = idx;
+            if (el.dataset.matCol !== undefined) mat.pairCol = Number(el.dataset.matCol);
+            if (idx === 5) mat.chkChecked = !mat.chkChecked;
+            else if (idx === 7) mat.selectIdx = (mat.selectIdx + 1) % mat.selectOpts.length;
+            else if (idx === 8) mat.sessionSelected = !mat.sessionSelected;
+            else showToast({ text: `触发控件：${el.textContent.trim() || "图标按钮"}`, ignoreSlow: true });
+            renderActiveTab(false);
+          });
+        });
+        paneMatrix.querySelectorAll("[data-mat-seg]").forEach(el => {
+          el.addEventListener("click", () => {
+            mat.focusIdx = 6;
+            mat.segVal = el.dataset.matSeg;
+            renderActiveTab(false);
+          });
+        });
+      }
+
+      function renderActiveTab(snapHalo = false) {
+        paneExport.hidden = activeTab !== "export";
+        paneBranch.hidden = activeTab !== "branch";
+        paneMatrix.hidden = activeTab !== "matrix";
+        syncHud();
+        syncSlowBtn();
+        if (activeTab === "export") renderExport();
+        else if (activeTab === "branch") renderBranch();
+        else renderMatrix();
+        syncHalo(snapHalo);
+      }
+
+      const styleNoteEl = stageEl.querySelector("#kn-style-note");
+      function setHaloStyle(nextStyle) {
+        if (!STYLE_META[nextStyle]) return;
+        haloStyle = nextStyle;
+        stageEl.querySelectorAll("[data-kn-style]").forEach(b => {
+          b.dataset.active = String(b.dataset.knStyle === haloStyle);
+        });
+        if (styleNoteEl) styleNoteEl.textContent = STYLE_META[haloStyle].note;
+        inputMode = "keyboard";
+        syncHud();
+        syncHalo(false);
+      }
+
+      stageEl.querySelectorAll("[data-kn-style]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          btn.blur();
+          setHaloStyle(btn.dataset.knStyle);
+        });
+      });
+
+      stageEl.querySelectorAll("[data-kn-tab]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          btn.blur();
+          activeTab = btn.dataset.knTab;
+          stageEl.querySelectorAll("[data-kn-tab]").forEach(b => {
+            const on = b === btn;
+            b.dataset.active = String(on);
+            b.setAttribute("aria-selected", String(on));
+          });
+          inputMode = "keyboard";
+          renderActiveTab(true);
+        });
+      });
+
+      controlsEl?.querySelector("#kn-theme-btn")?.addEventListener("click", (e) => {
+        e.currentTarget.blur();
+        const nextTheme = AppState.theme === "dark" ? "light" : "dark";
+        applyTheme(nextTheme);
+        const btn = controlsEl.querySelector("#kn-theme-btn");
+        if (btn) btn.innerHTML = `${icon(nextTheme === "dark" ? "sun" : "moon", 13)}<span class="cjk">切换主题对照</span>`;
+        syncHalo(true);
+      });
+
+      slowBtn?.addEventListener("click", (e) => {
+        e.currentTarget.blur();
+        const globalSlow = document.getElementById("sb-set-slow-btn");
+        if (globalSlow) globalSlow.click();
+        syncSlowBtn();
+        syncHalo(false);
+      });
+
+      controlsEl?.querySelector("#kn-reset-btn")?.addEventListener("click", (e) => {
+        e.currentTarget.blur();
+        exp.focusIdx = 0; exp.format = "html"; exp.docTheme = "dark"; exp.thinking = true; exp.tools = true; exp.saved = false;
+        br.query = ""; br.collapsed.clear(); br.activeLeaf = "n4"; br.focusArea = "list"; br.focusIdx = 2; br.modalOpen = false; br.modalIdx = 0;
+        mat.focusIdx = 0; mat.pairCol = 0; mat.chkChecked = true; mat.segVal = "html"; mat.selectIdx = 0; mat.sessionSelected = false;
+        inputMode = "keyboard"; lastKeyText = "重置";
+        renderActiveTab(false);
+      });
+
+      let lastMouseX = null, lastMouseY = null;
+      const onPointerMove = (e) => {
+        if (lastMouseX === null) { lastMouseX = e.clientX; lastMouseY = e.clientY; return; }
+        if (Math.hypot(e.clientX - lastMouseX, e.clientY - lastMouseY) >= 6) {
+          lastMouseX = e.clientX; lastMouseY = e.clientY;
+          if (inputMode !== "pointer") {
+            inputMode = "pointer";
+            renderActiveTab();
+          }
+        }
+      };
+      stageRoot.addEventListener("mousemove", onPointerMove);
+
+      const keyLabel = (k) => ({ ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", Enter: "Enter", " ": "Space", Escape: "Esc", Home: "Home", End: "End" }[k] || k);
+
+      const onKeyDown = (e) => {
+        if (!document.body.contains(stageEl) || AppState.activeStoryId !== "motion-keyboard-nav") return;
+        if (AppState.focusStack.length > 1) return;
+        const ae = document.activeElement;
+        const inForeignInput = ae && ["INPUT", "TEXTAREA", "SELECT"].includes(ae.tagName) && !stageEl.contains(ae);
+        if (inForeignInput) return;
+
+        const k = e.key;
+        const inBranchSearch = activeTab === "branch" && ae && ae.id === "kn-tree-search";
+        if (!inBranchSearch && ["1", "2"].includes(k) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          const map = { "1": "brackets", "2": "rail" };
+          e.preventDefault();
+          lastKeyText = `${k} · ${STYLE_META[map[k]].label}`;
+          setHaloStyle(map[k]);
+          return;
+        }
+        const isNavKey = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", " ", "Escape", "Home", "End"].includes(k);
+        if (!isNavKey) return;
+
+        // 分支树搜索框内特殊衔接：仅拦截 ArrowDown 与 Escape
+        if (inBranchSearch) {
+          if (k === "ArrowDown") {
+            e.preventDefault();
+            ae.blur();
+            br.focusArea = "list";
+            br.focusIdx = 0;
+            inputMode = "keyboard";
+            lastKeyText = "↓";
+            renderActiveTab();
+          } else if (k === "Escape") {
+            e.preventDefault();
+            if (br.query) { br.query = ""; br.focusIdx = 0; }
+            else { ae.blur(); br.focusArea = "list"; }
+            inputMode = "keyboard";
+            lastKeyText = "Esc";
+            renderActiveTab();
+          }
+          return;
+        }
+
+        if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Home", "End"].includes(k) || k === "Enter") {
+          e.preventDefault();
+        }
+        inputMode = "keyboard";
+        lastKeyText = keyLabel(k);
+
+        if (activeTab === "export") {
+          const maxIdx = exp.saved ? 5 : 4;
+          if (k === "ArrowUp") exp.focusIdx = Math.max(0, exp.focusIdx - 1);
+          else if (k === "ArrowDown") exp.focusIdx = Math.min(maxIdx, exp.focusIdx + 1);
+          else if (k === "Home") exp.focusIdx = 0;
+          else if (k === "End") exp.focusIdx = maxIdx;
+          else if (k === "ArrowLeft" || k === "ArrowRight") {
+            if (exp.focusIdx === 0) exp.format = k === "ArrowLeft" ? "png" : "html";
+            else if (exp.focusIdx === 1) exp.docTheme = k === "ArrowLeft" ? "light" : "dark";
+          } else if (k === "Enter" || k === " ") {
+            if (exp.focusIdx === 2) exp.thinking = !exp.thinking;
+            else if (exp.focusIdx === 3) exp.tools = !exp.tools;
+            else if (exp.focusIdx === 4) {
+              exp.saved = true;
+              const fmtLabel = exp.format === "png" ? "PNG 长图" : "HTML 离线文档";
+              const thLabel = exp.docTheme === "light" ? "日间" : "夜间";
+              showToast({ text: `已导出 ${fmtLabel}（${thLabel}主题）`, ignoreSlow: true });
+            } else if (exp.focusIdx === 5 && exp.saved) {
+              showToast({ text: "已在文件管理器中定位导出的文件", ignoreSlow: true });
+            }
+          }
+          renderActiveTab();
+          return;
+        }
+
+        if (activeTab === "branch") {
+          if (br.modalOpen) {
+            if (k === "ArrowUp") br.modalIdx = (br.modalIdx + 2) % 3;
+            else if (k === "ArrowDown") br.modalIdx = (br.modalIdx + 1) % 3;
+            else if (k === "Escape") { e.preventDefault(); br.modalOpen = false; }
+            else if (k === "Enter" || k === " ") {
+              const labels = ["直接回退", "总结", "自定义提示词总结"];
+              if (br.modalTargetId) br.activeLeaf = br.modalTargetId;
+              br.modalOpen = false;
+              showToast({ text: `分支切换：${labels[br.modalIdx]}`, ignoreSlow: true });
+            }
+            renderActiveTab();
+            return;
+          }
+          const visible = getVisibleTreeNodes();
+          if (k === "ArrowUp") {
+            if (br.focusIdx === 0) br.focusArea = "search";
+            else br.focusIdx = Math.max(0, br.focusIdx - 1);
+          } else if (k === "ArrowDown") {
+            br.focusArea = "list";
+            if (visible.length) br.focusIdx = Math.min(visible.length - 1, br.focusIdx + 1);
+          } else if (k === "Home") {
+            br.focusArea = "list";
+            br.focusIdx = 0;
+          } else if (k === "End" && visible.length) {
+            br.focusArea = "list";
+            br.focusIdx = visible.length - 1;
+          } else if (k === "ArrowLeft" && visible[br.focusIdx]) {
+            const cur = visible[br.focusIdx];
+            if (cur.foldable && !br.collapsed.has(cur.id)) {
+              br.collapsed.add(cur.id);
+            } else if (cur.parent) {
+              const pIdx = visible.findIndex(x => x.id === cur.parent);
+              if (pIdx >= 0) br.focusIdx = pIdx;
+            }
+          } else if (k === "ArrowRight" && visible[br.focusIdx]) {
+            const cur = visible[br.focusIdx];
+            if (cur.foldable && br.collapsed.has(cur.id)) {
+              br.collapsed.delete(cur.id);
+            } else {
+              const cIdx = visible.findIndex(x => x.parent === cur.id);
+              if (cIdx >= 0) br.focusIdx = cIdx;
+            }
+          } else if ((k === "Enter" || k === " ") && visible[br.focusIdx]) {
+            br.modalTargetId = visible[br.focusIdx].id;
+            br.modalIdx = 0;
+            br.modalOpen = true;
+          }
+          renderActiveTab();
+          return;
+        }
+
+        if (activeTab === "matrix") {
+          if (k === "ArrowUp") mat.focusIdx = Math.max(0, mat.focusIdx - 1);
+          else if (k === "ArrowDown") mat.focusIdx = Math.min(9, mat.focusIdx + 1);
+          else if (k === "Home") mat.focusIdx = 0;
+          else if (k === "End") mat.focusIdx = 9;
+          else if (k === "ArrowLeft" || k === "ArrowRight") {
+            if (mat.focusIdx === 4 || mat.focusIdx === 9) mat.pairCol = k === "ArrowLeft" ? 0 : 1;
+            else if (mat.focusIdx === 6) mat.segVal = k === "ArrowLeft" ? "png" : "html";
+            else if (mat.focusIdx === 7) mat.selectIdx = (mat.selectIdx + (k === "ArrowRight" ? 1 : mat.selectOpts.length - 1)) % mat.selectOpts.length;
+          } else if (k === "Enter" || k === " ") {
+            if (mat.focusIdx === 5) mat.chkChecked = !mat.chkChecked;
+            else if (mat.focusIdx === 7) mat.selectIdx = (mat.selectIdx + 1) % mat.selectOpts.length;
+            else if (mat.focusIdx === 8) mat.sessionSelected = !mat.sessionSelected;
+            else {
+              const names = ["主按钮 · 确认操作", "实心危险按钮 · 删除", "描边按钮 · 打开保存目录", "描边危险按钮 · 删除", mat.pairCol === 0 ? "文字按钮 · 管理" : "图标按钮 · 更多", "", "", "", "", mat.pairCol === 0 ? "菜单项 · 重命名" : "设置导航 · 模型偏好"];
+              if (names[mat.focusIdx]) showToast({ text: `键盘 Enter 触发：${names[mat.focusIdx]}`, ignoreSlow: true });
+            }
+          }
+          renderActiveTab();
+        }
+      };
+
+      const onResize = () => syncHalo(true);
+      window.addEventListener("resize", onResize);
+      document.addEventListener("keydown", onKeyDown);
+      AppState.cleanups.push(() => {
+        window.removeEventListener("resize", onResize);
+        document.removeEventListener("keydown", onKeyDown);
+        stageRoot.removeEventListener("mousemove", onPointerMove);
+      });
+
+      renderActiveTab(true);
+      requestAnimationFrame(() => syncHalo(true));
+    },
+    hosts: {
+      gpui: { note: "默认绘制外扩 3px 同心四角折线，可在「设置 · 常规」切为 3px 边轨游标；两种样式均保持控件原底色，按 180ms ease-out 连续插值滑移。", html: "" },
+      web: { note: "Web 与桌面端共用「设置 · 常规 → 方向键选中样式（四角 / 游标）」配置，复用 $kbd-bracket-* 与 $kbd-rail-color 及 180ms 滑移动效。", html: "" }
+    },
+    contracts: [
+      ["默认四角与常规切换", "全应用默认采用外扩 3px 四角取景标 $kbd-bracket-color；在「设置 · 常规 · 外观」提供「四角 / 游标」二段开关切换 $kbd-rail-color", "两种形态均严禁修改控件内部底色"],
+      ["高动效平滑滑移", "方向键切换时指示器按 180ms ease-out 沿位置、宽高与圆角连续滑移，高频连按支持中途折返", "支持 0.25× 慢放核验；减少动态回退 0ms 瞬切"],
+      ["场景键位闭环", "导出页 ↑↓ 纵移、←→ 切换格式/主题、Enter/Space 勾选与保存；分支树支持搜索框 ↓ 落入列表、←→ 折展与 Enter 开切换弹窗", "鼠标位移自动淡出指示器交回悬停态"]
+    ]
   }
 
 ];
@@ -10352,8 +11704,12 @@ const DESIGN_TOKEN_GROUPS = [
     items: [
       { token: "$bg-hover",           cssVar: "--bg-hover",           type: "bg",     zh: "轻量悬停底色",     desc: "交互侧悬停瞬态：文字按钮、图标按钮与列表行鼠标移入时浮现的半透明底。" },
       { token: "$bg-active-press",    cssVar: "--bg-active-press",    type: "bg",     zh: "按压反馈底色",     desc: "交互侧按压瞬态：文字按钮与图标按钮按下瞬间加深一档的按压底色。" },
-      { token: "$border-focus",       cssVar: "--border-focus",       type: "border", zh: "聚焦描边",         desc: "交互侧聚焦瞬态：输入框与按钮获得键盘焦点时加深的中性边框，配柔和羽化外阴影。" },
-      { token: "$accent-solid-hover", cssVar: "--accent-solid-hover", type: "bg",     zh: "主色悬停压暗",     desc: "交互侧悬停瞬态：主按钮鼠标悬停与按压时的深一阶蓝。" },
+      { token: "$border-focus",             cssVar: "--border-focus",             type: "border", zh: "聚焦描边",         desc: "交互侧聚焦瞬态：输入框与按钮获得键盘焦点时加深的中性边框，配柔和羽化外阴影。" },
+      { token: "$kbd-bracket-color",        cssVar: "--kbd-bracket-color",        type: "bg",     zh: "方向键四角取景色", desc: "交互侧键盘瞬态：常规独立控件获方向键焦点时的外扩 3px 同心四角短折线颜色，不改变控件内部底色。" },
+      { token: "$kbd-bracket-accent",       cssVar: "--kbd-bracket-accent",       type: "bg",     zh: "方向键主色取景标", desc: "交互侧键盘瞬态：实心主按钮与已选复选框获方向键焦点时的主色四角取景折线颜色。" },
+      { token: "$kbd-bracket-danger",       cssVar: "--kbd-bracket-danger",       type: "bg",     zh: "方向键危险取景标", desc: "交互侧键盘瞬态：危险按钮与危险菜单项获方向键焦点时的警示红四角取景或边轨游标颜色。" },
+      { token: "$kbd-rail-color",           cssVar: "--kbd-rail-color",           type: "bg",     zh: "方向键边轨游标色", desc: "交互侧键盘瞬态：分支树、会话列表与菜单项等密集纵向列表的左侧 3px 圆头竖条游标颜色。" },
+      { token: "$accent-solid-hover",       cssVar: "--accent-solid-hover",       type: "bg",     zh: "主色悬停压暗",     desc: "交互侧悬停瞬态：主按钮鼠标悬停与按压时的深一阶蓝。" },
       { token: "$status-danger-tint", cssVar: "--status-danger-tint", type: "bg",     zh: "危险悬停浅红",     desc: "交互侧悬停瞬态：描边危险按钮与危险菜单项鼠标悬停时的半透明红底。" },
       { token: "$duration-press",     cssVar: "--duration-press",     type: "text",   zh: "按压缩放 (120ms)", desc: "交互侧动效：按钮按下缩至 0.97（复选框 0.92），松手快速回弹。" },
       { token: "$fast",               cssVar: "--fast",               type: "text",   zh: "快捷过渡 (150ms)", desc: "交互侧动效：悬停变色、浮层关闭、元素淡出等高频瞬态反馈。" },
@@ -10373,6 +11729,8 @@ function renderSpecText(rawText) {
     if (!info) return tok;
     const swatch = info.type === "bg" || info.type === "border"
       ? `<span class="tok-swatch" style="background:var(${info.cssVar});"></span>`
+      : info.type === "shadow"
+        ? `<span class="tok-swatch" style="background:var(--bg-workspace);box-shadow:var(${info.cssVar});"></span>`
       : info.type === "glass"
         ? `<span class="tok-swatch" style="background:linear-gradient(135deg,var(--accent-tint),var(--bg-surface));"></span>`
         : "";
@@ -11617,6 +12975,9 @@ function renderTokensPage(viewport) {
                 previewHtml = `<span class="sb-tok-preview" style="background:var(${it.cssVar});"></span>`;
               } else if (it.type === "border") {
                 previewHtml = `<span class="sb-tok-preview is-border" style="border-color:var(${it.cssVar});"></span>`;
+              } else if (it.type === "shadow") {
+                const bg = it.token.includes("accent") ? "var(--accent-solid)" : it.token.includes("danger") ? "var(--status-danger)" : "var(--bg-workspace)";
+                previewHtml = `<span class="sb-tok-preview" style="background:${bg};border-color:var(--border-strong);box-shadow:var(${it.cssVar});"></span>`;
               } else if (it.type === "glass") {
                 previewHtml = `<span class="sb-tok-preview" style="background:linear-gradient(135deg,var(--accent-tint),var(--bg-surface));"></span>`;
               }
