@@ -143,6 +143,8 @@ pub struct AppShell {
     client: ClientHandle,
     snapshot: std::sync::Arc<ClientSnapshot>,
     theme_preference: ThemeModeDto,
+    theme_saving: bool,
+    pending_theme: Option<ThemeModeDto>,
     route: ShellRoute,
     session_subview: SessionSubView,
     route_history: Vec<(ShellRoute, SessionSubView, Option<String>)>,
@@ -186,6 +188,8 @@ pub struct AppShell {
     account_menu_open: bool,
     account_menu_prior_focus: Option<FocusHandle>,
     web_switch_confirm: Option<WebSwitchConfirmState>,
+    web_switch_trap_focus: FocusHandle,
+    web_switch_cancel_focus: FocusHandle,
     exit_dialog: Option<ExitDialogModalState>,
     exit_check_pending: bool,
     shutting_down: bool,
@@ -367,6 +371,8 @@ impl AppShell {
             client,
             snapshot: initial_snapshot,
             theme_preference,
+            theme_saving: false,
+            pending_theme: None,
             route: ShellRoute::Home,
             session_subview: SessionSubView::Chat,
             route_history: Vec::new(),
@@ -410,6 +416,8 @@ impl AppShell {
             account_menu_open: false,
             account_menu_prior_focus: None,
             web_switch_confirm: None,
+            web_switch_trap_focus: cx.focus_handle(),
+            web_switch_cancel_focus: cx.focus_handle().tab_stop(true),
             exit_dialog: None,
             exit_check_pending: false,
             shutting_down: false,
@@ -708,7 +716,12 @@ impl AppShell {
             motion::RouteTransitionKind::SlideBackward
         };
         self.set_workspace_route_inner(dest_route, dest_subview, false, Some(transition_kind), cx);
-        self.root_focus.focus(window, cx);
+        if dest_route == ShellRoute::AllSessions {
+            self.all_sessions_view
+                .update(cx, |v, cx| v.focus(window, cx));
+        } else {
+            self.root_focus.focus(window, cx);
+        }
         if let Some(id) = session_id {
             self.initialize_session_subview(dest_subview, id, window, cx);
         }
@@ -965,6 +978,16 @@ impl AppShell {
         };
         self.theme_preference = next_mode;
         apply_desktop_theme(next_mode, Some(window), None, cx);
+        self.save_theme_mode(next_mode, cx);
+        cx.notify();
+    }
+
+    fn save_theme_mode(&mut self, mode: ThemeModeDto, cx: &mut Context<Self>) {
+        if self.theme_saving {
+            self.pending_theme = Some(mode);
+            return;
+        }
+        self.theme_saving = true;
         let client = self.client.clone();
         cx.spawn(async move |weak, cx| {
             let res = cx
@@ -972,20 +995,24 @@ impl AppShell {
                 .spawn(async move {
                     client
                         .patch_desktop_settings(DesktopSettingsPatchDto {
-                            theme: Some(next_mode),
+                            theme: Some(mode),
                             ..DesktopSettingsPatchDto::default()
                         })
                         .await
                 })
                 .await;
-            if let Err(err) = res {
-                let _ = weak.update(cx, |this, cx| {
+            let _ = weak.update(cx, |this, cx| {
+                this.theme_saving = false;
+                if let Err(err) = res {
                     this.show_workspace_error(err.to_string(), cx);
-                });
-            }
+                }
+                if let Some(next) = this.pending_theme.take() {
+                    this.save_theme_mode(next, cx);
+                }
+                cx.notify();
+            });
         })
         .detach();
-        cx.notify();
     }
 
     fn maybe_check_startup_missing_key_and_updates(
@@ -1149,10 +1176,12 @@ impl AppShell {
                     if this.snapshot.desktop_settings_corrupt && !was_corrupt {
                         this.show_top_notice("桌面配置文件格式异常，已保留原文件。", cx);
                     }
-                    this.theme_preference = this.snapshot.desktop_settings.theme;
+                    if !this.theme_saving && this.pending_theme.is_none() {
+                        this.theme_preference = this.snapshot.desktop_settings.theme;
 
-                    if prev_theme != this.theme_preference {
-                        apply_desktop_theme(this.theme_preference, Some(window), None, cx);
+                        if prev_theme != this.theme_preference {
+                            apply_desktop_theme(this.theme_preference, Some(window), None, cx);
+                        }
                     }
                     if prev_mode != this.snapshot.channel_mode {
                         if this.snapshot.channel_mode == ChannelModeDto::WebActive {
@@ -2046,6 +2075,7 @@ impl AppShell {
             self.web_switch_confirm = Some(WebSwitchConfirmState {
                 prior_focus: window.focused(cx),
             });
+            self.web_switch_cancel_focus.focus(window, cx);
             cx.notify();
             return;
         }
@@ -3812,6 +3842,7 @@ impl Render for AppShell {
                     )
                     .test_support()
                     .a11y_dialog("web-switch-confirm-card", "切换到网页端确认")
+                    .focus_trap("web-switch-confirm-trap", &self.web_switch_trap_focus)
                     .w(layout::MODAL_STANDARD_WIDTH)
                     .rounded(radius::ROW)
                     .border_1()
@@ -3848,12 +3879,15 @@ impl Render for AppShell {
                                     .id("web-switch-cancel-btn")
                                     .test_support()
                                     .a11y_button("web-switch-cancel-btn", "取消")
+                                    .track_focus(&self.web_switch_cancel_focus)
+                                    .tab_index(0)
                                     .h(height::CONTROL)
                                     .px(space::MD)
                                     .rounded(radius::CONTROL)
                                     .border_1()
                                     .border_color(palette.border_strong)
                                     .bg(palette.bg_elevated)
+                                    .text_color(palette.text_primary)
                                     .flex()
                                     .items_center()
                                     .hover(|s| s.bg(palette.bg_item_hover))
@@ -3869,6 +3903,7 @@ impl Render for AppShell {
                                     .id("web-switch-confirm-btn")
                                     .test_support()
                                     .a11y_button("web-switch-confirm-btn", "继续切换")
+                                    .tab_index(0)
                                     .h(height::CONTROL)
                                     .px(space::LG)
                                     .rounded(radius::CONTROL)

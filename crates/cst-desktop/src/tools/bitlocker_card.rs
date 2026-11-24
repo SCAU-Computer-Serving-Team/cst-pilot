@@ -152,6 +152,17 @@ pub struct BitLockerCardProps<'a> {
     pub running_light_allowed: bool,
 }
 
+#[derive(Default)]
+struct BitLockerCountdownState {
+    scheduled_for_request: Option<String>,
+    tick_task: Option<gpui::Task<()>>,
+}
+
+#[derive(Default)]
+struct BitLockerActionGuard {
+    in_flight_request: Option<String>,
+}
+
 /// Renders the standalone BitLocker Controlled Interaction & Result Card (`bitlocker` `unlock / decrypt`,
 /// `cst-pilot-desktop.pen` `ABn8j`).
 #[allow(clippy::too_many_arguments)]
@@ -173,6 +184,17 @@ pub fn render_bitlocker_card<V: 'static>(
         .as_ref()
         .is_some_and(|p| p.expires_at_ms > 0 && now >= p.expires_at_ms);
 
+    let countdown_state = window.use_keyed_state(
+        SharedString::from(format!("bitlocker-countdown-{}", props.call_id)),
+        cx,
+        |_, _| BitLockerCountdownState::default(),
+    );
+    let action_guard = window.use_keyed_state(
+        SharedString::from(format!("bitlocker-action-guard-{}", props.call_id)),
+        cx,
+        |_, _| BitLockerActionGuard::default(),
+    );
+
     if pending_expired && let Some(ref si) = props.secret_input {
         si.update(cx, |s, cx| {
             if !s.is_empty() || !s.is_disabled() {
@@ -190,13 +212,47 @@ pub fn render_bitlocker_card<V: 'static>(
         });
     }
 
-    // Request frame refresh while active 180s countdown is running; freezes at 0 FPS once resolved/expired
+    // Wake once per second on second boundaries while active 180s countdown is running;
+    // freezes at 0 FPS once resolved or expired instead of polling every VSync frame.
     let countdown_display = props.pending.as_ref().and_then(|p| {
         if p.expires_at_ms == 0 {
             return None;
         }
         if p.expires_at_ms > now {
-            window.request_animation_frame();
+            let expires_at_ms = p.expires_at_ms;
+            let req_id = p.request_id.clone();
+            countdown_state.update(cx, |st, cx| {
+                if st.scheduled_for_request.as_deref() != Some(req_id.as_str())
+                    || st.tick_task.is_none()
+                {
+                    st.scheduled_for_request = Some(req_id);
+                    st.tick_task = Some(cx.spawn_in(window, async move |weak, cx| {
+                        loop {
+                            let now_ms = now_epoch_ms();
+                            if now_ms >= expires_at_ms {
+                                break;
+                            }
+                            let rem_ms = expires_at_ms.saturating_sub(now_ms);
+                            let wait_ms = ((rem_ms - 1) % 1000) + 1;
+                            cx.background_executor()
+                                .timer(std::time::Duration::from_millis(wait_ms.max(50)))
+                                .await;
+                            let alive = weak
+                                .update_in(cx, |_, window, _| {
+                                    window.refresh();
+                                })
+                                .is_ok();
+                            if !alive {
+                                break;
+                            }
+                        }
+                        let _ = weak.update_in(cx, |st, window, _| {
+                            st.tick_task = None;
+                            window.refresh();
+                        });
+                    }));
+                }
+            });
             let rem = p.expires_at_ms.saturating_sub(now).div_ceil(1000);
             let mins = rem / 60;
             let secs = rem % 60;
@@ -207,9 +263,21 @@ pub fn render_bitlocker_card<V: 'static>(
             };
             Some((format!("剩余 {mins:02}:{secs:02}"), color))
         } else {
+            countdown_state.update(cx, |st, _| {
+                st.tick_task = None;
+            });
             Some(("请求已过期".to_owned(), palette.text_secondary))
         }
     });
+    if props.pending.is_none() {
+        countdown_state.update(cx, |st, _| {
+            st.scheduled_for_request = None;
+            st.tick_task = None;
+        });
+        action_guard.update(cx, |g, _| {
+            g.in_flight_request = None;
+        });
+    }
 
     let has_pending_ui = props.pending.is_some();
 
@@ -603,11 +671,16 @@ pub fn render_bitlocker_card<V: 'static>(
             let rid_cancel = pending.request_id.clone();
             let client_cancel = client.clone();
             let err_cancel_cb = on_error_notice.clone();
+            let guard_cancel = action_guard.clone();
 
             let sid_confirm = props.session_id.to_owned();
             let rid_confirm = pending.request_id.clone();
             let client_confirm = client;
             let err_confirm_cb = on_error_notice;
+            let guard_confirm = action_guard;
+            let action_busy = guard_confirm.read(cx).in_flight_request.as_deref()
+                == Some(pending.request_id.as_str());
+            let action_disabled = pending_expired || action_busy;
 
             card = card.child(
                 div()
@@ -645,7 +718,7 @@ pub fn render_bitlocker_card<V: 'static>(
                                     .rounded(radius::CONTROL)
                                     .bg(palette.accent_solid)
                                     .text_color(palette.text_on_accent)
-                                    .opacity(if pending_expired { 0.45 } else { 1.0 })
+                                    .opacity(if action_disabled { 0.45 } else { 1.0 })
                                     .flex()
                                     .items_center()
                                     .hover(|s| s.bg(palette.accent_hover))
@@ -653,16 +726,41 @@ pub fn render_bitlocker_card<V: 'static>(
                                         if pending_expired {
                                             return;
                                         }
+                                        let already_busy = guard_confirm.update(cx, |g, _| {
+                                            if g.in_flight_request.as_deref()
+                                                == Some(rid_confirm.as_str())
+                                            {
+                                                true
+                                            } else {
+                                                g.in_flight_request = Some(rid_confirm.clone());
+                                                false
+                                            }
+                                        });
+                                        if already_busy {
+                                            return;
+                                        }
+                                        cx.notify();
                                         let c = client_confirm.clone();
                                         let s_id = sid_confirm.clone();
                                         let r_id = rid_confirm.clone();
                                         let e_cb = err_confirm_cb.clone();
+                                        let guard = guard_confirm.clone();
                                         cx.spawn(async move |weak, cx| {
-                                            if let Err(err) =
-                                                c.respond_bitlocker_confirm(s_id, r_id, true).await
+                                            if let Err(err) = c
+                                                .respond_bitlocker_confirm(s_id, r_id.clone(), true)
+                                                .await
                                             {
-                                                let _ = weak
-                                                    .update(cx, |_, cx| e_cb(err.to_string(), cx));
+                                                let _ = weak.update(cx, |_, cx| {
+                                                    guard.update(cx, |g, _| {
+                                                        if g.in_flight_request.as_deref()
+                                                            == Some(r_id.as_str())
+                                                        {
+                                                            g.in_flight_request = None;
+                                                        }
+                                                    });
+                                                    e_cb(err.to_string(), cx);
+                                                    cx.notify();
+                                                });
                                             }
                                         })
                                         .detach();
@@ -694,20 +792,48 @@ pub fn render_bitlocker_card<V: 'static>(
                                     .border_color(palette.border_strong)
                                     .bg(palette.bg_elevated)
                                     .text_color(palette.text_primary)
+                                    .opacity(if action_disabled { 0.45 } else { 1.0 })
                                     .flex()
                                     .items_center()
                                     .hover(|s| s.bg(palette.bg_item_hover))
                                     .on_click(cx.listener(move |_, _, _, cx| {
+                                        if pending_expired {
+                                            return;
+                                        }
+                                        let already_busy = guard_cancel.update(cx, |g, _| {
+                                            if g.in_flight_request.as_deref()
+                                                == Some(rid_cancel.as_str())
+                                            {
+                                                true
+                                            } else {
+                                                g.in_flight_request = Some(rid_cancel.clone());
+                                                false
+                                            }
+                                        });
+                                        if already_busy {
+                                            return;
+                                        }
+                                        cx.notify();
                                         let c = client_cancel.clone();
                                         let s_id = sid_cancel.clone();
                                         let r_id = rid_cancel.clone();
                                         let e_cb = err_cancel_cb.clone();
+                                        let guard = guard_cancel.clone();
                                         cx.spawn(async move |weak, cx| {
                                             if let Err(err) =
-                                                c.cancel_bitlocker_request(s_id, r_id).await
+                                                c.cancel_bitlocker_request(s_id, r_id.clone()).await
                                             {
-                                                let _ = weak
-                                                    .update(cx, |_, cx| e_cb(err.to_string(), cx));
+                                                let _ = weak.update(cx, |_, cx| {
+                                                    guard.update(cx, |g, _| {
+                                                        if g.in_flight_request.as_deref()
+                                                            == Some(r_id.as_str())
+                                                        {
+                                                            g.in_flight_request = None;
+                                                        }
+                                                    });
+                                                    e_cb(err.to_string(), cx);
+                                                    cx.notify();
+                                                });
                                             }
                                         })
                                         .detach();

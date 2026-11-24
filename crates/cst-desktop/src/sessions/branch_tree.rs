@@ -1940,6 +1940,11 @@ impl BranchTreeView {
                     if this.custom_prompt_mode {
                         if event.keystroke.key == "enter"
                             && !event.is_held
+                            && this
+                                .custom_prompt_input
+                                .read(cx)
+                                .focus_handle(cx)
+                                .is_focused(window)
                             && !super::input_is_composing(&this.custom_prompt_input, window, cx)
                             && (event.keystroke.modifiers == gpui::Modifiers::default()
                                 || event.keystroke.modifiers.control)
@@ -1982,7 +1987,9 @@ impl BranchTreeView {
                             cx.notify();
                             cx.stop_propagation();
                         }
-                        "enter" | "space" if !event.is_held => {
+                        "enter" | "space"
+                            if !event.is_held && this.modal_trap_focus.is_focused(window) =>
+                        {
                             match this.summary_selected_idx {
                                 0 => this.execute_navigate(t_key.clone(), false, None, window, cx),
                                 1 => this.execute_navigate(t_key.clone(), true, None, window, cx),

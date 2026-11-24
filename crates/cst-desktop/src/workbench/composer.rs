@@ -659,7 +659,9 @@ impl ComposerView {
         let models = snap.models.as_deref().unwrap_or(&empty_models);
         let scoped = resolve_scoped_models(models);
         let (provider, id, _, _) = self.current_model_choice(&snap);
-        let levels = active_thinking_levels(models, &provider, &id);
+        let levels = super::model_picker::effective_thinking_levels(active_thinking_levels(
+            models, &provider, &id,
+        ));
         let count = match self.picker_page {
             ModelPickerPage::Main => 2,
             ModelPickerPage::Models => scoped.len(),

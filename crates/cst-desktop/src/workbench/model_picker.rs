@@ -45,6 +45,19 @@ pub fn resolve_scoped_models(snapshot: &ModelsSnapshot) -> Vec<ModelChoiceDto> {
     out
 }
 
+pub fn effective_thinking_levels(thinking_levels: &[String]) -> Vec<String> {
+    if thinking_levels.is_empty() {
+        vec![
+            "low".to_owned(),
+            "medium".to_owned(),
+            "high".to_owned(),
+            "max".to_owned(),
+        ]
+    } else {
+        thinking_levels.to_vec()
+    }
+}
+
 pub fn thinking_level_label(raw: &str) -> &'static str {
     match raw.to_ascii_lowercase().as_str() {
         "off" => "Off",
@@ -1170,16 +1183,7 @@ pub fn render_model_picker_popover(
                 back_btn.into_any_element()
             });
 
-            let levels: Vec<String> = if thinking_levels.is_empty() {
-                vec![
-                    "low".to_owned(),
-                    "medium".to_owned(),
-                    "high".to_owned(),
-                    "max".to_owned(),
-                ]
-            } else {
-                thinking_levels.to_vec()
-            };
+            let levels = effective_thinking_levels(thinking_levels);
             let mut list = div()
                 .id(if interactive {
                     "thinking-picker-list-l7gwjv"

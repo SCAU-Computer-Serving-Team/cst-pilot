@@ -597,6 +597,10 @@ impl MessageListView {
         self.auto_follow_bottom
     }
 
+    pub fn is_action_in_flight(&self) -> bool {
+        self.action_in_flight
+    }
+
     pub fn scroll_to_bottom_and_follow(&mut self, cx: &mut Context<Self>) {
         self.auto_follow_bottom = true;
         self.scroll_handle.scroll_to_bottom();
@@ -748,6 +752,9 @@ impl MessageListView {
     }
 
     fn submit_inline_edit(&mut self, cx: &mut Context<Self>) {
+        if self.action_in_flight {
+            return;
+        }
         let Some(edit) = self.inline_edit.as_ref() else {
             return;
         };
@@ -2902,6 +2909,9 @@ impl Render for MessageListView {
                 .size_full()
                 .into_any_element();
         };
+        if session.running && self.inline_edit.is_some() {
+            self.inline_edit = None;
+        }
 
         if self.revealed_session_id.as_deref() != Some(sid.as_str()) {
             self.revealed_session_id = Some(sid.clone());

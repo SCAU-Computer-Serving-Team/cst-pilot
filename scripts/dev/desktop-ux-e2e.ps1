@@ -185,7 +185,7 @@ function Get-UiaBoundingRect {
     return $null
 }
 
-function Get-UiaModelRows {
+function Get-UiaModelRow {
     param([intptr]$Hwnd)
     $root = [Windows.Automation.AutomationElement]::FromHandle($Hwnd)
     foreach ($el in $root.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition)) {
@@ -808,8 +808,13 @@ try {
             $null -eq (Get-UiaBoundingRect -Hwnd $hwnd -AutomationId 'pref-enabled-row-0')) {
             throw 'P3-5: 未打开模型偏好页或找不到首个已启用模型。'
         }
+        if (Test-UiaElementPresent -Hwnd $hwnd -AutomationId 'pref-toggle-expand-models-btn') {
+            if (-not (Invoke-UiaById -Hwnd $hwnd -AutomationId 'pref-toggle-expand-models-btn' -TimeoutMs 2500)) {
+                throw 'P3-5: 无法展开全部已启用模型列表。'
+            }
+        }
         Start-Sleep -Milliseconds 250
-        $prefStartRows = @(Get-UiaModelRows -Hwnd $hwnd | Sort-Object Index)
+        $prefStartRows = @(Get-UiaModelRow -Hwnd $hwnd | Sort-Object Index)
         if ($prefStartRows.Count -eq 0 -or $prefStartRows.Count -ge $fixtureModelCount) {
             throw 'P3-5: 模型列表的可见行数异常。'
         }
@@ -822,14 +827,14 @@ try {
             Start-Sleep -Milliseconds 16
         }
         Start-Sleep -Milliseconds 150
-        $prefDownRows = @(Get-UiaModelRows -Hwnd $hwnd | Sort-Object Index)
+        $prefDownRows = @(Get-UiaModelRow -Hwnd $hwnd | Sort-Object Index)
         for ($w = 1; $w -le 20; $w++) {
             [CstUxWin32]::SendWheelAtScreen($hwnd, 240, $prefWheelX, $prefWheelY)
             Start-Sleep -Milliseconds 16
         }
         Start-Sleep -Milliseconds 150
         $p3PrefScrollSnap = Invoke-ProbeRequest -Port $port -Path '/probe'
-        $prefUpRows = @(Get-UiaModelRows -Hwnd $hwnd | Sort-Object Index)
+        $prefUpRows = @(Get-UiaModelRow -Hwnd $hwnd | Sort-Object Index)
         if ($prefDownRows.Count -eq 0 -or $prefUpRows.Count -eq 0 -or
             $prefDownRows[0].Index -le $prefStartRows[0].Index -or $prefUpRows[0].Index -ge $prefDownRows[0].Index -or
             $p3PrefScrollSnap.frame_pacing.window_frames -le 0) {

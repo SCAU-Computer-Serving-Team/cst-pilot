@@ -151,7 +151,7 @@ impl PreferencesTabView {
         } else {
             self.filter_trigger_focus.focus(window, cx);
         }
-        self.leave(cx);
+        self.dismiss_dropdowns_on_outside_click(cx);
         true
     }
 
@@ -691,18 +691,18 @@ impl Render for PreferencesTabView {
                             .focus_trap("pref-default-model-focus", &self.picker_focus)
                             .on_key_down(cx.listener(
                                 move |this, event: &KeyDownEvent, window, cx| {
-                                    if !choices.is_empty() {
+                                    if !choices.is_empty()
+                                        && event.keystroke.modifiers == gpui::Modifiers::default()
+                                    {
+                                        let cur = this.picker_index.min(choices.len() - 1);
                                         let moved = match event.keystroke.key.as_str() {
                                             "down" => {
-                                                this.picker_index =
-                                                    (this.picker_index + 1) % choices.len();
+                                                this.picker_index = (cur + 1) % choices.len();
                                                 true
                                             }
                                             "up" => {
-                                                this.picker_index = this
-                                                    .picker_index
-                                                    .checked_sub(1)
-                                                    .unwrap_or(choices.len() - 1);
+                                                this.picker_index =
+                                                    cur.checked_sub(1).unwrap_or(choices.len() - 1);
                                                 true
                                             }
                                             "home" => {

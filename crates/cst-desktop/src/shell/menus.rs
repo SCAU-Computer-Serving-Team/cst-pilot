@@ -445,6 +445,8 @@ impl AppShell {
                                                 ent_all.update(cx, |this, cx| {
                                                     this.close_recent_drawer(window, cx);
                                                     this.set_route(ShellRoute::AllSessions, cx);
+                                                    this.all_sessions_view
+                                                        .update(cx, |v, cx| v.focus(window, cx));
                                                 });
                                             })
                                             .into_any_element()

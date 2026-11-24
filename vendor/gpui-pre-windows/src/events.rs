@@ -792,9 +792,11 @@ impl WindowsWindowInner {
             if GetFocus() == handle
                 && let Some(ctx) = ImeContext::get(handle)
             {
+                let prev = self.state.ime_completion.replace(Some(String::new()));
                 ImmNotifyIME(*ctx, NI_COMPOSITIONSTR, CPS_CANCEL, 0)
                     .ok()
                     .log_err();
+                self.state.ime_completion.replace(prev);
             }
         }
     }

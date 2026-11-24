@@ -569,38 +569,26 @@ impl CommandPaletteModal {
 }
 
 fn format_palette_time(raw: Option<&str>) -> Option<String> {
+    use chrono::{DateTime, Local};
+
     let s = raw?.trim();
     if s.is_empty() {
         return None;
     }
-    if s.len() >= 16 && s.as_bytes().get(10) == Some(&b'T') {
-        let today = chrono_free_today_prefix();
-        if today.as_deref() == Some(&s[..10]) {
-            return Some(s[11..16].to_owned());
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        let local = dt.with_timezone(&Local);
+        let today = Local::now().date_naive();
+        if local.date_naive() == today {
+            return Some(local.format("%H:%M").to_string());
         }
+        return Some(local.format("%Y/%m/%d").to_string());
     }
-    if s.len() >= 10 {
-        Some(s[..10].replace('-', "/"))
-    } else {
-        Some(s.to_owned())
+    if let Some(date_prefix) = s.get(..10)
+        && date_prefix.bytes().all(|b| b.is_ascii_digit() || b == b'-')
+    {
+        return Some(date_prefix.replace('-', "/"));
     }
-}
-
-fn chrono_free_today_prefix() -> Option<String> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
-    // Civil date from Unix days (Howard Hinnant's algorithm, UTC fallback).
-    let z = (secs / 86_400) as i64 + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = (z - era * 146_097) as u64;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = y + i64::from(m <= 2);
-    Some(format!("{year:04}-{m:02}-{d:02}"))
+    Some(s.to_owned())
 }
 
 fn format_export_bytes(bytes: u64) -> String {

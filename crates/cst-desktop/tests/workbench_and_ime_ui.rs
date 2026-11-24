@@ -1578,6 +1578,13 @@ async fn message_actions_direct_fork_queue_edit_backfill_scroll_anchor_and_ime_c
         let rewound = g.navigated_entries.len() == 2;
         let sent_edited =
             g.sent_messages.len() == 2 && g.sent_messages[1].1["text"] == "修改后的你好";
+        let ml = shell_edit_done
+            .read(cx)
+            .workbench()
+            .read(cx)
+            .message_list()
+            .read(cx);
+        let settled = !ml.is_action_in_flight();
         let draft_preserved = shell_edit_done
             .read(cx)
             .workbench()
@@ -1589,7 +1596,7 @@ async fn message_actions_direct_fork_queue_edit_backfill_scroll_anchor_and_ime_c
             .value()
             .as_ref()
             == "保留中的草稿";
-        rewound && sent_edited && draft_preserved
+        rewound && sent_edited && settled && draft_preserved
     })
     .await;
     assert_eq!(
@@ -1599,6 +1606,9 @@ async fn message_actions_direct_fork_queue_edit_backfill_scroll_anchor_and_ime_c
 
     // 4. Direct Fork (`assistant-fork-btn-u-0`): posts `entryId: "a-0"` and switches straight to `"sess-forked"`!
     cx.update_window(win_handle, |_, window, cx| {
+        let ml = shell.read(cx).workbench().read(cx).message_list().clone();
+        ml.update(cx, |m, cx| m.scroll_to_top(cx));
+        window.render_frame(cx);
         window.click("assistant-fork-btn-u-0", cx);
     })
     .unwrap();

@@ -223,8 +223,8 @@ pub fn render_gliding_row_indicator(
                 let y = f32::from(bounds.origin.y) + top;
                 let width = f32::from(bounds.size.width);
                 let clip = Bounds {
-                    origin: point(bounds.origin.x - px(4.0), bounds.origin.y),
-                    size: gpui::size(bounds.size.width + px(8.0), bounds.size.height),
+                    origin: point(bounds.origin.x - px(4.0), bounds.origin.y - px(3.0)),
+                    size: gpui::size(bounds.size.width + px(8.0), bounds.size.height + px(6.0)),
                 };
                 window.with_content_mask(
                     Some(ContentMask { bounds: clip }),
