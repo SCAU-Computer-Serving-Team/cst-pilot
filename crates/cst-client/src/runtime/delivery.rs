@@ -47,7 +47,7 @@ pub(super) async fn execute_send_draft(
     let item = OutboxItem::from_draft(initial_session_id.clone(), draft, now_ms)?;
     let client_message_id = item.client_message_id.clone();
 
-    let (session_id, bound_item) = match initial_session_id {
+    let (session_id, bound_item, _created_tail) = match initial_session_id {
         Some(sid) => {
             core.outbox
                 .lock()
@@ -67,7 +67,7 @@ pub(super) async fn execute_send_draft(
                     "本机磁盘空间已满，当前会话后续消息已暂停发送。".into(),
                 ));
             }
-            (sid, item)
+            (sid, item, None)
         }
         None => {
             let req_key = item
@@ -100,6 +100,12 @@ pub(super) async fn execute_send_draft(
                 .await
             {
                 Ok(created_sid) => {
+                    // Register a send-chain tail BEFORE switching `active_session` so a rapid
+                    // follow-up send in the new session waits for this first POST `/messages`.
+                    let (tail_tx, prev_tail) = core.enqueue_send_tail(&created_sid);
+                    if let Some(mut prev) = prev_tail {
+                        let _ = prev.changed().await;
+                    }
                     let bound = core
                         .outbox
                         .lock()
@@ -111,7 +117,7 @@ pub(super) async fn execute_send_draft(
                         .expect("workspace lock")
                         .set_active_session(Some(created_sid.clone()));
                     bump_revision(core, revision_tx);
-                    (created_sid, bound)
+                    (created_sid, bound, Some(tail_tx))
                 }
                 Err(err) if err.is_disconnected() => {
                     core.outbox
@@ -198,7 +204,7 @@ pub(super) async fn execute_retry_outbox(
     client_message_id: &str,
     previous: Option<watch::Receiver<()>>,
 ) -> Result<SendSubmissionOutcome, ClientError> {
-    let (target_sid, item, check_receipt_first) = match session_id {
+    let (target_sid, item, check_receipt_first, _created_tail) = match session_id {
         None => {
             let (home_item, was_uncertain) = core
                 .outbox
@@ -278,6 +284,10 @@ pub(super) async fn execute_retry_outbox(
                 },
             };
 
+            let (tail_tx, prev_tail) = core.enqueue_send_tail(&sid);
+            if let Some(mut prev) = prev_tail {
+                let _ = prev.changed().await;
+            }
             let bound = core
                 .outbox
                 .lock()
@@ -295,7 +305,7 @@ pub(super) async fn execute_retry_outbox(
                 }
             }
             bump_revision(core, revision_tx);
-            (sid, bound, was_uncertain)
+            (sid, bound, was_uncertain, Some(tail_tx))
         }
         Some(sid) => {
             let (sess_item, was_uncertain) = core
@@ -307,7 +317,7 @@ pub(super) async fn execute_retry_outbox(
             if let Some(mut previous) = previous {
                 let _ = previous.changed().await;
             }
-            (sid, sess_item, was_uncertain)
+            (sid, sess_item, was_uncertain, None)
         }
     };
 
@@ -364,95 +374,182 @@ pub(super) async fn reconcile_uncertain_items(
 ) -> Result<ReconcileReport, ClientError> {
     let items = core.outbox.lock().expect("outbox lock").uncertain_items();
     let mut report = ReconcileReport::default();
+    let mut first_error: Option<ClientError> = None;
 
     for (maybe_sid, item) in items {
         match maybe_sid {
             None => {
                 if let Some(req_key) = &item.creation_request_key {
-                    let (status, created_sid) = core.http.check_session_creation(req_key).await?;
+                    let (status, created_sid) =
+                        match core.http.check_session_creation(req_key).await {
+                            Ok(res) => res,
+                            Err(err) => {
+                                if first_error.is_none() {
+                                    first_error = Some(err);
+                                }
+                                continue;
+                            }
+                        };
                     if status == "done"
                         && let Some(sid) = created_sid
                     {
-                        let already_accepted = core
+                        let already_accepted = match core
                             .http
                             .check_message_receipt(&sid, &item.client_message_id)
-                            .await?
-                            .is_some();
+                            .await
                         {
-                            let mut ob = core.outbox.lock().expect("outbox lock");
-                            ob.bind_home_to_session(&sid);
-                            if already_accepted {
-                                ob.mark_accepted(&sid, &item.client_message_id);
-                            } else {
-                                ob.mark_session_error(
-                                    &sid,
-                                    &item.client_message_id,
-                                    &ClientError::NotFound {
-                                        code: "message_not_delivered".into(),
-                                        message: "会话已创建，首条消息未送达，请点击重试。".into(),
-                                    },
-                                );
+                            Ok(found) => found.is_some(),
+                            Err(err @ ClientError::NotFound { .. }) => {
+                                let applied = core
+                                    .outbox
+                                    .lock()
+                                    .expect("outbox lock")
+                                    .reconcile_home_bound(
+                                        &item.client_message_id,
+                                        &sid,
+                                        false,
+                                        &err,
+                                    );
+                                if applied {
+                                    report.resolved_count += 1;
+                                }
+                                continue;
                             }
-                        }
-                        {
-                            let mut ws = core.workspace.lock().expect("workspace lock");
-                            if ws.active_session_id().is_none()
-                                && !ws
-                                    .draft(&DraftKey::NewSession)
-                                    .is_some_and(ComposerDraft::has_unsent_content)
+                            Err(err) => {
+                                if first_error.is_none() {
+                                    first_error = Some(err);
+                                }
+                                continue;
+                            }
+                        };
+                        let not_delivered = ClientError::NotFound {
+                            code: "message_not_delivered".into(),
+                            message: "会话已创建，首条消息未送达，请点击重试。".into(),
+                        };
+                        let applied = core
+                            .outbox
+                            .lock()
+                            .expect("outbox lock")
+                            .reconcile_home_bound(
+                                &item.client_message_id,
+                                &sid,
+                                already_accepted,
+                                &not_delivered,
+                            );
+                        if applied {
                             {
-                                ws.set_active_session(Some(sid.clone()));
+                                let mut ws = core.workspace.lock().expect("workspace lock");
+                                if ws.active_session_id().is_none()
+                                    && !ws
+                                        .draft(&DraftKey::NewSession)
+                                        .is_some_and(ComposerDraft::has_unsent_content)
+                                {
+                                    ws.set_active_session(Some(sid.clone()));
+                                }
                             }
+                            report.recovered_home_session_id = Some(sid);
+                            report.resolved_count += 1;
                         }
-                        report.recovered_home_session_id = Some(sid);
-                        report.resolved_count += 1;
                     } else if status == "missing" {
+                        // Guard against races: only restore draft & clear home if the exact item is still Uncertain.
+                        let still_uncertain = core
+                            .outbox
+                            .lock()
+                            .expect("outbox lock")
+                            .is_home_uncertain(&item.client_message_id);
+                        if !still_uncertain {
+                            continue;
+                        }
                         let restored = core
                             .workspace
                             .lock()
                             .expect("workspace lock")
                             .restore_draft_if_empty(DraftKey::NewSession, item.to_composer_draft());
-                        {
-                            let mut ob = core.outbox.lock().expect("outbox lock");
+                        let not_created = ClientError::NotFound {
+                            code: "session_not_created".into(),
+                            message: "连接中断前会话尚未创建，可重试或移除。".into(),
+                        };
+                        let applied = core
+                            .outbox
+                            .lock()
+                            .expect("outbox lock")
+                            .reconcile_home_missing(
+                                &item.client_message_id,
+                                restored,
+                                &not_created,
+                            );
+                        if applied {
                             if restored {
-                                ob.clear_home();
                                 report.restored_home_draft = true;
-                            } else {
-                                ob.mark_home_failed(&ClientError::NotFound {
-                                    code: "session_not_created".into(),
-                                    message: "连接中断前会话尚未创建，可重试或移除。".into(),
-                                });
                             }
+                            report.resolved_count += 1;
                         }
-                        report.resolved_count += 1;
                     }
                 }
             }
-            Some(sid) => {
-                if let Some(_server_item) = core
-                    .http
-                    .check_message_receipt(&sid, &item.client_message_id)
-                    .await?
-                {
-                    core.outbox
+            Some(sid) => match core
+                .http
+                .check_message_receipt(&sid, &item.client_message_id)
+                .await
+            {
+                Ok(Some(_server_item)) => {
+                    if core
+                        .outbox
                         .lock()
                         .expect("outbox lock")
-                        .mark_accepted(&sid, &item.client_message_id);
-                    report.resolved_count += 1;
-                } else {
-                    core.outbox.lock().expect("outbox lock").mark_session_error(
-                        &sid,
-                        &item.client_message_id,
-                        &ClientError::NotFound {
-                            code: "message_not_received".into(),
-                            message: "网络中断前服务端未收到该消息，可手动重试或编辑。".into(),
-                        },
-                    );
-                    report.resolved_count += 1;
+                        .reconcile_session_uncertain(&sid, &item.client_message_id, true, None)
+                    {
+                        report.resolved_count += 1;
+                    }
                 }
-            }
+                Ok(None) => {
+                    let not_received = ClientError::NotFound {
+                        code: "message_not_received".into(),
+                        message: "网络中断前服务端未收到该消息，可手动重试或编辑。".into(),
+                    };
+                    if core
+                        .outbox
+                        .lock()
+                        .expect("outbox lock")
+                        .reconcile_session_uncertain(
+                            &sid,
+                            &item.client_message_id,
+                            false,
+                            Some(&not_received),
+                        )
+                    {
+                        report.resolved_count += 1;
+                    }
+                }
+                Err(err @ ClientError::NotFound { .. }) => {
+                    if core
+                        .outbox
+                        .lock()
+                        .expect("outbox lock")
+                        .reconcile_session_uncertain(
+                            &sid,
+                            &item.client_message_id,
+                            false,
+                            Some(&err),
+                        )
+                    {
+                        report.resolved_count += 1;
+                    }
+                }
+                Err(err) => {
+                    if first_error.is_none() {
+                        first_error = Some(err);
+                    }
+                }
+            },
         }
     }
 
-    Ok(report)
+    if report.resolved_count > 0 {
+        Ok(report)
+    } else if let Some(err) = first_error {
+        Err(err)
+    } else {
+        Ok(report)
+    }
 }

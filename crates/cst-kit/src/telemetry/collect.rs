@@ -290,7 +290,7 @@ impl Collector {
                             | "service"
                             | "disk"
                             | "security"
-                            | "find"
+                            | "query"
                             | "detail"
                     ),
                     "bitlocker" => matches!(*scope, "status" | "unlock" | "decrypt"),

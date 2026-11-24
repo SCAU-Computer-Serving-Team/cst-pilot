@@ -312,8 +312,13 @@ impl FileSettingsStorage {
     fn acquire_lock(&self, path: &Path) -> Result<DedicatedFileLockGuard, String> {
         if let Some(lock_dir) = &self.lock_dir {
             use sha2::{Digest, Sha256};
-            let key = path.to_string_lossy().to_lowercase();
-            let hash = Sha256::digest(key.as_bytes());
+            let raw = path.to_string_lossy();
+            let normalized = raw
+                .strip_prefix(r"\\?\")
+                .unwrap_or(&raw)
+                .replace('\\', "/")
+                .to_lowercase();
+            let hash = Sha256::digest(normalized.as_bytes());
             let lock_path = lock_dir.join(format!("settings-{hash:x}.lock"));
             DedicatedFileLockGuard::acquire_at(&lock_path)
         } else {

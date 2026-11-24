@@ -1230,6 +1230,8 @@ impl SessionExportStore {
 
         while self.creating_count.load(Ordering::SeqCst) > 0 {
             let notified = self.creating_done.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
             if self.creating_count.load(Ordering::SeqCst) == 0 {
                 break;
             }

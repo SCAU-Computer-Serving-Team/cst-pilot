@@ -47,8 +47,14 @@ pub(crate) async fn prepare(
             .map_err(|_| "升级包下载失败。")?;
         let mut count = 0u64;
         let mut hash = Sha256::new();
-        while let Some(chunk) = stream.body.next().await {
+        loop {
             stopped(&cancel)?;
+            let next = tokio::time::timeout(Duration::from_secs(30), stream.body.next())
+                .await
+                .map_err(|_| "升级包下载超时（30 秒无数据）。".to_owned())?;
+            let Some(chunk) = next else {
+                break;
+            };
             let chunk = chunk.map_err(|_| "升级包下载失败。")?;
             count = count
                 .checked_add(chunk.len() as u64)
@@ -69,7 +75,7 @@ pub(crate) async fn prepare(
     };
     let result: Result<(), String> = tokio::select! { biased;
         _ = cancel.cancelled() => Err("升级包下载已取消。".into()),
-        r = tokio::time::timeout(Duration::from_secs(10), download) => r.map_err(|_| "升级包下载超过 10 秒。".to_owned())?,
+        r = tokio::time::timeout(Duration::from_secs(600), download) => r.map_err(|_| "升级包下载超过 10 分钟。".to_owned())?,
     };
     drop(file);
     result?;

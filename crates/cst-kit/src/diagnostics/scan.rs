@@ -76,6 +76,7 @@ impl Ord for Ranked {
         self.bytes
             .cmp(&other.bytes)
             .then_with(|| self.path.cmp(&other.path))
+            .then_with(|| self.modified.cmp(&other.modified))
     }
 }
 impl PartialOrd for Ranked {

@@ -122,18 +122,21 @@ struct FlightSub {
 impl Drop for FlightSub {
     fn drop(&mut self) {
         if self.flight.subscribers.fetch_sub(1, Ordering::AcqRel) == 1 {
-            let done = self.flight.result.lock().is_ok_and(|g| g.is_some());
-            if !done {
-                self.flight.scan_cancel.cancel();
-                // Immediately detach the cancelled flight from `pending` so a follow-up scan
-                // never joins a dying cancelled flight before its worker thread finishes unwinding.
-                if let Ok(mut state) = self.inner.state.lock()
-                    && state
+            // Re-verify under `inner.state` lock so a concurrent subscriber joining in `scan()`
+            // cannot have its flight cancelled out from under it.
+            if let Ok(mut state) = self.inner.state.lock()
+                && self.flight.subscribers.load(Ordering::Acquire) == 0
+            {
+                let done = self.flight.result.lock().is_ok_and(|g| g.is_some());
+                if !done {
+                    self.flight.scan_cancel.cancel();
+                    if state
                         .pending
                         .get(&self.pending_key)
                         .is_some_and(|active| Arc::ptr_eq(active, &self.flight))
-                {
-                    state.pending.remove(&self.pending_key);
+                    {
+                        state.pending.remove(&self.pending_key);
+                    }
                 }
             }
         }
@@ -307,9 +310,8 @@ impl VolumeIndex {
                 if snapshot.identity.as_ref() != Some(&identity) {
                     return Err("扫描期间卷身份变化，请重试。".into());
                 }
-                if (!force && snapshot.covers_target(root))
+                if snapshot.covers_target(root)
                     || path_key(Path::new(&snapshot.root)) == path_key(root)
-                    || snapshot.covers_target(root)
                 {
                     Ok(Some(snapshot))
                 } else {

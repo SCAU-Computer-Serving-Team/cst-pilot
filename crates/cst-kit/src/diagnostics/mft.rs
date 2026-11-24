@@ -78,10 +78,11 @@ impl MftIndex {
     fn relative_volume_path(&self, path: &Path) -> Option<String> {
         let disp = display_path(path).replace('/', "\\");
         let trimmed = disp.trim_end_matches('\\');
-        if trimmed.len() < 2 || !trimmed[..2].eq_ignore_ascii_case(&self.drive_upper) {
+        let prefix = trimmed.get(..2)?;
+        if !prefix.eq_ignore_ascii_case(&self.drive_upper) {
             return None;
         }
-        let rest = trimmed[2..].trim_start_matches('\\');
+        let rest = trimmed.get(2..)?.trim_start_matches('\\');
         Some(rest.to_owned())
     }
 }
@@ -590,7 +591,7 @@ pub fn scan_mft_source<S: ReadAt + Sync>(
         .min(MAX_MFT_THREADS);
 
     let cancel_flag = AtomicBool::new(false);
-    let done_flag = AtomicBool::new(false);
+    let done_signal = (std::sync::Mutex::new(false), std::sync::Condvar::new());
     let mut chunks: Vec<ChunkOut> = Vec::new();
     let mut builder = IndexBuilder::new();
     let mut mem_bytes = estimated_slot_bytes;
@@ -598,14 +599,19 @@ pub fn scan_mft_source<S: ReadAt + Sync>(
 
     let summary = std::thread::scope(|scope| {
         let cf = &cancel_flag;
-        let df = &done_flag;
+        let ds = &done_signal;
         let watcher = scope.spawn(move || {
-            while !df.load(Ordering::Acquire) {
+            let (lock, cv) = ds;
+            let mut done = lock.lock().unwrap_or_else(|e| e.into_inner());
+            while !*done {
                 if control.check().is_err() {
                     cf.store(true, Ordering::Release);
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(20));
+                let (guard, _) = cv
+                    .wait_timeout(done, Duration::from_millis(20))
+                    .unwrap_or_else(|e| e.into_inner());
+                done = guard;
             }
         });
         let scan = Scan::new(mft)
@@ -635,7 +641,13 @@ pub fn scan_mft_source<S: ReadAt + Sync>(
             }
             ControlFlow::Continue(())
         });
-        done_flag.store(true, Ordering::Release);
+        {
+            let (lock, cv) = &done_signal;
+            if let Ok(mut done) = lock.lock() {
+                *done = true;
+                cv.notify_all();
+            }
+        }
         let _ = watcher.join();
         res
     })

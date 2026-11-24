@@ -209,6 +209,73 @@ impl SessionOutbox {
         }
     }
 
+    pub fn is_home_uncertain(&self, client_message_id: &str) -> bool {
+        self.home_pending.as_ref().is_some_and(|item| {
+            item.client_message_id == client_message_id
+                && matches!(item.state, OutboxItemState::Uncertain { .. })
+        })
+    }
+
+    pub fn reconcile_home_bound(
+        &mut self,
+        client_message_id: &str,
+        session_id: &str,
+        already_accepted: bool,
+        not_delivered_error: &ClientError,
+    ) -> bool {
+        if !self.is_home_uncertain(client_message_id) {
+            return false;
+        }
+        self.bind_home_to_session(session_id);
+        if already_accepted {
+            self.mark_accepted(session_id, client_message_id);
+        } else {
+            self.mark_session_error(session_id, client_message_id, not_delivered_error);
+        }
+        true
+    }
+
+    pub fn reconcile_home_missing(
+        &mut self,
+        client_message_id: &str,
+        restored: bool,
+        not_created_error: &ClientError,
+    ) -> bool {
+        if !self.is_home_uncertain(client_message_id) {
+            return false;
+        }
+        if restored {
+            self.clear_home();
+        } else {
+            self.mark_home_failed(not_created_error);
+        }
+        true
+    }
+
+    pub fn reconcile_session_uncertain(
+        &mut self,
+        session_id: &str,
+        client_message_id: &str,
+        accepted: bool,
+        error: Option<&ClientError>,
+    ) -> bool {
+        let still_uncertain = self.by_session.get(session_id).is_some_and(|list| {
+            list.iter().any(|item| {
+                item.client_message_id == client_message_id
+                    && matches!(item.state, OutboxItemState::Uncertain { .. })
+            })
+        });
+        if !still_uncertain {
+            return false;
+        }
+        if accepted {
+            self.mark_accepted(session_id, client_message_id);
+        } else if let Some(err) = error {
+            self.mark_session_error(session_id, client_message_id, err);
+        }
+        true
+    }
+
     pub fn restore_home_failed_item(&mut self, mut item: OutboxItem, error: &ClientError) {
         item.state = OutboxItemState::Failed {
             code: error.code().to_owned(),

@@ -98,12 +98,26 @@ impl RunningServer {
         write_discovery_file(state.kit_root(), bound_addr.port(), state.app_token())
             .map_err(|e| e.to_string())?;
 
-        // Watch for automatic presence shutdown (15s first-connect timeout or disconnect grace period)
+        // Watch for automatic presence shutdown (15s first-connect timeout or disconnect grace period).
+        // Loops across busy-session shutdown cancellations and registers the Notify waiter before
+        // checking `is_stopping()` so early signals are never lost.
         let state_for_auto = state.clone();
         tokio::spawn(async move {
-            state_for_auto.mode.shutdown_notified().notified().await;
-            if state_for_auto.mode.is_stopping() {
-                let _ = state_for_auto.execute_shutdown().await;
+            loop {
+                let notified = state_for_auto.mode.shutdown_notified().notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if state_for_auto.mode.is_stopping() {
+                    if state_for_auto.execute_shutdown().await.is_ok() {
+                        break;
+                    }
+                    continue;
+                }
+                tokio::select! {
+                    biased;
+                    _ = state_for_auto.server_stop.cancelled() => break,
+                    () = notified => {}
+                }
             }
         });
 

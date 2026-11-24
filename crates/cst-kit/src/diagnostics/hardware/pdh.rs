@@ -56,6 +56,11 @@ fn localize(path: &str) -> Result<Vec<u16>, String> {
     check(unsafe {
         PdhGetCounterInfoW(counter, false, &mut size, Some(buffer.as_mut_ptr().cast()))
     })?;
+    if (size as usize) < std::mem::size_of::<PDH_COUNTER_INFO_W>()
+        || std::mem::size_of_val(buffer.as_slice()) < std::mem::size_of::<PDH_COUNTER_INFO_W>()
+    {
+        return Err("PDH 计数器元数据缓冲过短。".into());
+    }
     let info = unsafe { &*buffer.as_ptr().cast::<PDH_COUNTER_INFO_W>() };
     let localized = bounded_string(info.szFullPath, &buffer)?;
     Ok(wide(&localized))

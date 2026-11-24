@@ -666,12 +666,18 @@ pub fn apply_portable_sanitized_env(
     let win_dir = windows_directory().map_err(ClientError::BootstrapFailed)?;
     let sys_dir = system_directory().map_err(ClientError::BootstrapFailed)?;
 
-    let path_entries = vec![
+    let mut path_entries = Vec::with_capacity(6);
+    for bundled in [clean_root.join("pwsh"), clean_root.join("bin")] {
+        if bundled.is_dir() {
+            path_entries.push(bundled);
+        }
+    }
+    path_entries.extend([
         sys_dir.clone(),
         win_dir.clone(),
         sys_dir.join("Wbem"),
         sys_dir.join("WindowsPowerShell").join("v1.0"),
-    ];
+    ]);
     let joined_path = std::env::join_paths(path_entries)
         .map_err(|e| ClientError::BootstrapFailed(format!("组装安全 PATH 失败：{e}")))?;
 

@@ -361,23 +361,23 @@ impl OAuthFlowManager {
         flow: &Arc<Mutex<ActiveFlow>>,
     ) -> Result<Value, ServiceError> {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let notify_arc = flow.lock().expect("flow lock").change_notify.clone();
         loop {
-            let (is_ready, notify_arc) = {
+            let notified = notify_arc.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let is_ready = {
                 let guard = flow.lock().expect("flow lock");
-                let ready = guard.view.state != "pending"
+                guard.view.state != "pending"
                     || guard.view.device_code.is_some()
                     || guard.view.auth_url.is_some()
                     || guard.view.prompt.is_some()
-                    || guard.view.message.is_some();
-                (ready, guard.change_notify.clone())
+                    || guard.view.message.is_some()
             };
             if is_ready {
                 return Ok(self.status(provider_id, None));
             }
-            if tokio::time::timeout_at(deadline, notify_arc.notified())
-                .await
-                .is_err()
-            {
+            if tokio::time::timeout_at(deadline, notified).await.is_err() {
                 self.cancel(provider_id, None);
                 return Err(ServiceError::new(
                     ServiceErrorKind::InvalidInput,
@@ -506,15 +506,16 @@ impl OAuthFlowManager {
             return;
         };
         self.cancel(provider_id, None);
+        let notify_arc = flow_arc.lock().expect("flow lock").done_notify.clone();
         loop {
-            let (done, notify_arc) = {
-                let guard = flow_arc.lock().expect("flow lock");
-                (guard.finished, guard.done_notify.clone())
-            };
+            let notified = notify_arc.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let done = flow_arc.lock().expect("flow lock").finished;
             if done {
                 break;
             }
-            notify_arc.notified().await;
+            notified.await;
         }
     }
 

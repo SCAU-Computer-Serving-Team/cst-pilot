@@ -95,15 +95,21 @@ pub fn is_process_alive(pid: u32) -> bool {
     #[cfg(windows)]
     {
         use windows::Win32::{
-            Foundation::CloseHandle,
-            System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+            Foundation::{CloseHandle, STILL_ACTIVE},
+            System::Threading::{
+                GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+            },
         };
         match unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) } {
             Ok(handle) => {
+                let mut exit_code = 0u32;
+                let alive = unsafe { GetExitCodeProcess(handle, &mut exit_code) }
+                    .map(|()| exit_code == STILL_ACTIVE.0 as u32)
+                    .unwrap_or(true);
                 unsafe {
                     let _ = CloseHandle(handle);
                 }
-                true
+                alive
             }
             Err(error) => error.code().0 as u32 != 0x8007_0057,
         }
@@ -373,21 +379,27 @@ pub fn query_process_token_info(pid: u32) -> Result<Option<ProcessTokenInfo>, St
 
         let mut user_len = 0u32;
         let _ = unsafe { GetTokenInformation(token_handle, TokenUser, None, 0, &mut user_len) };
-        if user_len == 0 || user_len > 4096 {
+        let min_user_len = std::mem::size_of::<TOKEN_USER>();
+        if (user_len as usize) < min_user_len || user_len > 4096 {
             return Err("无法读取进程用户安全标识符长度。".into());
         }
-        let mut user_buf = vec![0u8; user_len as usize];
+        let mut user_buf = vec![0u64; (user_len as usize).div_ceil(std::mem::size_of::<u64>())];
+        let mut returned_len = 0u32;
         unsafe {
             GetTokenInformation(
                 token_handle,
                 TokenUser,
                 Some(user_buf.as_mut_ptr().cast()),
                 user_len,
-                &mut user_len,
+                &mut returned_len,
             )
         }
         .map_err(|_| "无法读取进程用户安全标识符。".to_owned())?;
+        if (returned_len as usize) < min_user_len {
+            return Err("目标进程用户安全标识符数据不完整。".into());
+        }
 
+        // SAFETY: `user_buf` is 8-byte aligned (satisfying `TOKEN_USER`) and at least `size_of::<TOKEN_USER>()` bytes were written.
         let token_user: &TOKEN_USER = unsafe { &*(user_buf.as_ptr().cast::<TOKEN_USER>()) };
         let sid = token_user.User.Sid;
         if sid.is_invalid() || !unsafe { IsValidSid(sid) }.as_bool() {

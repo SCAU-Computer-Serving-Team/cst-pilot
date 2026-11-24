@@ -725,8 +725,10 @@ fn apply_frame_to_snapshot(snap: &mut SessionViewSnapshot, frame: BufferedSessio
                     }
                 }
                 "ui_requests" => {
-                    if let Some(reqs) = ev.get("requests") {
-                        snap.ui = Some(json!({ "requests": reqs }));
+                    if let Some(questions) = ev.get("questions") {
+                        snap.ui = Some(questions.clone());
+                    } else if let Some(reqs) = ev.get("requests") {
+                        snap.ui = Some(reqs.clone());
                     } else {
                         snap.ui = Some(ev);
                     }

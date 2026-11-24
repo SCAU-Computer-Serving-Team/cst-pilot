@@ -179,6 +179,7 @@ struct SharedClientCore {
     snapshot: Mutex<Arc<ClientSnapshot>>,
     workspace: Mutex<WorkspaceState>,
     outbox: Mutex<SessionOutbox>,
+    send_tails: Mutex<BTreeMap<String, watch::Receiver<()>>>,
     presenter_cache: Mutex<ToolPresenterCache>,
     revision_tx: watch::Sender<u64>,
     revision_rx: watch::Receiver<u64>,
@@ -188,6 +189,17 @@ struct SharedClientCore {
 }
 
 impl SharedClientCore {
+    pub(super) fn enqueue_send_tail(
+        &self,
+        session_id: &str,
+    ) -> (watch::Sender<()>, Option<watch::Receiver<()>>) {
+        let mut tails = self.send_tails.lock().expect("send_tails lock");
+        tails.retain(|_, tail| tail.has_changed().is_ok());
+        let (tx, rx) = watch::channel(());
+        let previous = tails.insert(session_id.to_owned(), rx);
+        (tx, previous)
+    }
+
     fn alloc_op_revision(&self) -> u64 {
         self.next_op_revision.fetch_add(1, Ordering::SeqCst)
     }
@@ -1331,6 +1343,7 @@ fn spawn_client_workers(
         snapshot: Mutex::new(initial_snapshot),
         workspace: Mutex::new(WorkspaceState::default()),
         outbox: Mutex::new(SessionOutbox::default()),
+        send_tails: Mutex::new(BTreeMap::new()),
         presenter_cache: Mutex::new(ToolPresenterCache::default()),
         revision_tx: revision_tx.clone(),
         revision_rx,
@@ -1495,7 +1508,6 @@ async fn run_state_reducer_loop(
 
     let mut mux_cancel: Option<CancellationToken> = None;
     let mut active_mux_generation = 0u64;
-    let mut send_tails: BTreeMap<String, watch::Receiver<()>> = BTreeMap::new();
     let mut usage_fetches = UsageFetches::default();
     let mut pending_usage_sessions: BTreeSet<String> = BTreeSet::new();
 
@@ -1614,7 +1626,7 @@ async fn run_state_reducer_loop(
                                 .map(str::to_owned)
                                 && session_store.has_ready(&active_sid)
                             {
-                                usage_fetches.start(&core.http, &done_tx, &session_store, active_sid);
+                                usage_fetches.start(&core, &done_tx, &session_store, active_sid);
                             }
                         }
                     }
@@ -1638,7 +1650,7 @@ async fn run_state_reducer_loop(
                             .map(str::to_owned)
                             && session_store.has_ready(&active_sid)
                         {
-                            usage_fetches.start(&core.http, &done_tx, &session_store, active_sid);
+                            usage_fetches.start(&core, &done_tx, &session_store, active_sid);
                         }
                     }
                     KeepaliveSignal::StateEvent { payload, .. } => {
@@ -1863,7 +1875,7 @@ async fn run_state_reducer_loop(
                 }
                 for session_id in immediate_usage_sessions {
                     pending_usage_sessions.remove(&session_id);
-                    usage_fetches.start(&core.http, &done_tx, &session_store, session_id);
+                    usage_fetches.start(&core, &done_tx, &session_store, session_id);
                 }
                 if !coalesce_usage_sessions.is_empty() {
                     pending_usage_sessions.extend(coalesce_usage_sessions);
@@ -2140,7 +2152,7 @@ async fn run_state_reducer_loop(
                                 let active = core.workspace.lock().expect("workspace lock").active_session_id() == Some(session_id.as_str());
                                 if active {
                                     pending_usage_sessions.remove(&session_id);
-                                    usage_fetches.start(&core.http, &done_tx, &session_store, session_id);
+                                    usage_fetches.start(&core, &done_tx, &session_store, session_id);
                                 }
                                 for waiter in waiters {
                                     let _ = waiter.send(Ok(Some(loaded.clone())));
@@ -2277,7 +2289,7 @@ async fn run_state_reducer_loop(
                                     sub_debounce_pending = true;
                                     sub_sleep.as_mut().reset(tokio::time::Instant::now() + Duration::from_millis(SUBSCRIPTION_DEBOUNCE_MS));
                                 }
-                                usage_fetches.start(&core.http, &done_tx, &session_store, sid);
+                                usage_fetches.start(&core, &done_tx, &session_store, sid);
                                 let _ = reply.send(Ok(existing));
                                 continue;
                             }
@@ -2348,7 +2360,7 @@ async fn run_state_reducer_loop(
                     }
                     WorkerCommand::RefreshSessionUsage { session_id } => {
                         pending_usage_sessions.remove(&session_id);
-                        usage_fetches.start(&core.http, &done_tx, &session_store, session_id);
+                        usage_fetches.start(&core, &done_tx, &session_store, session_id);
                     }
                     WorkerCommand::RefreshGlobals { op_revision, reply } => {
                         let http = core.http.clone();
@@ -2488,10 +2500,9 @@ async fn run_state_reducer_loop(
                         });
                     }
                     WorkerCommand::SendDraft { target, draft, reply } => {
-                        send_tails.retain(|_, tail| tail.has_changed().is_ok());
                         let (tail, previous) = if let DraftKey::Session(sid) = &target {
-                            let (tx, rx) = watch::channel(());
-                            (Some(tx), send_tails.insert(sid.clone(), rx))
+                            let (tx, prev) = core.enqueue_send_tail(sid);
+                            (Some(tx), prev)
                         } else {
                             (None, None)
                         };
@@ -2508,9 +2519,7 @@ async fn run_state_reducer_loop(
                         draft,
                         reply,
                     } => {
-                        send_tails.retain(|_, tail| tail.has_changed().is_ok());
-                        let (tx, rx) = watch::channel(());
-                        let previous = send_tails.insert(session_id.clone(), rx);
+                        let (tx, previous) = core.enqueue_send_tail(&session_id);
                         let tail = Some(tx);
                         let core_clone = Arc::clone(&core);
                         let rev_tx = revision_tx.clone();
@@ -2533,10 +2542,9 @@ async fn run_state_reducer_loop(
                         client_message_id,
                         reply,
                     } => {
-                        send_tails.retain(|_, tail| tail.has_changed().is_ok());
                         let (tail, previous) = if let Some(ref sid) = session_id {
-                            let (tx, rx) = watch::channel(());
-                            (Some(tx), send_tails.insert(sid.clone(), rx))
+                            let (tx, prev) = core.enqueue_send_tail(sid);
+                            (Some(tx), prev)
                         } else {
                             (None, None)
                         };
@@ -2703,7 +2711,7 @@ async fn run_state_reducer_loop(
                 usage_timer_armed = false;
                 let batch = std::mem::take(&mut pending_usage_sessions);
                 for sid in batch {
-                    usage_fetches.start(&core.http, &done_tx, &session_store, sid);
+                    usage_fetches.start(&core, &done_tx, &session_store, sid);
                 }
             }
             () = &mut sub_sleep, if sub_debounce_pending => {
@@ -3014,11 +3022,15 @@ struct UsageFetches {
 impl UsageFetches {
     fn start(
         &mut self,
-        http: &AppHttpClient,
+        core: &SharedClientCore,
         done_tx: &mpsc::UnboundedSender<InternalAsyncCompletion>,
         sessions: &SessionStore,
         session_id: String,
     ) {
+        if core.snapshot.lock().expect("snapshot lock").channel_mode != ChannelModeDto::AppActive {
+            return;
+        }
+        let http = &core.http;
         // Snapshot and usage reads overlap on the server. Refresh after loading
         // instead of letting one generation's response overwrite another's snapshot.
         let Some(generation) = sessions.ready_generation(&session_id) else {

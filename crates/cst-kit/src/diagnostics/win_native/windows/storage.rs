@@ -995,13 +995,14 @@ fn query_nvme_health_row(handle: HANDLE, device_id: &str) -> Option<NativeHealth
     ] {
         let (mut buf, total_len) = build_nvme_health_query(prop_id);
         let mut ret = 0u32;
+        let ptr = buf.as_mut_ptr().cast();
         let ok = unsafe {
             DeviceIoControl(
                 handle,
                 IOCTL_STORAGE_QUERY_PROPERTY,
-                Some(buf.as_ptr().cast()),
+                Some(ptr),
                 total_len as u32,
-                Some(buf.as_mut_ptr().cast()),
+                Some(ptr),
                 total_len as u32,
                 Some(&mut ret),
                 None,
@@ -1128,6 +1129,9 @@ fn query_ata_smart_row(
     disk_number: u32,
     device_id: &str,
 ) -> Result<Option<NativeHealthRow>, NativeError> {
+    let Ok(drive_number) = u8::try_from(disk_number) else {
+        return Ok(None);
+    };
     // SMART_RCV_DRIVE_DATA requires FILE_READ_ACCESS | FILE_WRITE_ACCESS per Windows SDK winioctl.h.
     let handle = match open_device(dev_path, (GENERIC_READ | GENERIC_WRITE).0) {
         Ok(h) => h,
@@ -1150,7 +1154,7 @@ fn query_ata_smart_row(
             command: 0xB0, // SMART_CMD
             reserved: 0,
         },
-        drive_number: (disk_number & 0xFF) as u8,
+        drive_number,
         reserved: [0; 3],
         dw_reserved: [0; 4],
         buffer: [0],

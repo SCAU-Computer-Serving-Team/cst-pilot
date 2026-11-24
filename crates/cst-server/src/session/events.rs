@@ -344,7 +344,7 @@ impl SessionEvents {
     /// and storing the immutable `Bytes` frame in the 256-entry ring buffer.
     pub fn publish(&self, event_name: &'static str, value: &Value) -> u64 {
         let data_json = browser_json_string(value);
-        let (seq, subscribers, forwarders) = {
+        let (seq, subs, forwarders) = {
             let mut guard = self.inner.lock().expect("events lock");
             guard.sequence += 1;
             let seq = guard.sequence;
@@ -361,20 +361,42 @@ impl SessionEvents {
                 data_json: data_json.clone(),
                 single_frame: single_frame.clone(),
             });
+            // Enqueue single-stream frames inside the events lock (`events -> subscriber`) so
+            // concurrent publishers cannot deliver out-of-order sequences to single-stream readers.
             let subs: Vec<Arc<SseSubscriber>> = guard.subscribers.values().cloned().collect();
+            for sub in &subs {
+                let _ = sub.enqueue_deferred(single_frame.clone());
+            }
             let fwds: Vec<MultiplexForwarder> =
                 guard.multiplex_forwarders.values().cloned().collect();
-            (seq, (subs, single_frame), fwds)
+            (seq, subs, fwds)
         };
 
-        let (subs, single_frame) = subscribers;
         for sub in subs {
-            sub.enqueue(single_frame.clone());
+            sub.finish_overflow();
         }
         for fwd in forwarders {
             fwd(&self.epoch, seq, event_name, &data_json);
         }
         seq
+    }
+
+    fn replay_range(
+        &self,
+        epoch: &str,
+        from_seq_inclusive: u64,
+        to_seq_inclusive: u64,
+    ) -> Vec<HistoryRecord> {
+        if self.epoch != epoch || from_seq_inclusive > to_seq_inclusive {
+            return Vec::new();
+        }
+        let guard = self.inner.lock().expect("events lock");
+        guard
+            .history
+            .iter()
+            .filter(|r| r.sequence >= from_seq_inclusive && r.sequence <= to_seq_inclusive)
+            .cloned()
+            .collect()
     }
 
     /// Subscribes a single-stream SSE client (`/api/events`, `/api/app/events`, or `/api/sessions/:id/events`).
@@ -623,6 +645,7 @@ impl MultiplexHub {
         };
 
         let weak_slots = Arc::downgrade(&hub.slots);
+        let global_for_fwd = global_events.clone();
         let fwd_id = global_events.register_multiplex_forwarder(Arc::new(
             move |epoch, seq, event_name, data_json| {
                 let Some(slots_arc) = weak_slots.upgrade() else {
@@ -633,7 +656,15 @@ impl MultiplexHub {
                     map.values().cloned().collect()
                 };
                 for slot in slot_list {
-                    Self::emit_to_slot(&slot, "global", epoch, seq, event_name, data_json);
+                    Self::emit_to_slot(
+                        &slot,
+                        "global",
+                        &global_for_fwd,
+                        epoch,
+                        seq,
+                        event_name,
+                        data_json,
+                    );
                 }
             },
         ));
@@ -686,12 +717,13 @@ impl MultiplexHub {
     fn emit_to_slot(
         slot: &Arc<Mutex<MultiplexSlotState>>,
         source_key: &str,
+        source_events: &SessionEvents,
         epoch: &str,
         seq: u64,
         event_name: &'static str,
         raw_data_json: &str,
     ) {
-        let (sub, frame) = {
+        let sub = {
             let mut guard = slot.lock().expect("slot lock");
             if source_key != "global" && !guard.subscribed_sessions.contains(source_key) {
                 return;
@@ -699,6 +731,34 @@ impl MultiplexHub {
             let Some(sub) = guard.active_subscriber.clone() else {
                 return;
             };
+            // Enforce strict per-source monotonic delivery: drop stale/duplicate frames arriving
+            // out of order from concurrent publishers or replay, and backfill any gap from the
+            // source ring buffer before emitting `seq` (`slot -> events -> subscriber`).
+            if let Some((prev_epoch, prev_seq)) = guard.emitted_cursors.get(source_key).cloned()
+                && prev_epoch == epoch
+            {
+                if seq <= prev_seq {
+                    return;
+                }
+                if seq > prev_seq + 1 {
+                    for rec in source_events.replay_range(epoch, prev_seq + 1, seq - 1) {
+                        guard
+                            .emitted_cursors
+                            .insert(source_key.to_owned(), (epoch.to_owned(), rec.sequence));
+                        let cid = Self::format_vector_cursor(&guard.emitted_cursors);
+                        let wrapped = Self::wrap_multiplex_payload(
+                            source_key,
+                            rec.event_name,
+                            &rec.data_json,
+                        );
+                        let frame = Bytes::from(format!(
+                            "id: {cid}\nevent: {}\ndata: {wrapped}\n\n",
+                            rec.event_name
+                        ));
+                        let _ = sub.enqueue_deferred(frame);
+                    }
+                }
+            }
             guard
                 .emitted_cursors
                 .insert(source_key.to_owned(), (epoch.to_owned(), seq));
@@ -707,9 +767,10 @@ impl MultiplexHub {
             let frame = Bytes::from(format!(
                 "id: {cursor_id}\nevent: {event_name}\ndata: {wrapped_data}\n\n"
             ));
-            (sub, frame)
+            let _ = sub.enqueue_deferred(frame);
+            sub
         };
-        sub.enqueue(frame);
+        sub.finish_overflow();
     }
 
     fn wrap_multiplex_payload(
@@ -1032,12 +1093,14 @@ impl MultiplexHub {
             sess_events.increment_multiplex_ref();
             let weak_slot = Arc::downgrade(&slot);
             let sid_for_fwd = sid.clone();
+            let events_for_fwd = sess_events.clone();
             let fwd_id = sess_events.register_multiplex_forwarder(Arc::new(
                 move |epoch, seq, event_name, data_json| {
                     if let Some(slot_arc) = weak_slot.upgrade() {
                         Self::emit_to_slot(
                             &slot_arc,
                             &sid_for_fwd,
+                            &events_for_fwd,
                             epoch,
                             seq,
                             event_name,

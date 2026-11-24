@@ -170,6 +170,7 @@ pub fn query(
         match unsafe { EvtNext(result.0, &mut raw[..capacity], 1000, 0, &mut returned) } {
             Ok(()) => {}
             Err(e) if is_code(&e, ERROR_NO_MORE_ITEMS.0) => break,
+            Err(e) if is_code(&e, windows::Win32::Foundation::ERROR_TIMEOUT.0) => continue,
             Err(e) => return Err(error(&query.log, e)),
         }
         let handles: Vec<_> = raw[..returned as usize]

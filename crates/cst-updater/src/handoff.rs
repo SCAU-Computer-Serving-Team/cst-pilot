@@ -240,7 +240,9 @@ pub fn run_request(root: &Path, id: &str, key: ReleaseKey) -> Result<ApplyOutcom
         .map_err(|_| "更新器路径无法核验。")?;
     let expected_path = storage
         .root
-        .join(format!(".state/update/cst-updater-{id}.exe"));
+        .join(format!(".state/update/cst-updater-{id}.exe"))
+        .canonicalize()
+        .map_err(|_| "更新器未从已校验的独立路径启动。")?;
     if own != expected_path {
         return Err("更新器未从已校验的独立路径启动。".into());
     }

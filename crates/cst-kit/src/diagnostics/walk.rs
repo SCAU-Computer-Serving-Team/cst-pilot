@@ -22,10 +22,15 @@ const EXT_AGG_MAX: usize = 40;
 /// Leave room for deterministic aggregation and JSON serialization before the outer hard timeout.
 const SOFT_BUDGET_MARGIN: Duration = Duration::from_millis(250);
 
+#[cfg(any(windows, test))]
 const FILE_ATTRIBUTE_DIRECTORY_BITS: u32 = 0x0000_0010;
+#[cfg(any(windows, test))]
 const FILE_ATTRIBUTE_REPARSE_POINT_BITS: u32 = 0x0000_0400;
+#[cfg(any(windows, test))]
 const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x0004_0000;
+#[cfg(any(windows, test))]
 const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
+#[cfg(any(windows, test))]
 const FILE_ATTRIBUTE_CLOUD_RECALL: u32 =
     FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS;
 
@@ -113,6 +118,7 @@ pub fn linked(meta: &Metadata) -> bool {
     }
 }
 
+#[cfg(any(windows, test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WinEntryClass {
     Dir,
@@ -122,6 +128,7 @@ enum WinEntryClass {
 
 /// Classifies a Windows directory entry consistently across `FileIdBothDirectoryInfo` and
 /// `FindFirstFileExW`, distinguishing cloud placeholders, hydrated cloud files, and symlinks/junctions.
+#[cfg(any(windows, test))]
 fn classify_win_entry(
     attrs: u32,
     reparse_tag: u32,
@@ -238,6 +245,7 @@ pub fn list_direct_children(
 
 /// Safely parses a `FILE_ID_BOTH_DIR_INFO` byte buffer without reading past the variable-length
 /// header (`104` bytes) or creating unaligned `u16` slices.
+#[cfg(any(windows, test))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ParsedDirEntry {
     pub name_u16: Vec<u16>,
@@ -249,8 +257,10 @@ pub(crate) struct ParsedDirEntry {
     pub file_id: u64,
 }
 
+#[cfg(any(windows, test))]
 const FILE_ID_BOTH_HEADER_LEN: usize = 104;
 
+#[cfg(any(windows, test))]
 pub(crate) fn parse_file_id_both_dir_buffer(buf: &[u8]) -> (Vec<ParsedDirEntry>, bool) {
     let mut entries = Vec::new();
     let mut off = 0usize;
@@ -478,6 +488,7 @@ struct WalkOutcome {
 struct SharedState {
     dirs: Mutex<Vec<DirRecord>>,
     denied: Mutex<Vec<String>>,
+    root_started: Vec<AtomicBool>,
     root_unreadable: Vec<AtomicBool>,
     scanned: AtomicUsize,
     incomplete: AtomicBool,
@@ -488,6 +499,7 @@ struct SharedState {
     deadline: Instant,
     collect_analytics: bool,
     dedup_hardlinks: bool,
+    #[cfg(windows)]
     expected_vol_serial: Option<u32>,
 }
 impl SharedState {
@@ -499,12 +511,14 @@ impl SharedState {
         deadline: Instant,
         collect_analytics: bool,
         dedup_hardlinks: bool,
-        expected_vol_serial: Option<u32>,
+        #[cfg(windows)] expected_vol_serial: Option<u32>,
     ) -> Self {
+        let root_started = (0..root_slots).map(|_| AtomicBool::new(false)).collect();
         let root_unreadable = (0..root_slots).map(|_| AtomicBool::new(false)).collect();
         Self {
             dirs: Mutex::new(initial_dirs),
             denied: Mutex::new(Vec::new()),
+            root_started,
             root_unreadable,
             scanned: AtomicUsize::new(0),
             incomplete: AtomicBool::new(false),
@@ -515,6 +529,7 @@ impl SharedState {
             deadline,
             collect_analytics,
             dedup_hardlinks,
+            #[cfg(windows)]
             expected_vol_serial,
         }
     }
@@ -539,6 +554,13 @@ impl SharedState {
     }
     fn mark_incomplete(&self) {
         self.incomplete.store(true, Ordering::Release);
+    }
+    fn mark_root_started(&self, root_slot: Option<usize>) {
+        if let Some(slot) = root_slot
+            && let Some(flag) = self.root_started.get(slot)
+        {
+            flag.store(true, Ordering::Release);
+        }
     }
     fn mark_root_unreadable(&self, root_slot: Option<usize>) {
         self.mark_incomplete();
@@ -590,16 +612,9 @@ fn should_dedup_hardlinks(root: &Path) -> bool {
     }
 }
 
+#[cfg(windows)]
 fn volume_serial_of(root: &Path) -> Option<u32> {
-    #[cfg(windows)]
-    {
-        win_walk::query_dir_volume_serial(root)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = root;
-        None
-    }
+    win_walk::query_dir_volume_serial(root)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -642,6 +657,7 @@ fn walk_forest(
     }
     let deadline = Instant::now() + effective_timeout;
     let dedup = should_dedup_hardlinks(scope_root);
+    #[cfg(windows)]
     let expected_vol_serial = volume_serial_of(scope_root);
     let desired = std::thread::available_parallelism()
         .map_or(4, std::num::NonZeroUsize::get)
@@ -656,6 +672,7 @@ fn walk_forest(
         deadline,
         collect_analytics,
         dedup,
+        #[cfg(windows)]
         expected_vol_serial,
     );
     let queue = WalkQueue::new(initial_queue);
@@ -664,36 +681,43 @@ fn walk_forest(
     let cancel_handles = win_walk::CancelRegistry::new();
 
     let all_files: Mutex<Vec<FileRecord>> = Mutex::new(seed_files);
-    let done_flag = AtomicBool::new(false);
+    let done_signal = (Mutex::new(false), Condvar::new());
 
     let any_worker_panicked = std::thread::scope(|scope| {
         // Watchdog stops the queue and repeatedly issues CancelSynchronousIo until every worker
         // exits, closing the check-to-syscall race window.
         let shared_ref = &shared;
         let queue_ref = &queue;
-        let done_ref = &done_flag;
+        let done_ref = &done_signal;
         #[cfg(windows)]
         let cancel_ref = &cancel_handles;
         let watcher = scope.spawn(move || {
+            let (lock, cv) = done_ref;
             let mut cancelling = false;
-            while !done_ref.load(Ordering::Acquire) {
+            let mut done = lock.lock().unwrap_or_else(|e| e.into_inner());
+            while !*done {
                 if !cancelling {
                     if control.cancel.is_cancelled() {
                         shared_ref.cancelled.store(true, Ordering::Release);
                         queue_ref.stop();
                         cancelling = true;
-                    } else if Instant::now() >= shared_ref.deadline {
+                    } else if shared_ref.exhausted.load(Ordering::Acquire)
+                        || Instant::now() >= shared_ref.deadline
+                    {
                         shared_ref.exhausted.store(true, Ordering::Release);
                         shared_ref.incomplete.store(true, Ordering::Release);
                         queue_ref.stop();
                         cancelling = true;
                     }
                 }
+                #[cfg(windows)]
                 if cancelling {
-                    #[cfg(windows)]
                     cancel_ref.cancel_all();
                 }
-                std::thread::sleep(Duration::from_millis(20));
+                let (guard, _) = cv
+                    .wait_timeout(done, Duration::from_millis(20))
+                    .unwrap_or_else(|e| e.into_inner());
+                done = guard;
             }
         });
 
@@ -719,6 +743,7 @@ fn walk_forest(
                     if shared_ref.cancelled.load(Ordering::Acquire)
                         || shared_ref.exhausted.load(Ordering::Acquire)
                     {
+                        queue_ref.stop();
                         active_guard.completed = true;
                         break;
                     }
@@ -768,7 +793,13 @@ fn walk_forest(
                 panicked = true;
             }
         }
-        done_flag.store(true, Ordering::Release);
+        {
+            let (lock, cv) = &done_signal;
+            if let Ok(mut done) = lock.lock() {
+                *done = true;
+                cv.notify_all();
+            }
+        }
         let _ = watcher.join();
         panicked
     });
@@ -790,6 +821,11 @@ fn walk_forest(
     let scanned = shared.scanned.load(Ordering::Relaxed);
     let incomplete = shared.incomplete.load(Ordering::Relaxed);
     let exhausted = shared.exhausted.load(Ordering::Relaxed);
+    let root_started: Vec<bool> = shared
+        .root_started
+        .iter()
+        .map(|f| f.load(Ordering::Acquire))
+        .collect();
     let root_unreadable: Vec<bool> = shared
         .root_unreadable
         .iter()
@@ -798,6 +834,7 @@ fn walk_forest(
 
     aggregate_deterministic(
         &dirs,
+        &root_started,
         &root_unreadable,
         files,
         denied,
@@ -814,6 +851,7 @@ fn walk_forest(
 #[allow(clippy::too_many_arguments)]
 fn aggregate_deterministic(
     dirs: &[DirRecord],
+    root_started: &[bool],
     root_unreadable: &[bool],
     files: Vec<FileRecord>,
     denied: Vec<String>,
@@ -939,7 +977,8 @@ fn aggregate_deterministic(
         if let Some(slot) = rec.root_slot
             && slot < root_totals.len()
         {
-            root_totals[slot] = (!root_unreadable[slot]).then_some(dir_totals[id]);
+            root_totals[slot] =
+                (root_started[slot] && !root_unreadable[slot]).then_some(dir_totals[id]);
         }
     }
 
@@ -982,7 +1021,10 @@ fn scan_dir_portable(
     local_files: &mut Vec<FileRecord>,
 ) -> Vec<PathBuf> {
     let entries = match fs::read_dir(dir_path) {
-        Ok(e) => e,
+        Ok(e) => {
+            shared.mark_root_started(root_slot);
+            e
+        }
         Err(err) => {
             if root_slot.is_some() {
                 shared.mark_root_unreadable(root_slot);
@@ -996,10 +1038,15 @@ fn scan_dir_portable(
         }
     };
     let mut subdirs = Vec::new();
+    let mut processed = 0usize;
     for entry in entries {
         if !shared.take_entry(control) {
+            if processed == 0 {
+                shared.mark_root_unreadable(root_slot);
+            }
             break;
         }
+        processed += 1;
         let Ok(entry) = entry else {
             shared.mark_incomplete();
             continue;
@@ -1287,11 +1334,12 @@ mod win_walk {
     use windows::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
         FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-        FILE_ID_BOTH_DIR_INFO, FILE_LIST_DIRECTORY, FILE_SHARE_DELETE, FILE_SHARE_READ,
-        FILE_SHARE_WRITE, FIND_FIRST_EX_FLAGS, FIND_FIRST_EX_LARGE_FETCH, FileIdBothDirectoryInfo,
-        FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
-        GetDriveTypeW, GetFileInformationByHandle, GetFileInformationByHandleEx,
-        GetVolumeInformationW, GetVolumePathNameW, OPEN_EXISTING, WIN32_FIND_DATAW,
+        FILE_ID_BOTH_DIR_INFO, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
+        FILE_SHARE_READ, FILE_SHARE_WRITE, FIND_FIRST_EX_FLAGS, FIND_FIRST_EX_LARGE_FETCH,
+        FileIdBothDirectoryInfo, FindClose, FindExInfoBasic, FindExSearchNameMatch,
+        FindFirstFileExW, FindNextFileW, GetDriveTypeW, GetFileInformationByHandle,
+        GetFileInformationByHandleEx, GetVolumeInformationW, GetVolumePathNameW, OPEN_EXISTING,
+        WIN32_FIND_DATAW,
     };
     use windows::Win32::System::IO::CancelSynchronousIo;
     use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentThread};
@@ -1477,7 +1525,7 @@ mod win_walk {
         let h = unsafe {
             CreateFileW(
                 PCWSTR(w.as_ptr()),
-                FILE_LIST_DIRECTORY.0,
+                FILE_LIST_DIRECTORY.0 | FILE_READ_ATTRIBUTES.0,
                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                 None,
                 OPEN_EXISTING,
@@ -1566,15 +1614,17 @@ mod win_walk {
     ) -> Result<DirectChildrenPage, String> {
         control.check()?;
         let cancel_reg = CancelRegistry::new();
-        let done_flag = AtomicBool::new(false);
+        let done_signal = (Mutex::new(false), Condvar::new());
         let deadline = Instant::now() + budget.remaining_timeout().min(control.remaining());
 
         std::thread::scope(|scope| {
             let cancel_ref = &cancel_reg;
-            let done_ref = &done_flag;
+            let done_ref = &done_signal;
             let watcher = scope.spawn(move || {
+                let (lock, cv) = done_ref;
                 let mut cancelling = false;
-                while !done_ref.load(Ordering::Acquire) {
+                let mut done = lock.lock().unwrap_or_else(|e| e.into_inner());
+                while !*done {
                     if !cancelling && (control.cancel.is_cancelled() || Instant::now() >= deadline)
                     {
                         cancelling = true;
@@ -1582,12 +1632,21 @@ mod win_walk {
                     if cancelling {
                         cancel_ref.cancel_all();
                     }
-                    std::thread::sleep(Duration::from_millis(20));
+                    let (guard, _) = cv
+                        .wait_timeout(done, Duration::from_millis(20))
+                        .unwrap_or_else(|e| e.into_inner());
+                    done = guard;
                 }
             });
             let _thread_guard = cancel_reg.register_current_thread();
             let result = list_direct_children_inner(dir, budget, control);
-            done_flag.store(true, Ordering::Release);
+            {
+                let (lock, cv) = &done_signal;
+                if let Ok(mut done) = lock.lock() {
+                    *done = true;
+                    cv.notify_all();
+                }
+            }
             let _ = watcher.join();
             result
         })
@@ -1838,7 +1897,10 @@ mod win_walk {
             return Vec::new();
         }
         let handle = match open_dir_handle_checked(dir_path, shared.expected_vol_serial) {
-            Ok(h) => h,
+            Ok(h) => {
+                shared.mark_root_started(root_slot);
+                h
+            }
             Err(DirOpenError::AccessDenied) => {
                 shared.mark_root_unreadable(root_slot);
                 shared.record_denied(dir_path);
@@ -1853,9 +1915,13 @@ mod win_walk {
         let buf_bytes = std::mem::size_of_val(buf);
         let mut subdirs = Vec::new();
         let mut first_batch = true;
+        let mut processed = 0usize;
         loop {
             if shared.cancelled.load(Ordering::Acquire) || shared.exhausted.load(Ordering::Acquire)
             {
+                if processed == 0 {
+                    shared.mark_root_unreadable(root_slot);
+                }
                 break;
             }
             let res = unsafe {
@@ -1891,8 +1957,12 @@ mod win_walk {
                             continue;
                         }
                         if !shared.take_entry(control) {
+                            if processed == 0 {
+                                shared.mark_root_unreadable(root_slot);
+                            }
                             return subdirs;
                         }
+                        processed += 1;
                         let logical = item.end_of_file.max(0) as u64;
                         let alloc = item.allocation_size.max(0) as u64;
                         match classify_win_entry(item.attrs, item.ea_size, logical, Some(alloc)) {
@@ -2137,8 +2207,48 @@ mod tests {
         assert!(!corrupted);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].end_of_file, 1234);
+        assert_eq!(entries[0].allocation_size, 4096);
+        assert_eq!(entries[0].attrs, 0x20);
+        assert_eq!(entries[0].ea_size, 0);
+        assert_eq!(entries[0].last_write_time, 0);
         assert_eq!(entries[0].file_id, 0x0001_0000_0000_002A);
         assert_eq!(entries[0].name_u16, vec![b'a' as u16]);
+    }
+
+    #[test]
+    fn measure_ls_subdirs_returns_none_for_unstarted_subdir_when_budget_exhausted() {
+        let root = std::env::temp_dir().join(format!("cst-walk-budget-{}", uuid::Uuid::new_v4()));
+        let sub_a = root.join("a");
+        let sub_b = root.join("b");
+        fs::create_dir_all(&sub_a).unwrap();
+        fs::create_dir_all(&sub_b).unwrap();
+        for i in 0..8 {
+            fs::write(sub_a.join(format!("f{i}.bin")), vec![1u8; 64]).unwrap();
+            fs::write(sub_b.join(format!("g{i}.bin")), vec![1u8; 64]).unwrap();
+        }
+        let control = Control::new(Default::default(), Duration::from_secs(5));
+        let mut budget = WalkBudget::new(WalkLimits {
+            entries: 1,
+            timeout: Duration::from_secs(5),
+        });
+        let totals = measure_ls_subdirs(
+            &root,
+            &[],
+            &[sub_a.clone(), sub_b.clone()],
+            &mut budget,
+            &control,
+        )
+        .unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert!(budget.exhausted);
+        assert!(budget.incomplete);
+        // With an entry budget of 1 across two subdirectories containing 8 files each,
+        // any subdir that was never opened must be `None` (never misreported as `Some(0)`).
+        assert_eq!(totals.len(), 2);
+        assert!(
+            totals.iter().all(|v| *v != Some(0)),
+            "unstarted or truncated subdir must not misreport 0 bytes: {totals:?}"
+        );
     }
 
     #[test]
