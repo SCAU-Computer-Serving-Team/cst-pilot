@@ -26,8 +26,8 @@ test("侧边栏母版定义完整，会话管理画布统一复用侧栏母版",
   assert.ok(nav);
   const sidebar = descendants(nav).find((node) => node.id === "L081M1");
   const batchSidebar = descendants(nav).find((node) => node.id === "h5AY3");
-  assert.ok(sidebar && sidebar.reusable, "缺少侧边栏母版 L081M1");
-  assert.ok(batchSidebar && batchSidebar.reusable, "缺少多选侧边栏母版 h5AY3");
+  assert.ok(sidebar?.reusable, "缺少侧边栏母版 L081M1");
+  assert.ok(batchSidebar?.reusable, "缺少多选侧边栏母版 h5AY3");
   assert.deepEqual(
     sidebar.children.map((child) => child.name),
     ["侧栏上部容器", "账户与设置"],

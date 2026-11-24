@@ -1038,15 +1038,13 @@ fn scan_dir_portable(
         }
     };
     let mut subdirs = Vec::new();
-    let mut processed = 0usize;
-    for entry in entries {
+    for (processed, entry) in entries.enumerate() {
         if !shared.take_entry(control) {
             if processed == 0 {
                 shared.mark_root_unreadable(root_slot);
             }
             break;
         }
-        processed += 1;
         let Ok(entry) = entry else {
             shared.mark_incomplete();
             continue;

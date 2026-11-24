@@ -110,7 +110,7 @@ test("输入栏与模型选择器不残留旧版独立 Select 控件", () => {
     );
   }
   const composerMaster = allNodes.find((node) => node.id === "ZWAs1");
-  assert.ok(composerMaster && composerMaster.reusable, "缺少消息输入框母版 ZWAs1");
+  assert.ok(composerMaster?.reusable, "缺少消息输入框母版 ZWAs1");
   const inputGroup = webCanvas.children
     .find((node) => node.name === "01 · 工作台")
     .children.find((node) => node.name === "输入与快捷面板");
