@@ -56,25 +56,29 @@ fn localize(path: &str) -> Result<Vec<u16>, String> {
     check(unsafe {
         PdhGetCounterInfoW(counter, false, &mut size, Some(buffer.as_mut_ptr().cast()))
     })?;
-    if (size as usize) < std::mem::size_of::<PDH_COUNTER_INFO_W>()
-        || std::mem::size_of_val(buffer.as_slice()) < std::mem::size_of::<PDH_COUNTER_INFO_W>()
+    let size = size as usize;
+    if size < std::mem::size_of::<PDH_COUNTER_INFO_W>()
+        || size > std::mem::size_of_val(buffer.as_slice())
     {
-        return Err("PDH 计数器元数据缓冲过短。".into());
+        return Err("PDH 计数器元数据长度无效。".into());
     }
     let info = unsafe { &*buffer.as_ptr().cast::<PDH_COUNTER_INFO_W>() };
-    let localized = bounded_string(info.szFullPath, &buffer)?;
+    let localized = bounded_string(info.szFullPath, &buffer, size)?;
     Ok(wide(&localized))
 }
 // All string pointers must point into the PDH-owned result buffer, with a NUL
 // inside that allocation; no unbounded pointer-to-string scan is needed.
-fn bounded_string(pointer: PWSTR, buffer: &[usize]) -> Result<String, String> {
-    let start = buffer.as_ptr() as usize;
-    let end = start + std::mem::size_of_val(buffer);
-    let ptr = pointer.0 as usize;
-    if ptr < start || ptr >= end || !ptr.is_multiple_of(2) {
+fn bounded_string(pointer: PWSTR, buffer: &[usize], written: usize) -> Result<String, String> {
+    let base = buffer.as_ptr().cast::<u16>();
+    let off = (pointer.0 as usize).checked_sub(base as usize);
+    let Some(off) = off.filter(|&off| off < written && off.is_multiple_of(2)) else {
         return Err("PDH 返回无效的字符串指针。".into());
+    };
+    if written > std::mem::size_of_val(buffer) {
+        return Err("PDH 返回的字符串缓冲区长度无效。".into());
     }
-    let units = unsafe { std::slice::from_raw_parts(pointer.0, (end - ptr) / 2) };
+    // Derive the pointer from the allocation and exclude any rounding padding.
+    let units = unsafe { std::slice::from_raw_parts(base.add(off / 2), (written - off) / 2) };
     let len = units
         .iter()
         .position(|c| *c == 0)
@@ -114,8 +118,10 @@ fn values(counter: PDH_HCOUNTER, key: &str) -> Result<(Vec<CounterSample>, usize
             continue;
         }
         check(status)?;
-        if count as usize > 100_000
-            || count as usize * std::mem::size_of::<PDH_FMT_COUNTERVALUE_ITEM_W>() > capacity
+        let written = bytes as usize;
+        if written > capacity
+            || count as usize > 100_000
+            || count as usize * std::mem::size_of::<PDH_FMT_COUNTERVALUE_ITEM_W>() > written
         {
             return Err("PDH 计数器实例超过采集上限。".into());
         }
@@ -139,7 +145,7 @@ fn values(counter: PDH_HCOUNTER, key: &str) -> Result<(Vec<CounterSample>, usize
             }
             samples.push(CounterSample {
                 counter: key.into(),
-                instance: bounded_string(item.szName, &buffer)?,
+                instance: bounded_string(item.szName, &buffer, written)?,
                 value,
             });
         }
@@ -241,4 +247,19 @@ pub fn pawnio() -> Result<bool, NativeError> {
         let _ = RegCloseKey(key);
     }
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn string_terminator_must_be_within_reported_result() {
+        let buffer = [usize::from(u16::from_ne_bytes([b'A', 0]))];
+        let pointer = PWSTR(buffer.as_ptr().cast_mut().cast());
+        assert!(bounded_string(pointer, &buffer, 2).is_err());
+        assert!(bounded_string(pointer, &buffer, std::mem::size_of_val(&buffer) + 1).is_err());
+        #[cfg(target_endian = "little")]
+        assert_eq!(bounded_string(pointer, &buffer, 4).unwrap(), "A");
+    }
 }

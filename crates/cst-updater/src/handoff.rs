@@ -135,6 +135,12 @@ impl Handoff {
             .sums
             .get(layout::UPDATER_EXE_PATH)
             .ok_or("更新器哈希缺失。")?;
+        // On Windows, the read handle denies write/delete sharing. Hold it until the image
+        // has been opened by CreateProcess so verification and launch use the same executable.
+        let image = self
+            .storage
+            .open_read(&self.updater)?
+            .ok_or("独立更新器已消失。")?;
         io::same(&self.storage, &self.updater, Some(expected), &cancel)?;
         let pid = process::launch(
             &self.updater,
@@ -146,6 +152,7 @@ impl Handoff {
             ],
             &self.storage.root,
         )?;
+        drop(image);
         self.package.stage.retain = true;
         self.launched = true;
         Ok(LaunchReceipt {

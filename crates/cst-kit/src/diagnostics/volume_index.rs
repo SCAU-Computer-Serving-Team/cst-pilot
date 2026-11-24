@@ -145,12 +145,18 @@ impl Drop for FlightSub {
 
 #[derive(Default)]
 struct State {
-    /// `drive -> (monotonic_probe_seq, VolumeIdentity)` so stale out-of-order probes never overwrite newer ones.
-    identities: HashMap<String, (u64, VolumeIdentity)>,
+    /// Keep the last probe sequence even if the drive could not be identified.
+    identities: HashMap<String, (u64, Option<VolumeIdentity>)>,
     snapshots: HashMap<String, Arc<ScanSnapshot>>,
     failed: HashMap<String, (Instant, String)>,
     /// Keyed by `(drive, identity)` so in-flight scans are never shared across volume swaps.
     pending: HashMap<(String, VolumeIdentity), Arc<Flight>>,
+}
+
+impl State {
+    fn identity(&self, drive: &str) -> Option<&VolumeIdentity> {
+        self.identities.get(drive).and_then(|(_, id)| id.as_ref())
+    }
 }
 
 struct VolumeIndexInner {
@@ -226,7 +232,7 @@ impl VolumeIndex {
         let identity = self.refresh(&drive).ok()?;
         let mut state = self.inner.state.lock().ok()?;
         purge_expired(&mut state, self.inner.failed_ttl);
-        if state.identities.get(&drive).map(|(_, id)| id) != Some(&identity) {
+        if state.identity(&drive) != Some(&identity) {
             return None;
         }
         let snapshot = state.snapshots.get(&drive)?;
@@ -255,10 +261,10 @@ impl VolumeIndex {
             Err(_) => return Ok(None),
         };
         let pending_key = (drive.clone(), identity.clone());
-        let (flight, sub, spawned) = {
+        let (flight, sub) = {
             let mut state = self.inner.state.lock().map_err(|_| "卷缓存状态异常。")?;
             purge_expired(&mut state, self.inner.failed_ttl);
-            if state.identities.get(&drive).map(|(_, id)| id) != Some(&identity) {
+            if state.identity(&drive) != Some(&identity) {
                 return Err("扫描期间卷身份变化，请重试。".into());
             }
             if !force {
@@ -279,7 +285,7 @@ impl VolumeIndex {
             {
                 let f = Arc::clone(existing);
                 let s = f.subscribe(Arc::clone(&self.inner), pending_key.clone());
-                (f, s, false)
+                (f, s)
             } else {
                 let Some(slot) = MftScanSlot::try_acquire(&self.inner.active_scans) else {
                     return Err("原生卷索引并发扫描已达上限，已回退目录遍历。".into());
@@ -294,10 +300,9 @@ impl VolumeIndex {
                     Arc::clone(&f),
                     slot,
                 );
-                (f, s, true)
+                (f, s)
             }
         };
-        let _ = spawned;
         let outcome = {
             let _keep_sub = sub;
             flight.wait(control)?
@@ -346,22 +351,31 @@ fn refresh_inner(inner: &VolumeIndexInner, drive: &str) -> Result<VolumeIdentity
     let mut state = inner.state.lock().map_err(|_| "卷缓存状态异常。")?;
     purge_expired(&mut state, inner.failed_ttl);
     // Reject out-of-order stale probe completions so a slow older probe cannot clobber a newer identity.
-    if let Some((existing_seq, _)) = state.identities.get(drive)
+    let observed = current.as_ref().ok();
+    if let Some((existing_seq, latest)) = state.identities.get(drive)
         && *existing_seq > seq
     {
-        return current;
+        return if observed == latest.as_ref() {
+            current
+        } else {
+            Err("扫描期间卷身份变化，请重试。".into())
+        };
     }
-    let changed = state.identities.get(drive).map(|(_, id)| id) != current.as_ref().ok();
-    if changed {
+    if state.identity(drive) != observed {
         state.snapshots.remove(drive);
         state.failed.remove(drive);
-        state.identities.remove(drive);
+        state.pending.retain(|(pending_drive, _), flight| {
+            if pending_drive == drive {
+                flight.scan_cancel.cancel();
+                false
+            } else {
+                true
+            }
+        });
     }
-    if let Ok(identity) = &current {
-        state
-            .identities
-            .insert(drive.into(), (seq, identity.clone()));
-    }
+    state
+        .identities
+        .insert(drive.into(), (seq, observed.cloned()));
     current
 }
 
@@ -374,7 +388,6 @@ fn spawn_flight_worker(
 ) {
     let pending_key = (drive.clone(), identity.clone());
     std::thread::spawn(move || {
-        let _slot = slot;
         let scan_control = Control::new(flight.scan_cancel.clone(), Duration::from_secs(180));
         let outcome = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut snapshot = inner.source.scan_volume(&drive, &scan_control)?;
@@ -397,17 +410,21 @@ fn spawn_flight_worker(
             Err(_) => FlightOutcome::Failed("卷索引扫描工作线程异常退出。".into()),
         };
 
+        drop(slot);
         if let Ok(mut state) = inner.state.lock() {
             purge_expired(&mut state, inner.failed_ttl);
-            if state
+            let active_flight = state
                 .pending
                 .get(&pending_key)
-                .is_some_and(|active| Arc::ptr_eq(active, &flight))
-            {
-                state.pending.remove(&pending_key);
+                .is_some_and(|active| Arc::ptr_eq(active, &flight));
+            if !active_flight {
+                // A detach or cancellation invalidated this flight, even if the same volume
+                // identity was observed again before the worker completed.
+                flight.finish(FlightOutcome::Cancelled);
+                return;
             }
-            let same_identity = state.identities.get(&drive).map(|(_, id)| id) == Some(&identity);
-            if same_identity {
+            state.pending.remove(&pending_key);
+            if state.identity(&drive) == Some(&identity) {
                 match &outcome {
                     FlightOutcome::Ready(snapshot) => {
                         let merged = if let Some(old) = state.snapshots.get(&drive) {

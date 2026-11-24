@@ -350,6 +350,47 @@ fn volume_index_prevents_out_of_order_identity_clobber_and_evicts_by_byte_budget
 }
 
 #[test]
+fn delayed_volume_probe_cannot_revive_identity_after_newer_probe_fails() {
+    struct RemovedVolume {
+        entered: Barrier,
+        release: Barrier,
+        calls: AtomicUsize,
+    }
+    impl ScanSource for RemovedVolume {
+        fn identity(&self, _: &str) -> Result<VolumeIdentity, String> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.entered.wait();
+                self.release.wait();
+                Ok(id(1))
+            } else {
+                Err("volume removed".into())
+            }
+        }
+        fn scan_volume(&self, _: &str, _: &Control) -> Result<scan::ScanSnapshot, String> {
+            unreachable!("identity-only test")
+        }
+    }
+
+    let source = Arc::new(RemovedVolume {
+        entered: Barrier::new(2),
+        release: Barrier::new(2),
+        calls: AtomicUsize::new(0),
+    });
+    let index = Arc::new(VolumeIndex::new(source.clone()));
+    let mut snapshot = mock_snapshot("C:\\", &[], &[]);
+    snapshot.identity = Some(id(1));
+    let pending = {
+        let index = index.clone();
+        std::thread::spawn(move || index.is_current(&snapshot, Path::new("C:\\")))
+    };
+    source.entered.wait();
+    let removed = index.filesystem(Path::new("C:\\"));
+    source.release.wait();
+    assert!(removed.is_none());
+    assert!(!pending.join().unwrap());
+}
+
+#[test]
 fn subtree_refresh_removes_stale_descendants_and_invalidates_ancestor_totals() {
     let mut first = mock_snapshot(
         "C:\\",

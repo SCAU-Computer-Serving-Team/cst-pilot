@@ -287,7 +287,7 @@ pub(crate) fn parse_file_id_both_dir_buffer(buf: &[u8]) -> (Vec<ParsedDirEntry>,
         let ea_size = u32::from_le_bytes([h[64], h[65], h[66], h[67]]);
         let file_id =
             u64::from_le_bytes([h[96], h[97], h[98], h[99], h[100], h[101], h[102], h[103]]);
-        if !name_len.is_multiple_of(2) {
+        if name_len == 0 || !name_len.is_multiple_of(2) {
             corrupted = true;
             break;
         }
@@ -325,7 +325,7 @@ pub(crate) fn parse_file_id_both_dir_buffer(buf: &[u8]) -> (Vec<ParsedDirEntry>,
             corrupted = true;
             break;
         };
-        if next < name_end || next > buf.len() {
+        if next < name_end || next >= buf.len() {
             corrupted = true;
             break;
         }
@@ -2271,6 +2271,15 @@ mod tests {
         let (entries_trunc, corrupted_trunc) = parse_file_id_both_dir_buffer(&trunc);
         assert!(corrupted_trunc);
         assert!(entries_trunc.is_empty());
+
+        let empty = encode_dir_entry(0, 0, 0, 0x10, 0, 1, "");
+        let (entries, corrupted) = parse_file_id_both_dir_buffer(&empty);
+        assert!(corrupted && entries.is_empty());
+
+        let mut missing_next = encode_dir_entry(112, 10, 10, 0x20, 0, 1, "x");
+        missing_next.resize(112, 0);
+        let (entries, corrupted) = parse_file_id_both_dir_buffer(&missing_next);
+        assert!(corrupted && entries.len() == 1);
     }
 
     #[test]

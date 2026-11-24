@@ -74,12 +74,12 @@ pub(super) async fn execute_send_draft(
                 .creation_request_key
                 .clone()
                 .expect("home item has creation_request_key");
-            if let Err(err) = core
+            let queued = core
                 .outbox
                 .lock()
                 .expect("outbox lock")
-                .enqueue_home(item.clone())
-            {
+                .enqueue_home(item.clone());
+            if let Err(err) = queued {
                 let _ = core
                     .workspace
                     .lock()
@@ -404,12 +404,7 @@ pub(super) async fn reconcile_uncertain_items(
                                     .outbox
                                     .lock()
                                     .expect("outbox lock")
-                                    .reconcile_home_bound(
-                                        &item.client_message_id,
-                                        &sid,
-                                        false,
-                                        &err,
-                                    );
+                                    .reconcile_home_bound(&item, &sid, false, &err);
                                 if applied {
                                     report.resolved_count += 1;
                                 }
@@ -430,12 +425,7 @@ pub(super) async fn reconcile_uncertain_items(
                             .outbox
                             .lock()
                             .expect("outbox lock")
-                            .reconcile_home_bound(
-                                &item.client_message_id,
-                                &sid,
-                                already_accepted,
-                                &not_delivered,
-                            );
+                            .reconcile_home_bound(&item, &sid, already_accepted, &not_delivered);
                         if applied {
                             {
                                 let mut ws = core.workspace.lock().expect("workspace lock");
@@ -451,37 +441,21 @@ pub(super) async fn reconcile_uncertain_items(
                             report.resolved_count += 1;
                         }
                     } else if status == "missing" {
-                        // Guard against races: only restore draft & clear home if the exact item is still Uncertain.
-                        let still_uncertain = core
-                            .outbox
-                            .lock()
-                            .expect("outbox lock")
-                            .is_home_uncertain(&item.client_message_id);
-                        if !still_uncertain {
-                            continue;
-                        }
-                        let restored = core
-                            .workspace
-                            .lock()
-                            .expect("workspace lock")
-                            .restore_draft_if_empty(DraftKey::NewSession, item.to_composer_draft());
                         let not_created = ClientError::NotFound {
                             code: "session_not_created".into(),
                             message: "连接中断前会话尚未创建，可重试或移除。".into(),
                         };
-                        let applied = core
-                            .outbox
-                            .lock()
-                            .expect("outbox lock")
-                            .reconcile_home_missing(
-                                &item.client_message_id,
-                                restored,
-                                &not_created,
+                        // Hold both locks through the attempt check and the draft transfer.
+                        // Match edit_outbox_item's workspace -> outbox order.
+                        let mut workspace = core.workspace.lock().expect("workspace lock");
+                        let mut outbox = core.outbox.lock().expect("outbox lock");
+                        if outbox.is_home_uncertain(&item) {
+                            let restored = workspace.restore_draft_if_empty(
+                                DraftKey::NewSession,
+                                item.to_composer_draft(),
                             );
-                        if applied {
-                            if restored {
-                                report.restored_home_draft = true;
-                            }
+                            outbox.reconcile_home_missing(&item, restored, &not_created);
+                            report.restored_home_draft |= restored;
                             report.resolved_count += 1;
                         }
                     }
@@ -497,7 +471,7 @@ pub(super) async fn reconcile_uncertain_items(
                         .outbox
                         .lock()
                         .expect("outbox lock")
-                        .reconcile_session_uncertain(&sid, &item.client_message_id, true, None)
+                        .reconcile_session_uncertain(&sid, &item, true, None)
                     {
                         report.resolved_count += 1;
                     }
@@ -511,12 +485,7 @@ pub(super) async fn reconcile_uncertain_items(
                         .outbox
                         .lock()
                         .expect("outbox lock")
-                        .reconcile_session_uncertain(
-                            &sid,
-                            &item.client_message_id,
-                            false,
-                            Some(&not_received),
-                        )
+                        .reconcile_session_uncertain(&sid, &item, false, Some(&not_received))
                     {
                         report.resolved_count += 1;
                     }
@@ -526,12 +495,7 @@ pub(super) async fn reconcile_uncertain_items(
                         .outbox
                         .lock()
                         .expect("outbox lock")
-                        .reconcile_session_uncertain(
-                            &sid,
-                            &item.client_message_id,
-                            false,
-                            Some(&err),
-                        )
+                        .reconcile_session_uncertain(&sid, &item, false, Some(&err))
                     {
                         report.resolved_count += 1;
                     }

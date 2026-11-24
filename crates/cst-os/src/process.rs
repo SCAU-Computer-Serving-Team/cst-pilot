@@ -95,17 +95,13 @@ pub fn is_process_alive(pid: u32) -> bool {
     #[cfg(windows)]
     {
         use windows::Win32::{
-            Foundation::{CloseHandle, STILL_ACTIVE},
-            System::Threading::{
-                GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-            },
+            Foundation::{CloseHandle, WAIT_OBJECT_0},
+            System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject},
         };
-        match unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) } {
+        match unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) } {
             Ok(handle) => {
-                let mut exit_code = 0u32;
-                let alive = unsafe { GetExitCodeProcess(handle, &mut exit_code) }
-                    .map(|()| exit_code == STILL_ACTIVE.0 as u32)
-                    .unwrap_or(true);
+                // The process handle is signalled on exit, including exit code 259 (STILL_ACTIVE).
+                let alive = unsafe { WaitForSingleObject(handle, 0) } != WAIT_OBJECT_0;
                 unsafe {
                     let _ = CloseHandle(handle);
                 }
@@ -475,6 +471,17 @@ pub fn can_elevate_same_user() -> Result<bool, String> {
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exited_process_with_still_active_exit_code_is_not_live() {
+        let mut process = std::process::Command::new(system_directory().unwrap().join("cmd.exe"))
+            .args(["/d", "/c", "exit", "259"])
+            .spawn()
+            .unwrap();
+        let pid = process.id();
+        assert_eq!(process.wait().unwrap().code(), Some(259));
+        assert!(!is_process_alive(pid));
+    }
 
     #[test]
     fn trusted_windows_and_process_image_queries_succeed() {

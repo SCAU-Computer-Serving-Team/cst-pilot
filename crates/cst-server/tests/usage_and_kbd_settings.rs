@@ -212,10 +212,12 @@ async fn session_usage_endpoint_tracks_active_branch_and_compaction_boundaries()
     fs::create_dir_all(&session_dir).unwrap();
     let session_file = session_dir.join(format!("2026-11-24T00-00-00-000Z_{session_id}.jsonl"));
     // A regular session open repairs this tail; the read-only usage endpoint must leave it alone.
-    let original = format!(
+    let mut original = format!(
         "{}\n{{\"type\":",
         build_branching_session_jsonl(session_id, &clean_cwd_str)
-    );
+    )
+    .into_bytes();
+    original.push(0xff);
     fs::write(&session_file, &original).unwrap();
 
     // 1. Default leaf is `a2` (post-compaction reply on branch A): 5632 / (1307 + 5632)
@@ -233,7 +235,7 @@ async fn session_usage_endpoint_tracks_active_branch_and_compaction_boundaries()
     let body: Value = resp.json().await.unwrap();
     assert_eq!(body["sessionId"], session_id);
     assert_eq!(body["leafId"], "a2");
-    assert_eq!(fs::read_to_string(&session_file).unwrap(), original);
+    assert_eq!(fs::read(&session_file).unwrap(), original);
     assert_eq!(body["usage"]["scope"], "last_assistant");
     assert_eq!(body["usage"]["sourceEntryId"], "a2");
     let expected_a2 = 5632.0 / (1307.0 + 5632.0);
@@ -252,8 +254,12 @@ async fn session_usage_endpoint_tracks_active_branch_and_compaction_boundaries()
         .unwrap();
     assert_eq!(head.status(), 200);
     assert!(head.bytes().await.unwrap().is_empty());
-    assert_eq!(fs::read_to_string(&session_file).unwrap(), original);
+    assert_eq!(fs::read(&session_file).unwrap(), original);
     assert_eq!(server.state.pool.active_slot_count().await, 0);
+
+    // The regular session index requires UTF-8; keep its fixture's tail truncated but valid UTF-8.
+    original.pop();
+    fs::write(&session_file, original).unwrap();
 
     // 2. Navigate tree to `c1` (compaction boundary with no post-compaction assistant reply) -> null cacheHitRate & null tokens
     let nav_c1 = client
@@ -350,6 +356,38 @@ async fn session_usage_endpoint_tracks_active_branch_and_compaction_boundaries()
         .unwrap();
     assert!(after_u1["usage"]["cacheHitRate"].is_null());
 
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn cold_usage_ignores_linked_transcripts_and_rejects_duplicate_ids() {
+    let fixture = UsageTestKitDir::new();
+    let server = start_server(&fixture).await;
+    let session_id = "01a20927-1668-71fb-b50e-f0001f03f3bf";
+    let session_dir = fixture.0.join("data/sessions/project");
+    fs::create_dir_all(&session_dir).unwrap();
+    let external = fixture.0.join("outside-sessions.jsonl");
+    let transcript = build_branching_session_jsonl(session_id, &fixture.0.to_string_lossy());
+    fs::write(&external, &transcript).unwrap();
+    let first = session_dir.join("one.jsonl");
+    fs::hard_link(&external, &first).unwrap();
+    let client = reqwest::Client::new();
+    let request = || {
+        client
+            .get(format!(
+                "{}/api/sessions/{session_id}/usage",
+                server.base_url()
+            ))
+            .header("Host", format!("127.0.0.1:{}", server.port()))
+            .bearer_auth(server.app_token())
+    };
+    assert_eq!(request().send().await.unwrap().status(), 404);
+    fs::remove_file(&first).unwrap();
+    fs::write(&first, &transcript).unwrap();
+    assert_eq!(request().send().await.unwrap().status(), 200);
+    fs::write(session_dir.join("two.jsonl"), &transcript).unwrap();
+    assert_eq!(request().send().await.unwrap().status(), 404);
+    assert_eq!(server.state.pool.active_slot_count().await, 0);
     server.shutdown().await;
 }
 

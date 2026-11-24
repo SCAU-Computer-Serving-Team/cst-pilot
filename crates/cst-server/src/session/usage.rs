@@ -1,3 +1,8 @@
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader, Read, Seek};
+use std::path::Path;
+
+use cst_os::Storage;
 use pi_agent::AgentMessage;
 use pi_ai::StopReason;
 use pi_session::{
@@ -117,6 +122,114 @@ pub fn build_session_usage_payload(
     })
 }
 
+fn session_not_found() -> SessionPoolError {
+    SessionPoolError::NotFound("会话不存在或 ID 不唯一".to_owned())
+}
+
+fn usage_io(error: std::io::Error) -> SessionPoolError {
+    SessionPoolError::Storage(StorageError::from_io(&error, "读取会话用量"))
+}
+
+fn parse_line(line: &[u8]) -> Option<FileEntry> {
+    std::str::from_utf8(line)
+        .ok()
+        .and_then(parse_session_entry_line)
+}
+
+fn has_session_id(file: &mut File, id: &str) -> bool {
+    const HEADER_LIMIT: u64 = 1024 * 1024;
+    let mut header = BufReader::new(file.take(HEADER_LIMIT + 1));
+    let mut line = Vec::new();
+    let mut scanned = 0;
+    loop {
+        line.clear();
+        let Ok(n) = header.read_until(b'\n', &mut line) else {
+            return false;
+        };
+        scanned += n as u64;
+        if n == 0 || scanned > HEADER_LIMIT {
+            return false;
+        }
+        if !line.iter().all(u8::is_ascii_whitespace) {
+            return matches!(parse_line(&line), Some(FileEntry::Session(h)) if h.id == id);
+        }
+    }
+}
+
+fn read_saved_manager(
+    root: &Path,
+    data: &Path,
+    id: &str,
+) -> Result<Option<SessionManager>, SessionPoolError> {
+    if !data.join("sessions").exists() {
+        return Ok(None);
+    }
+    // Honor the configured data-root override while validating and pinning its descendants.
+    let (anchor, rel) = data
+        .strip_prefix(root)
+        .map_or((data, Path::new("")), |rel| (root, rel));
+    let storage = Storage::new(anchor).map_err(SessionPoolError::Conflict)?;
+    let relative = rel.join("sessions");
+    let _root_pin = storage
+        .pin_directory(&relative, false)
+        .map_err(SessionPoolError::Conflict)?;
+    let root = storage.root.join(&relative);
+    let mut dirs = vec![relative];
+    for entry in fs::read_dir(&root)
+        .map_err(usage_io)?
+        .filter_map(Result::ok)
+    {
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            dirs.push(dirs[0].join(entry.file_name()));
+        }
+    }
+    let mut matched = None;
+    for dir in dirs {
+        let Ok(_pin) = storage.pin_directory(&dir, false) else {
+            continue;
+        };
+        let Ok(entries) = fs::read_dir(storage.root.join(dir)) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Ok(Some(mut file)) = storage.open_read(&path) else {
+                continue;
+            };
+            if has_session_id(&mut file, id) && matched.replace(file).is_some() {
+                return Err(session_not_found());
+            }
+        }
+    }
+    let Some(mut file) = matched else {
+        return Ok(None);
+    };
+    file.rewind().map_err(usage_io)?;
+    let mut reader = BufReader::new(file);
+    let mut entries = Vec::new();
+    let mut line = Vec::new();
+    while reader.read_until(b'\n', &mut line).map_err(usage_io)? != 0 {
+        if let Some(entry) = parse_line(&line) {
+            entries.push(entry);
+        }
+        line.clear();
+    }
+    let Some(FileEntry::Session(header)) = entries.first() else {
+        return Err(SessionPoolError::Conflict(
+            "会话文件缺少有效头部".to_owned(),
+        ));
+    };
+    if header.id != id {
+        return Err(session_not_found());
+    }
+    SessionManager::in_memory(header.cwd.clone(), None, Some(entries))
+        .map(Some)
+        .map_err(|err| SessionPoolError::Conflict(err.to_string()))
+}
+
 impl SessionPool {
     /// Read a loaded session or project a saved transcript without opening a writer or inbox.
     pub async fn read_session_usage(
@@ -124,48 +237,25 @@ impl SessionPool {
         id: &str,
     ) -> Result<SessionUsagePayload, SessionPoolError> {
         let _loading = self.load_locks.lock(id).await;
-        let not_found = || SessionPoolError::NotFound("会话不存在或 ID 不唯一".to_owned());
         if self.is_deleted_sync(id)? {
-            return Err(not_found());
+            return Err(session_not_found());
         }
         let loaded = self.slots.lock().await.get(id).cloned();
         if let Some(slot) = loaded {
             return Ok(build_session_usage_payload(id, slot.session()));
         }
 
-        let sessions = self.list_all_project_sessions().await;
-        let mut matches = sessions.iter().filter(|info| info.id == id);
+        let kit = self.host.kit();
+        let root = kit.root().to_owned();
+        let data = kit.data_dir().to_owned();
+        let saved_id = id.to_owned();
+        let saved =
+            tokio::task::spawn_blocking(move || read_saved_manager(&root, &data, &saved_id))
+                .await
+                .map_err(|_| SessionPoolError::Conflict("读取会话用量任务异常退出".to_owned()))??;
         let runtime = self.host.auth().runtime();
         let default_model = || default_model_reference(&self.settings_manager());
-        let (leaf_id, usage, context_usage) = if let Some(info) = matches.next() {
-            if matches.next().is_some() {
-                return Err(not_found());
-            }
-            let bytes = tokio::fs::read(&info.path).await.map_err(|err| {
-                SessionPoolError::Storage(StorageError::from_io(&err, "读取会话用量"))
-            })?;
-            let mut lines = bytes
-                .split(|&byte| byte == b'\n')
-                .filter(|line| !line.iter().all(u8::is_ascii_whitespace));
-            let parse_line = |line| {
-                std::str::from_utf8(line)
-                    .ok()
-                    .and_then(parse_session_entry_line)
-            };
-            let Some(FileEntry::Session(header)) = lines.next().and_then(parse_line) else {
-                return Err(SessionPoolError::Conflict(
-                    "会话文件缺少有效头部".to_owned(),
-                ));
-            };
-            if header.id != id {
-                return Err(not_found());
-            }
-            let cwd = header.cwd.clone();
-            let entries = std::iter::once(FileEntry::Session(header))
-                .chain(lines.filter_map(parse_line))
-                .collect();
-            let manager = SessionManager::in_memory(cwd, None, Some(entries))
-                .map_err(|err| SessionPoolError::Conflict(err.to_string()))?;
+        let (leaf_id, usage, context_usage) = if let Some(manager) = saved {
             let branch = manager.get_branch(None);
             let projection = manager.build_session_projection();
             let (provider, model_id) = projection
@@ -194,7 +284,7 @@ impl SessionPool {
                     .values()
                     .any(|saved| saved.as_deref() == Some(id))
             {
-                return Err(not_found());
+                return Err(session_not_found());
             }
             let (provider, model_id) = unflushed
                 .and_then(|saved| saved.model)
