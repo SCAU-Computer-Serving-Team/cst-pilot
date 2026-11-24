@@ -12,11 +12,92 @@ export interface ShaderGateInputs {
 }
 
 const HARDWARE_SAMPLING_CHANNEL = "cst-pilot-hardware-sampling";
-const HARDWARE_SAMPLING_EVENT = "cst-pilot:hardware-sampling";
-let hardwareSamplingActive = false;
+const SAMPLING_HEARTBEAT_MS = 15_000;
+// Hidden tabs can be throttled to one timer wakeup per minute.
+const SAMPLING_LEASE_MS = 90_000;
+
+export class HardwareSamplingSources {
+	local = false;
+	private readonly remote = new Map<string, number>();
+
+	update(source: string, expiresAt: number | null) {
+		if (expiresAt === null) this.remote.delete(source);
+		else this.remote.set(source, expiresAt);
+	}
+
+	nextExpiry(now: number): number {
+		let next = Infinity;
+		for (const [source, expiresAt] of this.remote) {
+			if (expiresAt <= now) this.remote.delete(source);
+			else next = Math.min(next, expiresAt);
+		}
+		return next;
+	}
+
+	active(now: number): boolean {
+		return this.nextExpiry(now) < Infinity || this.local;
+	}
+}
+
+type SamplingMessage = { source: string; expiresAt: number | null } | { request: true };
+
+const sampling = new HardwareSamplingSources();
+const listeners = new Set<(active: boolean) => void>();
+let notifiedActive = false;
+let channel: BroadcastChannel | null | undefined;
+let source: string;
+let heartbeat: number | undefined;
+let expiry: number | undefined;
 
 export function isHardwareSamplingActive(): boolean {
-	return hardwareSamplingActive;
+	return sampling.active(Date.now());
+}
+
+function notifySampling() {
+	const now = Date.now();
+	const next = sampling.nextExpiry(now);
+	window.clearTimeout(expiry);
+	expiry = next < Infinity ? window.setTimeout(notifySampling, next - now) : undefined;
+	const active = sampling.local || next < Infinity;
+	if (active !== notifiedActive) {
+		notifiedActive = active;
+		for (const listener of listeners) listener(active);
+	}
+}
+
+function announceSampling(active: boolean) {
+	channel?.postMessage({ source, expiresAt: active ? Date.now() + SAMPLING_LEASE_MS : null });
+}
+
+function connectSamplingChannel() {
+	if (channel !== undefined || typeof BroadcastChannel === "undefined") return;
+	try {
+		channel = new BroadcastChannel(HARDWARE_SAMPLING_CHANNEL);
+		source = crypto.randomUUID();
+		channel.onmessage = ({ data }: MessageEvent<SamplingMessage>) => {
+			if (!data || typeof data !== "object") return;
+			if ("request" in data) {
+				if (sampling.local) announceSampling(true);
+			} else if (typeof data.source === "string" && (data.expiresAt === null || Number.isFinite(data.expiresAt))) {
+				sampling.update(
+					data.source,
+					data.expiresAt === null ? null : Math.min(data.expiresAt, Date.now() + SAMPLING_LEASE_MS),
+				);
+				notifySampling();
+			}
+		};
+		// A tab opened mid-sample requests current leases without waiting for the next heartbeat.
+		channel.postMessage({ request: true });
+		window.addEventListener("pagehide", () => {
+			if (sampling.local) announceSampling(false);
+		});
+		window.addEventListener("pageshow", () => {
+			if (sampling.local) announceSampling(true);
+		});
+	} catch {
+		channel?.close();
+		channel = null;
+	}
 }
 
 const SOFTWARE_RENDERER_PATTERN =
@@ -28,50 +109,23 @@ export function isSoftwareWebGlRenderer(renderer: unknown, vendor?: unknown): bo
 	return text.length > 0 && SOFTWARE_RENDERER_PATTERN.test(text);
 }
 
-/** 更新硬件采样停帧标志并跨标签页同步，供 sys(gpu)/sys(sensor) 采样期间强制 0 FPS 停帧。 */
+/** Publish this tab's sampling state without changing any other tab's lease. */
 export function setHardwareSamplingActive(active: boolean): void {
-	if (hardwareSamplingActive === active) return;
-	hardwareSamplingActive = active;
-	if (typeof window !== "undefined") {
-		window.dispatchEvent(new CustomEvent<boolean>(HARDWARE_SAMPLING_EVENT, { detail: active }));
-	}
-	if (typeof BroadcastChannel !== "undefined") {
-		try {
-			const channel = new BroadcastChannel(HARDWARE_SAMPLING_CHANNEL);
-			channel.postMessage({ active });
-			channel.close();
-		} catch {
-			/* 隐私模式或受限环境下忽略跨标签页广播失败。 */
-		}
-	}
+	if (typeof window === "undefined" || sampling.local === active) return;
+	sampling.local = active;
+	connectSamplingChannel();
+	window.clearInterval(heartbeat);
+	heartbeat = active && channel ? window.setInterval(() => announceSampling(true), SAMPLING_HEARTBEAT_MS) : undefined;
+	announceSampling(active);
+	notifySampling();
 }
 
 export function subscribeHardwareSampling(onChange: (active: boolean) => void): () => void {
 	if (typeof window === "undefined") return () => {};
-	const onLocal = (event: Event) => {
-		if (event instanceof CustomEvent && typeof event.detail === "boolean") {
-			hardwareSamplingActive = event.detail;
-			onChange(hardwareSamplingActive);
-		}
-	};
-	window.addEventListener(HARDWARE_SAMPLING_EVENT, onLocal);
-	let channel: BroadcastChannel | null = null;
-	if (typeof BroadcastChannel !== "undefined") {
-		try {
-			channel = new BroadcastChannel(HARDWARE_SAMPLING_CHANNEL);
-			channel.onmessage = (event: MessageEvent<{ active?: unknown }>) => {
-				if (typeof event.data?.active === "boolean") {
-					hardwareSamplingActive = event.data.active;
-					onChange(hardwareSamplingActive);
-				}
-			};
-		} catch {
-			channel = null;
-		}
-	}
+	connectSamplingChannel();
+	listeners.add(onChange);
 	return () => {
-		window.removeEventListener(HARDWARE_SAMPLING_EVENT, onLocal);
-		channel?.close();
+		listeners.delete(onChange);
 	};
 }
 

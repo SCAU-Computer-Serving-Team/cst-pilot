@@ -976,20 +976,29 @@ impl AppShell {
             ThemeModeDto::Light => ThemeModeDto::Dark,
             ThemeModeDto::Dark => ThemeModeDto::System,
         };
-        self.theme_preference = next_mode;
-        apply_desktop_theme(next_mode, Some(window), None, cx);
-        self.save_theme_mode(next_mode, cx);
+        self.set_theme_preference(next_mode, window, cx);
+    }
+
+    fn set_theme_preference(
+        &mut self,
+        mode: ThemeModeDto,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.theme_preference = mode;
+        apply_desktop_theme(mode, Some(window), None, cx);
+        self.save_theme_mode(mode, window, cx);
         cx.notify();
     }
 
-    fn save_theme_mode(&mut self, mode: ThemeModeDto, cx: &mut Context<Self>) {
+    fn save_theme_mode(&mut self, mode: ThemeModeDto, window: &mut Window, cx: &mut Context<Self>) {
         if self.theme_saving {
             self.pending_theme = Some(mode);
             return;
         }
         self.theme_saving = true;
         let client = self.client.clone();
-        cx.spawn(async move |weak, cx| {
+        cx.spawn_in(window, async move |weak, cx| {
             let res = cx
                 .background_executor()
                 .spawn(async move {
@@ -1001,13 +1010,19 @@ impl AppShell {
                         .await
                 })
                 .await;
-            let _ = weak.update(cx, |this, cx| {
+            let _ = weak.update_in(cx, |this, window, cx| {
                 this.theme_saving = false;
+                let next = this.pending_theme.take();
                 if let Err(err) = res {
                     this.show_workspace_error(err.to_string(), cx);
+                    if next.is_none() {
+                        let saved = this.client.snapshot().desktop_settings.theme;
+                        this.theme_preference = saved;
+                        apply_desktop_theme(saved, Some(window), None, cx);
+                    }
                 }
-                if let Some(next) = this.pending_theme.take() {
-                    this.save_theme_mode(next, cx);
+                if let Some(next) = next {
+                    this.save_theme_mode(next, window, cx);
                 }
                 cx.notify();
             });
@@ -2367,6 +2382,9 @@ impl AppShell {
         match event {
             SettingsViewEvent::NavigateBack => {
                 self.navigate_back(window, cx);
+            }
+            SettingsViewEvent::ThemeChanged(theme) => {
+                self.set_theme_preference(*theme, window, cx);
             }
             SettingsViewEvent::OpenUpdateDialog => {
                 self.open_update_dialog(window, cx);

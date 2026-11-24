@@ -24,7 +24,7 @@ use crate::settings::preferences_tab::{PreferencesTabEvent, PreferencesTabView};
 use crate::settings::providers_tab::{ProvidersTabEvent, ProvidersTabView};
 use crate::settings::shortcuts_tab::render_shortcuts_tab;
 use crate::theme::{
-    DesktopThemeGlobal, apply_desktop_theme, apply_scale, cjk_inline_label, height, layout, motion,
+    DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion,
     render_subpage_header_xwjof, scale, space,
 };
 
@@ -103,6 +103,7 @@ impl SettingsCategory {
 #[derive(Debug, Clone)]
 pub enum SettingsViewEvent {
     NavigateBack,
+    ThemeChanged(ThemeModeDto),
     OpenUpdateDialog,
     CancelUpdate,
     OpenLoginOrAccount { signed_in: bool },
@@ -120,8 +121,6 @@ pub struct SettingsView {
     tab_rects: Rc<[Cell<(f32, f32)>; 4]>,
     providers_tab: Entity<ProvidersTabView>,
     preferences_tab: Entity<PreferencesTabView>,
-    theme_saving: bool,
-    pending_theme: Option<ThemeModeDto>,
     keyboard_style_saving: bool,
     pending_keyboard_style: Option<KeyboardFocusStyleDto>,
     _subscriptions: Vec<Subscription>,
@@ -167,40 +166,10 @@ impl SettingsView {
             tab_rects: Rc::new(Default::default()),
             providers_tab,
             preferences_tab,
-            theme_saving: false,
-            pending_theme: None,
             keyboard_style_saving: false,
             pending_keyboard_style: None,
             _subscriptions: subs,
         }
-    }
-
-    fn save_theme_mode(&mut self, theme: ThemeModeDto, cx: &mut Context<Self>) {
-        if self.theme_saving {
-            self.pending_theme = Some(theme);
-            return;
-        }
-        self.theme_saving = true;
-        let client = self.client.clone();
-        cx.spawn(async move |weak, cx| {
-            let result = client
-                .patch_desktop_settings(DesktopSettingsPatchDto {
-                    theme: Some(theme),
-                    ..DesktopSettingsPatchDto::default()
-                })
-                .await;
-            let _ = weak.update(cx, |this, cx| {
-                this.theme_saving = false;
-                if let Err(err) = result {
-                    cx.emit(SettingsViewEvent::ErrorMessage(err.to_string()));
-                }
-                if let Some(next) = this.pending_theme.take() {
-                    this.save_theme_mode(next, cx);
-                }
-                cx.notify();
-            });
-        })
-        .detach();
     }
 
     fn save_keyboard_style(&mut self, style: KeyboardFocusStyleDto, cx: &mut Context<Self>) {
@@ -420,12 +389,8 @@ impl Render for SettingsView {
                 snap.update_state.as_deref(),
                 mono_family,
                 &palette,
-                Rc::new(move |theme: ThemeModeDto, w, cx| {
-                    let _ = apply_desktop_theme(theme, Some(w), None, cx);
-                    e_theme.update(cx, |this, cx| {
-                        this.save_theme_mode(theme, cx);
-                        cx.notify();
-                    });
+                Rc::new(move |theme: ThemeModeDto, _, cx| {
+                    e_theme.update(cx, |_, cx| cx.emit(SettingsViewEvent::ThemeChanged(theme)));
                 }),
                 Rc::new(move |style: KeyboardFocusStyleDto, _, cx| {
                     e_kbd_style.update(cx, |this, cx| this.save_keyboard_style(style, cx));

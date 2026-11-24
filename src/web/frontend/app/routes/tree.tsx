@@ -178,39 +178,50 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 			choiceDialogRef.current?.querySelector<HTMLElement>(".summary-option")?.focus({ preventScroll: true });
 		});
 		const onKey = (event: KeyboardEvent) => {
-			if (event.isComposing || event.keyCode === 229) return;
+			const dialog = choiceDialogRef.current;
+			if (
+				!dialog ||
+				dialog.closest("[inert]") ||
+				event.defaultPrevented ||
+				event.isComposing ||
+				event.keyCode === 229
+			)
+				return;
 			if (event.key === "Escape") {
 				event.preventDefault();
 				setChoice("");
 				return;
 			}
-			if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey && choiceDialogRef.current) {
-				const items = focusableElements(choiceDialogRef.current);
+			if (event.key === "Tab" && !event.ctrlKey && !event.altKey && !event.metaKey) {
+				const items = focusableElements(dialog);
 				const active =
-					document.activeElement instanceof HTMLElement && choiceDialogRef.current.contains(document.activeElement)
+					document.activeElement instanceof HTMLElement && dialog.contains(document.activeElement)
 						? document.activeElement
 						: null;
 				const target = resolveDialogTabTarget(items, active, event.shiftKey);
 				if (target) {
 					event.preventDefault();
-					if (target === "dialog") choiceDialogRef.current.focus();
+					if (target === "dialog") dialog.focus();
 					else target.focus();
 				}
 				return;
 			}
+			if (!isNavigationKeyEvent(event)) return;
 			if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+				const options = [...dialog.querySelectorAll<HTMLButtonElement>(".summary-option")];
+				if (options.length === 0) return;
 				event.preventDefault();
-				const next = (choiceIndexRef.current + (event.key === "ArrowUp" ? 2 : 1)) % 3;
+				const active = document.activeElement;
+				const focused = active instanceof HTMLButtonElement ? options.indexOf(active) : -1;
+				const from = focused >= 0 ? focused : choiceIndexRef.current;
+				const step = event.key === "ArrowUp" ? -1 : 1;
+				const next = (from + step + options.length) % options.length;
 				setChoiceIndex(next);
-				const options = choiceDialogRef.current?.querySelectorAll<HTMLButtonElement>(".summary-option");
-				options?.[next]?.focus({ preventScroll: true });
+				options[next]?.focus({ preventScroll: true });
 				return;
 			}
 			if (event.key === "Enter") {
-				if (
-					document.activeElement instanceof HTMLButtonElement &&
-					choiceDialogRef.current?.contains(document.activeElement)
-				) {
+				if (document.activeElement instanceof HTMLButtonElement && dialog.contains(document.activeElement)) {
 					return;
 				}
 				event.preventDefault();

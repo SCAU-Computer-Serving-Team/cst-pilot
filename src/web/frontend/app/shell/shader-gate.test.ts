@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+	HardwareSamplingSources,
 	HOME_SHADER_UNIFORMS,
 	isSoftwareWebGlRenderer,
 	normalizeBackgroundKind,
@@ -53,6 +54,20 @@ test("着色器帧门控仅在可见、聚焦、未暂停且非减少动态时�
 		}),
 		false,
 	);
+});
+
+test("标签页分别释放采样状态，异常关闭后剩余租约过期", () => {
+	const sources = new HardwareSamplingSources();
+	sources.local = true;
+	sources.update("tab-a", 100);
+	sources.update("tab-b", 150);
+	sources.update("tab-a", null);
+	assert.equal(sources.nextExpiry(0), 150);
+	sources.local = false;
+	assert.equal(sources.active(120), true);
+	sources.update("tab-b", 200);
+	assert.equal(sources.active(150), true);
+	assert.equal(sources.active(200), false);
 });
 
 test("主页与登录页着色器参数严格对齐 cst-pilot-web.pen 与 storybook.html", () => {
