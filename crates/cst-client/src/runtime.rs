@@ -831,6 +831,20 @@ impl ClientHandle {
         .await
     }
 
+    pub async fn navigate_session_tree_to_leaf(
+        &self,
+        session_id: String,
+        entry_id: String,
+        expected_leaf: Option<String>,
+    ) -> Result<Value, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.navigate_session_tree_to_leaf(&session_id, &entry_id, expected_leaf.as_deref())
+                .await
+        })
+        .await
+    }
+
     pub async fn edit_queue_item(
         &self,
         session_id: String,

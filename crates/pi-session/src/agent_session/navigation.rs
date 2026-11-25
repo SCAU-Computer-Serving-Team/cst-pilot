@@ -10,6 +10,30 @@ impl AgentSession {
         target_id: &str,
         options: NavigateTreeOptions,
     ) -> Result<NavigateTreeResult, String> {
+        self.navigate_tree_admitted(target_id, options, None).await
+    }
+
+    /// Select an exact saved leaf for search without stopping a run or rewinding a user entry.
+    /// `expected_leaf` is the leaf observed before the request, including an empty branch.
+    pub async fn navigate_tree_to_leaf(
+        &self,
+        target_id: &str,
+        expected_leaf: Option<&str>,
+    ) -> Result<NavigateTreeResult, String> {
+        self.navigate_tree_admitted(
+            target_id,
+            NavigateTreeOptions::default(),
+            Some(expected_leaf),
+        )
+        .await
+    }
+
+    async fn navigate_tree_admitted(
+        &self,
+        target_id: &str,
+        options: NavigateTreeOptions,
+        expected_leaf: Option<Option<&str>>,
+    ) -> Result<NavigateTreeResult, String> {
         let cancel = CancellationToken::new();
         {
             let _admission = self
@@ -27,10 +51,19 @@ impl AgentSession {
             if self.is_compacting() {
                 return Err("Wait for the current compaction or tree navigation to finish before navigating the session tree.".to_owned());
             }
+            if let Some(expected) = expected_leaf {
+                if !self.is_idle() {
+                    return Err("会话正在执行".to_owned());
+                }
+                if !self.with_session_manager(|sm| sm.get_leaf_id() == expected) {
+                    return Err("当前分支已变更，请重新定位".to_owned());
+                }
+            }
             *self.inner.branch_summary_cancel.lock().expect("lock") = Some(cancel.clone());
         }
         let session = self.clone();
         let target_id = target_id.to_owned();
+        let expected_leaf = expected_leaf.map(|leaf| leaf.map(str::to_owned));
         tokio::spawn(async move {
             let _active = ActiveAuxiliaryGuard {
                 session: session.downgrade(),
@@ -39,7 +72,7 @@ impl AgentSession {
             RUN_SESSION
                 .scope(
                     Arc::as_ptr(&session.inner) as usize,
-                    session.navigate_tree_internal(&target_id, options, cancel),
+                    session.navigate_tree_internal(&target_id, options, cancel, expected_leaf),
                 )
                 .await
         })
@@ -52,14 +85,23 @@ impl AgentSession {
         target_id: &str,
         options: NavigateTreeOptions,
         cancel: CancellationToken,
+        expected_leaf: Option<Option<String>>,
     ) -> Result<NavigateTreeResult, String> {
         let old_leaf_id = self.with_session_manager(|sm| sm.get_leaf_id().map(ToOwned::to_owned));
+        let exact_leaf = expected_leaf.is_some();
+        if expected_leaf
+            .as_ref()
+            .is_some_and(|expected| expected != &old_leaf_id)
+        {
+            return Err("当前分支已变更，请重新定位".to_owned());
+        }
         let target_entry = self
             .with_session_manager(|sm| sm.get_entry(target_id).cloned())
             .ok_or_else(|| format!("Entry {target_id} not found"))?;
         // Editing a user/custom message at the current leaf still rewinds to its parent.
-        let rewinds_to_parent = matches!(&target_entry, SessionEntry::Message(m) if m.message.role() == "user")
-            || matches!(&target_entry, SessionEntry::CustomMessage(_));
+        let rewinds_to_parent = !exact_leaf
+            && (matches!(&target_entry, SessionEntry::Message(m) if m.message.role() == "user")
+                || matches!(&target_entry, SessionEntry::CustomMessage(_)));
         if old_leaf_id.as_deref() == Some(target_id) && !rewinds_to_parent {
             return Ok(NavigateTreeResult::default());
         }
@@ -163,6 +205,7 @@ impl AgentSession {
 
         // 若目标节点为 user 或 custom_message，将叶节点移至其 parent_id 并回填编辑器文本
         let (new_leaf_id, editor_text): (Option<String>, Option<String>) = match &target_entry {
+            _ if exact_leaf => (Some(target_id.to_owned()), None),
             SessionEntry::Message(m) if m.message.role() == "user" => {
                 let text = match &m.message {
                     AgentMessage::User(u) => match &u.content {
@@ -211,8 +254,18 @@ impl AgentSession {
                 summary_entry = Some(bs);
             }
         } else if let Some(nl) = &new_leaf_id {
-            self.with_session_manager_internal(|sm| sm.branch(nl))
-                .map_err(|e| e.to_string())?;
+            self.with_session_manager_internal(|sm| {
+                if expected_leaf
+                    .as_ref()
+                    .is_some_and(|expected| sm.get_leaf_id() != expected.as_deref())
+                {
+                    return Err(SessionStoreError::InvalidOperation(
+                        "当前分支已变更，请重新定位".to_owned(),
+                    ));
+                }
+                sm.branch(nl)
+            })
+            .map_err(|e| e.to_string())?;
         } else {
             self.with_session_manager_internal(SessionManager::reset_leaf);
         }

@@ -199,6 +199,24 @@
       "expectTier": "none"
     },
     {
+      "name": "ascii_separated_words_are_not_pinyin",
+      "text": "中文 a b",
+      "query": "ab",
+      "expectMatch": false,
+      "minScore": 0,
+      "maxScore": 0,
+      "expectTier": "none"
+    },
+    {
+      "name": "fuzzy_subsequence_does_not_cross_whitespace",
+      "text": "a b c",
+      "query": "abc",
+      "expectMatch": false,
+      "minScore": 0,
+      "maxScore": 0,
+      "expectTier": "none"
+    },
+    {
       "name": "blank_query_no_match",
       "text": "C 盘空间与硬盘信息",
       "query": "   ",

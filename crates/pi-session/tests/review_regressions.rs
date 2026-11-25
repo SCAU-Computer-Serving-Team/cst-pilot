@@ -47,6 +47,115 @@ async fn navigating_to_the_current_user_leaf_rewinds_and_returns_editor_text() {
     assert!(session.with_session_manager(|manager| manager.get_leaf_id().is_none()));
 }
 
+#[tokio::test]
+async fn search_navigation_preserves_user_leaf_and_rejects_stale_return() {
+    let models = Arc::new(Models::default());
+    let registered = register_faux_provider(&models);
+    let mut manager = SessionManager::in_memory("/search-navigation", None, None).unwrap();
+    let first = manager
+        .append_message(AgentMessage::User(UserMessage::new("first")))
+        .unwrap();
+    let second = manager
+        .append_message(AgentMessage::User(UserMessage::new("second")))
+        .unwrap();
+    let session = AgentSession::new(AgentSessionOptions::new(
+        "/search-navigation",
+        registered.model,
+        models,
+        manager,
+    ))
+    .unwrap();
+
+    let moved = session
+        .navigate_tree_to_leaf(&first, Some(&second))
+        .await
+        .unwrap();
+    assert!(!moved.cancelled);
+    assert!(moved.editor_text.is_none());
+    assert!(session.with_session_manager(|manager| manager.get_leaf_id() == Some(first.as_str())));
+
+    assert!(
+        session
+            .navigate_tree_to_leaf(&second, Some(&second))
+            .await
+            .is_err()
+    );
+    assert!(session.with_session_manager(|manager| manager.get_leaf_id() == Some(first.as_str())));
+    session
+        .navigate_tree_to_leaf(&second, Some(&first))
+        .await
+        .unwrap();
+    assert!(session.with_session_manager(|manager| manager.get_leaf_id() == Some(second.as_str())));
+}
+
+#[tokio::test]
+async fn search_navigation_does_not_interrupt_a_running_tool() {
+    use std::time::Duration;
+    use tokio::sync::Notify;
+
+    let models = Arc::new(Models::default());
+    let registered = register_faux_provider(&models);
+    let mut manager = SessionManager::in_memory("/search-busy", None, None).unwrap();
+    let leaf = manager
+        .append_message(AgentMessage::User(UserMessage::new("saved")))
+        .unwrap();
+    let started = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let mut options =
+        AgentSessionOptions::new("/search-busy", registered.model.clone(), models, manager);
+    options.base_tools = vec![ToolDefinition::new(
+        "wait_tool",
+        "Wait",
+        "Wait",
+        json!({"type":"object"}),
+        Arc::new({
+            let started = started.clone();
+            let release = release.clone();
+            move |_, _, _, _, _| {
+                let started = started.clone();
+                let release = release.clone();
+                Box::pin(async move {
+                    started.notify_one();
+                    release.notified().await;
+                    Ok(AgentToolResult::text("completed"))
+                })
+            }
+        }),
+    )];
+    let session = AgentSession::new(options).unwrap();
+    registered.set_responses(vec![
+        FauxResponseStep::Static(faux_assistant_message(
+            vec![faux_tool_call(
+                "wait_tool",
+                JsonObject::new(),
+                Some("wait-1".to_owned()),
+            )],
+            Some(StopReason::ToolUse),
+        )),
+        FauxResponseStep::Static(faux_text_message("completed")),
+    ]);
+    let agent = session.clone();
+    let run = tokio::spawn(async move { agent.prompt("run", None).await });
+    tokio::time::timeout(Duration::from_secs(3), started.notified())
+        .await
+        .unwrap();
+    let current = session.with_session_manager(|manager| manager.get_leaf_id().map(str::to_owned));
+    assert!(
+        session
+            .navigate_tree_to_leaf(&leaf, current.as_deref())
+            .await
+            .is_err()
+    );
+    assert!(session.is_streaming());
+    release.notify_one();
+    tokio::time::timeout(Duration::from_secs(3), run)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(session.with_session_manager(|manager| manager.get_leaf_id() != Some(leaf.as_str())));
+}
+
 #[test]
 fn explicit_thinking_level_wins_over_persisted_session_history() {
     let models = Arc::new(Models::default());

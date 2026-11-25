@@ -22,13 +22,29 @@ const MAX_FUZZY_SCAN_CHARS: usize = 1500;
 static PINYIN_DATA: LazyLock<PinyinData> =
     LazyLock::new(|| PinyinData::new(PinyinNotation::Ascii | PinyinNotation::AsciiFirstLetter));
 
-/// Character-index highlight range `[start, end)` in Unicode scalar values (matching JS string slices
-/// for BMP text and Rust `.chars()`).
+/// Character-index highlight range `[start, end)` in Unicode scalar values, not UTF-8 bytes or UTF-16 units.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MatchSpan {
     pub start: usize,
     pub end: usize,
+}
+
+/// Converts scalar spans to UTF-8 byte ranges for rendering; drops invalid spans.
+pub fn scalar_spans_to_byte_ranges(text: &str, spans: &[MatchSpan]) -> Vec<std::ops::Range<usize>> {
+    if spans.is_empty() {
+        return Vec::new();
+    }
+    let offsets: Vec<_> = text
+        .char_indices()
+        .map(|(offset, _)| offset)
+        .chain(std::iter::once(text.len()))
+        .collect();
+    spans
+        .iter()
+        .filter(|span| span.start < span.end)
+        .filter_map(|span| Some(*offsets.get(span.start)?..*offsets.get(span.end)?))
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,7 +232,11 @@ fn match_pinyin_term(norm_text: &str, norm_chars: &[char], term: &str) -> Option
         }
         if let Some(m) = full_matcher.find(compact.as_str()) {
             let cs = byte_range_to_char_span(&compact, m.start(), m.end());
-            if cs.start < idx_map.len() && cs.end > cs.start && cs.end <= idx_map.len() {
+            if cs.start < idx_map.len()
+                && cs.end > cs.start
+                && cs.end <= idx_map.len()
+                && has_cjk(&norm_chars[idx_map[cs.start]..=idx_map[cs.end - 1]])
+            {
                 return Some((
                     SCORE_PINYIN_FULL,
                     MatchSpan {
@@ -228,7 +248,11 @@ fn match_pinyin_term(norm_text: &str, norm_chars: &[char], term: &str) -> Option
         }
         if let Some(m) = mixed_matcher.find(compact.as_str()) {
             let cs = byte_range_to_char_span(&compact, m.start(), m.end());
-            if cs.start < idx_map.len() && cs.end > cs.start && cs.end <= idx_map.len() {
+            if cs.start < idx_map.len()
+                && cs.end > cs.start
+                && cs.end <= idx_map.len()
+                && has_cjk(&norm_chars[idx_map[cs.start]..=idx_map[cs.end - 1]])
+            {
                 return Some((
                     SCORE_PINYIN_INITIAL,
                     MatchSpan {
@@ -363,6 +387,9 @@ fn match_bounded_subsequence(norm_chars: &[char], term_chars: &[char]) -> Option
                 .take(search_end)
                 .skip(prev + 1)
             {
+                if hc.is_whitespace() {
+                    break;
+                }
                 if hc == tc {
                     found = Some(idx);
                     break;
@@ -716,6 +743,29 @@ mod tests {
                 lo.score
             );
         }
+    }
+
+    #[test]
+    fn scalar_spans_convert_to_utf8_boundaries() {
+        let (snippet, spans) = build_snippet("🙂显卡驱动", "显卡", "工具 · ", 24);
+        let ranges = scalar_spans_to_byte_ranges(&snippet, &spans);
+        assert_eq!(
+            ranges
+                .iter()
+                .map(|r| &snippet[r.clone()])
+                .collect::<Vec<_>>(),
+            ["显卡"]
+        );
+        assert!(
+            scalar_spans_to_byte_ranges(
+                &snippet,
+                &[MatchSpan {
+                    start: 0,
+                    end: usize::MAX
+                }]
+            )
+            .is_empty()
+        );
     }
 
     #[test]

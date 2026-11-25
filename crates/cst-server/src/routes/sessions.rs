@@ -633,6 +633,26 @@ pub async fn handle_sessions_route(
             ));
         };
 
+        let expected_leaf = match obj.get("expectedLeafId") {
+            None => None,
+            Some(Value::Null) => Some(None),
+            Some(Value::String(id)) if !id.is_empty() => Some(Some(id.as_str())),
+            _ => {
+                return Err(ApiError::new(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    "请求的当前分支节点无效",
+                ));
+            }
+        };
+        if expected_leaf.is_some() && (summarize || custom_instructions.is_some()) {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "定位历史分支时不能生成总结",
+            ));
+        }
+
         let id_owned = id.to_owned();
         let result = state
             .write_once_for_session(
@@ -648,7 +668,15 @@ pub async fn handle_sessions_route(
                         .open_saved(&id_owned)
                         .await
                         .map_err(ApiError::from)?;
-                    if slot.session().is_streaming() {
+                    if expected_leaf.is_some() {
+                        if slot.inbox.has_delivering().await.map_err(ApiError::from)? {
+                            return Err(ApiError::new(
+                                StatusCode::CONFLICT,
+                                "conflict",
+                                "会话正在执行",
+                            ));
+                        }
+                    } else if slot.session().is_streaming() {
                         slot.inbox.pause().await.map_err(ApiError::from)?;
                         slot.session().abort().await;
                     }
@@ -662,19 +690,34 @@ pub async fn handle_sessions_route(
                             "请求的分支节点不存在",
                         ));
                     }
-                    let nav = slot
-                        .session()
-                        .navigate_tree(
-                            &entry_id,
-                            NavigateTreeOptions {
-                                summarize,
-                                custom_instructions,
-                                replace_instructions: false,
-                                label: None,
-                            },
-                        )
-                        .await
-                        .map_err(|msg| ApiError::new(StatusCode::CONFLICT, "conflict", msg))?;
+                    let nav = match expected_leaf {
+                        Some(expected) => {
+                            slot.session()
+                                .navigate_tree_to_leaf(&entry_id, expected)
+                                .await
+                        }
+                        None => {
+                            slot.session()
+                                .navigate_tree(
+                                    &entry_id,
+                                    NavigateTreeOptions {
+                                        summarize,
+                                        custom_instructions,
+                                        replace_instructions: false,
+                                        label: None,
+                                    },
+                                )
+                                .await
+                        }
+                    }
+                    .map_err(|msg| ApiError::new(StatusCode::CONFLICT, "conflict", msg))?;
+                    if nav.cancelled && expected_leaf.is_some() {
+                        return Err(ApiError::new(
+                            StatusCode::CONFLICT,
+                            "conflict",
+                            "历史分支切换已取消",
+                        ));
+                    }
 
                     state.pool.search.upsert_from_slot(&slot);
 

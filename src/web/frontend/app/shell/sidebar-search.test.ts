@@ -7,6 +7,7 @@ import {
 	clickExpandContents,
 	createInitialSidebarSearchState,
 	finishContentPrefetch,
+	replaceExpiredSearchSnapshot,
 	searchLocalPreloadedSessions,
 } from "./sidebar-search.ts";
 
@@ -93,6 +94,33 @@ test("chained background prefetch appends next 10 items instantly on expand and 
 	state = pf3.state;
 	assert.equal(state.contentMatches.length, 25);
 	assert.equal(state.contentHasMore, false);
+});
+
+test("an expired snapshot replaces both result groups and rejects the other old prefetch", () => {
+	const oldPage = {
+		query: "缓存",
+		snapshotToken: "old",
+		titleMatches: [makeTitle("old-title")],
+		titleTotal: 2,
+		titleHasMore: true,
+		contentMatches: [makeContent("old-content")],
+		contentTotal: 2,
+		contentHasMore: true,
+	};
+	const state = beginSidebarSearchQuery(createInitialSidebarSearchState(), "缓存", oldPage);
+	const { state: first } = applyFirstSearchPage(state, state.requestSeq, oldPage);
+	const { state: waiting } = clickExpandContents(first);
+	const replacement = replaceExpiredSearchSnapshot(waiting, first.requestSeq, {
+		...oldPage,
+		snapshotToken: "new",
+		titleMatches: [makeTitle("new-title")],
+		contentMatches: [makeContent("new-content")],
+	});
+	assert.equal(replacement.snapshotToken, "new");
+	assert.equal(replacement.titleMatches[0]?.sessionId, "new-title");
+	assert.equal(replacement.contentMatches[0]?.sessionId, "new-content");
+	assert.deepEqual(clickExpandContents(replacement).action, { kind: "fetch_now", offset: 1 });
+	assert.equal(finishContentPrefetch(replacement, first.requestSeq, [makeContent("stale")], false).state, replacement);
 });
 
 test("searchLocalPreloadedSessions pins active session, includes tool results, and excludes thinking/bitlocker", () => {
