@@ -22,7 +22,7 @@
 通用行为约束：
 
 1. **只读与写入例外**：查询与检索工具不修改系统配置、服务状态或机主文件，存储诊断全程零临时文件落盘。`command_plan` 写入 `data/plans/`，`runbook_deliver` 与 `runbook` 写入 `artifacts/<日期>/runbook/`。仅 `bitlocker` 的 `unlock` 与 `decrypt` 经本地确认后变更卷状态。
-2. **敏感路径与内网阻断**：`read`、`fffind` 与 `ffgrep` 统一阻断 `data/config/{auth,models,mcp-auth,web-search}.json`、`data/telemetry/identity.json` 与 `.state/` 目录，同时拦截目录外硬链接、Windows 设备路径（`\\.\`）与 NTFS 备用数据流。联网工具每次请求与重定向前校验解析后的 IP，拒绝回环与私网地址，仅按配置放行 `198.18.0.0/15` TUN 假 IP 网段。
+2. **敏感路径与内网阻断**：`read`、`fffind` 与 `ffgrep` 统一阻断 `data/config/{auth,models,mcp-auth,web-search}.json`、`data/telemetry/identity.json` 与 `.state/` 目录，同时拦截目录外硬链接、Windows 设备路径（`\\.\`）与 NTFS 备用数据流。`ls` 与 `disk(usage)`（含原生遍历与 `$MFT` 后端）在明细、排行与拒绝列表中隐去上述敏感路径名，其体积仍计入总容量。联网工具每次请求与重定向前校验解析后的 IP，拒绝回环与私网地址，仅按配置放行 `198.18.0.0/15` TUN 假 IP 网段。
 3. **口径与错误诚实**：工具固定说明（`notice`）仅陈述数据来源、单位、采样窗口与采集限制，不输出故障定性或修复建议。部分数据源失败时保留成功数据并标记 `degraded: true`。整次查询失败时返回错误并标记 `isError: true`。空数组或 `null` 必须结合错误字段判读，禁止直接当作健康或零值。
 
 ## 查询工具规则

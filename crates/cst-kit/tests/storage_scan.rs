@@ -1086,3 +1086,660 @@ fn mft_synthetic_dump_verifies_fileref_prunes_reparse_rejects_damaged_and_dedups
         .expect("damaged MFT record must fail integrity gate");
     assert!(err.contains("损坏"));
 }
+
+#[test]
+fn sensitive_kit_path_predicates_match_cross_platform_and_avoid_false_positives() {
+    assert!(scan::is_sensitive_dir_str(r"C:\kit\.state"));
+    assert!(scan::is_sensitive_dir_str(r"C:\kit\.STATE\nested"));
+    assert!(scan::is_sensitive_dir_str("/tmp/kit/.state/sub"));
+    assert!(!scan::is_sensitive_dir_str(r"C:\kit\.state_backup"));
+
+    for name in [
+        "auth.json",
+        "models.json",
+        "mcp-auth.json",
+        "web-search.json",
+    ] {
+        assert!(scan::is_sensitive_entry_str(r"C:\kit\data\config", name));
+        assert!(scan::is_sensitive_entry_str(r"data\config", name));
+        assert!(scan::is_sensitive_entry_str("./data/config/", name));
+        assert!(scan::is_sensitive_entry_str(
+            r"\\?\C:\kit\DATA\CONFIG",
+            &name.to_uppercase()
+        ));
+        assert!(scan::is_sensitive_entry_str(r"C:\kit\agent\home", name));
+        assert!(!scan::is_sensitive_entry_str(
+            r"C:\kit\my-data\config",
+            name
+        ));
+        assert!(!scan::is_sensitive_entry_str(
+            r"C:\kit\data\config\sub",
+            name
+        ));
+    }
+    assert!(scan::is_sensitive_entry_str(
+        r"C:\kit\data\telemetry",
+        "identity.json"
+    ));
+    assert!(scan::is_sensitive_entry_str(
+        r"C:\kit\agent\home\telemetry",
+        "IDENTITY.JSON"
+    ));
+    assert!(!scan::is_sensitive_entry_str(
+        r"C:\kit\data\config",
+        "settings.json"
+    ));
+    assert!(!scan::is_sensitive_entry_str(
+        r"C:\kit\data\telemetry",
+        "events.json"
+    ));
+    assert!(scan::is_sensitive_entry_str(r"C:\kit", ".state"));
+    assert!(scan::is_sensitive_entry_str(
+        r"C:\kit\.state",
+        "anything.bin"
+    ));
+    assert!(scan::is_sensitive_full_path(Path::new(
+        "/kit/.state/secret.db"
+    )));
+    assert!(scan::is_sensitive_full_path(Path::new(
+        "/kit/data/config/auth.json"
+    )));
+    assert!(!scan::is_sensitive_full_path(Path::new(
+        "/kit/data/config/settings.json"
+    )));
+}
+
+#[test]
+fn walk_usage_and_ls_hide_sensitive_kit_paths_while_preserving_totals() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    fs::create_dir_all(root.join(".state/nested")).unwrap();
+    fs::create_dir_all(root.join("data/config")).unwrap();
+    fs::create_dir_all(root.join("data/telemetry")).unwrap();
+    fs::create_dir_all(root.join("notes")).unwrap();
+
+    fs::write(root.join(".state/nested/secret.bin"), vec![1u8; 40_000]).unwrap();
+    fs::write(root.join("data/config/auth.json"), vec![2u8; 20_000]).unwrap();
+    fs::write(root.join("data/config/models.json"), vec![3u8; 5_000]).unwrap();
+    fs::write(root.join("data/config/mcp-auth.json"), vec![4u8; 5_000]).unwrap();
+    fs::write(root.join("data/config/web-search.json"), vec![5u8; 5_000]).unwrap();
+    fs::write(root.join("data/config/settings.json"), vec![6u8; 2_000]).unwrap();
+    fs::write(root.join("data/telemetry/identity.json"), vec![7u8; 10_000]).unwrap();
+    fs::write(root.join("data/telemetry/events.json"), vec![8u8; 3_000]).unwrap();
+    fs::write(root.join("notes/readme.txt"), vec![9u8; 10_000]).unwrap();
+    // Total = 40_000 + 37_000 + 13_000 + 10_000 = 100_000 bytes.
+    let expected_total = 100_000u64;
+
+    // 1. walk::usage with small top=1 must still return non-sensitive items without eviction.
+    let usage_top1 = walk::usage(root, 1, &control(), walk::WalkLimits::default()).unwrap();
+    assert_eq!(usage_top1["totalGB"], scan::gib(expected_total));
+    assert_eq!(usage_top1["topDirs"].as_array().unwrap().len(), 1);
+    assert!(
+        usage_top1["topDirs"][0]["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("data")
+    );
+    assert_eq!(usage_top1["topDirs"][0]["pct"], 50.0);
+    assert_eq!(usage_top1["topFiles"].as_array().unwrap().len(), 1);
+    assert!(
+        usage_top1["topFiles"][0]["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("readme.txt")
+    );
+
+    // Full walk::usage must never expose any sensitive dir or file name.
+    let usage = walk::usage(root, 20, &control(), walk::WalkLimits::default()).unwrap();
+    let dir_paths: Vec<&str> = usage["topDirs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["path"].as_str().unwrap())
+        .collect();
+    assert!(
+        dir_paths
+            .iter()
+            .all(|p| !p.to_ascii_lowercase().contains(".state"))
+    );
+    let file_paths: Vec<&str> = usage["topFiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(file_paths.len(), 3);
+    assert!(file_paths.iter().any(|p| p.ends_with("readme.txt")));
+    assert!(file_paths.iter().any(|p| p.ends_with("events.json")));
+    assert!(file_paths.iter().any(|p| p.ends_with("settings.json")));
+
+    // Direct walk::usage on `.state` hides all child rankings while preserving totalGB.
+    let state_usage = walk::usage(
+        &root.join(".state"),
+        10,
+        &control(),
+        walk::WalkLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(state_usage["totalGB"], scan::gib(40_000));
+    assert!(state_usage["topDirs"].as_array().unwrap().is_empty());
+    assert!(state_usage["topFiles"].as_array().unwrap().is_empty());
+
+    // 2. ls::run on kit root hides `.state` while keeping its 40_000 bytes in totalSize.
+    let mut mock = MockScan::new(scan::ScanSnapshot::default());
+    mock.fail = true;
+    let index = VolumeIndex::new(Arc::new(mock));
+    let root_ls = ls::run(&index, root, 20, &control(), walk::WalkLimits::default()).unwrap();
+    assert_eq!(root_ls["totalChildren"], 2);
+    assert_eq!(root_ls["totalSize"], scan::format_bytes(expected_total));
+    let root_entries = root_ls["entries"].as_array().unwrap();
+    assert_eq!(root_entries.len(), 2);
+    assert!(root_entries.iter().all(|e| e["name"] != ".state"));
+    assert_eq!(root_entries[0]["name"], "data");
+    assert_eq!(root_entries[0]["bytes"], 50_000);
+    assert_eq!(root_entries[0]["pct"], 50.0);
+    assert_eq!(root_entries[1]["name"], "notes");
+    assert_eq!(root_entries[1]["bytes"], 10_000);
+    assert_eq!(root_entries[1]["pct"], 10.0);
+    assert!(root_ls["notice"].as_str().unwrap().contains("敏感路径名"));
+
+    // 3. ls::run on data/config hides the 4 secret configs while showing settings.json.
+    let cfg_ls = ls::run(
+        &index,
+        &root.join("data/config"),
+        20,
+        &control(),
+        walk::WalkLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(cfg_ls["totalChildren"], 1);
+    assert_eq!(cfg_ls["totalSize"], scan::format_bytes(37_000));
+    assert_eq!(cfg_ls["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(cfg_ls["entries"][0]["name"], "settings.json");
+    assert_eq!(cfg_ls["entries"][0]["bytes"], 2_000);
+    assert!(cfg_ls["notice"].as_str().unwrap().contains("敏感路径名"));
+
+    // 4. ls::run on data/telemetry hides identity.json while showing events.json.
+    let tel_ls = ls::run(
+        &index,
+        &root.join("data/telemetry"),
+        20,
+        &control(),
+        walk::WalkLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(tel_ls["totalChildren"], 1);
+    assert_eq!(tel_ls["totalSize"], scan::format_bytes(13_000));
+    assert_eq!(tel_ls["entries"][0]["name"], "events.json");
+
+    // 5. ls::run directly on `.state` returns 0 entries while keeping totalSize.
+    let state_ls = ls::run(
+        &index,
+        &root.join(".state"),
+        20,
+        &control(),
+        walk::WalkLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(state_ls["totalChildren"], 0);
+    assert_eq!(state_ls["totalSize"], scan::format_bytes(40_000));
+    assert!(state_ls["entries"].as_array().unwrap().is_empty());
+    assert!(state_ls["notice"].as_str().unwrap().contains("敏感路径名"));
+
+    // 6. ls::run on normal directory emits no sensitive-path notice.
+    let notes_ls = ls::run(
+        &index,
+        &root.join("notes"),
+        20,
+        &control(),
+        walk::WalkLimits::default(),
+    )
+    .unwrap();
+    assert!(notes_ls.get("notice").is_none());
+
+    // 7. ls::run via `native-index` cached snapshot also hides `.state` while keeping its bytes.
+    #[cfg(windows)]
+    {
+        let root_s = display_path(root);
+        let state_s = display_path(&root.join(".state"));
+        let data_s = display_path(&root.join("data"));
+        let notes_s = display_path(&root.join("notes"));
+        let snap = mock_snapshot(
+            &root_s,
+            &[
+                (&root_s, expected_total),
+                (&state_s, 40_000),
+                (&data_s, 50_000),
+                (&notes_s, 10_000),
+            ],
+            &[],
+        );
+        let cached_index = VolumeIndex::new(Arc::new(MockScan::new(snap)));
+        cached_index.scan(root, true, &control()).unwrap();
+        let cached_ls = ls::run(
+            &cached_index,
+            root,
+            20,
+            &control(),
+            walk::WalkLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(cached_ls["method"], "native-index");
+        assert_eq!(cached_ls["totalChildren"], 2);
+        assert_eq!(cached_ls["totalSize"], scan::format_bytes(expected_total));
+        assert!(
+            cached_ls["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|e| e["name"] != ".state")
+        );
+        assert!(cached_ls["notice"].as_str().unwrap().contains("敏感路径名"));
+    }
+}
+
+#[test]
+fn mft_synthetic_dump_hides_sensitive_kit_paths_while_preserving_totals() {
+    let mut dump = vec![0u8; 40 * 1024];
+    let put = |buf: &mut [u8], rec_num: usize, rec: [u8; 1024]| {
+        buf[rec_num * 1024..(rec_num + 1) * 1024].copy_from_slice(&rec);
+    };
+
+    put(
+        &mut dump,
+        5,
+        build_mft_record(5, 5, true, |r, p| {
+            push_resident_attr(r, p, 0x30, &encode_file_name(5, 5, "."));
+        }),
+    );
+    put(
+        &mut dump,
+        20,
+        build_mft_record(20, 1, true, |r, p| {
+            push_resident_attr(r, p, 0x30, &encode_file_name(5, 5, ".state"));
+        }),
+    );
+    put(
+        &mut dump,
+        21,
+        build_mft_record(21, 1, true, |r, p| {
+            push_resident_attr(r, p, 0x30, &encode_file_name(5, 5, "data"));
+        }),
+    );
+    put(
+        &mut dump,
+        22,
+        build_mft_record(22, 1, true, |r, p| {
+            push_resident_attr(r, p, 0x30, &encode_file_name(21, 1, "config"));
+        }),
+    );
+    put(
+        &mut dump,
+        23,
+        build_mft_record(23, 1, true, |r, p| {
+            push_resident_attr(r, p, 0x30, &encode_file_name(21, 1, "telemetry"));
+        }),
+    );
+    let mib = 1024 * 1024u64;
+    // Sensitive stale files: 80 MiB in .state, 70 MiB auth.json, 65 MiB identity.json.
+    put(
+        &mut dump,
+        24,
+        build_mft_record(24, 1, false, |r, p| {
+            push_resident_attr(r, p, 0x10, &encode_std_info(1_577_836_800));
+            push_resident_attr(r, p, 0x30, &encode_file_name(20, 1, "runtime.db"));
+            push_non_resident_data(r, p, 80 * mib, 80 * mib);
+        }),
+    );
+    put(
+        &mut dump,
+        25,
+        build_mft_record(25, 1, false, |r, p| {
+            push_resident_attr(r, p, 0x10, &encode_std_info(1_577_836_800));
+            push_resident_attr(r, p, 0x30, &encode_file_name(22, 1, "auth.json"));
+            push_non_resident_data(r, p, 70 * mib, 70 * mib);
+        }),
+    );
+    put(
+        &mut dump,
+        26,
+        build_mft_record(26, 1, false, |r, p| {
+            push_resident_attr(r, p, 0x10, &encode_std_info(1_577_836_800));
+            push_resident_attr(r, p, 0x30, &encode_file_name(23, 1, "identity.json"));
+            push_non_resident_data(r, p, 65 * mib, 65 * mib);
+        }),
+    );
+    // Non-sensitive stale file: 60 MiB settings.json.
+    put(
+        &mut dump,
+        27,
+        build_mft_record(27, 1, false, |r, p| {
+            push_resident_attr(r, p, 0x10, &encode_std_info(1_577_836_800));
+            push_resident_attr(r, p, 0x30, &encode_file_name(22, 1, "settings.json"));
+            push_non_resident_data(r, p, 60 * mib, 60 * mib);
+        }),
+    );
+
+    let mft_ok = ntfs_ng::mft::Mft::from_file_with_record_size(dump, 1024).unwrap();
+    let snap = mft::scan_mft_source("C:", &mft_ok, &control()).unwrap();
+    assert_eq!(snap.total, (80 + 70 + 65 + 60) * mib);
+    assert!(
+        snap.top_dirs
+            .iter()
+            .all(|d| !d.path.to_ascii_lowercase().contains(".state"))
+    );
+    assert_eq!(snap.top_files.len(), 1);
+    assert_eq!(snap.top_files[0].path, r"C:\data\config\settings.json");
+    assert_eq!(snap.stale.len(), 1);
+    assert_eq!(snap.stale[0].path, r"C:\data\config\settings.json");
+    // Real MftIndex FileReference (48-bit record 20 + 16-bit seq 1) still resolves `.state`
+    // bytes so `ls` `native-index` keeps `.state` volume in `totalSize` while hiding the name.
+    let state_ref = (1u64 << 48) | 20u64;
+    assert_eq!(
+        snap.lookup_dir(Some(state_ref), Path::new(r"C:\.state")),
+        Some(80 * mib)
+    );
+}
+
+#[test]
+fn custom_data_dir_layout_hides_credentials_across_walk_ls_and_mft() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    let custom_data = root.join("profile");
+    fs::create_dir_all(root.join(".state")).unwrap();
+    fs::create_dir_all(custom_data.join("config")).unwrap();
+    fs::create_dir_all(custom_data.join("telemetry")).unwrap();
+    fs::create_dir_all(root.join("notes")).unwrap();
+
+    fs::write(root.join(".state/session.lock"), vec![1u8; 30_000]).unwrap();
+    fs::write(custom_data.join("config/auth.json"), vec![2u8; 25_000]).unwrap();
+    fs::write(custom_data.join("config/models.json"), vec![3u8; 5_000]).unwrap();
+    fs::write(custom_data.join("config/settings.json"), vec![4u8; 4_000]).unwrap();
+    fs::write(
+        custom_data.join("telemetry/identity.json"),
+        vec![5u8; 16_000],
+    )
+    .unwrap();
+    fs::write(custom_data.join("telemetry/events.json"), vec![6u8; 6_000]).unwrap();
+    fs::write(root.join("notes/readme.txt"), vec![7u8; 14_000]).unwrap();
+    let expected_total = 100_000u64;
+
+    let filter = scan::SensitivePathFilter::from_kit_dirs(
+        Some(&root.join(".state")),
+        Some(&custom_data.join("config")),
+        Some(&custom_data.join("telemetry")),
+    );
+
+    // 1. Scanning parent root and custom data root via walk::usage_with_filter hides credentials.
+    let parent_usage =
+        walk::usage_with_filter(root, 20, &control(), walk::WalkLimits::default(), &filter)
+            .unwrap();
+    assert_eq!(parent_usage["totalGB"], scan::gib(expected_total));
+    let parent_files: Vec<&str> = parent_usage["topFiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(parent_files.len(), 3);
+    assert!(parent_files.iter().any(|p| p.ends_with("readme.txt")));
+    assert!(parent_files.iter().any(|p| p.ends_with("events.json")));
+    assert!(parent_files.iter().any(|p| p.ends_with("settings.json")));
+
+    let data_usage = walk::usage_with_filter(
+        &custom_data,
+        20,
+        &control(),
+        walk::WalkLimits::default(),
+        &filter,
+    )
+    .unwrap();
+    assert_eq!(data_usage["totalGB"], scan::gib(56_000));
+    let data_files: Vec<&str> = data_usage["topFiles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(data_files.len(), 2);
+    assert!(data_files.iter().any(|p| p.ends_with("events.json")));
+    assert!(data_files.iter().any(|p| p.ends_with("settings.json")));
+
+    // 2. ls::run_with_filter on custom config & telemetry dirs hides secrets while keeping totals.
+    let mut mock = MockScan::new(scan::ScanSnapshot::default());
+    mock.fail = true;
+    let index = VolumeIndex::new(Arc::new(mock));
+    let cfg_ls = ls::run_with_filter(
+        &index,
+        &custom_data.join("config"),
+        20,
+        &control(),
+        walk::WalkLimits::default(),
+        &filter,
+    )
+    .unwrap();
+    assert_eq!(cfg_ls["totalChildren"], 1);
+    assert_eq!(cfg_ls["totalSize"], scan::format_bytes(34_000));
+    assert_eq!(cfg_ls["entries"][0]["name"], "settings.json");
+    assert!(cfg_ls["notice"].as_str().unwrap().contains("敏感路径名"));
+
+    let tel_ls = ls::run_with_filter(
+        &index,
+        &custom_data.join("telemetry"),
+        20,
+        &control(),
+        walk::WalkLimits::default(),
+        &filter,
+    )
+    .unwrap();
+    assert_eq!(tel_ls["totalChildren"], 1);
+    assert_eq!(tel_ls["totalSize"], scan::format_bytes(22_000));
+    assert_eq!(tel_ls["entries"][0]["name"], "events.json");
+    assert!(tel_ls["notice"].as_str().unwrap().contains("敏感路径名"));
+
+    // 3. Synthetic $MFT scan with custom `C:\profile\config` and `C:\profile\telemetry`.
+    let mut dump = vec![0u8; 40 * 1024];
+    let put = |buf: &mut [u8], rec_num: usize, rec: [u8; 1024]| {
+        buf[rec_num * 1024..(rec_num + 1) * 1024].copy_from_slice(&rec);
+    };
+    put(
+        &mut dump,
+        5,
+        build_mft_record(5, 5, true, |r, p| {
+            push_resident_attr(r, p, 0x30, &encode_file_name(5, 5, "."));
+        }),
+    );
+    put(
+        &mut dump,
+        20,
+        build_mft_record(20, 1, true, |r, p| {
+            push_resident_attr(r, p, 0x30, &encode_file_name(5, 5, "profile"));
+        }),
+    );
+    put(
+        &mut dump,
+        21,
+        build_mft_record(21, 1, true, |r, p| {
+            push_resident_attr(r, p, 0x30, &encode_file_name(20, 1, "config"));
+        }),
+    );
+    put(
+        &mut dump,
+        22,
+        build_mft_record(22, 1, true, |r, p| {
+            push_resident_attr(r, p, 0x30, &encode_file_name(20, 1, "telemetry"));
+        }),
+    );
+    let mib = 1024 * 1024u64;
+    put(
+        &mut dump,
+        23,
+        build_mft_record(23, 1, false, |r, p| {
+            push_resident_attr(r, p, 0x10, &encode_std_info(1_577_836_800));
+            push_resident_attr(r, p, 0x30, &encode_file_name(21, 1, "auth.json"));
+            push_non_resident_data(r, p, 90 * mib, 90 * mib);
+        }),
+    );
+    put(
+        &mut dump,
+        24,
+        build_mft_record(24, 1, false, |r, p| {
+            push_resident_attr(r, p, 0x10, &encode_std_info(1_577_836_800));
+            push_resident_attr(r, p, 0x30, &encode_file_name(22, 1, "identity.json"));
+            push_non_resident_data(r, p, 70 * mib, 70 * mib);
+        }),
+    );
+    put(
+        &mut dump,
+        25,
+        build_mft_record(25, 1, false, |r, p| {
+            push_resident_attr(r, p, 0x10, &encode_std_info(1_577_836_800));
+            push_resident_attr(r, p, 0x30, &encode_file_name(21, 1, "settings.json"));
+            push_non_resident_data(r, p, 60 * mib, 60 * mib);
+        }),
+    );
+    let mft_filter = scan::SensitivePathFilter::from_kit_dirs(
+        None,
+        Some(Path::new(r"C:\profile\config")),
+        Some(Path::new(r"C:\profile\telemetry")),
+    );
+    let mft_ok = ntfs_ng::mft::Mft::from_file_with_record_size(dump, 1024).unwrap();
+    let snap = mft::scan_mft_source_with_filter("C:", &mft_ok, &control(), &mft_filter).unwrap();
+    assert_eq!(snap.total, (90 + 70 + 60) * mib);
+    assert_eq!(snap.top_files.len(), 1);
+    assert_eq!(snap.top_files[0].path, r"C:\profile\config\settings.json");
+    assert_eq!(snap.stale.len(), 1);
+    assert_eq!(snap.stale[0].path, r"C:\profile\config\settings.json");
+}
+
+#[test]
+fn ls_combined_incomplete_and_sensitive_notice_reports_known_bytes() {
+    let fixture = Fixture::new();
+    let root = &fixture.0;
+    fs::create_dir_all(root.join(".state")).unwrap();
+    fs::create_dir_all(root.join("big")).unwrap();
+    fs::write(root.join(".state/s.bin"), vec![1u8; 1024]).unwrap();
+    fs::write(root.join("big/a.bin"), vec![2u8; 1024]).unwrap();
+    fs::write(root.join("big/b.bin"), vec![3u8; 1024]).unwrap();
+    let mut mock = MockScan::new(scan::ScanSnapshot::default());
+    mock.fail = true;
+    let index = VolumeIndex::new(Arc::new(mock));
+    // Budget of 2 entries enumerates direct children (`.state` and `big`), exhausting budget
+    // before measuring subdirectories -> both `budget.incomplete` and `hidden_sensitive` are true.
+    let res = ls::run(
+        &index,
+        root,
+        20,
+        &control(),
+        walk::WalkLimits {
+            entries: 2,
+            timeout: Duration::from_secs(5),
+        },
+    )
+    .unwrap();
+    assert!(
+        res["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["name"] != ".state")
+    );
+    assert!(
+        res["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["pct"].is_null())
+    );
+    let notice = res["notice"].as_str().unwrap();
+    assert!(notice.contains("下界"));
+    assert!(notice.contains("其已知大小仍计入 totalSize"));
+}
+
+#[cfg(windows)]
+#[test]
+fn ls_dedups_same_directory_hardlinks_including_hidden_sensitive_and_cached() {
+    // 1. Pure-file directory with two hardlinks to the same file -> counted once, pct sums to 100.
+    let pure = Fixture::new();
+    let a = pure.0.join("a.bin");
+    fs::write(&a, vec![1u8; 10_000]).unwrap();
+    fs::hard_link(&a, pure.0.join("b.bin")).unwrap();
+    let index = VolumeIndex::new_production(Arc::new(MockScan::new(scan::ScanSnapshot::default())));
+    let res = ls::run(&index, &pure.0, 20, &control(), walk::WalkLimits::default()).unwrap();
+    assert_eq!(res["totalSize"], scan::format_bytes(10_000));
+    let entries = res["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["name"], "a.bin");
+    assert_eq!(entries[0]["bytes"], 10_000);
+    assert_eq!(entries[0]["pct"], 100.0);
+    assert_eq!(entries[1]["name"], "b.bin");
+    assert_eq!(entries[1]["bytes"], 0);
+    assert_eq!(entries[1]["pct"], 0.0);
+
+    // 2. Hidden sensitive `auth.json` hardlinked to `z_alias.json` inside `data/config` -> counted once.
+    let cfg_fixture = Fixture::new();
+    let cfg = cfg_fixture.0.join("data/config");
+    fs::create_dir_all(&cfg).unwrap();
+    let auth = cfg.join("auth.json");
+    fs::write(&auth, vec![2u8; 10_000]).unwrap();
+    fs::hard_link(&auth, cfg.join("z_alias.json")).unwrap();
+    fs::write(cfg.join("settings.json"), vec![3u8; 10_000]).unwrap();
+    let cfg_res = ls::run(&index, &cfg, 20, &control(), walk::WalkLimits::default()).unwrap();
+    assert_eq!(cfg_res["totalSize"], scan::format_bytes(20_000));
+    let cfg_entries = cfg_res["entries"].as_array().unwrap();
+    assert!(cfg_entries.iter().all(|e| e["name"] != "auth.json"));
+    let settings = cfg_entries
+        .iter()
+        .find(|e| e["name"] == "settings.json")
+        .unwrap();
+    let alias = cfg_entries
+        .iter()
+        .find(|e| e["name"] == "z_alias.json")
+        .unwrap();
+    assert_eq!(settings["bytes"], 10_000);
+    assert_eq!(settings["pct"], 50.0);
+    assert_eq!(alias["bytes"], 0);
+    assert_eq!(alias["pct"], 0.0);
+
+    // 3. Warm `native-index` branch also deduplicates same-directory direct-file hardlinks.
+    let cached_fixture = Fixture::new();
+    fs::create_dir_all(cached_fixture.0.join("sub")).unwrap();
+    let h1 = cached_fixture.0.join("first.bin");
+    fs::write(&h1, vec![4u8; 10_000]).unwrap();
+    fs::hard_link(&h1, cached_fixture.0.join("second.bin")).unwrap();
+    let root_s = display_path(&cached_fixture.0);
+    let sub_s = display_path(&cached_fixture.0.join("sub"));
+    let snap = mock_snapshot(&root_s, &[(&root_s, 30_000), (&sub_s, 20_000)], &[]);
+    let cached_index = VolumeIndex::new(Arc::new(MockScan::new(snap)));
+    cached_index
+        .scan(&cached_fixture.0, true, &control())
+        .unwrap();
+    let cached_res = ls::run(
+        &cached_index,
+        &cached_fixture.0,
+        20,
+        &control(),
+        walk::WalkLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(cached_res["method"], "native-index");
+    assert_eq!(cached_res["totalSize"], scan::format_bytes(30_000));
+    let ce = cached_res["entries"].as_array().unwrap();
+    assert_eq!(
+        ce.iter().find(|e| e["name"] == "first.bin").unwrap()["bytes"],
+        10_000
+    );
+    assert_eq!(
+        ce.iter().find(|e| e["name"] == "second.bin").unwrap()["bytes"],
+        0
+    );
+}
+
+#[cfg(not(windows))]
+#[test]
+fn unix_literal_backslash_dirname_is_not_misclassified_as_sensitive() {
+    let filter = scan::SensitivePathFilter::default();
+    assert!(!filter.is_sensitive_dir_path(Path::new(r"/tmp/foo\.state")));
+    assert!(!filter.is_sensitive_entry_path(Path::new(r"/tmp/foo\data\config"), "auth.json"));
+    assert!(!filter.is_sensitive_full_path(Path::new(r"/tmp/foo\.state/bar.txt")));
+}

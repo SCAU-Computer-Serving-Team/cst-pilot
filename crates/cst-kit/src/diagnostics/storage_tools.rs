@@ -1,3 +1,4 @@
+use super::scan::SensitivePathFilter;
 use super::volume::NativeScanSource;
 use super::volume_index::{VolumeIndex, is_volume_root};
 use super::walk::WalkLimits;
@@ -8,12 +9,18 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-pub fn definitions(_root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolDefinition> {
+pub fn definitions(root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolDefinition> {
+    let filter = Arc::new(
+        cst_os::KitLayout::new(root)
+            .map(|layout| SensitivePathFilter::from_layout(&layout))
+            .unwrap_or_default(),
+    );
     let index = Arc::new(VolumeIndex::new_production(Arc::new(
-        NativeScanSource::new(),
+        NativeScanSource::with_filter((*filter).clone()),
     )));
     let ls_index = index.clone();
     let ls_source = source.clone();
+    let ls_filter = filter.clone();
     let mut ls = ToolDefinition::from_typed(
         "ls",
         "LS",
@@ -21,6 +28,7 @@ pub fn definitions(_root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolD
         move |_, input: ls::LsInput, cancel, _, ctx| {
             let index = ls_index.clone();
             let source = ls_source.clone();
+            let filter = ls_filter.clone();
             let cwd = PathBuf::from(ctx.cwd());
             async move {
                 let value = super::execute(
@@ -30,12 +38,13 @@ pub fn definitions(_root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolD
                     Duration::from_secs(215),
                     move |_, (input, cwd), control| {
                         let target = resolve(&cwd, &input.path)?;
-                        ls::run(
+                        ls::run_with_filter(
                             &index,
                             &target,
                             input.top.unwrap_or(20).clamp(1, 50),
                             control,
                             WalkLimits::default(),
+                            &filter,
                         )
                     },
                 )
@@ -46,6 +55,7 @@ pub fn definitions(_root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolD
     );
     ls.prompt_snippet =
         Some("按大小浏览目录，仅统计直接子项，未知大小和预算下界在结果中说明。".into());
+    let disk_filter = filter;
     let mut disk = ToolDefinition::from_typed(
         "disk",
         "Disk",
@@ -53,6 +63,7 @@ pub fn definitions(_root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolD
         move |_, input: disk::DiskInput, cancel, _, ctx| {
             let index = index.clone();
             let source = source.clone();
+            let filter = disk_filter.clone();
             let cwd = PathBuf::from(ctx.cwd());
             async move {
                 let timeout =
@@ -74,7 +85,7 @@ pub fn definitions(_root: &Path, source: Arc<dyn DiagnosticSource>) -> Vec<ToolD
                         let target =
                             resolve(&cwd, input.path.as_deref().ok_or("usage 需要提供 path。")?)?;
                         let top = input.top.unwrap_or(20).clamp(1, 100);
-                        let usage = run_usage(&index, &target, top, control)?;
+                        let usage = run_usage_with_filter(&index, &target, top, control, &filter)?;
                         Ok(serde_json::json!({"usage": usage}))
                     },
                 )
@@ -99,6 +110,16 @@ pub fn run_usage(
     target: &Path,
     top: usize,
     control: &Control,
+) -> Result<serde_json::Value, String> {
+    run_usage_with_filter(index, target, top, control, &SensitivePathFilter::default())
+}
+
+pub fn run_usage_with_filter(
+    index: &VolumeIndex,
+    target: &Path,
+    top: usize,
+    control: &Control,
+    filter: &SensitivePathFilter,
 ) -> Result<serde_json::Value, String> {
     // MFT acceleration is strictly opt-in (gated by `index.allows_mft()`) and limited to elevated
     // local NTFS volume roots. Default release path, regular subdirectories, non-NTFS volumes,
@@ -143,9 +164,17 @@ pub fn run_usage(
 
     match attempt {
         MftAttempt::Succeeded(value) => Ok(value),
-        MftAttempt::NotEligible => super::walk::usage(target, top, control, WalkLimits::default()),
+        MftAttempt::NotEligible => {
+            super::walk::usage_with_filter(target, top, control, WalkLimits::default(), filter)
+        }
         MftAttempt::Degraded(reason) => {
-            let mut value = super::walk::usage(target, top, control, WalkLimits::default())?;
+            let mut value = super::walk::usage_with_filter(
+                target,
+                top,
+                control,
+                WalkLimits::default(),
+                filter,
+            )?;
             value["degradedFrom"] = serde_json::json!(format!("native-mft: {reason}"));
             Ok(value)
         }

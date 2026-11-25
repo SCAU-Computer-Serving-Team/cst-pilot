@@ -1,13 +1,14 @@
-use super::scan::{ScanSnapshot, format_bytes};
+use super::scan::{ScanSnapshot, SensitivePathFilter, format_bytes, hardlink_rank_key};
 use super::volume_index::{VolumeIndex, display_path, is_volume_root};
 use super::walk::{
     DirectChild, DirectChildKind, DirectFileSeed, WalkBudget, WalkLimits, linked,
-    list_direct_children, measure_ls_subdirs,
+    list_direct_children, measure_ls_subdirs_with_filter, should_dedup_hardlinks,
 };
 use super::win_native::{Control, rounded};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -30,6 +31,24 @@ pub fn run(
     top: usize,
     control: &Control,
     limits: WalkLimits,
+) -> Result<Value, String> {
+    run_with_filter(
+        index,
+        target,
+        top,
+        control,
+        limits,
+        &SensitivePathFilter::default(),
+    )
+}
+
+pub fn run_with_filter(
+    index: &VolumeIndex,
+    target: &Path,
+    top: usize,
+    control: &Control,
+    limits: WalkLimits,
+    filter: &SensitivePathFilter,
 ) -> Result<Value, String> {
     let meta = fs::symlink_metadata(target).map_err(|_| "目标目录无法读取。")?;
     if linked(&meta) || !meta.is_dir() {
@@ -70,6 +89,7 @@ pub fn run(
         snapshot.as_deref(),
         page.entries,
         page.truncated,
+        filter,
     )
 }
 
@@ -83,6 +103,7 @@ fn measure(
     snapshot: Option<&ScanSnapshot>,
     entries: impl IntoIterator<Item = Result<DirectChild, ()>>,
     children_truncated: bool,
+    filter: &SensitivePathFilter,
 ) -> Result<Value, String> {
     let mut direct_children: Vec<DirectChild> = Vec::new();
     for entry in entries {
@@ -91,6 +112,42 @@ fn measure(
             continue;
         };
         direct_children.push(child);
+    }
+
+    // Deduplicate same-directory NTFS hardlinks deterministically (matching `walk.rs` & `mft.rs`)
+    // so direct-file totals, `pct` denominators, and `direct_file_seeds` never double-count.
+    let dedup_direct = should_dedup_hardlinks(target);
+    let mut attributed_file_bytes: Vec<Option<u64>> =
+        direct_children.iter().map(|c| c.bytes).collect();
+    if dedup_direct {
+        let mut winners: HashMap<u64, usize> = HashMap::new();
+        for (idx, child) in direct_children.iter().enumerate() {
+            if child.kind != DirectChildKind::File {
+                continue;
+            }
+            let Some(file_id) = child.file_id.filter(|&id| id != 0) else {
+                continue;
+            };
+            if child.bytes.is_none() {
+                continue;
+            }
+            match winners.entry(file_id) {
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    slot.insert(idx);
+                }
+                std::collections::hash_map::Entry::Occupied(mut occ) => {
+                    let prev_idx = *occ.get();
+                    if hardlink_rank_key("", &child.name)
+                        < hardlink_rank_key("", &direct_children[prev_idx].name)
+                    {
+                        attributed_file_bytes[prev_idx] = Some(0);
+                        *occ.get_mut() = idx;
+                    } else {
+                        attributed_file_bytes[idx] = Some(0);
+                    }
+                }
+            }
+        }
     }
 
     // Decide cleanly between pure `native-index` (every direct subdirectory resolved from one
@@ -122,7 +179,7 @@ fn measure(
         for (idx, child) in direct_children.iter().enumerate() {
             match child.kind {
                 DirectChildKind::File => {
-                    if let Some(bytes) = child.bytes {
+                    if let Some(bytes) = attributed_file_bytes[idx] {
                         direct_file_seeds.push(DirectFileSeed {
                             file_id: child.file_id.unwrap_or(0),
                             bytes,
@@ -139,8 +196,14 @@ fn measure(
         }
         if !subdir_paths.is_empty() {
             walked = true;
-            let measured =
-                measure_ls_subdirs(target, &direct_file_seeds, &subdir_paths, budget, control)?;
+            let measured = measure_ls_subdirs_with_filter(
+                target,
+                &direct_file_seeds,
+                &subdir_paths,
+                budget,
+                control,
+                filter,
+            )?;
             for (slot, idx) in subdir_indices.into_iter().enumerate() {
                 walked_dir_sizes[idx] = measured.get(slot).copied().flatten();
                 if walked_dir_sizes[idx].is_none() {
@@ -151,6 +214,8 @@ fn measure(
     }
 
     let mut items = Vec::with_capacity(direct_children.len());
+    let mut total = 0u64;
+    let mut hidden_sensitive = false;
     for (idx, child) in direct_children.into_iter().enumerate() {
         let (kind, bytes) = match child.kind {
             DirectChildKind::ReparseOrCloud => {
@@ -165,7 +230,7 @@ fn measure(
                     ("dir", walked_dir_sizes[idx])
                 }
             }
-            DirectChildKind::File => ("file", child.bytes),
+            DirectChildKind::File => ("file", attributed_file_bytes[idx]),
             DirectChildKind::Unknown => {
                 if all_dirs_cached && let Some(snap) = snapshot {
                     let cached_dir = snap.lookup_dir(child.file_id, &child.path);
@@ -190,6 +255,13 @@ fn measure(
                 }
             }
         };
+        if let Some(size) = bytes {
+            total = total.saturating_add(size);
+        }
+        if filter.is_sensitive_entry_path(target, &child.name) {
+            hidden_sensitive = true;
+            continue;
+        }
         items.push(Item {
             name: child.name,
             kind,
@@ -201,10 +273,6 @@ fn measure(
         return Err("目录读取期间卷身份变化，请重试。".into());
     }
     items.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.name.cmp(&b.name)));
-    let total = items
-        .iter()
-        .filter_map(|i| i.bytes)
-        .fold(0u64, u64::saturating_add);
     let mut result = json!({
         "path": display_path(target),
         "totalChildren": items.len(),
@@ -240,9 +308,18 @@ fn measure(
             "note": "已按已知大小截断，未知大小不参与排序"
         });
     }
-    if budget.incomplete {
-        result["notice"] =
-            json!("部分子项因预算、链接或访问限制未统计完整，大小为下界，全部占比未计算。");
+    let notice = match (budget.incomplete, hidden_sensitive) {
+        (true, true) => Some(
+            "部分子项因预算、链接或访问限制未统计完整，大小为下界，全部占比未计算。已隐去工具包敏感路径名，其已知大小仍计入 totalSize。",
+        ),
+        (true, false) => {
+            Some("部分子项因预算、链接或访问限制未统计完整，大小为下界，全部占比未计算。")
+        }
+        (false, true) => Some("已隐去工具包敏感路径名，其体积仍计入 totalSize。"),
+        (false, false) => None,
+    };
+    if let Some(text) = notice {
+        result["notice"] = json!(text);
     }
     if children_truncated {
         result["childrenTruncated"] = json!(true);
@@ -266,6 +343,7 @@ mod tests {
         let index = VolumeIndex::new(std::sync::Arc::new(
             super::super::volume::NativeScanSource::new(),
         ));
+        let filter = SensitivePathFilter::default();
         let result = measure(
             &index,
             &dir,
@@ -275,6 +353,7 @@ mod tests {
             None,
             entries,
             page.truncated,
+            &filter,
         );
         fs::remove_dir_all(&dir).unwrap();
         let result = result.unwrap();

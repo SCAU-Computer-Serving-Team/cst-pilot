@@ -1,6 +1,6 @@
 use super::scan::{
-    Ranked, STALE_AGE_SECS, STALE_MIN_BYTES, TopN, ext_key, format_modified_utc, gib,
-    hardlink_rank_key, pct,
+    Ranked, STALE_AGE_SECS, STALE_MIN_BYTES, SensitivePathFilter, TopN, ext_key,
+    format_modified_utc, gib, hardlink_rank_key, pct,
 };
 use super::volume_index::{display_path, path_key};
 use super::win_native::{Control, rounded};
@@ -86,8 +86,11 @@ impl WalkBudget {
         Ok(true)
     }
     pub fn failed(&mut self, path: &Path) {
+        self.failed_with_filter(path, &SensitivePathFilter::default());
+    }
+    pub fn failed_with_filter(&mut self, path: &Path, filter: &SensitivePathFilter) {
         self.incomplete = true;
-        if self.denied.len() < MAX_DENIED_PATHS {
+        if self.denied.len() < MAX_DENIED_PATHS && !filter.is_sensitive_full_path(path) {
             self.denied.push(display_path(path));
         }
     }
@@ -375,6 +378,18 @@ struct DirRecord {
     path: PathBuf,
     depth: usize,
     root_slot: Option<usize>,
+    #[cfg(windows)]
+    expected_file_id: Option<u64>,
+    #[cfg(not(windows))]
+    expected_dev_ino: Option<(u64, u64)>,
+}
+
+struct DiscoveredSubdir {
+    path: PathBuf,
+    #[cfg(windows)]
+    file_id: Option<u64>,
+    #[cfg(not(windows))]
+    dev_ino: Option<(u64, u64)>,
 }
 
 #[derive(Clone)]
@@ -499,8 +514,17 @@ struct SharedState {
     deadline: Instant,
     collect_analytics: bool,
     dedup_hardlinks: bool,
+    filter: SensitivePathFilter,
     #[cfg(windows)]
     expected_vol_serial: Option<u32>,
+    #[cfg(windows)]
+    root_raw_key: String,
+    #[cfg(windows)]
+    root_final_key: Option<String>,
+    #[cfg(not(windows))]
+    root_raw_path: PathBuf,
+    #[cfg(not(windows))]
+    root_canonical: Option<PathBuf>,
 }
 impl SharedState {
     #[allow(clippy::too_many_arguments)]
@@ -511,7 +535,12 @@ impl SharedState {
         deadline: Instant,
         collect_analytics: bool,
         dedup_hardlinks: bool,
+        filter: SensitivePathFilter,
         #[cfg(windows)] expected_vol_serial: Option<u32>,
+        #[cfg(windows)] root_raw_key: String,
+        #[cfg(windows)] root_final_key: Option<String>,
+        #[cfg(not(windows))] root_raw_path: PathBuf,
+        #[cfg(not(windows))] root_canonical: Option<PathBuf>,
     ) -> Self {
         let root_started = (0..root_slots).map(|_| AtomicBool::new(false)).collect();
         let root_unreadable = (0..root_slots).map(|_| AtomicBool::new(false)).collect();
@@ -529,9 +558,40 @@ impl SharedState {
             deadline,
             collect_analytics,
             dedup_hardlinks,
+            filter,
             #[cfg(windows)]
             expected_vol_serial,
+            #[cfg(windows)]
+            root_raw_key,
+            #[cfg(windows)]
+            root_final_key,
+            #[cfg(not(windows))]
+            root_raw_path,
+            #[cfg(not(windows))]
+            root_canonical,
         }
+    }
+    #[cfg(windows)]
+    fn expected_final_key(&self, dir_path: &Path) -> Option<String> {
+        let root_final = self.root_final_key.as_ref()?;
+        let raw = path_key(dir_path);
+        if raw == self.root_raw_key {
+            return Some(root_final.clone());
+        }
+        raw.strip_prefix(&self.root_raw_key)
+            .filter(|tail| tail.starts_with('\\'))
+            .map(|tail| format!("{root_final}{tail}"))
+    }
+    #[cfg(not(windows))]
+    fn expected_canonical_path(&self, dir_path: &Path) -> Option<PathBuf> {
+        let root_canon = self.root_canonical.as_ref()?;
+        if dir_path == self.root_raw_path {
+            return Some(root_canon.clone());
+        }
+        dir_path
+            .strip_prefix(&self.root_raw_path)
+            .ok()
+            .map(|rel| root_canon.join(rel))
     }
     fn take_entry(&self, control: &Control) -> bool {
         if control.cancel.is_cancelled() {
@@ -572,27 +632,39 @@ impl SharedState {
     }
     fn record_denied(&self, path: &Path) {
         self.mark_incomplete();
+        if self.filter.is_sensitive_full_path(path) {
+            return;
+        }
         if let Ok(mut list) = self.denied.lock()
             && list.len() < MAX_DENIED_PATHS
         {
             list.push(display_path(path));
         }
     }
-    fn add_subdirs(&self, parent: usize, depth: usize, paths: Vec<PathBuf>) -> Vec<usize> {
-        if paths.is_empty() {
+    fn add_subdirs(
+        &self,
+        parent: usize,
+        depth: usize,
+        subdirs: Vec<DiscoveredSubdir>,
+    ) -> Vec<usize> {
+        if subdirs.is_empty() {
             return Vec::new();
         }
         let Ok(mut dirs) = self.dirs.lock() else {
             return Vec::new();
         };
-        let mut ids = Vec::with_capacity(paths.len());
-        for path in paths {
+        let mut ids = Vec::with_capacity(subdirs.len());
+        for sub in subdirs {
             let id = dirs.len();
             dirs.push(DirRecord {
                 parent: Some(parent),
-                path,
+                path: sub.path,
                 depth,
                 root_slot: None,
+                #[cfg(windows)]
+                expected_file_id: sub.file_id,
+                #[cfg(not(windows))]
+                expected_dev_ino: sub.dev_ino,
             });
             ids.push(id);
         }
@@ -600,7 +672,7 @@ impl SharedState {
     }
 }
 
-fn should_dedup_hardlinks(root: &Path) -> bool {
+pub(crate) fn should_dedup_hardlinks(root: &Path) -> bool {
     #[cfg(windows)]
     {
         win_walk::is_local_ntfs_volume(root)
@@ -613,8 +685,8 @@ fn should_dedup_hardlinks(root: &Path) -> bool {
 }
 
 #[cfg(windows)]
-fn volume_serial_of(root: &Path) -> Option<u32> {
-    win_walk::query_dir_volume_serial(root)
+fn query_root_identity(root: &Path) -> (Option<u32>, Option<String>) {
+    win_walk::query_dir_root_identity(root)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -629,6 +701,7 @@ fn walk_forest(
     control: &Control,
     collect_analytics: bool,
     top_dirs_limit: usize,
+    filter: &SensitivePathFilter,
 ) -> Result<WalkOutcome, String> {
     control.check()?;
     let effective_timeout = {
@@ -658,7 +731,11 @@ fn walk_forest(
     let deadline = Instant::now() + effective_timeout;
     let dedup = should_dedup_hardlinks(scope_root);
     #[cfg(windows)]
-    let expected_vol_serial = volume_serial_of(scope_root);
+    let (expected_vol_serial, root_final_key) = query_root_identity(scope_root);
+    #[cfg(windows)]
+    let root_raw_key = path_key(scope_root);
+    #[cfg(not(windows))]
+    let root_canonical = scope_root.canonicalize().ok();
     let desired = std::thread::available_parallelism()
         .map_or(4, std::num::NonZeroUsize::get)
         .min(MAX_PER_SCAN_WORKERS);
@@ -672,8 +749,17 @@ fn walk_forest(
         deadline,
         collect_analytics,
         dedup,
+        filter.clone(),
         #[cfg(windows)]
         expected_vol_serial,
+        #[cfg(windows)]
+        root_raw_key,
+        #[cfg(windows)]
+        root_final_key,
+        #[cfg(not(windows))]
+        scope_root.to_path_buf(),
+        #[cfg(not(windows))]
+        root_canonical,
     );
     let queue = WalkQueue::new(initial_queue);
 
@@ -747,12 +833,24 @@ fn walk_forest(
                         active_guard.completed = true;
                         break;
                     }
-                    let (dir_path, depth, root_slot) = {
+                    #[cfg(windows)]
+                    let (dir_path, depth, root_slot, expected_file_id) = {
                         let dirs = shared_ref.dirs.lock().expect("dirs mutex");
                         (
                             dirs[dir_id].path.clone(),
                             dirs[dir_id].depth,
                             dirs[dir_id].root_slot,
+                            dirs[dir_id].expected_file_id,
+                        )
+                    };
+                    #[cfg(not(windows))]
+                    let (dir_path, depth, root_slot, expected_dev_ino) = {
+                        let dirs = shared_ref.dirs.lock().expect("dirs mutex");
+                        (
+                            dirs[dir_id].path.clone(),
+                            dirs[dir_id].depth,
+                            dirs[dir_id].root_slot,
+                            dirs[dir_id].expected_dev_ino,
                         )
                     };
                     #[cfg(windows)]
@@ -761,6 +859,7 @@ fn walk_forest(
                         &dir_path,
                         depth,
                         root_slot,
+                        expected_file_id,
                         &mut dir_buf,
                         shared_ref,
                         control,
@@ -772,6 +871,7 @@ fn walk_forest(
                         &dir_path,
                         depth,
                         root_slot,
+                        expected_dev_ino,
                         shared_ref,
                         control,
                         &mut local_files,
@@ -844,6 +944,7 @@ fn walk_forest(
         shared.collect_analytics,
         shared.dedup_hardlinks,
         top_dirs_limit,
+        &shared.filter,
         control,
     )
 }
@@ -861,6 +962,7 @@ fn aggregate_deterministic(
     collect_analytics: bool,
     dedup_hardlinks: bool,
     top_dirs_limit: usize,
+    filter: &SensitivePathFilter,
     control: &Control,
 ) -> Result<WalkOutcome, String> {
     let dir_count = dirs.len();
@@ -940,24 +1042,29 @@ fn aggregate_deterministic(
             } else {
                 ext_overflow = true;
             }
-            let make_path = || display_path(&dirs[file.dir_id].path.join(&file.name));
-            if top_files_heap.would_accept(file.bytes) {
-                top_files_heap.add(Ranked {
-                    bytes: file.bytes,
-                    path: make_path(),
-                    modified: format_modified_utc(file.modified_unix),
-                });
-            }
-            if file.bytes >= STALE_MIN_BYTES
+            let wants_top = top_files_heap.would_accept(file.bytes);
+            let wants_stale = file.bytes >= STALE_MIN_BYTES
                 && file.modified_unix > 0
                 && file.modified_unix <= stale_cutoff
-                && stale_heap.would_accept(file.bytes)
+                && stale_heap.would_accept(file.bytes);
+            if (wants_top || wants_stale)
+                && !filter.is_sensitive_entry_path(&dirs[file.dir_id].path, &file.name)
             {
-                stale_heap.add(Ranked {
-                    bytes: file.bytes,
-                    path: make_path(),
-                    modified: format_modified_utc(file.modified_unix),
-                });
+                let full_path = display_path(&dirs[file.dir_id].path.join(&file.name));
+                if wants_top {
+                    top_files_heap.add(Ranked {
+                        bytes: file.bytes,
+                        path: full_path.clone(),
+                        modified: format_modified_utc(file.modified_unix),
+                    });
+                }
+                if wants_stale {
+                    stale_heap.add(Ranked {
+                        bytes: file.bytes,
+                        path: full_path,
+                        modified: format_modified_utc(file.modified_unix),
+                    });
+                }
             }
         }
     }
@@ -985,7 +1092,7 @@ fn aggregate_deterministic(
     let mut top_dirs_heap = TopN::new(top_dirs_limit);
     if top_dirs_limit > 0 {
         for (id, &bytes) in dir_totals.iter().enumerate() {
-            if top_dirs_heap.would_accept(bytes) {
+            if top_dirs_heap.would_accept(bytes) && !filter.is_sensitive_dir_path(&dirs[id].path) {
                 top_dirs_heap.add(Ranked {
                     bytes,
                     path: display_path(&dirs[id].path),
@@ -1011,17 +1118,67 @@ fn aggregate_deterministic(
 }
 
 #[cfg(not(windows))]
+#[allow(clippy::too_many_arguments)]
 fn scan_dir_portable(
     dir_id: usize,
     dir_path: &Path,
     depth: usize,
     root_slot: Option<usize>,
+    expected_dev_ino: Option<(u64, u64)>,
     shared: &SharedState,
     control: &Control,
     local_files: &mut Vec<FileRecord>,
-) -> Vec<PathBuf> {
+) -> Vec<DiscoveredSubdir> {
+    #[cfg(unix)]
+    use std::os::unix::fs::MetadataExt;
+
+    let pre_meta = match fs::symlink_metadata(dir_path) {
+        Ok(m) => m,
+        Err(err) => {
+            if root_slot.is_some() {
+                shared.mark_root_unreadable(root_slot);
+            }
+            if err.kind() == std::io::ErrorKind::PermissionDenied {
+                shared.record_denied(dir_path);
+            } else {
+                shared.mark_incomplete();
+            }
+            return Vec::new();
+        }
+    };
+    if linked(&pre_meta) || !pre_meta.is_dir() {
+        shared.mark_root_unreadable(root_slot);
+        shared.mark_incomplete();
+        return Vec::new();
+    }
+    #[cfg(unix)]
+    let observed_dev_ino = (pre_meta.dev(), pre_meta.ino());
+    #[cfg(unix)]
+    if expected_dev_ino.is_some_and(|expected| expected != observed_dev_ino) {
+        shared.mark_root_unreadable(root_slot);
+        shared.mark_incomplete();
+        return Vec::new();
+    }
+    #[cfg(not(unix))]
+    let _ = expected_dev_ino;
+    if let Some(expected_canon) = shared.expected_canonical_path(dir_path)
+        && dir_path.canonicalize().ok().as_deref() != Some(expected_canon.as_path())
+    {
+        shared.mark_root_unreadable(root_slot);
+        shared.mark_incomplete();
+        return Vec::new();
+    }
     let entries = match fs::read_dir(dir_path) {
         Ok(e) => {
+            #[cfg(unix)]
+            if fs::symlink_metadata(dir_path)
+                .map(|m| !linked(&m) && m.is_dir() && (m.dev(), m.ino()) == observed_dev_ino)
+                != Ok(true)
+            {
+                shared.mark_root_unreadable(root_slot);
+                shared.mark_incomplete();
+                return Vec::new();
+            }
             shared.mark_root_started(root_slot);
             e
         }
@@ -1069,7 +1226,11 @@ fn scan_dir_portable(
             if depth + 1 >= MAX_DIR_DEPTH {
                 shared.mark_incomplete();
             } else {
-                subdirs.push(path);
+                #[cfg(unix)]
+                let dev_ino = Some((meta.dev(), meta.ino()));
+                #[cfg(not(unix))]
+                let dev_ino = None;
+                subdirs.push(DiscoveredSubdir { path, dev_ino });
             }
         } else if meta.is_file() {
             let modified_unix = meta
@@ -1105,6 +1266,24 @@ pub fn measure_ls_subdirs(
     budget: &mut WalkBudget,
     control: &Control,
 ) -> Result<Vec<Option<u64>>, String> {
+    measure_ls_subdirs_with_filter(
+        parent_root,
+        direct_files,
+        subdir_paths,
+        budget,
+        control,
+        &SensitivePathFilter::default(),
+    )
+}
+
+pub fn measure_ls_subdirs_with_filter(
+    parent_root: &Path,
+    direct_files: &[DirectFileSeed],
+    subdir_paths: &[PathBuf],
+    budget: &mut WalkBudget,
+    control: &Control,
+    filter: &SensitivePathFilter,
+) -> Result<Vec<Option<u64>>, String> {
     if subdir_paths.is_empty() {
         return Ok(Vec::new());
     }
@@ -1123,6 +1302,10 @@ pub fn measure_ls_subdirs(
         path: parent_root.to_path_buf(),
         depth: 0,
         root_slot: None,
+        #[cfg(windows)]
+        expected_file_id: None,
+        #[cfg(not(windows))]
+        expected_dev_ino: None,
     });
     let mut initial_queue = Vec::with_capacity(subdir_paths.len());
     for (slot, path) in subdir_paths.iter().enumerate() {
@@ -1132,6 +1315,10 @@ pub fn measure_ls_subdirs(
             path: path.clone(),
             depth: 1,
             root_slot: Some(slot),
+            #[cfg(windows)]
+            expected_file_id: None,
+            #[cfg(not(windows))]
+            expected_dev_ino: None,
         });
         initial_queue.push(id);
     }
@@ -1160,6 +1347,7 @@ pub fn measure_ls_subdirs(
         control,
         false,
         0,
+        filter,
     )?;
     budget.scanned = budget.scanned.saturating_add(outcome.scanned);
     budget.incomplete |= outcome.incomplete;
@@ -1178,6 +1366,16 @@ pub fn size(
     control: &Control,
     top: &mut TopN,
 ) -> Result<u64, String> {
+    size_with_filter(root, budget, control, top, &SensitivePathFilter::default())
+}
+
+pub fn size_with_filter(
+    root: &Path,
+    budget: &mut WalkBudget,
+    control: &Control,
+    top: &mut TopN,
+    filter: &SensitivePathFilter,
+) -> Result<u64, String> {
     let remaining_entries = budget.remaining_entries();
     let remaining_timeout = budget.remaining_timeout();
     if budget.exhausted || remaining_entries == 0 || remaining_timeout.is_zero() {
@@ -1190,6 +1388,10 @@ pub fn size(
         path: root.to_path_buf(),
         depth: 0,
         root_slot: Some(0),
+        #[cfg(windows)]
+        expected_file_id: None,
+        #[cfg(not(windows))]
+        expected_dev_ino: None,
     }];
     let outcome = walk_forest(
         root,
@@ -1202,6 +1404,7 @@ pub fn size(
         control,
         false,
         top.limit(),
+        filter,
     )?;
     budget.scanned = budget.scanned.saturating_add(outcome.scanned);
     budget.incomplete |= outcome.incomplete;
@@ -1223,6 +1426,16 @@ pub fn usage(
     control: &Control,
     limits: WalkLimits,
 ) -> Result<Value, String> {
+    usage_with_filter(root, top, control, limits, &SensitivePathFilter::default())
+}
+
+pub fn usage_with_filter(
+    root: &Path,
+    top: usize,
+    control: &Control,
+    limits: WalkLimits,
+    filter: &SensitivePathFilter,
+) -> Result<Value, String> {
     let meta = fs::symlink_metadata(root).map_err(|_| "目标目录无法读取。")?;
     if linked(&meta) || !meta.is_dir() {
         return Err("目标必须是目录且不能是链接或重解析点。".into());
@@ -1233,6 +1446,10 @@ pub fn usage(
         path: root.to_path_buf(),
         depth: 0,
         root_slot: Some(0),
+        #[cfg(windows)]
+        expected_file_id: None,
+        #[cfg(not(windows))]
+        expected_dev_ino: None,
     }];
     let outcome = walk_forest(
         root,
@@ -1245,6 +1462,7 @@ pub fn usage(
         control,
         true,
         top + 1,
+        filter,
     )?;
     let root_key = path_key(root);
     let top_dirs = outcome
@@ -1332,12 +1550,12 @@ mod win_walk {
     use windows::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
         FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-        FILE_ID_BOTH_DIR_INFO, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, FIND_FIRST_EX_FLAGS, FIND_FIRST_EX_LARGE_FETCH,
-        FileIdBothDirectoryInfo, FindClose, FindExInfoBasic, FindExSearchNameMatch,
-        FindFirstFileExW, FindNextFileW, GetDriveTypeW, GetFileInformationByHandle,
-        GetFileInformationByHandleEx, GetVolumeInformationW, GetVolumePathNameW, OPEN_EXISTING,
-        WIN32_FIND_DATAW,
+        FILE_ID_BOTH_DIR_INFO, FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FIND_FIRST_EX_FLAGS,
+        FIND_FIRST_EX_LARGE_FETCH, FileIdBothDirectoryInfo, FindClose, FindExInfoBasic,
+        FindExSearchNameMatch, FindFirstFileExW, FindNextFileW, GetDriveTypeW,
+        GetFileInformationByHandle, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
+        GetVolumeInformationW, GetVolumePathNameW, OPEN_EXISTING, WIN32_FIND_DATAW,
     };
     use windows::Win32::System::IO::CancelSynchronousIo;
     use windows::Win32::System::Threading::{GetCurrentProcess, GetCurrentThread};
@@ -1469,11 +1687,32 @@ mod win_walk {
         String::from_utf16_lossy(&fs_name[..len]).eq_ignore_ascii_case("NTFS")
     }
 
-    pub(super) fn query_dir_volume_serial(dir: &Path) -> Option<u32> {
-        let handle = open_dir_handle_raw(dir).ok()?;
+    fn final_path_key(handle: HANDLE) -> Option<String> {
+        let mut buf = vec![0u16; 512];
+        let mut len = unsafe { GetFinalPathNameByHandleW(handle, &mut buf, FILE_NAME_NORMALIZED) };
+        if len == 0 {
+            return None;
+        }
+        if (len as usize) >= buf.len() {
+            buf.resize(len as usize + 1, 0);
+            len = unsafe { GetFinalPathNameByHandleW(handle, &mut buf, FILE_NAME_NORMALIZED) };
+            if len == 0 || (len as usize) >= buf.len() {
+                return None;
+            }
+        }
+        let text = OsString::from_wide(&buf[..len as usize]);
+        Some(path_key(Path::new(&text)))
+    }
+
+    pub(super) fn query_dir_root_identity(dir: &Path) -> (Option<u32>, Option<String>) {
+        let Ok(handle) = open_dir_handle_raw(dir) else {
+            return (None, None);
+        };
         let mut info = BY_HANDLE_FILE_INFORMATION::default();
-        unsafe { GetFileInformationByHandle(handle.0, &mut info).ok()? };
-        (info.dwVolumeSerialNumber != 0).then_some(info.dwVolumeSerialNumber)
+        let serial = unsafe { GetFileInformationByHandle(handle.0, &mut info).ok() }
+            .and_then(|()| (info.dwVolumeSerialNumber != 0).then_some(info.dwVolumeSerialNumber));
+        let final_key = final_path_key(handle.0);
+        (serial, final_key)
     }
 
     fn to_wide_path(path: &Path) -> Vec<u16> {
@@ -1544,11 +1783,14 @@ mod win_walk {
     }
 
     /// Opens a directory with `FILE_FLAG_OPEN_REPARSE_POINT` and immediately re-verifies the
-    /// handle's attributes and volume serial so a directory replaced by a junction/symlink or
-    /// mount point between queueing and opening is never descended into.
+    /// handle's attributes, volume serial, optional 64-bit FileId, and normalized final path so a
+    /// directory (or intermediate ancestor) replaced by a junction/symlink or moved between
+    /// queueing and opening is never descended into.
     fn open_dir_handle_checked(
         dir: &Path,
         expected_vol_serial: Option<u32>,
+        expected_file_id: Option<u64>,
+        expected_final_key: Option<&str>,
     ) -> Result<OwnedHandle, DirOpenError> {
         let handle = open_dir_handle_raw(dir).map_err(|e| {
             if (e.code().0 as u32 & 0xFFFF) == ERROR_ACCESS_DENIED.0 {
@@ -1572,6 +1814,20 @@ mod win_walk {
             && info.dwVolumeSerialNumber != expected
         {
             return Err(DirOpenError::ReparseOrCrossVolume);
+        }
+        if let Some(expected_id) = expected_file_id.filter(|&id| id != 0) {
+            let opened_id = ((info.nFileIndexHigh as u64) << 32) | (info.nFileIndexLow as u64);
+            if opened_id != expected_id {
+                return Err(DirOpenError::ReparseOrCrossVolume);
+            }
+        }
+        if let Some(expected_final) = expected_final_key {
+            let Some(actual_final) = final_path_key(handle.0) else {
+                return Err(DirOpenError::ReparseOrCrossVolume);
+            };
+            if actual_final != expected_final {
+                return Err(DirOpenError::ReparseOrCrossVolume);
+            }
         }
         Ok(handle)
     }
@@ -1655,7 +1911,7 @@ mod win_walk {
         budget: &mut WalkBudget,
         control: &Control,
     ) -> Result<DirectChildrenPage, String> {
-        let handle = match open_dir_handle_checked(dir, None) {
+        let handle = match open_dir_handle_checked(dir, None, None, None) {
             Ok(h) => h,
             Err(DirOpenError::ReparseOrCrossVolume) => {
                 return Err("目标必须是目录且不能是链接或重解析点。".into());
@@ -1886,15 +2142,22 @@ mod win_walk {
         dir_path: &Path,
         depth: usize,
         root_slot: Option<usize>,
+        expected_file_id: Option<u64>,
         buf: &mut [u64],
         shared: &SharedState,
         control: &Control,
         local_files: &mut Vec<FileRecord>,
-    ) -> Vec<PathBuf> {
+    ) -> Vec<DiscoveredSubdir> {
         if shared.cancelled.load(Ordering::Acquire) || shared.exhausted.load(Ordering::Acquire) {
             return Vec::new();
         }
-        let handle = match open_dir_handle_checked(dir_path, shared.expected_vol_serial) {
+        let expected_final = shared.expected_final_key(dir_path);
+        let handle = match open_dir_handle_checked(
+            dir_path,
+            shared.expected_vol_serial,
+            expected_file_id,
+            expected_final.as_deref(),
+        ) {
             Ok(h) => {
                 shared.mark_root_started(root_slot);
                 h
@@ -1937,13 +2200,15 @@ mod win_walk {
                         unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, buf_bytes) };
                     let (parsed, corrupted) = parse_file_id_both_dir_buffer(raw);
                     if first_batch && corrupted && parsed.is_empty() {
-                        // Safe to fall back only because the directory handle itself was already
-                        // verified to be a non-reparse directory on the expected volume.
+                        // Keep the verified handle alive and re-check identity around fallback enumeration.
+                        let _verified = handle;
                         return scan_dir_findfirst(
                             dir_id,
                             dir_path,
                             depth,
                             root_slot,
+                            expected_file_id,
+                            expected_final.as_deref(),
                             shared,
                             control,
                             local_files,
@@ -1968,8 +2233,10 @@ mod win_walk {
                                 if depth + 1 >= MAX_DIR_DEPTH {
                                     shared.mark_incomplete();
                                 } else {
-                                    subdirs
-                                        .push(dir_path.join(OsString::from_wide(&item.name_u16)));
+                                    subdirs.push(DiscoveredSubdir {
+                                        path: dir_path.join(OsString::from_wide(&item.name_u16)),
+                                        file_id: (item.file_id != 0).then_some(item.file_id),
+                                    });
                                 }
                             }
                             WinEntryClass::File(bytes) => {
@@ -2000,11 +2267,14 @@ mod win_walk {
                 }
                 Err(e) if is_enum_eof(&e) => break,
                 Err(e) if first_batch && is_info_class_unsupported(&e) => {
+                    let _verified = handle;
                     return scan_dir_findfirst(
                         dir_id,
                         dir_path,
                         depth,
                         root_slot,
+                        expected_file_id,
+                        expected_final.as_deref(),
                         shared,
                         control,
                         local_files,
@@ -2026,15 +2296,18 @@ mod win_walk {
         subdirs
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn scan_dir_findfirst(
         dir_id: usize,
         dir_path: &Path,
         depth: usize,
         root_slot: Option<usize>,
+        expected_file_id: Option<u64>,
+        expected_final: Option<&str>,
         shared: &SharedState,
         control: &Control,
         local_files: &mut Vec<FileRecord>,
-    ) -> Vec<PathBuf> {
+    ) -> Vec<DiscoveredSubdir> {
         if shared.cancelled.load(Ordering::Acquire) || shared.exhausted.load(Ordering::Acquire) {
             return Vec::new();
         }
@@ -2095,6 +2368,19 @@ mod win_walk {
             }
         }
         let _guard = FindGuard(handle);
+        // Re-verify the directory identity after opening FindFirstFileExW to catch swaps.
+        if open_dir_handle_checked(
+            dir_path,
+            shared.expected_vol_serial,
+            expected_file_id,
+            expected_final,
+        )
+        .is_err()
+        {
+            shared.mark_root_unreadable(root_slot);
+            shared.mark_incomplete();
+            return Vec::new();
+        }
         let mut subdirs = Vec::new();
         loop {
             if shared.cancelled.load(Ordering::Acquire) || shared.exhausted.load(Ordering::Acquire)
@@ -2117,7 +2403,10 @@ mod win_walk {
                         if depth + 1 >= MAX_DIR_DEPTH {
                             shared.mark_incomplete();
                         } else {
-                            subdirs.push(dir_path.join(OsString::from_wide(name_slice)));
+                            subdirs.push(DiscoveredSubdir {
+                                path: dir_path.join(OsString::from_wide(name_slice)),
+                                file_id: None,
+                            });
                         }
                     }
                     WinEntryClass::File(bytes) => {
@@ -2340,5 +2629,200 @@ mod tests {
             ),
             WinEntryClass::ReparseOrCloudSkipped
         );
+    }
+
+    #[test]
+    fn aggregate_and_denied_hide_sensitive_paths_while_keeping_totals_and_slots() {
+        let root = PathBuf::from("/kit");
+        let make_dir = |parent, path, depth, root_slot| DirRecord {
+            parent,
+            path,
+            depth,
+            root_slot,
+            #[cfg(windows)]
+            expected_file_id: None,
+            #[cfg(not(windows))]
+            expected_dev_ino: None,
+        };
+        let dirs = vec![
+            make_dir(None, root.clone(), 0, Some(0)),
+            make_dir(Some(0), root.join(".state"), 1, None),
+            make_dir(Some(0), root.join("data"), 1, None),
+            make_dir(Some(2), root.join("data").join("config"), 2, None),
+            make_dir(Some(2), root.join("data").join("telemetry"), 2, None),
+            make_dir(Some(0), root.join("notes"), 1, None),
+        ];
+        let stale_ts = 1_577_836_800i64; // 2020-01-01
+        let files = vec![
+            FileRecord {
+                file_id: 1,
+                dir_id: 1,
+                bytes: 200 * 1024 * 1024,
+                modified_unix: stale_ts,
+                name: "token.db".into(),
+            },
+            FileRecord {
+                file_id: 2,
+                dir_id: 3,
+                bytes: 120 * 1024 * 1024,
+                modified_unix: stale_ts,
+                name: "auth.json".into(),
+            },
+            FileRecord {
+                file_id: 3,
+                dir_id: 4,
+                bytes: 90 * 1024 * 1024,
+                modified_unix: stale_ts,
+                name: "identity.json".into(),
+            },
+            FileRecord {
+                file_id: 4,
+                dir_id: 3,
+                bytes: 60 * 1024 * 1024,
+                modified_unix: stale_ts,
+                name: "settings.json".into(),
+            },
+            FileRecord {
+                file_id: 5,
+                dir_id: 5,
+                bytes: 55 * 1024 * 1024,
+                modified_unix: stale_ts,
+                name: "archive.log".into(),
+            },
+        ];
+        let filter = SensitivePathFilter::default();
+        let control = Control::new(Default::default(), Duration::from_secs(5));
+        let outcome = aggregate_deterministic(
+            &dirs,
+            &[true],
+            &[false],
+            files,
+            Vec::new(),
+            5,
+            false,
+            false,
+            true,
+            false,
+            3,
+            &filter,
+            &control,
+        )
+        .unwrap();
+
+        let expected_total = (200 + 120 + 90 + 60 + 55) * 1024 * 1024;
+        assert_eq!(outcome.total, expected_total);
+        assert!(
+            outcome
+                .top_dirs
+                .iter()
+                .all(|d| !d.path.to_ascii_lowercase().contains(".state"))
+        );
+        // Large sensitive `.state` (200 MiB) must not evict non-sensitive dirs from the 3-slot heap.
+        assert_eq!(outcome.top_dirs.len(), 3);
+        let top_file_paths: Vec<&str> = outcome.top_files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(top_file_paths.len(), 2);
+        assert!(top_file_paths.iter().any(|p| p.ends_with("settings.json")));
+        assert!(top_file_paths.iter().any(|p| p.ends_with("archive.log")));
+        let stale_paths: Vec<&str> = outcome
+            .stale_files
+            .iter()
+            .map(|f| f.path.as_str())
+            .collect();
+        assert_eq!(stale_paths.len(), 2);
+        assert!(stale_paths.iter().any(|p| p.ends_with("settings.json")));
+        assert!(stale_paths.iter().any(|p| p.ends_with("archive.log")));
+
+        let mut budget = WalkBudget::new(WalkLimits::default());
+        budget.failed(&root.join(".state").join("locked.db"));
+        budget.failed(&root.join("data").join("config").join("auth.json"));
+        budget.failed(&root.join("notes").join("locked.txt"));
+        assert!(budget.incomplete);
+        assert_eq!(budget.denied.len(), 1);
+        assert!(budget.denied[0].ends_with("locked.txt"));
+
+        // Verify SharedState::record_denied (production traversal path) also filters custom layout.
+        let custom_cfg = root.join("profile").join("config");
+        let custom_filter = SensitivePathFilter::from_kit_dirs(None, Some(&custom_cfg), None);
+        let shared = SharedState::new(
+            Vec::new(),
+            0,
+            100,
+            Instant::now() + Duration::from_secs(5),
+            false,
+            false,
+            custom_filter,
+            #[cfg(windows)]
+            None,
+            #[cfg(windows)]
+            path_key(&root),
+            #[cfg(windows)]
+            None,
+            #[cfg(not(windows))]
+            root.clone(),
+            #[cfg(not(windows))]
+            None,
+        );
+        shared.record_denied(&root.join(".state").join("runtime.lock"));
+        shared.record_denied(&custom_cfg.join("auth.json"));
+        shared.record_denied(&root.join("notes").join("denied.log"));
+        assert!(shared.incomplete.load(Ordering::Acquire));
+        let denied = shared.denied.into_inner().unwrap();
+        assert_eq!(denied.len(), 1);
+        assert!(denied[0].ends_with("denied.log"));
+    }
+
+    #[test]
+    fn queued_directory_identity_mismatch_skips_subtree_and_marks_incomplete() {
+        let dir = std::env::temp_dir().join(format!("cst-walk-swap-{}", uuid::Uuid::new_v4()));
+        let sub = dir.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("payload.bin"), vec![1u8; 4096]).unwrap();
+        let canonical_dir = dir.canonicalize().unwrap();
+        let canonical_sub = canonical_dir.join("sub");
+
+        // Inject a stale queued identity for `sub` (simulating directory replacement after enqueue).
+        let initial_dirs = vec![
+            DirRecord {
+                parent: None,
+                path: canonical_dir.clone(),
+                depth: 0,
+                root_slot: None,
+                #[cfg(windows)]
+                expected_file_id: None,
+                #[cfg(not(windows))]
+                expected_dev_ino: None,
+            },
+            DirRecord {
+                parent: Some(0),
+                path: canonical_sub,
+                depth: 1,
+                root_slot: Some(0),
+                #[cfg(windows)]
+                expected_file_id: Some(u64::MAX - 7),
+                #[cfg(not(windows))]
+                expected_dev_ino: Some((u64::MAX, u64::MAX - 7)),
+            },
+        ];
+        let control = Control::new(Default::default(), Duration::from_secs(5));
+        let outcome = walk_forest(
+            &canonical_dir,
+            initial_dirs,
+            vec![1],
+            Vec::new(),
+            1,
+            10_000,
+            Duration::from_secs(5),
+            &control,
+            true,
+            10,
+            &SensitivePathFilter::default(),
+        )
+        .unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+
+        assert!(outcome.incomplete);
+        assert_eq!(outcome.total, 0);
+        assert_eq!(outcome.root_totals, vec![None]);
+        assert!(outcome.top_files.is_empty());
     }
 }

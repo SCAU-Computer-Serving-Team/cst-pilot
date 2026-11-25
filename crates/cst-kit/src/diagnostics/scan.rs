@@ -4,7 +4,7 @@ use super::win_native::rounded;
 use serde_json::{Value, json};
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, HashMap};
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -27,6 +27,393 @@ pub fn hardlink_rank_key<'a>(
     name: &'a str,
 ) -> (String, String, &'a str, &'a str) {
     (dir_key.to_uppercase(), name.to_uppercase(), dir_key, name)
+}
+
+/// Canonicalizes the longest existing ancestor of `path` and re-attaches any non-existent tail
+/// components so pre-creation layout directories still match canonical scan paths.
+fn canonicalize_best_effort(path: &Path) -> Option<PathBuf> {
+    if let Ok(canon) = path.canonicalize() {
+        return Some(canon);
+    }
+    let mut cur = path;
+    let mut tail = Vec::new();
+    while let Some(name) = cur.file_name() {
+        tail.push(name.to_os_string());
+        let Some(parent) = cur.parent() else {
+            break;
+        };
+        if let Ok(mut canon) = parent.canonicalize() {
+            for part in tail.into_iter().rev() {
+                canon.push(part);
+            }
+            return Some(canon);
+        }
+        cur = parent;
+    }
+    None
+}
+
+#[cfg(not(windows))]
+fn normalize_unix_path(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for comp in path.components() {
+        if !matches!(comp, Component::CurDir) {
+            out.push(comp.as_os_str());
+        }
+    }
+    out
+}
+
+fn push_unique_mft_key(list: &mut Vec<String>, path: &Path) {
+    let key = path_key(path);
+    if !key.is_empty() && !list.contains(&key) {
+        list.push(key);
+    }
+}
+
+#[cfg(windows)]
+fn push_unique_native_key(list: &mut Vec<String>, path: &Path) {
+    push_unique_mft_key(list, path);
+}
+
+#[cfg(not(windows))]
+fn push_unique_native_key(list: &mut Vec<PathBuf>, path: &Path) {
+    let norm = normalize_unix_path(path);
+    if !norm.as_os_str().is_empty() && !list.contains(&norm) {
+        list.push(norm);
+    }
+}
+
+fn is_config_secret_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("auth.json")
+        || name.eq_ignore_ascii_case("models.json")
+        || name.eq_ignore_ascii_case("mcp-auth.json")
+        || name.eq_ignore_ascii_case("web-search.json")
+}
+
+fn is_identity_secret_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("identity.json")
+}
+
+fn segments_match_default_secret_dir(tail: [&str; 3], len: usize, is_config: bool) -> bool {
+    let ends_with_2 = |a: &str, b: &str| {
+        len >= 2 && tail[len - 2].eq_ignore_ascii_case(a) && tail[len - 1].eq_ignore_ascii_case(b)
+    };
+    let ends_with_3 = |a: &str, b: &str, c: &str| {
+        len == 3
+            && tail[0].eq_ignore_ascii_case(a)
+            && tail[1].eq_ignore_ascii_case(b)
+            && tail[2].eq_ignore_ascii_case(c)
+    };
+    if is_config {
+        ends_with_2("data", "config") || ends_with_2("agent", "home")
+    } else {
+        ends_with_2("data", "telemetry") || ends_with_3("agent", "home", "telemetry")
+    }
+}
+
+/// Unified sensitive-path filter shared across `walk`, `ls`, and `$MFT` backends.
+/// Always protects default kit paths (`.state`, `data/config/*`, `data/telemetry/identity.json`,
+/// and legacy `agent/home/*`) and additionally protects custom `KitLayout` directories (such as
+/// `CST_PILOT_DATA_DIR` overrides).
+#[derive(Clone, Debug, Default)]
+pub struct SensitivePathFilter {
+    #[cfg(windows)]
+    extra_state_dirs: Vec<String>,
+    #[cfg(windows)]
+    extra_config_dirs: Vec<String>,
+    #[cfg(windows)]
+    extra_telemetry_dirs: Vec<String>,
+    #[cfg(not(windows))]
+    extra_state_dirs: Vec<PathBuf>,
+    #[cfg(not(windows))]
+    extra_config_dirs: Vec<PathBuf>,
+    #[cfg(not(windows))]
+    extra_telemetry_dirs: Vec<PathBuf>,
+    // Windows-style uppercase `\` keys used for NTFS `$MFT` matching across all platforms/tests.
+    extra_mft_state_dirs: Vec<String>,
+    extra_mft_config_dirs: Vec<String>,
+    extra_mft_telemetry_dirs: Vec<String>,
+}
+
+impl SensitivePathFilter {
+    pub fn from_layout(layout: &cst_os::KitLayout) -> Self {
+        Self::from_kit_dirs(
+            Some(&layout.state_dir()),
+            Some(&layout.config_dir()),
+            Some(&layout.telemetry_data_dir()),
+        )
+    }
+
+    pub fn from_kit_dirs(
+        state_dir: Option<&Path>,
+        config_dir: Option<&Path>,
+        telemetry_dir: Option<&Path>,
+    ) -> Self {
+        let mut filter = Self::default();
+        if let Some(dir) = state_dir {
+            push_unique_native_key(&mut filter.extra_state_dirs, dir);
+            push_unique_mft_key(&mut filter.extra_mft_state_dirs, dir);
+            if let Some(canon) = canonicalize_best_effort(dir) {
+                push_unique_native_key(&mut filter.extra_state_dirs, &canon);
+                push_unique_mft_key(&mut filter.extra_mft_state_dirs, &canon);
+            }
+        }
+        if let Some(dir) = config_dir {
+            push_unique_native_key(&mut filter.extra_config_dirs, dir);
+            push_unique_mft_key(&mut filter.extra_mft_config_dirs, dir);
+            if let Some(canon) = canonicalize_best_effort(dir) {
+                push_unique_native_key(&mut filter.extra_config_dirs, &canon);
+                push_unique_mft_key(&mut filter.extra_mft_config_dirs, &canon);
+            }
+        }
+        if let Some(dir) = telemetry_dir {
+            push_unique_native_key(&mut filter.extra_telemetry_dirs, dir);
+            push_unique_mft_key(&mut filter.extra_mft_telemetry_dirs, dir);
+            if let Some(canon) = canonicalize_best_effort(dir) {
+                push_unique_native_key(&mut filter.extra_telemetry_dirs, &canon);
+                push_unique_mft_key(&mut filter.extra_mft_telemetry_dirs, &canon);
+            }
+        }
+        filter
+    }
+
+    fn matches_extra_state_path(&self, dir: &Path) -> bool {
+        if self.extra_state_dirs.is_empty() {
+            return false;
+        }
+        #[cfg(windows)]
+        {
+            let key = path_key(dir);
+            self.extra_state_dirs.iter().any(|s| in_tree(&key, s))
+        }
+        #[cfg(not(windows))]
+        {
+            let norm = normalize_unix_path(dir);
+            self.extra_state_dirs.iter().any(|s| norm.starts_with(s))
+        }
+    }
+
+    fn matches_extra_config_path(&self, dir: &Path) -> bool {
+        if self.extra_config_dirs.is_empty() {
+            return false;
+        }
+        #[cfg(windows)]
+        {
+            let key = path_key(dir);
+            self.extra_config_dirs.contains(&key)
+        }
+        #[cfg(not(windows))]
+        {
+            let norm = normalize_unix_path(dir);
+            self.extra_config_dirs.contains(&norm)
+        }
+    }
+
+    fn matches_extra_telemetry_path(&self, dir: &Path) -> bool {
+        if self.extra_telemetry_dirs.is_empty() {
+            return false;
+        }
+        #[cfg(windows)]
+        {
+            let key = path_key(dir);
+            self.extra_telemetry_dirs.contains(&key)
+        }
+        #[cfg(not(windows))]
+        {
+            let norm = normalize_unix_path(dir);
+            self.extra_telemetry_dirs.contains(&norm)
+        }
+    }
+
+    /// Checks a native filesystem directory `Path` using platform path components (so literal `\`
+    /// characters in Unix filenames are never treated as separators).
+    pub fn is_sensitive_dir_path(&self, dir: &Path) -> bool {
+        for comp in dir.components() {
+            if let Component::Normal(seg) = comp
+                && seg.to_string_lossy().eq_ignore_ascii_case(".state")
+            {
+                return true;
+            }
+        }
+        self.matches_extra_state_path(dir)
+    }
+
+    /// Checks a native filesystem `(dir, name)` entry using platform path components plus any
+    /// custom `KitLayout` directories.
+    pub fn is_sensitive_entry_path(&self, dir: &Path, name: &str) -> bool {
+        if name.eq_ignore_ascii_case(".state") || self.is_sensitive_dir_path(dir) {
+            return true;
+        }
+        if !self.extra_state_dirs.is_empty() && self.matches_extra_state_path(&dir.join(name)) {
+            return true;
+        }
+        let is_config = is_config_secret_name(name);
+        let is_identity = !is_config && is_identity_secret_name(name);
+        if !is_config && !is_identity {
+            return false;
+        }
+        if is_config && self.matches_extra_config_path(dir) {
+            return true;
+        }
+        if is_identity && self.matches_extra_telemetry_path(dir) {
+            return true;
+        }
+        let mut tail = [String::new(), String::new(), String::new()];
+        let mut len = 0usize;
+        for comp in dir.components() {
+            if let Component::Normal(seg) = comp {
+                let text = seg.to_string_lossy().into_owned();
+                if len < 3 {
+                    tail[len] = text;
+                    len += 1;
+                } else {
+                    tail.swap(0, 1);
+                    tail.swap(1, 2);
+                    tail[2] = text;
+                }
+            }
+        }
+        segments_match_default_secret_dir(
+            [tail[0].as_str(), tail[1].as_str(), tail[2].as_str()],
+            len,
+            is_config,
+        )
+    }
+
+    /// Checks a full native filesystem path (file or directory) for kit sensitivity.
+    pub fn is_sensitive_full_path(&self, path: &Path) -> bool {
+        if self.is_sensitive_dir_path(path) {
+            return true;
+        }
+        match (path.parent(), path.file_name().and_then(|n| n.to_str())) {
+            (Some(parent), Some(name)) => self.is_sensitive_entry_path(parent, name),
+            _ => false,
+        }
+    }
+
+    fn mft_full_key(drive_upper: &str, rel_dir: &str) -> String {
+        if rel_dir.is_empty() {
+            drive_upper.to_ascii_uppercase()
+        } else {
+            path_key(Path::new(&format!("{drive_upper}\\{rel_dir}")))
+        }
+    }
+
+    /// Checks an NTFS `$MFT` relative directory (`\`-separated) on `drive_upper`.
+    pub fn is_sensitive_mft_dir(&self, drive_upper: &str, rel_dir: &str) -> bool {
+        if rel_dir
+            .split('\\')
+            .filter(|seg| !seg.is_empty() && *seg != ".")
+            .any(|seg| seg.eq_ignore_ascii_case(".state"))
+        {
+            return true;
+        }
+        if self.extra_mft_state_dirs.is_empty() {
+            return false;
+        }
+        let full = Self::mft_full_key(drive_upper, rel_dir);
+        self.extra_mft_state_dirs.iter().any(|s| in_tree(&full, s))
+    }
+
+    /// Checks an NTFS `$MFT` entry `(rel_dir, name)` (`\`-separated) on `drive_upper`.
+    pub fn is_sensitive_mft_entry(&self, drive_upper: &str, rel_dir: &str, name: &str) -> bool {
+        if name.eq_ignore_ascii_case(".state") || self.is_sensitive_mft_dir(drive_upper, rel_dir) {
+            return true;
+        }
+        if !self.extra_mft_state_dirs.is_empty() {
+            let child_rel = if rel_dir.is_empty() {
+                name.to_owned()
+            } else {
+                format!("{rel_dir}\\{name}")
+            };
+            let full_child = Self::mft_full_key(drive_upper, &child_rel);
+            if self
+                .extra_mft_state_dirs
+                .iter()
+                .any(|s| in_tree(&full_child, s))
+            {
+                return true;
+            }
+        }
+        let is_config = is_config_secret_name(name);
+        let is_identity = !is_config && is_identity_secret_name(name);
+        if !is_config && !is_identity {
+            return false;
+        }
+        let mut tail = [""; 3];
+        let mut len = 0usize;
+        for seg in rel_dir
+            .split('\\')
+            .filter(|seg| !seg.is_empty() && *seg != ".")
+        {
+            if len < 3 {
+                tail[len] = seg;
+                len += 1;
+            } else {
+                tail[0] = tail[1];
+                tail[1] = tail[2];
+                tail[2] = seg;
+            }
+        }
+        if segments_match_default_secret_dir(tail, len, is_config) {
+            return true;
+        }
+        let full_dir = Self::mft_full_key(drive_upper, rel_dir);
+        if is_config {
+            self.extra_mft_config_dirs.contains(&full_dir)
+        } else {
+            self.extra_mft_telemetry_dirs.contains(&full_dir)
+        }
+    }
+}
+
+/// Returns `true` when any Windows/NTFS path component of `dir` is `.state` (case-insensitive ASCII).
+pub fn is_sensitive_dir_str(dir: &str) -> bool {
+    dir.split(['\\', '/'])
+        .filter(|seg| !seg.is_empty() && *seg != ".")
+        .any(|seg| seg.eq_ignore_ascii_case(".state"))
+}
+
+pub fn is_sensitive_dir_path(dir: &Path) -> bool {
+    SensitivePathFilter::default().is_sensitive_dir_path(dir)
+}
+
+/// Returns `true` when string-formatted `(dir, name)` matches default protected kit paths.
+pub fn is_sensitive_entry_str(dir: &str, name: &str) -> bool {
+    if name.eq_ignore_ascii_case(".state") || is_sensitive_dir_str(dir) {
+        return true;
+    }
+    let is_config = is_config_secret_name(name);
+    let is_identity = !is_config && is_identity_secret_name(name);
+    if !is_config && !is_identity {
+        return false;
+    }
+    let mut tail = [""; 3];
+    let mut len = 0usize;
+    for seg in dir
+        .split(['\\', '/'])
+        .filter(|seg| !seg.is_empty() && *seg != ".")
+    {
+        if len < 3 {
+            tail[len] = seg;
+            len += 1;
+        } else {
+            tail[0] = tail[1];
+            tail[1] = tail[2];
+            tail[2] = seg;
+        }
+    }
+    segments_match_default_secret_dir(tail, len, is_config)
+}
+
+pub fn is_sensitive_entry_path(dir: &Path, name: &str) -> bool {
+    SensitivePathFilter::default().is_sensitive_entry_path(dir, name)
+}
+
+/// Checks a full file or directory path for default kit sensitivity.
+pub fn is_sensitive_full_path(path: &Path) -> bool {
+    SensitivePathFilter::default().is_sensitive_full_path(path)
 }
 
 pub fn format_modified_utc(unix_secs: i64) -> Option<String> {

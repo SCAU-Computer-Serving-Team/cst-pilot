@@ -1,13 +1,19 @@
-use super::scan::ScanSnapshot;
+use super::scan::{ScanSnapshot, SensitivePathFilter};
 use super::volume_index::{ScanSource, VolumeIdentity};
 use super::win_native::Control;
 
 #[derive(Default)]
-pub struct NativeScanSource;
+pub struct NativeScanSource {
+    filter: SensitivePathFilter,
+}
 
 impl NativeScanSource {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    pub fn with_filter(filter: SensitivePathFilter) -> Self {
+        Self { filter }
     }
 }
 
@@ -31,7 +37,12 @@ impl ScanSource for NativeScanSource {
         if !cst_os::is_elevated().unwrap_or(false) {
             return Err("当前非管理员权限，无法直读 NTFS 主文件表（$MFT）。".into());
         }
-        super::mft::scan_ntfs_volume(drive, identity.volume_guid.as_deref(), control)
+        super::mft::scan_ntfs_volume_with_filter(
+            drive,
+            identity.volume_guid.as_deref(),
+            control,
+            &self.filter,
+        )
     }
 }
 

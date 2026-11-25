@@ -1,6 +1,6 @@
 use super::scan::{
-    Ranked, STALE_AGE_SECS, STALE_MIN_BYTES, ScanMethod, ScanSnapshot, TopN, ext_key,
-    format_modified_utc, hardlink_rank_key,
+    Ranked, STALE_AGE_SECS, STALE_MIN_BYTES, ScanMethod, ScanSnapshot, SensitivePathFilter, TopN,
+    ext_key, format_modified_utc, hardlink_rank_key,
 };
 use super::volume_index::{display_path, drive_key, path_key};
 use super::walk::is_cloud_reparse_tag;
@@ -504,31 +504,19 @@ impl MftProjection {
     }
 }
 
-fn is_sensitive_kit_path(rel_dir: &str, name: &str) -> bool {
-    let lower_dir = rel_dir.to_ascii_lowercase();
-    let lower_name = name.to_ascii_lowercase();
-    if lower_dir.split('\\').any(|seg| seg == ".state") {
-        return true;
-    }
-    let sensitive_config = matches!(
-        lower_name.as_str(),
-        "auth.json" | "models.json" | "mcp-auth.json" | "web-search.json"
-    ) && (lower_dir.ends_with(r"\data\config")
-        || lower_dir == r"data\config"
-        || lower_dir.ends_with(r"\agent\home")
-        || lower_dir == r"agent\home");
-    let sensitive_identity = lower_name == "identity.json"
-        && (lower_dir.ends_with(r"\data\telemetry")
-            || lower_dir == r"data\telemetry"
-            || lower_dir.ends_with(r"\agent\home\telemetry")
-            || lower_dir == r"agent\home\telemetry");
-    sensitive_config || sensitive_identity
-}
-
 pub fn scan_ntfs_volume(
     drive: &str,
     volume_guid: Option<&str>,
     control: &Control,
+) -> Result<ScanSnapshot, String> {
+    scan_ntfs_volume_with_filter(drive, volume_guid, control, &SensitivePathFilter::default())
+}
+
+pub fn scan_ntfs_volume_with_filter(
+    drive: &str,
+    volume_guid: Option<&str>,
+    control: &Control,
+    filter: &SensitivePathFilter,
 ) -> Result<ScanSnapshot, String> {
     control.check()?;
     if !mft_enabled() {
@@ -560,7 +548,7 @@ pub fn scan_ntfs_volume(
     read_at(&device, 0, &mut boot_buf).map_err(|e| format!("读取卷引导扇区失败：{e}"))?;
     let boot = BootSector::parse(&boot_buf).map_err(|e| format!("NTFS 引导扇区无效：{e:?}"))?;
     let mft = Mft::from_volume(&device, &boot).map_err(|e| format!("解析 $MFT 布局失败：{e:?}"))?;
-    scan_mft_source(&drive_upper, &mft, control)
+    scan_mft_source_with_filter(&drive_upper, &mft, control, filter)
 }
 
 /// Core generic `$MFT` scanning & aggregation pipeline (testable offline with synthetic `Mft`
@@ -570,6 +558,15 @@ pub fn scan_mft_source<S: ReadAt + Sync>(
     drive_upper: &str,
     mft: &Mft<S>,
     control: &Control,
+) -> Result<ScanSnapshot, String> {
+    scan_mft_source_with_filter(drive_upper, mft, control, &SensitivePathFilter::default())
+}
+
+pub fn scan_mft_source_with_filter<S: ReadAt + Sync>(
+    drive_upper: &str,
+    mft: &Mft<S>,
+    control: &Control,
+    filter: &SensitivePathFilter,
 ) -> Result<ScanSnapshot, String> {
     control.check()?;
     let total_records = mft.records();
@@ -845,7 +842,7 @@ pub fn scan_mft_source<S: ReadAt + Sync>(
             None
         };
         if let Some(rel) = rel {
-            if is_sensitive_kit_path(&rel, name) {
+            if filter.is_sensitive_mft_entry(drive_upper, &rel, name) {
                 continue;
             }
             let full_path = if rel.is_empty() {
@@ -905,7 +902,7 @@ pub fn scan_mft_source<S: ReadAt + Sync>(
         let bytes = dir_bytes[dir_id as usize];
         if top_dirs_heap.would_accept(bytes) {
             let rel = index.path(dir_id, '\\');
-            if !rel.is_empty() && !rel.to_ascii_lowercase().split('\\').any(|s| s == ".state") {
+            if !rel.is_empty() && !filter.is_sensitive_mft_dir(drive_upper, &rel) {
                 top_dirs_heap.add(Ranked {
                     bytes,
                     path: format!("{drive_upper}\\{rel}"),
