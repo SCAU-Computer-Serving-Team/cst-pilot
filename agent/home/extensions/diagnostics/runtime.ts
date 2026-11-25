@@ -6,8 +6,6 @@ import { diagnosticCommand } from "./pwsh-data.ts";
 
 export const ROOT_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 export const PWSH = join(ROOT_DIR, "pwsh", "pwsh.exe");
-export const WIZTREE = join(ROOT_DIR, "wiztree", "WizTree64.exe");
-export const WIZTREE_TMP = join(ROOT_DIR, "wiztree", "tmp");
 export const execFileP = promisify(execFile);
 
 export function errorMessage(error: unknown): string {

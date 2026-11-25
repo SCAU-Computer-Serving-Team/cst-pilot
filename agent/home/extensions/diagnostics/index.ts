@@ -7,16 +7,14 @@ import registerLs from "./ls.ts";
 import registerRunbook from "./runbook.ts";
 import registerStartup from "./startup.ts";
 import registerSys from "./sys.ts";
-import { createVolumeIndex } from "./wz-index.ts";
 
-/** One loader instance owns the tools and their shared in-memory index. */
+/** One loader instance owns the diagnostic tools. */
 export default function diagnostics(pi: ExtensionAPI): void {
-	const volumeIndex = createVolumeIndex();
 	registerBitLocker(pi);
-	registerDisk(pi, volumeIndex);
+	registerDisk(pi);
 	registerDriver(pi);
 	registerEventlog(pi);
-	registerLs(pi, volumeIndex);
+	registerLs(pi);
 	registerRunbook(pi);
 	registerStartup(pi);
 	registerSys(pi);

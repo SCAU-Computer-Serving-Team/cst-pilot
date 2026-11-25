@@ -9,7 +9,7 @@
 | 组成部分 | 发行规格 |
 |---|---|
 | 原生主程序 | 根目录提供 `cst-pilot.exe`（桌面与内置 TUI 统一入口，支持 `--ui desktop/tui/web`）、`cst-server.exe`（本机后台服务）与 `cst-updater.exe`（独立升级程序） |
-| 随包诊断组件 | `wiztree/`（排除运行期 `WizTree3.ini`、`WizTree3.ini.bad` 与 `tmp/`，保留 `license.txt`）、`lhm/`（`LibreHardwareMonitorLib.dll` 0.9.6 及其依赖）与 `lhm/host/cst-lhm-host.exe`（自包含 .NET 10 隔离采集器及运行时许可） |
+| 随包诊断组件 | `app/tools/lhm/`（`LibreHardwareMonitorLib.dll` 0.9.6 及其依赖）与 `app/tools/lhm/host/cst-lhm-host.exe`（自包含 .NET 10 隔离采集器及运行时许可） |
 | 业务提示词与技能 | `agent/home/APPEND_SYSTEM.md`、`agent/home/skills/`（8 份维护技能说明），以及 `agent/home/extensions/telemetry/` 下的专用证书 `timserver_1.crt` 与币种映射 `currency.json` |
 | 界面与字体资产 | `agent/home/extensions/web/static/` 预构建静态产物，以及 `assets/fonts/` 下的双端共享可变字体 `SourceHanSansCN-VF.otf`、`LICENSE.txt` 与桌面等宽字体 `JetBrainsMono-Regular.ttf`、`JetBrainsMono-Medium.ttf`、`JetBrainsMono-OFL.txt` |
 | 预置标准配置 | 生成干净 `settings.json`、双端 `telemetry.json`、默认免费 Exa MCP 且仅放行 `198.18.0.0/15` 的 `web-search.json`，以及补齐默认模型 `deepseek/deepseek-flash` 的离线 `models-store.json` |
@@ -32,7 +32,7 @@
 无论是打包输出树还是在线升级归档，均执行以下六条强制校验，违反任一条立即拒绝发布或安装：
 
 1. **禁止开发与测试文件**：不得包含任何路径下的 `AGENTS.md`、前端源码（`src/`）、测试目录或编译缓存。
-2. **禁止运行态与个人数据**：不得包含 `.state/`、`.git/`、`sessions/`、`.cache/`、`artifacts/`、`outbox/`、`agent/home/fff/`、`agent/home/npm/`、`auth.json`、`models.json`、`mcp-auth.json`、`web-settings.json`、`desktop.json`、`desktop-settings.json`、`device.json`、`identity.json`、`telemetry/` 待发与草稿目录、`session-exports/`、`command-plans/`、`wiztree/tmp/`、`WizTree3.ini`、`WizTree3.ini.bad`、`.env` 或 `.env.*`。
+2. **禁止运行态与个人数据**：不得包含 `.state/`、`.git/`、`sessions/`、`.cache/`、`artifacts/`、`outbox/`、`agent/home/fff/`、`agent/home/npm/`、`auth.json`、`models.json`、`mcp-auth.json`、`web-settings.json`、`desktop.json`、`desktop-settings.json`、`device.json`、`identity.json`、`telemetry/` 待发与草稿目录、`session-exports/`、`command-plans/`、`.env` 或 `.env.*`。
 3. **禁止越界路径与链接**：归档与发行树不得包含符号链接、Windows 目录联接（Junction）、硬链接、保留设备名、备用数据流（ADS）、`..` 越界路径或大小写冲突路径。仅精确放行 `assets/fonts/SourceHanSansCN-VF.otf` 与 `assets/fonts/JetBrainsMono-{Regular,Medium}.ttf`，其余路径不得包含未裁剪 `.otf` 源文件。
 4. **禁止任何凭据或密钥**：全树扫描拒绝疑似 API 密钥、GitHub 令牌、云厂商密钥、JWT 或私钥块。所有 `.json` 递归检查禁止出现非空的 `apiKey`、`accessToken`、`refreshToken`、`clientSecret`、`identityKey`、`token`、`secret`、`password` 或 `authorization` 字段。
 5. **预置配置精确匹配**：`agent/home/web-search.json` 与 `agent/home/telemetry.json` 必须与发行标准常量一致，禁止把构建机本机配置带入发行包。

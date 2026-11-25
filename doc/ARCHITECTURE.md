@@ -45,14 +45,14 @@ flowchart TB
 |---|---|---|---|
 | `pi-core` | `crates/pi-{ai,agent,session,runtime}` | 多协议模型流、三阶段参数校验与 Agent 循环、JSONL v3 会话树与压缩、静态扩展接口、MCP/Codemode 及公开 SDK | [SPEC](pi-core/SPEC.md) · [ARCHITECTURE](pi-core/ARCHITECTURE.md) · [API](pi-core/API.md) |
 | `server` | `crates/cst-server`、`pi-web-rust.cmd` | 单实例服务发现、正交存活与通道状态机、本机 HTTP/SSE 路由、10 空闲会话 LRU 池、持久化收件箱与交互桥接 | [SPEC](server/SPEC.md) · [ARCHITECTURE](server/ARCHITECTURE.md) · [API](server/API.md) |
-| `diagnostics` | `crates/cst-kit/src/{kit,tools,diagnostics,runbook,bitlocker}`、`app/skills/`、`lhm/` | 17 个开放工具白名单、凭据与 SSRF 拦截、Windows 原生软硬件采集（Win32 IOCTL、并行目录遍历与实验 `$MFT`）、共享卷缓存、命令方案交付及原生加密 WMI BitLocker | [SPEC](diagnostics/SPEC.md) · [ARCHITECTURE](diagnostics/ARCHITECTURE.md) · [API](diagnostics/API.md) |
+| `diagnostics` | `crates/cst-kit/src/{kit,tools,diagnostics,runbook,bitlocker}`、`app/skills/`、`lhm/` | 17 个开放工具白名单、凭据与 SSRF 拦截、Windows 原生软硬件采集（Win32 IOCTL、无条目上限并行目录遍历与默认 `$MFT`）、共享卷缓存、命令方案交付及原生加密 WMI BitLocker | [SPEC](diagnostics/SPEC.md) · [ARCHITECTURE](diagnostics/ARCHITECTURE.md) · [API](diagnostics/API.md) |
 | `auth` | `crates/cst-kit/src/auth/`、`crates/cst-server/src/routes/{auth,models}.rs` | `cstoa` 设备码 OAuth 与 APIKEY 双路由、官方模型能力对齐、多服务异步授权流、自定义服务与 60 秒额度缓存 | [SPEC](auth/SPEC.md) · [ARCHITECTURE](auth/ARCHITECTURE.md) · [API](auth/API.md) |
 | `telemetry` | `crates/cst-kit/src/telemetry/`、`cst-pilot-server` | 会话统计累加、CSTOA 请求扣点核对、命名管道草稿存活证明、双端独立发送队列与 Go + SQLite 接收端 | [SPEC](telemetry/SPEC.md) · [ARCHITECTURE](telemetry/ARCHITECTURE.md) · [API](telemetry/API.md) · [OPERATIONS](telemetry/OPERATIONS.md) |
 | `web` | `src/web/frontend/`、`crates/cst-server/src/exports/`、`design/cst-pilot-web.pen` | React 19 单页应用、`SharedWorker` 32 会话分片聚合流、乐观发送状态机、工具卡片渲染及 PNG/离线 HTML 导出 | [SPEC](web/SPEC.md) · [ARCHITECTURE](web/ARCHITECTURE.md) · [API](web/API.md) |
 | `desktop` | `design/cst-pilot-desktop.pen`、`crates/{cst-client,cst-desktop}`（阶段 10 规划 `crates/cst-tui`） | 原生 GPUI 桌面工作台、单窗口 D3D11 着色器背景与毛玻璃、清零密码框及预留窗口内置 TUI 视图 | [SPEC](desktop/SPEC.md) · [ARCHITECTURE](desktop/ARCHITECTURE.md) |
 | `release` | `crates/cst-updater/`、`crates/cst-kit/src/update/`、`crates/xtask/`、`src/web/frontend/scripts/` | Ed25519 双重签名在线升级与独立更新器回滚、纯 Rust `xtask` 装配与干净发行树校验、共享可变字体分发及 LHM 自包含辅助程序发布 | [SPEC](release/SPEC.md) · [ARCHITECTURE](release/ARCHITECTURE.md) |
 
-注：跨进程基础原语位于 `crates/cst-os`，独立更新器位于 `crates/cst-updater`，业务核心位于 `crates/cst-kit`，`crates/cst-desktop` 编译产出主程序 `cst-pilot.exe`。阶段 11 移除前，仓库冻结保留 `agent/home/extensions/`、`wiztree/` 与 `pack/`，供 `v0.6.2` 旧版对照。
+注：跨进程基础原语位于 `crates/cst-os`，独立更新器位于 `crates/cst-updater`，业务核心位于 `crates/cst-kit`，`crates/cst-desktop` 编译产出主程序 `cst-pilot.exe`。阶段 11 移除前，仓库冻结保留 `agent/home/extensions/` 与 `pack/`，供 `v0.6.2` 旧版对照。
 
 ## 全局运行边界
 

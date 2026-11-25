@@ -53,7 +53,7 @@ impl Fixture {
             ),
             ("data/sessions/session.jsonl", b"synthetic session data\n"),
             ("artifacts/2026-11-09/runbook/01.txt", b"user command text"),
-            (".state/tmp/wiztree/old.csv", b"scan cache"),
+            (".state/tmp/cache/old.tmp", b"scan cache"),
             ("user-note.txt", b"unrelated user file"),
         ] {
             f.write(name, bytes)
@@ -76,7 +76,7 @@ impl Fixture {
             "data/config/auth.json",
             "data/sessions/session.jsonl",
             "artifacts/2026-11-09/runbook/01.txt",
-            ".state/tmp/wiztree/old.csv",
+            ".state/tmp/cache/old.tmp",
             "user-note.txt",
         ]
         .into_iter()
@@ -994,86 +994,6 @@ fn independent_updater_binary_recovers_interrupted_transaction_when_test_key_com
             .reason,
         Some(RollbackReason::Interrupted)
     );
-}
-
-#[test]
-fn upgrade_removes_legacy_wiztree_files_and_restores_them_on_rollback() {
-    // 1. Successful in-place upgrade removes legacy installed `app/tools/wiztree/WizTree64.exe`
-    let f = Fixture::new();
-    f.write("app/tools/wiztree/WizTree64.exe", b"legacy wiztree binary");
-    f.write("app/tools/wiztree/license.txt", b"legacy wiztree license");
-    let users = f.users();
-    let package = f.package();
-    let applier = Applier::new(&f.root, key()).unwrap();
-    let outcome = applier
-        .apply(package, &Host::default(), &CancellationToken::new())
-        .unwrap();
-    assert_eq!(outcome, ApplyOutcome::Updated { restarted: true });
-    assert!(!f.root.join("app/tools/wiztree/WizTree64.exe").exists());
-    assert!(!f.root.join("app/tools/wiztree/license.txt").exists());
-    assert_eq!(users, f.users());
-
-    // 2. Rollback after WizTree files have actually been moved out of the install tree
-    //    (at health check time, after all entries are installed/deleted) restores them byte-for-byte.
-    let f2 = Fixture::new();
-    f2.write("app/tools/wiztree/WizTree64.exe", b"legacy wiztree binary");
-    f2.write("app/tools/wiztree/license.txt", b"legacy wiztree license");
-    let mut package2 = f2.package();
-    let applier2 = Applier::new(&f2.root, key()).unwrap();
-    struct CrashAfterWizTreeRemoved {
-        root: PathBuf,
-    }
-    impl ApplyObserver for CrashAfterWizTreeRemoved {
-        fn reached(&self, step: ApplyStep) -> Result<(), String> {
-            if matches!(step, ApplyStep::Installed(_))
-                && !self.root.join("app/tools/wiztree/WizTree64.exe").exists()
-                && !self.root.join("app/tools/wiztree/license.txt").exists()
-            {
-                panic!("crash after legacy wiztree files were removed");
-            }
-            Ok(())
-        }
-    }
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| applier2.apply_observed(
-            &mut package2,
-            &Host::default(),
-            &CrashAfterWizTreeRemoved {
-                root: f2.root.clone(),
-            },
-            &CancellationToken::new()
-        )))
-        .is_err()
-    );
-    // Explicitly prove both legacy WizTree files were removed before rollback runs.
-    assert!(!f2.root.join("app/tools/wiztree/WizTree64.exe").exists());
-    assert!(!f2.root.join("app/tools/wiztree/license.txt").exists());
-    assert_eq!(applier2.recover().unwrap(), Recovery::RolledBack);
-    assert_eq!(
-        f2.read("app/tools/wiztree/WizTree64.exe"),
-        b"legacy wiztree binary"
-    );
-    assert_eq!(
-        f2.read("app/tools/wiztree/license.txt"),
-        b"legacy wiztree license"
-    );
-
-    // 3. New signed release package containing `app/tools/wiztree/*` is rejected at verify time.
-    let mut bad_files = files();
-    bad_files.insert("app/tools/wiztree/WizTree64.exe".into(), b"bad".to_vec());
-    let (envelope, _zip) = bundle(bad_files);
-    assert!(key().verify(&envelope).is_err());
-
-    // 4. Empty mixed-case `app/tools/WizTree/` directory in an assembled dist tree is rejected.
-    let dist_dir = std::env::temp_dir().join(format!("cst-dist-check-{}", uuid::Uuid::new_v4()));
-    for (rel, bytes) in files() {
-        let p = dist_dir.join(&rel);
-        fs::create_dir_all(p.parent().unwrap()).unwrap();
-        fs::write(p, bytes).unwrap();
-    }
-    fs::create_dir_all(dist_dir.join("app/tools/WizTree")).unwrap();
-    assert!(cst_updater::verify::scan_clean_dist_tree(&dist_dir, "v0.7.0").is_err());
-    let _ = fs::remove_dir_all(&dist_dir);
 }
 
 #[test]

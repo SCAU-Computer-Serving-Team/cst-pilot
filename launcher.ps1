@@ -92,11 +92,6 @@ function Initialize-PilotEnvironment {
     } catch {
         throw 'cannot create or write state directories. The media may be write-protected, read-only or full.'
     }
-    # Portable WizTree display state is rebuilt for the current machine; retain its backup.
-    $wiztreeConfig = Join-Path $Root 'wiztree/WizTree3.ini'
-    if (Test-Path -LiteralPath $wiztreeConfig) {
-        Move-Item -LiteralPath $wiztreeConfig -Destination (Join-Path $Root 'wiztree/WizTree3.ini.bad') -Force -ErrorAction SilentlyContinue
-    }
     $env:PI_CODING_AGENT_DIR = Join-Path $Root 'agent/home'
     $env:PI_OFFLINE = '1'
     $env:POWERSHELL_TELEMETRY_OPTOUT = '1'

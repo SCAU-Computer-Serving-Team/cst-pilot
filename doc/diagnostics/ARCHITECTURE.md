@@ -32,7 +32,7 @@ flowchart LR
 
 ## 共享目录大小缓存（`VolumeIndex`）
 
-`volume_index.rs` 与 `mft.rs` 提供进程内按盘符缓存纯 Rust `ntfs-ng` 紧凑索引的能力（当前默认关闭，须通过阶段 `1C` 实盘门禁或设置实验开关 `CST_ENABLE_MFT=1` 开启，`CST_DISABLE_MFT=1` 始终强制关闭并阻断缓存读取）：
+`volume_index.rs` 与 `mft.rs` 提供进程内按盘符缓存纯 Rust `ntfs-ng` 紧凑索引的能力。管理员权限下的本地 NTFS 根目录默认启用，`CST_DISABLE_MFT=1` 强制关闭扫描与缓存读取：
 
 | 内部字段 | 存储内容 |
 |---|---|

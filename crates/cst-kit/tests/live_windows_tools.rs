@@ -207,7 +207,7 @@ fn live_disk_space_info_health_all_and_usage() {
     assert!(all.get("smartNotice").is_some());
 
     // 4. disk(usage) through production `storage_tools::run_usage` defaults to `native-walk`
-    //    (zero WizTree temp writes, no spurious `degradedFrom`, strict `API.md` `topFiles` keys)
+    //    for subdirectories (zero temp file writes, no spurious `degradedFrom`, strict `API.md` `topFiles` keys)
     let kit = TempKit::new("disk-usage");
     let sample = kit.root.join("测试 目录 (中文)");
     fs::create_dir_all(sample.join("sub_a")).unwrap();
@@ -235,8 +235,8 @@ fn live_disk_space_info_health_all_and_usage() {
     assert!(usage_val["extAgg"].is_array());
     assert!(usage_val["totalGB"].is_number());
     assert!(
-        !kit.root.join(".state/tmp/wiztree").exists(),
-        ".state/tmp/wiztree must not be created"
+        !kit.root.join(".state/tmp").exists(),
+        ".state/tmp must not be created by storage scan"
     );
     println!(
         "[live] disk(usage): method={} topDirs={} topFiles={} in {}ms",
@@ -1405,7 +1405,7 @@ async fn live_stage93_1a_1b_benchmarks() {
 }
 
 #[test]
-#[ignore = "live Windows stage 9.3 1C elevated $MFT gate (requires Admin + CST_ENABLE_MFT=1)"]
+#[ignore = "live Windows stage 9.3 1C elevated $MFT gate (requires Admin; unset CST_DISABLE_MFT)"]
 fn live_stage93_1c_elevated_mft_gate() {
     use cst_kit::diagnostics::result::diagnostic_result;
     use cst_kit::diagnostics::{mft, storage_tools, walk};
@@ -1416,7 +1416,7 @@ fn live_stage93_1c_elevated_mft_gate() {
     );
     assert!(
         mft::mft_enabled(),
-        "set CST_ENABLE_MFT=1 before running the 1C elevated gate"
+        "unset CST_DISABLE_MFT before running the 1C elevated gate"
     );
 
     let ws_before = current_process_working_set_mb();

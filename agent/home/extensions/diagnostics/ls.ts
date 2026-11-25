@@ -5,7 +5,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { diagnosticResult, OUTPUT_GUIDELINE } from "./result.ts";
 import { errorMessage } from "./runtime.ts";
-import { normalizePath, type VolumeIndex } from "./wz-index.ts";
 
 /**
  * ls - 自定义目录浏览工具（覆盖 pi 内置 ls）
@@ -17,13 +16,7 @@ import { normalizePath, type VolumeIndex } from "./wz-index.ts";
  *   - 附各子项占父目录的百分比
  *   - 默认截断最大的前 20 项，并报告被截掉的数量与合计（模型不丢失全貌感）
  *
- * 大小引擎（只读，账本与 disk usage 共享，见 wz-index.ts）：
- *   1) WizTree 存在 -> 全盘 MFT 导出一次（或直接吃 disk usage 扫描喂的现成账），
- *      进程内共享缓存，之后同盘任意路径秒回
- *   2) 无 WizTree / 建账失败 -> 逐文件递归累计（50 万条目熔断，标注"下界"）
- *
- * 文件兜底：pagefile.sys 等系统独占文件 stat 返回假 0，用 MFT 文件行兜底。
- * 结构只读：临时 CSV 写自家 wiztree\tmp 并即时删除。
+ * 大小引擎：逐文件递归累计（50 万条目、30 秒预算，超限标注"下界"），结构只读。
  */
 
 const TOP_DEFAULT = 20;
@@ -85,7 +78,7 @@ async function walkSize(
 
 /* ---------------- 工具定义 ---------------- */
 
-export default function registerLs(pi: ExtensionAPI, index: VolumeIndex) {
+export default function registerLs(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "ls",
 		label: "LS",
@@ -129,7 +122,6 @@ export default function registerLs(pi: ExtensionAPI, index: VolumeIndex) {
 				throw new Error(`无法列出: ${errorMessage(e)}`);
 			}
 
-			const { dirs, files } = await index.ensureIndex(target, signal);
 			let incomplete = false;
 			const items: { name: string; type: "file" | "dir" | "unknown"; bytes: number | null }[] = [];
 			const budget = { files: 0, deadline: Date.now() + WALK_TIMEOUT_MS };
@@ -137,43 +129,24 @@ export default function registerLs(pi: ExtensionAPI, index: VolumeIndex) {
 			for (const name of names) {
 				signal?.throwIfAborted();
 				const full = join(target, name);
-				const key = normalizePath(full);
 				try {
 					const s = await fsp.stat(full);
 					if (s.isDirectory()) {
-						const cached = dirs?.get(key);
-						if (cached !== undefined) {
-							items.push({ name, type: "dir", bytes: cached });
-						} else {
-							const r = await walkSize(full, budget, signal);
-							items.push({ name, type: "dir", bytes: r.bytes });
-							if (!r.complete) incomplete = true;
-						}
+						const r = await walkSize(full, budget, signal);
+						items.push({ name, type: "dir", bytes: r.bytes });
+						if (!r.complete) incomplete = true;
 					} else {
-						// stat 对 pagefile.sys 等系统独占文件返回假 0，用 MFT 文件行兜底
-						const bytes = s.size > 0 ? s.size : (files?.get(key) ?? 0);
-						items.push({ name, type: "file", bytes });
+						items.push({ name, type: "file", bytes: s.size });
 					}
 				} catch {
 					signal?.throwIfAborted();
 					const s = await fsp.stat(full).catch(() => null);
-					const dirBytes = dirs?.get(key);
-					const fileBytes = files?.get(key);
 					if (s?.isDirectory()) {
-						const r =
-							dirBytes !== undefined
-								? { bytes: dirBytes, complete: true }
-								: await walkSize(full, budget, signal);
+						const r = await walkSize(full, budget, signal);
 						items.push({ name, type: "dir", bytes: r.bytes });
 						if (!r.complete) incomplete = true;
 					} else if (s) {
-						items.push({ name, type: "file", bytes: s.size > 0 ? s.size : (fileBytes ?? 0) });
-					} else if (dirBytes !== undefined || fileBytes !== undefined) {
-						items.push({
-							name,
-							type: dirBytes !== undefined ? "dir" : "file",
-							bytes: dirBytes ?? fileBytes ?? null,
-						});
+						items.push({ name, type: "file", bytes: s.size });
 					} else {
 						items.push({ name, type: "unknown", bytes: null });
 						incomplete = true;
@@ -193,7 +166,7 @@ export default function registerLs(pi: ExtensionAPI, index: VolumeIndex) {
 				path: target,
 				totalChildren: items.length,
 				totalSize: formatBytes(totalBytes),
-				method: dirs ? "wiztree-index" : "walk",
+				method: "walk",
 				entries: kept.map((i) => ({
 					name: i.name,
 					type: i.type,

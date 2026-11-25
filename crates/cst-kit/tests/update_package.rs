@@ -318,7 +318,6 @@ fn signed_manifest_limits_duplicate_fields_and_windows_path_policy() {
         "agent/home/auth.json",
         "cst-pilot-desktop.exe",
         ".state/x",
-        "app/tools/wiztree/tmp/a.csv",
         "app/tools/lhm/test/x",
         "app/AGENTS.md",
         "app/.env.local",
@@ -337,14 +336,6 @@ fn signed_manifest_limits_duplicate_fields_and_windows_path_policy() {
     );
     assert_eq!(
         layout::classify("app/fonts/JetBrainsMono-Regular.ttf").unwrap(),
-        Area::Program
-    );
-    // Retired WizTree paths are rejected in new releases while `classify` retains legacy
-    // installed-tree recognition so `applier.rs` can cleanly remove and roll them back.
-    assert!(layout::classify_release("app/tools/wiztree/WizTree64.exe").is_err());
-    assert!(layout::classify_release("app/tools/wiztree/license.txt").is_err());
-    assert_eq!(
-        layout::classify("app/tools/wiztree/WizTree64.exe").unwrap(),
         Area::Program
     );
     assert_eq!(

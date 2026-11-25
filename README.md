@@ -35,7 +35,7 @@
 1. **基于开源项目 Pi**。在 [Pi](https://github.com/earendil-works/pi) 的基础上，针对计算机诊断定制。
 2. **专门的诊断能力**。配有诊断提示词、技能说明和工具，可以查看磁盘状态、进程占用、设备与驱动等信息。
 3. **操作可控**。诊断查询只读，常规修复由队员手动执行。BitLocker 解锁与解密需在 TUI 或 Web 本地输入或确认。
-4. **扫描高效**。使用 WizTree 等第三方工具加速磁盘扫描。
+4. **扫描高效**。使用纯 Rust `$MFT` 直读与并行 Win32 遍历加速磁盘扫描，零临时文件落盘。
 5. **即插即用**。发行版可存放在 U 盘，内置所需运行环境，无需在机主电脑上安装 Node、Python 或 npm。
 
 ## 功能
@@ -93,7 +93,7 @@ cst-pilot/
 |-- agent/
 |   |-- .runtime/              Pi 运行时，由 pi.cmd 调用
 |   `-- home/                  扩展、技能、配置与预构建 Web 界面
-|-- pwsh/, wiztree/, lhm/       便携诊断程序
+|-- pwsh/, lhm/                  便携诊断程序
 |-- assets/, doc/, licenses/   品牌资源、文档与第三方许可
 |-- README.md, LICENSE, THIRD-PARTY-NOTICES.md
 `-- VERSION, SHA256SUMS, BUILD-INFO.json
@@ -107,7 +107,7 @@ cst-pilot/
 2. 本仓库用于代码开发，不包含完整便携运行环境。开发准备见 [贡献规范](CONTRIBUTING.md)。
 3. 发行包默认使用 DeepSeek 官方 `deepseek-flash`，不包含密钥。队员也可连接 CSTOA 团队服务；所需资源请联系队内委员。联网检索默认使用无需密钥的 Exa MCP。
 4. 项目遥测默认启用，未登录时使用工具包安装签名上传，会话统计同时发送到 CSTOA 服务器和 Tim 的 `timserver_1`。CSTOA 登录仅提供经验证的上传账号。收集范围见 [信息收集契约](doc/contract.md)。
-5. WizTree 仅个人使用免费，商业使用需授权。本项目采用 [MIT 许可证](LICENSE)，第三方条款见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+5. 本项目采用 [MIT 许可证](LICENSE)，第三方条款见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
 
 其他运行限制见 [后台服务与运行协调规格](doc/server/SPEC.md)。
 

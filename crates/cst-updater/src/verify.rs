@@ -220,7 +220,6 @@ pub fn extract_archive(
         }
         check_extra(file.extra_data().unwrap_or_default())?;
         if directory {
-            layout::reject_retired_release_path(&relative)?;
             if file.size() != 0
                 || !release
                     .sums
@@ -232,7 +231,7 @@ pub fn extract_archive(
             let _pin = storage.pin_directory(Path::new(&relative), true)?;
             continue;
         }
-        if layout::classify_release(&relative)? != layout::Area::Program {
+        if layout::classify(&relative)? != layout::Area::Program {
             return Err("升级归档不能包含用户数据路径。".into());
         }
         let expected = release.sums.get(&relative);
@@ -428,7 +427,7 @@ pub fn verify_tree(
                 }
                 pending.push(rel);
             } else {
-                if layout::classify_release(&name)? != layout::Area::Program {
+                if layout::classify(&name)? != layout::Area::Program {
                     return Err("升级目录不能包含用户数据路径。".into());
                 }
                 if !seen.insert(name.clone()) {
@@ -509,14 +508,13 @@ pub fn scan_clean_dist_tree(
             }
             if meta.is_dir() {
                 layout::safe_path(&name)?;
-                layout::reject_retired_release_path(&name)?;
                 pending.push(rel);
                 continue;
             }
             if name == layout::SHA256SUMS_PATH {
                 continue;
             }
-            if layout::classify_release(&name)? != layout::Area::Program {
+            if layout::classify(&name)? != layout::Area::Program {
                 return Err(format!("发行目录包含非程序区文件：{name}"));
             }
             if !seen_lower.insert(name.to_lowercase()) {

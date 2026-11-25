@@ -258,7 +258,7 @@ pub(crate) fn parse_sums(text: &str) -> Result<BTreeMap<String, String>, String>
         if !hash_text(hash) || path == layout::SHA256SUMS_PATH {
             return Err("文件校验清单格式无效。".into());
         }
-        if layout::classify_release(path)? != layout::Area::Program {
+        if layout::classify(path)? != layout::Area::Program {
             return Err("文件校验清单不能包含用户数据路径。".into());
         }
         if !names.insert(path.to_lowercase()) || sums.insert(path.into(), hash.into()).is_some() {

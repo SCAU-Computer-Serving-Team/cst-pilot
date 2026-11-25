@@ -344,7 +344,7 @@ fn tool_metrics_count_once_and_omit_all_business_arguments_and_body() {
     let input = json!({"scope":"usage","path":"private-path","query":"private-query","recoveryPassword":"private-password"});
     state.tool_start("1", "disk", &input, 1100);
     state.tool_start("1", "disk", &input, 1100);
-    let result=cst_kit::diagnostics::result::diagnostic_result(json!({"usage":{"method":"node-walk","degradedFrom":"wiztree"},"degraded":true,"outputTruncated":true,"private":"private-result-body"})).unwrap();
+    let result=cst_kit::diagnostics::result::diagnostic_result(json!({"usage":{"method":"native-walk","degradedFrom":"native-mft: 卷不可读"},"degraded":true,"outputTruncated":true,"private":"private-result-body"})).unwrap();
     state.tool_end("1", &result, true, Some(40), 1200);
     state.tool_end("1", &result, true, None, 1300);
     state.tool_start(
