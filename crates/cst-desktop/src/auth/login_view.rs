@@ -205,6 +205,16 @@ impl LoginView {
         self.provider_dropdown_open
     }
 
+    pub fn focus_primary_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.tab != LoginMethodTab::ApiKey || self.provider_dropdown_open {
+            return false;
+        }
+        self.api_key_input
+            .update(cx, |inp, cx| inp.focus(window, cx));
+        cx.notify();
+        true
+    }
+
     pub fn dismiss_dropdown(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if !self.provider_dropdown_open {
             return false;

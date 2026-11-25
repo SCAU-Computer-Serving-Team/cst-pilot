@@ -1351,6 +1351,29 @@ impl BranchTreeView {
         self.pending_target_id.is_some()
     }
 
+    pub(crate) fn focus_primary_input(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.has_summary_modal() {
+            if self.custom_prompt_mode {
+                self.custom_prompt_input
+                    .update(cx, |inp, cx| inp.focus(window, cx));
+                cx.notify();
+                return true;
+            }
+            return false;
+        }
+        if self.filter_dropdown_open {
+            self.filter_dropdown_open = false;
+        }
+        self.search_input
+            .update(cx, |inp, cx| inp.focus(window, cx));
+        cx.notify();
+        true
+    }
+
     pub(crate) fn dismiss_summary(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.filter_dropdown_open {
             self.filter_dropdown_open = false;
@@ -1398,6 +1421,14 @@ impl BranchTreeView {
 
     pub fn filter_mode(&self) -> TreeFilterMode {
         self.filter_mode
+    }
+
+    pub fn search_input(&self) -> &Entity<InputState> {
+        &self.search_input
+    }
+
+    pub fn custom_prompt_input(&self) -> &Entity<InputState> {
+        &self.custom_prompt_input
     }
 
     pub fn cycle_filter(&mut self, reverse: bool, cx: &mut Context<Self>) {
@@ -1951,6 +1982,34 @@ impl BranchTreeView {
             div()
                 .tab_stop(false)
                 .focus_trap("branch-summary-focus-trap", &self.modal_trap_focus)
+                .capture_action(cx.listener(
+                    |this, _: &gpui_kit::component::input::MoveUp, window, cx| {
+                        if this.custom_prompt_mode
+                            && crate::shell::input_nav::handle_input_vertical_boundary(
+                                &this.custom_prompt_input,
+                                false,
+                                window,
+                                cx,
+                            )
+                        {
+                            cx.stop_propagation();
+                        }
+                    },
+                ))
+                .capture_action(cx.listener(
+                    |this, _: &gpui_kit::component::input::MoveDown, window, cx| {
+                        if this.custom_prompt_mode
+                            && crate::shell::input_nav::handle_input_vertical_boundary(
+                                &this.custom_prompt_input,
+                                true,
+                                window,
+                                cx,
+                            )
+                        {
+                            cx.stop_propagation();
+                        }
+                    },
+                ))
                 .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                     if this.custom_prompt_mode {
                         if event.keystroke.key == "enter"

@@ -393,6 +393,14 @@ impl ComposerView {
             .is_some()
     }
 
+    pub fn focus_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_floating_popovers(cx);
+        self.textarea.update(cx, |st, cx| {
+            st.focus(window, cx);
+        });
+        cx.notify();
+    }
+
     pub fn close_floating_popovers(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
         if self.clear_completion() {
@@ -561,11 +569,29 @@ impl ComposerView {
             if self.clear_completion() {
                 cx.notify();
             }
-            cx.propagate();
+            if crate::shell::input_nav::handle_textarea_vertical_boundary(
+                &self.textarea,
+                forward,
+                window,
+                cx,
+            ) {
+                cx.stop_propagation();
+            } else {
+                cx.propagate();
+            }
             return;
         }
         let Some(comp) = &mut self.completion else {
-            cx.propagate();
+            if crate::shell::input_nav::handle_textarea_vertical_boundary(
+                &self.textarea,
+                forward,
+                window,
+                cx,
+            ) {
+                cx.stop_propagation();
+            } else {
+                cx.propagate();
+            }
             return;
         };
         let (index, len, separator) = match comp {

@@ -201,6 +201,19 @@ impl AllSessionsView {
         self.renaming_session_id.is_some()
     }
 
+    pub(crate) fn focus_primary_input(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if let Some(input) = &self.rename_input {
+            input.update(cx, |inp, cx| inp.focus(window, cx));
+            cx.notify();
+            return true;
+        }
+        false
+    }
+
     pub(crate) fn reset_surface(&mut self, cx: &mut Context<Self>) {
         self.batch_mode = false;
         self.selected_ids.clear();
@@ -970,6 +983,28 @@ impl AllSessionsView {
                 super::consume_composing_escape(input, window, cx);
             }
         }))
+        .capture_action(
+            cx.listener(|this, _: &gpui_kit::component::input::MoveUp, window, cx| {
+                if let Some(input) = &this.rename_input
+                    && crate::shell::input_nav::handle_input_vertical_boundary(
+                        input, false, window, cx,
+                    )
+                {
+                    cx.stop_propagation();
+                }
+            }),
+        )
+        .capture_action(cx.listener(
+            |this, _: &gpui_kit::component::input::MoveDown, window, cx| {
+                if let Some(input) = &this.rename_input
+                    && crate::shell::input_nav::handle_input_vertical_boundary(
+                        input, true, window, cx,
+                    )
+                {
+                    cx.stop_propagation();
+                }
+            },
+        ))
         .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
             if ev.keystroke.key == "enter"
                 && !ev.is_held

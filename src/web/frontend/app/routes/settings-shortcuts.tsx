@@ -9,6 +9,7 @@ const shortcutGroups = [
 			{ command: "新建对话（浏览器环境避让 Ctrl + N）", keys: "Alt + N" },
 			{ command: "展开或收起左侧会话导航栏", keys: "Ctrl + B" },
 			{ command: "打开设置页面", keys: "Ctrl + ," },
+			{ command: "聚焦当前页面或弹窗的输入框", keys: "Ctrl + J" },
 		],
 	},
 	{

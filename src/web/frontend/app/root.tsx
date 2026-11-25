@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Links, Meta, Outlet, Scripts, ScrollRestoration } from "react-router";
 import { collectDraftImages } from "./composer/draft-images";
+import { installFocusInputShortcut } from "./shell/input-shortcuts";
 import stylesheet from "./styles.css?url";
 
 export function meta() {
@@ -38,6 +39,7 @@ export default function App() {
 		void collectDraftImages().catch(() => {
 			/* 引用无法核实时暂停回收。 */
 		});
+		return installFocusInputShortcut();
 	}, []);
 	return <Outlet />;
 }

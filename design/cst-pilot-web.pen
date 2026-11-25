@@ -49789,7 +49789,7 @@
           "y": 4964,
           "name": "快捷键",
           "width": 1280,
-          "height": 1234,
+          "height": 1282,
           "layout": "none",
           "children": [
             {
@@ -49816,7 +49816,7 @@
               },
               "clip": true,
               "width": 1280,
-              "height": 1120,
+              "height": 1168,
               "fill": "$bg-shell",
               "stroke": "$border-strong",
               "strokeWidth": 1,
@@ -50298,6 +50298,57 @@
                                                   "descendants": {
                                                     "NGNZO": {
                                                       "content": "Ctrl + ,"
+                                                    }
+                                                  }
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "type": "frame",
+                                              "id": "mk1f2",
+                                              "name": "快捷键行 · Ctrl + J",
+                                              "width": "fill_container",
+                                              "height": 48,
+                                              "padding": [
+                                                0,
+                                                "$space-section"
+                                              ],
+                                              "justifyContent": "space_between",
+                                              "alignItems": "center",
+                                              "children": [
+                                                {
+                                                  "type": "frame",
+                                                  "id": "ZxbMP",
+                                                  "name": "动作说明对齐槽",
+                                                  "padding": [
+                                                    0,
+                                                    0,
+                                                    "$space-micro",
+                                                    0
+                                                  ],
+                                                  "alignItems": "center",
+                                                  "children": [
+                                                    {
+                                                      "type": "text",
+                                                      "id": "yowIo",
+                                                      "name": "动作说明",
+                                                      "fill": "$text-primary",
+                                                      "content": "聚焦当前页面或弹窗的输入框",
+                                                      "lineHeight": 1.5,
+                                                      "fontFamily": "Source Han Sans CN",
+                                                      "fontSize": "$font-body",
+                                                      "fontWeight": "normal"
+                                                    }
+                                                  ]
+                                                },
+                                                {
+                                                  "id": "C5Sn9",
+                                                  "type": "ref",
+                                                  "ref": "ZCGS3",
+                                                  "name": "按键胶囊 · Ctrl + J",
+                                                  "descendants": {
+                                                    "NGNZO": {
+                                                      "content": "Ctrl + J"
                                                     }
                                                   }
                                                 }

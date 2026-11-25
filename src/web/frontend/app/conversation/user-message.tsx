@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { OutgoingMessage } from "../data/message-outbox";
 import { messageOutbox } from "../data/use-message-outbox";
 import type { ContentPart, Message } from "../data/web-state";
+import { handleTextFieldVerticalArrow } from "../shell/input-shortcuts";
 import { useCopyFeedback } from "../shell/use-copy-feedback";
 import { useWorkspaceShell } from "../shell/workspace-shell-context";
 import { textOf } from "./conversation-parts";
@@ -117,7 +118,9 @@ export function UserMessage({
 								if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
 									event.preventDefault();
 									void submitEdit();
+									return;
 								}
+								handleTextFieldVerticalArrow(event);
 							}}
 						/>
 						<div className="user-edit-actions">

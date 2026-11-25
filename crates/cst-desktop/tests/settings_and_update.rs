@@ -949,9 +949,52 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         window.press("down", cx);
         window.press("enter", cx);
         assert!(window.find("branch-custom-prompt-card").visible());
+        // Test Ctrl+J refocuses custom prompt input and Up/Down jump to start/end
+        window.input("正文", cx);
+        window.press("tab", cx);
+        window.press("ctrl-j", cx);
+        window.press("up", cx);
+        window.input("前", cx);
+        window.press("down", cx);
+        window.input("后", cx);
+        assert_eq!(
+            shell
+                .read(cx)
+                .branch_tree_view()
+                .read(cx)
+                .custom_prompt_input()
+                .read(cx)
+                .value()
+                .as_ref(),
+            "前正文后",
+            "Ctrl+J must refocus custom prompt input and Up/Down must jump to start/end"
+        );
         window.press("escape", cx);
         assert!(window.try_find("branch-custom-prompt-card").is_none());
         assert!(window.find("branch-tree-view").visible());
+        // Ctrl+J on normal BranchTree focuses the branch search input
+        window.press("ctrl-j", cx);
+        window.input("蓝屏", cx);
+        assert_eq!(
+            shell
+                .read(cx)
+                .branch_tree_view()
+                .read(cx)
+                .search_input()
+                .read(cx)
+                .value()
+                .as_ref(),
+            "蓝屏",
+            "Ctrl+J on BranchTree must focus branch search input"
+        );
+        let bt_search = shell
+            .read(cx)
+            .branch_tree_view()
+            .read(cx)
+            .search_input()
+            .clone();
+        bt_search.update(cx, |inp, cx| inp.set_value("", window, cx));
+        window.render_frame(cx);
         window.click("tree-node-row-e-user-1", cx);
         window.click("branch-mode-direct-btn", cx);
     })
@@ -979,6 +1022,80 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         }
         window.click("topbar-expand-sidebar-btn", cx);
         window.render_frame(cx);
+    })
+    .unwrap();
+
+    // Verify Ctrl+J focuses session composer & Up/Down move between lines then jump to start/end
+    cx.update_window(win_handle, |_, window, cx| {
+        use gpui_kit::Focusable as _;
+        let composer = shell
+            .read(cx)
+            .workbench()
+            .read(cx)
+            .session_composer()
+            .clone();
+        let ta = composer.read(cx).textarea_state().clone();
+        // Move focus away from composer first (onto mounted header more button)
+        shell
+            .read(cx)
+            .workbench()
+            .read(cx)
+            .header_more_focus()
+            .focus(window, cx);
+        assert!(!composer.read(cx).focus_handle(cx).is_focused(window));
+
+        window.press("ctrl-j", cx);
+        assert!(
+            composer.read(cx).focus_handle(cx).is_focused(window),
+            "Ctrl+J on Session chat must focus session composer"
+        );
+
+        let sample = "first-line\nsecond-line";
+        let line1_end = "first-line".len();
+        let line2_start = "first-line\n".len();
+        let mid_line2 = line2_start + 3;
+        ta.update(cx, |st, cx| {
+            st.set_value(sample, window, cx);
+            st.set_selected_range(mid_line2..mid_line2, cx);
+        });
+        window.render_frame(cx);
+
+        // First Up moves from line 2 to line 1 (not start yet)
+        window.press("up", cx);
+        let after_first_up = ta.read(cx).cursor();
+        assert!(
+            after_first_up > 0 && after_first_up <= line1_end,
+            "first Up should move to previous line, got {after_first_up}"
+        );
+
+        // Second Up on line 1 jumps to start (0)
+        window.press("up", cx);
+        assert_eq!(
+            ta.read(cx).cursor(),
+            0,
+            "Up on first line must jump to start (0)"
+        );
+
+        // First Down moves from line 1 to line 2 (not end yet)
+        window.press("down", cx);
+        let after_first_down = ta.read(cx).cursor();
+        assert!(
+            after_first_down >= line2_start && after_first_down < sample.len(),
+            "first Down should move to next line, got {after_first_down}"
+        );
+
+        // Second Down on last line jumps to end (len)
+        window.press("down", cx);
+        assert_eq!(
+            ta.read(cx).cursor(),
+            sample.len(),
+            "Down on last line must jump to end"
+        );
+
+        // Restore original text so subsequent steps stay clean
+        ta.update(cx, |st, cx| {
+            st.set_value("分析蓝屏转储（分支回填）", window, cx);
+        });
     })
     .unwrap();
 

@@ -1,4 +1,5 @@
 pub mod exit_dialog;
+pub(crate) mod input_nav;
 mod menus;
 pub mod overlays;
 pub mod sidebar;
@@ -72,6 +73,7 @@ gpui_kit::actions!(
         OpenSettings,
         ToggleCommandPalette,
         ToggleQuickOpenPalette,
+        FocusPrimaryInput,
         DismissTopSurface,
         RequestAppExit
     ]
@@ -86,6 +88,7 @@ pub fn register_shell_keys(cx: &mut App) {
         KeyBinding::new("ctrl-,", OpenSettings, Some(SHELL_KEY_CONTEXT)),
         KeyBinding::new("ctrl-p", ToggleCommandPalette, Some(SHELL_KEY_CONTEXT)),
         KeyBinding::new("ctrl-o", ToggleQuickOpenPalette, Some(SHELL_KEY_CONTEXT)),
+        KeyBinding::new("ctrl-j", FocusPrimaryInput, Some(SHELL_KEY_CONTEXT)),
         KeyBinding::new("escape", DismissTopSurface, Some(SHELL_KEY_CONTEXT)),
     ]);
 }
@@ -1832,6 +1835,79 @@ impl AppShell {
         }));
     }
 
+    /// Focuses the primary text input on the active surface or topmost modal (`Ctrl+J`).
+    pub fn focus_primary_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.shutting_down
+            || self.snapshot.channel_mode == ChannelModeDto::WebActive
+            || self.exit_dialog.is_some()
+            || self.update_dialog.open
+            || self.missing_key_modal.is_some()
+            || self.web_switch_confirm.is_some()
+        {
+            return false;
+        }
+        if let Some(palette) = &self.command_palette {
+            let query_input = palette.read(cx).query_input().clone();
+            query_input.update(cx, |inp, cx| {
+                inp.focus(window, cx);
+            });
+            cx.notify();
+            return true;
+        }
+        if let Some(rm) = &self.rename_modal {
+            rm.input.update(cx, |inp, cx| {
+                inp.focus(window, cx);
+            });
+            cx.notify();
+            return true;
+        }
+        match self.route {
+            ShellRoute::Home => {
+                if self.workbench.read(cx).has_modal() {
+                    return false;
+                }
+                self.dismiss_click_outside_surfaces(cx);
+                self.workbench
+                    .update(cx, |wb, cx| wb.focus_primary_input(window, cx))
+            }
+            ShellRoute::Session => match self.session_subview {
+                SessionSubView::Chat => {
+                    if self.workbench.read(cx).has_modal() {
+                        return false;
+                    }
+                    self.dismiss_click_outside_surfaces(cx);
+                    self.workbench
+                        .update(cx, |wb, cx| wb.focus_primary_input(window, cx))
+                }
+                SessionSubView::Tree => {
+                    if !self.branch_tree_view.read(cx).has_summary_modal() {
+                        self.dismiss_click_outside_surfaces(cx);
+                    }
+                    self.branch_tree_view
+                        .update(cx, |bt, cx| bt.focus_primary_input(window, cx))
+                }
+                SessionSubView::Export => false,
+            },
+            ShellRoute::AllSessions => {
+                if self.all_sessions_view.read(cx).has_rename_modal() {
+                    return self
+                        .all_sessions_view
+                        .update(cx, |v, cx| v.focus_primary_input(window, cx));
+                }
+                false
+            }
+            ShellRoute::Settings => {
+                self.dismiss_click_outside_surfaces(cx);
+                self.settings_view
+                    .update(cx, |sv, cx| sv.focus_primary_input(window, cx))
+            }
+            ShellRoute::Login => self
+                .login_view
+                .update(cx, |lv, cx| lv.focus_primary_input(window, cx)),
+            ShellRoute::Account => false,
+        }
+    }
+
     /// Closes ONLY the single topmost open surface and restores focus within 1 frame.
     pub fn dismiss_topmost_surface(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.shutting_down {
@@ -3488,6 +3564,9 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &ToggleQuickOpenPalette, window, cx| {
                 this.toggle_quick_open_palette(window, cx);
             }))
+            .on_action(cx.listener(|this, _: &FocusPrimaryInput, window, cx| {
+                let _ = this.focus_primary_input(window, cx);
+            }))
             .capture_action(cx.listener(|this, _: &Escape, window, cx| {
                 crate::sessions::consume_composing_escape(&this.sidebar_search_input, window, cx);
             }))
@@ -3726,6 +3805,8 @@ impl Render for AppShell {
                     .child({
                         let rename_focused = rm.input.read(cx).focus_handle(cx).is_focused(window);
                         let rename_focus_ent = rm.input.clone();
+                        let rename_up_ent = rm.input.clone();
+                        let rename_down_ent = rm.input.clone();
                         div()
                             .id("rename-session-input-box")
                             .relative()
@@ -3742,6 +3823,30 @@ impl Render for AppShell {
                             .bg(palette.bg_workspace)
                             .flex()
                             .items_center()
+                            .capture_action(
+                                move |_: &gpui_kit::component::input::MoveUp, window, cx| {
+                                    if crate::shell::input_nav::handle_input_vertical_boundary(
+                                        &rename_up_ent,
+                                        false,
+                                        window,
+                                        cx,
+                                    ) {
+                                        cx.stop_propagation();
+                                    }
+                                },
+                            )
+                            .capture_action(
+                                move |_: &gpui_kit::component::input::MoveDown, window, cx| {
+                                    if crate::shell::input_nav::handle_input_vertical_boundary(
+                                        &rename_down_ent,
+                                        true,
+                                        window,
+                                        cx,
+                                    ) {
+                                        cx.stop_propagation();
+                                    }
+                                },
+                            )
                             .on_click(move |_, w, cx| {
                                 rename_focus_ent.update(cx, |s, cx| s.focus(w, cx));
                             })

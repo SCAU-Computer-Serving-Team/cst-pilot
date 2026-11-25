@@ -363,6 +363,8 @@ pub fn render_sidebar(
             )
     });
 
+    let search_up_ent = search_input.clone();
+    let search_down_ent = search_input.clone();
     let search_box = div()
         .id("sidebar-search-box")
         .test_support()
@@ -375,6 +377,28 @@ pub fn render_sidebar(
         .flex()
         .items_center()
         .gap(space::SM)
+        .capture_action(move |_: &gpui_kit::component::input::MoveUp, window, cx| {
+            if crate::shell::input_nav::handle_input_vertical_boundary(
+                &search_up_ent,
+                false,
+                window,
+                cx,
+            ) {
+                cx.stop_propagation();
+            }
+        })
+        .capture_action(
+            move |_: &gpui_kit::component::input::MoveDown, window, cx| {
+                if crate::shell::input_nav::handle_input_vertical_boundary(
+                    &search_down_ent,
+                    true,
+                    window,
+                    cx,
+                ) {
+                    cx.stop_propagation();
+                }
+            },
+        )
         .on_click(move |_, window, cx| {
             search_focus_ent.focus_handle(cx).focus(window, cx);
         })

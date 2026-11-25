@@ -262,6 +262,18 @@ impl SettingsView {
             .update(cx, |pt, cx| pt.dismiss_click_outside_dropdowns(cx));
         closed
     }
+
+    pub fn focus_primary_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        match self.category {
+            SettingsCategory::Preferences => self
+                .preferences_tab
+                .update(cx, |pt, cx| pt.focus_primary_input(window, cx)),
+            SettingsCategory::Providers => self
+                .providers_tab
+                .update(cx, |pt, cx| pt.focus_primary_input(window, cx)),
+            SettingsCategory::General | SettingsCategory::Shortcuts => false,
+        }
+    }
 }
 
 impl Render for SettingsView {

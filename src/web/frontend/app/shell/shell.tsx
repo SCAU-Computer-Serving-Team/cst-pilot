@@ -28,6 +28,7 @@ import { outgoingFor, useMessageOutbox } from "../data/use-message-outbox";
 import { useGlobalEvents } from "../data/web-state";
 import { BlueHour } from "./blue-hour";
 import { ExitDialog } from "./exit-dialog";
+import { handleTextFieldVerticalArrow } from "./input-shortcuts";
 import { usePanelDismiss } from "./panel-dismiss";
 import { sampleSessions } from "./sample-sessions";
 import { SessionActionsOverlay, useSessionActions } from "./session-actions";
@@ -287,7 +288,9 @@ export function Sidebar({
 									event.preventDefault();
 									event.stopPropagation();
 									setSearchQuery("");
+									return;
 								}
+								handleTextFieldVerticalArrow(event);
 							}}
 						/>
 						{hasSearchQuery && (

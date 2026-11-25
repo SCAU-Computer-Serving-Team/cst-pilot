@@ -256,6 +256,30 @@ impl WorkbenchView {
         self.session_composer.read(cx).focus_handle(cx)
     }
 
+    pub fn focus_primary_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.has_modal() {
+            return false;
+        }
+        if self.header_menu_open {
+            self.header_menu_open = false;
+            self.header_menu_prior_focus = None;
+        }
+        if self.active_session_id.is_some() {
+            if let Some(inline_ta) = self.message_list.read(cx).inline_edit_textarea() {
+                inline_ta.update(cx, |st, cx| st.focus(window, cx));
+                cx.notify();
+                return true;
+            }
+            self.session_composer
+                .update(cx, |comp, cx| comp.focus_input(window, cx));
+        } else {
+            self.home_composer
+                .update(cx, |comp, cx| comp.focus_input(window, cx));
+        }
+        cx.notify();
+        true
+    }
+
     pub fn header_more_focus(&self) -> FocusHandle {
         self.header_more_focus.clone()
     }

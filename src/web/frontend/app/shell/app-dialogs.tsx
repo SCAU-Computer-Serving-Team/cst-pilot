@@ -3,6 +3,7 @@ import { type FormEvent, type RefObject, useCallback, useEffect, useId, useRef, 
 import { createPortal } from "react-dom";
 import { useDialogFocusTrap } from "./dialog-focus";
 import { ErrorNotice } from "./error-notice";
+import { handleTextFieldVerticalArrow } from "./input-shortcuts";
 import { readDurationMs, readEasing } from "./motion-tokens";
 import { useWorkspaceShell } from "./workspace-shell-context";
 
@@ -249,7 +250,9 @@ export function SessionRenameDialog({
 					onKeyDown={(event) => {
 						if (event.key === "Enter" && (event.nativeEvent.isComposing || event.keyCode === 229)) {
 							event.preventDefault();
+							return;
 						}
+						handleTextFieldVerticalArrow(event);
 					}}
 				/>
 				{error && <ErrorNotice message={error} />}

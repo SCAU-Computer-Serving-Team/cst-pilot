@@ -17,6 +17,7 @@ pub fn render_shortcuts_tab(
         ("Ctrl + N", "新建对话并返回欢迎主页"),
         ("Ctrl + B", "展开或收起左侧会话导航栏"),
         ("Ctrl + ,", "打开设置页面"),
+        ("Ctrl + J", "聚焦当前页面或弹窗的输入框"),
     ];
 
     let chat_shortcuts = [

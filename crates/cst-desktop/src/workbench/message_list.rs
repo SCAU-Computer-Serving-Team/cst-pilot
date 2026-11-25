@@ -1017,6 +1017,8 @@ impl MessageListView {
             let ent_cancel_key = entity.clone();
             let ta_for_ime = edit_textarea.clone();
             let ta_for_esc = edit_textarea.clone();
+            let ta_for_up = edit_textarea.clone();
+            let ta_for_down = edit_textarea.clone();
 
             let mut edit_bubble = div()
                 .id(SharedString::from(format!(
@@ -1033,6 +1035,25 @@ impl MessageListView {
                 .flex_col()
                 .justify_center()
                 .gap(space::SM)
+                .capture_action(move |_: &gpui_kit::component::input::MoveUp, window, cx| {
+                    if crate::shell::input_nav::handle_textarea_vertical_boundary(
+                        &ta_for_up, false, window, cx,
+                    ) {
+                        cx.stop_propagation();
+                    }
+                })
+                .capture_action(
+                    move |_: &gpui_kit::component::input::MoveDown, window, cx| {
+                        if crate::shell::input_nav::handle_textarea_vertical_boundary(
+                            &ta_for_down,
+                            true,
+                            window,
+                            cx,
+                        ) {
+                            cx.stop_propagation();
+                        }
+                    },
+                )
                 .capture_action(move |action: &Enter, window, cx| {
                     if !ta_for_ime.read(cx).focus_handle(cx).is_focused(window) {
                         return;
