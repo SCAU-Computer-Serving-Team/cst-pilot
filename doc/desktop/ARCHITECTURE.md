@@ -1,6 +1,6 @@
 # 桌面端与客户端架构
 
-本页说明本机客户端库 `crates/cst-client`（已实现）与 GPUI 桌面应用 `crates/cst-desktop`（阶段 9 实施）的模块分层、跨线程状态同步及 GPU 表面管线。详细模块目录与接口设计见 [9.desktop.md](../rust/plan/9.desktop.md)。
+本页说明本机客户端库 `crates/cst-client` 与 GPUI 桌面应用 `crates/cst-desktop` 的模块分层、跨线程状态同步及 GPU 表面管线。详细模块目录与接口设计见 [9.desktop.md](../rust/plan/9.desktop.md)。
 
 ## 双包分层结构
 

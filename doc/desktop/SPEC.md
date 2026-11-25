@@ -1,6 +1,6 @@
 # 桌面端与内置 TUI 规格
 
-`desktop` 模块定义统一软件端主程序 `cst-pilot.exe` 的功能与交互规格（`crates/cst-client` 已落地，`crates/cst-desktop` 归属阶段 9 实施，`crates/cst-tui` 归属阶段 10 实施），通过本机客户端库连接公用后台服务 `cst-server`。静态设计、Shader 与整体设计以 [桌面端画布](../../design/cst-pilot-desktop.pen) 为最高规范，动效、令牌与交互行为以 [storybook.html](../../design/storybook.html) 为最高规范，文本规范见 [DESIGN.md](../../DESIGN.md)。客户端与窗口架构见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段实施细则见 [9.desktop.md](../rust/plan/9.desktop.md)。
+`desktop` 模块定义统一软件端主程序 `cst-pilot.exe` 的功能与交互规格（`crates/cst-client` 与 `crates/cst-desktop` 已实现，`crates/cst-tui` 归属阶段 10 开发），通过本机客户端库连接公用后台服务 `cst-server`。静态设计、Shader 与整体设计以 [桌面端画布](../../design/cst-pilot-desktop.pen) 为最高规范，动效、令牌与交互行为以 [storybook.html](../../design/storybook.html) 为最高规范，文本规范见 [DESIGN.md](../../DESIGN.md)。客户端与窗口架构见 [ARCHITECTURE.md](ARCHITECTURE.md)，阶段实施细则见 [9.desktop.md](../rust/plan/9.desktop.md)。
 
 ## 窗口基线与启动约束
 
@@ -31,7 +31,7 @@
 
 ## 桌面配置与安全边界
 
-1. **局部合并配置（`data/config/desktop.json`）**：保存主题、默认视图、侧栏折叠态与常规窗口矩形。读写采用顶层 JSON 对象局部合并，未知字段原样保留，未知枚举回退默认值而不改写磁盘。文件语法损坏时回退内存默认值并禁止覆盖原文件。
+1. **局部合并配置（`data/config/desktop.json`）**：保存主题、方向键选中样式（`keyboardFocusStyle`）、默认视图、侧栏折叠态与常规窗口矩形。读写采用顶层 JSON 对象局部合并，未知字段原样保留，未知枚举回退默认值而不改写磁盘。文件语法损坏时回退内存默认值并禁止覆盖原文件。
 2. **共享冷却提示（`.state/ui-hints.json`）**：首次完全缺少模型凭据的 24 小时自动弹窗冷却时间戳与 Web 端共用，避免双端重复打扰。
 3. **密码内存清零**：BitLocker 恢复密码与 APIKEY 输入使用固定容量清零控件，提交或关闭时逐字节清零内存并临时禁用 IME 联想记录，严禁进入剪贴板历史、日志或普通状态快照。
 4. **双进程在线升级**：设置页支持手动检查版本并弹出升级确认框，展示更新说明、下载校验进度与取消入口。确认重启后移交独立更新器同时替换 `cst-pilot.exe` 与 `cst-server.exe`，并对双进程执行健康检查与失败回滚。

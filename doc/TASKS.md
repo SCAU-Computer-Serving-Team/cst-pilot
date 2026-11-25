@@ -8,30 +8,30 @@
 
 | 阶段 | 模块 | 待完成内容 | 设计依据 |
 |---|---|---|---|
-| 阶段 9 | `desktop` | 补 Windows 前台输入、UAC、异构 DPI、远程桌面及桌面交互验收 | [9.desktop.md](rust/plan/9.desktop.md#开发步骤与验收方案) |
-| 阶段 9.2 | `os` / `updater` / `kit` / `server` / `desktop` / `xtask` | 实现与本地发行包冒烟已完成。待发布前真机与签名验收 | [9.2.config-isolation-and-packaging.md](rust/plan/9.2.config-isolation-and-packaging.md) |
-| 阶段 9.3 | `kit` / `client` / `updater` / `xtask` | 分三阶段推进性能优化与工程收敛：阶段 1 首要落地 `ls`/`disk` 重构与移除 `WizTree`（`1A–1E`），后续展开其余工具与全栈优化。进度见 [阶段 9.3 分阶段执行清单](#阶段-93-分阶段执行清单) | [9.3.optimization.md](rust/plan/9.3.optimization.md) · [ADR.md](ADR.md#adr-014移除-wiztree存储诊断改用纯-rust-mft-与-win32-ioctl) |
-| 阶段 9.4 | `desktop` / `web` | 全应用方向键交互改造与动效优化（草案）：默认四角取景并在「设置 · 常规」提供「四角 / 游标」切换，配 `180ms` 平滑滑移动效，按 `P0–P2` 覆盖分支树、导出页、选择器、弹窗与设置控件 | [9.4.keyboard-navigation.md](rust/plan/9.4.keyboard-navigation.md) · [storybook.html](../design/storybook.html) |
+| 阶段 9 | `desktop` | 代码、无头测试与主要双主题真窗核查已完成。待补 Windows 前台输入、UAC、异构 DPI、远程桌面实机验收及剩余真窗复核项 | [9.desktop.md](rust/plan/9.desktop.md#开发步骤与验收方案) · [desktop-ui-audit.md](test/desktop-ui-audit.md) |
+| 阶段 9.2 | `os` / `updater` / `kit` / `server` / `desktop` / `xtask` | 代码实现与本地发行包基础测试已完成。待发布前真机与签名验收 | [9.2.config-isolation-and-packaging.md](rust/plan/9.2.config-isolation-and-packaging.md) |
+| 阶段 9.3 | `kit` / `client` / `updater` / `xtask` | 阶段 1（`ls`/`disk` 重构与 Rust 发行包移除 `WizTree`）已完成 `1A–1D` 代码、单元测试与本机实测，管理员本地 NTFS 根目录已默认启用 `$MFT` 并取消目录遍历条目上限。待补多环境实盘测试并完成 `1E` 验收。阶段 2–3（其余工具与全栈优化）尚未开始。进度见 [阶段 9.3 分阶段执行清单](#阶段-93-分阶段执行清单) | [9.3.optimization.md](rust/plan/9.3.optimization.md) · [ADR.md](ADR.md#adr-014移除-wiztree存储诊断改用纯-rust-mft-与-win32-ioctl) |
+| 阶段 9.4 | `desktop` / `web` | 全部 P0（设置 · 常规「四角 / 游标」切换、全部会话、分支树、导出会话）已在桌面端与 Web 端实现。后续按选择器、输入槽与排队栏、弹窗、其余设置页与侧栏的顺序继续开发 | [9.4.keyboard-navigation.md](rust/plan/9.4.keyboard-navigation.md) · [ADR.md](ADR.md#adr-016双端方向键选中态采用无底色滑移指示器支持四角与游标切换) · [storybook.html](../design/storybook.html) |
 | 阶段 10 | `desktop` | 在 `cst-pilot.exe` 同一窗口内集成基于 `Ratatui` 的内置 TUI 视图 `crates/cst-tui`，与图形视图共享 `cst-client` 状态层与草稿。评估以 `cst-tui` 替代 `tree-parity.test.ts` 的旧 Pi 对照基准（无可靠新参照前保留当前对照基准） | [0.PLAN.md](rust/plan/0.PLAN.md#10-内置-tui-终端适配) |
 | 阶段 11 | `release` | 构建单文件便携引导器（`portable.exe`）与直观自有目录结构（根部仅保留主程序与清晰子目录，去除 `agent/home/` 等 Pi 遗留目录及过渡期 TS/`pack/` 资产），接入生产升级公钥 `CST_UPDATE_PUBLIC_KEY`，保持文档功能、签名推送更新与设计系统一致 | [0.PLAN.md](rust/plan/0.PLAN.md#11-便携打包与三端验收) · [ADR.md](ADR.md#adr-006阶段-11-采用单文件便携引导器与直观子目录分发) |
 
 ### 阶段 9.3 分阶段执行清单
 
-详细方案与出口门禁见 [9.3.optimization.md](rust/plan/9.3.optimization.md)。验收勾选时附带测试版本、条件与结果或明确未覆盖项。
+详细方案与通过条件见 [9.3.optimization.md](rust/plan/9.3.optimization.md)。验收勾选时附带测试版本、条件与结果或明确未覆盖项。
 
-- [x] **前置准备**：完成 `ls`/`disk` 与 `WizTree` 调研、本机非提权隔离对照、[ADR-014](ADR.md#adr-014移除-wiztree存储诊断改用纯-rust-mft-与-win32-ioctl) 拍板及双人方案评审（实盘 MFT 未验，前移至 `1C` 硬门禁）
-- **阶段 1（首要目标：`ls`、`disk` 与 Rust 发行移除 `WizTree`）**
-  - [ ] **1A（代码、单测与本机 NVMe 实测已通过；待多控制器与慢速 SMB 补测）**：`2026-11-24` release 端到端 20 轮实测通过（`space` P95 `0.6 ms`、`health` 非提权 P95 `6.9 ms` / 提权 `10.2 ms`、`info(C:)` P95 `151.0 ms`、`all(C:)` P95 `118.7 ms`，原生路径免 WMI 达标，Storage WMI `MSFT_PhysicalDisk` 在本机约 84–151 ms）；未覆盖：SATA/USB-SAT/RST 控制器与断连 SMB 实测
-  - [ ] **1B（代码、单测与本机 NVMe 红线实测已通过；待真实断连 UNC 补测）**：`2026-11-24` release 实测 `C:\Program Files` 热扫中位数 `393.4 ms`（达标 `≤ 500 ms`）、`System32` `167.6 ms`、`WinSxS`（24 万项）`12.37 s`、4 槽并发取消在 `32.1 ms` 退出且 `4.3 ms` 恢复可用；未覆盖：真实断连 UNC 槽位恢复
-  - [ ] **1D（代码、单测与干净 `xtask dist` 发行包实测已通过；待真实旧版二进制交接）**：`2026-11-24` `xtask dist --profile release` 产出 42 文件（解包 `105.76 MiB` / ZIP `43.14 MiB`），零 `wiztree` 文件、`app/licenses/ntfs-ng-LICENSE.txt` 纳入 `SHA256SUMS` 且 ZIP/树校验与健康检查烟雾通过，更新器测试验证旧 WizTree 文件移除后逐字节回滚；未覆盖：已发布的旧版二进制原位升级交接
-  - [ ] **1C（实验开关默认关闭；本机 512e NVMe 提权实盘门禁已通过，待 BitLocker 两态 / 4Kn / 热拔插补测后评估默认切流）**：`2026-11-24` 管理员提权 + `CST_ENABLE_MFT=1`（Samsung 970 EVO + WD SN580 512e NVMe，未加密卷）实测通过：`C:\`（212 万记录 / 165 万文件 / `214.80 GB`）冷扫 `4.61–5.91 s`、估算驻留 `58.26 MiB`、进程 Working Set `8.6 -> 97.5 MiB`（双卷 `107.3 MiB`，全周期峰值 `411.9 MiB`）；热 `ls`（`C:\` / `Windows` / `Program Files`）`2.2–22.5 ms` 均命中 `native-index`；`Program Files` 口径 `35.76 GB` vs `walk` `35.8 GB`；`D:\` 取消 `31.3 ms` 且紧邻复扫 `1.33 s` 直接成功；未覆盖：4Kn 盘、BitLocker 加密/锁定两态、热拔插换盘
+- [x] **前置准备**：完成 `ls`/`disk` 与 `WizTree` 调研、本机非提权隔离对照、[ADR-014](ADR.md#adr-014移除-wiztree存储诊断改用纯-rust-mft-与-win32-ioctl) 决策与双人方案评审（实盘 MFT 移至 `1C` 必测项）
+- **阶段 1（首要目标：`ls`、`disk` 与 Rust 发行包移除 `WizTree`）**
+  - [ ] **1A（代码、单元测试与本机 NVMe 实测已通过，待补多控制器与慢速 SMB 测试）**：`2026-11-24` release 端到端 20 轮实测通过（`space` P95 `0.6 ms`、`health` 非提权 P95 `6.9 ms` / 提权 `10.2 ms`、`info(C:)` P95 `151.0 ms`、`all(C:)` P95 `118.7 ms`，原生路径免 WMI 达标，Storage WMI `MSFT_PhysicalDisk` 在本机约 84–151 ms）。未覆盖：SATA/USB-SAT/RST 控制器与断连 SMB 实测
+  - [ ] **1B（代码、单元测试与本机 NVMe 性能指标已通过，待补真实断连 UNC 测试）**：`2026-11-24` release 实测 `C:\Program Files` 热扫中位数 `393.4 ms`（达标 `≤ 500 ms`）、`System32` `167.6 ms`、`WinSxS`（24 万项）`12.37 s`、4 槽并发取消在 `32.1 ms` 退出且 `4.3 ms` 恢复可用。未覆盖：真实断连 UNC 槽位恢复
+  - [ ] **1D（代码、单元测试与干净 `xtask dist` 发行包实测已通过，待补真实旧版二进制升级测试）**：`2026-11-24` `xtask dist --profile release` 产出 42 文件（解包 `105.76 MiB` / ZIP `43.14 MiB`），零 `wiztree` 文件、`app/licenses/ntfs-ng-LICENSE.txt` 纳入 `SHA256SUMS` 且 ZIP 与目录树校验和健康检查基础测试通过，更新器测试验证旧 WizTree 文件移除后逐字节回滚。未覆盖：已发布旧版二进制的就地升级测试
+  - [ ] **1C（管理员本地 NTFS 根目录已默认启用 `$MFT`，可用 `CST_DISABLE_MFT=1` 关闭。本机 512e NVMe 提权实盘测试已通过，待补测 BitLocker 加密与锁定状态、4Kn 与热拔插）**：`2026-11-24` 管理员提权（Samsung 970 EVO + WD SN580 512e NVMe，未加密卷）实测通过。`C:\`（212 万记录 / 165 万文件 / `214.80 GB`）冷扫 `4.61–5.91 s`、估算驻留 `58.26 MiB`、进程 Working Set `8.6 -> 97.5 MiB`（双卷 `107.3 MiB`，全周期峰值 `411.9 MiB`）。热 `ls`（`C:\` / `Windows` / `Program Files`）`2.2–22.5 ms` 均命中 `native-index`。`Program Files` 统计口径 `35.76 GB` vs `walk` `35.8 GB`。`D:\` 取消 `31.3 ms` 且紧邻复扫 `1.33 s` 直接成功。未覆盖：4Kn 盘、BitLocker 加密与锁定两态、热拔插换盘
   - [ ] **1E**：基于真实发布产物完成 Win10/11、WinPE、BitLocker、SATA/USB-SAT/RST、OneDrive、热拔插及三类只读布局验收
-- **阶段 2（其余诊断与检索工具优化，阶段 1 封板后启动产品改造）**
+- **阶段 2（其余诊断与检索工具优化，阶段 1 验收完成后启动代码改造）**
   - [ ] **2A**：`fffind` / `ffgrep` 单次操作内身份复用降耗与 UTF-16 LE / GB18030 回退解码评估
   - [ ] **2B**：`sys(io)` `GetProcessIoCounters` 边界验证与 `sys(gpu)` 双显卡核显传感器保留
-  - [ ] **2C**：联网检索并发容错（明确 `get_search_content` 范围）与 `runbook` / 提示词契约拆项收口
+  - [ ] **2C**：联网检索并发容错（明确 `get_search_content` 范围）与 `runbook` / 提示词规范逐项整理
 - **阶段 3（运行时、服务端与桌面端优化，量化后独立立项）**
-  - [ ] **3A**：`pi-session` 内部结构收敛与 Web 前端全局事件订阅、大组件拆分
+  - [ ] **3A**：`pi-session` 内部结构整理与 Web 前端全局事件订阅、大组件拆分
   - [ ] **3B**：桌面端首帧与长会话指标复测，同 `[profile.dist]` 分记 ZIP 与解包体积
 
 ## 功能迭代
@@ -44,14 +44,14 @@
 | `web` | 会话内全文搜索与侧栏会话列表搜索 | [web/SPEC.md](web/SPEC.md#聊天工作台) |
 | `web` | 视觉令牌微调（`P2`）：将 `.composer-chip .chip-remove` 热区放大至 `≥ 20×20px`，校准 `/sessions` 会话行高至 `40px`，对齐 `/login` 缩放标签与 `special-tool` 附属图标最小尺寸 | [ux-e2e.md](web/test/ux-e2e.md) |
 | `telemetry` / `release` | 生产服务部署：上线 OA 请求级扣点接口 `/api/agent/llm/billing` 与版本升级签名清单接口 `/api/agent/releases/latest` | [telemetry/OPERATIONS.md](telemetry/OPERATIONS.md#发布与回退)、[release/SPEC.md](release/SPEC.md#rust-软件内升级) |
-| `pi-core` | 内部结构优化（非阶段 9 阻塞）：将 `pi-session` 38 个闭包袋收敛为 `SessionHost` Trait，将 `AgentSessionInner` 80 个字段分组管理 | [8.5.pre-desktop-cleanup.md](rust/plan/8.5.pre-desktop-cleanup.md#明确不做) |
-| `web` | 前端结构优化（非阶段 9 阻塞）：收敛 6 处重复全局事件订阅至 `WorkspaceStore`，拆分 `composer.tsx`、`shell.tsx` 与 `routes/tree.tsx` 大组件 | [8.5.pre-desktop-cleanup.md](rust/plan/8.5.pre-desktop-cleanup.md#明确不做) |
+| `pi-core` | 内部结构优化（非阶段 9 阻塞）：将 `pi-session` 38 个闭包整合为 `SessionHost` Trait，将 `AgentSessionInner` 80 个字段分组管理 | [8.5.pre-desktop-cleanup.md](rust/plan/8.5.pre-desktop-cleanup.md#明确不做) |
+| `web` | 前端结构优化（非阶段 9 阻塞）：将 6 处重复全局事件订阅统一移入 `WorkspaceStore`，拆分 `composer.tsx`、`shell.tsx` 与 `routes/tree.tsx` 大组件 | [8.5.pre-desktop-cleanup.md](rust/plan/8.5.pre-desktop-cleanup.md#明确不做) |
 
 ## 文档与设计规范待办
 
 | 文档 / 资产 | 待办项 | 依据 |
 |---|---|---|
-| [cst-pilot-web.pen](../design/cst-pilot-web.pen) | Web 设计规范对齐：单文件画布合并（原 `cst-pilot-tools.pen` 已归档至 `design/achieved/`）、50 项静态变量、`mode: [light, dark]` 轴、`LKIQI` 规范板、`00A–00F`/`00H` 母版与 `01–07` 单行主区已完成；前端静态令牌、快捷面板、焦点栈、键盘导航与画布契约测试已同步，待继续收口 P2 视觉令牌微调与剩余交互页（仪表盘/分享/搜索） | [DESIGN.md](../DESIGN.md) · [storybook.html](../design/storybook.html) · [cst-pilot-desktop.pen](../design/cst-pilot-desktop.pen) |
+| [cst-pilot-web.pen](../design/cst-pilot-web.pen) | Web 设计规范对齐：单文件画布合并（原 `cst-pilot-tools.pen` 已归档至 `design/achieved/`）、50 项静态变量、`mode: [light, dark]` 轴、`LKIQI` 规范板、`00A–00F`/`00H` 母版与 `01–07` 单行主区已完成。前端静态变量、快捷面板、焦点栈、键盘导航与画布校验测试已同步，待完成 P2 视觉微调与剩余交互页（仪表盘、分享、搜索） | [DESIGN.md](../DESIGN.md) · [storybook.html](../design/storybook.html) · [cst-pilot-desktop.pen](../design/cst-pilot-desktop.pen) |
 
 ## 待决议题
 

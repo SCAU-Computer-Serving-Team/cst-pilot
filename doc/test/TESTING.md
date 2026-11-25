@@ -72,12 +72,12 @@ LHM 隔离采集辅助程序需在安装 .NET 10 SDK 的构建机上验证，命
 1. **B01** `disk(space)` 全卷：与可访问卷对照，`freeGB <= totalGB`，剩余空间为 0 时保留数值 `0`。
 2. **B02** `disk(info, drive=Kit盘)`：`volumes` 仅含目标卷。物理盘关联成功时按盘过滤，关联失败时返回全量物理盘并附 `infoNotice`。
 3. **B03** `disk(health, drive=Sys)`：保留可用 SMART 字段与 `smartErrors`，区分管理员与普通权限的实际错误。
-4. **B04** `disk(usage, path=Kit, top=10)`：WizTree 成功时四类排行齐全。降级 `node-walk` 时仅返回目录排行并注明原因。
+4. **B04** `disk(usage, path=Kit, top=10)`：管理员权限下本地 NTFS 根目录默认走 `native-mft`，其余场景与失败回退走不设条目上限的 `native-walk`（失败回退附 `degradedFrom`），四类排行齐全。
 5. **B05** `disk(usage, path=Win/WinSxS, top=5)` 连续两次：记录冷／热耗时与结果量级。
 6. **B06** `disk(usage)` 不存在路径：整次报错，无挂起。
 7. **B07** `disk(all)`：`space`、`info`、`health` 独立返回成功数据或各自错误，互不吞没。
 8. **B08** `ls(path=Kit/pwsh, top=15)`：按大小倒序，`omitted` 项数与体积准确，未知大小保持 `null`。
-9. **B09** `ls(path=Win/WinSxS, top=10)`：在 B05 后命中共享卷缓存 `wiztree-index`，跨卷查询不串用缓存。
+9. **B09** `ls(path=Win/WinSxS, top=10)`：管理员权限下已扫整卷且未设 `CST_DISABLE_MFT=1` 时命中共享卷缓存 `native-index`，其余走 `walk`，跨卷查询不串用缓存。
 10. **B10** `ls(path=Vol)`：卷根目录与文件均可枚举，不可读项与预算停止如实说明。
 
 ### sys 与 startup（B11–B16）
@@ -106,7 +106,7 @@ LHM 隔离采集辅助程序需在安装 .NET 10 SDK 的构建机上验证，命
 | 编号 | 核查项 | 通过标准 |
 |---|---|---|
 | S01–S05 | 通道切换与模型范围 | 软件端与 Web 切换通道后会话状态衔接一致。输入框切换仅改当前会话，模型偏好页保存新会话默认值。各端模型启用范围与排序实时同步 |
-| S06–S07 | 三端独立主题与配置合并 | TUI 主题（`settings.json`）、Web 主题（`web-settings.json`）与桌面端设置（`desktop-settings.json`，阶段 9 接入桌面壳层并迁移为 `desktop.json`）互不覆盖。共享设置按字段合并 |
+| S06–S07 | 三端独立主题与配置合并 | 共享配置（`data/config/settings.json`）、Web 设置（`data/config/web.json`）、桌面端设置（`data/config/desktop.json`）与阶段 10 终端设置（`data/config/tui.json`）互不覆盖。共享设置按字段合并 |
 | S08–S12 | 目录、凭据与思考强度 | `models.json` 与 `models-store.json` 更新后即时生效。任一端登录或退出单服务后全局广播同步。思考强度按模型支持档位保存 |
 | S13–S15 | 历史、`cwd` 与单写权 | 改名与续答跨端可见。历史会话沿用记录中的 `cwd` 执行 `read` 与 `@` 补全。会话被其他进程持有写权时返回 `409` |
 | S16–S21 | 隔离与共享资源 | 忽略工作目录 `AGENTS.md`、保留 `APPEND_SYSTEM.md`。17 工具白名单一致。损坏配置按类别提示且不暴露密钥。收件箱、扫描缓存与遥测互不干扰 |
@@ -138,5 +138,5 @@ CI 自动化浏览器套件覆盖以下核心回归面：
 |---|---|---|
 | 设备形态（D01–D07） | 组装机、品牌台式机、核显+独显笔记本、一体机、4–7 代酷睿 + 机械盘旧机 | `sys overview` 组装机默认字段、OEM 自启项、双显卡与虚拟显示器枚举、机械盘 I/O 队列与忙碌度 |
 | 系统镜像（O01–O08） | Windows 11 家／专、Windows 10（1507–22H2）、政采裁剪镜像、非中文语言包 | 原生 WMI／存储命名空间缺失降级、PDH 英文计数器转本地化路径、事件日志多语言格式化、安全软件虚拟设备与 UKey 枚举 |
-| 启动介质（M01–M08） | USB 2.0 / 3.0 U 盘、移动机械盘、PSSD、SD 卡，覆盖 FAT32、exFAT、NTFS | 低速介质启动与 WizTree 导出耗时、非 NTFS 卷标 `wiztree-walk`、换盘拔插后清空旧卷缓存、U 盘原位升级替换 |
-| PE 环境（P01–P10） | 微 PE、FirPE、优启通、官方 ADK WinPE，以及只读启动介质 | WMI／事件服务缺失时的结构化报错、`startup` 注明 PE 自身注册表、`wiztree/tmp` 或 `.state/` 不可写时的明确提示 |
+| 启动介质（M01–M08） | USB 2.0 / 3.0 U 盘、移动机械盘、PSSD、SD 卡，覆盖 FAT32、exFAT、NTFS | 低速介质启动与原生目录遍历耗时、非 NTFS 卷标 `native-walk`、换盘拔插后清空旧卷缓存、U 盘原位升级替换 |
+| PE 环境（P01–P10） | 微 PE、FirPE、优启通、官方 ADK WinPE，以及只读启动介质 | WMI／事件服务缺失时的结构化报错、`startup` 注明 PE 自身注册表、`data/` 或 `.state/` 不可写时的明确提示 |

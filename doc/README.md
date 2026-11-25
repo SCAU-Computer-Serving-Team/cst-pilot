@@ -47,7 +47,8 @@
 | [rust/plan/9.desktop.md](rust/plan/9.desktop.md) | 阶段 9 `crates/cst-client` 与 `crates/cst-desktop` GPUI 桌面端详细设计 |
 | [rust/plan/9.1.desktop-automation.md](rust/plan/9.1.desktop-automation.md) | 阶段 9.1 桌面端外部解耦 CLI（`winapp ui`）自动化操作、无回显凭据投递与截图录屏详细设计 |
 | [rust/plan/9.2.config-isolation-and-packaging.md](rust/plan/9.2.config-isolation-and-packaging.md) | 阶段 9.2 配置目录隔离（`app/` + `data/`）、纯 Rust 打包策略与存量兼容性设计 |
-| [rust/plan/9.3.optimization.md](rust/plan/9.3.optimization.md) | 阶段 9.3 性能优化与工程收敛：纯 Rust MFT / Win32 IOCTL 存储工具重构、其余工具与全栈性能专题 |
+| [rust/plan/9.3.optimization.md](rust/plan/9.3.optimization.md) | 阶段 9.3 性能优化与结构整理：纯 Rust MFT / Win32 IOCTL 存储工具重构、其余工具与全栈性能专题 |
+| [rust/plan/9.4.keyboard-navigation.md](rust/plan/9.4.keyboard-navigation.md) | 阶段 9.4 桌面端与 Web 端方向键交互改造、四角 / 游标切换与 `180ms` 滑移动效方案及进展 |
 
 ## 同名文件职责
 
