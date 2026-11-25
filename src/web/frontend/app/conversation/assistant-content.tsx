@@ -19,6 +19,8 @@ export function AssistantContent({
 	requests,
 	firstProcessLabel = "已完成",
 	format,
+	locateEntryId,
+	locateToolCallId,
 	children,
 }: {
 	id?: string;
@@ -28,6 +30,8 @@ export function AssistantContent({
 	requests: PendingBitLocker[];
 	firstProcessLabel?: string;
 	format?: TranscriptFormat;
+	locateEntryId?: string;
+	locateToolCallId?: string;
 	children?: ReactNode;
 }) {
 	const { process, finalText } = splitTurn(turn.assistants);
@@ -59,6 +63,14 @@ export function AssistantContent({
 						</div>
 					);
 				const label = index === 0 ? firstProcessLabel : processSegmentLabel(segment.parts, resultsByTurn, live);
+				const segmentHasLocate = Boolean(
+					(locateToolCallId &&
+						segment.parts.some(
+							({ part }) => part.kind === "tools" && part.calls.some((call) => call.id === locateToolCallId),
+						)) ||
+						(locateEntryId &&
+							segment.parts.some(({ entry, part }) => part.kind === "text" && entry.id === locateEntryId)),
+				);
 				return label ? (
 					<ProcessSegment
 						key={segment.key}
@@ -68,6 +80,7 @@ export function AssistantContent({
 						waiting={live && !process.length && !finalText}
 						results={resultsByTurn}
 						format={format}
+						forceOpen={segmentHasLocate}
 					/>
 				) : null;
 			})}

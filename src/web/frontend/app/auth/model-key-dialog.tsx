@@ -1,10 +1,11 @@
 import { KeyRound, X } from "lucide-react";
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router";
 import type { ModelChoice } from "../data/model-selection";
 import { restorePreviousFocus, useAnimatedDialogClose, useStandbyDialogClose } from "../shell/app-dialogs";
 import { useDialogFocusTrap } from "../shell/dialog-focus";
+import { type DialogActionItem, KbdFocusOverlay, useDialogActionNav } from "../shell/kbd-focus";
 import { CSTOA_PROVIDER, loginPath, returnPath } from "./providers";
 
 export type ModelKeyDialogReason = "initial" | "unsent" | "missing";
@@ -27,12 +28,28 @@ export function ModelKeyDialog({
 	const providerName = model.providerName ?? model.provider;
 	const destination = returnPath(`${location.pathname}${location.search}`);
 	const { requestClose, closing } = useAnimatedDialogClose(dialog);
+	const actions = useMemo<readonly DialogActionItem[]>(
+		() =>
+			reason === "initial"
+				? [
+						{ id: "cancel", tone: "neutral" },
+						{ id: "apikey", tone: "neutral" },
+						{ id: "primary", tone: "accent" },
+					]
+				: [
+						{ id: "cancel", tone: "neutral" },
+						{ id: "primary", tone: "accent" },
+					],
+		[reason],
+	);
+	const actionNav = useDialogActionNav(actions, { initialId: "cancel", disabled: closing });
 	useDialogFocusTrap(dialog, cancelRef);
 	useStandbyDialogClose(dialog, onClose);
 	useEffect(() => {
 		const previous = document.activeElement;
 		const node = dialog.current;
 		node?.showModal();
+		cancelRef.current?.focus();
 		return () => restorePreviousFocus(node, previous);
 	}, []);
 	function leave() {
@@ -62,6 +79,7 @@ export function ModelKeyDialog({
 			ref={dialog}
 			aria-labelledby={titleId}
 			aria-describedby={descriptionId}
+			onKeyDown={actionNav.onDialogKeyDown}
 			onCancel={(event) => {
 				event.preventDefault();
 				leave();
@@ -95,24 +113,42 @@ export function ModelKeyDialog({
 						? "尚未配置 API key。消息未发送，草稿已保留。"
 						: "尚未配置 API key，配置后即可开始对话。"}
 			</p>
-			<div className="exit-actions">
-				<button ref={cancelRef} type="button" className="tier-1-btn-outline" disabled={closing} onClick={leave}>
+			<div
+				ref={actionNav.containerRef}
+				className="exit-actions kbd-focus-scope kbd-dialog-actions"
+				data-kbd-active={actionNav.kbdActive ? "true" : "false"}
+			>
+				<button
+					ref={actionNav.registerButton("cancel", cancelRef)}
+					type="button"
+					className="tier-1-btn-outline"
+					disabled={closing}
+					onPointerDown={actionNav.onButtonPointerDown}
+					onFocus={() => actionNav.onButtonFocus("cancel")}
+					onClick={leave}
+				>
 					暂不配置
 				</button>
 				{reason === "initial" ? (
 					<>
 						<button
+							ref={actionNav.registerButton("apikey")}
 							type="button"
 							className="tier-1-btn-outline"
 							disabled={closing}
+							onPointerDown={actionNav.onButtonPointerDown}
+							onFocus={() => actionNav.onButtonFocus("apikey")}
 							onClick={() => openProviderPage("api_key")}
 						>
 							填写 APIKEY
 						</button>
 						<button
+							ref={actionNav.registerButton("primary")}
 							type="button"
 							className="tier-1-btn-primary model-key-configure"
 							disabled={closing}
+							onPointerDown={actionNav.onButtonPointerDown}
+							onFocus={() => actionNav.onButtonFocus("primary")}
 							onClick={login}
 						>
 							登录 CSTOA
@@ -120,14 +156,26 @@ export function ModelKeyDialog({
 					</>
 				) : (
 					<button
+						ref={actionNav.registerButton("primary")}
 						type="button"
 						className="tier-1-btn-primary model-key-configure"
 						disabled={closing}
+						onPointerDown={actionNav.onButtonPointerDown}
+						onFocus={() => actionNav.onButtonFocus("primary")}
 						onClick={() => openProviderPage()}
 					>
 						配置密钥
 					</button>
 				)}
+				<KbdFocusOverlay
+					containerRef={actionNav.containerRef}
+					itemRefs={actionNav.itemRefs}
+					targetId={actionNav.targetId}
+					style={actionNav.kbdStyle}
+					tone={actionNav.activeTone}
+					railPlacement="bottom"
+					bracketOutset={3}
+				/>
 			</div>
 		</dialog>,
 		document.body,

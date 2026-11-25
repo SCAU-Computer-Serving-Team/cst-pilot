@@ -1,6 +1,8 @@
 pub mod exit_dialog;
+pub(crate) mod input_nav;
 mod menus;
 pub mod overlays;
+pub mod search_state;
 pub mod sidebar;
 pub mod topbar;
 pub mod window_bounds;
@@ -10,14 +12,16 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use cst_client::{
-    ChannelModeDto, ClientError, ClientHandle, ClientSnapshot, DesktopSettingsPatchDto,
-    ExitCheckReport, RecentExportSummary, ThemeModeDto, UpdatePhaseDto, WorkspaceView,
+    ChannelModeDto, ClientError, ClientHandle, ClientSnapshot, ContentSearchMatchDto,
+    DesktopSettingsPatchDto, ExitCheckReport, RecentExportSummary, ThemeModeDto, UpdatePhaseDto,
+    WorkspaceView,
 };
 use gpui_kit::assets::IconName;
-use gpui_kit::base::FocusTrapElement as _;
 use gpui_kit::base::motion::{Transition, TransitionState, transition};
+use gpui_kit::base::{ElementExt as _, FocusTrapElement as _};
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
     KeyBinding, ParentElement, Pixels, Point, Render, SharedString, StatefulInteractiveElement,
@@ -42,6 +46,9 @@ use crate::shell::exit_dialog::render_exit_confirm_dialog;
 use crate::shell::overlays::{
     BannerCountdownState, BannerDeadline, render_top_notice_banner, render_web_active_lock_overlay,
     render_workspace_error_bar,
+};
+use crate::shell::search_state::{
+    ExpandAction, SEARCH_PAGE_SIZE, SidebarSearchState, search_local_preloaded_sessions,
 };
 use crate::shell::sidebar::{
     ShellRoute, SidebarCallbacks, filter_recent_sidebar_sessions, render_sidebar,
@@ -72,6 +79,7 @@ gpui_kit::actions!(
         OpenSettings,
         ToggleCommandPalette,
         ToggleQuickOpenPalette,
+        FocusPrimaryInput,
         DismissTopSurface,
         RequestAppExit
     ]
@@ -86,6 +94,7 @@ pub fn register_shell_keys(cx: &mut App) {
         KeyBinding::new("ctrl-,", OpenSettings, Some(SHELL_KEY_CONTEXT)),
         KeyBinding::new("ctrl-p", ToggleCommandPalette, Some(SHELL_KEY_CONTEXT)),
         KeyBinding::new("ctrl-o", ToggleQuickOpenPalette, Some(SHELL_KEY_CONTEXT)),
+        KeyBinding::new("ctrl-j", FocusPrimaryInput, Some(SHELL_KEY_CONTEXT)),
         KeyBinding::new("escape", DismissTopSurface, Some(SHELL_KEY_CONTEXT)),
     ]);
 }
@@ -112,6 +121,13 @@ struct RenameSessionModalState {
     session_id: String,
     input: Entity<InputState>,
     prior_focus: Option<FocusHandle>,
+}
+
+#[derive(Clone)]
+struct TopNoticeAction {
+    label: SharedString,
+    session_id: String,
+    previous_leaf_id: String,
 }
 
 #[derive(Default)]
@@ -156,6 +172,10 @@ pub struct AppShell {
     login_view: Entity<LoginView>,
     account_view: Entity<AccountView>,
     sidebar_search_input: Entity<InputState>,
+    sidebar_search: SidebarSearchState,
+    sidebar_search_debounce_task: Option<Task<()>>,
+    sidebar_search_prefetch_title_task: Option<Task<()>>,
+    sidebar_search_prefetch_content_task: Option<Task<()>>,
     command_palette: Option<Entity<CommandPaletteModal>>,
     command_palette_sub: Option<Subscription>,
     recent_exports_cache: Vec<RecentExportSummary>,
@@ -201,6 +221,7 @@ pub struct AppShell {
     update_dismiss_focus: FocusHandle,
     workspace_error: Option<SharedString>,
     top_notice: Option<SharedString>,
+    top_notice_action: Option<TopNoticeAction>,
     error_banner_timer: BannerCountdownState,
     notice_banner_timer: BannerCountdownState,
     shader_scheduler: ShaderFrameScheduler,
@@ -313,8 +334,13 @@ impl AppShell {
         subscriptions.push(cx.subscribe_in(
             &sidebar_search_input,
             window,
-            |this, _, ev: &InputEvent, _, cx| match ev {
-                InputEvent::Change => cx.notify(),
+            |this, _, ev: &InputEvent, window, cx| match ev {
+                InputEvent::Change => {
+                    if !crate::sessions::input_is_composing(&this.sidebar_search_input, window, cx)
+                    {
+                        this.on_sidebar_search_changed(cx);
+                    }
+                }
                 InputEvent::Focus => this.dismiss_click_outside_surfaces(cx),
                 _ => {}
             },
@@ -384,6 +410,10 @@ impl AppShell {
             login_view,
             account_view,
             sidebar_search_input,
+            sidebar_search: SidebarSearchState::default(),
+            sidebar_search_debounce_task: None,
+            sidebar_search_prefetch_title_task: None,
+            sidebar_search_prefetch_content_task: None,
             command_palette: None,
             command_palette_sub: None,
             recent_exports_cache: Vec::new(),
@@ -429,6 +459,7 @@ impl AppShell {
             update_dismiss_focus: cx.focus_handle().tab_stop(true),
             workspace_error: None,
             top_notice: None,
+            top_notice_action: None,
             error_banner_timer: BannerCountdownState::new(),
             notice_banner_timer: BannerCountdownState::new(),
             shader_scheduler: ShaderFrameScheduler::new(),
@@ -949,6 +980,9 @@ impl AppShell {
                 if timer.expire(deadline, cx.background_executor().now()) {
                     *message = None;
                     *task = None;
+                    if !is_error {
+                        this.top_notice_action = None;
+                    }
                     cx.notify();
                 }
             });
@@ -1002,11 +1036,341 @@ impl AppShell {
 
     pub fn show_top_notice(&mut self, message: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.top_notice = Some(message.into());
+        self.top_notice_action = None;
         let deadline = self
             .notice_banner_timer
             .start(cx.background_executor().now());
         self.schedule_banner_dismiss(false, deadline, cx);
         cx.notify();
+    }
+
+    fn show_top_notice_with_action(
+        &mut self,
+        message: impl Into<SharedString>,
+        action: TopNoticeAction,
+        cx: &mut Context<Self>,
+    ) {
+        self.top_notice = Some(message.into());
+        self.top_notice_action = Some(action);
+        let deadline = self
+            .notice_banner_timer
+            .start(cx.background_executor().now());
+        self.schedule_banner_dismiss(false, deadline, cx);
+        cx.notify();
+    }
+
+    pub fn sidebar_search_input(&self) -> &Entity<InputState> {
+        &self.sidebar_search_input
+    }
+
+    pub fn sidebar_search_state(&self) -> &SidebarSearchState {
+        &self.sidebar_search
+    }
+
+    fn clear_sidebar_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sidebar_search_debounce_task = None;
+        self.sidebar_search_prefetch_title_task = None;
+        self.sidebar_search_prefetch_content_task = None;
+        self.sidebar_search.clear();
+        self.sidebar_search_input.update(cx, |st, cx| {
+            st.set_value("", window, cx);
+            st.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    fn on_sidebar_search_changed(&mut self, cx: &mut Context<Self>) {
+        let raw_query = self.sidebar_search_input.read(cx).value().to_string();
+        let trimmed = raw_query.trim().to_owned();
+        self.sidebar_search_debounce_task = None;
+        self.sidebar_search_prefetch_title_task = None;
+        self.sidebar_search_prefetch_content_task = None;
+
+        if trimmed.is_empty() {
+            self.sidebar_search.clear();
+            cx.notify();
+            return;
+        }
+
+        let active_sid = self
+            .client
+            .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
+        let sessions = self.all_sessions_view.read(cx).visible_sessions();
+        let local_preview = search_local_preloaded_sessions(
+            &trimmed,
+            active_sid.as_deref(),
+            &sessions,
+            &self.snapshot.loaded_sessions,
+        );
+        let seq = self
+            .sidebar_search
+            .begin_query(trimmed.clone(), local_preview);
+        cx.notify();
+
+        let client = self.client.clone();
+        self.sidebar_search_debounce_task = Some(cx.spawn(async move |weak, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(100))
+                .await;
+            let res = client
+                .search_sessions(
+                    trimmed,
+                    active_sid,
+                    0,
+                    SEARCH_PAGE_SIZE,
+                    0,
+                    SEARCH_PAGE_SIZE,
+                    None,
+                )
+                .await;
+            let _ = weak.update(cx, |this, cx| {
+                this.sidebar_search_debounce_task = None;
+                match res {
+                    Ok(resp) => {
+                        if let Some((next_title, next_content)) =
+                            this.sidebar_search.apply_first_page(seq, resp)
+                        {
+                            if let Some(off) = next_title {
+                                this.spawn_sidebar_search_prefetch_titles(seq, off, cx);
+                            }
+                            if let Some(off) = next_content {
+                                this.spawn_sidebar_search_prefetch_contents(seq, off, cx);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        this.sidebar_search.mark_first_page_failed(seq);
+                    }
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    fn spawn_sidebar_search_prefetch_titles(
+        &mut self,
+        seq: u64,
+        offset: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let query = self.sidebar_search.query.clone();
+        if query.trim().is_empty() {
+            return;
+        }
+        let token = self.sidebar_search.snapshot_token.clone();
+        let active_sid = self
+            .client
+            .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
+        let client = self.client.clone();
+        self.sidebar_search_prefetch_title_task = Some(cx.spawn(async move |weak, cx| {
+            let res = client
+                .search_sessions(query, active_sid, offset, SEARCH_PAGE_SIZE, 0, 1, token)
+                .await;
+            let _ = weak.update(cx, |this, cx| {
+                this.sidebar_search_prefetch_title_task = None;
+                match res {
+                    Ok(resp) => {
+                        if let Some(next_off) = this.sidebar_search.finish_title_prefetch(
+                            seq,
+                            resp.title_matches,
+                            resp.title_has_more,
+                        ) {
+                            this.spawn_sidebar_search_prefetch_titles(seq, next_off, cx);
+                        }
+                    }
+                    Err(_) => this.sidebar_search.fail_title_prefetch(seq),
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    fn spawn_sidebar_search_prefetch_contents(
+        &mut self,
+        seq: u64,
+        offset: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let query = self.sidebar_search.query.clone();
+        if query.trim().is_empty() {
+            return;
+        }
+        let token = self.sidebar_search.snapshot_token.clone();
+        let active_sid = self
+            .client
+            .with_workspace(|ws| ws.active_session_id().map(str::to_owned));
+        let client = self.client.clone();
+        self.sidebar_search_prefetch_content_task = Some(cx.spawn(async move |weak, cx| {
+            let res = client
+                .search_sessions(query, active_sid, 0, 1, offset, SEARCH_PAGE_SIZE, token)
+                .await;
+            let _ = weak.update(cx, |this, cx| {
+                this.sidebar_search_prefetch_content_task = None;
+                match res {
+                    Ok(resp) => {
+                        if let Some(next_off) = this.sidebar_search.finish_content_prefetch(
+                            seq,
+                            resp.content_matches,
+                            resp.content_has_more,
+                        ) {
+                            this.spawn_sidebar_search_prefetch_contents(seq, next_off, cx);
+                        }
+                    }
+                    Err(_) => this.sidebar_search.fail_content_prefetch(seq),
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    fn expand_sidebar_search_titles(&mut self, cx: &mut Context<Self>) {
+        let seq = self.sidebar_search.request_seq;
+        match self.sidebar_search.click_expand_titles() {
+            ExpandAction::Appended {
+                next_prefetch_offset: Some(next_off),
+            } => {
+                self.spawn_sidebar_search_prefetch_titles(seq, next_off, cx);
+            }
+            ExpandAction::FetchNow { offset } => {
+                self.spawn_sidebar_search_prefetch_titles(seq, offset, cx);
+            }
+            ExpandAction::Appended {
+                next_prefetch_offset: None,
+            }
+            | ExpandAction::WaitingInFlight
+            | ExpandAction::None => {}
+        }
+        cx.notify();
+    }
+
+    fn expand_sidebar_search_contents(&mut self, cx: &mut Context<Self>) {
+        let seq = self.sidebar_search.request_seq;
+        match self.sidebar_search.click_expand_contents() {
+            ExpandAction::Appended {
+                next_prefetch_offset: Some(next_off),
+            } => {
+                self.spawn_sidebar_search_prefetch_contents(seq, next_off, cx);
+            }
+            ExpandAction::FetchNow { offset } => {
+                self.spawn_sidebar_search_prefetch_contents(seq, offset, cx);
+            }
+            ExpandAction::Appended {
+                next_prefetch_offset: None,
+            }
+            | ExpandAction::WaitingInFlight
+            | ExpandAction::None => {}
+        }
+        cx.notify();
+    }
+
+    fn open_session_tree_focus(
+        &mut self,
+        sid: String,
+        focus_entry_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let prior = window
+            .focused(cx)
+            .filter(|focus| focus != &self.root_focus)
+            .or_else(|| Some(self.workbench.read(cx).session_composer_focus(cx)));
+        self.set_workspace_route(ShellRoute::Session, SessionSubView::Tree, cx);
+        self.session_subview_prior_focus = prior;
+        self.branch_tree_view.update(cx, |view, cx| {
+            view.set_session_id_and_focus(sid, focus_entry_id, window, cx);
+            view.focus(window, cx);
+        });
+    }
+
+    fn select_sidebar_search_content(
+        &mut self,
+        hit: ContentSearchMatchDto,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let sid = hit.session_id.clone();
+        let entry_id = hit.best_hit.entry_id.clone();
+        let query = self.sidebar_search.query.clone();
+
+        if hit.best_hit.on_active_branch {
+            self.activate_session_by_id(sid.clone(), cx);
+            self.workbench
+                .update(cx, |wb, cx| wb.locate_entry(sid, entry_id, query, cx));
+            self.root_focus.focus(window, cx);
+            return;
+        }
+
+        let is_running = self
+            .snapshot
+            .loaded_sessions
+            .get(&sid)
+            .is_some_and(|s| s.running)
+            || self
+                .snapshot
+                .sessions
+                .iter()
+                .any(|s| s.id == sid && s.running);
+        if is_running {
+            self.activate_session_by_id(sid.clone(), cx);
+            self.open_session_tree_focus(sid, entry_id, window, cx);
+            self.show_top_notice("当前会话正在输出，已在分支树定位该节点。", cx);
+            return;
+        }
+
+        let target_leaf = hit
+            .best_hit
+            .branch_leaf_id
+            .clone()
+            .unwrap_or_else(|| entry_id.clone());
+        let cached_prev_leaf = self
+            .snapshot
+            .loaded_sessions
+            .get(&sid)
+            .and_then(|s| s.leaf_id.clone());
+        let client = self.client.clone();
+        self.root_focus.focus(window, cx);
+        cx.spawn(async move |weak, cx| {
+            let previous_leaf = match cached_prev_leaf {
+                Some(prev) => Some(prev),
+                None => client
+                    .get_session_tree(sid.clone())
+                    .await
+                    .ok()
+                    .and_then(|val| {
+                        val.get("leafId")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_owned)
+                    }),
+            };
+            let nav_res = client
+                .navigate_session_tree(sid.clone(), target_leaf, false, None)
+                .await;
+            let _ = weak.update(cx, |this, cx| match nav_res {
+                Ok(_) => {
+                    this.activate_session_by_id(sid.clone(), cx);
+                    this.workbench.update(cx, |wb, cx| {
+                        wb.locate_entry(sid.clone(), entry_id, query, cx);
+                    });
+                    if let Some(prev_leaf) = previous_leaf {
+                        this.show_top_notice_with_action(
+                            "已切换至历史分支",
+                            TopNoticeAction {
+                                label: SharedString::from("返回原分支"),
+                                session_id: sid,
+                                previous_leaf_id: prev_leaf,
+                            },
+                            cx,
+                        );
+                    } else {
+                        this.show_top_notice("已切换至历史分支", cx);
+                    }
+                }
+                Err(err) => {
+                    this.show_workspace_error(err.to_string(), cx);
+                }
+            });
+        })
+        .detach();
     }
 
     fn cycle_theme_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1271,6 +1635,11 @@ impl AppShell {
                         && this.snapshot.channel_mode != ChannelModeDto::WebActive
                     {
                         this.restore_surface_focus(None, window, cx);
+                    }
+                    let sessions_changed =
+                        !std::sync::Arc::ptr_eq(&prev_snap.sessions, &this.snapshot.sessions);
+                    if sessions_changed && this.sidebar_search.is_active() {
+                        this.on_sidebar_search_changed(cx);
                     }
                     cx.notify();
                 });
@@ -1830,6 +2199,79 @@ impl AppShell {
                 }
             }
         }));
+    }
+
+    /// Focuses the primary text input on the active surface or topmost modal (`Ctrl+J`).
+    pub fn focus_primary_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.shutting_down
+            || self.snapshot.channel_mode == ChannelModeDto::WebActive
+            || self.exit_dialog.is_some()
+            || self.update_dialog.open
+            || self.missing_key_modal.is_some()
+            || self.web_switch_confirm.is_some()
+        {
+            return false;
+        }
+        if let Some(palette) = &self.command_palette {
+            let query_input = palette.read(cx).query_input().clone();
+            query_input.update(cx, |inp, cx| {
+                inp.focus(window, cx);
+            });
+            cx.notify();
+            return true;
+        }
+        if let Some(rm) = &self.rename_modal {
+            rm.input.update(cx, |inp, cx| {
+                inp.focus(window, cx);
+            });
+            cx.notify();
+            return true;
+        }
+        match self.route {
+            ShellRoute::Home => {
+                if self.workbench.read(cx).has_modal() {
+                    return false;
+                }
+                self.dismiss_click_outside_surfaces(cx);
+                self.workbench
+                    .update(cx, |wb, cx| wb.focus_primary_input(window, cx))
+            }
+            ShellRoute::Session => match self.session_subview {
+                SessionSubView::Chat => {
+                    if self.workbench.read(cx).has_modal() {
+                        return false;
+                    }
+                    self.dismiss_click_outside_surfaces(cx);
+                    self.workbench
+                        .update(cx, |wb, cx| wb.focus_primary_input(window, cx))
+                }
+                SessionSubView::Tree => {
+                    if !self.branch_tree_view.read(cx).has_summary_modal() {
+                        self.dismiss_click_outside_surfaces(cx);
+                    }
+                    self.branch_tree_view
+                        .update(cx, |bt, cx| bt.focus_primary_input(window, cx))
+                }
+                SessionSubView::Export => false,
+            },
+            ShellRoute::AllSessions => {
+                if self.all_sessions_view.read(cx).has_rename_modal() {
+                    return self
+                        .all_sessions_view
+                        .update(cx, |v, cx| v.focus_primary_input(window, cx));
+                }
+                false
+            }
+            ShellRoute::Settings => {
+                self.dismiss_click_outside_surfaces(cx);
+                self.settings_view
+                    .update(cx, |sv, cx| sv.focus_primary_input(window, cx))
+            }
+            ShellRoute::Login => self
+                .login_view
+                .update(cx, |lv, cx| lv.focus_primary_input(window, cx)),
+            ShellRoute::Account => false,
+        }
     }
 
     /// Closes ONLY the single topmost open surface and restores focus within 1 frame.
@@ -2710,11 +3152,46 @@ impl AppShell {
                 .into_any_element(),
             )
         } else {
+            let (action_label, on_action) = match self.top_notice_action.clone() {
+                Some(act) if is_open => {
+                    let ent_act = entity.clone();
+                    let sid_back = act.session_id.clone();
+                    let leaf_back = act.previous_leaf_id.clone();
+                    let cb: overlays::NoticeActionFn = Rc::new(move |_, cx| {
+                        let s = sid_back.clone();
+                        let leaf = leaf_back.clone();
+                        ent_act.update(cx, |this, cx| {
+                            this.top_notice = None;
+                            this.top_notice_action = None;
+                            this.notice_dismiss_task = None;
+                            let client = this.client.clone();
+                            cx.spawn(async move |weak, cx| {
+                                let res = client
+                                    .navigate_session_tree(s.clone(), leaf, false, None)
+                                    .await;
+                                let _ = weak.update(cx, |this, cx| match res {
+                                    Ok(_) => {
+                                        this.activate_session_by_id(s, cx);
+                                        this.show_top_notice("已返回原分支", cx);
+                                    }
+                                    Err(err) => this.show_workspace_error(err.to_string(), cx),
+                                });
+                            })
+                            .detach();
+                            cx.notify();
+                        });
+                    });
+                    (Some(act.label), Some(cb))
+                }
+                _ => (None, None),
+            };
             Some(
                 render_top_notice_banner(
                     is_open,
                     progress,
                     msg,
+                    action_label,
+                    on_action,
                     palette,
                     transparency_enabled,
                     scale_factor,
@@ -3250,6 +3727,9 @@ impl Render for AppShell {
                 let s3 = entity.clone();
                 let s4 = entity.clone();
                 let s5 = entity.clone();
+                let s5_content = entity.clone();
+                let s5_exp_title = entity.clone();
+                let s5_exp_content = entity.clone();
                 let s5_menu = entity.clone();
                 let s7 = entity.clone();
                 let s8 = entity.clone();
@@ -3265,6 +3745,7 @@ impl Render for AppShell {
                     cx,
                     &self.sidebar_search_input,
                     &search_query,
+                    &self.sidebar_search,
                     self.sidebar_batch_mode,
                     &self.sidebar_selected_ids,
                     account_label,
@@ -3294,11 +3775,7 @@ impl Render for AppShell {
                         }),
                         on_clear_search: Rc::new(move |w, cx| {
                             s_clr.update(cx, |this, cx| {
-                                this.sidebar_search_input.update(cx, |st, cx| {
-                                    st.set_value("", w, cx);
-                                    st.focus(w, cx);
-                                });
-                                cx.notify();
+                                this.clear_sidebar_search(w, cx);
                             });
                         }),
                         on_open_all_sessions: Rc::new(move |window, cx| {
@@ -3321,6 +3798,21 @@ impl Render for AppShell {
                             s5.update(cx, |this, cx| {
                                 this.activate_session_by_id(sid, cx);
                                 this.root_focus.focus(window, cx);
+                            });
+                        }),
+                        on_select_search_content: Rc::new(move |hit, window, cx| {
+                            s5_content.update(cx, |this, cx| {
+                                this.select_sidebar_search_content(hit, window, cx);
+                            });
+                        }),
+                        on_expand_search_titles: Rc::new(move |_, cx| {
+                            s5_exp_title.update(cx, |this, cx| {
+                                this.expand_sidebar_search_titles(cx);
+                            });
+                        }),
+                        on_expand_search_contents: Rc::new(move |_, cx| {
+                            s5_exp_content.update(cx, |this, cx| {
+                                this.expand_sidebar_search_contents(cx);
                             });
                         }),
                         on_open_session_menu: Rc::new(move |sid, pos, window, cx| {
@@ -3488,6 +3980,9 @@ impl Render for AppShell {
             .on_action(cx.listener(|this, _: &ToggleQuickOpenPalette, window, cx| {
                 this.toggle_quick_open_palette(window, cx);
             }))
+            .on_action(cx.listener(|this, _: &FocusPrimaryInput, window, cx| {
+                let _ = this.focus_primary_input(window, cx);
+            }))
             .capture_action(cx.listener(|this, _: &Escape, window, cx| {
                 crate::sessions::consume_composing_escape(&this.sidebar_search_input, window, cx);
             }))
@@ -3654,6 +4149,8 @@ impl Render for AppShell {
             root = root.child(cp_modal.clone());
         }
 
+        let kbd_style = self.snapshot.desktop_settings.keyboard_focus_style;
+
         // Rename Session Modal (`384px`, `r: 8px`, `p: 20px`, `gap: 12px`)
         let rename_scrim_p = motion::surface_presence(
             "rename-session-scrim-p",
@@ -3662,8 +4159,56 @@ impl Render for AppShell {
             window,
             cx,
         );
+        let rename_nav = crate::theme::kbd_focus::use_dialog_action_nav(
+            "rename-session",
+            self.rename_modal.is_some(),
+            1,
+            window,
+            cx,
+        );
         if let Some(ref rm) = self.rename_modal {
             let ent_cancel = entity.clone();
+            let ent_confirm = entity.clone();
+            let on_cancel_rc: crate::theme::kbd_focus::DialogActionCallback =
+                Rc::new(move |w, cx| {
+                    ent_cancel.update(cx, |this, cx| {
+                        this.close_sidebar_rename(w, cx);
+                    });
+                });
+            let on_confirm_rc: crate::theme::kbd_focus::DialogActionCallback =
+                Rc::new(move |w, cx| {
+                    ent_confirm.update(cx, |this, cx| {
+                        this.submit_sidebar_rename(w, cx);
+                    });
+                });
+            let cancel_focus = rename_nav.fallback_focus(0, cx);
+            let confirm_focus = rename_nav.fallback_focus(1, cx);
+            let focuses = [cancel_focus.clone(), confirm_focus.clone()];
+            rename_nav.clear_tracker(cx);
+            let kbd_active = rename_nav.is_keyboard_active(cx);
+            let tracker_cancel = rename_nav.tracker(cx);
+            let tracker_confirm = rename_nav.tracker(cx);
+            let kbd_overlay = rename_nav.render_overlay(
+                kbd_style,
+                &focuses,
+                [
+                    crate::theme::kbd_focus::KbdTone::Neutral,
+                    crate::theme::kbd_focus::KbdTone::Accent,
+                ],
+                true,
+                &palette,
+                window,
+                cx,
+            );
+            let nav_move = rename_nav.clone();
+            let nav_key = rename_nav.clone();
+            let nav_click_cancel = rename_nav.clone();
+            let nav_click_confirm = rename_nav.clone();
+            let key_cancel = Rc::clone(&on_cancel_rc);
+            let key_confirm = Rc::clone(&on_confirm_rc);
+            let click_cancel = Rc::clone(&on_cancel_rc);
+            let click_confirm = Rc::clone(&on_confirm_rc);
+
             root = root.child(
                 render_frosted_surface(
                     "rename-session-scrim",
@@ -3682,6 +4227,7 @@ impl Render for AppShell {
                 .items_center()
                 .justify_center()
                 .occlude()
+                .on_mouse_move(move |ev, w, cx| nav_move.handle_mouse_move(ev, w, cx))
                 .child(motion::animate_modal_enter(
                     "rename-session-modal-anim",
                     render_frosted_surface(
@@ -3698,17 +4244,31 @@ impl Render for AppShell {
                             crate::sessions::consume_composing_escape(&modal.input, window, cx);
                         }
                     }))
-                    .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
-                        if event.keystroke.key == "enter"
-                            && !event.is_held
-                            && this.rename_modal.as_ref().is_some_and(|modal| {
-                                modal.input.read(cx).focus_handle(cx).is_focused(window)
-                            })
-                        {
-                            this.submit_sidebar_rename(window, cx);
-                            cx.stop_propagation();
-                        }
-                    }))
+                    .on_key_down(cx.listener(
+                        move |this, event: &gpui::KeyDownEvent, window, cx| {
+                            if event.keystroke.key == "enter"
+                                && !event.is_held
+                                && this.rename_modal.as_ref().is_some_and(|modal| {
+                                    modal.input.read(cx).focus_handle(cx).is_focused(window)
+                                })
+                            {
+                                this.submit_sidebar_rename(window, cx);
+                                cx.stop_propagation();
+                                return;
+                            }
+                            if nav_key.handle_key_down(
+                                event,
+                                &focuses,
+                                true,
+                                key_cancel.as_ref(),
+                                key_confirm.as_ref(),
+                                window,
+                                cx,
+                            ) {
+                                cx.stop_propagation();
+                            }
+                        },
+                    ))
                     .w(layout::MODAL_STANDARD_WIDTH)
                     .p(px(20.0))
                     .rounded(radius::ROW)
@@ -3726,6 +4286,8 @@ impl Render for AppShell {
                     .child({
                         let rename_focused = rm.input.read(cx).focus_handle(cx).is_focused(window);
                         let rename_focus_ent = rm.input.clone();
+                        let rename_up_ent = rm.input.clone();
+                        let rename_down_ent = rm.input.clone();
                         div()
                             .id("rename-session-input-box")
                             .relative()
@@ -3742,6 +4304,30 @@ impl Render for AppShell {
                             .bg(palette.bg_workspace)
                             .flex()
                             .items_center()
+                            .capture_action(
+                                move |_: &gpui_kit::component::input::MoveUp, window, cx| {
+                                    if crate::shell::input_nav::handle_input_vertical_boundary(
+                                        &rename_up_ent,
+                                        false,
+                                        window,
+                                        cx,
+                                    ) {
+                                        cx.stop_propagation();
+                                    }
+                                },
+                            )
+                            .capture_action(
+                                move |_: &gpui_kit::component::input::MoveDown, window, cx| {
+                                    if crate::shell::input_nav::handle_input_vertical_boundary(
+                                        &rename_down_ent,
+                                        true,
+                                        window,
+                                        cx,
+                                    ) {
+                                        cx.stop_propagation();
+                                    }
+                                },
+                            )
                             .on_click(move |_, w, cx| {
                                 rename_focus_ent.update(cx, |s, cx| s.focus(w, cx));
                             })
@@ -3768,6 +4354,7 @@ impl Render for AppShell {
                                     .id("rename-session-cancel-btn")
                                     .test_support()
                                     .a11y_button("rename-session-cancel-btn", "取消")
+                                    .track_focus(&cancel_focus)
                                     .tab_index(0)
                                     .h(height::CONTROL)
                                     .px(space::MD)
@@ -3777,19 +4364,24 @@ impl Render for AppShell {
                                     .bg(palette.bg_elevated)
                                     .flex()
                                     .items_center()
-                                    .hover(|s| s.bg(palette.bg_item_hover))
-                                    .on_click(move |_, w, cx| {
-                                        ent_cancel.update(cx, |this, cx| {
-                                            this.close_sidebar_rename(w, cx);
-                                        });
+                                    .when(!kbd_active, |el| {
+                                        el.hover(|s| s.bg(palette.bg_item_hover))
                                     })
-                                    .child(cjk_inline_label("取消")),
+                                    .on_click(move |_, w, cx| {
+                                        nav_click_cancel.clear_keyboard(w, cx);
+                                        click_cancel(w, cx);
+                                    })
+                                    .child(cjk_inline_label("取消"))
+                                    .on_prepaint(move |bounds, _, _| {
+                                        tracker_cancel.set(0, bounds);
+                                    }),
                             )
                             .child(
                                 apply_scale(div(), scale::UI_MEDIUM)
                                     .id("rename-session-confirm-btn")
                                     .test_support()
                                     .a11y_button("rename-session-confirm-btn", "保存")
+                                    .track_focus(&confirm_focus)
                                     .tab_index(0)
                                     .h(height::CONTROL)
                                     .px(space::LG)
@@ -3798,12 +4390,19 @@ impl Render for AppShell {
                                     .text_color(palette.text_on_accent)
                                     .flex()
                                     .items_center()
-                                    .hover(|s| s.bg(palette.accent_hover))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.submit_sidebar_rename(window, cx)
-                                    }))
-                                    .child(cjk_inline_label("保存")),
-                            ),
+                                    .when(!kbd_active, |el| {
+                                        el.hover(|s| s.bg(palette.accent_hover))
+                                    })
+                                    .on_click(move |_, w, cx| {
+                                        nav_click_confirm.clear_keyboard(w, cx);
+                                        click_confirm(w, cx);
+                                    })
+                                    .child(cjk_inline_label("保存"))
+                                    .on_prepaint(move |bounds, _, _| {
+                                        tracker_confirm.set(1, bounds);
+                                    }),
+                            )
+                            .child(kbd_overlay),
                     )
                     .tab_stop(false)
                     .focus_trap("sidebar-rename-focus-trap", &self.rename_trap_focus),
@@ -3820,12 +4419,21 @@ impl Render for AppShell {
             window,
             cx,
         );
+        let missing_key_nav = crate::theme::kbd_focus::use_dialog_action_nav(
+            "missing-key",
+            self.missing_key_modal.is_some(),
+            0,
+            window,
+            cx,
+        );
         if let Some(ref mk_state) = self.missing_key_modal {
             let ent_cancel = entity.clone();
             let ent_cfg = entity.clone();
             root = root.child(render_missing_key_dialog(
                 mk_state,
                 missing_key_p,
+                kbd_style,
+                missing_key_nav,
                 &palette,
                 transparency_enabled,
                 scale_factor,
@@ -3850,6 +4458,8 @@ impl Render for AppShell {
                         cx.notify();
                     });
                 },
+                window,
+                cx,
             ));
         }
 
@@ -3859,6 +4469,16 @@ impl Render for AppShell {
             "update-dialog-scrim-p",
             update_dialog_open,
             motion::MODAL_OPEN,
+            window,
+            cx,
+        );
+        let update_interactive = update_dialog_open
+            && !self.update_dialog.handoff_locked
+            && !self.update_dialog.launch_pending;
+        let update_nav = crate::theme::kbd_focus::use_dialog_action_nav(
+            "update-dialog",
+            update_interactive,
+            0,
             window,
             cx,
         );
@@ -3875,6 +4495,8 @@ impl Render for AppShell {
                 &palette,
                 transparency_enabled,
                 scale_factor,
+                kbd_style,
+                update_nav,
                 &self.update_trap_focus,
                 &self.update_dismiss_focus,
                 move |w, cx| {
@@ -3891,6 +4513,8 @@ impl Render for AppShell {
                 move |w, cx| {
                     ent_lnch.update(cx, |this, cx| this.trigger_update_launch_handoff(w, cx));
                 },
+                window,
+                cx,
             ));
         }
 
@@ -3902,9 +4526,55 @@ impl Render for AppShell {
             window,
             cx,
         );
+        let web_switch_nav = crate::theme::kbd_focus::use_dialog_action_nav(
+            "web-switch-confirm",
+            self.web_switch_confirm.is_some(),
+            0,
+            window,
+            cx,
+        );
         if self.web_switch_confirm.is_some() {
             let ent_cancel = entity.clone();
             let ent_proceed = entity.clone();
+            let on_cancel_rc: crate::theme::kbd_focus::DialogActionCallback =
+                Rc::new(move |w, cx| {
+                    ent_cancel.update(cx, |this, cx| {
+                        let _ = this.dismiss_topmost_surface(w, cx);
+                    });
+                });
+            let on_proceed_rc: crate::theme::kbd_focus::DialogActionCallback =
+                Rc::new(move |w, cx| {
+                    ent_proceed.update(cx, |this, cx| {
+                        this.trigger_open_web(true, w, cx);
+                    });
+                });
+            let confirm_focus = web_switch_nav.fallback_focus(1, cx);
+            let focuses = [self.web_switch_cancel_focus.clone(), confirm_focus.clone()];
+            web_switch_nav.clear_tracker(cx);
+            let kbd_active = web_switch_nav.is_keyboard_active(cx);
+            let tracker_cancel = web_switch_nav.tracker(cx);
+            let tracker_confirm = web_switch_nav.tracker(cx);
+            let kbd_overlay = web_switch_nav.render_overlay(
+                kbd_style,
+                &focuses,
+                [
+                    crate::theme::kbd_focus::KbdTone::Neutral,
+                    crate::theme::kbd_focus::KbdTone::Accent,
+                ],
+                false,
+                &palette,
+                window,
+                cx,
+            );
+            let nav_move = web_switch_nav.clone();
+            let nav_key = web_switch_nav.clone();
+            let nav_click_cancel = web_switch_nav.clone();
+            let nav_click_proceed = web_switch_nav.clone();
+            let key_cancel = Rc::clone(&on_cancel_rc);
+            let key_proceed = Rc::clone(&on_proceed_rc);
+            let click_cancel = Rc::clone(&on_cancel_rc);
+            let click_proceed = Rc::clone(&on_proceed_rc);
+
             root = root.child(
                 render_frosted_surface(
                     "web-switch-confirm-scrim",
@@ -3923,6 +4593,7 @@ impl Render for AppShell {
                 .items_center()
                 .justify_center()
                 .occlude()
+                .on_mouse_move(move |ev, w, cx| nav_move.handle_mouse_move(ev, w, cx))
                 .child(motion::animate_modal_enter(
                     "web-switch-confirm-anim",
                     render_frosted_surface(
@@ -3934,6 +4605,19 @@ impl Render for AppShell {
                     )
                     .test_support()
                     .a11y_dialog("web-switch-confirm-card", "切换到网页端确认")
+                    .on_key_down(move |ev, w, cx| {
+                        if nav_key.handle_key_down(
+                            ev,
+                            &focuses,
+                            false,
+                            key_cancel.as_ref(),
+                            key_proceed.as_ref(),
+                            w,
+                            cx,
+                        ) {
+                            cx.stop_propagation();
+                        }
+                    })
                     .focus_trap("web-switch-confirm-trap", &self.web_switch_trap_focus)
                     .w(layout::MODAL_STANDARD_WIDTH)
                     .rounded(radius::ROW)
@@ -3982,19 +4666,24 @@ impl Render for AppShell {
                                     .text_color(palette.text_primary)
                                     .flex()
                                     .items_center()
-                                    .hover(|s| s.bg(palette.bg_item_hover))
-                                    .on_click(move |_, w, cx| {
-                                        ent_cancel.update(cx, |this, cx| {
-                                            let _ = this.dismiss_topmost_surface(w, cx);
-                                        });
+                                    .when(!kbd_active, |el| {
+                                        el.hover(|s| s.bg(palette.bg_item_hover))
                                     })
-                                    .child(cjk_inline_label("取消")),
+                                    .on_click(move |_, w, cx| {
+                                        nav_click_cancel.clear_keyboard(w, cx);
+                                        click_cancel(w, cx);
+                                    })
+                                    .child(cjk_inline_label("取消"))
+                                    .on_prepaint(move |bounds, _, _| {
+                                        tracker_cancel.set(0, bounds);
+                                    }),
                             )
                             .child(
                                 apply_scale(div(), scale::UI_MEDIUM)
                                     .id("web-switch-confirm-btn")
                                     .test_support()
                                     .a11y_button("web-switch-confirm-btn", "继续切换")
+                                    .track_focus(&confirm_focus)
                                     .tab_index(0)
                                     .h(height::CONTROL)
                                     .px(space::LG)
@@ -4003,14 +4692,19 @@ impl Render for AppShell {
                                     .text_color(palette.text_on_accent)
                                     .flex()
                                     .items_center()
-                                    .hover(|s| s.bg(palette.accent_hover))
-                                    .on_click(move |_, w, cx| {
-                                        ent_proceed.update(cx, |this, cx| {
-                                            this.trigger_open_web(true, w, cx);
-                                        });
+                                    .when(!kbd_active, |el| {
+                                        el.hover(|s| s.bg(palette.accent_hover))
                                     })
-                                    .child(cjk_inline_label("继续切换")),
-                            ),
+                                    .on_click(move |_, w, cx| {
+                                        nav_click_proceed.clear_keyboard(w, cx);
+                                        click_proceed(w, cx);
+                                    })
+                                    .child(cjk_inline_label("继续切换"))
+                                    .on_prepaint(move |bounds, _, _| {
+                                        tracker_confirm.set(1, bounds);
+                                    }),
+                            )
+                            .child(kbd_overlay),
                     ),
                     palette.craft_stack_shadows(),
                 )),
@@ -4025,11 +4719,20 @@ impl Render for AppShell {
             window,
             cx,
         );
+        let web_lock_nav = crate::theme::kbd_focus::use_dialog_action_nav(
+            "web-active-lock",
+            web_locked,
+            1,
+            window,
+            cx,
+        );
         if web_locked {
             let ent_open = entity.clone();
             let ent_back = entity.clone();
             root = root.child(render_web_active_lock_overlay(
                 web_lock_p,
+                kbd_style,
+                web_lock_nav,
                 &palette,
                 transparency_enabled,
                 scale_factor,
@@ -4044,6 +4747,8 @@ impl Render for AppShell {
                 move |w, cx| {
                     ent_back.update(cx, |this, cx| this.trigger_close_web(w, cx));
                 },
+                window,
+                cx,
             ));
         }
 
@@ -4055,6 +4760,13 @@ impl Render for AppShell {
             window,
             cx,
         );
+        let exit_nav = crate::theme::kbd_focus::use_dialog_action_nav(
+            "exit-dialog",
+            self.exit_dialog.is_some(),
+            0,
+            window,
+            cx,
+        );
         if let Some(ref dialog) = self.exit_dialog {
             let ent_cancel = entity.clone();
             let ent_confirm = entity.clone();
@@ -4062,6 +4774,8 @@ impl Render for AppShell {
                 &dialog.report,
                 dialog.exiting,
                 exit_dialog_p,
+                kbd_style,
+                exit_nav,
                 &palette,
                 transparency_enabled,
                 scale_factor,
@@ -4076,6 +4790,8 @@ impl Render for AppShell {
                 move |w, cx| {
                     ent_confirm.update(cx, |this, cx| this.execute_final_shutdown(w, cx));
                 },
+                window,
+                cx,
             ));
         }
 

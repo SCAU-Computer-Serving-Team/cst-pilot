@@ -81,6 +81,7 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 	const navigate = useNavigate();
 	const [params] = useSearchParams();
 	const preview = params.get("preview") === "1";
+	const focusParam = params.get("focus")?.trim() || null;
 	const sample = useMemo(() => (preview ? sampleTree() : undefined), [preview]);
 	const live = useSessionTree(preview ? undefined : sessionId);
 	const tree = sample?.tree ?? live.tree;
@@ -90,7 +91,7 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 	const title = useSessionTitle(sessionId, preview ? "checkpoint4 UI 精修" : "会话", !preview);
 	const [query, setQuery] = useState("");
 	const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
-	const [filter, setFilter] = useState<ViewFilter>(loadViewFilter);
+	const [filter, setFilter] = useState<ViewFilter>(() => (focusParam ? "all" : loadViewFilter()));
 	// 视图过滤下拉弹层打开中：Esc 先关弹层，不退出树页。
 	const [filterOpen, setFilterOpen] = useState(false);
 	const filterTriggerRef = useRef<HTMLButtonElement>(null);
@@ -107,9 +108,18 @@ function SessionTreeView({ sessionId }: { sessionId?: string }) {
 	}, [shell?.appActive]);
 	const [toast, setToast] = useState("");
 	const [actionError, setActionError] = useState("");
-	// 未指定条目时跟随当前叶。
-	const [cursorId, setCursorId] = useState<string | null>(null);
-	const [kbdActive, setKbdActive] = useState(false);
+	// 未指定条目时跟随当前叶；带 ?focus= 时自动定位目标节点。
+	const [cursorId, setCursorId] = useState<string | null>(() => focusParam);
+	const [kbdActive, setKbdActive] = useState(() => Boolean(focusParam));
+	const appliedFocusRef = useRef<string | null>(null);
+	useEffect(() => {
+		if (!focusParam || appliedFocusRef.current === focusParam) return;
+		appliedFocusRef.current = focusParam;
+		setFilter("all");
+		setFolded(new Set());
+		setCursorId(focusParam);
+		setKbdActive(true);
+	}, [focusParam]);
 	const clearKeyboard = useCallback(() => setKbdActive(false), []);
 	const kbdStyle = useKeyboardFocusStyle();
 	const listRef = useRef<HTMLUListElement>(null);

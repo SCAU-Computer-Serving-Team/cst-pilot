@@ -7,7 +7,7 @@
 | 文档 | 优化对象 | 核心改造 | 决策依据 | 日期 |
 |---|---|---|---|---|
 | [storage-ls-disk.md](storage-ls-disk.md) | `ls` 与 `disk` 存储诊断 | 全仓移除 `WizTree`，改用纯 Rust `ntfs-ng` `$MFT`、无条目上限并行 Win32 遍历与原生存储 IOCTL | [ADR-014](../ADR.md#adr-014移除-wiztree存储诊断改用纯-rust-mft-与-win32-ioctl) | `2026-11-24` |
-| [file-search-fff.md](file-search-fff.md) | `fffind` 与 `ffgrep` 文件检索 | 单次基线与单句柄 `PathGuardSession`、多线程并行遍历、相关性打分及 UTF-16 / GB18030 解码 | [ADR-017](../ADR.md#adr-017文件检索采用单次基线单句柄核验与无状态并行多编码引擎) | `2026-11-25` |
+| [file-search-fff.md](file-search-fff.md) | `fffind` 与 `ffgrep` 文件检索 | 单次基线与单句柄 `PathGuardSession`、多线程并行遍历、相关性打分及 UTF-16 / GB18030 解码 | [ADR-018](../ADR.md#adr-018文件检索采用单次基线单句柄核验与无状态并行多编码引擎) | `2026-11-25` |
 
 ## 编写约定
 

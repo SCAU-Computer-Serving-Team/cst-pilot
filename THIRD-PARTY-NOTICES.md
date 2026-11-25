@@ -33,6 +33,9 @@ CST Pilot 发行版包含以下第三方组件。各组件以其原有许可证�
 | 组件 | 版本 | 许可证 | 来源 | 用途与条款 |
 |---|---|---|---|---|
 | ntfs-ng | 0.1.2 | MIT（原包为 MIT / Apache-2.0 双许可，本项目按 MIT 分发） | https://crates.io/crates/ntfs-ng | 纯 Rust NTFS `$MFT` 只读解析引擎，许可证原文见随包 `app/licenses/ntfs-ng-LICENSE.txt` |
+| ib-matcher / ib-pinyin-data | 0.4.5 / 0.1.0 | MIT | https://crates.io/crates/ib-matcher | Rust 侧栏搜索与快速打开的中文拼音（全拼／简拼／多音字）匹配引擎 |
+| strsim | 0.11.1 | MIT | https://crates.io/crates/strsim | Rust 侧栏搜索与快速打开的受限编辑距离模糊打分 |
+| pinyin-match | 1.2.10 | MIT | https://www.npmjs.com/package/pinyin-match | Web 前端侧栏搜索与快速打开的中文拼音匹配库 |
 | LibreHardwareMonitorLib | — | MPL-2.0 | https://github.com/LibreHardwareMonitor/LibreHardwareMonitor | 硬件传感器读取（sensor/gpu 工具），许可证原文见随包 `licenses/MPL-2.0.txt` |
 
 ## 字体

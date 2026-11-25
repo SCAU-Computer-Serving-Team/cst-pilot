@@ -21,6 +21,54 @@ export function isNavigationKeyEvent(event: KeyEvent): boolean {
 	);
 }
 
+type DialogKeyEvent = KeyEvent & Pick<KeyboardEvent, "key">;
+
+/**
+ * 解析确认类模态弹窗按钮栏的横向方向键。
+ * 左右到达边界时夹紧停驻，避免在安全取消钮上按左键折返到危险确认钮；自动跳过禁用按钮。
+ */
+export function resolveDialogActionKey(
+	event: DialogKeyEvent,
+	currentIndex: number,
+	count: number,
+	isDisabled: (index: number) => boolean = () => false,
+): number | null {
+	if (count <= 0 || !isNavigationKeyEvent(event)) return null;
+	const firstEnabled = () => {
+		for (let i = 0; i < count; i++) {
+			if (!isDisabled(i)) return i;
+		}
+		return null;
+	};
+	const lastEnabled = () => {
+		for (let i = count - 1; i >= 0; i--) {
+			if (!isDisabled(i)) return i;
+		}
+		return null;
+	};
+	const cur = Math.max(0, Math.min(currentIndex, count - 1));
+	switch (event.key) {
+		case "ArrowLeft": {
+			for (let i = cur - 1; i >= 0; i--) {
+				if (!isDisabled(i)) return i;
+			}
+			return !isDisabled(cur) ? cur : firstEnabled();
+		}
+		case "ArrowRight": {
+			for (let i = cur + 1; i < count; i++) {
+				if (!isDisabled(i)) return i;
+			}
+			return !isDisabled(cur) ? cur : lastEnabled();
+		}
+		case "Home":
+			return firstEnabled();
+		case "End":
+			return lastEnabled();
+		default:
+			return null;
+	}
+}
+
 /** Scroll only the list, without moving the enclosing layout or stealing focus. */
 export function scrollRowIntoView(list: HTMLElement, row: HTMLElement): void {
 	const top = list.getBoundingClientRect().top + list.clientTop;

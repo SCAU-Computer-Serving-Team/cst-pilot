@@ -21,6 +21,10 @@ pub use bootstrap::{
     acquire_or_activate_desktop_instance, ensure_server_running,
     recover_pending_update_transaction,
 };
+pub use cst_search::{
+    ContentSearchBestHitDto, ContentSearchMatchDto, MatchSpan, SearchContentKind,
+    SessionSearchResponseDto, TitleSearchMatchDto,
+};
 pub use error::ClientError;
 pub use http::AppHttpClient;
 pub use outbox::{ExitCheckReport, OutboxItem, OutboxItemState, SessionOutbox, WebSwitchCheck};

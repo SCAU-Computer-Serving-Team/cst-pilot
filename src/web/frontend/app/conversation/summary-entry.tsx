@@ -1,5 +1,5 @@
 import { GitBranch, Minimize2 } from "lucide-react";
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { CodeBlock } from "../shell/code-block";
 import type { TurnEntry } from "./conversation-parts";
 import { TranscriptDisclosure, type TranscriptFormat } from "./transcript-disclosure";
@@ -8,11 +8,16 @@ import { TranscriptDisclosure, type TranscriptFormat } from "./transcript-disclo
 export const SummaryEntry = memo(function SummaryEntry({
 	entry,
 	format,
+	forceOpen = false,
 }: {
 	entry: TurnEntry;
 	format?: TranscriptFormat;
+	forceOpen?: boolean;
 }) {
-	const [open, setOpen] = useState(format === "png");
+	const [open, setOpen] = useState(format === "png" || forceOpen);
+	useEffect(() => {
+		if (forceOpen) setOpen(true);
+	}, [forceOpen]);
 	const isCompaction = entry.message.role === "compactionSummary";
 	const tokensBefore = entry.message.tokensBefore ?? 0;
 	const tokensText =

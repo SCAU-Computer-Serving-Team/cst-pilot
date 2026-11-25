@@ -6,12 +6,14 @@ pub mod model_picker;
 pub mod queue_bar;
 pub mod turn_segments;
 
+use std::rc::Rc;
 use std::time::Instant;
 
 use cst_client::{ClientHandle, DraftKey};
 use gpui_kit::assets::IconName;
-use gpui_kit::base::FocusTrapElement;
+use gpui_kit::base::{ElementExt as _, FocusTrapElement};
 use gpui_kit::component::Icon;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
     IntoElement, ParentElement, PathBuilder, Render, StatefulInteractiveElement, Styled,
@@ -23,6 +25,7 @@ use crate::accessibility::A11yElementExt as _;
 use crate::background::{
     FrostedGlassSpec, SkyPreset, render_frosted_surface, render_sky_background_rounded,
 };
+use crate::theme::kbd_focus::{KbdTone, use_dialog_action_nav};
 use crate::theme::{
     DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
@@ -254,6 +257,43 @@ impl WorkbenchView {
 
     pub fn session_composer_focus(&self, cx: &gpui::App) -> FocusHandle {
         self.session_composer.read(cx).focus_handle(cx)
+    }
+
+    /// Scrolls to `entry_id` inside `session_id` and highlights matched text briefly (`~1.8s`).
+    pub fn locate_entry(
+        &mut self,
+        session_id: String,
+        entry_id: String,
+        query: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.message_list.update(cx, |ml, cx| {
+            ml.locate_entry(session_id, entry_id, query, cx)
+        });
+    }
+
+    pub fn focus_primary_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.has_modal() {
+            return false;
+        }
+        if self.header_menu_open {
+            self.header_menu_open = false;
+            self.header_menu_prior_focus = None;
+        }
+        if self.active_session_id.is_some() {
+            if let Some(inline_ta) = self.message_list.read(cx).inline_edit_textarea() {
+                inline_ta.update(cx, |st, cx| st.focus(window, cx));
+                cx.notify();
+                return true;
+            }
+            self.session_composer
+                .update(cx, |comp, cx| comp.focus_input(window, cx));
+        } else {
+            self.home_composer
+                .update(cx, |comp, cx| comp.focus_input(window, cx));
+        }
+        cx.notify();
+        true
     }
 
     pub fn header_more_focus(&self) -> FocusHandle {
@@ -976,10 +1016,54 @@ impl Render for WorkbenchView {
             window,
             cx,
         );
+        let edit_confirm_nav = use_dialog_action_nav(
+            "overwrite-draft-confirm",
+            self.pending_edit_confirm.is_some(),
+            0,
+            window,
+            cx,
+        );
         if self.pending_edit_confirm.is_some() {
+            let kbd_style = self.client.snapshot().desktop_settings.keyboard_focus_style;
             let ent_scrim = entity.clone();
             let ent_keep = entity.clone();
             let ent_overwrite = entity.clone();
+            let on_keep: crate::theme::kbd_focus::DialogActionCallback = Rc::new(move |w, cx| {
+                ent_keep.update(cx, |this, cx| {
+                    let _ = this.dismiss_topmost_surface(w, cx);
+                });
+            });
+            let on_overwrite: crate::theme::kbd_focus::DialogActionCallback =
+                Rc::new(move |w, cx| {
+                    ent_overwrite.update(cx, |this, cx| {
+                        if let Some(pending) = this.pending_edit_confirm.take() {
+                            this.execute_overwrite_action(pending.action, w, cx);
+                        }
+                    });
+                });
+            let focuses = [
+                self.edit_confirm_keep_focus.clone(),
+                self.edit_confirm_overwrite_focus.clone(),
+            ];
+            edit_confirm_nav.clear_tracker(cx);
+            let kbd_active = edit_confirm_nav.is_keyboard_active(cx);
+            let tracker_keep = edit_confirm_nav.tracker(cx);
+            let tracker_overwrite = edit_confirm_nav.tracker(cx);
+            let kbd_overlay = edit_confirm_nav.render_overlay(
+                kbd_style,
+                &focuses,
+                [KbdTone::Neutral, KbdTone::Accent],
+                false,
+                &palette,
+                window,
+                cx,
+            );
+            let nav_move = edit_confirm_nav.clone();
+            let nav_key = edit_confirm_nav.clone();
+            let nav_click_keep = edit_confirm_nav.clone();
+            let nav_click_overwrite = edit_confirm_nav.clone();
+            let click_keep = Rc::clone(&on_keep);
+            let click_overwrite = Rc::clone(&on_overwrite);
 
             let scrim = render_frosted_surface(
                 "overwrite-draft-confirm-scrim",
@@ -999,6 +1083,7 @@ impl Render for WorkbenchView {
             .items_center()
             .justify_center()
             .occlude()
+            .on_mouse_move(move |ev, w, cx| nav_move.handle_mouse_move(ev, w, cx))
             .on_click(move |_, w, cx| {
                 ent_scrim.update(cx, |this, cx| {
                     let _ = this.dismiss_topmost_surface(w, cx);
@@ -1064,13 +1149,13 @@ impl Render for WorkbenchView {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .hover(|s| s.bg(palette.bg_item_hover))
+                            .when(!kbd_active, |el| el.hover(|s| s.bg(palette.bg_item_hover)))
                             .on_click(move |_, w, cx| {
-                                ent_keep.update(cx, |this, cx| {
-                                    let _ = this.dismiss_topmost_surface(w, cx);
-                                });
+                                nav_click_keep.clear_keyboard(w, cx);
+                                click_keep(w, cx);
                             })
-                            .child(cjk_inline_label("保留原草稿")),
+                            .child(cjk_inline_label("保留原草稿"))
+                            .on_prepaint(move |bounds, _, _| tracker_keep.set(0, bounds)),
                     )
                     .child(
                         apply_scale(div(), scale::UI_MEDIUM)
@@ -1087,22 +1172,34 @@ impl Render for WorkbenchView {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .hover(|s| s.bg(palette.accent_hover))
+                            .when(!kbd_active, |el| el.hover(|s| s.bg(palette.accent_hover)))
                             .on_click(move |_, w, cx| {
-                                ent_overwrite.update(cx, |this, cx| {
-                                    if let Some(pending) = this.pending_edit_confirm.take() {
-                                        this.execute_overwrite_action(pending.action, w, cx);
-                                    }
-                                });
+                                nav_click_overwrite.clear_keyboard(w, cx);
+                                click_overwrite(w, cx);
                             })
-                            .child(cjk_inline_label("覆盖草稿")),
-                    ),
+                            .child(cjk_inline_label("覆盖草稿"))
+                            .on_prepaint(move |bounds, _, _| tracker_overwrite.set(1, bounds)),
+                    )
+                    .child(kbd_overlay),
             );
 
             root = root.child(
                 scrim.child(
                     div()
                         .tab_stop(false)
+                        .on_key_down(move |ev, w, cx| {
+                            if nav_key.handle_key_down(
+                                ev,
+                                &focuses,
+                                false,
+                                on_keep.as_ref(),
+                                on_overwrite.as_ref(),
+                                w,
+                                cx,
+                            ) {
+                                cx.stop_propagation();
+                            }
+                        })
                         .child(motion::animate_modal_enter(
                             "overwrite-draft-confirm-anim",
                             card,

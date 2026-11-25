@@ -6,7 +6,7 @@ use cst_client::{ClientError, ClientHandle, SessionSummary};
 use gpui::KeyDownEvent;
 use gpui::{MouseButton, MouseMoveEvent, Pixels, Point, ScrollStrategy, Size, size};
 use gpui_kit::assets::IconName;
-use gpui_kit::base::FocusTrapElement as _;
+use gpui_kit::base::{ElementExt as _, FocusTrapElement as _};
 use gpui_kit::base::{VirtualListScrollHandle, v_virtual_list};
 use gpui_kit::component::Icon;
 use gpui_kit::component::input::{Escape, Input, InputState};
@@ -20,7 +20,8 @@ use gpui_kit::{
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
 use crate::theme::kbd_focus::{
-    KbdRowTarget, pointer_moved_past_threshold, render_gliding_row_indicator,
+    DialogActionNav, KbdRowTarget, KbdTone, pointer_moved_past_threshold,
+    render_gliding_row_indicator, use_dialog_action_nav,
 };
 use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, layout, motion,
@@ -199,6 +200,19 @@ impl AllSessionsView {
 
     pub(crate) fn has_rename_modal(&self) -> bool {
         self.renaming_session_id.is_some()
+    }
+
+    pub(crate) fn focus_primary_input(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if let Some(input) = &self.rename_input {
+            input.update(cx, |inp, cx| inp.focus(window, cx));
+            cx.notify();
+            return true;
+        }
+        false
     }
 
     pub(crate) fn reset_surface(&mut self, cx: &mut Context<Self>) {
@@ -942,6 +956,7 @@ impl AllSessionsView {
             .into_any_element()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_rename_modal(
         &self,
         scrim_progress: f32,
@@ -949,8 +964,49 @@ impl AllSessionsView {
         palette: &DesktopPalette,
         transparency_enabled: bool,
         scale_factor: f32,
+        kbd_style: cst_client::KeyboardFocusStyleDto,
+        nav: DialogActionNav,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
+        let entity = cx.entity();
+        let ent_cancel = entity.clone();
+        let ent_save = entity.clone();
+        let on_cancel: crate::theme::kbd_focus::DialogActionCallback = Rc::new(move |w, cx| {
+            ent_cancel.update(cx, |this, cx| {
+                this.close_rename(w, cx);
+            });
+        });
+        let on_save: crate::theme::kbd_focus::DialogActionCallback = Rc::new(move |w, cx| {
+            ent_save.update(cx, |this, cx| {
+                this.submit_rename(w, cx);
+            });
+        });
+        let cancel_focus = nav.fallback_focus(0, cx);
+        let save_focus = nav.fallback_focus(1, cx);
+        let focuses = [cancel_focus.clone(), save_focus.clone()];
+        nav.clear_tracker(cx);
+        let kbd_active = nav.is_keyboard_active(cx);
+        let tracker_cancel = nav.tracker(cx);
+        let tracker_save = nav.tracker(cx);
+        let kbd_overlay = nav.render_overlay(
+            kbd_style,
+            &focuses,
+            [KbdTone::Neutral, KbdTone::Accent],
+            true,
+            palette,
+            window,
+            cx,
+        );
+        let nav_move = nav.clone();
+        let nav_key = nav.clone();
+        let nav_click_cancel = nav.clone();
+        let nav_click_save = nav.clone();
+        let key_cancel = Rc::clone(&on_cancel);
+        let key_save = Rc::clone(&on_save);
+        let click_cancel = Rc::clone(&on_cancel);
+        let click_save = Rc::clone(&on_save);
+
         let modal_card = render_frosted_surface(
             "all-sessions-rename-modal",
             FrostedGlassSpec::modal(palette, 8.0).with_opacity(scrim_progress),
@@ -970,7 +1026,29 @@ impl AllSessionsView {
                 super::consume_composing_escape(input, window, cx);
             }
         }))
-        .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+        .capture_action(
+            cx.listener(|this, _: &gpui_kit::component::input::MoveUp, window, cx| {
+                if let Some(input) = &this.rename_input
+                    && crate::shell::input_nav::handle_input_vertical_boundary(
+                        input, false, window, cx,
+                    )
+                {
+                    cx.stop_propagation();
+                }
+            }),
+        )
+        .capture_action(cx.listener(
+            |this, _: &gpui_kit::component::input::MoveDown, window, cx| {
+                if let Some(input) = &this.rename_input
+                    && crate::shell::input_nav::handle_input_vertical_boundary(
+                        input, true, window, cx,
+                    )
+                {
+                    cx.stop_propagation();
+                }
+            },
+        ))
+        .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, window, cx| {
             if ev.keystroke.key == "enter"
                 && !ev.is_held
                 && this.rename_input.as_ref().is_some_and(|input| {
@@ -979,6 +1057,18 @@ impl AllSessionsView {
                 })
             {
                 this.submit_rename(window, cx);
+                cx.stop_propagation();
+                return;
+            }
+            if nav_key.handle_key_down(
+                ev,
+                &focuses,
+                true,
+                key_cancel.as_ref(),
+                key_save.as_ref(),
+                window,
+                cx,
+            ) {
                 cx.stop_propagation();
             }
         }))
@@ -1030,6 +1120,7 @@ impl AllSessionsView {
                     apply_scale(div(), scale::UI_MEDIUM)
                         .id("all-sessions-rename-cancel-btn")
                         .test_support()
+                        .track_focus(&cancel_focus)
                         .tab_index(0)
                         .a11y_button("all-sessions-rename-cancel-btn", "取消")
                         .h(height::CONTROL)
@@ -1041,16 +1132,19 @@ impl AllSessionsView {
                         .text_color(palette.text_primary)
                         .flex()
                         .items_center()
-                        .hover(|s| s.bg(palette.bg_item_hover))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.close_rename(window, cx);
-                        }))
-                        .child(cjk_inline_label("取消")),
+                        .when(!kbd_active, |el| el.hover(|s| s.bg(palette.bg_item_hover)))
+                        .on_click(move |_, window, cx| {
+                            nav_click_cancel.clear_keyboard(window, cx);
+                            click_cancel(window, cx);
+                        })
+                        .child(cjk_inline_label("取消"))
+                        .on_prepaint(move |bounds, _, _| tracker_cancel.set(0, bounds)),
                 )
                 .child(
                     apply_scale(div(), scale::UI_MEDIUM)
                         .id("all-sessions-rename-save-btn")
                         .test_support()
+                        .track_focus(&save_focus)
                         .tab_index(0)
                         .a11y_button("all-sessions-rename-save-btn", "保存")
                         .h(height::CONTROL)
@@ -1060,12 +1154,15 @@ impl AllSessionsView {
                         .text_color(palette.text_on_accent)
                         .flex()
                         .items_center()
-                        .hover(|s| s.bg(palette.accent_hover))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.submit_rename(window, cx);
-                        }))
-                        .child(cjk_inline_label("保存")),
-                ),
+                        .when(!kbd_active, |el| el.hover(|s| s.bg(palette.accent_hover)))
+                        .on_click(move |_, window, cx| {
+                            nav_click_save.clear_keyboard(window, cx);
+                            click_save(window, cx);
+                        })
+                        .child(cjk_inline_label("保存"))
+                        .on_prepaint(move |bounds, _, _| tracker_save.set(1, bounds)),
+                )
+                .child(kbd_overlay),
         );
 
         let wrapped_modal = div()
@@ -1096,6 +1193,9 @@ impl AllSessionsView {
         .items_center()
         .justify_center()
         .occlude()
+        .on_mouse_move(move |ev: &MouseMoveEvent, w, cx| {
+            nav_move.handle_mouse_move(ev, w, cx);
+        })
         .child(wrapped_modal)
         .into_any_element()
     }
@@ -1345,6 +1445,13 @@ impl Render for AllSessionsView {
             window,
             cx,
         );
+        let rename_nav = use_dialog_action_nav(
+            "all-sessions-rename",
+            self.renaming_session_id.is_some(),
+            1,
+            window,
+            cx,
+        );
         let rename_overlay = if self.renaming_session_id.is_some() {
             self.rename_input.clone().map(|inp| {
                 self.render_rename_modal(
@@ -1353,6 +1460,9 @@ impl Render for AllSessionsView {
                     &palette,
                     transparency_enabled,
                     scale_factor,
+                    kbd_style,
+                    rename_nav,
+                    window,
                     cx,
                 )
             })

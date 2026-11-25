@@ -3,6 +3,7 @@ import { ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { apiJson, sessionPath } from "../data/api";
 import type { Question } from "../data/web-state";
+import { handleTextFieldVerticalArrow } from "../shell/input-shortcuts";
 import { useWorkspaceShell } from "../shell/workspace-shell-context";
 
 export function QuestionPanel({
@@ -102,7 +103,11 @@ export function QuestionPanel({
 							onChange={setValue}
 						>
 							<Label className="visually-hidden">输入回答</Label>
-							<TextArea className="question-textarea" placeholder="输入回答" />
+							<TextArea
+								className="question-textarea"
+								placeholder="输入回答"
+								onKeyDown={handleTextFieldVerticalArrow}
+							/>
 						</TextField>
 					) : (
 						<TextField
@@ -113,7 +118,11 @@ export function QuestionPanel({
 							onChange={setValue}
 						>
 							<Label className="visually-hidden">输入回答</Label>
-							<Input className="question-input" placeholder="输入回答" />
+							<Input
+								className="question-input"
+								placeholder="输入回答"
+								onKeyDown={handleTextFieldVerticalArrow}
+							/>
 						</TextField>
 					)}
 					<div className="question-action-buttons">

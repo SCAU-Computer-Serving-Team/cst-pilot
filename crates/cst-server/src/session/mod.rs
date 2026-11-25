@@ -5,6 +5,7 @@ pub mod inbox;
 pub mod index;
 pub mod interactions;
 pub mod receipts;
+pub mod search_index;
 pub mod slot;
 pub mod usage;
 
@@ -40,6 +41,7 @@ use crate::session::events::{
 use crate::session::index::SessionIndexStore;
 use crate::session::interactions::{BitLockerSessionBridge, ServerUiBridge};
 use crate::session::receipts::MutationReceipts;
+use crate::session::search_index::{SearchQueryParams, SessionSearchIndex};
 use crate::session::slot::{SessionLease, SessionSlot};
 
 pub const DEFAULT_MAX_IDLE_SESSIONS: usize = 10;
@@ -234,6 +236,7 @@ pub struct SessionPool {
     pub receipts: MutationReceipts,
     pub global_events: SessionEvents,
     pub multiplex_hub: MultiplexHub,
+    pub search: SessionSearchIndex,
 }
 
 impl SessionPool {
@@ -262,8 +265,9 @@ impl SessionPool {
         let multiplex_hub = MultiplexHub::new(global_events.clone());
 
         let index = SessionIndexStore::new(sessions_root.clone(), inbox_root.clone());
+        let search = SessionSearchIndex::new(sessions_root.clone(), inbox_root.clone());
 
-        Self {
+        let pool = Self {
             host,
             default_cwd: canonical_cwd,
             config_dir,
@@ -284,7 +288,15 @@ impl SessionPool {
             receipts,
             global_events,
             multiplex_hub,
+            search,
+        };
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let bg = pool.clone();
+            handle.spawn(async move {
+                bg.sync_search_index().await;
+            });
         }
+        pool
     }
 
     pub fn host(&self) -> &KitHost {
@@ -530,11 +542,13 @@ impl SessionPool {
             self.images.clone(),
             self.global_events.clone(),
             self.invalid_auth.clone(),
+            self.search.clone(),
             on_flushed,
             self.next_touch(),
         )
         .map_err(SessionPoolError::Conflict)?;
 
+        self.search.upsert_from_slot(&slot);
         Ok(slot)
     }
 
@@ -793,6 +807,7 @@ impl SessionPool {
             .set_session_name(trimmed)
             .map_err(|e| SessionPoolError::Conflict(e.to_string()))?;
         self.sync_unflushed_metadata(slot)?;
+        self.search.upsert_from_slot(slot);
         self.global_events
             .publish("state", &json!({"type": "sessions_changed"}));
         Ok(slot.session().session_name())
@@ -1048,10 +1063,40 @@ impl SessionPool {
         let _ = fs::remove_file(self.inbox_root.join(format!("{id}.json")));
         self.images.delete_session_attachments(id).await;
         self.index.clear_created_for_deleted(id).await;
+        self.search.remove(id);
 
         self.global_events
             .publish("state", &json!({"type": "sessions_changed"}));
         Ok(())
+    }
+
+    pub async fn sync_search_index(&self) {
+        if self.closed.load(Ordering::SeqCst) {
+            return;
+        }
+        let live_sessions: Vec<search_index::IndexedSession> = {
+            let slots = self.slots.lock().await;
+            slots
+                .values()
+                .map(|slot| search_index::extract_indexed_from_slot(slot))
+                .collect()
+        };
+        let search = self.search.clone();
+        let index = self.index.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            search.sync_all(&index, live_sessions);
+        })
+        .await;
+    }
+
+    pub async fn search_sessions(
+        &self,
+        params: SearchQueryParams<'_>,
+    ) -> cst_search::SessionSearchResponseDto {
+        if !self.search.is_synced() {
+            self.sync_search_index().await;
+        }
+        self.search.search(params)
     }
 
     pub async fn list(&self) -> Result<Vec<SessionListRow>, SessionPoolError> {
@@ -1359,6 +1404,7 @@ impl SessionPool {
         for slot in drained {
             slot.close().await;
         }
+        self.search.close();
         self.multiplex_hub.close_all();
         self.global_events.close_all();
         Ok(())

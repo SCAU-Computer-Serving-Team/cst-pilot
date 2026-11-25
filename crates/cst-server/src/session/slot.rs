@@ -22,6 +22,7 @@ use crate::session::decorators::{
 use crate::session::events::{SessionEvents, browser_json_value};
 use crate::session::inbox::{InboxError, InboxExecutor, SessionInbox};
 use crate::session::interactions::{BitLockerSessionBridge, ServerUiBridge};
+use crate::session::search_index::SessionSearchIndex;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompactSessionError {
@@ -449,6 +450,7 @@ impl SessionSlot {
         images: ImageStore,
         global_events: SessionEvents,
         invalid_auth: Arc<Mutex<BTreeSet<String>>>,
+        search_index: SessionSearchIndex,
         on_flushed: Arc<dyn Fn(&str) + Send + Sync>,
         initial_touch: u64,
     ) -> Result<Arc<Self>, String> {
@@ -508,6 +510,7 @@ impl SessionSlot {
         let hosted_for_session = hosted.clone();
         let inbox_for_session = inbox.clone();
         let id_for_session = id.clone();
+        let search_for_session = search_index;
 
         let unsub = session.subscribe(Arc::new(move |event| {
             accepted_for_session.on_event(&event);
@@ -526,6 +529,20 @@ impl SessionSlot {
                 .with_session_manager(|sm| sm.is_flushed());
             if is_now_flushed {
                 on_flushed(&id_for_session);
+            }
+
+            if !is_non_visible_message_lifecycle
+                && matches!(
+                    event,
+                    AgentSessionEvent::MessageEnd { .. }
+                        | AgentSessionEvent::AgentEnd { .. }
+                        | AgentSessionEvent::CompactionEnd { .. }
+                        | AgentSessionEvent::SessionInfoChanged { .. }
+                )
+            {
+                hosted_for_session.session().with_session_manager(|sm| {
+                    search_for_session.upsert_from_manager(sm);
+                });
             }
 
             match &event {

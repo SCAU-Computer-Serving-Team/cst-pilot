@@ -171,3 +171,31 @@ test("willPaletteTargetChangeRoute distinguishes same-page actions from route ch
 	assert.equal(willPaletteTargetChangeRoute({ kind: "toggle_sidebar" }, "/sessions", undefined), false);
 	assert.equal(willPaletteTargetChangeRoute({ kind: "slash_fork" }, "/s/abc", "abc"), false);
 });
+
+test("filterPaletteEntries supports Chinese Pinyin, bounded fuzzy matching, and active-session pinning in quick open", () => {
+	const entries = buildQuickOpenEntries(
+		[
+			{ id: "s-newer", title: "浏览器缓存清理方案", updatedAt: "2026-11-25T12:00:00.000Z" },
+			{ id: "s-active", title: "系统缓存排查记录", updatedAt: "2026-11-24T12:00:00.000Z" },
+			{ id: "s-gpu", title: "NVIDIA 驱动更新失败", updatedAt: "2026-11-24T11:00:00.000Z" },
+		],
+		"s-active",
+		[],
+	);
+
+	// 拼音全拼命中并置顶当前打开会话
+	const pinyinHits = filterPaletteEntries(entries, "huancun");
+	assert.equal(pinyinHits.length, 2);
+	assert.equal(pinyinHits[0]?.id, "sess-s-active");
+	assert.equal(pinyinHits[1]?.id, "sess-s-newer");
+
+	// 拼音首字母简拼命中
+	const initialsHits = filterPaletteEntries(entries, "llq");
+	assert.equal(initialsHits.length, 1);
+	assert.equal(initialsHits[0]?.id, "sess-s-newer");
+
+	// 受限模糊拼写纠错命中
+	const fuzzyHits = filterPaletteEntries(entries, "nvida");
+	assert.equal(fuzzyHits.length, 1);
+	assert.equal(fuzzyHits[0]?.id, "sess-s-gpu");
+});

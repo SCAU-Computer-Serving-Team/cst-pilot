@@ -1055,6 +1055,33 @@ impl ClientHandle {
             .await
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub async fn search_sessions(
+        &self,
+        query: String,
+        active_session_id: Option<String>,
+        title_offset: usize,
+        title_limit: usize,
+        content_offset: usize,
+        content_limit: usize,
+        snapshot_token: Option<String>,
+    ) -> Result<cst_search::SessionSearchResponseDto, ClientError> {
+        let http = self.core.http.clone();
+        self.spawn_tokio(async move {
+            http.search_sessions(
+                &query,
+                active_session_id.as_deref(),
+                title_offset,
+                title_limit,
+                content_offset,
+                content_limit,
+                snapshot_token.as_deref(),
+            )
+            .await
+        })
+        .await
+    }
+
     pub async fn list_recent_exports(
         &self,
         limit: usize,

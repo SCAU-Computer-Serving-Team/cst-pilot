@@ -134,6 +134,16 @@ impl PreferencesTabView {
         self.default_dropdown_open || self.filter_dropdown_open
     }
 
+    pub fn focus_primary_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.has_dropdown() {
+            return false;
+        }
+        self.search_input
+            .update(cx, |inp, cx| inp.focus(window, cx));
+        cx.notify();
+        true
+    }
+
     pub fn leave(&mut self, cx: &mut Context<Self>) {
         self.default_dropdown_open = false;
         self.filter_dropdown_open = false;

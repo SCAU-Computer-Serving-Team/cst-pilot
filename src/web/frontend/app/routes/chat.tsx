@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams, useViewTransitionState } from "react-router";
 import { Composer, type ComposerConfig } from "../composer/composer";
 import { addImage, type DraftImage, releaseImageHolds } from "../composer/draft-images";
-import { Conversation } from "../conversation/conversation";
+import { Conversation, type LocateRequest } from "../conversation/conversation";
 import { visibleQueueItems } from "../conversation/conversation-parts";
 import { QuestionPanel } from "../conversation/question-panel";
 import { QueuePanel } from "../conversation/queue-panel";
@@ -30,6 +30,8 @@ type ChatToast = {
 	message: string;
 	duration: number;
 	key: number;
+	actionLabel?: string;
+	onAction?: () => void;
 };
 
 function imagePartToFile(part: UserImagePart, index: number): File {
@@ -119,17 +121,67 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 	}, [shell?.appActive]);
 	const location = useLocation();
 	const [toast, setToast] = useState<ChatToast | null>(null);
-	const showToast = useCallback((kind: ChatToast["kind"], message: string, duration = 2600) => {
-		setToast((current) => ({ kind, message, duration, key: (current?.key ?? 0) + 1 }));
-	}, []);
+	const [locateRequest, setLocateRequest] = useState<LocateRequest | null>(null);
+	const showToast = useCallback(
+		(kind: ChatToast["kind"], message: string, duration = 2600, action?: { label: string; onPress: () => void }) => {
+			setToast((current) => ({
+				kind,
+				message,
+				duration,
+				key: (current?.key ?? 0) + 1,
+				actionLabel: action?.label,
+				onAction: action?.onPress,
+			}));
+		},
+		[],
+	);
 	const showSuccess = useCallback((message: string) => showToast("success", message, 2200), [showToast]);
-	// 分支会话直接跳转后弹出顶部成功提示（H3YwBW / ZVIJj），并清掉 history state 防止刷新重放。
+	// 消费路由 state：分支成功提示、侧栏搜索命中定位、历史分支自动切换后的「返回原分支」提示。
 	useEffect(() => {
-		const state = location.state as { forkNotice?: boolean } | null;
-		if (!state?.forkNotice) return;
-		showToast("success", "已从当前节点分支新会话", 2600);
-		navigate(location.pathname + location.search, { replace: true, state: null });
-	}, [location.pathname, location.search, location.state, navigate, showToast]);
+		const state = location.state as {
+			forkNotice?: boolean;
+			locateEntryId?: string;
+			locateQuery?: string;
+			locateNonce?: number;
+			historyBranch?: { previousLeafId: string };
+		} | null;
+		if (!state) return;
+		let consumed = false;
+		if (state.forkNotice) {
+			showToast("success", "已从当前节点分支新会话", 2600);
+			consumed = true;
+		}
+		if (state.locateEntryId) {
+			setLocateRequest({
+				entryId: state.locateEntryId,
+				query: state.locateQuery ?? "",
+				nonce: state.locateNonce ?? Date.now(),
+			});
+			consumed = true;
+		}
+		if (state.historyBranch?.previousLeafId && sessionId) {
+			const prevLeaf = state.historyBranch.previousLeafId;
+			showToast("success", "已切换至历史分支", 5000, {
+				label: "返回原分支",
+				onPress: () => {
+					setToast(null);
+					void apiJson(sessionPath(sessionId, "/tree/navigate"), {
+						method: "POST",
+						body: { entryId: prevLeaf, summarize: false },
+					})
+						.then(() => refresh())
+						.then(() => showSuccess("已返回原分支"))
+						.catch((cause) =>
+							showToast("danger", cause instanceof Error ? cause.message : "返回原分支失败", 4000),
+						);
+				},
+			});
+			consumed = true;
+		}
+		if (consumed) {
+			navigate(location.pathname + location.search, { replace: true, state: null });
+		}
+	}, [location.pathname, location.search, location.state, navigate, refresh, sessionId, showSuccess, showToast]);
 	const transitioning = useViewTransitionState(location.pathname);
 	const entrance = useRef<{ id: string; snapshot: boolean } | null>(null);
 	if (entrance.current?.id !== sessionId) entrance.current = null;
@@ -339,6 +391,11 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 						<CircleAlert size={16} aria-hidden="true" />
 					)}
 					<span className="notification-message">{toast.message}</span>
+					{toast.actionLabel && toast.onAction && (
+						<button type="button" className="notification-action-btn" onClick={toast.onAction}>
+							{toast.actionLabel}
+						</button>
+					)}
 					{toast.kind !== "success" && (
 						<button
 							type="button"
@@ -424,6 +481,7 @@ function SessionChat({ sessionId }: { sessionId: string | undefined }) {
 							running={runningNow}
 							actionBusy={sessionMutationBusy}
 							summarizing={summarizing}
+							locate={locateRequest}
 							refresh={refresh}
 							onCancelSummary={cancelSummary}
 							onFork={example ? NOOP_FORK : handleConversationFork}

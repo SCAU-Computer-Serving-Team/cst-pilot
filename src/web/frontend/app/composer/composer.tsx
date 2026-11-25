@@ -13,6 +13,7 @@ import { type Model, useGlobalEvents } from "../data/web-state";
 import { PreviewableImage } from "../images/image-preview";
 import { ConfirmDialog } from "../shell/app-dialogs";
 import { ErrorNotice } from "../shell/error-notice";
+import { handleContentEditableVerticalArrow } from "../shell/input-shortcuts";
 import { hasOpenDismissiblePanel, usePanelDismiss } from "../shell/panel-dismiss";
 import { useWorkspaceShell } from "../shell/workspace-shell-context";
 import { chipCaretSpace, editorHtml, extractPayload, parseEditor, replaceTrailingFileQuery } from "./composer-editor";
@@ -817,7 +818,9 @@ export function Composer({
 		if (event.key === "Enter" && !event.shiftKey) {
 			event.preventDefault();
 			void submit();
+			return;
 		}
+		handleContentEditableVerticalArrow(event, editorRef.current, () => editorRevision.current);
 	}
 	// biome-ignore lint/correctness/useExhaustiveDependencies: 选项索引变化后滚动已渲染的高亮行。
 	useEffect(() => {

@@ -1,10 +1,17 @@
 import { TriangleAlert } from "lucide-react";
-import { type FormEvent, type RefObject, useCallback, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, type RefObject, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useDialogFocusTrap } from "./dialog-focus";
 import { ErrorNotice } from "./error-notice";
+import { handleTextFieldVerticalArrow } from "./input-shortcuts";
+import { type DialogActionItem, KbdFocusOverlay, useDialogActionNav } from "./kbd-focus";
 import { readDurationMs, readEasing } from "./motion-tokens";
 import { useWorkspaceShell } from "./workspace-shell-context";
+
+const RENAME_DIALOG_ACTIONS: readonly DialogActionItem[] = [
+	{ id: "cancel", tone: "neutral" },
+	{ id: "submit", tone: "accent" },
+];
 
 /** 软件端通道接管（appActive）时立即同步关闭原生顶层 <dialog> 并卸载，避免盖在待机遮罩之上。 */
 export function useStandbyDialogClose(dialogRef: RefObject<HTMLDialogElement | null>, onDismiss: () => void): void {
@@ -127,6 +134,14 @@ export function ConfirmDialog({
 	const titleId = useId();
 	const descId = useId();
 	const { requestClose, closing } = useAnimatedDialogClose(dialog);
+	const actions = useMemo<readonly DialogActionItem[]>(
+		() => [
+			{ id: "cancel", tone: "neutral" },
+			{ id: "confirm", tone: danger ? "danger" : "accent" },
+		],
+		[danger],
+	);
+	const actionNav = useDialogActionNav(actions, { initialId: "cancel", disabled: busy || closing });
 	useDialogFocusTrap(dialog, cancel);
 	useStandbyDialogClose(dialog, onCancel);
 	useEffect(() => {
@@ -142,6 +157,7 @@ export function ConfirmDialog({
 			className="tier-3-dialog exit-dialog confirm-dialog"
 			aria-labelledby={titleId}
 			aria-describedby={descId}
+			onKeyDown={actionNav.onDialogKeyDown}
 			onCancel={(event) => {
 				event.preventDefault();
 				if (!busy && !closing) requestClose(onCancel);
@@ -154,24 +170,42 @@ export function ConfirmDialog({
 			<p id={descId} className="exit-description">
 				{description}
 			</p>
-			<div className="exit-actions">
+			<div
+				ref={actionNav.containerRef}
+				className="exit-actions kbd-focus-scope kbd-dialog-actions"
+				data-kbd-active={actionNav.kbdActive ? "true" : "false"}
+			>
 				<button
 					type="button"
-					ref={cancel}
+					ref={actionNav.registerButton("cancel", cancel)}
 					className="tier-1-btn-outline"
 					disabled={busy || closing}
+					onPointerDown={actionNav.onButtonPointerDown}
+					onFocus={() => actionNav.onButtonFocus("cancel")}
 					onClick={() => requestClose(onCancel)}
 				>
 					{cancelLabel}
 				</button>
 				<button
 					type="button"
+					ref={actionNav.registerButton("confirm")}
 					className={danger ? "tier-1-btn-danger solid-danger exit-confirm" : "tier-1-btn-primary dialog-primary"}
 					disabled={busy || closing}
+					onPointerDown={actionNav.onButtonPointerDown}
+					onFocus={() => actionNav.onButtonFocus("confirm")}
 					onClick={() => requestClose(onConfirm)}
 				>
 					{confirmLabel}
 				</button>
+				<KbdFocusOverlay
+					containerRef={actionNav.containerRef}
+					itemRefs={actionNav.itemRefs}
+					targetId={actionNav.targetId}
+					style={actionNav.kbdStyle}
+					tone={actionNav.activeTone}
+					railPlacement="bottom"
+					bracketOutset={3}
+				/>
 			</div>
 		</dialog>,
 		document.body,
@@ -194,6 +228,10 @@ export function SessionRenameDialog({
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
 	const { requestClose, closing } = useAnimatedDialogClose(dialog);
+	const actionNav = useDialogActionNav(RENAME_DIALOG_ACTIONS, {
+		requireButtonFocus: true,
+		disabled: busy || closing,
+	});
 	useDialogFocusTrap(dialog, input);
 	useStandbyDialogClose(dialog, onCancel);
 	useEffect(() => {
@@ -229,6 +267,7 @@ export function SessionRenameDialog({
 			ref={dialog}
 			className="tier-3-dialog exit-dialog session-rename-dialog"
 			aria-labelledby={titleId}
+			onKeyDown={actionNav.onDialogKeyDown}
 			onCancel={(event) => {
 				event.preventDefault();
 				if (!busy && !closing) requestClose(onCancel);
@@ -249,26 +288,47 @@ export function SessionRenameDialog({
 					onKeyDown={(event) => {
 						if (event.key === "Enter" && (event.nativeEvent.isComposing || event.keyCode === 229)) {
 							event.preventDefault();
+							return;
 						}
+						handleTextFieldVerticalArrow(event);
 					}}
 				/>
 				{error && <ErrorNotice message={error} />}
-				<div className="exit-actions">
+				<div
+					ref={actionNav.containerRef}
+					className="exit-actions kbd-focus-scope kbd-dialog-actions"
+					data-kbd-active={actionNav.kbdActive ? "true" : "false"}
+				>
 					<button
 						type="button"
+						ref={actionNav.registerButton("cancel")}
 						className="tier-1-btn-outline"
 						disabled={busy || closing}
+						onPointerDown={actionNav.onButtonPointerDown}
+						onFocus={() => actionNav.onButtonFocus("cancel")}
 						onClick={() => requestClose(onCancel)}
 					>
 						取消
 					</button>
 					<button
 						type="submit"
+						ref={actionNav.registerButton("submit")}
 						className="tier-1-btn-primary dialog-primary"
 						disabled={busy || closing || !name.trim()}
+						onPointerDown={actionNav.onButtonPointerDown}
+						onFocus={() => actionNav.onButtonFocus("submit")}
 					>
 						{busy ? "正在保存…" : "保存"}
 					</button>
+					<KbdFocusOverlay
+						containerRef={actionNav.containerRef}
+						itemRefs={actionNav.itemRefs}
+						targetId={actionNav.targetId}
+						style={actionNav.kbdStyle}
+						tone={actionNav.activeTone}
+						railPlacement="bottom"
+						bracketOutset={3}
+					/>
 				</div>
 			</form>
 		</dialog>,

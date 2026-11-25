@@ -26,6 +26,11 @@
   position: relative;
 }
 
+.kbd-dialog-actions[data-kbd-active="true"] button:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 .kbd-focus-halo {
   position: absolute;
   top: 0;

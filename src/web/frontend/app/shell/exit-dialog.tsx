@@ -5,6 +5,12 @@ import { apiJson } from "../data/api";
 import { useAnimatedDialogClose, useStandbyDialogClose } from "./app-dialogs";
 import { useDialogFocusTrap } from "./dialog-focus";
 import { ErrorNotice } from "./error-notice";
+import { type DialogActionItem, KbdFocusOverlay, useDialogActionNav } from "./kbd-focus";
+
+const EXIT_DIALOG_ACTIONS: readonly DialogActionItem[] = [
+	{ id: "cancel", tone: "neutral" },
+	{ id: "confirm", tone: "danger" },
+];
 
 type Lifecycle = { stopping: boolean; sessions: { id: string; title?: string; running: boolean }[] };
 export function ExitDialog({ onClose }: { onClose: () => void }) {
@@ -15,6 +21,7 @@ export function ExitDialog({ onClose }: { onClose: () => void }) {
 	const [busy, setBusy] = useState(false);
 	const [exited, setExited] = useState(false);
 	const { requestClose, closing } = useAnimatedDialogClose(dialog);
+	const actionNav = useDialogActionNav(EXIT_DIALOG_ACTIONS, { initialId: "cancel", disabled: exited || closing });
 	useDialogFocusTrap(dialog, cancel);
 	useStandbyDialogClose(dialog, onClose);
 	useEffect(() => {
@@ -64,6 +71,7 @@ export function ExitDialog({ onClose }: { onClose: () => void }) {
 			ref={dialog}
 			tabIndex={-1}
 			aria-labelledby="exit-title"
+			onKeyDown={actionNav.onDialogKeyDown}
 			onCancel={(event) => {
 				event.preventDefault();
 				if (!busy && !closing) requestClose(onClose);
@@ -97,24 +105,42 @@ export function ExitDialog({ onClose }: { onClose: () => void }) {
 					)}
 					{state && <p className="exit-description">{count ? "记录保留，任务不自动重放。" : "会话保留。"}</p>}
 					{error && <ErrorNotice message={error} />}
-					<div className="exit-actions">
+					<div
+						ref={actionNav.containerRef}
+						className="exit-actions kbd-focus-scope kbd-dialog-actions"
+						data-kbd-active={actionNav.kbdActive ? "true" : "false"}
+					>
 						<button
 							type="button"
-							ref={cancel}
+							ref={actionNav.registerButton("cancel", cancel)}
 							className="tier-1-btn-outline"
 							disabled={busy || closing}
+							onPointerDown={actionNav.onButtonPointerDown}
+							onFocus={() => actionNav.onButtonFocus("cancel")}
 							onClick={() => requestClose(onClose)}
 						>
 							继续使用
 						</button>
 						<button
 							type="button"
+							ref={actionNav.registerButton("confirm")}
 							className="tier-1-btn-danger solid-danger exit-confirm"
 							disabled={busy || closing || !state}
+							onPointerDown={actionNav.onButtonPointerDown}
+							onFocus={() => actionNav.onButtonFocus("confirm")}
 							onClick={() => void confirm()}
 						>
 							{busy ? "正在退出…" : count ? "停止任务并退出" : "退出程序"}
 						</button>
+						<KbdFocusOverlay
+							containerRef={actionNav.containerRef}
+							itemRefs={actionNav.itemRefs}
+							targetId={actionNav.targetId}
+							style={actionNav.kbdStyle}
+							tone={actionNav.activeTone}
+							railPlacement="bottom"
+							bracketOutset={3}
+						/>
 					</div>
 				</>
 			)}

@@ -15,6 +15,7 @@ embed-web = []
 
 [dependencies]
 cst-os = { path = "../cst-os" }
+cst-search = { path = "../cst-search" }
 cst-kit = { path = "../cst-kit" }
 pi-ai = { path = "../pi-ai" }
 pi-agent = { path = "../pi-agent" }

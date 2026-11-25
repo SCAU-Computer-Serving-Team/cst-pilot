@@ -1,9 +1,10 @@
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use cst_client::KeyboardFocusStyleDto;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::FocusTrapElement;
-use gpui_kit::component::Icon;
+use gpui_kit::component::{ElementExt as _, Icon};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
     App, FocusHandle, InteractiveElement, IntoElement, ParentElement, SharedString,
@@ -12,6 +13,7 @@ use gpui_kit::{
 
 use crate::accessibility::A11yElementExt as _;
 use crate::background::{FrostedGlassSpec, render_frosted_surface};
+use crate::theme::kbd_focus::{DialogActionNav, KbdTone};
 use crate::theme::{
     DesktopPalette, apply_scale, cjk_inline_label, height, layout, motion, radius, scale, space,
 };
@@ -118,6 +120,8 @@ impl BannerDeadline {
 #[allow(clippy::too_many_arguments)]
 pub fn render_web_active_lock_overlay(
     scrim_progress: f32,
+    kbd_style: KeyboardFocusStyleDto,
+    nav: DialogActionNav,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
@@ -125,9 +129,30 @@ pub fn render_web_active_lock_overlay(
     switch_back_focus: &FocusHandle,
     on_open_browser: impl Fn(&mut Window, &mut App) + 'static,
     on_switch_back: impl Fn(&mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
 ) -> impl IntoElement {
     let on_open_browser = Rc::new(on_open_browser);
     let on_switch_back = Rc::new(on_switch_back);
+    let open_focus = nav.fallback_focus(0, cx);
+    let focuses = [open_focus.clone(), switch_back_focus.clone()];
+    let kbd_active = nav.is_keyboard_active(cx);
+    nav.clear_tracker(cx);
+    let tracker_open = nav.tracker(cx);
+    let tracker_back = nav.tracker(cx);
+    let nav_move = nav.clone();
+    let nav_key = nav.clone();
+    let nav_click_open = nav.clone();
+    let nav_click_back = nav.clone();
+    let kbd_overlay = nav.render_overlay(
+        kbd_style,
+        &focuses,
+        [KbdTone::Neutral, KbdTone::Accent],
+        false,
+        palette,
+        window,
+        cx,
+    );
 
     let scrim = render_frosted_surface(
         "web-active-scrim",
@@ -146,7 +171,8 @@ pub fn render_web_active_lock_overlay(
     .flex()
     .items_center()
     .justify_center()
-    .occlude();
+    .occlude()
+    .on_mouse_move(move |ev, window, cx| nav_move.handle_mouse_move(ev, window, cx));
 
     let card = render_frosted_surface(
         "web-active-card-wo6nq",
@@ -206,6 +232,7 @@ pub fn render_web_active_lock_overlay(
                     .id("web-active-open-browser-btn")
                     .test_support()
                     .a11y_button("web-active-open-browser-btn", "打开网页")
+                    .track_focus(&open_focus)
                     .tab_index(0)
                     .h(height::CONTROL)
                     .px(space::MD)
@@ -217,9 +244,13 @@ pub fn render_web_active_lock_overlay(
                     .flex()
                     .items_center()
                     .justify_center()
-                    .hover(|s| s.bg(palette.bg_item_hover))
-                    .on_click(move |_, window, cx| cb(window, cx))
+                    .when(!kbd_active, |el| el.hover(|s| s.bg(palette.bg_item_hover)))
+                    .on_click(move |_, window, cx| {
+                        nav_click_open.clear_keyboard(window, cx);
+                        cb(window, cx);
+                    })
                     .child(cjk_inline_label("打开网页"))
+                    .on_prepaint(move |bounds, _, _| tracker_open.set(0, bounds))
             })
             .child({
                 let cb = Rc::clone(&on_switch_back);
@@ -237,15 +268,33 @@ pub fn render_web_active_lock_overlay(
                     .flex()
                     .items_center()
                     .justify_center()
-                    .hover(|s| s.bg(palette.accent_hover))
-                    .on_click(move |_, window, cx| cb(window, cx))
+                    .when(!kbd_active, |el| el.hover(|s| s.bg(palette.accent_hover)))
+                    .on_click(move |_, window, cx| {
+                        nav_click_back.clear_keyboard(window, cx);
+                        cb(window, cx);
+                    })
                     .child(cjk_inline_label("切回桌面端"))
-            }),
+                    .on_prepaint(move |bounds, _, _| tracker_back.set(1, bounds))
+            })
+            .child(kbd_overlay),
     );
 
     scrim.child(
         div()
             .tab_stop(false)
+            .on_key_down(move |ev, window, cx| {
+                if nav_key.handle_key_down(
+                    ev,
+                    &focuses,
+                    false,
+                    &*on_open_browser,
+                    &*on_switch_back,
+                    window,
+                    cx,
+                ) {
+                    cx.stop_propagation();
+                }
+            })
             .child(motion::animate_modal_enter(
                 "web-active-card-anim",
                 card,
@@ -333,6 +382,8 @@ pub fn render_workspace_error_bar(
         .child(card)
 }
 
+pub type NoticeActionFn = Rc<dyn Fn(&mut Window, &mut App)>;
+
 /// Non-blocking top notice banner (`h1BufF`:
 /// `top(20px)`, `h(40px)`, `px(16px)`, `rounded(8px)`, `CircleCheck` `16px` `$status-success` + message, `H2p2z` frosted glass).
 #[allow(clippy::too_many_arguments)]
@@ -340,12 +391,36 @@ pub fn render_top_notice_banner(
     interactive: bool,
     progress: f32,
     message: SharedString,
+    action_label: Option<SharedString>,
+    on_action: Option<NoticeActionFn>,
     palette: &DesktopPalette,
     transparency_enabled: bool,
     scale_factor: f32,
     on_hover: impl Fn(&bool, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let label = single_line_banner_label(&message);
+    let action_el = match (interactive, action_label, on_action) {
+        (true, Some(act_text), Some(cb)) => Some(
+            apply_scale(div(), scale::UI_MEDIUM)
+                .id("top-notice-action-btn")
+                .test_support()
+                .a11y_button("top-notice-action-btn", act_text.clone())
+                .h(height::INLINE)
+                .px(space::SM)
+                .rounded(radius::CONTROL)
+                .text_color(palette.accent_ink)
+                .flex()
+                .items_center()
+                .flex_shrink_0()
+                .hover(|s| s.bg(palette.accent_subtle))
+                .on_click(move |_, w, cx| {
+                    (cb)(w, cx);
+                    cx.stop_propagation();
+                })
+                .child(cjk_inline_label(act_text)),
+        ),
+        _ => None,
+    };
     let card = render_frosted_surface(
         if interactive {
             "top-notice-banner"
@@ -364,7 +439,7 @@ pub fn render_top_notice_banner(
         progress.powi(3),
     ))
     .h(height::FIELD)
-    .max_w(px(480.0))
+    .max_w(px(520.0))
     .px(space::LG)
     .rounded(radius::ROW)
     .border_1()
@@ -389,7 +464,8 @@ pub fn render_top_notice_banner(
                     .min_w_0()
                     .truncate()
                     .child(cjk_inline_label(label)),
-            ),
+            )
+            .children(action_el),
     )
     .map(|el| {
         if interactive {

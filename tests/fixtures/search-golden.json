@@ -1,0 +1,237 @@
+{
+  "cases": [
+    {
+      "name": "exact_cjk",
+      "text": "缓存",
+      "query": "缓存",
+      "expectMatch": true,
+      "minScore": 1050,
+      "maxScore": 1050,
+      "expectTier": "exact"
+    },
+    {
+      "name": "prefix_mixed",
+      "text": "C 盘空间与硬盘信息",
+      "query": "c 盘空间",
+      "expectMatch": true,
+      "minScore": 1000,
+      "maxScore": 1000,
+      "expectTier": "prefix"
+    },
+    {
+      "name": "substring_fullwidth_case",
+      "text": "NVIDIA 驱动安装包缓存占用 4.8 GB",
+      "query": "ｎｖｉｄｉａ",
+      "expectMatch": true,
+      "minScore": 1000,
+      "maxScore": 1000,
+      "expectTier": "prefix"
+    },
+    {
+      "name": "substring_middle",
+      "text": "空间主要由休眠文件与本地缓存占用",
+      "query": "缓存",
+      "expectMatch": true,
+      "minScore": 800,
+      "maxScore": 800,
+      "expectTier": "substring"
+    },
+    {
+      "name": "full_pinyin_simple",
+      "text": "空间主要由休眠文件与本地缓存占用",
+      "query": "huancun",
+      "expectMatch": true,
+      "minScore": 650,
+      "maxScore": 650,
+      "expectTier": "pinyin_full"
+    },
+    {
+      "name": "full_pinyin_browser",
+      "text": "浏览器经常无响应",
+      "query": "liulanqi",
+      "expectMatch": true,
+      "minScore": 650,
+      "maxScore": 650,
+      "expectTier": "pinyin_full"
+    },
+    {
+      "name": "initial_pinyin_short",
+      "text": "空间主要由休眠文件与本地缓存占用",
+      "query": "hc",
+      "expectMatch": true,
+      "minScore": 550,
+      "maxScore": 550,
+      "expectTier": "pinyin_initial"
+    },
+    {
+      "name": "initial_pinyin_session_title",
+      "text": "浏览器经常无响应",
+      "query": "llq",
+      "expectMatch": true,
+      "minScore": 550,
+      "maxScore": 550,
+      "expectTier": "pinyin_initial"
+    },
+    {
+      "name": "mixed_ascii_and_pinyin",
+      "text": "C 盘空间与硬盘信息",
+      "query": "cpankongjian",
+      "expectMatch": true,
+      "minScore": 550,
+      "maxScore": 650,
+      "expectTier": "pinyin"
+    },
+    {
+      "name": "mixed_pinyin_and_english",
+      "text": "拼音搜索Everything",
+      "query": "pysousuoeve",
+      "expectMatch": true,
+      "minScore": 550,
+      "maxScore": 650,
+      "expectTier": "pinyin"
+    },
+    {
+      "name": "polyphone_bank_hang",
+      "text": "清理银行客户端缓存",
+      "query": "yinhang",
+      "expectMatch": true,
+      "minScore": 650,
+      "maxScore": 650,
+      "expectTier": "pinyin_full"
+    },
+    {
+      "name": "polyphone_xing",
+      "text": "系统运行缓慢排查",
+      "query": "yunxing",
+      "expectMatch": true,
+      "minScore": 650,
+      "maxScore": 650,
+      "expectTier": "pinyin_full"
+    },
+    {
+      "name": "polyphone_chong",
+      "text": "系统重启后风扇狂转",
+      "query": "chongqi",
+      "expectMatch": true,
+      "minScore": 650,
+      "maxScore": 650,
+      "expectTier": "pinyin_full"
+    },
+    {
+      "name": "multi_term_and_hit",
+      "text": "D 盘微信与容器缓存迁移核对",
+      "query": "weixin 缓存",
+      "expectMatch": true,
+      "minScore": 700,
+      "maxScore": 750,
+      "expectTier": "multi"
+    },
+    {
+      "name": "multi_term_and_miss",
+      "text": "D 盘微信与容器缓存迁移核对",
+      "query": "微信 蓝屏",
+      "expectMatch": false,
+      "minScore": 0,
+      "maxScore": 0,
+      "expectTier": "none"
+    },
+    {
+      "name": "fuzzy_typo_len4_dist1",
+      "text": "BitLocker 恢复密钥检查",
+      "query": "bitlokcer",
+      "expectMatch": true,
+      "minScore": 260,
+      "maxScore": 260,
+      "expectTier": "fuzzy_edit"
+    },
+    {
+      "name": "fuzzy_typo_english_dist1",
+      "text": "NVIDIA 驱动安装包缓存",
+      "query": "nvida",
+      "expectMatch": true,
+      "minScore": 260,
+      "maxScore": 260,
+      "expectTier": "fuzzy_edit"
+    },
+    {
+      "name": "fuzzy_typo_len7_dist2",
+      "text": "hiberfil.sys 休眠文件占用",
+      "query": "hibrfyl",
+      "expectMatch": true,
+      "minScore": 220,
+      "maxScore": 220,
+      "expectTier": "fuzzy_edit"
+    },
+    {
+      "name": "fuzzy_subsequence_compact",
+      "text": "AppData\\Local\\Temp",
+      "query": "adlt",
+      "expectMatch": false,
+      "minScore": 0,
+      "maxScore": 0,
+      "expectTier": "none"
+    },
+    {
+      "name": "fuzzy_subsequence_valid",
+      "text": "system_info_report",
+      "query": "sysinf",
+      "expectMatch": true,
+      "minScore": 200,
+      "maxScore": 260,
+      "expectTier": "fuzzy"
+    },
+    {
+      "name": "short_term_no_fuzzy_noise",
+      "text": "开机要等三分钟",
+      "query": "xz",
+      "expectMatch": false,
+      "minScore": 0,
+      "maxScore": 0,
+      "expectTier": "none"
+    },
+    {
+      "name": "unrelated_long_query_rejected",
+      "text": "C 盘空间与硬盘信息",
+      "query": "rtx5090",
+      "expectMatch": false,
+      "minScore": 0,
+      "maxScore": 0,
+      "expectTier": "none"
+    },
+    {
+      "name": "blank_query_no_match",
+      "text": "C 盘空间与硬盘信息",
+      "query": "   ",
+      "expectMatch": false,
+      "minScore": 0,
+      "maxScore": 0,
+      "expectTier": "none"
+    }
+  ],
+  "orderingPairs": [
+    {
+      "name": "exact_beats_substring",
+      "query": "缓存",
+      "higher": "缓存",
+      "lower": "清理本地缓存目录"
+    },
+    {
+      "name": "substring_beats_full_pinyin",
+      "query": "huancun",
+      "higher": "huancun.log 日志",
+      "lower": "清理本地缓存目录"
+    },
+    {
+      "name": "full_pinyin_beats_initial_or_fuzzy",
+      "query": "nvidia",
+      "higher": "NVIDIA 驱动缓存",
+      "lower": "NVIDA 驱动缓存"
+    },
+    {
+      "name": "exact_cjk_beats_typo",
+      "query": "bitlocker",
+      "higher": "BitLocker 恢复密码",
+      "lower": "BitLokcer 恢复密码"
+    }
+  ]
+}

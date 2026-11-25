@@ -103,6 +103,40 @@ a:focus-visible, button:focus-visible, summary:focus-visible, .markdown-table:fo
 .session-delete-copy ul { max-height: 240px; overflow: auto; margin: var(--space-inline) 0 0; padding-left: var(--space-section); overflow-wrap: anywhere; }
 .notification-close { flex: 0 0 var(--h-inline); color: var(--text-secondary); }
 .notification-close:hover { color: var(--text-primary); }
+.notification-action-btn { appearance: none; border: 0; background: transparent; height: var(--h-inline); padding: 0 var(--space-inline); border-radius: var(--radius-control); color: var(--accent-ink); font-size: var(--font-ui); font-weight: 500; line-height: var(--line-ui); flex-shrink: 0; cursor: default; transition: background-color var(--fast) var(--ease-out); }
+.notification-action-btn:hover { background: var(--accent-tint); }
+
+/* 侧栏搜索命中定位：左侧 2px --accent-ink 指示线 + 关键词柔底色，1.3s 后 500ms 平滑消退 */
+.turn[data-located-turn="true"],
+.turn-summary-wrap[data-located-turn="true"] {
+  position: relative;
+  padding-left: var(--space-component);
+  border-left: 2px solid var(--accent-ink);
+  transition: border-color 500ms var(--ease-out);
+}
+.turn[data-located-turn="true"][data-locate-fading="true"],
+.turn-summary-wrap[data-located-turn="true"][data-locate-fading="true"] {
+  border-left-color: transparent;
+}
+.locate-inline-mark {
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+  font-weight: 500;
+  border-radius: 2px;
+  padding: 0 2px;
+  transition: background-color 500ms var(--ease-out), color 500ms var(--ease-out);
+}
+.locate-inline-mark[data-fading="true"] {
+  background: transparent;
+  color: inherit;
+}
+@media (prefers-reduced-motion: reduce) {
+  .turn[data-located-turn="true"],
+  .turn-summary-wrap[data-located-turn="true"],
+  .locate-inline-mark {
+    transition: none;
+  }
+}
 .home-main { flex: 1; min-width: 0; min-height: 0; height: 100%; position: relative; background: var(--bg-workspace); overflow-x: hidden; overflow-y: auto; display: flex; flex-direction: column; align-items: center; padding: 0 var(--space-section); }
 .app-layout[data-sidebar-reveal] .home-main { overflow: visible; }
 .home-backdrop { position: absolute; inset: 0; pointer-events: none; background: var(--home-fallback); transform-origin: left top; }

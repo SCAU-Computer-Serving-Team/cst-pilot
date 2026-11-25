@@ -187,19 +187,11 @@ impl CommandPaletteModal {
     }
 
     fn build_entries(&self, query: &str) -> Vec<PaletteEntry> {
-        let q = query.trim().to_lowercase();
         let all = match self.mode {
             PaletteMode::Commands => self.build_command_entries(),
             PaletteMode::QuickOpen => self.build_quick_open_entries(),
         };
-
-        if q.is_empty() {
-            all
-        } else {
-            all.into_iter()
-                .filter(|item| item.search_haystack.contains(&q))
-                .collect()
-        }
+        filter_palette_entries(self.mode, self.active_session_id.as_deref(), all, query)
     }
 
     fn build_command_entries(&self) -> Vec<PaletteEntry> {
@@ -401,7 +393,7 @@ impl CommandPaletteModal {
                 .collect::<Vec<_>>()
                 .join(" ");
             let fmt_kw = if is_png { "png 图片" } else { "html 网页" };
-            let hay = format!("{title} {file_names} {fmt_kw} 导出 export").to_lowercase();
+            let hay = format!("{title} {file_names} {fmt_kw}").to_lowercase();
             let time_meta = format_palette_time(Some(exp.captured_at.as_str()));
 
             all.push(PaletteEntry {
@@ -565,6 +557,76 @@ impl CommandPaletteModal {
                 inset: false,
             },
         ]
+    }
+}
+
+fn filter_palette_entries(
+    mode: PaletteMode,
+    active_session_id: Option<&str>,
+    all: Vec<PaletteEntry>,
+    query: &str,
+) -> Vec<PaletteEntry> {
+    let q = query.trim();
+    if q.is_empty() {
+        return all;
+    }
+
+    if mode == PaletteMode::QuickOpen {
+        // `Ctrl+O` filters only session titles and recent exports using the shared
+        // fuzzy + Chinese Pinyin matcher, pinning the active session first when matched.
+        let q_lower = q.to_lowercase();
+        let mut session_hits: Vec<(bool, u32, usize, PaletteEntry)> = Vec::new();
+        let mut export_hits: Vec<(u32, usize, PaletteEntry)> = Vec::new();
+        for (idx, item) in all.into_iter().enumerate() {
+            match &item.target {
+                PaletteCommandTarget::OpenSession(sid) => {
+                    let score = cst_search::match_query(item.title.as_ref(), q)
+                        .map(|m| m.score)
+                        .or_else(|| {
+                            (q_lower.len() >= 4 && sid.to_lowercase().contains(&q_lower))
+                                .then_some(500)
+                        });
+                    let Some(score) = score else {
+                        continue;
+                    };
+                    let is_active = active_session_id == Some(sid.as_str());
+                    session_hits.push((is_active, score, idx, item));
+                }
+                _ => {
+                    let score = cst_search::match_query(item.title.as_ref(), q)
+                        .map(|m| m.score)
+                        .or_else(|| {
+                            cst_search::match_query(&item.search_haystack, q)
+                                .map(|m| m.score.saturating_sub(50))
+                        });
+                    let Some(score) = score else {
+                        continue;
+                    };
+                    export_hits.push((score, idx, item));
+                }
+            }
+        }
+        session_hits.sort_by(|a, b| {
+            b.0.cmp(&a.0)
+                .then_with(|| b.1.cmp(&a.1))
+                .then_with(|| a.2.cmp(&b.2))
+        });
+        export_hits.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        let mut out = Vec::with_capacity(session_hits.len() + export_hits.len());
+        out.extend(session_hits.into_iter().map(|x| x.3));
+        out.extend(export_hits.into_iter().map(|x| x.2));
+        out
+    } else {
+        let mut scored: Vec<(u32, usize, PaletteEntry)> = all
+            .into_iter()
+            .enumerate()
+            .filter_map(|(idx, item)| {
+                let m = cst_search::match_query(&item.search_haystack, q)?;
+                Some((m.score, idx, item))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        scored.into_iter().map(|x| x.2).collect()
     }
 }
 
@@ -849,5 +911,108 @@ impl Render for CommandPaletteModal {
                     .child(list),
             ),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session_entry(id: &str, title: &str) -> PaletteEntry {
+        PaletteEntry {
+            group: "指定会话",
+            title: SharedString::from(title.to_owned()),
+            title_is_cjk: true,
+            command_col_width: None,
+            subtitle: None,
+            subtitle_is_cjk: false,
+            trailing_kbd: None,
+            trailing_meta: None,
+            icon: IconName::MessageSquare,
+            disabled: false,
+            target: PaletteCommandTarget::OpenSession(id.to_owned()),
+            search_haystack: format!("{title} {id} 会话 session").to_lowercase(),
+        }
+    }
+
+    fn export_entry(id: &str, title: &str) -> PaletteEntry {
+        PaletteEntry {
+            group: "近期导出",
+            title: SharedString::from(title.to_owned()),
+            title_is_cjk: true,
+            command_col_width: None,
+            subtitle: Some(SharedString::from("PNG · 1 页")),
+            subtitle_is_cjk: true,
+            trailing_kbd: None,
+            trailing_meta: None,
+            icon: IconName::Image,
+            disabled: false,
+            target: PaletteCommandTarget::OpenExport(id.to_owned()),
+            search_haystack: format!("{title} png 图片").to_lowercase(),
+        }
+    }
+
+    #[test]
+    fn quick_open_supports_pinyin_fuzzy_and_active_pin_without_false_session_hits() {
+        let items = vec![
+            session_entry("s-net", "校园网代理与端口排查"),
+            session_entry("s-cache", "清理浏览器缓存"),
+            session_entry("s-gpu", "NVIDIA 驱动更新异常"),
+            export_entry("exp-1", "浏览器缓存清理报告"),
+        ];
+
+        // Full Pinyin & initialism match titles and exports, pinning active session first.
+        let pinyin_hits = filter_palette_entries(
+            PaletteMode::QuickOpen,
+            Some("s-cache"),
+            items.clone(),
+            "huancun",
+        );
+        assert_eq!(pinyin_hits.len(), 2);
+        assert_eq!(
+            pinyin_hits[0].target,
+            PaletteCommandTarget::OpenSession("s-cache".into())
+        );
+        assert_eq!(
+            pinyin_hits[1].target,
+            PaletteCommandTarget::OpenExport("exp-1".into())
+        );
+
+        let initials =
+            filter_palette_entries(PaletteMode::QuickOpen, None, items.clone(), "llq hc");
+        assert_eq!(initials.len(), 2);
+        assert_eq!(
+            initials[0].target,
+            PaletteCommandTarget::OpenSession("s-cache".into())
+        );
+
+        // Bounded fuzzy typo match on ASCII.
+        let fuzzy = filter_palette_entries(PaletteMode::QuickOpen, None, items.clone(), "nvida");
+        assert_eq!(fuzzy.len(), 1);
+        assert_eq!(
+            fuzzy[0].target,
+            PaletteCommandTarget::OpenSession("s-gpu".into())
+        );
+
+        // Active session beats higher-scoring non-active session when both match.
+        let pinned = filter_palette_entries(
+            PaletteMode::QuickOpen,
+            Some("s-net"),
+            vec![
+                session_entry("s-exact", "缓存"),
+                session_entry("s-net", "排查校园网缓存占用问题"),
+            ],
+            "缓存",
+        );
+        assert_eq!(
+            pinned[0].target,
+            PaletteCommandTarget::OpenSession("s-net".into())
+        );
+
+        // Generic "会话"/"session" tokens in haystack must not cause false matches.
+        assert!(
+            filter_palette_entries(PaletteMode::QuickOpen, None, items.clone(), "hh").is_empty()
+        );
+        assert!(filter_palette_entries(PaletteMode::QuickOpen, None, items, "session").is_empty());
     }
 }

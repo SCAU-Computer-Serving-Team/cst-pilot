@@ -340,6 +340,37 @@ impl ProvidersTabView {
         self.protocol_dropdown_open || self.inline_token_edit.is_some()
     }
 
+    pub fn focus_primary_input(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.inline_token_edit.is_some() {
+            self.inline_token_input
+                .update(cx, |inp, cx| inp.focus(window, cx));
+            cx.notify();
+            return true;
+        }
+        if self.protocol_dropdown_open {
+            return false;
+        }
+        if self.creating_new_custom || self.inline_edit_mode {
+            self.provider_name_input
+                .update(cx, |inp, cx| inp.focus(window, cx));
+            cx.notify();
+            return true;
+        }
+        if self.search_visible {
+            self.search_input
+                .update(cx, |inp, cx| inp.focus(window, cx));
+            cx.notify();
+            return true;
+        }
+        if self.active_provider_id.is_some() {
+            self.api_key_input
+                .update(cx, |inp, cx| inp.focus(window, cx));
+            cx.notify();
+            return true;
+        }
+        false
+    }
+
     pub fn dismiss_dropdowns(&mut self, cx: &mut Context<Self>) -> bool {
         let mut changed = false;
         if self.protocol_dropdown_open {

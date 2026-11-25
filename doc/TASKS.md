@@ -10,8 +10,8 @@
 |---|---|---|---|
 | 阶段 9 | `desktop` | 代码、无头测试与主要双主题真窗核查已完成。待补 Windows 前台输入、UAC、异构 DPI、远程桌面实机验收及剩余真窗复核项 | [9.desktop.md](rust/plan/9.desktop.md#开发步骤与验收方案) · [desktop-ui-audit.md](test/desktop-ui-audit.md) |
 | 阶段 9.2 | `os` / `updater` / `kit` / `server` / `desktop` / `xtask` | 代码实现与本地发行包基础测试已完成。待发布前真机与签名验收 | [9.2.config-isolation-and-packaging.md](rust/plan/9.2.config-isolation-and-packaging.md) |
-| 阶段 9.3 | `kit` / `client` / `updater` / `xtask` | 阶段 1（`ls`/`disk` 重构与全仓移除 `WizTree`）已完成 `1A–1D`，待补多环境实盘验收（`1E`）；阶段 `2A`（`fffind`/`ffgrep` 并行检索、单句柄核验与多编码改造）已完成代码、测试与本机基准对比；`2B`、`2C` 与阶段 3 尚未开始。进度见 [阶段 9.3 分阶段执行清单](#阶段-93-分阶段执行清单) | [9.3.optimization.md](rust/plan/9.3.optimization.md) · [ADR-014](ADR.md#adr-014移除-wiztree存储诊断改用纯-rust-mft-与-win32-ioctl) · [ADR-017](ADR.md#adr-017文件检索采用单次基线单句柄核验与无状态并行多编码引擎) |
-| 阶段 9.4 | `desktop` / `web` | 全部 P0（设置 · 常规「四角 / 游标」切换、全部会话、分支树、导出会话）已在桌面端与 Web 端实现。后续按选择器、输入槽与排队栏、弹窗、其余设置页与侧栏的顺序继续开发 | [9.4.keyboard-navigation.md](rust/plan/9.4.keyboard-navigation.md) · [ADR.md](ADR.md#adr-016双端方向键选中态采用无底色滑移指示器支持四角与游标切换) · [storybook.html](../design/storybook.html) |
+| 阶段 9.3 | `kit` / `client` / `updater` / `xtask` | 阶段 1（`ls`/`disk` 重构与全仓移除 `WizTree`）已完成 `1A–1D`，待补多环境实盘验收（`1E`）；阶段 `2A`（`fffind`/`ffgrep` 并行检索、单句柄核验与多编码改造）已完成代码、测试与本机基准对比；`2B`、`2C` 与阶段 3 尚未开始。进度见 [阶段 9.3 分阶段执行清单](#阶段-93-分阶段执行清单) | [9.3.optimization.md](rust/plan/9.3.optimization.md) · [ADR-014](ADR.md#adr-014移除-wiztree存储诊断改用纯-rust-mft-与-win32-ioctl) · [ADR-018](ADR.md#adr-018文件检索采用单次基线单句柄核验与无状态并行多编码引擎) |
+| 阶段 9.4 | `desktop` / `web` | 已确立全项目「键盘友好交互」正式产品特性与三态切换模型，并完成 P0（设置 · 常规「四角 / 游标」切换、全部会话、分支树、导出会话、`Ctrl+J` 输入聚焦）与 P1-1（双端确认与提示类模态弹窗方向键横切夹紧、危险色滑移指示器与自动化回归）。待按 `P1-2`（选择器、补全与排队栏）→ `P1-3`（设置页）→ `P1-4`（侧栏与抽屉）→ `P2`（对话浏览态、登录账号、灯箱与快捷面板视觉统一）顺序推进 | [SPEC.md](SPEC.md#键盘友好交互需求) · [9.4.keyboard-navigation.md](rust/plan/9.4.keyboard-navigation.md) · [ADR.md](ADR.md#adr-016双端方向键选中态采用无底色滑移指示器支持四角与游标切换) · [storybook.html](../design/storybook.html) |
 | 阶段 10 | `desktop` | 在 `cst-pilot.exe` 同一窗口内集成基于 `Ratatui` 的内置 TUI 视图 `crates/cst-tui`，与图形视图共享 `cst-client` 状态层与草稿。评估以 `cst-tui` 替代 `tree-parity.test.ts` 的旧 Pi 对照基准（无可靠新参照前保留当前对照基准） | [0.PLAN.md](rust/plan/0.PLAN.md#10-内置-tui-终端适配) |
 | 阶段 11 | `release` | 构建单文件便携引导器（`portable.exe`）与直观自有目录结构（根部仅保留主程序与清晰子目录，去除 `agent/home/` 等 Pi 遗留目录及过渡期 TS/`pack/` 资产），接入生产升级公钥 `CST_UPDATE_PUBLIC_KEY`，保持文档功能、签名推送更新与设计系统一致 | [0.PLAN.md](rust/plan/0.PLAN.md#11-便携打包与三端验收) · [ADR.md](ADR.md#adr-006阶段-11-采用单文件便携引导器与直观子目录分发) |
 
@@ -41,7 +41,7 @@
 | `web` | 兼容版：面向 Chromium 86 单独构建 Tailwind 3.4 样式并验证组件交互 | [web/SPEC.md](web/SPEC.md#浏览器基线与分发) |
 | `web` / `desktop` | 仪表盘：实现 `/dashboard` 用量概览、趋势、筛选与逐请求本地日志，确定本地存储位置、保留期和清理方式 | [web/SPEC.md](web/SPEC.md#仪表盘) |
 | `web` / `desktop` | 分享：复用会话导出接口，确定发送渠道、链接承载、敏感信息核对与销毁规则 | [web/SPEC.md](web/SPEC.md#命令与功能对应) |
-| `web` | 会话内全文搜索与侧栏会话列表搜索 | [web/SPEC.md](web/SPEC.md#聊天工作台) |
+| `web` / `desktop` | 会话内查找（`Ctrl+F` 当前会话内逐条定位；侧栏全文搜索与 `Ctrl+O` 拼音／模糊已实现） | [web/SPEC.md](web/SPEC.md#聊天工作台) |
 | `web` | 视觉令牌微调（`P2`）：将 `.composer-chip .chip-remove` 热区放大至 `≥ 20×20px`，校准 `/sessions` 会话行高至 `40px`，对齐 `/login` 缩放标签与 `special-tool` 附属图标最小尺寸 | [ux-e2e.md](web/test/ux-e2e.md) |
 | `telemetry` / `release` | 生产服务部署：上线 OA 请求级扣点接口 `/api/agent/llm/billing` 与版本升级签名清单接口 `/api/agent/releases/latest` | [telemetry/OPERATIONS.md](telemetry/OPERATIONS.md#发布与回退)、[release/SPEC.md](release/SPEC.md#rust-软件内升级) |
 | `pi-core` | 内部结构优化（非阶段 9 阻塞）：将 `pi-session` 38 个闭包整合为 `SessionHost` Trait，将 `AgentSessionInner` 80 个字段分组管理 | [8.5.pre-desktop-cleanup.md](rust/plan/8.5.pre-desktop-cleanup.md#明确不做) |

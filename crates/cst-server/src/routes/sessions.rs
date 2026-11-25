@@ -43,7 +43,7 @@ pub async fn handle_sessions_route(
     raw_body: &[u8],
     conn_cancel: CancellationToken,
 ) -> Result<Option<Response<SseOrBytesBody>>, ApiError> {
-    // 1. `/api/sessions` & `/api/sessions/creation/:requestKey`
+    // 1. `/api/sessions`, `/api/sessions/search` & `/api/sessions/creation/:requestKey`
     if pathname == "/api/sessions" && (*method == Method::GET || *method == Method::HEAD) {
         let rows = state.pool.list().await.map_err(ApiError::from)?;
         return Ok(Some(json_response(
@@ -51,6 +51,72 @@ pub async fn handle_sessions_route(
             &json!({ "sessions": rows }),
             method,
         )));
+    }
+
+    if pathname == "/api/sessions/search" && (*method == Method::GET || *method == Method::HEAD) {
+        let mut q = String::new();
+        let mut active_session_id: Option<String> = None;
+        let mut title_offset: usize = 0;
+        let mut title_limit: usize = 10;
+        let mut content_offset: usize = 0;
+        let mut content_limit: usize = 10;
+        let mut snapshot_token: Option<String> = None;
+
+        if let Some(raw_q) = query {
+            for (k, v) in url::form_urlencoded::parse(raw_q.as_bytes()) {
+                match k.as_ref() {
+                    "q" => q = v.into_owned(),
+                    "activeSessionId" => {
+                        let s = v.trim();
+                        if !s.is_empty() && is_valid_session_id_key(s) {
+                            active_session_id = Some(s.to_owned());
+                        }
+                    }
+                    "titleOffset" => {
+                        if let Ok(n) = v.parse::<usize>() {
+                            title_offset = n;
+                        }
+                    }
+                    "titleLimit" => {
+                        if let Ok(n) = v.parse::<usize>() {
+                            title_limit = n.clamp(1, 50);
+                        }
+                    }
+                    "contentOffset" => {
+                        if let Ok(n) = v.parse::<usize>() {
+                            content_offset = n;
+                        }
+                    }
+                    "contentLimit" => {
+                        if let Ok(n) = v.parse::<usize>() {
+                            content_limit = n.clamp(1, 50);
+                        }
+                    }
+                    "snapshotToken" => {
+                        let s = v.trim();
+                        if !s.is_empty() && s.len() <= 64 {
+                            snapshot_token = Some(s.to_owned());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let resp = state
+            .pool
+            .search_sessions(crate::session::search_index::SearchQueryParams {
+                query: &q,
+                active_session_id: active_session_id.as_deref(),
+                title_offset,
+                title_limit,
+                content_offset,
+                content_limit,
+                snapshot_token: snapshot_token.as_deref(),
+            })
+            .await;
+        let body = serde_json::to_value(&resp).unwrap_or_else(|_| json!({}));
+        return Ok(Some(json_response(StatusCode::OK, &body, method)));
     }
 
     if let Some(req_key) = pathname.strip_prefix("/api/sessions/creation/")
@@ -610,6 +676,8 @@ pub async fn handle_sessions_route(
                         .await
                         .map_err(|msg| ApiError::new(StatusCode::CONFLICT, "conflict", msg))?;
 
+                    state.pool.search.upsert_from_slot(&slot);
+
                     slot.events
                         .publish("session", &json!({ "type": "session_tree" }));
                     state.pool.global_events.publish(
@@ -695,6 +763,7 @@ pub async fn handle_sessions_route(
                         .await
                         .map_err(ApiError::from)?;
                     slot.compact(instructions).await.map_err(ApiError::from)?;
+                    state.pool.search.upsert_from_slot(&slot);
                     Ok(json!({
                         "id": id_owned,
                         "compacted": true,

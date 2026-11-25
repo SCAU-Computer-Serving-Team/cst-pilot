@@ -1050,6 +1050,7 @@ pub struct BranchTreeView {
     search_input: Entity<InputState>,
     collapsed_heads: BTreeSet<String>,
     selected_id: Option<String>,
+    pending_focus_entry_id: Option<String>,
     keyboard_active: bool,
     last_keyboard_row: Option<(String, usize)>,
     last_pointer_pos: Option<Point<Pixels>>,
@@ -1100,6 +1101,7 @@ impl BranchTreeView {
             search_input,
             collapsed_heads: BTreeSet::new(),
             selected_id: None,
+            pending_focus_entry_id: None,
             keyboard_active: false,
             last_keyboard_row: None,
             last_pointer_pos: None,
@@ -1154,9 +1156,28 @@ impl BranchTreeView {
         }
         self.keyboard_active = false;
         self.last_pointer_pos = None;
+        self.pending_focus_entry_id = None;
         self.is_open = !self.session_id.is_empty();
         self.enter_anim_start = self.is_open.then(|| cx.background_executor().now());
         self.trigger_tree_fetch(cx);
+        cx.notify();
+    }
+
+    pub fn set_session_id_and_focus(
+        &mut self,
+        session_id: String,
+        focus_entry_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_session_id(session_id, window, cx);
+        self.filter_mode = TreeFilterMode::All;
+        self.collapsed_heads.clear();
+        self.selected_id = Some(focus_entry_id.clone());
+        self.pending_focus_entry_id = Some(focus_entry_id);
+        self.keyboard_active = true;
+        self.layout = None;
+        self.computed = None;
         cx.notify();
     }
 
@@ -1179,6 +1200,7 @@ impl BranchTreeView {
         self.focus_handle.focus(window, cx);
         self.keyboard_active = true;
         self.selected_id = None;
+        self.pending_focus_entry_id = None;
         self.last_keyboard_row = None;
         self.last_pointer_pos = Some(window.mouse_position());
         cx.notify();
@@ -1337,6 +1359,7 @@ impl BranchTreeView {
         self.is_open = false;
         self.keyboard_active = false;
         self.selected_id = None;
+        self.pending_focus_entry_id = None;
         self.last_keyboard_row = None;
         self.last_pointer_pos = None;
         self.enter_anim_start = None;
@@ -1349,6 +1372,29 @@ impl BranchTreeView {
 
     pub(crate) fn has_summary_modal(&self) -> bool {
         self.pending_target_id.is_some()
+    }
+
+    pub(crate) fn focus_primary_input(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.has_summary_modal() {
+            if self.custom_prompt_mode {
+                self.custom_prompt_input
+                    .update(cx, |inp, cx| inp.focus(window, cx));
+                cx.notify();
+                return true;
+            }
+            return false;
+        }
+        if self.filter_dropdown_open {
+            self.filter_dropdown_open = false;
+        }
+        self.search_input
+            .update(cx, |inp, cx| inp.focus(window, cx));
+        cx.notify();
+        true
     }
 
     pub(crate) fn dismiss_summary(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -1398,6 +1444,14 @@ impl BranchTreeView {
 
     pub fn filter_mode(&self) -> TreeFilterMode {
         self.filter_mode
+    }
+
+    pub fn search_input(&self) -> &Entity<InputState> {
+        &self.search_input
+    }
+
+    pub fn custom_prompt_input(&self) -> &Entity<InputState> {
+        &self.custom_prompt_input
     }
 
     pub fn cycle_filter(&mut self, reverse: bool, cx: &mut Context<Self>) {
@@ -1951,6 +2005,34 @@ impl BranchTreeView {
             div()
                 .tab_stop(false)
                 .focus_trap("branch-summary-focus-trap", &self.modal_trap_focus)
+                .capture_action(cx.listener(
+                    |this, _: &gpui_kit::component::input::MoveUp, window, cx| {
+                        if this.custom_prompt_mode
+                            && crate::shell::input_nav::handle_input_vertical_boundary(
+                                &this.custom_prompt_input,
+                                false,
+                                window,
+                                cx,
+                            )
+                        {
+                            cx.stop_propagation();
+                        }
+                    },
+                ))
+                .capture_action(cx.listener(
+                    |this, _: &gpui_kit::component::input::MoveDown, window, cx| {
+                        if this.custom_prompt_mode
+                            && crate::shell::input_nav::handle_input_vertical_boundary(
+                                &this.custom_prompt_input,
+                                true,
+                                window,
+                                cx,
+                            )
+                        {
+                            cx.stop_propagation();
+                        }
+                    },
+                ))
                 .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                     if this.custom_prompt_mode {
                         if event.keystroke.key == "enter"
@@ -2079,7 +2161,13 @@ impl Render for BranchTreeView {
             .then(|| self.cursor_index(&computed))
             .flatten();
         let next_row = keyboard_row.map(|idx| (rows[idx].node.id.clone(), idx));
-        if next_row != self.last_keyboard_row {
+        if let Some(target_eid) = self.pending_focus_entry_id.clone()
+            && let Some(idx) = rows.iter().position(|r| r.node.id == target_eid)
+        {
+            self.selected_id = Some(target_eid);
+            self.scroll_handle.scroll_to_item(idx);
+            self.pending_focus_entry_id = None;
+        } else if next_row != self.last_keyboard_row {
             self.last_keyboard_row = next_row;
             if let Some(idx) = keyboard_row {
                 self.scroll_handle.scroll_to_item(idx);
