@@ -3,19 +3,33 @@ use std::time::Duration;
 
 use cst_client::ClientHandle;
 use cst_client::tool_presenter::{ToolCallInput, ToolResultInput, map_special_tool, map_tool};
+use gpui::{KeyDownEvent, MouseMoveEvent, Pixels, Point};
 use gpui_kit::assets::IconName;
-use gpui_kit::component::Icon;
+use gpui_kit::component::{ElementExt, Icon};
 use gpui_kit::{
-    Context, EventEmitter, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Task, TestSupportExt, Window, div, px,
+    Context, EventEmitter, FocusHandle, InteractiveElement, IntoElement, ParentElement, Render,
+    SharedString, StatefulInteractiveElement, Styled, Task, TestSupportExt, Window, div, px,
 };
 use serde_json::Value;
 
 use crate::accessibility::A11yElementExt as _;
+use crate::theme::kbd_focus::{
+    KbdBoundsTracker, KbdControlSpec, KbdRailPlacement, KbdTone, pointer_moved_past_threshold,
+    render_gliding_control_indicator,
+};
 use crate::theme::{
     DesktopPalette, DesktopThemeGlobal, apply_scale, cjk_inline_label, height, motion, radius,
     scale, space,
 };
+
+const SLOT_FMT_PNG: usize = 0;
+const SLOT_FMT_HTML: usize = 1;
+const SLOT_THEME_LIGHT: usize = 2;
+const SLOT_THEME_DARK: usize = 3;
+const SLOT_CHK_THINK: usize = 4;
+const SLOT_CHK_TOOLS: usize = 5;
+const SLOT_BTN_SAVE: usize = 6;
+const SLOT_BTN_OPEN: usize = 7;
 use crate::tools::normal_card::render_normal_tool_card_with_args;
 use crate::tools::{SpecialToolDispatchProps, render_special_tool_component};
 use crate::workbench::turn_segments::{
@@ -91,6 +105,11 @@ pub struct ExportView {
     last_completed_export_id: Option<String>,
     last_completed_dir: Option<String>,
     preview_reveal: motion::SurfaceReveal,
+    focus_handle: FocusHandle,
+    keyboard_active: bool,
+    focus_idx: usize,
+    last_pointer_pos: Option<Point<Pixels>>,
+    bounds_tracker: KbdBoundsTracker<8>,
 }
 
 impl EventEmitter<ExportViewEvent> for ExportView {}
@@ -117,9 +136,226 @@ impl ExportView {
             last_completed_export_id: None,
             last_completed_dir: None,
             preview_reveal: motion::SurfaceReveal::default(),
+            focus_handle: cx.focus_handle(),
+            keyboard_active: false,
+            focus_idx: 0,
+            last_pointer_pos: None,
+            bounds_tracker: KbdBoundsTracker::new(),
         };
         this.reload_preview(cx);
         this
+    }
+
+    pub(crate) fn focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_handle.focus(window, cx);
+        self.keyboard_active = false;
+        self.last_pointer_pos = None;
+        cx.notify();
+    }
+
+    pub(crate) fn focus_from_keyboard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.focus_handle.focus(window, cx);
+        self.keyboard_active = true;
+        self.focus_idx = 0;
+        self.last_pointer_pos = Some(window.mouse_position());
+        cx.notify();
+    }
+
+    pub fn keyboard_active(&self) -> bool {
+        self.keyboard_active
+    }
+
+    pub fn focus_index(&self) -> usize {
+        self.focus_idx
+    }
+
+    pub fn format_choice(&self) -> ExportFormatChoice {
+        self.format
+    }
+
+    pub fn doc_theme_choice(&self) -> ExportDocTheme {
+        self.doc_theme
+    }
+
+    pub fn include_thinking(&self) -> bool {
+        self.include_thinking
+    }
+
+    pub fn include_tools(&self) -> bool {
+        self.include_tools
+    }
+
+    fn max_focus_idx(&self) -> usize {
+        if self.last_completed_export_id.is_some() {
+            5
+        } else {
+            4
+        }
+    }
+
+    fn current_kbd_spec(&self) -> Option<KbdControlSpec> {
+        if !self.keyboard_active {
+            return None;
+        }
+        let idx = self.focus_idx.min(self.max_focus_idx());
+        let (slot, tone, rail) = match idx {
+            0 => (
+                match self.format {
+                    ExportFormatChoice::Png => SLOT_FMT_PNG,
+                    ExportFormatChoice::Html => SLOT_FMT_HTML,
+                },
+                KbdTone::Neutral,
+                KbdRailPlacement::BottomCenter,
+            ),
+            1 => (
+                match self.doc_theme {
+                    ExportDocTheme::Light => SLOT_THEME_LIGHT,
+                    ExportDocTheme::Dark => SLOT_THEME_DARK,
+                },
+                KbdTone::Neutral,
+                KbdRailPlacement::BottomCenter,
+            ),
+            2 => (
+                SLOT_CHK_THINK,
+                KbdTone::Neutral,
+                KbdRailPlacement::LeftInside,
+            ),
+            3 => (
+                SLOT_CHK_TOOLS,
+                KbdTone::Neutral,
+                KbdRailPlacement::LeftInside,
+            ),
+            4 => (
+                SLOT_BTN_SAVE,
+                KbdTone::Accent,
+                KbdRailPlacement::LeftOutside,
+            ),
+            5 if self.last_completed_export_id.is_some() => (
+                SLOT_BTN_OPEN,
+                KbdTone::Neutral,
+                KbdRailPlacement::LeftOutside,
+            ),
+            _ => return None,
+        };
+        Some(KbdControlSpec {
+            slot,
+            corner_radius: 4.0,
+            tone,
+            rail,
+        })
+    }
+
+    fn on_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.keyboard_active
+            && pointer_moved_past_threshold(&mut self.last_pointer_pos, event.position)
+        {
+            self.keyboard_active = false;
+            cx.notify();
+        }
+    }
+
+    fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if event.keystroke.modifiers != gpui::Modifiers::default()
+            || !self.focus_handle.is_focused(window)
+        {
+            return;
+        }
+        let key = event.keystroke.key.as_str();
+        let max_idx = self.max_focus_idx();
+        let cur = self.focus_idx.min(max_idx);
+        let handled = match key {
+            "up" => {
+                self.focus_idx = if self.keyboard_active {
+                    cur.saturating_sub(1)
+                } else {
+                    cur
+                };
+                self.keyboard_active = true;
+                self.last_pointer_pos = Some(window.mouse_position());
+                true
+            }
+            "down" => {
+                self.focus_idx = if self.keyboard_active {
+                    (cur + 1).min(max_idx)
+                } else {
+                    cur
+                };
+                self.keyboard_active = true;
+                self.last_pointer_pos = Some(window.mouse_position());
+                true
+            }
+            "home" => {
+                self.focus_idx = 0;
+                self.keyboard_active = true;
+                self.last_pointer_pos = Some(window.mouse_position());
+                true
+            }
+            "end" => {
+                self.focus_idx = max_idx;
+                self.keyboard_active = true;
+                self.last_pointer_pos = Some(window.mouse_position());
+                true
+            }
+            "left" | "right" => {
+                self.focus_idx = cur;
+                self.keyboard_active = true;
+                self.last_pointer_pos = Some(window.mouse_position());
+                let is_left = key == "left";
+                if cur == 0 {
+                    let next = if is_left {
+                        ExportFormatChoice::Png
+                    } else {
+                        ExportFormatChoice::Html
+                    };
+                    if self.format != next {
+                        self.format = next;
+                        self.reload_preview(cx);
+                    }
+                } else if cur == 1 {
+                    let next = if is_left {
+                        ExportDocTheme::Light
+                    } else {
+                        ExportDocTheme::Dark
+                    };
+                    if self.doc_theme != next {
+                        self.doc_theme = next;
+                        self.reload_preview(cx);
+                    }
+                }
+                true
+            }
+            "enter" | "space" => {
+                self.focus_idx = cur;
+                self.keyboard_active = true;
+                self.last_pointer_pos = Some(window.mouse_position());
+                match cur {
+                    2 => {
+                        self.include_thinking = !self.include_thinking;
+                        self.reload_preview(cx);
+                    }
+                    3 => {
+                        self.include_tools = !self.include_tools;
+                        self.reload_preview(cx);
+                    }
+                    4 => self.start_generate_and_save(cx),
+                    5 if self.last_completed_export_id.is_some() => {
+                        self.open_export_directory(false, cx);
+                    }
+                    _ => {}
+                }
+                true
+            }
+            _ => false,
+        };
+        if handled {
+            cx.stop_propagation();
+            cx.notify();
+        }
     }
 
     pub(crate) fn session_id(&self) -> &str {
@@ -143,6 +379,10 @@ impl ExportView {
         self.last_completed_export_id = None;
         self.last_completed_dir = None;
         self.preview_reveal.clear();
+        self.keyboard_active = false;
+        self.focus_idx = 0;
+        self.last_pointer_pos = None;
+        self.bounds_tracker.clear();
     }
 
     /// Keep the previous preview mounted until the latest request settles.
@@ -286,7 +526,7 @@ impl ExportView {
         scale_factor: f32,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> impl IntoElement + use<> {
         let doc_palette = self.doc_theme.palette();
         let (preview_op, preview_dy) = self.preview_reveal.sample(window, cx);
 
@@ -667,6 +907,19 @@ impl Render for ExportView {
                     .child(cjk_inline_label("导出会话")),
             );
 
+        let kbd_style = self.client.snapshot().desktop_settings.keyboard_focus_style;
+        let kbd_spec = self.current_kbd_spec();
+        let tracker = self.bounds_tracker.clone();
+        tracker.clear();
+        let t_open = tracker.clone();
+        let t_png = tracker.clone();
+        let t_html = tracker.clone();
+        let t_light = tracker.clone();
+        let t_dark = tracker.clone();
+        let t_think = tracker.clone();
+        let t_tools = tracker.clone();
+        let t_save = tracker.clone();
+
         // Left `264px` options column `ER02w` (no gray `bg_surface`, no right border)
         let saved_section_opt = self.last_completed_export_id.as_ref().map(|_| {
             let dir_hint = self.last_completed_dir.clone();
@@ -703,16 +956,33 @@ impl Render for ExportView {
                         .items_center()
                         .justify_center()
                         .hover(|s| s.bg(palette.bg_item_hover))
-                        .on_click(
-                            cx.listener(|this, _, _, cx| this.open_export_directory(false, cx)),
-                        )
-                        .child(cjk_inline_label("打开保存目录")),
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.focus_idx = 5;
+                            this.keyboard_active = false;
+                            this.focus_handle.focus(window, cx);
+                            this.open_export_directory(false, cx);
+                        }))
+                        .child(cjk_inline_label("打开保存目录"))
+                        .on_prepaint(move |bounds, _, _| t_open.set(SLOT_BTN_OPEN, bounds)),
                 )
         });
+
+        let fmt_kbd_hint = self.keyboard_active && self.focus_idx == 0;
+        let theme_kbd_hint = self.keyboard_active && self.focus_idx == 1;
+        let kbd_overlay = render_gliding_control_indicator(
+            "export-options",
+            kbd_style,
+            kbd_spec,
+            tracker,
+            &palette,
+            window,
+            cx,
+        );
 
         let left_options = div()
             .id("export-options-pane-er02w")
             .test_support()
+            .relative()
             .w(px(264.0))
             .h_full()
             .flex_shrink_0()
@@ -731,9 +1001,20 @@ impl Render for ExportView {
                     .flex_col()
                     .gap(space::XS)
                     .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("导出格式")),
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                apply_scale(div(), scale::CAPTION_MEDIUM)
+                                    .text_color(palette.text_secondary)
+                                    .child(cjk_inline_label("导出格式")),
+                            )
+                            .children(fmt_kbd_hint.then(|| {
+                                apply_scale(div(), scale::CAPTION)
+                                    .text_color(palette.text_muted)
+                                    .child(cjk_inline_label("← → 切换"))
+                            })),
                     )
                     .child(
                         div()
@@ -744,7 +1025,12 @@ impl Render for ExportView {
                                 ExportFormatChoice::Png.label(),
                                 self.format == ExportFormatChoice::Png,
                                 &palette,
-                                cx.listener(|this, _, _, cx| {
+                                SLOT_FMT_PNG,
+                                t_png,
+                                cx.listener(|this, _, window, cx| {
+                                    this.focus_idx = 0;
+                                    this.keyboard_active = false;
+                                    this.focus_handle.focus(window, cx);
                                     this.format = ExportFormatChoice::Png;
                                     this.reload_preview(cx);
                                 }),
@@ -754,7 +1040,12 @@ impl Render for ExportView {
                                 ExportFormatChoice::Html.label(),
                                 self.format == ExportFormatChoice::Html,
                                 &palette,
-                                cx.listener(|this, _, _, cx| {
+                                SLOT_FMT_HTML,
+                                t_html,
+                                cx.listener(|this, _, window, cx| {
+                                    this.focus_idx = 0;
+                                    this.keyboard_active = false;
+                                    this.focus_handle.focus(window, cx);
                                     this.format = ExportFormatChoice::Html;
                                     this.reload_preview(cx);
                                 }),
@@ -768,9 +1059,20 @@ impl Render for ExportView {
                     .flex_col()
                     .gap(space::XS)
                     .child(
-                        apply_scale(div(), scale::CAPTION_MEDIUM)
-                            .text_color(palette.text_secondary)
-                            .child(cjk_inline_label("文档主题")),
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                apply_scale(div(), scale::CAPTION_MEDIUM)
+                                    .text_color(palette.text_secondary)
+                                    .child(cjk_inline_label("文档主题")),
+                            )
+                            .children(theme_kbd_hint.then(|| {
+                                apply_scale(div(), scale::CAPTION)
+                                    .text_color(palette.text_muted)
+                                    .child(cjk_inline_label("← → 切换"))
+                            })),
                     )
                     .child(
                         div()
@@ -781,7 +1083,12 @@ impl Render for ExportView {
                                 "日间",
                                 self.doc_theme == ExportDocTheme::Light,
                                 &palette,
-                                cx.listener(|this, _, _, cx| {
+                                SLOT_THEME_LIGHT,
+                                t_light,
+                                cx.listener(|this, _, window, cx| {
+                                    this.focus_idx = 1;
+                                    this.keyboard_active = false;
+                                    this.focus_handle.focus(window, cx);
                                     this.doc_theme = ExportDocTheme::Light;
                                     this.reload_preview(cx);
                                 }),
@@ -791,7 +1098,12 @@ impl Render for ExportView {
                                 "夜间",
                                 self.doc_theme == ExportDocTheme::Dark,
                                 &palette,
-                                cx.listener(|this, _, _, cx| {
+                                SLOT_THEME_DARK,
+                                t_dark,
+                                cx.listener(|this, _, window, cx| {
+                                    this.focus_idx = 1;
+                                    this.keyboard_active = false;
+                                    this.focus_handle.focus(window, cx);
                                     this.doc_theme = ExportDocTheme::Dark;
                                     this.reload_preview(cx);
                                 }),
@@ -809,7 +1121,12 @@ impl Render for ExportView {
                         "包含思考过程",
                         self.include_thinking,
                         &palette,
-                        cx.listener(|this, _, _, cx| {
+                        SLOT_CHK_THINK,
+                        t_think,
+                        cx.listener(|this, _, window, cx| {
+                            this.focus_idx = 2;
+                            this.keyboard_active = false;
+                            this.focus_handle.focus(window, cx);
                             this.include_thinking = !this.include_thinking;
                             this.reload_preview(cx);
                         }),
@@ -821,7 +1138,12 @@ impl Render for ExportView {
                         "包含工具调用结果",
                         self.include_tools,
                         &palette,
-                        cx.listener(|this, _, _, cx| {
+                        SLOT_CHK_TOOLS,
+                        t_tools,
+                        cx.listener(|this, _, window, cx| {
+                            this.focus_idx = 3;
+                            this.keyboard_active = false;
+                            this.focus_handle.focus(window, cx);
                             this.include_tools = !this.include_tools;
                             this.reload_preview(cx);
                         }),
@@ -857,17 +1179,22 @@ impl Render for ExportView {
                             .items_center()
                             .justify_center()
                             .hover(|s| s.bg(palette.accent_hover))
-                            .on_click(cx.listener(|this, _, _, cx| {
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.focus_idx = 4;
+                                this.keyboard_active = false;
+                                this.focus_handle.focus(window, cx);
                                 this.start_generate_and_save(cx);
                             }))
                             .child(cjk_inline_label(if self.export_task.is_some() {
                                 "正在生成…"
                             } else {
                                 "生成并保存"
-                            })),
+                            }))
+                            .on_prepaint(move |bounds, _, _| t_save.set(SLOT_BTN_SAVE, bounds)),
                     )
                     .children(saved_section_opt),
-            );
+            )
+            .child(kbd_overlay);
 
         let right_preview =
             self.render_readonly_preview(mono_family, &palette, scale_factor, window, cx);
@@ -876,6 +1203,9 @@ impl Render for ExportView {
             .id("export-view-ntay1")
             .test_support()
             .a11y_region("export-view", "导出会话")
+            .track_focus(&self.focus_handle)
+            .on_key_down(cx.listener(Self::on_key_down))
+            .on_mouse_move(cx.listener(Self::on_mouse_move))
             .size_full()
             .flex()
             .flex_col()
@@ -896,11 +1226,14 @@ impl Render for ExportView {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn export_seg_btn<F>(
     id: &'static str,
     label: &'static str,
     active: bool,
     palette: &DesktopPalette,
+    slot: usize,
+    tracker: KbdBoundsTracker<8>,
     on_click: F,
 ) -> impl IntoElement
 where
@@ -936,13 +1269,17 @@ where
         .hover(|s| s.bg(palette.bg_item_hover))
         .on_click(on_click)
         .child(cjk_inline_label(label))
+        .on_prepaint(move |bounds, _, _| tracker.set(slot, bounds))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn export_check_row<F>(
     id: &'static str,
     label: &'static str,
     checked: bool,
     palette: &DesktopPalette,
+    slot: usize,
+    tracker: KbdBoundsTracker<8>,
     on_click: F,
     window: &mut Window,
     cx: &mut gpui_kit::App,
@@ -957,6 +1294,8 @@ where
         .test_support()
         .a11y_checkbox(id, label, checked)
         .h(height::INLINE)
+        .pl(space::SM)
+        .pr(space::XS)
         .rounded(radius::CONTROL)
         .flex()
         .items_center()
@@ -988,4 +1327,5 @@ where
                 .text_color(palette.text_primary)
                 .child(cjk_inline_label(label)),
         )
+        .on_prepaint(move |bounds, _, _| tracker.set(slot, bounds))
 }

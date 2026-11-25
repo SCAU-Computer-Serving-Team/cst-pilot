@@ -1,6 +1,6 @@
 import { Label, ListBox, Select } from "@heroui/react";
 import { Check, ChevronDown } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePanelDismiss } from "../shell/panel-dismiss";
 import { useWorkspaceShell } from "../shell/workspace-shell-context";
 
@@ -10,20 +10,36 @@ export function ExportSelect<T extends string>({
 	items,
 	disabled,
 	onChange,
+	open: controlledOpen,
+	onOpenChange,
+	triggerRef,
+	kbdHint = false,
 }: {
 	label: string;
 	value: T;
 	items: readonly { id: T; label: string }[];
 	disabled: boolean;
 	onChange: (value: T) => void;
+	open?: boolean;
+	onOpenChange?: (open: boolean) => void;
+	triggerRef?: (el: HTMLButtonElement | null) => void;
+	kbdHint?: boolean;
 }) {
-	const [open, setOpen] = useState(false);
+	const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+	const open = controlledOpen ?? uncontrolledOpen;
+	const setOpen = useCallback(
+		(next: boolean) => {
+			if (controlledOpen === undefined) setUncontrolledOpen(next);
+			onOpenChange?.(next);
+		},
+		[controlledOpen, onOpenChange],
+	);
 	const trigger = useRef<HTMLButtonElement>(null);
 	const shell = useWorkspaceShell();
 	usePanelDismiss(open, () => setOpen(false), undefined, trigger);
 	useEffect(() => {
 		if (shell?.appActive) setOpen(false);
-	}, [shell?.appActive]);
+	}, [shell?.appActive, setOpen]);
 	return (
 		<Select
 			className="export-select"
@@ -36,8 +52,17 @@ export function ExportSelect<T extends string>({
 				if (item) onChange(item.id);
 			}}
 		>
-			<Label>{label}</Label>
-			<Select.Trigger ref={trigger} className="export-select-trigger">
+			<div className="export-label-row">
+				<Label>{label}</Label>
+				{kbdHint && <span className="export-kbd-hint">← → 切换</span>}
+			</div>
+			<Select.Trigger
+				ref={(node) => {
+					trigger.current = node;
+					triggerRef?.(node);
+				}}
+				className="export-select-trigger"
+			>
 				<Select.Value>{items.find((item) => item.id === value)?.label}</Select.Value>
 				<ChevronDown size={14} aria-hidden="true" />
 			</Select.Trigger>

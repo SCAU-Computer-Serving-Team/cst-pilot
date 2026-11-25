@@ -1523,7 +1523,7 @@ impl AppShell {
         match target {
             PaletteCommandTarget::SlashExport => {
                 if let Some(sid) = active_sid {
-                    self.open_session_export(sid, window, cx);
+                    self.open_session_export(sid, true, window, cx);
                 } else {
                     self.show_top_notice("请先进入一个会话后再执行导出。", cx);
                 }
@@ -1646,14 +1646,20 @@ impl AppShell {
         self.initialize_session_subview(SessionSubView::Tree, sid, from_keyboard, window, cx);
     }
 
-    fn open_session_export(&mut self, sid: String, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_session_export(
+        &mut self,
+        sid: String,
+        from_keyboard: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let prior = window
             .focused(cx)
             .filter(|focus| focus != &self.root_focus)
             .or_else(|| Some(self.workbench.read(cx).session_composer_focus(cx)));
         self.set_workspace_route(ShellRoute::Session, SessionSubView::Export, cx);
         self.session_subview_prior_focus = prior;
-        self.initialize_session_subview(SessionSubView::Export, sid, false, window, cx);
+        self.initialize_session_subview(SessionSubView::Export, sid, from_keyboard, window, cx);
     }
 
     fn initialize_session_subview(
@@ -1679,11 +1685,14 @@ impl AppShell {
                     view.focus(window, cx);
                 }
             }),
-            SessionSubView::Export => {
-                self.export_view
-                    .update(cx, |view, cx| view.set_session_id(sid, cx));
-                self.root_focus.focus(window, cx);
-            }
+            SessionSubView::Export => self.export_view.update(cx, |view, cx| {
+                view.set_session_id(sid, cx);
+                if from_keyboard {
+                    view.focus_from_keyboard(window, cx);
+                } else {
+                    view.focus(window, cx);
+                }
+            }),
             SessionSubView::Chat => {}
         }
     }
@@ -2285,7 +2294,7 @@ impl AppShell {
                     }
                     SlashNavigationTarget::Export => {
                         if let Some(sid) = active_sid {
-                            self.open_session_export(sid, window, cx);
+                            self.open_session_export(sid, *from_keyboard, window, cx);
                         }
                     }
                     SlashNavigationTarget::ForkLatest => {}

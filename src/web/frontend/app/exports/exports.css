@@ -6,11 +6,14 @@
 .export-back { height: var(--h-compact); min-height: var(--h-compact); padding: 0 var(--space-inline); color: var(--text-secondary); font-size: var(--font-ui); line-height: var(--line-ui); }
 .export-layout { flex: 1; min-height: 0; overflow: auto; overscroll-behavior-y: contain; display: grid; grid-template-columns: 264px minmax(0, 1fr); gap: var(--space-group); padding: var(--space-group); align-items: start; }
 .export-controls { display: grid; gap: var(--space-group); min-width: 0; }
+.export-controls:focus { outline: none; }
 .export-controls fieldset { display: grid; gap: var(--space-group); min-width: 0; border: 0; margin: 0; padding: 0; }
 .export-controls legend { margin-bottom: var(--space-group); padding: 0; color: var(--text-primary); font-size: var(--font-body); font-weight: 600; line-height: var(--line-body); }
 .export-controls label { font-size: var(--font-ui); line-height: var(--line-ui); color: var(--text-primary); }
 .export-select { display: grid; gap: var(--space-inline); width: 100%; }
-.export-select > label { color: var(--text-primary); font-weight: 400; }
+.export-label-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-inline); }
+.export-label-row > label { color: var(--text-primary); font-weight: 400; }
+.export-kbd-hint { font-size: 11px; line-height: 16px; color: var(--text-muted); }
 .export-select .export-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: var(--space-component); width: 100%; height: var(--h-control); min-height: var(--h-control); padding: 0 var(--space-component); border: 1px solid var(--border-strong); border-radius: var(--radius-control); color: var(--text-primary); background: var(--bg-workspace); box-shadow: none; font: 400 var(--font-ui)/var(--line-ui) var(--font-sans); cursor: default; transition: border-color var(--fast) var(--ease-out), background-color var(--fast) var(--ease-out), box-shadow var(--fast) var(--ease-out); }
 .export-select-trigger > .select__value { min-width: 0; text-align: left; }
 .export-select-trigger > svg { display: block; flex: 0 0 14px; width: 14px; height: 14px; margin: 0; color: var(--text-secondary); transition: transform var(--fast) var(--ease-out); }
@@ -23,7 +26,7 @@
 .export-select-option[aria-selected="true"] { background: var(--bg-item-active); font-weight: 500; }
 .export-select-check { flex: 0 0 14px; width: 14px; height: 14px; color: var(--accent-ink); }
 .export-checks { display: flex; flex-direction: column; gap: var(--space-component); }
-.export-controls label.export-check { display: flex; align-items: center; gap: var(--space-inline); min-height: var(--h-inline); cursor: default; }
+.export-controls label.export-check { display: flex; align-items: center; gap: var(--space-inline); min-height: var(--h-inline); padding: 2px 6px 2px 10px; margin-left: -10px; border-radius: var(--radius-control); cursor: default; }
 .export-controls input[type="checkbox"] { appearance: none; flex: none; width: 16px; height: 16px; margin: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--bg-workspace); cursor: default; transition: background-color var(--check-box) var(--check-ease), border-color var(--check-box) var(--check-ease), box-shadow var(--fast) var(--ease-out); }
 .export-controls input[type="checkbox"]:hover:not(:disabled) { border-color: var(--border-focus); }
 .export-controls input[type="checkbox"]:checked { border-color: var(--accent-solid); background: var(--accent-solid) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.2 5 8.7 9.5 3.5'/%3E%3C/svg%3E") center/11px 11px no-repeat; }

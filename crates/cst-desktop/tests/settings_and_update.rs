@@ -1194,11 +1194,47 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         window.press("ctrl-p", cx);
         window.input("export", cx);
         window.press("enter", cx);
+        window.render_frame(cx);
     })
     .unwrap();
+    // Entering Export via Ctrl+P activates keyboard focus mode (`focus_idx == 0`) and supports
+    // full arrow + Enter/Space navigation matching `storybook.html` `#kn-pane-export`.
     cx.update_window(win_handle, |_, window, cx| {
-        window.click("export-generate-save-btn", cx);
-        window.click("export-generate-save-btn", cx);
+        let ev = shell.read(cx).export_view().read(cx);
+        assert!(ev.keyboard_active());
+        assert_eq!(ev.focus_index(), 0);
+        assert_eq!(
+            ev.format_choice(),
+            cst_desktop::sessions::export_view::ExportFormatChoice::Png
+        );
+
+        window.press("right", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            shell.read(cx).export_view().read(cx).format_choice(),
+            cst_desktop::sessions::export_view::ExportFormatChoice::Html
+        );
+
+        window.press("down", cx);
+        window.press("left", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).export_view().read(cx).focus_index(), 1);
+        assert_eq!(
+            shell.read(cx).export_view().read(cx).doc_theme_choice(),
+            cst_desktop::sessions::export_view::ExportDocTheme::Light
+        );
+
+        window.press("down", cx);
+        window.press("space", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).export_view().read(cx).focus_index(), 2);
+        assert!(!shell.read(cx).export_view().read(cx).include_thinking());
+
+        window.press("down", cx);
+        window.press("down", cx);
+        assert_eq!(shell.read(cx).export_view().read(cx).focus_index(), 4);
+        window.press("enter", cx);
+        window.press("enter", cx);
     })
     .unwrap();
 
@@ -1212,6 +1248,17 @@ async fn headless_palette_all_sessions_409_rollback_tree_export_missing_key_logi
         assert_eq!(state.export_creates, 2);
         assert_eq!(state.export_opens, ["/api/exports/exp-job-1/open"]);
     }
+    cx.update_window(win_handle, |_, window, cx| {
+        window.press("down", cx);
+        window.render_frame(cx);
+        assert_eq!(shell.read(cx).export_view().read(cx).focus_index(), 5);
+        window.press("enter", cx);
+    })
+    .unwrap();
+    cx.wait_for(win_handle, Duration::from_secs(2), |_, _| {
+        backend.state.lock().unwrap().export_opens.len() == 2
+    })
+    .await;
 
     cx.update_window(win_handle, |_, window, cx| {
         window.click("export-back-btn", cx);

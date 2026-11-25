@@ -953,7 +953,7 @@ impl AppShell {
                                     ent_export.update(cx, |this, cx| {
                                         this.topbar_session_more_open = false;
                                         this.topbar_session_more_prior_focus = None;
-                                        this.open_session_export(target, window, cx);
+                                        this.open_session_export(target, false, window, cx);
                                     });
                                 })
                                 .into_any_element()

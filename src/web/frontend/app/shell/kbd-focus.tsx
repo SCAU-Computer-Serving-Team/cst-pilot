@@ -92,11 +92,15 @@ export function usePointerMutex(active: boolean, onClear: () => void) {
 	}, [active, onClear]);
 }
 
+export type KeyboardFocusTone = "neutral" | "accent" | "danger";
+export type KeyboardRailPlacement = "inside" | "outside" | "bottom";
+
 interface HaloRect {
 	x: number;
 	y: number;
 	width: number;
 	height: number;
+	borderRadius?: string;
 }
 
 export function KbdFocusOverlay({
@@ -105,6 +109,9 @@ export function KbdFocusOverlay({
 	targetId,
 	as: Element = "div",
 	style,
+	tone = "neutral",
+	railPlacement = "inside",
+	bracketOutset = 0,
 	insetX = 0,
 	insetY = 0,
 }: {
@@ -113,6 +120,9 @@ export function KbdFocusOverlay({
 	targetId: string | null;
 	as?: "div" | "li";
 	style: KeyboardFocusStyle;
+	tone?: KeyboardFocusTone;
+	railPlacement?: KeyboardRailPlacement;
+	bracketOutset?: number;
 	insetX?: number;
 	insetY?: number;
 }) {
@@ -131,24 +141,50 @@ export function KbdFocusOverlay({
 			const y = tRect.top - cRect.top - container.clientTop + container.scrollTop;
 			const w = tRect.width;
 			const h = tRect.height;
-			const railH = Math.max(16, Math.min(26, h * 0.56));
-			const rect =
-				style === "rail"
-					? { x: Math.max(2, x + insetX + 3), y: y + (h - railH) / 2, width: 3, height: railH }
-					: {
-							x: x + insetX,
-							y: y + insetY,
-							width: Math.max(12, w - insetX * 2),
-							height: Math.max(12, h - insetY * 2),
-						};
+			let rect: HaloRect;
+			if (style === "rail") {
+				if (railPlacement === "bottom") {
+					const barW = Math.max(16, Math.min(34, w * 0.36));
+					rect = { x: x + (w - barW) / 2, y: y + h + 4, width: barW, height: 3, borderRadius: "9999px" };
+				} else if (railPlacement === "outside") {
+					const railH = Math.max(14, Math.min(22, h * 0.56));
+					rect = { x: x - 7, y: y + (h - railH) / 2, width: 3, height: railH, borderRadius: "9999px" };
+				} else {
+					const railH = Math.max(16, Math.min(26, h * 0.56));
+					rect = {
+						x: Math.max(2, x + insetX + 3),
+						y: y + (h - railH) / 2,
+						width: 3,
+						height: railH,
+						borderRadius: "9999px",
+					};
+				}
+			} else {
+				const baseRadius =
+					bracketOutset > 0 ? Number.parseFloat(getComputedStyle(row).borderRadius) || 4 : undefined;
+				rect = {
+					x: x + insetX - bracketOutset,
+					y: y + insetY - bracketOutset,
+					width: Math.max(12, w - insetX * 2 + bracketOutset * 2),
+					height: Math.max(12, h - insetY * 2 + bracketOutset * 2),
+					borderRadius: baseRadius !== undefined ? `${baseRadius + bracketOutset}px` : undefined,
+				};
+			}
 			setGeometry((previous) => {
 				const old = previous?.rect;
-				if (old && old.x === rect.x && old.y === rect.y && old.width === rect.width && old.height === rect.height)
+				if (
+					old &&
+					old.x === rect.x &&
+					old.y === rect.y &&
+					old.width === rect.width &&
+					old.height === rect.height &&
+					old.borderRadius === rect.borderRadius
+				)
 					return previous;
 				return { rect, instant };
 			});
 		},
-		[containerRef, itemRefs, targetId, style, insetX, insetY],
+		[containerRef, itemRefs, targetId, style, railPlacement, bracketOutset, insetX, insetY],
 	);
 
 	// 插入、筛选和排序会移动行，即使它们的尺寸没有变化。
@@ -174,12 +210,14 @@ export function KbdFocusOverlay({
 			className="kbd-focus-halo"
 			aria-hidden="true"
 			data-style={style}
+			data-tone={tone}
 			data-visible={targetId !== null ? "true" : "false"}
 			data-instant={instant ? "true" : "false"}
 			style={{
 				transform: `translate3d(${rect.x}px, ${rect.y}px, 0)`,
 				width: `${rect.width}px`,
 				height: `${rect.height}px`,
+				borderRadius: rect.borderRadius,
 			}}
 		/>
 	);

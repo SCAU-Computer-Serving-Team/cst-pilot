@@ -1,17 +1,23 @@
 /* 方向键选中态交互专用变量与 180ms 滑移指示层（对齐 design/storybook.html） */
 :root {
   --kbd-bracket-color: rgba(17, 17, 20, 0.72);
+  --kbd-bracket-accent: #1a4be0;
+  --kbd-bracket-danger: #dc2626;
   --kbd-rail-color: #111111;
 }
 
 :root[data-theme="dark"] {
   --kbd-bracket-color: rgba(242, 242, 244, 0.78);
+  --kbd-bracket-accent: #688ff8;
+  --kbd-bracket-danger: #e5484d;
   --kbd-rail-color: #f2f2f4;
 }
 
 @media (prefers-color-scheme: dark) {
   :root[data-theme="system"] {
     --kbd-bracket-color: rgba(242, 242, 244, 0.78);
+    --kbd-bracket-accent: #688ff8;
+    --kbd-bracket-danger: #e5484d;
     --kbd-rail-color: #f2f2f4;
   }
 }
@@ -33,6 +39,7 @@
     transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
     width 180ms cubic-bezier(0.22, 1, 0.36, 1),
     height 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-radius 180ms cubic-bezier(0.22, 1, 0.36, 1),
     opacity 140ms ease;
 }
 
@@ -60,10 +67,26 @@
     linear-gradient(#000 0 0) bottom right / 8px 8px no-repeat;
 }
 
+.kbd-focus-halo[data-style="brackets"][data-tone="accent"] {
+  border-color: var(--kbd-bracket-accent);
+}
+
+.kbd-focus-halo[data-style="brackets"][data-tone="danger"] {
+  border-color: var(--kbd-bracket-danger);
+}
+
 .kbd-focus-halo[data-style="rail"] {
   border: 0;
   border-radius: 9999px;
   background: var(--kbd-rail-color);
+}
+
+.kbd-focus-halo[data-style="rail"][data-tone="accent"] {
+  background: var(--kbd-bracket-accent);
+}
+
+.kbd-focus-halo[data-style="rail"][data-tone="danger"] {
+  background: var(--kbd-bracket-danger);
 }
 
 @media (prefers-reduced-motion: reduce) {

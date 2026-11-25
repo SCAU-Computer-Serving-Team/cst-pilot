@@ -5,7 +5,13 @@ import type { SessionExport } from "../data/types";
 import { ErrorNotice } from "../shell/error-notice";
 
 /** 结果仅展示数量与保存目录；打开失败单独重试，不重新生成产物。 */
-export function ExportResult({ result }: { result: SessionExport }) {
+export function ExportResult({
+	result,
+	openButtonRef,
+}: {
+	result: SessionExport;
+	openButtonRef?: (el: HTMLButtonElement | null) => void;
+}) {
 	const [opening, setOpening] = useState(false);
 	const [error, setError] = useState("");
 	const request = useRef<AbortController | null>(null);
@@ -38,7 +44,10 @@ export function ExportResult({ result }: { result: SessionExport }) {
 		<section className="export-result" aria-label="导出结果">
 			<h2>已保存 {result.files.length} 个文件</h2>
 			<button
-				ref={trigger}
+				ref={(node) => {
+					trigger.current = node;
+					openButtonRef?.(node);
+				}}
 				type="button"
 				className="tier-1-btn-outline export-open-directory"
 				aria-label={`在文件管理器中打开保存目录：${result.directory}`}
