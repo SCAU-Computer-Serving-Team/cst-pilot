@@ -1171,9 +1171,8 @@ fn scan_dir_portable(
     let entries = match fs::read_dir(dir_path) {
         Ok(e) => {
             #[cfg(unix)]
-            if fs::symlink_metadata(dir_path)
-                .map(|m| !linked(&m) && m.is_dir() && (m.dev(), m.ino()) == observed_dev_ino)
-                != Ok(true)
+            if !fs::symlink_metadata(dir_path)
+                .is_ok_and(|m| !linked(&m) && m.is_dir() && (m.dev(), m.ino()) == observed_dev_ino)
             {
                 shared.mark_root_unreadable(root_slot);
                 shared.mark_incomplete();
