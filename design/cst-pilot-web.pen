@@ -16097,7 +16097,7 @@
                                                               "id": "GOsY4",
                                                               "name": "当前模型",
                                                               "fill": "$text-primary",
-                                                              "content": "deepseek-flash",
+                                                              "content": "DeepSeek V4.1 Flash",
                                                               "lineHeight": 1.3333,
                                                               "fontFamily": "Source Han Sans CN",
                                                               "fontSize": "$font-caption",
@@ -16183,8 +16183,8 @@
                               "ref": "H2p2z",
                               "name": "浮层 · 上下文容量与剩余额度",
                               "width": 336,
-                              "x": 363,
-                              "y": 545,
+                              "x": 16,
+                              "y": 490,
                               "padding": "$space-section",
                               "stroke": "$border-hairline",
                               "children": [
@@ -16497,15 +16497,15 @@
                               "type": "ref",
                               "ref": "H2p2z",
                               "name": "模型与思考强度面板",
-                              "width": 148,
-                              "x": 728,
-                              "y": 680,
+                              "width": 224,
+                              "x": 652,
+                              "y": 612,
                               "padding": "$space-tight",
                               "stroke": "$border-hairline",
                               "children": [
                                 {
                                   "type": "frame",
-                                  "id": "UiJ6f",
+                                  "id": "sAtgA",
                                   "name": "内容容器",
                                   "width": "fill_container",
                                   "layout": "vertical",
@@ -16513,23 +16513,23 @@
                                   "children": [
                                     {
                                       "type": "frame",
-                                      "id": "aS0TF",
-                                      "name": "选项 · deepseek-flash",
+                                      "id": "TfVsv",
+                                      "name": "行 · 模型",
                                       "width": "fill_container",
-                                      "height": 26,
+                                      "height": 32,
                                       "cornerRadius": "$radius-control",
-                                      "gap": "$space-tight",
+                                      "gap": "$space-component",
                                       "padding": [
                                         0,
-                                        "$space-detail"
+                                        "$space-inline"
                                       ],
-                                      "justifyContent": "end",
+                                      "justifyContent": "space_between",
                                       "alignItems": "center",
                                       "children": [
                                         {
                                           "type": "frame",
-                                          "id": "vp4DX",
-                                          "name": "deepseek-flash对齐槽",
+                                          "id": "ymLdn",
+                                          "name": "模型标签槽",
                                           "padding": [
                                             0,
                                             0,
@@ -16540,63 +16540,10 @@
                                           "children": [
                                             {
                                               "type": "text",
-                                              "id": "bnxeM",
-                                              "name": "deepseek-flash",
+                                              "id": "W04MZ",
+                                              "name": "模型标签",
                                               "fill": "$text-primary",
-                                              "content": "deepseek-flash",
-                                              "lineHeight": 1.3333,
-                                              "fontFamily": "Source Han Sans CN",
-                                              "fontSize": "$font-caption",
-                                              "fontWeight": "normal"
-                                            }
-                                          ]
-                                        },
-                                        {
-                                          "type": "icon",
-                                          "id": "cfWyb",
-                                          "name": "展开子菜单",
-                                          "width": 12,
-                                          "height": 12,
-                                          "icon": "chevron-right",
-                                          "library": "lucide",
-                                          "fill": "$text-secondary"
-                                        }
-                                      ]
-                                    },
-                                    {
-                                      "type": "frame",
-                                      "id": "ZrsRo",
-                                      "name": "选项 · Max",
-                                      "width": "fill_container",
-                                      "height": 26,
-                                      "fill": "$bg-track-recess",
-                                      "cornerRadius": "$radius-control",
-                                      "gap": "$space-tight",
-                                      "padding": [
-                                        0,
-                                        "$space-detail"
-                                      ],
-                                      "justifyContent": "end",
-                                      "alignItems": "center",
-                                      "children": [
-                                        {
-                                          "type": "frame",
-                                          "id": "f06brc",
-                                          "name": "Max对齐槽",
-                                          "padding": [
-                                            0,
-                                            0,
-                                            "$space-micro",
-                                            0
-                                          ],
-                                          "alignItems": "center",
-                                          "children": [
-                                            {
-                                              "type": "text",
-                                              "id": "aA1t5",
-                                              "name": "Max",
-                                              "fill": "$text-primary",
-                                              "content": "Max",
+                                              "content": "模型",
                                               "lineHeight": 1.3333,
                                               "fontFamily": "Source Han Sans CN",
                                               "fontSize": "$font-caption",
@@ -16605,14 +16552,135 @@
                                           ]
                                         },
                                         {
-                                          "type": "icon",
-                                          "id": "QeE61",
-                                          "name": "展开子菜单",
-                                          "width": 12,
-                                          "height": 12,
-                                          "icon": "chevron-right",
-                                          "library": "lucide",
-                                          "fill": "$text-secondary"
+                                          "type": "frame",
+                                          "id": "d4zh4h",
+                                          "name": "模型值组",
+                                          "gap": "$space-tight",
+                                          "alignItems": "center",
+                                          "children": [
+                                            {
+                                              "type": "frame",
+                                              "id": "IcvbB",
+                                              "name": "DeepSeek V4.1 Flash对齐槽",
+                                              "padding": [
+                                                0,
+                                                0,
+                                                "$space-micro",
+                                                0
+                                              ],
+                                              "alignItems": "center",
+                                              "children": [
+                                                {
+                                                  "type": "text",
+                                                  "id": "GLNCk",
+                                                  "name": "DeepSeek V4.1 Flash",
+                                                  "fill": "$text-secondary",
+                                                  "content": "DeepSeek V4.1 Flash",
+                                                  "lineHeight": 1.3333,
+                                                  "fontFamily": "Source Han Sans CN",
+                                                  "fontSize": "$font-caption",
+                                                  "fontWeight": "500"
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "type": "icon",
+                                              "id": "uqXBf",
+                                              "name": "展开子菜单",
+                                              "width": 13,
+                                              "height": 13,
+                                              "icon": "chevron-right",
+                                              "library": "lucide",
+                                              "fill": "$text-muted"
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "frame",
+                                      "id": "B3Zpr",
+                                      "name": "行 · 思考强度",
+                                      "width": "fill_container",
+                                      "height": 32,
+                                      "fill": "$bg-track-recess",
+                                      "cornerRadius": "$radius-control",
+                                      "gap": "$space-component",
+                                      "padding": [
+                                        0,
+                                        "$space-inline"
+                                      ],
+                                      "justifyContent": "space_between",
+                                      "alignItems": "center",
+                                      "children": [
+                                        {
+                                          "type": "frame",
+                                          "id": "R5el9H",
+                                          "name": "思考强度标签槽",
+                                          "padding": [
+                                            0,
+                                            0,
+                                            "$space-micro",
+                                            0
+                                          ],
+                                          "alignItems": "center",
+                                          "children": [
+                                            {
+                                              "type": "text",
+                                              "id": "mHBpq",
+                                              "name": "思考强度标签",
+                                              "fill": "$text-primary",
+                                              "content": "思考强度",
+                                              "lineHeight": 1.3333,
+                                              "fontFamily": "Source Han Sans CN",
+                                              "fontSize": "$font-caption",
+                                              "fontWeight": "500"
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "type": "frame",
+                                          "id": "gaR90",
+                                          "name": "思考强度值组",
+                                          "gap": "$space-tight",
+                                          "alignItems": "center",
+                                          "children": [
+                                            {
+                                              "type": "frame",
+                                              "id": "IF3Df",
+                                              "name": "Max对齐槽",
+                                              "padding": [
+                                                0,
+                                                0,
+                                                "$space-micro",
+                                                0
+                                              ],
+                                              "alignItems": "center",
+                                              "children": [
+                                                {
+                                                  "type": "text",
+                                                  "id": "SNE5N",
+                                                  "name": "Max",
+                                                  "fill": "$text-secondary",
+                                                  "content": "Max",
+                                                  "lineHeight": 1.3333,
+                                                  "fontFamily": "Source Han Sans CN",
+                                                  "fontSize": "$font-caption",
+                                                  "fontWeight": "500"
+                                                }
+                                              ]
+                                            },
+                                            {
+                                              "type": "icon",
+                                              "id": "fzEBk",
+                                              "name": "展开子菜单",
+                                              "width": 13,
+                                              "height": 13,
+                                              "icon": "chevron-right",
+                                              "library": "lucide",
+                                              "fill": "$text-muted"
+                                            }
+                                          ]
                                         }
                                       ]
                                     }
@@ -16625,15 +16693,15 @@
                               "type": "ref",
                               "ref": "H2p2z",
                               "name": "思考强度列表 · 二级子面板",
-                              "width": 84,
-                              "x": 880,
-                              "y": 652,
+                              "width": 224,
+                              "x": 368,
+                              "y": 513,
                               "padding": "$space-tight",
                               "stroke": "$border-hairline",
                               "children": [
                                 {
                                   "type": "frame",
-                                  "id": "qNDyt",
+                                  "id": "uou7L",
                                   "name": "内容容器",
                                   "width": "fill_container",
                                   "layout": "vertical",
@@ -16641,22 +16709,80 @@
                                   "children": [
                                     {
                                       "type": "frame",
-                                      "id": "zjN09",
-                                      "name": "选项 · Low",
+                                      "id": "qW3c3",
+                                      "name": "返回行 · 纯文字无悬停底",
                                       "width": "fill_container",
-                                      "height": 26,
-                                      "cornerRadius": "$radius-control",
+                                      "height": 28,
                                       "gap": "$space-tight",
                                       "padding": [
                                         0,
-                                        "$space-detail"
+                                        "$space-inline"
                                       ],
-                                      "justifyContent": "end",
+                                      "alignItems": "center",
+                                      "children": [
+                                        {
+                                          "type": "icon",
+                                          "id": "LEoDm",
+                                          "name": "返回箭头",
+                                          "width": 13,
+                                          "height": 13,
+                                          "icon": "chevron-left",
+                                          "library": "lucide",
+                                          "fill": "$text-secondary"
+                                        },
+                                        {
+                                          "type": "frame",
+                                          "id": "wQEGM",
+                                          "name": "返回文字槽",
+                                          "padding": [
+                                            0,
+                                            0,
+                                            "$space-micro",
+                                            0
+                                          ],
+                                          "alignItems": "center",
+                                          "children": [
+                                            {
+                                              "type": "text",
+                                              "id": "Ag8ux",
+                                              "name": "返回文字",
+                                              "fill": "$text-secondary",
+                                              "content": "返回",
+                                              "lineHeight": 1.3333,
+                                              "fontFamily": "Source Han Sans CN",
+                                              "fontSize": "$font-caption",
+                                              "fontWeight": "500"
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "rectangle",
+                                      "id": "XotKW",
+                                      "name": "分隔线",
+                                      "fill": "$border-subtle",
+                                      "width": "fill_container",
+                                      "height": 1
+                                    },
+                                    {
+                                      "type": "frame",
+                                      "id": "qRwGv",
+                                      "name": "选项 · Low",
+                                      "width": "fill_container",
+                                      "height": 32,
+                                      "cornerRadius": "$radius-control",
+                                      "gap": "$space-inline",
+                                      "padding": [
+                                        0,
+                                        "$space-inline"
+                                      ],
+                                      "justifyContent": "space_between",
                                       "alignItems": "center",
                                       "children": [
                                         {
                                           "type": "frame",
-                                          "id": "Jo4nu",
+                                          "id": "B7GX9T",
                                           "name": "Low对齐槽",
                                           "padding": [
                                             0,
@@ -16668,14 +16794,14 @@
                                           "children": [
                                             {
                                               "type": "text",
-                                              "id": "WaZcK",
+                                              "id": "y0HIWF",
                                               "name": "Low",
                                               "fill": "$text-primary",
                                               "content": "Low",
                                               "lineHeight": 1.3333,
                                               "fontFamily": "Source Han Sans CN",
                                               "fontSize": "$font-caption",
-                                              "fontWeight": "normal"
+                                              "fontWeight": "500"
                                             }
                                           ]
                                         }
@@ -16683,22 +16809,64 @@
                                     },
                                     {
                                       "type": "frame",
-                                      "id": "O8Bguc",
-                                      "name": "选项 · High",
+                                      "id": "mGLMY",
+                                      "name": "选项 · Medium",
                                       "width": "fill_container",
-                                      "height": 26,
+                                      "height": 32,
                                       "cornerRadius": "$radius-control",
-                                      "gap": "$space-tight",
+                                      "gap": "$space-inline",
                                       "padding": [
                                         0,
-                                        "$space-detail"
+                                        "$space-inline"
                                       ],
-                                      "justifyContent": "end",
+                                      "justifyContent": "space_between",
                                       "alignItems": "center",
                                       "children": [
                                         {
                                           "type": "frame",
-                                          "id": "h7uAd",
+                                          "id": "RvDEM",
+                                          "name": "Medium对齐槽",
+                                          "padding": [
+                                            0,
+                                            0,
+                                            "$space-micro",
+                                            0
+                                          ],
+                                          "alignItems": "center",
+                                          "children": [
+                                            {
+                                              "type": "text",
+                                              "id": "QPJNB",
+                                              "name": "Medium",
+                                              "fill": "$text-primary",
+                                              "content": "Medium",
+                                              "lineHeight": 1.3333,
+                                              "fontFamily": "Source Han Sans CN",
+                                              "fontSize": "$font-caption",
+                                              "fontWeight": "500"
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "frame",
+                                      "id": "NNVlZ",
+                                      "name": "选项 · High",
+                                      "width": "fill_container",
+                                      "height": 32,
+                                      "cornerRadius": "$radius-control",
+                                      "gap": "$space-inline",
+                                      "padding": [
+                                        0,
+                                        "$space-inline"
+                                      ],
+                                      "justifyContent": "space_between",
+                                      "alignItems": "center",
+                                      "children": [
+                                        {
+                                          "type": "frame",
+                                          "id": "J2a7MA",
                                           "name": "High对齐槽",
                                           "padding": [
                                             0,
@@ -16710,14 +16878,14 @@
                                           "children": [
                                             {
                                               "type": "text",
-                                              "id": "s9nNt",
+                                              "id": "m2ty5",
                                               "name": "High",
                                               "fill": "$text-primary",
                                               "content": "High",
                                               "lineHeight": 1.3333,
                                               "fontFamily": "Source Han Sans CN",
                                               "fontSize": "$font-caption",
-                                              "fontWeight": "normal"
+                                              "fontWeight": "500"
                                             }
                                           ]
                                         }
@@ -16725,23 +16893,23 @@
                                     },
                                     {
                                       "type": "frame",
-                                      "id": "y5tDP",
+                                      "id": "MKBMr",
                                       "name": "选项 · Max",
                                       "width": "fill_container",
-                                      "height": 26,
+                                      "height": 32,
                                       "fill": "$bg-track-recess",
                                       "cornerRadius": "$radius-control",
-                                      "gap": "$space-tight",
+                                      "gap": "$space-inline",
                                       "padding": [
                                         0,
-                                        "$space-detail"
+                                        "$space-inline"
                                       ],
-                                      "justifyContent": "end",
+                                      "justifyContent": "space_between",
                                       "alignItems": "center",
                                       "children": [
                                         {
                                           "type": "frame",
-                                          "id": "iItla",
+                                          "id": "S2wKAp",
                                           "name": "Max对齐槽",
                                           "padding": [
                                             0,
@@ -16753,7 +16921,7 @@
                                           "children": [
                                             {
                                               "type": "text",
-                                              "id": "XwgBh",
+                                              "id": "wbKmR",
                                               "name": "Max",
                                               "fill": "$text-primary",
                                               "content": "Max",
@@ -16763,6 +16931,16 @@
                                               "fontWeight": "500"
                                             }
                                           ]
+                                        },
+                                        {
+                                          "type": "icon",
+                                          "id": "azwoQ",
+                                          "name": "已选对勾",
+                                          "width": 13,
+                                          "height": 13,
+                                          "icon": "check",
+                                          "library": "lucide",
+                                          "fill": "$accent-ink"
                                         }
                                       ]
                                     }
@@ -16776,8 +16954,8 @@
                               "ref": "H2p2z",
                               "name": "模型列表 · 二级子面板（含提供商）",
                               "width": 268,
-                              "x": 696,
-                              "y": 496,
+                              "x": 608,
+                              "y": 451,
                               "stroke": "$border-hairline",
                               "padding": "$space-tight",
                               "children": [

@@ -3684,7 +3684,7 @@ SIDEBAR GROUPS & QUICK INDEX (grep "@story:<id>"):
     pointer-events: auto;
     visibility: visible;
     transform: translateY(0) scale(1);
-    transition: opacity var(--duration-open) var(--ease-out), transform var(--duration-open) var(--ease-out), height var(--duration-resize) var(--ease-out), visibility 0s;
+    transition: opacity var(--duration-open) var(--ease-out), transform var(--duration-open) var(--ease-out), width var(--duration-resize) var(--ease-out), height var(--duration-resize) var(--ease-out), visibility 0s;
   }
 
   .drop-chevron { display: inline-flex; transition: transform var(--fast) var(--ease-out); }
@@ -6779,8 +6779,14 @@ const STORIES = [
       let queue = [];
       let slashOpen = false;
       let pickerOpen = false;
-      let curModel = "deepseek-flash";
-      let curThink = "High";
+      let curModel = "DeepSeek V4.1 Flash";
+      let curThink = "Max";
+
+      const modelOptions = [
+        { name: "DeepSeek V4.1 Flash", provider: "cstoa" },
+        { name: "DeepSeek V4 Pro", provider: "cstoa" },
+        { name: "Qwen3.8 Max", provider: "qwen" }
+      ];
 
       const skills = [
         { short: "disk", name: "/skill:disk", icon: "hard-drive", desc: "排查分区空间与大目录" },
@@ -6833,37 +6839,48 @@ const STORIES = [
                 <div style="display:flex;align-items:center;gap:4px;">
                   <span class="sb-tip-wrap"><button type="button" class="btn-icon sm-28" id="cmp-quota-btn" aria-label="上下文容量与剩余额度">${ringSvg}</button><span class="sb-tip-bubble" data-open="false" data-instant="false">上下文容量与剩余额度</span></span>
                   <button type="button" class="btn-ghost" id="cmp-model-btn" style="height:28px;padding:0 6px;gap:4px;">
-                    <span id="cmp-m-txt" style="font-size:12px;color:var(--text-primary);">deepseek-flash</span>
-                    <span id="cmp-t-txt" style="font-size:12px;color:var(--text-secondary);">High</span>
+                    <span id="cmp-m-txt" style="font-size:12px;color:var(--text-primary);">DeepSeek V4.1 Flash</span>
+                    <span id="cmp-t-txt" style="font-size:12px;color:var(--text-secondary);">Max</span>
                     <span class="drop-chevron" id="cmp-model-chev" style="color:var(--text-secondary);">${icon("chevron-down", 12)}</span>
                   </button>
                 </div>
                 <!-- b0mRIk 发送按钮 · 28×28 $accent-solid -->
                 <span class="sb-tip-wrap"><button type="button" class="tier-1-btn-primary" id="cmp-send-btn" style="width:28px;height:28px;padding:0;" aria-label="发送消息">${icon("arrow-up", 14)}</button><span class="sb-tip-bubble" data-open="false" data-instant="false">发送消息</span></span>
 
-                <!-- d8zzg 模型与思考强度双级面板 -->
-                <div class="tier-2-glass pop-surface" id="cmp-picker-pop" data-dir="up" data-open="false" style="position:absolute;right:36px;bottom:36px;width:216px;overflow:hidden;z-index:35;">
+                <!-- d8zzg 模型与思考强度双级面板 (224px 主菜单 / 268px 模型列表含提供商 / 224px 思考强度) -->
+                <div class="tier-2-glass pop-surface" id="cmp-picker-pop" data-dir="up" data-open="false" style="position:absolute;right:36px;bottom:36px;width:224px;overflow:hidden;z-index:35;">
                   <div class="t-page-slide" id="cmp-picker-pages" data-active-page="main">
                     <div class="t-page" data-role="main" id="cmp-page-main" style="padding:4px;display:flex;flex-direction:column;gap:2px;">
-                      <button type="button" class="menu-row" data-goto="models">
-                        <span>模型</span>
-                        <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--text-secondary);"><span id="cmp-cur-m">deepseek-flash</span>${icon("chevron-right", 14)}</span>
+                      <button type="button" class="menu-row" data-goto="models" style="gap:12px;">
+                        <span style="flex-shrink:0;">模型</span>
+                        <span style="display:inline-flex;align-items:center;gap:4px;min-width:0;font-size:12px;color:var(--text-secondary);"><span id="cmp-cur-m" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">DeepSeek V4.1 Flash</span>${icon("chevron-right", 14)}</span>
                       </button>
-                      <button type="button" class="menu-row" data-goto="thinking">
-                        <span>思考强度</span>
-                        <span style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--text-secondary);"><span id="cmp-cur-t">High</span>${icon("chevron-right", 14)}</span>
+                      <button type="button" class="menu-row" data-goto="thinking" style="gap:12px;">
+                        <span style="flex-shrink:0;">思考强度</span>
+                        <span style="display:inline-flex;align-items:center;gap:4px;min-width:0;font-size:12px;color:var(--text-secondary);"><span id="cmp-cur-t">Max</span>${icon("chevron-right", 14)}</span>
                       </button>
                     </div>
                     <div class="t-page" data-role="sub" data-sub="models" id="cmp-page-models" style="padding:4px;display:flex;flex-direction:column;gap:2px;">
-                      <button type="button" class="menu-row" data-back="main" style="color:var(--text-secondary);font-size:12px;"><span class="menu-row-left">${icon("chevron-left", 14)}<span>返回</span></span></button>
-                      ${["deepseek-flash", "deepseek-v4-pro", "qwen3-coder-plus"].map(m => `
-                        <button type="button" class="menu-row" data-set-model="${m}"><span style="font-size:13px;">${m}</span>${icon("check", 14)}</button>
+                      <button type="button" class="menu-row" data-back="main" style="height:28px;color:var(--text-secondary);font-size:12px;"><span class="menu-row-left">${icon("chevron-left", 13)}<span>返回</span></span></button>
+                      <div style="height:1px;background:var(--border-subtle);"></div>
+                      ${modelOptions.map(m => `
+                        <button type="button" class="menu-row" data-set-model="${m.name}" style="gap:8px;">
+                          <span style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.name}</span>
+                          <span style="display:inline-flex;align-items:center;gap:4px;flex-shrink:0;">
+                            <span style="font-size:11px;line-height:16px;color:var(--text-muted);">${m.provider}</span>
+                            <span data-check style="display:inline-flex;color:var(--accent-ink);">${icon("check", 13)}</span>
+                          </span>
+                        </button>
                       `).join("")}
                     </div>
                     <div class="t-page" data-role="sub" data-sub="thinking" id="cmp-page-thinking" style="padding:4px;display:flex;flex-direction:column;gap:2px;">
-                      <button type="button" class="menu-row" data-back="main" style="color:var(--text-secondary);font-size:12px;"><span class="menu-row-left">${icon("chevron-left", 14)}<span>返回</span></span></button>
+                      <button type="button" class="menu-row" data-back="main" style="height:28px;color:var(--text-secondary);font-size:12px;"><span class="menu-row-left">${icon("chevron-left", 13)}<span>返回</span></span></button>
+                      <div style="height:1px;background:var(--border-subtle);"></div>
                       ${["Low", "Medium", "High", "Max"].map(lv => `
-                        <button type="button" class="menu-row" data-set-think="${lv}"><span style="font-size:13px;">${lv}</span>${icon("check", 14)}</button>
+                        <button type="button" class="menu-row" data-set-think="${lv}">
+                          <span style="font-size:13px;">${lv}</span>
+                          <span data-check style="display:inline-flex;color:var(--accent-ink);">${icon("check", 13)}</span>
+                        </button>
                       `).join("")}
                     </div>
                   </div>
@@ -7120,6 +7137,7 @@ const STORIES = [
 
       function syncPickerHeight(page) {
         pickerPages.dataset.activePage = page;
+        pickerPop.style.width = page === "models" ? "268px" : "224px";
         const targetEl = page === "main"
           ? stageEl.querySelector("#cmp-page-main")
           : page === "models"
@@ -7131,10 +7149,18 @@ const STORIES = [
         stageEl.querySelector("#cmp-m-txt").textContent = curModel;
         stageEl.querySelector("#cmp-t-txt").textContent = curThink;
         stageEl.querySelectorAll("[data-set-model]").forEach(r => {
-          r.querySelector("svg").style.opacity = r.dataset.setModel === curModel ? "1" : "0";
+          const active = r.dataset.setModel === curModel;
+          const chk = r.querySelector("[data-check]");
+          if (chk) chk.style.display = active ? "inline-flex" : "none";
+          r.style.background = active ? "var(--bg-item-active)" : "";
+          r.style.fontWeight = active ? "500" : "400";
         });
         stageEl.querySelectorAll("[data-set-think]").forEach(r => {
-          r.querySelector("svg").style.opacity = r.dataset.setThink === curThink ? "1" : "0";
+          const active = r.dataset.setThink === curThink;
+          const chk = r.querySelector("[data-check]");
+          if (chk) chk.style.display = active ? "inline-flex" : "none";
+          r.style.background = active ? "var(--bg-item-active)" : "";
+          r.style.fontWeight = active ? "500" : "400";
         });
       }
 
@@ -7191,7 +7217,7 @@ const STORIES = [
     },
     contracts: [
       ["增删元素平滑补位", "删除 MkfFr 胶囊、80×64 缩略图或排队项时，原位副本 150ms 淡出，剩余兄弟与输入框高度 250ms 平滑归位", "行首按 Backspace 整颗移除前序胶囊"],
-      ["输入法与双级面板", "拼音组合态内拦截 Enter/Esc/Tab；右下双级选择器按 300ms 连续伸缩高度并左右 8px 滑入", "外部点击关闭浮层且不穿透"]
+      ["输入法与双级面板", "拼音组合态内拦截 Enter/Esc/Tab；右下双级选择器按 300ms 连续伸缩宽高（224–320px，模型列表含服务商）并左右 8px 滑入", "外部点击关闭浮层且不穿透"]
     ]
   }
 ,

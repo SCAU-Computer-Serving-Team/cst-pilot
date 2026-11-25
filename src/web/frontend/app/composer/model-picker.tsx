@@ -5,12 +5,18 @@ import type { ModelChoice } from "../data/model-selection";
 import type { Model } from "../data/web-state";
 import { usePanelDismiss } from "../shell/panel-dismiss";
 import { useWorkspaceShell } from "../shell/workspace-shell-context";
+import {
+	computeModelPickerHeight,
+	computeModelPickerWidth,
+	type ModelPickerPage,
+	modelDisplayName,
+} from "./model-picker-size";
 
 const fullId = (model: Model) => `${model.provider}/${model.id}`;
 function thinkingLabel(level = "off") {
 	return level === "xhigh" || level === "max" ? "Max" : level.charAt(0).toUpperCase() + level.slice(1);
 }
-type Page = "main" | "models" | "thinking";
+type Page = ModelPickerPage;
 
 export function ModelPicker({
 	selected,
@@ -135,17 +141,34 @@ export function ModelPicker({
 		}
 	}
 	const modelKey = selected ? fullId(selected) : null;
+	const selectedLabel = selected ? modelDisplayName(selected) : "选择模型";
 	const supportedLevels = levels.length ? levels : ["off"];
+	const thinkingLabels = supportedLevels.map((level) => thinkingLabel(level));
 	const options =
 		listPage === "models"
-			? models.map((model) => ({ id: fullId(model), label: model.name, title: `${model.provider} · ${model.name}` }))
-			: supportedLevels.map((level) => ({ id: level, label: thinkingLabel(level), title: thinkingLabel(level) }));
+			? models.map((model) => {
+					const label = modelDisplayName(model);
+					return {
+						id: fullId(model),
+						label,
+						provider: model.provider,
+						title: `${model.provider} · ${label}`,
+					};
+				})
+			: supportedLevels.map((level) => {
+					const label = thinkingLabel(level);
+					return { id: level, label, provider: undefined, title: label };
+				});
 	const selectedKey = listPage === "models" ? modelKey : thinking;
-	// 主菜单 2 行（32px + 2px 间距 + 8px 上下内边距）；子列表含顶部返回行 + 选项行。
-	// 面板宽度对齐 cst-pilot-web.pen：主面板与思考强度 148px（完整容纳 Medium / Minimal 与勾选标记），模型列表 216px。
-	const rowCount = page === "main" ? 2 : 1 + Math.max(1, options.length);
-	const pickerHeight = rowCount * 32 + Math.max(0, rowCount - 1) * 2 + 8;
-	const pickerWidth = page === "main" ? 148 : page === "thinking" ? 148 : 216;
+	// 宽度与桌面端对齐（224–320px 自适应，窄视口受 calc(100vw - 32px) 限制），高度按行数连续过渡。
+	const pickerHeight = computeModelPickerHeight(page, options.length);
+	const pickerWidth = computeModelPickerWidth({
+		page,
+		selectedLabel,
+		thinkingLabel: thinkingLabel(thinking),
+		models,
+		thinkingLabels,
+	});
 	return (
 		<Popover
 			isOpen={open}
@@ -165,11 +188,11 @@ export function ModelPicker({
 				variant="ghost"
 				className="btn-ghost composer-model"
 				data-open={open || undefined}
-				aria-label={`模型与思考强度：${selected?.name ?? "加载中"}，${thinkingLabel(thinking)}`}
+				aria-label={`模型与思考强度：${selected ? selectedLabel : "加载中"}，${thinkingLabel(thinking)}`}
 				isDisabled={!selected && !models.length}
 			>
-				<span className="model-name" title={selected?.name}>
-					{selected?.name ?? "选择模型"}
+				<span className="model-name" title={selected ? selectedLabel : undefined}>
+					{selectedLabel}
 				</span>
 				<span className="model-current-strength">{thinkingLabel(thinking)}</span>
 				<span className="model-chevron">
@@ -211,8 +234,11 @@ export function ModelPicker({
 								}}
 							>
 								<span className="model-picker-row-label">模型</span>
-								<span className="model-picker-row-value" title={selected?.name}>
-									<span className="model-picker-row-text">{selected?.name ?? "选择模型"}</span>
+								<span
+									className="model-picker-row-value"
+									title={selected ? `${selected.provider} · ${selectedLabel}` : undefined}
+								>
+									<span className="model-picker-row-text">{selectedLabel}</span>
 									<ChevronRight size={14} aria-hidden="true" />
 								</span>
 							</Button>
@@ -264,7 +290,16 @@ export function ModelPicker({
 										<span className="model-picker-option-label" title={option.title}>
 											{option.label}
 										</span>
-										<Check size={14} className="model-picker-option-check" aria-hidden="true" />
+										<span className="model-picker-option-meta">
+											{option.provider && (
+												<span className="model-picker-option-provider" title={option.provider}>
+													{option.provider}
+												</span>
+											)}
+											{selectedKey === option.id && (
+												<Check size={14} className="model-picker-option-check" aria-hidden="true" />
+											)}
+										</span>
 									</ListBox.Item>
 								))}
 							</ListBox>

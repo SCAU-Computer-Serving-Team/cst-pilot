@@ -95,7 +95,7 @@
 }
 .composer-popover.model-picker-popover {
   position: relative;
-  width: var(--picker-width, 148px);
+  width: var(--picker-width, 224px);
   max-width: calc(100vw - 32px);
   height: min(var(--picker-height), 440px, 60vh);
   padding: 0;
@@ -121,7 +121,7 @@
 }
 .model-picker-main > .menu-row {
   justify-content: space-between;
-  gap: var(--space-tight);
+  gap: var(--space-component);
   font-size: var(--font-ui);
 }
 .model-picker-row-label {
@@ -191,20 +191,33 @@
   transition: background-color var(--fast) var(--ease-out), color var(--fast) var(--ease-out);
 }
 .model-picker-option-label {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+.model-picker-option-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-tight);
+  flex-shrink: 0;
+}
+.model-picker-option-provider {
+  max-width: 112px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 400;
 }
 .model-picker-option-check {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
   color: var(--accent-ink);
-  opacity: 0;
-}
-.model-picker-options [role="option"][aria-selected="true"] .model-picker-option-check {
-  opacity: 1;
 }
 .composer-popover .model-picker-options [role="option"]:is(:hover, [data-hovered="true"], [data-focused="true"], [data-focus-visible="true"]):not([aria-disabled="true"]) {
   background: var(--bg-item-active);
